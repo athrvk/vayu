@@ -36,6 +36,7 @@ import {
 	LabelSwap,
 	DialogCancelButton,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore, useToastStore, type ImportReport } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -1264,15 +1265,12 @@ function PreviewView({
 				positive
 				title={meta.format}
 				action={
-					<Button
-						size="icon"
-						variant="ghost"
+					<TooltipIconButton
 						className="-my-1"
 						onClick={onDismiss}
-						aria-label="Dismiss"
-					>
-						<X className="size-icon-sm" />
-					</Button>
+						label="Dismiss"
+						icon={<X className="size-icon-sm" />}
+					/>
 				}
 			>
 				{meta.fileName && (
@@ -1372,15 +1370,12 @@ function BatchLedger({
 				positive
 				title={`${entries.length} files`}
 				action={
-					<Button
-						size="icon"
-						variant="ghost"
+					<TooltipIconButton
 						className="-my-1"
 						onClick={onDismiss}
-						aria-label="Dismiss"
-					>
-						<X className="size-icon-sm" />
-					</Button>
+						label="Dismiss"
+						icon={<X className="size-icon-sm" />}
+					/>
 				}
 			>
 				<span className="text-label text-muted-foreground">

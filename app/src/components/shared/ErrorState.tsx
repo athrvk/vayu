@@ -32,7 +32,7 @@
 
 import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, Heading } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 interface ErrorStateProps {
@@ -96,7 +96,11 @@ export function ErrorState({
 		>
 			<AlertCircle className="h-12 w-12 text-destructive-text/60" aria-hidden="true" />
 			<div className="max-w-sm">
-				<p className="text-md font-semibold text-foreground">{title}</p>
+				{/* A heading in the main pane's outline, as `EmptyState`'s is (#3498);
+				    the inline line above is a status, not a title. */}
+				<Heading outside="p" className="text-md font-semibold text-foreground">
+					{title}
+				</Heading>
 				{detail && (
 					// Mono, because it is a machine's words, not the product's.
 					<p className="mt-1 break-words font-mono text-xs text-muted-foreground">

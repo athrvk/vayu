@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useToastStore } from "@/stores";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { BudgetsSection } from "./BudgetsSection";

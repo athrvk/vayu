@@ -56,13 +56,13 @@ export function LiveDistributionRow({
 			{/* HDR */}
 			<Card pad="sm" className="min-w-0">
 				<div className="flex items-baseline justify-between mb-3">
-					<h3 className="text-xs font-semibold text-foreground">
+					<h2 className="text-xs font-semibold text-foreground">
 						{pooledTitle("Latency distribution", pooled)}
 						<InfoChip tip={TOOLTIPS.latencyDistribution} />
 						<span className="ml-2 text-label font-normal text-muted-foreground">
 							HDR percentile plot
 						</span>
-					</h3>
+					</h2>
 				</div>
 				{latency ? (
 					<>
@@ -87,10 +87,10 @@ export function LiveDistributionRow({
 			{/* Timing waterfall */}
 			<Card pad="sm" className="min-w-0">
 				<div className="flex items-baseline justify-between mb-3">
-					<h3 className="text-xs font-semibold text-foreground">
+					<h2 className="text-xs font-semibold text-foreground">
 						Avg request timing
 						<InfoChip tip={TOOLTIPS.avgRequestTiming} />
-					</h3>
+					</h2>
 				</div>
 				{phases.kind === "ready" && (
 					<>

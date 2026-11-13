@@ -6,7 +6,7 @@
  */
 
 import { AlertTriangle, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { useEngineStore, useRecoveryNoticeStore } from "@/stores";
 import type { EngineRecovery } from "@/types/domain";
 
@@ -128,15 +128,13 @@ function RecoveryBanner() {
 			</span>
 			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
 			    no `size-7` override needed, the way one was before it existed. */}
-			<Button
-				size="icon"
-				variant="ghost"
+			<TooltipIconButton
 				className="shrink-0"
 				onClick={() => acknowledge(recovery.at)}
-				aria-label="Dismiss data recovery notice"
-			>
-				<X className="size-icon-sm" />
-			</Button>
+				label="Dismiss data recovery notice"
+				tooltip="Dismiss"
+				icon={<X className="size-icon-sm" />}
+			/>
 		</div>
 	);
 }

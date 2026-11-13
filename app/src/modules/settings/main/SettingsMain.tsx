@@ -39,10 +39,14 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	HeadingSection,
 	Skeleton,
 	Textarea,
 	SecretInput,
 	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import { EmptyState, ErrorState } from "@/components/shared";
 import { formatBytes } from "@/lib/format-number";
@@ -743,15 +747,19 @@ export default function SettingsMain() {
 							)}
 						</div>
 						{isModified && (
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => handleRevert(entry)}
-								className="text-xs h-control-sm px-2 shrink-0"
-								title="Discard this staged change"
-							>
-								Revert
-							</Button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => handleRevert(entry)}
+										className="text-xs h-control-sm px-2 shrink-0"
+									>
+										Revert
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Discard this staged change</TooltipContent>
+							</Tooltip>
 						)}
 					</div>
 				</CardHeader>
@@ -950,52 +958,54 @@ export default function SettingsMain() {
 				</div>
 			</div>
 
-			{/* Settings Grid */}
-			<div className="flex-1 overflow-auto p-6" data-setting-scroller>
-				<div className="grid gap-4 max-w-3xl mx-auto">
-					{/* Engine surfaces this category owns that are not config
+			{/* Settings Grid, a section under the category's `h1` (#3498). */}
+			<HeadingSection>
+				<div className="flex-1 overflow-auto p-6" data-setting-scroller>
+					<div className="grid gap-4 max-w-3xl mx-auto">
+						{/* Engine surfaces this category owns that are not config
 					    entries - the client-certificate registry (#707), the
 					    connection test (#708). Above the entries because they
 					    are what a user came here to manage, and they save
 					    themselves: the Save bar in the header belongs to the
 					    entries below. */}
-					{/* Keyed by index because the list is a module constant: it
+						{/* Keyed by index because the list is a module constant: it
 					    never reorders, grows or shrinks at runtime, so there is
 					    no identity for a key to preserve. */}
-					{categoryConfig?.Cards?.map((CategoryCard, index) => (
-						<CategoryCard key={index} />
-					))}
-					{primaryEntries.map(renderEntryCard)}
+						{categoryConfig?.Cards?.map((CategoryCard, index) => (
+							<CategoryCard key={index} />
+						))}
+						{primaryEntries.map(renderEntryCard)}
 
-					{advancedEntries.length > 0 && (
-						<section className="mt-2">
-							<button
-								type="button"
-								onClick={() => setAdvancedOpen((open) => !open)}
-								aria-expanded={showAdvanced}
-								className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-							>
-								<ChevronRight
-									className={cn(
-										"size-icon transition-transform",
-										showAdvanced && "rotate-90"
-									)}
-									aria-hidden="true"
-								/>
-								Advanced
-								<span className="text-xs font-normal">
-									({advancedEntries.length})
-								</span>
-							</button>
-							{showAdvanced && (
-								<div className="enter-fade grid gap-4 mt-4">
-									{advancedEntries.map(renderEntryCard)}
-								</div>
-							)}
-						</section>
-					)}
+						{advancedEntries.length > 0 && (
+							<section className="mt-2">
+								<button
+									type="button"
+									onClick={() => setAdvancedOpen((open) => !open)}
+									aria-expanded={showAdvanced}
+									className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+								>
+									<ChevronRight
+										className={cn(
+											"size-icon transition-transform",
+											showAdvanced && "rotate-90"
+										)}
+										aria-hidden="true"
+									/>
+									Advanced
+									<span className="text-xs font-normal">
+										({advancedEntries.length})
+									</span>
+								</button>
+								{showAdvanced && (
+									<div className="enter-fade grid gap-4 mt-4">
+										{advancedEntries.map(renderEntryCard)}
+									</div>
+								)}
+							</section>
+						)}
+					</div>
 				</div>
-			</div>
+			</HeadingSection>
 		</div>
 	);
 }

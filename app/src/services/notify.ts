@@ -22,9 +22,12 @@
  * did in a focused window, and the toast is the whole of it.
  *
  * `post` is fire-and-forget by design: no call site may await the OS to get on
- * with ending a run. Every event that posts one also raises its toast, so a
- * build that cannot notify (see `notify.ts` on what macOS authorizes) still
- * tells the user everything - just only where they can already see it.
+ * with ending a run. A notification is never the only place an event is told:
+ * each also shows in the window, so a build that cannot notify (see
+ * `notify.ts` on what macOS authorizes) loses only the reach outside it. Most
+ * are not toasts - a run ends in its own view and `RunAnnouncer`, the engine
+ * on the Dock's dot, an update on its banner, a capture in its inbox - and only
+ * a completed sign-in and a failed engine restart raise one.
  */
 
 import { useClientSettingsStore } from "@/stores";
@@ -103,9 +106,9 @@ export const systemNotify = {
 				target: request.target ?? { view: "app" },
 			})
 			.catch((error: unknown) => {
-				// The toast for this event has already been raised, so a failure
-				// here costs the user nothing they can act on. Logged, never thrown
-				// at the run that was ending.
+				// The window already shows this event (see the file header), so a
+				// failure here costs the user nothing they can act on. Logged, never
+				// thrown at the run that was ending.
 				console.warn(`[notify] "${request.kind}" could not be posted`, error);
 			});
 	},

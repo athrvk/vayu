@@ -18,7 +18,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -186,6 +188,18 @@ describe("dropping several files", () => {
 
 		fireEvent.click(within(box as HTMLElement).getByRole("button", { name: "Dismiss" }));
 		expect(screen.queryByText("2 files")).toBeNull();
+	});
+
+	it("says what the batch band's dismiss button does on keyboard focus (#3498)", async () => {
+		renderModal();
+		drop(file("one.json", postman), file("two.json", insomnia));
+		await waitFor(() => expect(screen.getByText("2 files")).toBeInTheDocument());
+
+		const box = screen.getByText("2 files").closest(".border");
+		await expectTooltipOnFocus(
+			within(box as HTMLElement).getByRole("button", { name: "Dismiss" }),
+			"Dismiss"
+		);
 	});
 
 	it("reports a file it cannot parse and imports the rest", async () => {

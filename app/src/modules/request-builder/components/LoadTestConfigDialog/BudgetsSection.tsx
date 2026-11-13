@@ -128,10 +128,10 @@ export function BudgetsSection({
 			 * the ones this plan records, then what a miss does.
 			 */}
 			<div className="space-y-1.5">
-				<Label className="text-xs">
+				<span className="block text-xs font-medium leading-none">
 					Custom metric budgets
 					<span className="ml-1 font-normal text-muted-foreground">(optional)</span>
-				</Label>
+				</span>
 				<CustomBudgetHint />
 				<CustomBudgetRows
 					rows={customBudgets}

@@ -31,6 +31,7 @@
 
 import { create } from "zustand";
 import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
+import type { TerminalRunStatus } from "@/lib/run-status";
 import {
 	emptyStepSummary,
 	foldStepEvents,
@@ -79,6 +80,13 @@ interface ScenarioRunState {
 	isStreaming: boolean;
 	/** A transport failure on the stream; cleared by the next `startRun`. */
 	error: string | null;
+	/**
+	 * How the run ended, once this window knows: the engine's completion frame,
+	 * or for a stream that closed without one, the stored report's status.
+	 * Null while it runs and for a stream that dropped mid-run, whose run has
+	 * not ended. Read by `RunAnnouncer`; the run tab reads the stored record.
+	 */
+	endedAs: TerminalRunStatus | null;
 
 	/*
 	 * `startRun` is the one action that replaces the held run. Every other
@@ -98,6 +106,8 @@ interface ScenarioRunState {
 	 * its stored status for that once the stream says nothing more.
 	 */
 	streamLost: (runId: string, message: string) => void;
+	/** The run ended as `status`: records it and lowers {@link isStreaming} in one write. */
+	runEnded: (runId: string, status: TerminalRunStatus) => void;
 }
 
 export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
@@ -108,6 +118,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	plan: null,
 	isStreaming: false,
 	error: null,
+	endedAs: null,
 
 	// An emptied list is the sharpest case of "not the list you were reading",
 	// so the epoch moves here too - without it, a second run's first batches
@@ -121,6 +132,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 			plan: null,
 			isStreaming: true,
 			error: null,
+			endedAs: null,
 		})),
 
 	// A batch that changed nothing - every event in it a replay of a row
@@ -149,4 +161,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 
 	streamLost: (runId, error) =>
 		set((state) => (state.runId === runId ? { error, isStreaming: false } : state)),
+
+	runEnded: (runId, endedAs) =>
+		set((state) => (state.runId === runId ? { endedAs, isStreaming: false } : state)),
 }));

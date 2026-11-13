@@ -51,12 +51,14 @@ import { Dock } from "./Dock";
 import { ActivityRail } from "./ActivityRail";
 import { ContextBar } from "./ContextBar";
 import { ContextRail } from "./ContextRail";
+import { RunAnnouncer } from "./RunAnnouncer";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
 import { cycleRegionFocus, focusRequestUrl, regionProps } from "./region-focus";
 import { CommandPalette } from "@/modules/palette";
 import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
+import { HeadingSection } from "@/components/ui/heading";
 import RequestBuilder from "@/modules/request-builder";
 
 /*
@@ -428,6 +430,9 @@ export default function Shell() {
 			    once, shows nothing until the flow asks where a request should
 			    land. The palette renders its own from the same hook. */}
 			<CollectionPicker {...pickerProps} />
+			{/* Here rather than in a run view: a run ends while its tab is not the
+			    one mounted, and the region must outlive every tab. */}
+			<RunAnnouncer />
 			{/* Every tab uses the same shell: the ActivityRail's view switchers,
 			    one left Drawer (its view switches with the tab -
 			    collections/history/variables/settings), the main content, and the
@@ -507,7 +512,12 @@ export default function Shell() {
 												/>
 											}
 										>
-											{renderTabContent(activeTab)}
+											{/* The outline opens here, so a tab's own title is its
+											    `h1` and every heading below it is levelled from that
+											    one (`heading-level.tsx`, #3498). */}
+											<HeadingSection level={1}>
+												{renderTabContent(activeTab)}
+											</HeadingSection>
 										</Suspense>
 									</div>
 								</main>

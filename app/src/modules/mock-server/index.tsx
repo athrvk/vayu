@@ -30,6 +30,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	EmptyState,
@@ -113,26 +114,31 @@ export default function MockServerView() {
 			<header className="flex flex-col gap-1 border-b border-border px-3 py-2">
 				<div className="flex flex-wrap items-center gap-2">
 					<MockIcon className="size-icon text-muted-foreground" aria-hidden="true" />
-					<code className="font-mono text-xs">{mock.url}</code>
-					<Button
-						variant="ghost"
+					{/* The tab's `h1` is the address, the mock's identity; the hidden
+					    prefix says what it is the address of (#3498). */}
+					<h1>
+						<span className="sr-only">Mock server </span>
+						<code className="font-mono text-xs">{mock.url}</code>
+					</h1>
+					<TooltipIconButton
 						size="sm"
-						aria-label="Copy mock server URL"
+						label="Copy mock server URL"
 						onClick={() => void copyUrl(mock.url, "Mock server URL")}
-					>
-						<IconSwap
-							state={urlCopied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-								copied: (
-									<Check
-										className="size-icon-sm text-status-success-text"
-										aria-hidden="true"
-									/>
-								),
-							}}
-						/>
-					</Button>
+						icon={
+							<IconSwap
+								state={urlCopied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+									copied: (
+										<Check
+											className="size-icon-sm text-status-success-text"
+											aria-hidden="true"
+										/>
+									),
+								}}
+							/>
+						}
+					/>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -213,9 +219,9 @@ export default function MockServerView() {
 
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="border-b border-border px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">
 						Routes ({routesQuery.isLoading ? "-" : routes.length})
-					</h3>
+					</h2>
 					{routesQuery.isError ? (
 						<ErrorState
 							variant="inline"
@@ -273,7 +279,7 @@ export default function MockServerView() {
 				</section>
 
 				<section className="flex-1 px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h3>
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h2>
 					{activityQuery.isError ? (
 						<ErrorState
 							variant="inline"

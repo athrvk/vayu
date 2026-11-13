@@ -170,8 +170,10 @@ scattered strings land the same way.
   `3.0 GB`), 1024-based under those labels, so an engine limit of 104857600
   reads `100.0 MB`. A byte *rate* is `formatByteRateParts`, which is decimal
   (`4.4 KB/s` is 4400 bytes per second); the two answer different questions and
-  do not share a base. The screen-reader announcer takes the
-  same digits and speaks the unit as a word (`2.40 seconds`). Name a latency series for what it
+  do not share a base. The screen-reader announcers take the
+  same digits and speak the unit as a word (`2.40 seconds`), and a figure
+  written `<0.1%` as "less than 0.1%" (`lib/spoken-text.ts`), since a reader
+  may skip the symbol. Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare
   "latency" or "wire".

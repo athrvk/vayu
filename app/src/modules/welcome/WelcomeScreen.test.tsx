@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
 import { useTabsStore, useSessionStore, useLayoutStore } from "@/stores";
@@ -51,9 +52,7 @@ function run(over: Partial<Run> = {}): Run {
 function renderScreen() {
 	const qc = new QueryClient();
 	return render(
-		<QueryClientProvider client={qc}>
-			<WelcomeScreen />
-		</QueryClientProvider>
+		<QueryClientProvider client={qc}>{asTab(<WelcomeScreen />)}</QueryClientProvider>
 	);
 }
 
@@ -66,6 +65,17 @@ describe("WelcomeScreen", () => {
 		useTabsStore.setState({ openTabs: [], activeTabId: null });
 		useSessionStore.setState({ lastCollectionId: null });
 		useLayoutStore.setState({ paletteOpen: false });
+	});
+
+	// One top heading per tab (#3498): the tab is named "Vayu", and the
+	// first-run screen draws that name while the Launcher has none to draw.
+	it.each([
+		["first run", false],
+		["the Launcher", true],
+	])("titles %s with one h1 and no skipped level", (_label, populated) => {
+		if (populated) mocks.collections = { data: [{ id: "c1", name: "API" }], isLoading: false };
+		const { container } = renderScreen();
+		expect(expectOneTopHeading(container)).toBe("Vayu");
 	});
 
 	describe("empty workspace", () => {
@@ -217,7 +227,12 @@ describe("WelcomeScreen", () => {
 
 		it("carries no branding - the title bar already has the logo", () => {
 			renderScreen();
-			expect(screen.queryByText("Vayu")).not.toBeInTheDocument();
+			// The tab's h1 is "Vayu" (#3498), but hidden: a name for heading
+			// navigation, not branding on screen.
+			expect(
+				screen.queryByText("Vayu", { ignore: "script, style, .sr-only" })
+			).not.toBeInTheDocument();
+			expect(screen.getByRole("heading", { level: 1, name: "Vayu" })).toHaveClass("sr-only");
 		});
 
 		it("counts collections and runs", () => {

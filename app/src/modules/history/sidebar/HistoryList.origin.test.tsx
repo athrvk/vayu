@@ -127,6 +127,15 @@ beforeEach(() => {
 	];
 });
 
+describe("the history sidebar's filter selects are named (#3498)", () => {
+	it("names all three, not only Origin", () => {
+		renderList();
+		expect(screen.getByRole("combobox", { name: "Run type" })).toHaveTextContent("All types");
+		expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("All status");
+		expect(originSelect()).toBeInTheDocument();
+	});
+});
+
 describe("the history sidebar's origin filter", () => {
 	it("asks the engine for every origin until one is chosen", () => {
 		renderList();

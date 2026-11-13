@@ -22,10 +22,9 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-	Label,
 	SecretInput,
 } from "@/components/ui";
-import { AuthFields, Callout, type AuthTextInput } from "@/components/shared";
+import { AuthFields, Callout, LabelledField, type AuthTextInput } from "@/components/shared";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 import { useOAuth2DeferredNames } from "../../../hooks/useOAuth2DeferredNames";
 import { AUTH_MODE_LABELS, EDITABLE_AUTH_MODES, uneditableAuthLabel } from "@/constants/auth-modes";
@@ -57,12 +56,14 @@ const AUTH_MODE_ICONS: Record<PickerMode, typeof Key> = {
 // Always mounted inside `RequestBuilderProvider`, so it reads the scope here
 // rather than threading it through every auth field - `VariableInput` itself no
 // longer knows the context exists (#564).
-const VariableTextInput: AuthTextInput = ({ value, onChange, placeholder, type }) => {
+const VariableTextInput: AuthTextInput = ({ id, label, value, onChange, placeholder, type }) => {
 	const variables = useVariableSupport();
 	return type === "password" ? (
-		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+		<SecretInput id={id} value={value} onChange={onChange} placeholder={placeholder} />
 	) : (
 		<VariableInput
+			id={id}
+			aria-label={label}
 			value={value}
 			onChange={onChange}
 			placeholder={placeholder}
@@ -112,33 +113,37 @@ export default function AuthPanel() {
 	return (
 		<div className="space-y-6">
 			{/* Auth Type Selector */}
-			<div className="space-y-2">
-				<Label>Authentication type</Label>
-				<Select value={uneditableLabel ? "" : auth.mode} onValueChange={handleModeChange}>
-					<SelectTrigger className="w-auto">
-						<SelectValue
-							placeholder={
-								uneditableLabel
-									? `${uneditableLabel} (not editable here)`
-									: undefined
-							}
-						/>
-					</SelectTrigger>
-					<SelectContent>
-						{PICKER_MODES.map((mode) => {
-							const Icon = AUTH_MODE_ICONS[mode];
-							return (
-								<SelectItem key={mode} value={mode}>
-									<div className="flex items-center gap-2">
-										<Icon className="size-icon" />
-										<span>{AUTH_MODE_LABELS[mode]}</span>
-									</div>
-								</SelectItem>
-							);
-						})}
-					</SelectContent>
-				</Select>
-			</div>
+			<LabelledField label="Authentication type">
+				{(c) => (
+					<Select
+						value={uneditableLabel ? "" : auth.mode}
+						onValueChange={handleModeChange}
+					>
+						<SelectTrigger id={c.id} className="w-auto">
+							<SelectValue
+								placeholder={
+									uneditableLabel
+										? `${uneditableLabel} (not editable here)`
+										: undefined
+								}
+							/>
+						</SelectTrigger>
+						<SelectContent>
+							{PICKER_MODES.map((mode) => {
+								const Icon = AUTH_MODE_ICONS[mode];
+								return (
+									<SelectItem key={mode} value={mode}>
+										<div className="flex items-center gap-2">
+											<Icon className="size-icon" />
+											<span>{AUTH_MODE_LABELS[mode]}</span>
+										</div>
+									</SelectItem>
+								);
+							})}
+						</SelectContent>
+					</Select>
+				)}
+			</LabelledField>
 
 			{/* Inherit resolution */}
 			{auth.mode === "inherit" && <AuthInheritBanner collectionId={request.collectionId} />}

@@ -46,6 +46,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui";
+import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 import { resolveHeaderLines } from "@/lib/header-lines";
 import type { HeaderLine } from "@/types/domain";
@@ -146,9 +147,9 @@ export default function HeadersViewer({
 						<ChevronRight className="size-icon-sm text-muted-foreground" />
 					)}
 				</div>
-				<h3 className={EYEBROW_CLASS}>
+				<Heading outside="h3" className={EYEBROW_CLASS}>
 					{title || (variant === "response" ? "Response headers" : "Request headers")}
-				</h3>
+				</Heading>
 				<Badge variant="outline" className="ml-auto text-xs">
 					{lines.length}
 				</Badge>
@@ -204,7 +205,12 @@ export function CompactHeadersViewer({
 
 	return (
 		<div className={className}>
-			{title && <h4 className={cn(EYEBROW_CLASS, "mb-2")}>{title}</h4>}
+			{/* The level is the host's: an inbox capture, a run's step or sample. */}
+			{title && (
+				<Heading outside="h4" className={cn(EYEBROW_CLASS, "mb-2")}>
+					{title}
+				</Heading>
+			)}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
 				{lines.map(({ name, value }, i) => (
 					// Same `border-rule` as the table above, resolving differently

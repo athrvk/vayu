@@ -62,6 +62,11 @@ const NO_COMMAND = new Map<Chord, string>([
 	[shortcuts.NEXT_REGION_CHORD, "moves focus - same reason as ⌘L"],
 	[shortcuts.PREVIOUS_REGION_CHORD, "moves focus - same reason as ⌘L"],
 	[
+		shortcuts.FOCUS_NOTIFICATIONS_CHORD,
+		"display only: Radix's toast viewport answers to it, and it moves focus - " +
+			"same reason as ⌘L",
+	],
+	[
 		shortcuts.NEXT_TAB_CHORD,
 		"the palette already lists every open tab by name, which is the better " +
 			"answer to 'go to that tab' when you are typing anyway",

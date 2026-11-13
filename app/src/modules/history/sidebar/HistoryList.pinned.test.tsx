@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useHistoryStore } from "@/modules/history/history-store";
@@ -139,6 +139,16 @@ describe("the history sidebar's pinned filter", () => {
 		// being sieved - a pin older than the loaded pages has to be findable.
 		expect(lastQuery().pinnedOnly).toBe(true);
 		expect(pinnedToggle()).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it("says what the toggle filters on keyboard focus (#3498)", async () => {
+		renderList();
+
+		await act(async () => {
+			fireEvent.focus(pinnedToggle());
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("Show only pinned runs");
 	});
 
 	it("turns back off, restoring the unfiltered list", () => {

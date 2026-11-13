@@ -463,7 +463,9 @@ export default function LoadTestConfigDialog({
 							</div>
 
 							<div className="space-y-1.5">
-								<Label className="text-xs">Load profile</Label>
+								<span className="block text-xs font-medium leading-none">
+									Load profile
+								</span>
 								<ProfilePicker
 									value={profile.mode}
 									onChange={(next) => updateProfile({ mode: next })}

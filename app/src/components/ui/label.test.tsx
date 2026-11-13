@@ -27,7 +27,7 @@ import { Label } from "./label";
 
 describe("Label", () => {
 	it("renders block", () => {
-		const { getByText } = render(<Label>Format</Label>);
+		const { getByText } = render(<Label htmlFor="format">Format</Label>);
 		expect(getByText("Format").className).toMatch(/\bblock\b/);
 	});
 });

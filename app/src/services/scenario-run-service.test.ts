@@ -30,6 +30,7 @@ const mockStreamLost = vi.fn();
 const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
 const mockSetPlan = vi.fn();
+const mockRunEnded = vi.fn();
 /** The fold the store keeps beside the rows; the notification body reads it. */
 const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
@@ -40,6 +41,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			setPlan: mockSetPlan,
 			setStreaming: mockSetStreaming,
 			streamLost: mockStreamLost,
+			runEnded: mockRunEnded,
 			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
 		}),
 	},
@@ -419,6 +421,50 @@ describe("ScenarioRunService", () => {
 		// awaits it, and the stream's own teardown is not the report's business.
 		await expect(closeStream()).resolves.toBeUndefined();
 		expect(mockSetStreaming).toHaveBeenCalledWith("run_4", false);
+	});
+
+	/*
+	 * What `RunAnnouncer` says the run ended as (#3498). Mutation check: drop
+	 * the frame's `runEnded` and the first case reddens; drop the stored-report
+	 * fallback and the second does; drop its `isRunTerminal` guard and the third
+	 * does.
+	 */
+	describe("how the run ended (#3498)", () => {
+		function storedAs(status: string) {
+			vi.mocked(apiService.getRunReport).mockResolvedValue({
+				...storedReport,
+				metadata: { status },
+			} as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>);
+		}
+
+		it("records the status the engine's frame names", async () => {
+			storedAs("completed");
+			scenarioRunService.startMonitoring("run_e1");
+			await closeStream("stopped");
+
+			expect(mockRunEnded).toHaveBeenCalledTimes(1);
+			expect(mockRunEnded).toHaveBeenCalledWith("run_e1", "stopped");
+		});
+
+		it("reads the stored report's status for a stream that closed without a frame", async () => {
+			storedAs("failed");
+			scenarioRunService.startMonitoring("run_e2");
+			await closeStream(null);
+
+			expect(mockRunEnded).toHaveBeenCalledWith("run_e2", "failed");
+		});
+
+		it("records nothing while the stored run is still running, or when it cannot be read", async () => {
+			storedAs("running");
+			scenarioRunService.startMonitoring("run_e3");
+			await closeStream(null);
+
+			vi.mocked(apiService.getRunReport).mockRejectedValue(new Error("engine gone"));
+			scenarioRunService.startMonitoring("run_e4");
+			await closeStream(null);
+
+			expect(mockRunEnded).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("wake lock (issue #1357)", () => {

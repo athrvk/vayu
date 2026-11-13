@@ -18,7 +18,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RequestItem from "./RequestItem";
 import { withCollectionTreeContext } from "@/test/collection-tree-context";
 import { useToastStore } from "@/stores";

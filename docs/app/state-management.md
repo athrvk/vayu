@@ -1677,7 +1677,7 @@ normalize, as `host-sleep-store` does.
 
 The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
 
-It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. **Every other writer - `addSteps`, `setPlan`, `setStreaming`, `streamLost` - names its run and is dropped for any other** (issue #3351), as `execution-events-store` does: the stream is replayable, so a step from a replaced run can still land on a socket that has not finished closing, and a release for one run must not lower a successor's flag. `ScenarioRunService` builds its step batcher per run for the same reason, the shape `useExecutionEvents` uses: `handleClose` flushes after it has let go of `activeRunId`, so the commit carries the run it was built for.
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. **Every other writer - `addSteps`, `setPlan`, `setStreaming`, `streamLost`, `runEnded` - names its run and is dropped for any other** (issue #3351), as `execution-events-store` does: the stream is replayable, so a step from a replaced run can still land on a socket that has not finished closing, and a release for one run must not lower a successor's flag. `ScenarioRunService` builds its step batcher per run for the same reason, the shape `useExecutionEvents` uses: `handleClose` flushes after it has let go of `activeRunId`, so the commit carries the run it was built for.
 
 **State:**
 ```typescript
@@ -1692,8 +1692,11 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
                              // iterations, stepsExpected. Null until it arrives
   isStreaming: boolean       // Between startRun and the stream closing or failing
   error: string | null       // A transport failure on the stream
+  endedAs: TerminalRunStatus | null  // How the run ended, once this window knows
 }
 ```
+
+`runEnded(runId, status)` records `endedAs` and lowers `isStreaming` in one write. `ScenarioRunService.handleClose` calls it with the engine's completion frame, or, for a stream that closed without one (#1415), with the stored report's status once the refetch below reads it as terminal; a run the report still calls running only lost its stream, and `endedAs` stays null. Its reader is `RunAnnouncer` (#3498), which says how the run ended; the run tab reads the stored record, not this field.
 
 `streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `useRunLiveness(run.id, run.status)`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
 

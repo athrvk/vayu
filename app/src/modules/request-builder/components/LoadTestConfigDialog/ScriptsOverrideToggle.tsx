@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Label, ToggleGroup, ToggleGroupItem } from "@/components/ui";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import type { ScriptsOverride } from "./buildLoadTestConfig";
 
 interface ScriptsOverrideToggleProps {
@@ -26,14 +26,14 @@ interface ScriptsOverrideToggleProps {
 export function ScriptsOverrideToggle({ value, onChange }: ScriptsOverrideToggleProps) {
 	return (
 		<div className="flex items-center justify-between gap-4">
-			<Label className="leading-snug">
+			<span className="block text-sm font-medium leading-snug">
 				Scripts
 				<span className="block text-xs font-normal text-muted-foreground">
 					As marked runs a script inline only where its own element says to; the other two
 					override every script this run. Tests in a post-request script run on a sample
 					unless All inline.
 				</span>
-			</Label>
+			</span>
 			<ToggleGroup
 				size="sm"
 				aria-label="Scripts"

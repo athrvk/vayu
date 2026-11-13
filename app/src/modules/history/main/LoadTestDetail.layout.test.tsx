@@ -23,6 +23,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
+import { HeadingSection } from "@/components/ui/heading";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import { apiService } from "@/services/api";
 import { useTabsStore } from "@/stores";
 import type { Run, RunReport } from "@/types";
@@ -250,5 +252,30 @@ describe("the Test config box", () => {
 			"false"
 		);
 		expect(screen.getByText(/not negotiated/i)).toBeVisible();
+	});
+});
+
+// The report has two hosts (#3498). In History the run's header is the tab's
+// h1 and the report is a section under it, so its crumb stays text; on the
+// dashboard (`dashboard.breadcrumb.test.tsx`) the crumb is the h1. Either way
+// the report's cards sit one level under the tab's title.
+describe("LoadTestDetail's headings under History's run title", () => {
+	it("adds no second h1 and skips no level", async () => {
+		const { container } = render(
+			withQueryClient(
+				asTab(
+					<>
+						<h1>Get users</h1>
+						<HeadingSection>
+							<LoadTestDetail report={report()} runId="run_open" />
+						</HeadingSection>
+					</>
+				)
+			)
+		);
+		await screen.findByText("vs baseline");
+
+		expect(expectOneTopHeading(container)).toBe("Get users");
+		expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(0);
 	});
 });

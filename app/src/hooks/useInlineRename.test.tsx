@@ -31,6 +31,7 @@ function Row({ initialValue = "Get users" }: { initialValue?: string }) {
 	const [renaming, setRenaming] = useState(true);
 	const rename = useInlineRename({
 		active: renaming,
+		label: "Name",
 		initialValue,
 		onCommit: (name) => {
 			onCommit(name);
@@ -42,7 +43,7 @@ function Row({ initialValue = "Get users" }: { initialValue?: string }) {
 
 	return (
 		<div data-row tabIndex={-1}>
-			{renaming ? <input aria-label="Name" {...rename.inputProps} /> : <span>closed</span>}
+			{renaming ? <input {...rename.inputProps} /> : <span>closed</span>}
 		</div>
 	);
 }
@@ -55,6 +56,15 @@ function renderRow(initialValue?: string) {
 beforeEach(() => onCommit.mockReset());
 
 describe("useInlineRename", () => {
+	// The field replaces a row's name and carries no visible label (#3498).
+	it("names the field with the caller's label", () => {
+		const view = render(<Row />);
+
+		expect(view.getByRole("textbox", { name: "Name" })).toBe(
+			view.container.querySelector("input")
+		);
+	});
+
 	// Typing over the name must replace it (#3450); a caret at the end made
 	// "List orders" into "List ordersList orders renamed". The field here has no
 	// `autoFocus`, so focusing it is the only thing that can select.
@@ -159,6 +169,7 @@ describe("useInlineRename and the blur a keyboard close causes", () => {
 		const view = renderHook(() =>
 			useInlineRename({
 				active: true,
+				label: "Name",
 				initialValue: "Get users",
 				onCommit,
 				onCancel,

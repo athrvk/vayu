@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";

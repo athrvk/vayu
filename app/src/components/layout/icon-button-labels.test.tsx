@@ -21,10 +21,13 @@
  * this scans the source rather than testing the handful that existed at the
  * time. A new unnamed icon button anywhere in the app fails this test.
  *
- * A name may come from `aria-label`, `aria-labelledby`, or `title` - all three
- * feed the accessible-name computation, and this codebase uses `title` for it
- * in several places. (title-only is weaker - it does not surface on keyboard
- * focus - but it is a name, and forcing a conversion is a separate decision.)
+ * A name comes from `aria-label` or `aria-labelledby`, never from `title`. A
+ * `title` is a name to the accessibility tree but a tooltip only to a pointer:
+ * it does not surface on keyboard focus or on touch, so
+ * an icon-only button that leans on it teaches a keyboard user nothing. An
+ * icon-only button is a `TooltipIconButton` (`aria-label` and the app's Tooltip
+ * from one `label`), and the count of icon buttons carrying `title=` at all,
+ * beside an `aria-label` or not, is pinned at zero (#3498).
  *
  * Two gaps closed in #1216:
  *
@@ -34,11 +37,7 @@
  *   thirteenth exists and is skipped on purpose: the schema explorer's chevron
  *   is `aria-hidden` and `tabIndex={-1}`, a pointer affordance for an expand
  *   the row already exposes through `aria-expanded` and the arrow keys.)
- * - `title`-only was accepted without limit. No site relies on it any more, so
- *   the count is pinned at zero: a *new* icon button gets a real `aria-label`,
- *   which is the half of the name computation that survives keyboard focus.
- *   The three buttons that carry `title` beside an `aria-label` are unaffected
- *   - a redundant tooltip is not a naming decision.
+ * - `title`-only was accepted without limit; #3498 closed the other half.
  */
 
 import { describe, it, expect } from "vitest";
@@ -55,7 +54,7 @@ const isIconButton = (tag: string) => /size=["']icon["']/.test(tag);
 const hasAriaName = (tag: string) =>
 	/aria-label[=\s]/.test(tag) || /aria-labelledby[=\s]/.test(tag);
 
-const hasAccessibleName = (tag: string) => hasAriaName(tag) || /\btitle[=\s]/.test(tag);
+const hasTitle = (tag: string) => /\btitle[=\s]/.test(tag);
 
 /**
  * Hidden from assistive technology, so there is no name to give. The tree rows
@@ -140,6 +139,22 @@ function skip(source: string, from: number, open: string, close: string): number
 	return source.length;
 }
 
+/**
+ * The plain `Button`s that are icon-only and carry their label on focus another
+ * way, by file and count. Each is wrapped in a `Tooltip` beside it (the trigger
+ * is a ref-taking child these files compose by hand). `RowActionsMenu`'s is
+ * also a `DropdownMenuTrigger`, and declines the tooltip on the focus the
+ * closing menu hands back (`RowActionsMenu.test.tsx`).
+ */
+const HAND_WRAPPED: Record<string, number> = {
+	"components/shared/KeyValueEditor/FilePartCell.tsx": 1,
+	"components/shared/KeyValueEditor/KeyValueRow.tsx": 2,
+	"components/shared/RowActionsMenu.tsx": 1,
+	"components/shared/TimeValue/TimeMarker.tsx": 1,
+	"components/shared/response-viewer/ResponseActions.tsx": 2,
+	"modules/collections/CollectionTree.tsx": 3,
+};
+
 describe("icon-only buttons have accessible names", () => {
 	const iconTags = Object.entries(sources).flatMap(([path, src]) =>
 		openingTags(src as string, "Button")
@@ -157,7 +172,7 @@ describe("icon-only buttons have accessible names", () => {
 
 	it("names every icon-only Button", () => {
 		const offenders = iconTags
-			.filter(({ tag }) => !hasAccessibleName(tag))
+			.filter(({ tag }) => !hasAriaName(tag))
 			.map(({ path, tag }) => summarize(path, tag));
 		expect(offenders).toEqual([]);
 	});
@@ -175,18 +190,34 @@ describe("icon-only buttons have accessible names", () => {
 
 	it("names every raw icon-only <button>", () => {
 		const offenders = rawIconButtons
-			.filter(({ tag }) => !hasAccessibleName(tag))
+			.filter(({ tag }) => !hasAriaName(tag))
 			.map(({ path, tag }) => summarize(path, tag));
 		expect(offenders).toEqual([]);
 	});
 
-	it("adds no new button whose only name is a title", () => {
-		const titleOnly = [...iconTags, ...rawIconButtons]
-			.filter(({ tag }) => hasAccessibleName(tag) && !hasAriaName(tag))
+	it("shows every icon-only Button's label on focus: it is a TooltipIconButton or wrapped by hand", () => {
+		// `TooltipIconButton` spells no `size="icon"` at its call sites, so a plain
+		// `<Button size="icon">` reaching this scan is one a keyboard user gets no
+		// visible label from, unless the file wraps it in a `Tooltip` itself. The
+		// count per file is pinned, so a new bare one beside an already-wrapped
+		// one still fails (#3498). Only `size="icon"` is read: whether a
+		// `size="sm"` button holds text is not something a scan can tell.
+		const counts = new Map<string, number>();
+		for (const { path, tag } of iconTags) {
+			if (path.includes(".test.") || isHiddenFromAt(tag)) continue;
+			const file = path.replace(/^\/src\//, "");
+			counts.set(file, (counts.get(file) ?? 0) + 1);
+		}
+
+		expect(Object.fromEntries([...counts].sort())).toEqual(HAND_WRAPPED);
+	});
+
+	it("gives no icon-only button a native title", () => {
+		const titled = [...iconTags, ...rawIconButtons]
+			.filter(({ tag }) => hasTitle(tag))
 			.map(({ path, tag }) => summarize(path, tag));
-		// The count today is zero. A cap rather than a ban, because the docblock
-		// above still holds - `title` is a name, just the weaker one - and this is
-		// the ratchet that keeps the weaker one from spreading.
-		expect(titleOnly).toEqual([]);
+		// A zero ceiling, not a cap: the tooltip is `TooltipIconButton`'s, and a
+		// `title` beside it would show twice on hover.
+		expect(titled).toEqual([]);
 	});
 });

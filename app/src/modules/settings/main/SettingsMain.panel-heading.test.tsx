@@ -31,6 +31,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import KeyboardShortcutsPanel from "./panels/KeyboardShortcutsPanel";
 import { APP_SETTINGS_PANELS, DEFAULT_SAVE_NOTE } from "./app-panels";
@@ -100,6 +101,24 @@ describe("a settings panel's heading is in the band, once", () => {
 		expect(screen.getByText(panel.saveNote!)).toBeInTheDocument();
 		// And the panel's content is there under it.
 		expect(screen.getAllByRole("definition").length).toBeGreaterThan(5);
+	});
+
+	// One top heading per tab (#3498): the band's, with the panel's cards a
+	// level under it.
+	it("is the tab's one h1, and the panel under it skips no level", () => {
+		const panel = APP_SETTINGS_PANELS.find((p) => p.id === "shortcuts")!;
+		const { container } = render(
+			asTab(
+				<ClientSettingsPanel
+					title={panel.label}
+					description={panel.description}
+					saveNote={panel.saveNote ?? DEFAULT_SAVE_NOTE}
+				>
+					<KeyboardShortcutsPanel />
+				</ClientSettingsPanel>
+			)
+		);
+		expect(expectOneTopHeading(container)).toBe(panel.label);
 	});
 
 	it("no panel's card repeats the name its band already prints", () => {

@@ -29,6 +29,8 @@ import {
 	TabsTrigger,
 	TabLabel,
 	ScrollArea,
+	HeadingSection,
+	useHeadingLevel,
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
 import { formatConcurrency } from "@/constants/load-test-modes";
@@ -65,6 +67,9 @@ import type { SampleDestination, SampleFilter } from "./sample-filter";
 import { RUN_TYPE_NAME, type LoadTestDetailProps, type SeriesFailure } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
+	// On the dashboard this report is the whole pane and its crumb is the pane's
+	// `h1`; in History the run's header is (#3498).
+	const titlesPane = useHeadingLevel() === 1;
 	const [activeTab, setActiveTab] = useState("overview");
 	// Held here, not in SamplesTab: Radix unmounts an inactive panel, so the tab
 	// would forget a chip or an open row the moment another tab was chosen. The
@@ -326,6 +331,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					<TabBreadcrumb
 						label="Run location"
 						crumbs={crumbs}
+						titlesPane={titlesPane}
 						className="min-w-0 flex-1 bg-transparent px-0 pt-0"
 					/>
 					{compareRequestId && (
@@ -342,105 +348,113 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				</div>
 			</div>
 
-			{comparing && compareRequestId ? (
-				<RunComparisonView
-					report={report}
-					runId={runId}
-					requestId={compareRequestId}
-					onClose={() => setComparing(false)}
-					runContext={runContext}
-				/>
-			) : (
-				/* Tabbed Content */
-				<Tabs
-					value={tab}
-					onValueChange={selectTab}
-					className="flex-1 flex flex-col min-h-0"
-				>
-					<TabsList variant="inset" className="mx-4 mt-3">
-						<TabsTrigger value="overview">
-							<BarChart3 className="size-icon-sm" />
-							<TabLabel>Overview</TabLabel>
-						</TabsTrigger>
-						<TabsTrigger value="performance">
-							<TrendingUp className="size-icon-sm" />
-							<TabLabel>Performance</TabLabel>
-						</TabsTrigger>
-						{/* Only for a run that has a sequence. A single-request load run
+			{/* Level 2 in both hosts: under this crumb on the dashboard, under the
+			    run's header in History. */}
+			<HeadingSection level={2}>
+				{comparing && compareRequestId ? (
+					<RunComparisonView
+						report={report}
+						runId={runId}
+						requestId={compareRequestId}
+						onClose={() => setComparing(false)}
+						runContext={runContext}
+					/>
+				) : (
+					/* Tabbed Content */
+					<Tabs
+						value={tab}
+						onValueChange={selectTab}
+						className="flex-1 flex flex-col min-h-0"
+					>
+						<TabsList variant="inset" className="mx-4 mt-3">
+							<TabsTrigger value="overview">
+								<BarChart3 className="size-icon-sm" />
+								<TabLabel>Overview</TabLabel>
+							</TabsTrigger>
+							<TabsTrigger value="performance">
+								<TrendingUp className="size-icon-sm" />
+								<TabLabel>Performance</TabLabel>
+							</TabsTrigger>
+							{/* Only for a run that has a sequence. A single-request load run
 					    would get an empty tab, and the breakdown is the *only* place a
 					    scenario load run says what each step did - it stores no
 					    per-step results rows. */}
-						{isScenarioLoad && (
-							<TabsTrigger value="steps">
-								<ListOrdered className="size-icon-sm" />
-								<TabLabel>Steps</TabLabel>
-							</TabsTrigger>
-						)}
-						<TabsTrigger value="samples">
-							<Activity className="size-icon-sm" />
-							<TabLabel>Sampled requests</TabLabel>
-						</TabsTrigger>
-					</TabsList>
-
-					<ScrollArea className="flex-1">
-						<div className="@container flex flex-col gap-4 p-6">
-							{runContext}
-							<TabsContent value="overview" className="mt-0 space-y-4">
-								<OverviewTab
-									report={report}
-									runId={runId}
-									derived={derived}
-									anomalies={anomalies}
-									onOpenSample={openSample}
-								/>
-							</TabsContent>
-
-							<TabsContent value="performance" className="mt-0 space-y-4">
-								<PerformanceTab
-									report={report}
-									runId={runId}
-									derived={derived}
-									anomalies={anomalies}
-									timeSeries={timeSeries}
-									seriesFailure={seriesFailure}
-									monitorSamples={monitorSamples}
-									monitorFailure={monitorFailure}
-									isLoadingSeries={isLoadingSeries}
-									ticksPerBucket={ticksPerBucket}
-									monitorTicksPerBucket={monitorTicksPerBucket}
-									monitorSeries={run?.configSnapshot?.monitor?.series}
-								/>
-								{/* Not part of PerformanceTab: that is a view of this run's report
-								    and renders without a QueryClient in tests; this reads the request's other runs. */}
-								<RunTrend requestId={compareRequestId} openRunId={runId} />
-							</TabsContent>
-
 							{isScenarioLoad && (
-								<TabsContent value="steps" className="mt-0 space-y-4">
-									<ScenarioStepsTab
-										steps={scenarioSteps}
-										virtualUsers={report.scenario?.virtualUsers}
-										iterations={report.scenario?.iterations}
-										iterationsCompleted={report.scenario?.iterationsCompleted}
-										iterationsAbandoned={report.scenario?.iterationsAbandoned}
-										replayCard={testValidationTitleOf(report)}
+								<TabsTrigger value="steps">
+									<ListOrdered className="size-icon-sm" />
+									<TabLabel>Steps</TabLabel>
+								</TabsTrigger>
+							)}
+							<TabsTrigger value="samples">
+								<Activity className="size-icon-sm" />
+								<TabLabel>Sampled requests</TabLabel>
+							</TabsTrigger>
+						</TabsList>
+
+						<ScrollArea className="flex-1">
+							<div className="@container flex flex-col gap-4 p-6">
+								{runContext}
+								<TabsContent value="overview" className="mt-0 space-y-4">
+									<OverviewTab
+										report={report}
+										runId={runId}
+										derived={derived}
+										anomalies={anomalies}
+										onOpenSample={openSample}
 									/>
 								</TabsContent>
-							)}
 
-							<TabsContent value="samples" className="mt-0 space-y-4">
-								<SamplesTab
-									report={report}
-									derived={derived}
-									filter={sampleFilter}
-									onFilterChange={setSampleFilter}
-									initialExpandedNumber={sampleToExpand}
-								/>
-							</TabsContent>
-						</div>
-					</ScrollArea>
-				</Tabs>
-			)}
+								<TabsContent value="performance" className="mt-0 space-y-4">
+									<PerformanceTab
+										report={report}
+										runId={runId}
+										derived={derived}
+										anomalies={anomalies}
+										timeSeries={timeSeries}
+										seriesFailure={seriesFailure}
+										monitorSamples={monitorSamples}
+										monitorFailure={monitorFailure}
+										isLoadingSeries={isLoadingSeries}
+										ticksPerBucket={ticksPerBucket}
+										monitorTicksPerBucket={monitorTicksPerBucket}
+										monitorSeries={run?.configSnapshot?.monitor?.series}
+									/>
+									{/* Not part of PerformanceTab: that is a view of this run's report
+								    and renders without a QueryClient in tests; this reads the request's other runs. */}
+									<RunTrend requestId={compareRequestId} openRunId={runId} />
+								</TabsContent>
+
+								{isScenarioLoad && (
+									<TabsContent value="steps" className="mt-0 space-y-4">
+										<ScenarioStepsTab
+											steps={scenarioSteps}
+											virtualUsers={report.scenario?.virtualUsers}
+											iterations={report.scenario?.iterations}
+											iterationsCompleted={
+												report.scenario?.iterationsCompleted
+											}
+											iterationsAbandoned={
+												report.scenario?.iterationsAbandoned
+											}
+											replayCard={testValidationTitleOf(report)}
+										/>
+									</TabsContent>
+								)}
+
+								<TabsContent value="samples" className="mt-0 space-y-4">
+									<SamplesTab
+										report={report}
+										derived={derived}
+										filter={sampleFilter}
+										onFilterChange={setSampleFilter}
+										initialExpandedNumber={sampleToExpand}
+									/>
+								</TabsContent>
+							</div>
+						</ScrollArea>
+					</Tabs>
+				)}
+			</HeadingSection>
 		</div>
 	);
 }

@@ -27,6 +27,7 @@ import { apiService } from "@/services/api";
 import type { Run } from "@/types";
 
 interface ChartProps {
+	ariaLabel: string;
 	data: [number[], (number | null)[], (number | null)[]];
 	series: { label: string; role: string }[];
 	annotations: { startSeconds: number }[];
@@ -39,7 +40,7 @@ const charts: ChartProps[] = [];
 vi.mock("@/modules/dashboard/components/charts/uplot/UPlotChart", () => ({
 	UPlotChart: (props: ChartProps) => {
 		charts.push(props);
-		return <div data-testid="uplot" />;
+		return <div data-testid="uplot" role="img" aria-label={props.ariaLabel} />;
 	},
 }));
 

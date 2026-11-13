@@ -52,6 +52,12 @@ import { isCommitEnter } from "@/lib/keyboard";
 export interface UseInlineRenameOptions {
 	/** True while this row's rename field is mounted. */
 	active: boolean;
+	/**
+	 * What the field names, as a screen reader hears it ("Request name"). The
+	 * field replaces a row's name and has no visible label, so without this it
+	 * is announced as a bare "edit text" holding the old name (#3498).
+	 */
+	label: string;
 	/** The name the field opens with; read once, when `active` turns true. */
 	initialValue: string;
 	/** Called with the trimmed, non-empty name. */
@@ -83,6 +89,7 @@ export interface InlineRename {
 	setValue: (value: string) => void;
 	/** Spread onto the rename `<Input>`; the caller keeps `autoFocus` and styling. */
 	inputProps: {
+		"aria-label": string;
 		value: string;
 		onChange: (e: ChangeEvent<HTMLInputElement>) => void;
 		onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
@@ -93,6 +100,7 @@ export interface InlineRename {
 
 export function useInlineRename({
 	active,
+	label,
 	initialValue,
 	onCommit,
 	onCancel,
@@ -157,6 +165,7 @@ export function useInlineRename({
 		value,
 		setValue,
 		inputProps: {
+			"aria-label": label,
 			value,
 			onChange: (e) => setValue(e.target.value),
 			onKeyDown: (e) => {

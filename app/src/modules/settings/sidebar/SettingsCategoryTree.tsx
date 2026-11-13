@@ -37,7 +37,7 @@ import type { SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
 import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button, Input, Skeleton, type IconMotion } from "@/components/ui";
+import { Input, Skeleton, TooltipIconButton, type IconMotion } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
@@ -161,15 +161,13 @@ export default function SettingsCategoryTree() {
 							className="pl-8 pr-8 text-sm"
 						/>
 						{query !== "" && (
-							<Button
-								variant="ghost"
+							<TooltipIconButton
 								size="sm"
 								onClick={() => setQuery("")}
-								aria-label="Clear search"
+								label="Clear search"
 								className="absolute right-0.5 top-1/2 size-target -translate-y-1/2 p-0"
-							>
-								<X className="size-icon-sm" />
-							</Button>
+								icon={<X className="size-icon-sm" />}
+							/>
 						)}
 					</div>
 				</div>

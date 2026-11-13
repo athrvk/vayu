@@ -694,7 +694,9 @@ export default function RunCollectionDialog({
 					{loadTest && (
 						<>
 							<div className="space-y-1.5">
-								<Label className="text-xs">Load profile</Label>
+								<span className="block text-xs font-medium leading-none">
+									Load profile
+								</span>
 								<ProfilePicker
 									value={profile.mode}
 									onChange={(next) => {
@@ -727,13 +729,13 @@ export default function RunCollectionDialog({
 							)}
 
 							<div className="flex items-center justify-between gap-4">
-								<Label className="leading-snug">
+								<span className="block text-sm font-medium leading-snug">
 									Scripts
 									<span className="block text-xs font-normal text-muted-foreground">
 										As marked runs a script inline only where its own element
 										says to; the other two override every script this run.
 									</span>
-								</Label>
+								</span>
 								<ToggleGroup
 									size="sm"
 									aria-label="Scripts"
@@ -785,12 +787,12 @@ export default function RunCollectionDialog({
 					    executor does (issue #1552's reopen), so a design-mode run
 					    can silence or override its timers too. */}
 					<div className="flex items-center justify-between gap-4">
-						<Label className="leading-snug">
+						<span className="block text-sm font-medium leading-snug">
 							Timers
 							<span className="block text-xs font-normal text-muted-foreground">
 								As configured, or off for this run.
 							</span>
-						</Label>
+						</span>
 						<ToggleGroup
 							size="sm"
 							aria-label="Timers"
@@ -863,12 +865,12 @@ export default function RunCollectionDialog({
 						 * metrics too).
 						 */}
 						<div className="space-y-1.5">
-							<Label className="text-xs">
+							<span className="block text-xs font-medium leading-none">
 								Custom metric budgets
 								<span className="ml-1 font-normal text-muted-foreground">
 									(optional)
 								</span>
-							</Label>
+							</span>
 							<CustomBudgetHint />
 							<CustomBudgetRows
 								rows={customBudgets}

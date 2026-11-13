@@ -30,8 +30,15 @@ import { Button, type ButtonProps } from "./button";
 import { Tooltip, TooltipContent, TooltipShortcutLabel, TooltipTrigger } from "./tooltip";
 
 export interface TooltipIconButtonProps extends Omit<ButtonProps, "aria-label" | "children"> {
-	/** Names the button (aria-label) and fills the tooltip. Required. */
+	/** Names the button (aria-label) and, unless `tooltip` says otherwise, fills the tooltip. Required. */
 	label: string;
+	/**
+	 * The tooltip's text when it should say something other than the name: a row
+	 * button is named for its row ("Restore Login") and its tooltip is the verb
+	 * alone, or a toggle's name is short and its tooltip explains the effect.
+	 * Defaults to `label`.
+	 */
+	tooltip?: string;
 	/** The icon. Kept as `icon` rather than children so the label can't be
 	 *  mistaken for the visible content. */
 	icon: React.ReactNode;
@@ -43,6 +50,7 @@ export interface TooltipIconButtonProps extends Omit<ButtonProps, "aria-label" |
 
 export function TooltipIconButton({
 	label,
+	tooltip = label,
 	icon,
 	tooltipSide = "top",
 	tooltipHint,
@@ -59,9 +67,9 @@ export function TooltipIconButton({
 			</TooltipTrigger>
 			<TooltipContent side={tooltipSide}>
 				{tooltipHint ? (
-					<TooltipShortcutLabel label={label} shortcut={tooltipHint} />
+					<TooltipShortcutLabel label={tooltip} shortcut={tooltipHint} />
 				) : (
-					label
+					tooltip
 				)}
 			</TooltipContent>
 		</Tooltip>

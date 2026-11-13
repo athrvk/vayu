@@ -63,7 +63,7 @@ export function MonitoringSection({ monitor, onMonitorChange, maxSeries }: Monit
 			/>
 
 			<div className="space-y-1.5">
-				<Label className="text-xs">Response format</Label>
+				<span className="block text-xs font-medium leading-none">Response format</span>
 				{/*
 				    A segmented control rather than a two-row select: it is a binary
 				    choice, and `ToggleGroup` is the app's primitive for one (roving
@@ -71,6 +71,7 @@ export function MonitoringSection({ monitor, onMonitorChange, maxSeries }: Monit
 				 */}
 				<ToggleGroup
 					size="sm"
+					aria-label="Response format"
 					value={monitor.format}
 					onValueChange={(value) => {
 						// Radix emits "" when the active item is clicked again; a format

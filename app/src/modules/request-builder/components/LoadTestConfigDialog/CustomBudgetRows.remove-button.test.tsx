@@ -16,7 +16,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { CustomBudgetRows } from "./CustomBudgetRows";
 import type { CustomBudgetDraft } from "./budgets";
 
@@ -35,5 +37,16 @@ describe("CustomBudgetRows remove button", () => {
 		render(<CustomBudgetRows rows={[ROW]} onChange={onChange} idPrefix="t" />);
 		fireEvent.click(screen.getByRole("button", { name: "Remove custom budget 1" }));
 		expect(onChange).toHaveBeenCalledWith([]);
+	});
+});
+
+describe("CustomBudgetRows remove button tooltip", () => {
+	it("says what it removes on keyboard focus (#3498)", async () => {
+		render(<CustomBudgetRows rows={[ROW]} onChange={() => {}} idPrefix="t" />);
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove custom budget 1" }),
+			"Remove budget"
+		);
 	});
 });

@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useToastStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import type { ElementOwner } from "@/lib/agent-reference";

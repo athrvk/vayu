@@ -85,6 +85,7 @@ function RequestItemRow({
 	 */
 	const rename = useInlineRename({
 		active: isRenaming,
+		label: "Request name",
 		initialValue: request.name,
 		onCommit: (name) => onRequestRenameSubmit(request.id, name),
 		onCancel: onRequestRenameCancel,

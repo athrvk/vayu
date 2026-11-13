@@ -134,7 +134,11 @@ export default function FilePartCell({
 						</TooltipTrigger>
 						<TooltipContent>Send the file under another name</TooltipContent>
 					</Tooltip>
-					<PopoverContent align="end" className="space-y-2">
+					<PopoverContent
+						align="end"
+						className="space-y-2"
+						aria-label={`Name the upload of ${partName || "this part"}`}
+					>
 						<VariableInput
 							value={fileName ?? ""}
 							onChange={onRename}

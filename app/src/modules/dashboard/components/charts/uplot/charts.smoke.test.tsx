@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import {
 	LatencyPercentilesChart,
@@ -85,6 +85,31 @@ describe("centralized uPlot charts - smoke", () => {
 			unmount();
 		}
 		expect(true).toBe(true);
+	});
+
+	it.each([
+		["Response time percentiles over time", <LatencyPercentilesChart history={history} />],
+		["Latency breakdown over time", <LatencyBreakdownChart history={history} />],
+		["Request rate over time", <RequestRateChart history={history} />],
+		["Virtual users over time", <ConnectionsChart history={history} mode="ramp_up" />],
+		["Error rate over time", <ErrorRateChart history={history} />],
+		["Response time against concurrency", <ResponseTimeVsConcurrencyChart history={history} />],
+		["Status codes over time", <StatusCodesOverTimeChart history={history} />],
+		["Latency by percentile, median 20ms", <HdrPercentileChart report={report} />],
+	])("names %s for a screen reader (#3498)", (title, chart) => {
+		const { unmount } = render(chart);
+
+		expect(screen.getByRole("img", { name: new RegExp(`^${title}`) })).toBeInTheDocument();
+		unmount();
+	});
+
+	it("reads the figures a sighted reader gets from the line, in the tooltip's digits", () => {
+		const { unmount } = render(<LatencyPercentilesChart history={history} />);
+
+		const label = screen.getByRole("img").getAttribute("aria-label");
+		expect(label).toMatch(/p50: latest \d+ms, lowest \d+ms, highest \d+ms/);
+		expect(label).toContain("p99: ");
+		unmount();
 	});
 
 	it("renders the ramp overlay (secondary axis) branch", () => {

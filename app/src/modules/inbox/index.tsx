@@ -42,6 +42,7 @@ import {
 	DeleteConfirmDialog,
 	DisabledHint,
 	IconSwap,
+	HeadingSection,
 	Label,
 	Select,
 	SelectContent,
@@ -54,6 +55,7 @@ import {
 	TooltipTrigger,
 	TooltipValue,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	Callout,
@@ -385,26 +387,31 @@ export default function InboxView() {
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
 				<InboxIcon className="size-icon text-muted-foreground" aria-hidden="true" />
-				<code className="font-mono text-xs">{inbox.url}</code>
-				<Button
-					variant="ghost"
+				{/* The tab's `h1` is the address, the inbox's identity; the hidden
+				    prefix says what it is the address of (#3498). */}
+				<h1>
+					<span className="sr-only">Webhook inbox </span>
+					<code className="font-mono text-xs">{inbox.url}</code>
+				</h1>
+				<TooltipIconButton
 					size="sm"
-					aria-label="Copy inbox URL"
+					label="Copy inbox URL"
 					onClick={() => void copyUrl(inbox.url, "Inbox URL")}
-				>
-					<IconSwap
-						state={urlCopied ? "copied" : "copy"}
-						icons={{
-							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-							copied: (
-								<Check
-									className="size-icon-sm text-status-success-text"
-									aria-hidden="true"
-								/>
-							),
-						}}
-					/>
-				</Button>
+					icon={
+						<IconSwap
+							state={urlCopied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+								copied: (
+									<Check
+										className="size-icon-sm text-status-success-text"
+										aria-hidden="true"
+									/>
+								),
+							}}
+						/>
+					}
+				/>
 				<Button
 					variant="ghost"
 					size="sm"
@@ -625,7 +632,9 @@ export default function InboxView() {
 				</aside>
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-					<CaptureDetail capture={selectedCapture} inboxUrl={inbox.url} />
+					<HeadingSection>
+						<CaptureDetail capture={selectedCapture} inboxUrl={inbox.url} />
+					</HeadingSection>
 				</div>
 			</div>
 		</div>

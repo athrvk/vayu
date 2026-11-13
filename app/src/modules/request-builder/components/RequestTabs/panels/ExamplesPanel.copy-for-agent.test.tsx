@@ -20,7 +20,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useToastStore } from "@/stores";
 import { RequestBuilderContext } from "../../../context/RequestBuilderContext";
@@ -145,5 +147,16 @@ describe("Copy for agent on an example row", () => {
 
 		await screen.findByText("Happy path");
 		expect(screen.queryByRole("button", { name: /for agent/ })).toBeNull();
+	});
+});
+
+describe("Delete on an example row", () => {
+	it("says what it deletes on keyboard focus (#3498)", async () => {
+		renderPanel();
+
+		await expectTooltipOnFocus(
+			await screen.findByRole("button", { name: "Delete example Happy path" }),
+			"Delete example"
+		);
 	});
 });

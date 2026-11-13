@@ -22,7 +22,9 @@
 
 import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { expectShowsError, expectShowsNoError } from "./field-error.testkit";
@@ -695,6 +697,15 @@ describe("GenericElementForm - an object with no declared properties is a key/va
 		expect(keys()).toEqual(["a", "b"]);
 		expect(screen.getByLabelText("Value 1")).toHaveValue("x");
 		expect(screen.getByLabelText("Value 2")).toHaveValue("y");
+	});
+
+	it("says what a row's remove button does on keyboard focus (#3498)", async () => {
+		render(<Harness initial={{ cases: { a: "x" } }} onChange={vi.fn()} />);
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove entry 1" }),
+			"Remove entry"
+		);
 	});
 
 	it("shows no rows for a stored value that is not an object", () => {

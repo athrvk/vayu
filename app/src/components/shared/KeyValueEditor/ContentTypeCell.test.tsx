@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import KeyValueEditor from "./index";
 import { contentTypeExtra, withContentType } from "./ContentTypeCell";
@@ -123,6 +123,12 @@ describe("the file name a file part is sent under (#3022)", () => {
 		if (!input) throw new Error("the rename popover did not open");
 		return input;
 	}
+
+	it("names the popover that holds the field (#3498)", () => {
+		const { container } = editor([upload]);
+		open(container);
+		expect(screen.getByRole("dialog", { name: "Name the upload of VersionData" })).toBeTruthy();
+	});
 
 	it("sets the part's file name, keeping the path and type", () => {
 		const { container, onChange } = editor([upload]);

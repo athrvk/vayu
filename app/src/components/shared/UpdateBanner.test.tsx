@@ -17,7 +17,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 import type { UpdateDownloadState } from "@/types/electron";
 import UpdateBanner from "./UpdateBanner";
@@ -88,6 +90,17 @@ const failed: UpdateDownloadState = {
 };
 
 describe("UpdateBanner", () => {
+	it("says Dismiss on keyboard focus (#3498)", async () => {
+		render(<UpdateBanner />);
+		announce();
+		push(verified);
+
+		await expectTooltipOnFocus(
+			await screen.findByRole("button", { name: "Dismiss update notification" }),
+			"Dismiss"
+		);
+	});
+
 	it("says Verifying, not a percentage, once the download reaches 100%", async () => {
 		render(<UpdateBanner />);
 		announce();

@@ -18,6 +18,8 @@ import { type Breakpoint } from "../../../utils/computeBreakpoint";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
+import { spokenSymbols } from "@/lib/spoken-text";
+import { describeChart } from "./chartLabel";
 import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
 import { formatLatency, formatTrimmed } from "@/lib/format-number";
@@ -105,6 +107,7 @@ export function ResponseTimeVsConcurrencyChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Response time against concurrency", data, series)}
 			data={data}
 			series={series}
 			height={height}
@@ -121,6 +124,21 @@ export function ResponseTimeVsConcurrencyChart({
 
 const HDR_MARKS = [0, 50, 90, 95, 99, 99.9];
 const HDR_SPLITS = HDR_MARKS.map(pctToX);
+
+/**
+ * The distribution's text alternative. `describeChart`'s "latest" would be the
+ * slowest request, so this names the percentiles the markers draw instead.
+ */
+function hdrLabel(latency: RunReport["latency"] | undefined): string {
+	const named = [
+		["median", latency?.p50],
+		["p95", latency?.p95],
+		["p99", latency?.p99],
+		["maximum", latency?.max],
+	] as const;
+	const figures = named.flatMap(([name, ms]) => (ms == null ? [] : [`${name} ${fmtMs(ms)}`]));
+	return spokenSymbols(["Latency by percentile", ...figures].join(", "));
+}
 
 /** HDR percentile distribution - latency at each percentile, tail-weighted x. */
 export function HdrPercentileChart({
@@ -169,6 +187,7 @@ export function HdrPercentileChart({
 
 	return (
 		<UPlotChart
+			ariaLabel={hdrLabel(report?.latency)}
 			data={data}
 			series={series}
 			height={height ?? 200}

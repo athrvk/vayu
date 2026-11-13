@@ -1143,7 +1143,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						<Icon className={cn("w-5 h-5", editorConfig.iconColor)} />
 						<div>
 							<div className="flex items-center gap-2">
-								<h2 className="text-md font-semibold text-foreground">{title}</h2>
+								{/* The variables tab's title; embedded in a collection's
+								    tab, the collection's header is (#3498). */}
+								<h1 className="text-md font-semibold text-foreground">{title}</h1>
 							</div>
 							<p className="text-xs text-muted-foreground">{editorConfig.subtitle}</p>
 						</div>
@@ -1254,7 +1256,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				<table className="w-full">
 					<thead>
 						<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-							<th className="pb-2 w-8"></th>
+							<th className="pb-2 w-8">
+								<span className="sr-only">Enabled</span>
+							</th>
 							<th className="pb-2 px-2 min-w-[8rem]">Variable</th>
 							<th className="pb-2 px-2 min-w-[10rem]">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
@@ -1265,7 +1269,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							 * the only unlabelled column in a table of labelled ones.
 							 */}
 							<th className="pb-2 w-14 px-2">Secret</th>
-							<th className="pb-2 w-18"></th>
+							<th className="pb-2 w-18">
+								<span className="sr-only">Actions</span>
+							</th>
 						</tr>
 					</thead>
 					<tbody>

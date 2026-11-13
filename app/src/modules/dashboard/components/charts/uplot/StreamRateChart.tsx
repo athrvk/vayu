@@ -19,6 +19,7 @@ import type uPlot from "uplot";
 import type { LoadTestMetrics } from "@/types";
 import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
+import { describeChart } from "./chartLabel";
 import { bucketColumns, pickEventsPerSecond } from "./buildData";
 import { axisRate, fmtRate } from "./formatters";
 
@@ -31,6 +32,8 @@ const STREAM_RATE_SERIES: UPlotSeriesSpec = {
 	width: 1.8,
 	format: fmtRate,
 };
+
+const STREAM_RATE_SPECS = [STREAM_RATE_SERIES];
 
 export function StreamRateChart({
 	history,
@@ -52,8 +55,9 @@ export function StreamRateChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Stream events per second", data, STREAM_RATE_SPECS)}
 			data={data}
-			series={[STREAM_RATE_SERIES]}
+			series={STREAM_RATE_SPECS}
 			xTime
 			height={height}
 			yFormat={axisRate}

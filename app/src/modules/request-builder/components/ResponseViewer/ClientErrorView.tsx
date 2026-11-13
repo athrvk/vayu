@@ -27,6 +27,7 @@ import {
 	Lightbulb,
 	type LucideIcon,
 } from "lucide-react";
+import { Heading } from "@/components/ui/heading";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { selectEngineRestartOffered, useEngineStore } from "@/stores";
 
@@ -196,7 +197,9 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				</div>
 
 				<div className="space-y-2">
-					<h3 className="text-md font-semibold text-foreground">{title}</h3>
+					<Heading outside="h3" className="text-md font-semibold text-foreground">
+						{title}
+					</Heading>
 					<p className="text-sm text-muted-foreground">
 						{errorMessage || "The request never reached the server."}
 					</p>

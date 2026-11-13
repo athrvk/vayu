@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import {
 	Button,
+	DisabledHint,
 	Input,
 	IconSwap,
 	Label,
@@ -59,6 +60,7 @@ import {
 	CardTitle,
 	Skeleton,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import type {
 	McpConnectClient,
@@ -710,9 +712,9 @@ export default function McpSettingsPanel() {
 					)}
 
 					<div className="flex items-center gap-2">
-						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
+						<span className="text-xs font-medium text-muted-foreground w-20 shrink-0">
 							Endpoint
-						</Label>
+						</span>
 						<code className="flex-1 text-xs font-mono bg-muted rounded-md px-2 py-1.5 break-all">
 							{endpoint}
 						</code>
@@ -727,29 +729,32 @@ export default function McpSettingsPanel() {
 								</span>
 								<div className="flex items-center gap-1">
 									{snippet.client && (
-										<Button
-											variant="outline"
-											size="sm"
-											onClick={() => void handleConnect(snippet.client!)}
-											disabled={
-												!hasElectron ||
-												!enabled ||
-												notListening ||
-												connecting !== null
-											}
-											className="h-control-sm px-2 text-xs shrink-0"
-											title={connectDisabledReason(enabled, notListening)}
+										<DisabledHint
+											reason={connectDisabledReason(enabled, notListening)}
 										>
-											{connecting === snippet.client ? (
-												<Loader2 className="size-icon-sm animate-spin" />
-											) : (
-												<Zap
-													className="size-icon-sm"
-													data-icon-motion={ICON_MOTION.flash}
-												/>
-											)}
-											Connect
-										</Button>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => void handleConnect(snippet.client!)}
+												disabled={
+													!hasElectron ||
+													!enabled ||
+													notListening ||
+													connecting !== null
+												}
+												className="h-control-sm px-2 text-xs shrink-0"
+											>
+												{connecting === snippet.client ? (
+													<Loader2 className="size-icon-sm animate-spin" />
+												) : (
+													<Zap
+														className="size-icon-sm"
+														data-icon-motion={ICON_MOTION.flash}
+													/>
+												)}
+												Connect
+											</Button>
+										</DisabledHint>
 									)}
 									<CopyButton text={snippet.code} disabled={!hasEndpoint} />
 								</div>
@@ -924,15 +929,14 @@ export default function McpSettingsPanel() {
 										className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
 									>
 										{host}
-										<Button
-											size="icon"
+										<TooltipIconButton
 											variant="rowActionDestructive"
 											className="-my-1"
 											onClick={() => removeHost(host)}
-											aria-label={`Remove ${host}`}
-										>
-											<X className="size-icon-sm" />
-										</Button>
+											label={`Remove ${host}`}
+											tooltip="Remove host"
+											icon={<X className="size-icon-sm" />}
+										/>
 									</span>
 								))}
 							</div>

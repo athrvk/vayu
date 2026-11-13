@@ -46,6 +46,9 @@ import {
 	SelectValue,
 	DeleteConfirmDialog,
 	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
@@ -367,7 +370,7 @@ export default function HistoryList() {
 							value={filterType}
 							onValueChange={(v) => setFilterType(v as FilterType)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Run type">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -382,7 +385,7 @@ export default function HistoryList() {
 							value={filterStatus}
 							onValueChange={(v) => setFilterStatus(v as FilterStatus)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Status">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -442,20 +445,24 @@ export default function HistoryList() {
 						 * toggle, not a navigation - the variant swap alone says
 						 * nothing to a screen reader.
 						 */}
-						<Button
-							variant={pinnedOnly ? "default" : "ghost"}
-							onClick={() => setPinnedOnly(!pinnedOnly)}
-							size="sm"
-							className="h-control-sm gap-1 ml-auto"
-							aria-pressed={pinnedOnly}
-							title="Show only pinned runs"
-						>
-							<Pin
-								className="size-icon-sm shrink-0"
-								data-icon-motion={ICON_MOTION.tiltPin}
-							/>
-							Pinned
-						</Button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant={pinnedOnly ? "default" : "ghost"}
+									onClick={() => setPinnedOnly(!pinnedOnly)}
+									size="sm"
+									className="h-control-sm gap-1 ml-auto"
+									aria-pressed={pinnedOnly}
+								>
+									<Pin
+										className="size-icon-sm shrink-0"
+										data-icon-motion={ICON_MOTION.tiltPin}
+									/>
+									Pinned
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Show only pinned runs</TooltipContent>
+						</Tooltip>
 					</div>
 				</div>
 

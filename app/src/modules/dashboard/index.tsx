@@ -32,7 +32,7 @@ import {
 } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/shared";
-import { Button } from "@/components/ui";
+import { Button, HeadingSection } from "@/components/ui";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { DashboardHeader, MetricsView } from "./components";
@@ -380,21 +380,28 @@ export default function LoadTestDashboard() {
 			 * run list rather than toggling it, so a crumb pressed from here always
 			 * shows the list it points at.
 			 */}
-			<TabBreadcrumb label="Run location" crumbs={crumbs} className="bg-transparent px-5" />
+			<TabBreadcrumb
+				label="Run location"
+				crumbs={crumbs}
+				titlesPane
+				className="bg-transparent px-5"
+			/>
 
-			{notices}
+			<HeadingSection>
+				{notices}
 
-			<div className="flex-1 overflow-auto bg-background">
-				<MetricsView
-					metrics={displayMetrics}
-					historicalMetrics={historicalMetrics}
-					targetRps={loadTestConfig?.targetRps}
-					concurrency={loadTestConfig?.concurrency}
-					mode={loadTestConfig?.mode}
-					runDurationSeconds={durationSeconds(loadTestConfig?.duration) ?? undefined}
-					rampConfig={rampConfig}
-				/>
-			</div>
+				<div className="flex-1 overflow-auto bg-background">
+					<MetricsView
+						metrics={displayMetrics}
+						historicalMetrics={historicalMetrics}
+						targetRps={loadTestConfig?.targetRps}
+						concurrency={loadTestConfig?.concurrency}
+						mode={loadTestConfig?.mode}
+						runDurationSeconds={durationSeconds(loadTestConfig?.duration) ?? undefined}
+						rampConfig={rampConfig}
+					/>
+				</div>
+			</HeadingSection>
 		</div>
 	);
 }

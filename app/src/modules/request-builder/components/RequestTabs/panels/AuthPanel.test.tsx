@@ -246,3 +246,35 @@ describe("AuthPanel writes the domain shape", () => {
 		).toBeInTheDocument();
 	});
 });
+
+/**
+ * Every auth field announced as its placeholder ("edit text, {{api_key}}") and the
+ * pickers as a bare "combo box" (#3498). The variable-aware input names itself
+ * from its placeholder unless it is told otherwise, and an `aria-label` outranks
+ * a `<label for>`, so the accessible name is what is asserted - not only that a
+ * label is attached.
+ */
+describe("AuthPanel names its controls", () => {
+	it("names the type picker", () => {
+		renderPanel({ mode: "bearer", token: "abc" });
+		expect(screen.getByRole("combobox", { name: "Authentication type" })).toBeInTheDocument();
+	});
+
+	it("names the bearer token by its label, not its placeholder", () => {
+		renderPanel({ mode: "bearer", token: "abc" });
+		expect(screen.getByLabelText("Token")).toHaveAccessibleName("Token");
+	});
+
+	it("names the basic fields, variable-aware and masked alike", () => {
+		renderPanel({ mode: "basic", username: "u", password: "p" });
+		expect(screen.getByLabelText("Username")).toHaveAccessibleName("Username");
+		expect(screen.getByLabelText("Password")).toHaveAccessibleName("Password");
+	});
+
+	it("names the api key fields and the location picker", () => {
+		renderPanel({ mode: "apikey", key: "k", value: "v", in: "header" });
+		expect(screen.getByRole("combobox", { name: "Add to" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Key name")).toHaveAccessibleName("Key name");
+		expect(screen.getByLabelText("Value")).toHaveAccessibleName("Value");
+	});
+});

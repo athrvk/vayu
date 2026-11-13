@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import type { FileRoot } from "@/types";
 
 const roots: FileRoot[] = [];
@@ -225,6 +226,16 @@ describe("FilesPanel", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Remove /data/fixtures" }));
 
 		await waitFor(() => expect(deleteRoot).toHaveBeenCalledWith("r1"));
+	});
+
+	it("says what a folder's remove button does on keyboard focus (#3498)", async () => {
+		roots.push({ id: "r1", path: "/data/fixtures", createdAt: 1 });
+		renderPanel();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove /data/fixtures" }),
+			"Remove folder"
+		);
 	});
 
 	it("offers no picker outside Electron, where nothing may allow a folder", () => {

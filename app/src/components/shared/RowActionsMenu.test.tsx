@@ -23,12 +23,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useState } from "react";
 import { CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowActionsMenu } from "./RowActionsMenu";
 import type { RowAction } from "./row-actions";
 import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 
 const duplicate = vi.fn();
 const remove = vi.fn();
@@ -231,5 +233,61 @@ describe("an action that opens a field (#3443)", () => {
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
 
 		expect(duplicate).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * The trigger is icon-only, so it shows its label on focus (#3498) - but not on
+ * the focus a closing menu hands back to it, which would cover the row the user
+ * just acted on after every Escape.
+ *
+ * Mutation check: drop `declineReturnedFocus`'s `preventDefault` and the
+ * hand-back case shows the tooltip; leave `focusReturning` set instead of
+ * clearing it on a microtask and the fresh-focus case shows none.
+ */
+describe("the trigger's tooltip", () => {
+	it("shows the label on keyboard focus", async () => {
+		renderMenu();
+		await expectTooltipOnFocus(trigger(), "More actions");
+	});
+
+	// Radix closes it on the trigger's click and blur; this holds that the menu
+	// taking focus leaves no tooltip over it.
+	it("stays shut while the menu is open", async () => {
+		renderMenu();
+		const button = trigger();
+		await expectTooltipOnFocus(button, "More actions");
+
+		button.click();
+		await screen.findByRole("menu");
+
+		await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+	});
+
+	it("does not open on the focus the closing menu hands back", async () => {
+		renderMenu();
+		const button = trigger();
+		button.click();
+		const menu = await screen.findByRole("menu");
+
+		fireEvent.keyDown(menu, { key: "Escape" });
+		await menuClosedAndFocusSettled();
+
+		// The hand-back happened, so this is the case under test and not a
+		// close that left focus somewhere else.
+		expect(document.activeElement).toBe(button);
+		expect(screen.queryByRole("tooltip")).toBeNull();
+	});
+
+	it("opens again on the next real focus after a hand-back", async () => {
+		renderMenu();
+		const button = trigger();
+		button.click();
+		fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+		await menuClosedAndFocusSettled();
+		expect(document.activeElement).toBe(button);
+
+		act(() => button.blur());
+		await expectTooltipOnFocus(button, "More actions");
 	});
 });

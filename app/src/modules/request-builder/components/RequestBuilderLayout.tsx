@@ -22,7 +22,12 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useGroupRef } from "react-resizable-panels";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
+import {
+	HeadingSection,
+	ResizableHandle,
+	ResizablePanel,
+	ResizablePanelGroup,
+} from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
 import { useResolvedResponsePosition } from "../hooks/useResolvedResponsePosition";
@@ -203,52 +208,54 @@ export default function RequestBuilderLayout() {
 			    nothing at all for a request with no collection and no name, so
 			    the header does not grow a permanent empty line - the mistake the
 			    description band made here before it became the Info tab. */}
-			<TabBreadcrumb label="Request location" crumbs={crumbs} />
-			<UrlBar />
+			<TabBreadcrumb label="Request location" crumbs={crumbs} titlesPane />
+			<HeadingSection>
+				<UrlBar />
 
-			{/* A field the user is editing that an external write (typically an
+				{/* A field the user is editing that an external write (typically an
 			    MCP agent) has changed to a different value (issue #1436). */}
-			<ExternalChangeNotice />
+				<ExternalChangeNotice />
 
-			{/*
-			 * Only a user's own drag is persisted (`isUserInteraction`) - the
-			 * layout the library reports on mount, after a flip, or after a pixel
-			 * minimum clamps a stacked pane, is not a preference anyone expressed.
-			 */}
-			<ResizablePanelGroup
-				groupRef={groupRef}
-				orientation={arrangement === "beside" ? "horizontal" : "vertical"}
-				data-response-position={arrangement}
-				className="flex-1"
-				onLayoutChanged={(layout, meta) => {
-					if (!meta.isUserInteraction) return;
-					const first = layout.request;
-					if (first !== undefined) debouncedSetRatio(first / 100);
-				}}
-			>
-				{/* Request Editor Panel */}
-				<ResizablePanel
-					id="request"
-					// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
-					defaultSize={percent(requestSplitRatio)}
-					{...paneBounds}
-					className="flex flex-col"
+				{/*
+				 * Only a user's own drag is persisted (`isUserInteraction`) - the
+				 * layout the library reports on mount, after a flip, or after a pixel
+				 * minimum clamps a stacked pane, is not a preference anyone expressed.
+				 */}
+				<ResizablePanelGroup
+					groupRef={groupRef}
+					orientation={arrangement === "beside" ? "horizontal" : "vertical"}
+					data-response-position={arrangement}
+					className="flex-1"
+					onLayoutChanged={(layout, meta) => {
+						if (!meta.isUserInteraction) return;
+						const first = layout.request;
+						if (first !== undefined) debouncedSetRatio(first / 100);
+					}}
 				>
-					<RequestTabs />
-				</ResizablePanel>
+					{/* Request Editor Panel */}
+					<ResizablePanel
+						id="request"
+						// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
+						defaultSize={percent(requestSplitRatio)}
+						{...paneBounds}
+						className="flex flex-col"
+					>
+						<RequestTabs />
+					</ResizablePanel>
 
-				<ResizableHandle withHandle onReset={resetSplit} />
+					<ResizableHandle withHandle onReset={resetSplit} />
 
-				{/* Response Viewer Panel */}
-				<ResizablePanel
-					id="response"
-					defaultSize={percent(1 - requestSplitRatio)}
-					{...paneBounds}
-					className="flex flex-col"
-				>
-					<ResponseViewer />
-				</ResizablePanel>
-			</ResizablePanelGroup>
+					{/* Response Viewer Panel */}
+					<ResizablePanel
+						id="response"
+						defaultSize={percent(1 - requestSplitRatio)}
+						{...paneBounds}
+						className="flex flex-col"
+					>
+						<ResponseViewer />
+					</ResizablePanel>
+				</ResizablePanelGroup>
+			</HeadingSection>
 		</div>
 	);
 }
