@@ -93,7 +93,7 @@ export function declaredHsl(body: string, token: string): Hsl | undefined {
  * asked for the light one.
  */
 export function blockBody(selector: string, css: string = indexCss): string {
-	const escaped = selector.replace(/[.[\]"=:-]/g, "\\$&");
+	const escaped = selector.replace(/[\\.[\]"=:-]/g, "\\$&");
 	const m = new RegExp(`^\\t${escaped} \\{`, "m").exec(css);
 	if (!m) throw new Error(`index.css has no block for ${selector}`);
 	return css
