@@ -109,6 +109,21 @@ describe("EmptyState", () => {
 		expect(screen.getByRole("button", { name: "New inbox" })).toBeInTheDocument();
 	});
 
+	it("sizes the inline line down for a dense surface, and only when asked", () => {
+		const { container, rerender } = render(<EmptyState variant="inline" title="Line" />);
+		const line = () => container.querySelector('[data-slot="empty-state"]');
+		expect(line()).toHaveClass("p-8", "text-sm");
+		rerender(<EmptyState variant="inline" compact title="Line" />);
+		expect(line()).toHaveClass("p-3", "text-xs");
+		expect(line()).not.toHaveClass("p-8", "text-sm");
+	});
+
+	it("refuses compact on a pane at compile time", () => {
+		// @ts-expect-error a pane is a whole region; only the inline line shrinks
+		const pane = <EmptyState title="t" compact />;
+		expect(pane).toBeDefined();
+	});
+
 	it("carries extra icon classes through, e.g. a spin for a loading pane", () => {
 		// A loading state that reuses this pane rather than a bespoke spinner -
 		// ScenarioRunView's reopened-stored-run case is the first caller.

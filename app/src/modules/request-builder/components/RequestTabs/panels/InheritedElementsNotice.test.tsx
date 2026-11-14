@@ -113,6 +113,25 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		expect(screen.getByText("Pre-request script")).toBeInTheDocument();
 	});
 
+	it("draws the kind as a Badge chip on the radius setting, not a pill (#3501)", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.pre", config: { script: "pm.log('x')" } }),
+			]),
+			collection("leaf", "Refunds", [])
+		);
+
+		renderNotice({ collectionId: "leaf" });
+
+		const chip = screen.getByText("Pre-request script");
+		expect(chip).toHaveAttribute("data-slot", "badge");
+		expect(chip.className).not.toContain("rounded-full");
+		expect(chip.className).toContain("rounded-md");
+		expect(chip.className).toContain("bg-primary/15");
+		expect(chip.className).not.toMatch(/hover:bg-/);
+	});
+
 	it.each<[string, ElementDef]>([
 		[
 			"a disabled element",

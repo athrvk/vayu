@@ -31,13 +31,13 @@ import { useMemo } from "react";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
-import { DrawerPanel, ErrorState } from "@/components/shared";
+import { DrawerPanel, EmptyState, ErrorState } from "@/components/shared";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
 import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Input, Skeleton, TooltipIconButton, type IconMotion } from "@/components/ui";
+import { Button, Input, Skeleton, TooltipIconButton, type IconMotion } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
@@ -182,9 +182,16 @@ export default function SettingsCategoryTree() {
 					<>
 						<SectionHeading>{`${results.length} ${pluralize(results.length, "result")}`}</SectionHeading>
 						{results.length === 0 ? (
-							<p className="px-4 py-2 text-xs text-muted-foreground">
-								No settings match “{trimmedQuery}”.
-							</p>
+							<EmptyState
+								variant="inline"
+								compact
+								title={`No settings match “${trimmedQuery}”.`}
+								action={
+									<Button variant="link" size="sm" onClick={() => setQuery("")}>
+										Clear filter
+									</Button>
+								}
+							/>
 						) : (
 							<div>
 								{results.map((result) => (

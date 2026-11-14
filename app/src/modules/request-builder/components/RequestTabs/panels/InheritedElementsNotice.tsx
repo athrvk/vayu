@@ -32,7 +32,7 @@
 
 import { Folder } from "lucide-react";
 import { useCollectionAncestors } from "@/queries/collections";
-import { Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { isBlankScriptElement } from "@/lib/elements";
 import type { Collection, ElementDef, ElementKindSchema, ResolvedElement } from "@/types";
 import { COLLECTION_ONLY_KINDS } from "../../../utils/elements-parts";
@@ -127,14 +127,17 @@ export default function InheritedElementsNotice({
 			{source.map((entry) => {
 				const isDisabled = disabled.has(entry.id);
 				return (
-					<span key={entry.id} className="flex items-center gap-2 flex-1 min-w-0">
+					<div key={entry.id} className="flex items-center gap-2 flex-1 min-w-0">
 						<Folder className="size-icon-sm shrink-0 text-primary" />
 						<span className="text-label font-mono truncate text-foreground font-semibold">
 							{entry.origin?.name}
 						</span>
-						<span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary">
+						<Badge
+							variant="chip"
+							className="bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary"
+						>
 							{kindLabel(entry.kind)}
-						</span>
+						</Badge>
 						<Button
 							variant="link"
 							size="sm"
@@ -143,7 +146,7 @@ export default function InheritedElementsNotice({
 						>
 							{isDisabled ? "Re-enable" : "Disable"}
 						</Button>
-					</span>
+					</div>
 				);
 			})}
 		</ChainCard>

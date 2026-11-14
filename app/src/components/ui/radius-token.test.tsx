@@ -23,7 +23,10 @@
  *
  * `rounded-full` and `rounded-none` are deliberately fixed - circles, switch
  * tracks and squared-off tab strips are not meant to follow the setting - so
- * they are allowed as classes.
+ * they are allowed as classes. A scan cannot tell a dot from a chip, so keeping
+ * `rounded-full` off buttons and chips is a review rule (design-system.md,
+ * "`rounded-full` is for circles"); the two sites that broke it are held by
+ * rendered-class tests beside them.
  *
  * The other way to escape the setting is an inline `borderRadius`, which no
  * class scan catches. The chart tooltip had one (`"6px"`), so it stayed rounded

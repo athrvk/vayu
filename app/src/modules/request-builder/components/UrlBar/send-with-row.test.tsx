@@ -709,6 +709,18 @@ describe("the row picker as a dialog", () => {
 		expect(screen.getByText(/no rows match/i)).toBeTruthy();
 	});
 
+	it("offers Clear filter under the empty line, and the rows come back (#3501)", async () => {
+		await openDialog();
+		const filter = screen.getByLabelText(/filter rows/i);
+		fireEvent.change(filter, { target: { value: "nosuchvalue" } });
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+
+		expect(filter).toHaveValue("");
+		expect(screen.queryByText(/no rows match/i)).toBeNull();
+		expect(screen.queryByRole("row", { name: /grace@example\.com/ })).toBeTruthy();
+	});
+
 	it("sends the selected row from the footer, for a row reached by typing", async () => {
 		const execute = await openDialog();
 

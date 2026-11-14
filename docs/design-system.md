@@ -1617,7 +1617,7 @@ stored preference is the right amount of mechanism.
 | `rounded-sm` | `calc(var(--radius) - 4px)` | yes |
 | `rounded-md` | `calc(var(--radius) - 2px)` | yes |
 | `rounded-lg` | `var(--radius)` | yes |
-| `rounded-full` | pill / circle | no - deliberately fixed |
+| `rounded-full` | circle, or a track that is a capsule | no - deliberately fixed, and only for a shape that *is* a circle (see below) |
 | `rounded-none` | `0` | no - deliberately fixed |
 | `rounded` | Tailwind default | **no - never use it** |
 
@@ -1642,7 +1642,8 @@ option regardless of which one is active. The same test enforces this, across
 `appearance-store`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
 live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
 unsuffixed `rounded`** (fixed 4px - it ignores `--radius` and won't follow the
-control). `rounded-full` stays a pill regardless.
+control). `rounded-full` does not follow it either, which is why it is reserved
+for shapes that are circles (below), never for a button or a chip.
 
 The primitives are the reference, not a table of their own: `Badge` and the
 chips that match it are `rounded-md` (`badge-variants.ts`), `Card` is `rounded-lg`
@@ -1666,15 +1667,21 @@ circle or a capsule. It is not for anything rectangular that merely looked
 nicer with round ends: the dashboard header's LIVE / COMPLETED / STOPPED chips
 were `rounded-full` while the `Badge` primitive they otherwise match is
 `rounded-md`, so on Square they were the only round things left on the screen.
-They are `rounded-md` now.
+They are `rounded-md` now, and so are the element list's quick-add buttons and
+the inherited-elements notice's kind chip (a `Badge variant="chip"`, #3501).
 
-No test can tell a chip from a dot, so this one is a judgement call at review
-time. The question to ask: if the user picks Square, should this element go
-square? If yes it is a chip, and `rounded-full` is wrong.
+The radius guard allows the class, because no source scan can tell a chip from a
+dot (`radius-token.test.tsx` is silent on it), so this one is a judgement call at
+review time. The question to ask: if the user picks Square, should this element
+go square? If yes it is a chip, and `rounded-full` is wrong. A track whose shape
+is the capsule (the progress bar, the switch) is the exemption, and says so
+under its own heading.
 
 The same reasoning rules out `rounded-full` on controls - a button or dropdown
 trigger that keeps its pill shape becomes the one thing on screen ignoring the
-Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
+Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`. Render
+the two sites that carried it (`ElementList`'s quick-add buttons,
+`InheritedElementsNotice`'s kind chip) and read `className`, as their tests do.
 
 **A control that renders at more than one box size caps the token by
 proportion instead of using it bare.** `Checkbox` (`ui/checkbox.tsx`) is
@@ -3541,7 +3548,7 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320) |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " in `modules/` or `components/`, #3501 |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
@@ -3558,7 +3565,10 @@ to the *same* handler that header button uses - never a second, parallel
 create path, which is what would drift. Where the surface genuinely has no
 create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
-user caused it undoes that ("Clear the filters", "Clear the filter"). The
+user caused it undoes that ("Clear the filters", "Clear the filter"). A list that
+is empty because of what was typed says what was typed and offers the way out:
+Settings search's "No settings match" and the Send-with-row dialog's "No rows
+match" carry a `variant="link"` "Clear filter" that empties the field. The
 collections sidebar offers its create path plus Import as a two-`Button`
 `flex gap-2` wrapper ("New request", "Import") rather than a lone link
 (`CollectionTree.tsx`): with no collection to hold it, a new request is what

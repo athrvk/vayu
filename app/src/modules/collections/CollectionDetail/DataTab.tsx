@@ -49,7 +49,7 @@ import { useEffect, useState } from "react";
 import { Check, Loader2, Trash2 } from "lucide-react";
 
 import { Button, Card } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, EmptyState } from "@/components/shared";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
 import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -244,9 +244,11 @@ export default function DataTab({ collection }: DataTabProps) {
 						)}
 					</Card>
 				) : (
-					<p className="text-xs text-muted-foreground">
-						No contract yet. Picking a file below declares its columns.
-					</p>
+					<EmptyState
+						variant="inline"
+						compact
+						title="No contract yet. Picking a file below declares its columns."
+					/>
 				)}
 			</div>
 
