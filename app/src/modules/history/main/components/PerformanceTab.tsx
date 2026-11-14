@@ -183,7 +183,7 @@ export default function PerformanceTab({
 				<CardContent>
 					<div className="grid grid-cols-2 @md:grid-cols-3 @3xl:grid-cols-6 gap-4">
 						<LatencyMetric label="Average" value={latency?.avg} />
-						<LatencyMetric label="P50 (Median)" value={latency?.p50} />
+						<LatencyMetric label="P50 (median)" value={latency?.p50} />
 						{latency?.p75 !== undefined && (
 							<LatencyMetric label="P75" value={latency.p75} />
 						)}

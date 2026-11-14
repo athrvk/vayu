@@ -889,7 +889,7 @@ refuses the send:
 3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
 4. Untrusted: `"Body file '<path>' was not picked on this machine and is not
    under an allowed folder - pick it again in the request, or allow its folder
-   in Settings > Files"`.
+   in Settings › Files"`.
 5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
 6. It cannot be opened: refused, naming the path and the reason.
 
@@ -4682,9 +4682,9 @@ preview tree lists them in the same order.
 - `400` `Unrecognised format` - readable, and no format claims it. Kept as its
   own sentence: "Vayu does not read this kind of file" and "this file is broken"
   are different answers.
-- `400` `Could not read the document: <detail>` - neither JSON nor YAML, with
+- `400` `Couldn't read the document: <detail>` - neither JSON nor YAML, with
   the line named.
-- `400` `Could not read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
+- `400` `Couldn't read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
   that is not a collection or an environment: `<kind>` reads `design document
   (spec)` for `spec.insomnia.rest/`, `mock server` for `mock.insomnia.rest/`,
   and the `type`'s own prefix otherwise. A collection or environment in a

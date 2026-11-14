@@ -60,10 +60,14 @@ describe("ScriptLogs level labels", () => {
 
 		const row = (message: string) => screen.getByText(message).parentElement as HTMLElement;
 		expect(within(row("root line")).getByText("Collection")).toBeTruthy();
-		expect(within(row("folder line")).getByText("Folder")).toBeTruthy();
-		expect(within(row("own line")).queryByText(/^(Collection|Folder|Request)$/)).toBeNull();
+		expect(within(row("folder line")).getByText("Nested collection")).toBeTruthy();
 		expect(
-			within(row("stored before the field")).queryByText(/^(Collection|Folder|Request)$/)
+			within(row("own line")).queryByText(/^(Collection|Nested collection|Request)$/)
+		).toBeNull();
+		expect(
+			within(row("stored before the field")).queryByText(
+				/^(Collection|Nested collection|Request)$/
+			)
 		).toBeNull();
 	});
 });

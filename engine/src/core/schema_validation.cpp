@@ -804,7 +804,7 @@ SchemaFailure unrecorded_failure (const nlohmann::json& schema, const nlohmann::
     SchemaFailure failure;
     const auto pointers = property_names_pointers (schema, root);
     if (pointers.empty ()) {
-        failure.message = "Failed to validate against a schema constraint that "
+        failure.message = "Couldn't validate against a schema constraint that "
                           "reports no detail.";
         return failure;
     }
@@ -815,7 +815,7 @@ SchemaFailure unrecorded_failure (const nlohmann::json& schema, const nlohmann::
     if (pointers.size () > MAX_NAMED_SCHEMA_PATHS) {
         named += std::format (" and {} more", pointers.size () - MAX_NAMED_SCHEMA_PATHS);
     }
-    failure.message = std::format ("Failed to validate against 'propertyNames' "
+    failure.message = std::format ("Couldn't validate against 'propertyNames' "
                                    "at {}, which reports no detail.",
     named);
     return failure;

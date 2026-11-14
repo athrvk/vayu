@@ -389,7 +389,7 @@ TEST (ImportParse, RefusesBytesThatAreNeitherJsonNorYaml) {
     const ImportParse parsed = parse_import ("{ unclosed: [1, 2", {}, {});
     EXPECT_FALSE (parsed.ok ());
     EXPECT_FALSE (parsed.unrecognised);
-    EXPECT_NE (parsed.error.find ("Could not read the document"), std::string::npos);
+    EXPECT_NE (parsed.error.find ("Couldn't read the document"), std::string::npos);
 }
 
 TEST (ImportParse, NamesTheFieldOfAMalformedInsomniaExport) {
@@ -741,18 +741,18 @@ environments:
 TEST (InsomniaV5Import, RefusesWhatIsNotACollectionByName) {
     const std::vector<std::pair<std::string, std::string>> cases{
         { "spec.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia design document "
+        "Couldn't read the document: this is an Insomnia design document "
         "(spec) "
         "export, which Vayu does not read. Export the collection instead." },
         { "mock.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia mock server export, "
+        "Couldn't read the document: this is an Insomnia mock server export, "
         "which Vayu does not read. Export the collection instead." },
         { "mcpClient.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia mcpClient export, "
+        "Couldn't read the document: this is an Insomnia mcpClient export, "
         "which "
         "Vayu does not read. Export the collection instead." },
         { "collection.insomnia.rest/6.0",
-        "Could not read the document: this is an Insomnia collection export in "
+        "Couldn't read the document: this is an Insomnia collection export in "
         "format 6.0, which this version of Vayu does not read. It reads format "
         "5." },
     };

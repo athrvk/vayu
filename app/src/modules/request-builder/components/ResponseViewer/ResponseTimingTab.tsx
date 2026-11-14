@@ -149,7 +149,7 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat
-						label="Wire"
+						label="Wire time"
 						value={timing.wireMs}
 						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
 					/>

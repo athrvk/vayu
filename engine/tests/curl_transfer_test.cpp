@@ -1207,7 +1207,7 @@ TEST (AddToMulti, RejectedHandleIsReportedRatherThanDiscarded) {
     auto rejected = vayu::http::detail::add_to_multi (multi, easy);
     ASSERT_HAS_VALUE (rejected) << "a rejected add must not look like success";
     EXPECT_EQ (rejected->code, vayu::ErrorCode::InternalError);
-    EXPECT_NE (rejected->message.find ("Failed to submit transfer"), std::string::npos);
+    EXPECT_NE (rejected->message.find ("Couldn't submit the transfer"), std::string::npos);
 
     curl_multi_remove_handle (multi, easy);
     curl_easy_cleanup (easy);

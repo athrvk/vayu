@@ -877,7 +877,7 @@ TEST_F (LoadStrategyTest, OtherErrorsDuringAStopStayErrors) {
     context->request_stop ();
     vayu::core::handle_result (context, db,
     vayu::Result<vayu::Response> (
-    vayu::Error{ vayu::ErrorCode::InternalError, "Failed to create curl handle" }));
+    vayu::Error{ vayu::ErrorCode::InternalError, "Couldn't create a curl handle" }));
 
     EXPECT_EQ (context->metrics_collector->cancelled (), 0u);
     EXPECT_EQ (context->metrics_collector->total_errors (), 1u);
@@ -900,7 +900,7 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
 
     vayu::Error error;
     error.code    = vayu::ErrorCode::InternalError;
-    error.message = "Failed to create curl handle";
+    error.message = "Couldn't create a curl handle";
     vayu::core::handle_result (context, db, vayu::Result<vayu::Response> (error));
 
     EXPECT_EQ (context->metrics_collector->total_errors (), 1u);
@@ -910,8 +910,8 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     const auto& errors = context->metrics_collector->errors ();
     ASSERT_EQ (errors.size (), 1u);
     EXPECT_NE (errors.front ().trace_data.find ("internal_error"), std::string::npos);
-    EXPECT_NE (errors.front ().trace_data.find ("Failed to create curl handle"),
-    std::string::npos);
+    EXPECT_NE (
+    errors.front ().trace_data.find ("Couldn't create a curl handle"), std::string::npos);
 }
 
 // #2462: a redirect loop and an undecodable body are stored under their own

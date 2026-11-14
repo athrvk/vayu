@@ -795,7 +795,7 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
 }
 
 /// Says, once the step has committed or stamped, which allowed folders are
-/// gone and why, so a user who finds one missing from Settings > Files can see
+/// gone and why, so a user who finds one missing from Settings › Files can see
 /// it; how many picked files the stored bodies were turned into grants for;
 /// and which chosen files were not found and must be picked again.
 void log_file_trust_plan (const FileTrustPlan& plan) {
@@ -1247,7 +1247,7 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
     std::error_code ec;
     fs::create_directories (directory, ec);
     if (ec && !fs::is_directory (directory)) {
-        return std::unexpected ("Could not create the backup directory " +
+        return std::unexpected ("Couldn't create the backup directory " +
         directory.string () + ": " + ec.message ());
     }
 
@@ -1257,7 +1257,7 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
         const std::string name = backup_file_name (stamp, label);
         if (name.empty ()) {
             return std::unexpected (
-            "Could not name a backup for the instant " + std::to_string (stamp));
+            "Couldn't name a backup for the instant " + std::to_string (stamp));
         }
         std::error_code exists_ec;
         if (fs::path candidate = directory / name; !fs::exists (candidate, exists_ec)) {
@@ -1267,14 +1267,14 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
     }
     if (destination.empty ()) {
         return std::unexpected (
-        "Could not find an unused backup name in " + directory.string ());
+        "Couldn't find an unused backup name in " + directory.string ());
     }
 
     if (const std::string refusal = vacuum_into (db_path, destination.string ());
     !refusal.empty ()) {
         remove_db_file_set (destination);
         return std::unexpected (
-        "Could not write the backup to " + destination.string () + ": " + refusal);
+        "Couldn't write the backup to " + destination.string () + ": " + refusal);
     }
 
     // The file, then the entry that names it: a snapshot someone is told

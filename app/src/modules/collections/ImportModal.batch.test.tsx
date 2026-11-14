@@ -65,7 +65,7 @@ vi.mock("@/services/api", async () => {
 				try {
 					document = JSON.parse(payload.content) as Record<string, unknown>;
 				} catch {
-					throw new ApiError(400, "BAD_REQUEST", "Could not read the document");
+					throw new ApiError(400, "BAD_REQUEST", "Couldn't read the document");
 				}
 				const info = document.info as { schema?: string } | undefined;
 				const format = info?.schema?.includes("v2.1.0")

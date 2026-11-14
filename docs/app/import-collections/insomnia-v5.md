@@ -32,9 +32,9 @@ Detection runs after [Insomnia v4](./insomnia-v4.md) and before OpenAPI; see [th
 
 ### Refusals
 
-A document Vayu does not read is refused with a sentence that says what the file is, rather than "Unrecognised format" - a design document or a mock server is a file you may well have picked believing it to be your collection. The sentence starts `Could not read the document: this is an Insomnia …` and the import dialog shows it as written. Nothing is imported.
+A document Vayu does not read is refused with a sentence that says what the file is, rather than "Unrecognised format" - a design document or a mock server is a file you may well have picked believing it to be your collection. The sentence starts `Couldn't read the document: this is an Insomnia …` and the import dialog shows it as written. Nothing is imported.
 
-| Document | Sentence (after `Could not read the document: `) |
+| Document | Sentence (after `Couldn't read the document: `) |
 |----------|--------------------------------------------------|
 | design document | `this is an Insomnia design document (spec) export, which Vayu does not read. Export the collection instead.` |
 | mock server | `this is an Insomnia mock server export, which Vayu does not read. Export the collection instead.` |

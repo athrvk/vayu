@@ -279,27 +279,13 @@ export function breachesOf(entry: UiString): string[] {
 const keyOf = (entry: Pick<UiString, "file" | "text">) => `${entry.file} :: ${entry.text}`;
 
 /**
- * Breaches that ship today, each with the issue that retires it. The fix
- * deletes its entry in the same commit; the rot test fails until it does.
+ * Breaches that ship today, each with the issue that retires it. Empty: nothing
+ * breaks a rule. An entry names an issue that is still open, and the fix deletes
+ * the entry in the same commit; the rot test fails until it does. A closed
+ * issue's entry is a breach nobody is fixing, so close the issue only with the
+ * entry gone.
  */
-const KNOWN_BREACHES: Readonly<Record<string, string>> = {
-	// The native menu: Title Case is right in the macOS menu bar and wrong in the
-	// same template popped from the title bar elsewhere, so the fix is the
-	// per-platform label function `docs/ux-writing.md` ("Case") assigns to the
-	// sentence-case sweep, not a respelling.
-	"electron/main.ts :: Check for Updates…": "#2287",
-	"electron/main.ts :: Actual Size": "#2287",
-	"electron/main.ts :: Zoom In": "#2287",
-	"electron/main.ts :: Zoom Out": "#2287",
-	"electron/main.ts :: Scripting Guide": "#2287",
-	"electron/main.ts :: Report an Issue": "#2287",
-
-	"src/components/shared/ScriptLifecycleSummary.tsx :: Setup / Teardown": "#2296",
-	"src/constants/appearance.ts :: System Mono": "#2296",
-	"src/modules/history/main/components/PerformanceTab.tsx :: P50 (Median)": "#2296",
-	"src/modules/variables/sidebar/VariablesCategoryTree.tsx :: Export as Postman Environment":
-		"#2296",
-};
+const KNOWN_BREACHES: Readonly<Record<string, string>> = {};
 
 /**
  * Text the rules match that is not interface copy, each with its reason. Not

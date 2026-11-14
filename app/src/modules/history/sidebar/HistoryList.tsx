@@ -360,7 +360,7 @@ export default function HistoryList() {
 							type="text"
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							placeholder="Search runs by API…"
+							placeholder="Search runs"
 							className="pl-10 w-full"
 						/>
 					</div>
@@ -389,7 +389,7 @@ export default function HistoryList() {
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All status</SelectItem>
+								<SelectItem value="all">All statuses</SelectItem>
 								<SelectItem value="pending">Pending</SelectItem>
 								<SelectItem value="running">Running</SelectItem>
 								<SelectItem value="completed">Completed</SelectItem>

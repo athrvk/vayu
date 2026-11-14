@@ -168,7 +168,7 @@ Engine-side, in `core::parse_import`:
    so the same bytes are claimed by the same format they always were.
 3. No match → `400 Unrecognised format`, which `factory.ts` turns back into
    `UnrecognisedFormatError`. Kept apart from a document that *claimed* a format
-   and is broken (`400 Could not read the document: …`): the dialog says
+   and is broken (`400 Couldn't read the document: …`): the dialog says
    different things about the two.
 4. **Joins each request's enabled params into its `url`** - see
    [The url/params invariant](#the-urlparams-invariant) below.

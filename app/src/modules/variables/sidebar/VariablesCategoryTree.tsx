@@ -631,7 +631,7 @@ export default function VariablesCategoryTree() {
 												onSelect: () => void copy(reference, "Reference"),
 											},
 											{
-												label: "Export as Postman Environment",
+												label: "Export as Postman environment",
 												icon: FileOutput,
 												onSelect: () => void exportEnvironment(environment),
 											},

@@ -53,7 +53,8 @@ import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
 import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
-import { formatLatency } from "@/lib/format-number";
+import { formatLatency, formatNumber } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -263,7 +264,8 @@ export default function MockServerView() {
 												(route.hasExample ? "varies" : "no example")}
 										</span>
 										<span className="shrink-0 tabular-nums text-muted-foreground">
-											{route.hits}
+											{formatNumber(route.hits)}{" "}
+											{pluralize(route.hits, "hit")}
 										</span>
 									</div>
 									{route.shadowedBy && (

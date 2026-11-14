@@ -147,7 +147,7 @@ describe("PerformanceTab latency tiles against the SLO", () => {
 	it("never colours the tiles that carry no verdict, however slow", () => {
 		renderTab({ avg: 5000, p50: 5000, p75: 5000, p90: 5000, p95: 1, p99: 1 });
 
-		for (const label of ["Average", "P50 (Median)", "P75", "P90"]) {
+		for (const label of ["Average", "P50 (median)", "P75", "P90"]) {
 			expect(isDanger(label), `${label} danger`).toBe(false);
 			expect(isWarning(label), `${label} warning`).toBe(false);
 			expect(tile(label).figure.className).toContain("text-foreground");

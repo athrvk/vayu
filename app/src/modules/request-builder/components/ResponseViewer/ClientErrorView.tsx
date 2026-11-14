@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { Heading } from "@/components/ui/heading";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
+import { badHostTip } from "./bad-host-tip";
 import { selectEngineRestartOffered, useEngineStore } from "@/stores";
 
 interface ErrorIconDisplayProps {
@@ -172,20 +173,31 @@ function getErrorIcon(errorCode?: string) {
 	}
 }
 
-function errorHint(errorCode: string | undefined, restartOffered: boolean): string | undefined {
+function errorHint(
+	errorCode: string | undefined,
+	restartOffered: boolean,
+	requestUrl: string | undefined
+): string | undefined {
 	if (!errorCode) return undefined;
 	if (errorCode === "ENGINE_ERROR" && restartOffered) return ENGINE_RESTART_IN_DOCK_HINT;
+	if (errorCode === "INVALID_URL") return badHostTip(requestUrl) ?? ErrorHints[errorCode];
 	return ErrorHints[errorCode];
 }
 
 export interface ClientErrorViewProps {
 	errorCode?: string;
 	errorMessage?: string;
+	/** The URL as the user wrote it at Send, which a host variable's name is read from. */
+	requestUrl?: string;
 }
 
-export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
+export default function ClientErrorView({
+	errorCode,
+	errorMessage,
+	requestUrl,
+}: ClientErrorViewProps) {
 	const restartOffered = useEngineStore(selectEngineRestartOffered);
-	const hint = errorHint(errorCode, restartOffered);
+	const hint = errorHint(errorCode, restartOffered, requestUrl);
 	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Couldn't get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 

@@ -135,8 +135,8 @@ describe("the sentence the dialog says", () => {
 		);
 	});
 
-	it("names an issuer as a mock issuer, not as an OAuth server", () => {
-		expect(describeRunningService(issuer)).toBe("the mock issuer on port 9882");
+	it("names an issuer as a mock OAuth issuer, not as an OAuth server", () => {
+		expect(describeRunningService(issuer)).toBe("the mock OAuth issuer on port 9882");
 	});
 
 	it("leads with the count and lists what will stop", () => {

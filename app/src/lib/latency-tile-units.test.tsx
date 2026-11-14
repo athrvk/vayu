@@ -59,7 +59,7 @@ function derived(ms: number): DashboardDerived {
 }
 
 const tiles: Array<[string, (ms: number) => ReactElement]> = [
-	["Mean iter time stat", (ms) => <MeanIterTimeStat d={derived(ms)} />],
+	["Mean iteration time stat", (ms) => <MeanIterTimeStat d={derived(ms)} />],
 	["p99 at peak stat", (ms) => <P99AtPeakStat d={derived(ms)} />],
 	[
 		"hero latency card",

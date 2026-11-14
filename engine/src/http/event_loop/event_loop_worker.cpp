@@ -392,7 +392,7 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
         if (!easy) {
             // Handle creation failure
             complete_transfer (*data,
-            Error{ ErrorCode::InternalError, "Failed to create curl handle" });
+            Error{ ErrorCode::InternalError, "Couldn't create a curl handle" });
             continue;
         }
 

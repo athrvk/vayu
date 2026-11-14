@@ -49,12 +49,11 @@ isn't the same:
 `Please` are banned in UI text. The first two are the passive, formal register
 the voice section rules out; `Please` is the apology's softer cousin and breaks
 the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
-that you would like them to. The app's own text has one breach left, the
-failed engine restart's "Please close the Application and reopen it."
-(`electron/sidecar.ts`, #2292). Beyond it are engine response bodies that the
-app shows after its own "Couldn't ..." prefix (#2295). The first is held by the
-voice and casing scan, the second by the engine test #2295 adds (see
-[Enforcement](#enforcement)). Log strings and code comments are a separate
+that you would like them to. The app's own text has no breach of these left,
+and the voice and casing scan keeps it so (see [Enforcement](#enforcement)).
+The engine's text is held the same way: a message the app shows after its own
+"Couldn't ..." prefix (#2295) opens "Couldn't ..." too, by an engine test
+(#3500). Log strings and code comments are a separate
 surface and keep whatever form reads well there.
 
 ## Terminology glossary
@@ -107,10 +106,11 @@ scattered strings land the same way.
     that is an in-app surface and has no platform convention to follow. One
     destination, one name: the settings item reads "Settings…" everywhere (macOS
     itself now calls it Settings, not Preferences). The macOS Dock menu follows
-    the macOS rule; the Windows Jump List follows sentence case. The code that
-    serves both from one template (`createMenu` in `electron/main.ts`, which
-    needs a per-platform label function) belongs to the sentence-case sweep, not to this
-    page.
+    the macOS rule; the Windows Jump List follows sentence case. `createMenu`
+    in `electron/main.ts` serves both from one template and takes every label
+    that differs from `menuLabels` in `electron/menu-labels.ts`, which holds the
+    Title Case set for `darwin` and the sentence-case set for anything else
+    (`menu-labels.test.ts`).
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis (one
@@ -281,15 +281,25 @@ from creeping back in afterward. These hold it:
   `EveryEngineSettingLabelIsSentenceCase` reads the setting labels the Settings
   page renders verbatim (#2293); a later word may start with a capital only when
   it is all capitals or one of OAuth, OpenAPI, Send, Sends,
-  Expect. The other, a scan of
-  `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
-  "Failed to", does not exist yet and is owned by #2295.
+  Expect. The other, `user_error_wording_scan_test.cpp`
+  (#2295, #3500), reads every statement under `engine/src` and fails on a
+  literal opening "Failed to" or "Could not" that can reach a client. A log
+  call and a `throw` are exempt, their wording being the engine's own, and so
+  is each entry of the test's short `kAllowed` list, which names the reason it
+  reaches no screen or must stay as written. An entry whose text is gone fails
+  the test, so the list cannot outlive its cause.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
-  fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
-  "curl request" (write "cURL"), and on three full stops straight after a
-  letter (write `…`). It has no allowlist: a spread, a regex, a `"..."` code
-  sample and a GraphQL `... on` fragment put something other than a letter
-  before the dots.
+  fails on names joined with `>` (`Settings > Files`, `Engine > Data`: write
+  `Settings ›`), on lowercase "curl command" or "curl request" (write "cURL"),
+  on three full stops straight after a letter (write `…`), and on "folder" or
+  "folders" as a word (#3500: a group of requests is a collection or a nested
+  collection). The first three have no allowlist: a spread, a regex, a `"..."`
+  code sample and a GraphQL `... on` fragment put something other than a letter
+  before the dots. The folder rule exempts an identifier (a lower-case token such
+  as `folder` or `new-folder-form`) and `FILESYSTEM_FOLDERS`, the phrases a file
+  uses for a directory on disk (the allowed folders, the folder picker, the logs
+  folder), each with its reason; a phrase no string carries any more fails the
+  test.
 - **Narrow scanners**, one rule each, are filed by their own issues; each adds
   its rule to the scan above when it lands. Landed: hand-built plurals and
   "(s)" (`plural-rule.test.ts`, #2307), which reads "(s)" in the same strings
@@ -301,9 +311,10 @@ from creeping back in afterward. These hold it:
   for a design-mode send.
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
-`file :: literal`, each entry naming the open issue that retires it. The commit
-that fixes a string deletes its entry: a test fails on an entry whose literal
-the sources no longer carry, so a fix cannot land with its entry left behind.
+`file :: literal`, each entry naming the open issue that retires it (it is empty
+now, #3500). The commit that fixes a string deletes its entry: a test fails on
+an entry whose literal the sources no longer carry, so a fix cannot land with
+its entry left behind.
 Text the rules match that is not interface copy (a line of a code sample) is
 listed apart, with its reason instead of an issue.
 

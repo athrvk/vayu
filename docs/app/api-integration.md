@@ -594,7 +594,7 @@ variable's row and name and writes its value `""`, counted in
 plus `notCarried`, whose one kind is `variable_types`: `json`-typed variables,
 which Postman has no type for, written as `default`, and typed secrets, whose
 type gives way to `secret` (#3252). The renderer's only caller
-is the environment row's **Export as Postman Environment** item, which sends the
+is the environment row's **Export as Postman environment** item, which sends the
 id alone, saves `text` as `fileName` and, once the file is written, puts
 `secretsOmitted` and the `variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).
 
@@ -1924,7 +1924,7 @@ request runs every level's scripts and the engine reports all of them. `scope`
 is not the console `level`; it is absent on a trace stored before the field and
 on a send whose elements carry no origin, and absent reads as the request's own.
 The Tests list and the Console label an inherited level ("Collection",
-"Folder") and leave the request's own bare. An inline Send resolves the chain in
+"Nested collection") and leave the request's own bare. An inline Send resolves the chain in
 the renderer (`elements-parts.ts`) and stamps each element's `origin.scope`
 itself - the root as `collection`, every level under it as `folder` - the same
 way the engine stamps a stored request's chain. A script that threw at an

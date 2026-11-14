@@ -547,7 +547,7 @@ function RunItem({
 						{scenario?.recursive && (
 							<span className="flex shrink-0 items-center gap-1">
 								<FolderTree className="size-icon-sm" />
-								Sub-folders
+								Nested collections
 							</span>
 						)}
 						{run.type === "load" && duration && (
