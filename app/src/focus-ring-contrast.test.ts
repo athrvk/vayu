@@ -9,11 +9,11 @@
  * A row's focus indicator reaches WCAG 1.4.11's 3:1 against the surface it
  * sits on, in every accent scheme and both themes (#3499).
  *
- * `.focus-row` drew `--primary` at 30%, which composites to 1.42-2.00 on a
- * card; the two disclosure chevrons carried the same alpha as `ring-primary/30`.
- * The indicators are read out of the stylesheet and the two components rather
- * than restated, so an alpha put back, or a token swapped for one that does
- * not reach, changes the verdict. `--ring` is re-declared per scheme and per
+ * An alpha of `--primary` composites to 1.42-2.00 on a card, so `.focus-row`
+ * and the two disclosure chevrons use the full `--ring`. The indicators are
+ * read out of the stylesheet and the two components rather than restated, so
+ * an alpha put back, or a token swapped for one that does not reach, changes
+ * the verdict. `--ring` is re-declared per scheme and per
  * theme, so the colour is resolved the way the cascade does
  * (`resolveToken`).
  */

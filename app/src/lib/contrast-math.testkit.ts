@@ -9,9 +9,8 @@
  * WCAG contrast, OKLab distance and the accent-scheme cascade, for the guards
  * that measure `index.css` rather than restate it.
  *
- * Four guards carried their own copy of the sRGB-to-luminance chain before this
- * file existed (#3499). The colour maths is the part a copy gets subtly wrong
- * and never hears about, so it lives here once.
+ * The sRGB-to-luminance chain is the part a copy gets subtly wrong and never
+ * hears about, so every guard reads it from here (#3499).
  */
 
 import { indexCss } from "./css-tokens.testkit";
