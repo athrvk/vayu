@@ -1119,8 +1119,9 @@
 	 * WCAG 1.4.11's 3:1, which an alpha of --primary composited onto the row
 	 * never reached (1.42-2.00, #3499). The selected-row ring (ring-1
 	 * ring-inset ring-primary/20) stays a tint: it marks selection beside a
-	 * fill, not focus. `outline` rather than box-shadow: Tailwind's ring utilities own box-shadow,
-	 * and a selected row already sets one, which would override this.
+	 * fill, not focus. `outline` rather than box-shadow: Tailwind's ring
+	 * utilities own box-shadow, and a selected row already sets one, which
+	 * would override this.
 	 *
 	 * Auxiliary controls inside the row that are their own target - the chevron
 	 * toggles expansion rather than opening the collection - opt out with

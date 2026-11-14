@@ -356,12 +356,13 @@ directly the way the tab strip still does (issue #1074); without that the
 editor would rank the scopes while the field one line above ranks the row over
 them, which is the disagreement this paragraph exists to forbid.
 
-A name that **no** scope defines but the row does is the same claim in the
-other direction, and it stops being reported as undefined: the destructive red
-(with its wavy underline) states a token that reaches the server with its braces still on, and this one
-does not. The chip reads `row`, the popover names the column, and a create
-offer - still worth making, since the variable answers every row-less send -
-says what the row already answers rather than implying the token is unanswered.
+A name that **no** scope defines but the row does is the same claim in the other
+direction, and it stops being reported as undefined: the destructive red (with
+its wavy underline) states a token that reaches the server with its braces still
+on, and this one does not. The chip reads `row`, the popover names the column,
+and a create offer - still worth making, since the variable answers every
+row-less send - says what the row already answers rather than implying the token
+is unanswered.
 
 **What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
 title resolves through one list-wide `useVariableResolver()` in

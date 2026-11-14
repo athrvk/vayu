@@ -209,8 +209,9 @@ under about 25%, or if the accent sits within 0.10 OKLab of
 `--muted-foreground`. `color-schemes.test.ts` derives the first rule from the
 stylesheet rather than naming graphite, so a new desaturated scheme fails until
 it declares one; `color-scheme-contrast.test.ts` measures the second, as the
-resolved-versus-empty pair of the variable states. It is deliberately *not* in that test's `REQUIRED` list -
-inheriting it is correct for a saturated scheme, not a forgotten block.
+resolved-versus-empty pair of the variable states. It is deliberately *not* in
+`color-schemes.test.ts`'s `REQUIRED` list - inheriting it is usually correct,
+not a forgotten block.
 
 Note the ratios above are between two *foreground* colours; neither WCAG nor
 APCA is defined for that, so treat them as a discriminability proxy rather than
@@ -1071,8 +1072,10 @@ The values have to clear three bars, and `color-scheme-contrast.test.ts`
 measures the first two in both themes. The fill carries a white label at
 **4.5:1** (the existing fills land at APCA Lc 76–84); keep it at **3.0+ against
 `--card`** too, so the button still reads as a control. `--primary` is text at
-**4.5:1** on every surface it can sit on: `--card`, `--panel`, `--background`,
+**4.5:1** on the opaque surfaces: `--card`, `--panel`, `--background`,
 `--muted` and `--accent`, so in light the darkest of them, `--muted`, sets it.
+Text on its own tint (`bg-primary/15` chips, `hover:bg-primary/20`) is not
+measured there and is tracked in a follow-up.
 The dark `--primary` also wants **Lc 44–69** against the dark card. Check the
 new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
 from the semantic status colours, or it will read as a duplicate in the picker.
