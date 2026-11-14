@@ -198,7 +198,7 @@ describe("PerformanceTab latency tiles: a mark besides the colour (#3499)", () =
 	it("never marks the tiles that carry no verdict, however slow", () => {
 		renderTab({ avg: 5000, p50: 5000, p75: 5000, p90: 5000, p95: 1, p99: 1 });
 
-		for (const label of ["Average", "P50 (Median)", "P75", "P90"]) {
+		for (const label of ["Average", "P50 (median)", "P75", "P90"]) {
 			expect(cue(label).glyph, label).toBeNull();
 			expect(cue(label).words, label).not.toContain("Over SLO");
 		}
