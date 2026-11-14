@@ -29,9 +29,10 @@ import { cn } from "@/lib/utils";
  * The on state has the same need in dark: `--primary-fill` is one deep value
  * in both themes, so the track alone is 2.98 against `--card` on aurora. The
  * reserved border takes `--primary` for the checked edge (at least 5.79 against
- * `--card` in every dark scheme). In light `--primary` equals `--primary-fill`,
- * so the edge is invisible there. It stays 2px, not 1px: a thinner border would
- * change `border-2` for the unchecked state and the thumb's 24px travel.
+ * `--card` in every dark scheme). In light, ocean and aurora keep `--primary`
+ * equal to `--primary-fill`, so the edge is invisible there; the other schemes
+ * retune `--primary`. It stays 2px, not 1px: a thinner border would change
+ * `border-2` for the unchecked state and the thumb's 24px travel.
  */
 function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimitives.Root>) {
 	return (
