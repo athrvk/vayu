@@ -281,6 +281,16 @@ describe("search", () => {
 		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
 	});
 
+	it("offers Clear the filter under that line, and the tree comes back (#3501)", () => {
+		renderExplorer();
+		const box = screen.getByLabelText("Search schema") as HTMLInputElement;
+		fireEvent.change(box, { target: { value: "zzzz" } });
+		fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
+		expect(box.value).toBe("");
+		expect(screen.queryByText(/Nothing matches/)).toBeNull();
+		expect(screen.getAllByRole("treeitem").length).toBeGreaterThan(0);
+	});
+
 	it("marks the matched run of a name, so a flat list says why each row is in it", () => {
 		renderExplorer();
 		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "gacy" } });
@@ -645,6 +655,7 @@ describe("what it says when there is no schema", () => {
 		renderExplorer({ entry: { schema: null, status: "error", fetchedAt: null } });
 		expect(screen.getByText(/No schema loaded/)).toBeTruthy();
 		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
+		expect(screen.queryByRole("button", { name: "Clear the filter" })).toBeNull();
 	});
 
 	it("browses a stale schema and states its age instead of blanking", () => {

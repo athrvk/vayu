@@ -49,6 +49,7 @@ import {
 	CommandList,
 	EYEBROW_CLASS,
 } from "@/components/ui";
+import { EmptyState } from "./EmptyState";
 import { useScriptCompletionsQuery } from "@/queries";
 import { countSnippets, snippetsForContext } from "@/lib/script-snippets";
 import type { SnippetInsertion, SnippetPlacement } from "@/lib/editor-snippet";
@@ -177,9 +178,11 @@ export function ScriptSnippets({
 					) : isPending ? (
 						<p className="px-3 py-2 text-xs text-muted-foreground">Loading snippets…</p>
 					) : total === 0 ? (
-						<p className="px-3 py-2 text-xs text-muted-foreground">
-							No snippets for this kind of script.
-						</p>
+						<EmptyState
+							variant="inline"
+							compact
+							title="No snippets for this kind of script."
+						/>
 					) : (
 						<Command>
 							<CommandInput placeholder="Filter snippets" />

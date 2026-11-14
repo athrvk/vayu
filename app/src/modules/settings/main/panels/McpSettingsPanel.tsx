@@ -74,7 +74,7 @@ import { useCopy } from "@/hooks/useCopy";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
-import { Callout } from "@/components/shared";
+import { Callout, EmptyState } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 import { loadTestModeLabel } from "@/constants/load-test-modes";
 import { appSetting } from "../app-settings";
@@ -941,9 +941,11 @@ export default function McpSettingsPanel() {
 								))}
 							</div>
 						) : config ? (
-							<p className="text-xs text-muted-foreground italic">
-								No hosts allowed yet. Agents can't send requests until you add one.
-							</p>
+							<EmptyState
+								variant="inline"
+								compact
+								title="No hosts allowed yet. Agents can't send requests until you add one."
+							/>
 						) : null}
 					</div>
 				</CardContent>

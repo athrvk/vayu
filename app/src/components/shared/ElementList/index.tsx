@@ -640,7 +640,6 @@ export function ElementList({
 								type="button"
 								variant="outline"
 								size="sm"
-								className="rounded-full"
 								onClick={() => addElement(kind)}
 							>
 								{QUICK_ADD_LABELS[kind.kind]}

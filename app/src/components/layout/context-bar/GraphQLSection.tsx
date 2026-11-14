@@ -122,11 +122,13 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 			</p>
 
 			<div>
-				<p className="text-label text-muted-foreground m-0 mb-1">
-					{operations.length === 0
-						? "No operation in this document"
-						: `${operations.length} ${pluralize(operations.length, "operation")}`}
-				</p>
+				{operations.length === 0 ? (
+					<SectionEmpty>No operation in this document</SectionEmpty>
+				) : (
+					<p className="text-label text-muted-foreground m-0 mb-1">
+						{`${operations.length} ${pluralize(operations.length, "operation")}`}
+					</p>
+				)}
 				<ul className="list-none p-0 m-0 space-y-0.5">
 					{operations.map((operation, index) => (
 						<li key={`${operation.kind}:${operation.name ?? ""}:${index}`}>

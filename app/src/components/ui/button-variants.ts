@@ -80,7 +80,7 @@ export const buttonVariants = cva(
 				 * row), and a single opinion here would renormalize all of them.
 				 * `h-auto` and `active:scale-100` live in `compoundVariants` below,
 				 * not here: cva concatenates `size`'s classes after `variant`'s, so a
-				 * height set in this string loses to `size`'s default `h-9` once both
+				 * height set in this string loses to `size`'s default `h-control` once both
 				 * pass through the same `cn()` merge, and the base string's own
 				 * `active:scale` (below `compoundVariants` in the final class list)
 				 * would win over a `scale-100` set here for the same reason.
@@ -91,13 +91,10 @@ export const buttonVariants = cva(
 			// #1679) rather than the bare `--spacing` rhythm: `h-9` and `h-8` were
 			// 27px/24px under the 3px unit (documented as 28/24 by every caller
 			// that mattered), and `icon` at `h-9 w-9` was a 27px interactive
-			// target, under the WCAG 2.2 SC 2.5.8 24x24px floor. `lg` is left on
-			// the rhythm unit - nothing names a "large control" step and it is
-			// already well clear of every floor here.
+			// target, under the WCAG 2.2 SC 2.5.8 24x24px floor.
 			size: {
 				default: "h-control px-4 py-2",
 				sm: "h-control-sm px-3 text-xs",
-				lg: "h-10 px-8",
 				icon: "size-target",
 			},
 		},

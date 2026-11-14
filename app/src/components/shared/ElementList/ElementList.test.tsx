@@ -964,6 +964,14 @@ describe("ElementList - empty state", () => {
 		expect(screen.queryByRole("button", { name: "Setup script" })).not.toBeInTheDocument();
 	});
 
+	it("draws the quick-add buttons on the radius setting, not as pills (#3501)", () => {
+		renderList([]);
+
+		const button = screen.getByRole("button", { name: "Extract from JSON" });
+		expect(button.className).not.toContain("rounded-full");
+		expect(button.className).toContain("rounded-md");
+	});
+
 	it("hides the chips once an element exists", () => {
 		renderList([extractElement("e1")]);
 

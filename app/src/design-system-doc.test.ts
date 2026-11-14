@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, statSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { declaredValues, familiesWithTextPair, indexCss as css } from "@/lib/css-tokens.testkit";
 
@@ -123,6 +124,161 @@ describe("design-system.md token values", () => {
 		for (const path of paths) {
 			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
 		}
+	});
+
+	// The same table, one column to the right: a row for `MetricsView.tsx` kept
+	// saying "Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard" after
+	// those moved out of the file, which sent readers to a file that held none of
+	// them. A symbol here is a backticked identifier or a bare camelCase /
+	// PascalCase word; it has to appear in the file the row names. Lowercase
+	// words, hyphenated tokens and directories (`hero/`) are prose.
+	it("names only symbols its Source Files row's file contains", () => {
+		const start = doc.indexOf("\n## Source Files\n");
+		const section = doc.slice(start + 1);
+		const next = section.indexOf("\n## ", 1);
+		const table = next === -1 ? section : section.slice(0, next);
+
+		const BACKTICKED = /`([A-Za-z_$][\w$]*)(?:\([^`]*\))?`/g;
+		const CASED_WORD = /\b(?:[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b/g;
+
+		const missing: string[] = [];
+		let checked = 0;
+		for (const [, path, description] of table.matchAll(/^\| `([^`]+)` \| (.+) \|$/gm)) {
+			const file = fromRepoRoot(path);
+			if (!existsSync(file) || statSync(file).isDirectory()) continue;
+			const source = readFileSync(file, "utf8");
+
+			const symbols = new Set<string>();
+			for (const m of description.matchAll(BACKTICKED)) symbols.add(m[1]);
+			// Backticked spans are removed first so `useInlineRename` is not read twice.
+			for (const m of description.replace(/`[^`]*`/g, " ").matchAll(CASED_WORD)) {
+				symbols.add(m[0]);
+			}
+			for (const symbol of symbols) {
+				checked++;
+				if (!source.includes(symbol)) missing.push(`${path}: ${symbol}`);
+			}
+		}
+
+		expect(checked, "no symbols found in the Source Files descriptions").toBeGreaterThan(10);
+		expect(missing.join("\n")).toBe("");
+	});
+
+	// A GitHub table is a header line, a separator line, then rows. Rows with no
+	// header above them render as literal pipes, and the Chrome-contrast rows for
+	// the switch sat that way - stranded when two branches' edits to the page
+	// merged. Fenced blocks are skipped: a snippet may hold a `|` line of its own.
+	it("has no table row stranded without its header and separator", () => {
+		const lines = doc.split(/\r?\n/);
+		const SEPARATOR = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+		const stranded: string[] = [];
+		let inFence = false;
+		let tables = 0;
+		let runStart = -1;
+		const endRun = (end: number) => {
+			if (runStart === -1) return;
+			tables++;
+			const isTable = end - runStart >= 2 && SEPARATOR.test(lines[runStart + 1]);
+			if (!isTable) {
+				stranded.push(
+					`design-system.md:${runStart + 1}-${end}  ${end - runStart} pipe line(s) with no header and separator: ${lines[runStart].slice(0, 60)}`
+				);
+			}
+			runStart = -1;
+		};
+
+		lines.forEach((line, i) => {
+			if (/^\s*```/.test(line)) {
+				endRun(i);
+				inFence = !inFence;
+				return;
+			}
+			if (inFence) return;
+			if (line.startsWith("|")) {
+				if (runStart === -1) runStart = i;
+				return;
+			}
+			endRun(i);
+		});
+		endRun(lines.length);
+
+		expect(tables, "no tables found - has the table syntax changed?").toBeGreaterThan(30);
+		expect(stranded.join("\n")).toBe("");
+	});
+
+	// The Utility Reference is the doc telling a reader which class to write.
+	// `method-get`, `font-code`, `variable-highlight` and `text-info` sat in it
+	// after the stylesheet's definitions had no reader and the table had nothing
+	// to check them against (#3501), so a reader copied a class that styled
+	// nothing. A class is real when Tailwind can generate it from the theme (a
+	// `--color-*` / `--font-*` in index.css, or a key in tailwind.config.js),
+	// when index.css defines it as a class, or when the app's own source writes
+	// it - the last covers the built-in utilities (`font-mono`, `hover:bg-accent`).
+	it("lists only utility classes something defines or the app writes", async () => {
+		const start = doc.indexOf("\n## Tailwind Utility Reference\n");
+		expect(start, "the Tailwind Utility Reference heading has moved").toBeGreaterThan(-1);
+		const end = doc.indexOf("\n## ", start + 1);
+		const section = doc.slice(start, end === -1 ? undefined : end);
+
+		// Variant prefixes (`hover:`, `dark:`) and an opacity suffix (`/10`) change
+		// when a class applies, not whether it exists.
+		const base = (cls: string) =>
+			cls
+				.replace(/^\./, "")
+				.replace(/^(?:[^\s:]+:)+/, "")
+				.replace(/\/\d+$/, "");
+
+		const sourceFiles = globSync("src/**/*.{ts,tsx}", { cwd: fromRepoRoot("app") }).filter(
+			(file) => !file.includes(".test.") && !file.includes(".testkit.")
+		);
+		const written = new Set<string>();
+		for (const file of sourceFiles) {
+			const text = readFileSync(fromRepoRoot(`app/${file}`), "utf8");
+			for (const m of text.matchAll(/[A-Za-z0-9_:/.[\]%-]+/g)) written.add(base(m[0]));
+		}
+		expect(written.size, "no class-like tokens read from app/src").toBeGreaterThan(1000);
+
+		type ColourTree = { [key: string]: string | ColourTree };
+		const configUrl = pathToFileURL(fromRepoRoot("app/tailwind.config.js")).href;
+		const config = (await import(/* @vite-ignore */ configUrl)).default as {
+			theme: { extend: { colors: ColourTree; fontFamily: Record<string, unknown> } };
+		};
+		const generated = new Set<string>();
+		const flatten = (tree: ColourTree, prefix: string) => {
+			for (const [key, value] of Object.entries(tree)) {
+				const name = key === "DEFAULT" ? prefix : prefix ? `${prefix}-${key}` : key;
+				if (typeof value === "string") generated.add(name);
+				else flatten(value, name);
+			}
+		};
+		flatten(config.theme.extend.colors, "");
+		for (const m of css.matchAll(/--color-([a-z0-9-]+):/g)) generated.add(m[1]);
+		for (const m of css.matchAll(/--font-([a-z0-9-]+):/g)) generated.add(m[1]);
+		expect(generated.size, "no theme colours or fonts found").toBeGreaterThan(20);
+
+		const COLOUR_PREFIX = /^(?:text|bg|border|ring|fill|stroke|outline|divide|from|via|to)-/;
+		const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const isReal = (cls: string) => {
+			if (written.has(cls)) return true;
+			if (new RegExp(`\\.${escape(cls)}(?![\\w-])`).test(css)) return true;
+			if (cls.startsWith("font-") && generated.has(cls.slice(5))) return true;
+			return COLOUR_PREFIX.test(cls) && generated.has(cls.replace(COLOUR_PREFIX, ""));
+		};
+
+		const rows = section.split("\n").filter((line) => /^\|.*`/.test(line));
+		let listed = 0;
+		const unreal: string[] = [];
+		for (const row of rows) {
+			const classes = row.split("|")[2] ?? "";
+			for (const [, span] of classes.matchAll(/`([^`]+)`/g)) {
+				listed++;
+				if (!isReal(base(span))) unreal.push(span);
+			}
+		}
+
+		expect(listed, "no utility classes found in the table - has it moved?").toBeGreaterThan(15);
+		expect(unreal.join("\n")).toBe("");
 	});
 
 	// Issue #1679: the Chrome, Target and Icon Floors table names ten steps

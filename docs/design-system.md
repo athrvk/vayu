@@ -397,6 +397,10 @@ things text contrast never touches: focus rings, control boundaries, and the
 |------|------:|-----:|---------|
 | `--ring` vs every surface | 4.57–5.39 | 5.11–6.75 | passes comfortably |
 | `--border` / `--input` vs card | 1.30 | 1.00 | decorative only - see below |
+| switch **off** track vs card | 1.55 | 1.28 | failed |
+| switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
+| switch **on** track vs card | 5.41 | 3.20 | passes |
+| switch on **thumb** vs its track | 4.93 | 4.93 | passes |
 
 **A divider *inside* a card says `border-rule`, not a border token.** `--border`
 is tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
@@ -520,12 +524,8 @@ the strongest available in both themes (1.356 light / 1.343 dark). The
 *faintest* option there in dark (1.11, per the table above). Decided in issue
 #69; the detected-collections preview list in the same dialog got the same
 treatment.
-| switch **off** track vs card | 1.55 | 1.28 | failed |
-| switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
-| switch **on** track vs card | 5.41 | 3.20 | passes |
-| switch on **thumb** vs its track | 4.93 | 4.93 | passes |
 
-The on rows are the default scheme (Ocean) with the track on `bg-primary-fill`.
+The switch on rows in the first table above are the default scheme (Ocean) with the track on `bg-primary-fill`.
 They used to read `--primary`, which brightens in dark: the track was 5.89
 against the card but only 2.94 under the white thumb. `checked-control-contrast.test.ts`
 holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme,
@@ -883,14 +883,10 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 --method-options: 240  5% 41%;   /* 240  5% 58% - gray   */
 ```
 
-**Utility classes** (defined in `index.css`, available as Tailwind class names):
-- Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
-- Background: `.bg-method-get`, `.bg-method-post`, etc.
-
-These exist but **nothing in `src/` currently uses them** - prefer
-`getMethodColor` below, which is the one path `MethodBadge`, the tab strip and
-the method selector all take. A second way to spell the same colour is a second
-place for it to drift.
+There is no `.method-get` or `.bg-method-get` utility class: the colour is
+read through `getMethodColor` below, the one path `MethodBadge`, the tab strip
+and the method selector all take. A second way to spell the same colour is a
+second place for it to drift.
 
 **`getMethodColor(method)`** in `app/src/lib/method-display.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
@@ -1107,7 +1103,7 @@ families - the weights bundled, the subsets, and why.
 
 ```css
 body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
-/* mono via font-mono Tailwind class, or .font-code utility */
+/* mono via the font-mono Tailwind class */
 ```
 
 The faces are bundled rather than fetched because a stylesheet in
@@ -1617,7 +1613,7 @@ stored preference is the right amount of mechanism.
 | `rounded-sm` | `calc(var(--radius) - 4px)` | yes |
 | `rounded-md` | `calc(var(--radius) - 2px)` | yes |
 | `rounded-lg` | `var(--radius)` | yes |
-| `rounded-full` | pill / circle | no - deliberately fixed |
+| `rounded-full` | circle, or a track that is a capsule | no - deliberately fixed, and only for a shape that *is* a circle (see below) |
 | `rounded-none` | `0` | no - deliberately fixed |
 | `rounded` | Tailwind default | **no - never use it** |
 
@@ -1642,7 +1638,8 @@ option regardless of which one is active. The same test enforces this, across
 `appearance-store`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
 live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
 unsuffixed `rounded`** (fixed 4px - it ignores `--radius` and won't follow the
-control). `rounded-full` stays a pill regardless.
+control). `rounded-full` does not follow it either, which is why it is reserved
+for shapes that are circles (below), never for a button or a chip.
 
 The primitives are the reference, not a table of their own: `Badge` and the
 chips that match it are `rounded-md` (`badge-variants.ts`), `Card` is `rounded-lg`
@@ -1666,15 +1663,21 @@ circle or a capsule. It is not for anything rectangular that merely looked
 nicer with round ends: the dashboard header's LIVE / COMPLETED / STOPPED chips
 were `rounded-full` while the `Badge` primitive they otherwise match is
 `rounded-md`, so on Square they were the only round things left on the screen.
-They are `rounded-md` now.
+They are `rounded-md` now, and so are the element list's quick-add buttons and
+the inherited-elements notice's kind chip (a `Badge variant="chip"`, #3501).
 
-No test can tell a chip from a dot, so this one is a judgement call at review
-time. The question to ask: if the user picks Square, should this element go
-square? If yes it is a chip, and `rounded-full` is wrong.
+The radius guard allows the class, because no source scan can tell a chip from a
+dot (`radius-token.test.tsx` is silent on it), so this one is a judgement call at
+review time. The question to ask: if the user picks Square, should this element
+go square? If yes it is a chip, and `rounded-full` is wrong. A track whose shape
+is the capsule (the progress bar, the switch) is the exemption, and says so
+under its own heading.
 
 The same reasoning rules out `rounded-full` on controls - a button or dropdown
 trigger that keeps its pill shape becomes the one thing on screen ignoring the
-Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
+Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`. Render
+the two sites that carried it (`ElementList`'s quick-add buttons,
+`InheritedElementsNotice`'s kind chip) and read `className`, as their tests do.
 
 **A control that renders at more than one box size caps the token by
 proportion instead of using it bare.** `Checkbox` (`ui/checkbox.tsx`) is
@@ -1694,17 +1697,14 @@ for the same `min(token, %)` shape rather than relearning this.
 
 ## Animations
 
-Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animations have Tailwind shorthand aliases (`animate-vayu-spin`, `animate-vayu-pulse`, `animate-vayu-fadepulse`) in addition to the verbose arbitrary form.
+Defined in `index.css`. `tailwind.config.js` carries no keyframes or animation aliases, so a keyframe has
+one definition to keep in step. The live indicator reaches `vayu-pulse` through an arbitrary class
+(`animate-[vayu-pulse_1.6s_ease-in-out_infinite]`).
 
 | Name | Duration | Curve | Tailwind class | Use |
 |------|----------|-------|----------------|-----|
-| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Unused by the app; spinners are `Loader2` with Tailwind's `animate-spin` |
-| `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
-| `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
-| `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `vayu-pulse` | 1.6s | ease-in-out | `animate-[vayu-pulse_1.6s_ease-in-out_infinite]` | Live indicators (100→35% opacity) |
 | `collapsible-down/up` | 0.2s | `--ease-enter` / `--ease-exit` | `animate-collapsible-down/up` | `CollapsibleContent`'s height (from `tw-animate-css`) |
-| `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
-| `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
 | interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 | press feedback | 0.1s | ease-out | *(baseline, `[data-slot="button"]`)* | `scale: 0.98` on `:active` |
 
@@ -1800,7 +1800,7 @@ must carry `.panel-clip`; every focusable descendant then gets
 wrapper and the bordered cards in the load-test and run-collection dialogs;
 `rg panel-clip app/src` is the authoritative list. Put it on the
 element carrying the overflow - not on the rows. For a one-off outside such a
-container, use the `.focus-ring-inset` utility.
+container, use `focus-visible:-outline-offset-2`.
 
 Two limits worth knowing before reaching for it. **`overflow-y-auto` clips
 horizontally too** - it computes `overflow-x` to `auto`, so a box that only
@@ -1816,7 +1816,7 @@ their own ring.
 field inside a dialog needs nothing.
 
 **Which is why a primitive fixes its own clipping, with `ring-inset`.** Neither
-`.panel-clip` nor `.focus-ring-inset` reaches a Tailwind `ring` - both move
+`.panel-clip` nor an `outline-offset` utility reaches a Tailwind `ring` - both move
 `outline-offset`, and a primitive has already turned its outline off. `TabsTrigger`
 is the worked example: a trigger fills its list's height exactly (measured in the
 running app, both boxes were 74->98) and the three scrolling strips - the response
@@ -2389,7 +2389,7 @@ control at a different scale.
 
 It carries only the axis-level shape: `w-full`, `justify-start` in place of
 the default's `justify-center`, `text-left`, and `h-auto` overriding the
-default size's fixed `h-9` (in `compoundVariants`, not the variant string
+default size's fixed `h-control` (in `compoundVariants`, not the variant string
 itself - `cva` concatenates `size`'s classes after `variant`'s, so a height
 set beside `w-full`/`justify-start` would lose to the default size once both
 pass through the same `cn()` merge; `button-variants.test.ts` mutation-checks
@@ -3541,14 +3541,14 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320) |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. The context bar's `SectionEmpty` is this component (inline, compact), so every section's empty body is one. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " or "Nothing matches" in `modules/` or `components/`, and on a `SectionEmpty` that stops rendering one, #3501 |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
+| Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
 A pane title (`EmptyState` and `ErrorState` alike) is a heading at the main
 pane's outline level - the tab's `h1` when the state is the whole tab, an `h2`
 under it otherwise - and a paragraph in the drawer and the context bar; see
 Accessibility (#3498). The inline variants are a line, never a heading.
-| Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
 **An empty state that has a create path says so** (issue #1693). Thirty-odd
 call sites had one between them before, so "No environments" and "No mock
@@ -3558,7 +3558,12 @@ to the *same* handler that header button uses - never a second, parallel
 create path, which is what would drift. Where the surface genuinely has no
 create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
-user caused it undoes that ("Clear the filters", "Clear the filter"). The
+user caused it undoes that. The wording is one pattern: "Clear the filter" for
+a single search or filter field, "Clear the filters" where several narrow the
+list (History). A list that is empty because of what was typed says what was
+typed and offers the way out: Settings search's "No settings match", the
+Send-with-row dialog's "No rows match" and the schema explorer's "Nothing
+matches" carry a `variant="link"` "Clear the filter" that empties the field. The
 collections sidebar offers its create path plus Import as a two-`Button`
 `flex gap-2` wrapper ("New request", "Import") rather than a lone link
 (`CollectionTree.tsx`): with no collection to hold it, a new request is what
@@ -4085,51 +4090,19 @@ The header's elapsed time is the `elapsedDuration` prop, the newest tick's
 `elapsed_seconds` from the engine, so it starts at 0 with each run and holds no
 timer of its own.
 
-### SVG Sparkline
-
-```tsx
-function Sparkline({ data, color }: { data: number[]; color: string }) {
-  if (!data || data.length < 2) return null;
-  const max = Math.max(...data), min = Math.min(...data), rng = max - min || 1;
-  const w = 108, h = 26;
-  const pts = data.map((v, i) =>
-    `${(1 + (i / (data.length - 1)) * w).toFixed(1)},${(1 + h * (1 - (v - min) / rng)).toFixed(1)}`
-  );
-  const area = `M1,${h + 1} L${pts.join(" L")} L${w + 1},${h + 1}Z`;
-  return (
-    <svg width={110} height={28} className="block overflow-visible">
-      <path d={area} fill={color} fillOpacity="0.15" />
-      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
-}
-```
-
-### SVG Area Chart
-
-`viewBox="0 0 600 150"`, padding `PL=42 PR=8 PT=6 PB=20`. Area fill uses `fillOpacity="0.12"` (slightly less than the sparkline's `0.15`). Grid lines use `hsl(var(--border))` with `strokeDasharray="2 2"`. Axis labels use `hsl(var(--muted-foreground))` in JetBrains Mono at `fontSize="9"`. Requires `data.length >= 2` (returns null otherwise).
-
 ### Hero Metric Card
 
 The reference is `app/src/modules/dashboard/components/hero/HeroCardShell.tsx`,
-which every hero card is built on: a `Card pad="md"` with an eyebrow label, a
-`text-hero` mono value with an optional unit beside it, an optional sub-label,
-and an optional `Sparkline` below.
-
-Note: sparkline renders **below** the value row, not beside it.
+which every hero card is built on: a `Card pad="md"` with an eyebrow label and
+its `InfoChip`, then a body. The usual body is `HeroValue`, a `text-hero` mono
+value with an optional unit beside it; two cards add a `MiniBar` fidelity gauge
+below, and a few supply a bespoke body of their own.
 
 ### Secondary Stat Card
 
 The reference is `app/src/modules/dashboard/components/stats/StatCard.tsx`: the
 same anatomy as the hero card at the `Card pad="sm"` (`p-3`) tier, with a
 `text-metric` value.
-
-### Latency Distribution Bar
-
-Gradient track (green→amber→red at 18% opacity), with absolute-positioned needle markers at p50/p95/p99. Each marker consists of:
-- A 1px-wide, 16px-tall vertical pin: `w-px h-4 mx-auto opacity-85`
-- A dot below it: `w-2 h-2 rounded-full mx-auto -mt-1` with `boxShadow: "0 0 0 2px hsl(var(--card))"` (creates the ring effect without Tailwind ring classes)
-- Value label + percentile label below
 
 ### Progress Bar
 
@@ -4173,54 +4146,34 @@ read as a fraction, and there is no fraction to report.
 | Selected state | `bg-accent-active` |
 | Success | `text-success-text`, `bg-success/10` |
 | Warning | `text-warning-text`, `bg-warning/10` |
-| Info | `text-info`, `bg-info/10` |
 | Error | `text-destructive-text`, `bg-destructive/10` |
-| Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
-| Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
-| Code font (utility) | `font-code` |
 | Thin scrollbar | nothing - 6px is the global baseline (see [Scrollbar](#scrollbar)) |
 | Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) - collection detail only; the request and response strips fit-and-overflow |
-| Variable color | `text-variable` or `.variable-highlight` |
+| Variable color | `text-variable` |
 
 ### Never use
 
 - `bg-gray-*`, `bg-zinc-*`, `bg-slate-*` - use `bg-card`, `bg-panel`, `bg-background`
-- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-info/10`, etc.
+- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-warning/10`, etc.
 - `dark:bg-*` hardcoded overrides - tokens handle both modes automatically
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
-- Hardcoded hex method colors like `text-[#22c55e]` - use `method-get` or `hsl(var(--method-get))`
+- Hardcoded hex method colors like `text-[#22c55e]` - use `getMethodColor` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
 - Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
 
-These rules are enforced for the request/response tree by
-`modules/request-builder/components/ResponseViewer/palette-tokens.test.ts`. They
-were documented long before they were enforced, and the tree had drifted: seven
-usages of `text-green-500` / `text-blue-500` and friends, every one of which
-failed its contrast bar in **light** mode (1.63–3.76 against thresholds of 3.0
-and 4.5) while passing in dark. That asymmetry is inherent to a raw palette
-class rather than bad luck - one value cannot suit a white card and a near-black
-one, so the light failure is unfixable without breaking dark. The per-theme
-`-text` tokens clear both.
+These rules are enforced by `palette-tokens.test.ts` (under
+`modules/request-builder/components/ResponseViewer/`) over every `.tsx` in
+`modules/` and `components/` (#1693). They were documented long before they
+were enforced, and the tree had drifted: seven usages of `text-green-500` /
+`text-blue-500` and friends, every one of which failed its contrast bar in
+**light** mode (1.63–3.76 against thresholds of 3.0 and 4.5) while passing in
+dark. That asymmetry is inherent to a raw palette class rather than bad luck -
+one value cannot suit a white card and a near-black one, so the light failure is
+unfixable without breaking dark. The per-theme `-text` tokens clear both.
 
-The guard is scoped to the trees that were measured. Elsewhere the raw palette
-classes appear as explicit `bg-blue-50 dark:bg-blue-950` pairs, which are
-theme-aware and so are not this defect; converting those needs new tokens
-(there is no purple or info `-text` token today) and is a design decision.
-
----
-
-## Response Body Syntax Highlighting
-
-Planned / pending implementation. Intended colors for the JSON pretty-printer:
-
-| Token | Color |
-|-------|-------|
-| Object keys | `#7dd3fc` (sky-300) |
-| String values | `#86efac` (green-300) |
-| Number values | `#fbbf24` (amber-400) |
-| Boolean values | `#a78bfa` (violet-400) |
-| Null | `#94a3b8` (slate-400) |
+The guard's scope and its two exemptions are described under "Decorative
+categorical palettes", above.
 
 ---
 
@@ -4483,11 +4436,13 @@ Appearance panel says so when `usePrefersReducedMotion()` is true. Without that
 line the only explanation for the app's behaviour lives in another
 application's settings.
 
-**Nothing animates from JavaScript.** No `element.animate()`, no
-requestAnimationFrame loops, and the single `scrollIntoView` passes no
-`behavior`, so it follows the `scroll-behavior` the rules above set. Keep it
-that way: JS-driven motion is invisible to both rules and would need its own
-opt-out.
+**Nothing animates from JavaScript.** No `element.animate()` and no property
+tweened frame by frame: `requestAnimationFrame` is for measuring, resizing and
+stepping a scroll (`lib/resize-gesture.ts`, the tree's drag auto-scroll in
+`useTreeDnd.ts`), and the two `scrollIntoView` calls (`components/ui/command.tsx`,
+`SendWithRowDialog.tsx`) pass `block: "nearest"` and no `behavior`, so they
+follow the `scroll-behavior` the rules above set. Keep it that way: JS-driven
+motion is invisible to both rules and would need its own opt-out.
 
 ### Icon motion
 
@@ -4615,7 +4570,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | File | Purpose |
 |------|---------|
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
-| `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
+| `app/tailwind.config.js` | Color mapping, font families, border radii (no keyframes or animations: those live in `index.css`) |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - the ActivityRail, the drawer row, the content column (TabStrip, main, ContextBar, ContextRail), the Dock, and the window chords |
@@ -4627,7 +4582,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/shared/run-status.ts` | `RUN_STATUS`: the one status-to-label/glyph/token map behind the dashboard pill and the history row |
-| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both read from `RUN_STATUS` (refined by a verdict through `runStatusDisplay`) |
+| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both drawn through `runStatusDisplay`, the status above refined by a verdict |
 | `app/src/components/shared/RunOutcomeBanner.tsx` | The Passed / Failed / Not judged line a finished load run opens on, over `run-outcome.ts`'s verdict |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
@@ -4637,4 +4592,4 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/lib/time-value.ts` | The one place text becomes a time: `parseTimeValue`, `describeInstant`, `formatInstant`, `formatRelative`, `formatDayHeading` |
 | `app/src/components/shared/TimeValue/TimeValue.tsx` | The one renderer of a time: visible text plus the hover card, and `TimeTooltip` for a trigger the surface draws |
 | `app/src/components/shared/TimeValue/TimeMarker.tsx` | The time card's marker beside an editable field that holds a time |
-| `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
+| `app/src/modules/dashboard/components/MetricsView.tsx` | `MetricsView`, the live dashboard's router: derives the run's metrics and composes the rows from `hero/`, `stats/` and `charts/` beside it |
