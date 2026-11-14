@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { declaredValues, familiesWithTextPair, indexCss as css } from "@/lib/css-tokens.testkit";
 
@@ -123,6 +123,87 @@ describe("design-system.md token values", () => {
 		for (const path of paths) {
 			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
 		}
+	});
+
+	// The same table, one column to the right: a row for `MetricsView.tsx` kept
+	// saying "Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard" after
+	// those moved out of the file, which sent readers to a file that held none of
+	// them. A symbol here is a backticked identifier or a bare camelCase /
+	// PascalCase word; it has to appear in the file the row names. Lowercase
+	// words, hyphenated tokens and directories (`hero/`) are prose.
+	it("names only symbols its Source Files row's file contains", () => {
+		const start = doc.indexOf("\n## Source Files\n");
+		const section = doc.slice(start + 1);
+		const next = section.indexOf("\n## ", 1);
+		const table = next === -1 ? section : section.slice(0, next);
+
+		const BACKTICKED = /`([A-Za-z_$][\w$]*)(?:\([^`]*\))?`/g;
+		const CASED_WORD = /\b(?:[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b/g;
+
+		const missing: string[] = [];
+		let checked = 0;
+		for (const [, path, description] of table.matchAll(/^\| `([^`]+)` \| (.+) \|$/gm)) {
+			const file = fromRepoRoot(path);
+			if (!existsSync(file) || statSync(file).isDirectory()) continue;
+			const source = readFileSync(file, "utf8");
+
+			const symbols = new Set<string>();
+			for (const m of description.matchAll(BACKTICKED)) symbols.add(m[1]);
+			// Backticked spans are removed first so `useInlineRename` is not read twice.
+			for (const m of description.replace(/`[^`]*`/g, " ").matchAll(CASED_WORD)) {
+				symbols.add(m[0]);
+			}
+			for (const symbol of symbols) {
+				checked++;
+				if (!source.includes(symbol)) missing.push(`${path}: ${symbol}`);
+			}
+		}
+
+		expect(checked, "no symbols found in the Source Files descriptions").toBeGreaterThan(10);
+		expect(missing.join("\n")).toBe("");
+	});
+
+	// A GitHub table is a header line, a separator line, then rows. Rows with no
+	// header above them render as literal pipes, and the Chrome-contrast rows for
+	// the switch sat that way - stranded when two branches' edits to the page
+	// merged. Fenced blocks are skipped: a snippet may hold a `|` line of its own.
+	it("has no table row stranded without its header and separator", () => {
+		const lines = doc.split(/\r?\n/);
+		const SEPARATOR = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+		const stranded: string[] = [];
+		let inFence = false;
+		let tables = 0;
+		let runStart = -1;
+		const endRun = (end: number) => {
+			if (runStart === -1) return;
+			tables++;
+			const isTable = end - runStart >= 2 && SEPARATOR.test(lines[runStart + 1]);
+			if (!isTable) {
+				stranded.push(
+					`design-system.md:${runStart + 1}-${end}  ${end - runStart} pipe line(s) with no header and separator: ${lines[runStart].slice(0, 60)}`
+				);
+			}
+			runStart = -1;
+		};
+
+		lines.forEach((line, i) => {
+			if (/^\s*```/.test(line)) {
+				endRun(i);
+				inFence = !inFence;
+				return;
+			}
+			if (inFence) return;
+			if (line.startsWith("|")) {
+				if (runStart === -1) runStart = i;
+				return;
+			}
+			endRun(i);
+		});
+		endRun(lines.length);
+
+		expect(tables, "no tables found - has the table syntax changed?").toBeGreaterThan(30);
+		expect(stranded.join("\n")).toBe("");
 	});
 
 	// Issue #1679: the Chrome, Target and Icon Floors table names ten steps

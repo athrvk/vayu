@@ -80,7 +80,7 @@ export const buttonVariants = cva(
 				 * row), and a single opinion here would renormalize all of them.
 				 * `h-auto` and `active:scale-100` live in `compoundVariants` below,
 				 * not here: cva concatenates `size`'s classes after `variant`'s, so a
-				 * height set in this string loses to `size`'s default `h-9` once both
+				 * height set in this string loses to `size`'s default `h-control` once both
 				 * pass through the same `cn()` merge, and the base string's own
 				 * `active:scale` (below `compoundVariants` in the final class list)
 				 * would win over a `scale-100` set here for the same reason.
