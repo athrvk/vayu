@@ -160,7 +160,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						<p className="text-sm font-medium text-warning-text">
 							Engine restart required
 						</p>
-						<p className="text-xs text-warning-text/80 mt-0.5">
+						<p className="text-xs text-warning-text mt-0.5">
 							Changes to <span className="font-medium">{labels.join(", ")}</span> will
 							take effect after restarting Vayu&apos;s engine
 						</p>
@@ -178,7 +178,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 					</Button>
 					<Button
 						size="sm"
-						className="bg-warning hover:bg-warning/90 text-warning-foreground"
+						className="bg-status-warning-fill text-white hover:bg-status-warning-fill/90"
 						disabled={isRestarting}
 						onClick={() => void restart()}
 					>

@@ -235,7 +235,7 @@ export default function ClientErrorView({
 				)}
 
 				{errorCode && (
-					<p className="text-xs text-muted-foreground/70 font-mono">
+					<p className="text-xs text-muted-foreground font-mono">
 						Error code: {errorCode}
 					</p>
 				)}

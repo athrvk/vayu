@@ -356,12 +356,13 @@ directly the way the tab strip still does (issue #1074); without that the
 editor would rank the scopes while the field one line above ranks the row over
 them, which is the disagreement this paragraph exists to forbid.
 
-A name that **no** scope defines but the row does is the same claim in the
-other direction, and it stops being reported as undefined: the destructive red
-states a token that reaches the server with its braces still on, and this one
-does not. The chip reads `row`, the popover names the column, and a create
-offer - still worth making, since the variable answers every row-less send -
-says what the row already answers rather than implying the token is unanswered.
+A name that **no** scope defines but the row does is the same claim in the other
+direction, and it stops being reported as undefined: the destructive red (with
+its wavy underline) states a token that reaches the server with its braces still
+on, and this one does not. The chip reads `row`, the popover names the column,
+and a create offer - still worth making, since the variable answers every
+row-less send - says what the row already answers rather than implying the token
+is unanswered.
 
 **What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
 title resolves through one list-wide `useVariableResolver()` in
@@ -432,15 +433,16 @@ above it.
 
 This is what makes the token states possible: with a contract in scope,
 `{{data.email}}` is *checkable*. A declared column paints informationally, a
-column no contract in scope declares paints **amber** with the declared list in
-its tooltip, and a chain that declares nothing keeps the neutral token above. It
-is authoring-time advice in every case - the run's file is the authority, and a
-run with a mismatched file is still the user's to start. Declared columns are
-also completed: `{{data.` offers them in the request fields and the body editors,
-and `pm.iterationData.get("` offers them in the script editors (see below). The
-body editors also colour and explain these tokens on hover, the same three
-states as the request fields; the script editors do not, for the same
-interpolation reason as everywhere else in this document (D16).
+column no contract in scope declares paints **amber** (double-underlined, so it
+stays apart from a close accent, #3499) with the declared list in its tooltip,
+and a chain that declares nothing keeps the neutral token above. It is
+authoring-time advice in every case - the run's file is the authority, and a run
+with a mismatched file is still the user's to start. Declared columns are also
+completed: `{{data.` offers them in the request fields and the body editors, and
+`pm.iterationData.get("` offers them in the script editors (see below). The body
+editors also colour and explain these tokens on hover, the same three states as
+the request fields; the script editors do not, for the same interpolation reason
+as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
 (issue #604). They used to paint a name red whenever no scope defined it, which

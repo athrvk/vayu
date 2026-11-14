@@ -70,10 +70,14 @@ export interface EditableVariableProps {
 }
 
 /**
- * The token's colour. A deferred name is checked before `resolved` and `value`:
+ * The token's colour, and the underline a state carries where colour alone does
+ * not separate it. A deferred name is checked before `resolved` and `value`:
  * the stored value it holds is not what is sent, so it must not read as
- * resolved (primary) or as an empty value either. Mirrors the `deferred` class
- * in `index.css` that paints the same state in Monaco.
+ * resolved or as an empty value either. An undefined name is wavy-underlined
+ * because in some schemes its red sits under 0.10 OKLab from the accent
+ * (#3499). Resolved paints `--primary-text`, which a scheme retunes where its
+ * accent would sit as close to the empty state's grey. Mirrors the
+ * `vayu-variable-token-*` classes in `index.css` that paint Monaco.
  */
 function toneClass({
 	resolved,
@@ -87,9 +91,11 @@ function toneClass({
 	if (deferred) {
 		return "text-muted-foreground underline decoration-dashed underline-offset-[3px] hover:bg-muted";
 	}
-	if (!resolved) return "text-destructive-text hover:bg-destructive-text/10";
+	if (!resolved) {
+		return "text-destructive-text underline decoration-wavy underline-offset-[3px] hover:bg-destructive-text/10";
+	}
 	if (!value) return "text-muted-foreground hover:bg-muted";
-	return "text-primary hover:bg-primary/10";
+	return "text-primary-text hover:bg-primary/10";
 }
 
 /** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */

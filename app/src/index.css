@@ -41,13 +41,10 @@
 	--color-tab-active: hsl(var(--tab-active));
 	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
-	--color-success-foreground: hsl(var(--success-foreground));
 	--color-success-text: hsl(var(--success-text));
 	--color-warning: hsl(var(--warning));
-	--color-warning-foreground: hsl(var(--warning-foreground));
 	--color-warning-text: hsl(var(--warning-text));
 	--color-info: hsl(var(--info));
-	--color-info-foreground: hsl(var(--info-foreground));
 	--color-variable: hsl(var(--variable));
 	--color-scope-global: hsl(var(--scope-global));
 	--color-scope-collection: hsl(var(--scope-collection));
@@ -252,11 +249,11 @@
 		--popover-foreground: 240 6% 10%;
 
 		/* Primary. --primary is the accent (text/border/tints); --primary-fill is
-		 * the button-background value (white labels). They match in light mode
-		 * and diverge in dark (see .dark). The values here are Sunset; the
-		 * default scheme is Ocean, applied by [data-color-scheme] below. */
-		--primary: 24 90% 46%;
-		--primary-fill: 24 90% 46%;
+		 * the button-background value (white labels), one value in both themes.
+		 * The values here are Sunset; the default scheme is Ocean, applied by
+		 * [data-color-scheme] below. */
+		--primary: 24 90% 36%;
+		--primary-fill: 24 90% 39%;
 		--primary-foreground: 0 0% 100%;
 
 		/*
@@ -264,17 +261,20 @@
 		 * --muted-foreground beside it.
 		 *
 		 * That separation is carried almost entirely by saturation, not
-		 * lightness: accent text and muted text sit within a 1.01-1.56 contrast
+		 * lightness: accent text and muted text sit within a 1.01-1.45 contrast
 		 * ratio of each other in every scheme, so the eye reads "coloured vs
-		 * grey". With 55-95% saturation against an inactive 4-5% that is plenty,
-		 * which is why this defaults to --primary and seven of the eight schemes
-		 * never override it.
+		 * grey". With 55-95% saturation against an inactive 4-5% that is
+		 * usually plenty, which is why this defaults to --primary. It also
+		 * paints a resolved `{{variable}}`, beside the empty state's
+		 * --muted-foreground, and color-scheme-contrast.test.ts holds the two at
+		 * 0.10 OKLab apart in every scheme.
 		 *
-		 * `graphite` does. It is the only desaturated scheme (S=12%/15%), so it
-		 * has no hue to spend and must separate by lightness instead - the same
-		 * bind --primary-fill exists to solve, answered the same way. Retuning
-		 * its --primary is not an option: that also paints its buttons, ring and
-		 * --chart-1.
+		 * `graphite` overrides it. It is the only desaturated scheme
+		 * (S=12%/15%), so it has no hue to spend and must separate by lightness
+		 * instead - the same bind --primary-fill exists to solve, answered the
+		 * same way. Retuning its --primary is not an option: that also paints
+		 * its ring, --chart-1 and every `text-primary`. Light `sky` overrides it
+		 * too, for the chroma its 4.5:1 accent gives up (see the sky block).
 		 *
 		 * Declared once here rather than per theme: `.dark` sits on the same
 		 * element as `:root`, so var(--primary) already resolves per theme.
@@ -308,7 +308,7 @@
 		--border: 240 6% 89%; /* #e2e2e5 - default dividers on paper white */
 		--border-strong: 240 5% 82%; /* #cfcfd5 - prominent borders */
 		--input: 240 6% 89%;
-		--ring: 24 90% 46%;
+		--ring: 24 90% 36%;
 
 		/* Destructive */
 		/* 48%, not red-500's 60%. This is the *fill* token, and the destructive
@@ -331,7 +331,7 @@
 		 * points of lightness apart, which is two of five phases rendered the
 		 * same colour. Moss sits in the widest gap in the ring (38 -> 172), 67
 		 * degrees from its nearest neighbour. */
-		--chart-1: 24 90% 46%;
+		--chart-1: 24 90% 36%;
 		--chart-2: 172 66% 38%; /* teal */
 		--chart-3: 258 55% 55%; /* violet */
 		--chart-4: 38 88% 48%; /* amber */
@@ -359,20 +359,18 @@
 		--method-options: 240 5% 41%;
 
 		/* Variable highlight */
-		--variable: 24 90% 46%;
+		--variable: 24 90% 36%;
 
 		/* Semantic - `-text` variants are darkened for legible text on light
 		 * surfaces (the base tokens are tuned as fills/indicators, like
 		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
-		--success-foreground: 0 0% 100%;
 		/* Solved against the *darkest* light surface (--muted/--accent at 93%),
 		 * not the card. At 30% these cleared the card but measured 4.04 (green)
 		 * and 3.57 (amber) on --muted, so a warning on a tinted chip failed -
 		 * which is exactly what "ramp off target" did on the dashboard. */
 		--success-text: 142 72% 27%;
 		--warning: 38 92% 50%;
-		--warning-foreground: 0 0% 100%;
 		--warning-text: 38 90% 30%;
 		/* Split per theme, like every other semantic token here. It was
 		 * `199 89% 48%` in both, which measured **2.85** on a light card
@@ -382,7 +380,6 @@
 		 * where one value must read as the same signal on either surface;
 		 * `--info` had no such reason and was never measured. */
 		--info: 199 89% 38%; /* cyan - see the note below */
-		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - global / collection / environment.
 		 * Used as text/icon/border at full strength and as tinted backgrounds
@@ -603,26 +600,33 @@
 
 	/* ── Accent color schemes (light mode) ── */
 
-	/* Light: --primary is the accent (used for text/border/ring/tints) and is
-	 * deep enough to read on light surfaces; --primary-fill (button fills) is
-	 * the same deep value here - white labels clear AA-large. In dark mode the
-	 * two diverge (see the .dark blocks). */
+	/* Light: --primary is the accent (used for text/border/ring/tints), deep
+	 * enough to clear 4.5:1 on every light surface down to --muted; --primary-fill
+	 * (button fills) carries a white label at 4.5:1 and is pinned to one value in
+	 * both themes. The darkest surface is what sets --primary, the white label
+	 * what sets the fill, so in six schemes the fill sits a few points lighter
+	 * than the text accent (#3499). color-scheme-contrast.test.ts holds both. */
 	[data-color-scheme="sunset"] {
-		--primary: 24 90% 46%;
-		--primary-fill: 24 90% 46%;
+		--primary: 24 90% 36%;
+		--primary-fill: 24 90% 39%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 24 90% 46%;
-		--variable: 24 90% 46%;
-		--chart-1: 24 90% 46%;
+		--ring: 24 90% 36%;
+		--variable: 24 90% 36%;
+		--chart-1: 24 90% 36%;
 	}
 
 	[data-color-scheme="sky"] {
-		--primary: 192 95% 36%;
-		--primary-fill: 192 95% 36%;
+		--primary: 192 95% 28%;
+		--primary-fill: 192 95% 31%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 192 95% 36%;
-		--variable: 192 95% 36%;
-		--chart-1: 192 95% 36%;
+		--ring: 192 95% 28%;
+		--variable: 192 95% 28%;
+		--chart-1: 192 95% 28%;
+		/* A cyan dark enough to clear 4.5:1 on --muted has lost most of its
+		 * chroma: at 28% it sits 0.088 OKLab from --muted-foreground, under the
+		 * 0.10 that reads as a different colour. 22% takes it to 0.115. Dark sky
+		 * is 0.163 apart already and resets the alias below. */
+		--primary-text: 192 95% 22%;
 	}
 
 	[data-color-scheme="ocean"] {
@@ -635,12 +639,12 @@
 	}
 
 	[data-color-scheme="forest"] {
-		--primary: 142 72% 33%;
-		--primary-fill: 142 72% 33%;
+		--primary: 142 72% 27%;
+		--primary-fill: 142 72% 30%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 142 72% 33%;
-		--variable: 142 72% 33%;
-		--chart-1: 142 72% 33%;
+		--ring: 142 72% 27%;
+		--variable: 142 72% 27%;
+		--chart-1: 142 72% 27%;
 	}
 
 	[data-color-scheme="aurora"] {
@@ -653,12 +657,12 @@
 	}
 
 	[data-color-scheme="coral"] {
-		--primary: 0 68% 54%;
-		--primary-fill: 0 68% 54%;
+		--primary: 0 68% 47%;
+		--primary-fill: 0 68% 53%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 0 68% 54%;
-		--variable: 0 68% 54%;
-		--chart-1: 0 68% 54%;
+		--ring: 0 68% 47%;
+		--variable: 0 68% 47%;
+		--chart-1: 0 68% 47%;
 	}
 
 	/* Magenta and Graphite were placed by measurement rather than by eye, in the
@@ -672,27 +676,27 @@
 	             saturation is 12% rather than a mistake.
 
 	   Both carry a white label at APCA Lc 78 / Lc 80 as `--primary-fill`, which
-	   sits inside the existing Lc 68-84 band. */
+	   sits inside the existing Lc 76-84 band. */
 	[data-color-scheme="magenta"] {
-		--primary: 305 72% 45%;
+		--primary: 305 72% 42%;
 		--primary-fill: 305 72% 45%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 305 72% 45%;
-		--variable: 305 72% 45%;
-		--chart-1: 305 72% 45%;
+		--ring: 305 72% 42%;
+		--variable: 305 72% 42%;
+		--chart-1: 305 72% 42%;
 	}
 
 	[data-color-scheme="graphite"] {
-		--primary: 220 12% 46%;
+		--primary: 220 12% 43%;
 		--primary-fill: 220 12% 46%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 220 12% 46%;
-		--variable: 220 12% 46%;
-		--chart-1: 220 12% 46%;
-		/* The only scheme that overrides --primary-text - see the note on the
-		 * token in :root. At 46% this measured 1.14 against --muted-foreground,
+		--ring: 220 12% 43%;
+		--variable: 220 12% 43%;
+		--chart-1: 220 12% 43%;
+		/* Overrides --primary-text in both themes - see the note on the token
+		 * in :root. --primary measures 1.02 against --muted-foreground,
 		 * i.e. the same brightness, with no saturation to tell them apart; 26%
-		 * takes it to 1.86, and the label's own contrast on --card from 4.94 to
+		 * takes it to 1.86, and the label's own contrast on --card from 5.50 to
 		 * 10.46. */
 		--primary-text: 220 12% 26%;
 	}
@@ -715,7 +719,7 @@
 		/* Primary - Sunset orange (default). Brightened accent for text on the
 		 * near-black canvas; --primary-fill stays deep for white-labelled buttons. */
 		--primary: 24 95% 58%;
-		--primary-fill: 24 90% 46%;
+		--primary-fill: 24 90% 39%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
@@ -773,13 +777,10 @@
 
 		/* Semantic - `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
-		--success-foreground: 0 0% 100%;
 		--success-text: 142 60% 55%; /* accessible green text on dark bg */
 		--warning: 38 92% 50%;
-		--warning-foreground: 0 0% 100%;
 		--warning-text: 40 92% 60%; /* accessible amber text on dark bg */
 		--info: 199 89% 55%; /* brighter on a near-black plot: 7.30 */
-		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - lighter tints for dark surfaces. */
 		--scope-global: 142 69% 58%; /* green-400 */
@@ -818,11 +819,11 @@
 
 	/* Dark: --primary (accent text/border/tints/ring) is brightened so it reads
 	 * on the near-black canvas; --primary-fill (button backgrounds) stays deep so
-	 * white labels clear AA-large. This is the split that resolves the
+	 * white labels clear 4.5:1. This is the split that resolves the
 	 * bright-text vs white-on-fill bind. */
 	.dark[data-color-scheme="sunset"] {
 		--primary: 24 95% 58%;
-		--primary-fill: 24 90% 46%;
+		--primary-fill: 24 90% 39%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 24 95% 58%;
 		--variable: 24 95% 58%;
@@ -831,11 +832,14 @@
 
 	.dark[data-color-scheme="sky"] {
 		--primary: 188 90% 52%;
-		--primary-fill: 192 95% 36%;
+		--primary-fill: 192 95% 31%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 188 90% 52%;
 		--variable: 188 90% 52%;
 		--chart-1: 188 90% 52%;
+		/* The light sky block's literal would otherwise win here: it ties
+		 * `.dark` on specificity, and `.dark` does not set this token. */
+		--primary-text: var(--primary);
 	}
 
 	.dark[data-color-scheme="ocean"] {
@@ -849,7 +853,7 @@
 
 	.dark[data-color-scheme="forest"] {
 		--primary: 142 65% 52%;
-		--primary-fill: 142 72% 33%;
+		--primary-fill: 142 72% 30%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 142 65% 52%;
 		--variable: 142 65% 52%;
@@ -867,7 +871,7 @@
 
 	.dark[data-color-scheme="coral"] {
 		--primary: 0 80% 68%;
-		--primary-fill: 0 68% 54%;
+		--primary-fill: 0 68% 53%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 0 80% 68%;
 		--variable: 0 80% 68%;
@@ -1102,20 +1106,22 @@
 	 * an outline on the control indicates the wrong shape in the wrong place.
 	 *
 	 * Put .focus-row on the element that paints the hover background: it draws
-	 * the indicator at its own radius (so the roundedness setting governs it)
-	 * and picks up the same accent fill hover already uses, which is how native
-	 * list selection reads. The inner control then draws nothing.
+	 * the indicator at its own radius (so the roundedness setting governs it).
+	 * The inner control then draws nothing.
 	 *
 	 * Only needed where control and row genuinely differ, which now includes the
 	 * variables sidebar's rows (they became treeitems in #1217). Full-width rows
 	 * (the history and settings trees) are their own target and use the baseline
 	 * above.
 	 *
-	 * The indicator deliberately mirrors the disclosure chevron's own ring
-	 * (ring-2 ring-primary/30) and the selected-row ring (ring-1 ring-inset
-	 * ring-primary/20), so focus, selection and hover speak one language.
-	 * `outline` rather than box-shadow: Tailwind's ring utilities own box-shadow,
-	 * and a selected row already sets one, which would override this.
+	 * The indicator is the full --ring, like the disclosure chevron's own ring
+	 * (ring-2 ring-ring): a focus indicator is a UI component boundary and owes
+	 * WCAG 1.4.11's 3:1, which an alpha of --primary composited onto the row
+	 * never reached (1.42-2.00, #3499). The selected-row ring (ring-1
+	 * ring-inset ring-primary/20) stays a tint: it marks selection beside a
+	 * fill, not focus. `outline` rather than box-shadow: Tailwind's ring
+	 * utilities own box-shadow, and a selected row already sets one, which
+	 * would override this.
 	 *
 	 * Auxiliary controls inside the row that are their own target - the chevron
 	 * toggles expansion rather than opening the collection - opt out with
@@ -1126,7 +1132,7 @@
 	   is descendant-only and does not cover the first. */
 	:where(.focus-row):focus-visible,
 	:where(.focus-row):has(:focus-visible:not(.focus-self)) {
-		outline: 2px solid hsl(var(--primary) / 0.3);
+		outline: 2px solid hsl(var(--ring));
 		outline-offset: -2px;
 	}
 
@@ -2827,15 +2833,22 @@
  * alone. Two classes beat one whenever the stylesheets load.
  */
 @layer utilities {
+	/* --primary-text, not --primary: graphite and light sky retune it so a
+	 * resolved name does not sit within 0.10 OKLab of the empty state's grey. */
 	.monaco-editor .vayu-variable-token-resolved {
-		@apply text-[hsl(var(--primary))];
+		@apply text-[hsl(var(--primary-text))];
 	}
 	/* Resolved, but to nothing - the reason a request carries an empty value. */
 	.monaco-editor .vayu-variable-token-empty {
 		@apply text-[hsl(var(--muted-foreground))];
 	}
+	/*
+	 * Wavy-underlined as well as red: coral's accent and sunset's sit
+	 * under 0.10 OKLab from --destructive-text (#3499). Wavy, because dashed is
+	 * the deferred state's and dotted the time token's.
+	 */
 	.monaco-editor .vayu-variable-token-undefined {
-		@apply text-[hsl(var(--destructive-text))];
+		@apply text-[hsl(var(--destructive-text))] underline decoration-wavy underline-offset-[3px];
 	}
 	/*
 	 * A stored variable a pre-request script may replace before the send (#2741):
@@ -2849,9 +2862,15 @@
 	.monaco-editor .vayu-variable-token-runtime {
 		@apply text-[hsl(var(--muted-foreground))];
 	}
-	/* A `data.*` name no contract in scope declares - `describeColumnToken`. */
+	/*
+	 * A `data.*` name no contract in scope declares - `describeColumnToken`.
+	 * Double-underlined as well as amber: light sunset's --primary-text sits
+	 * 0.068 OKLab from --warning-text (#3499). Double, because dashed is the
+	 * deferred state's, dotted the time token's and wavy the undefined one's.
+	 * `DATA_TOKEN_TONE_CLASS.warning` paints the same.
+	 */
 	.monaco-editor .vayu-variable-token-warning {
-		@apply text-[hsl(var(--warning-text))];
+		@apply text-[hsl(var(--warning-text))] underline decoration-double underline-offset-[3px];
 	}
 	/*
 	 * A time (issue #1786): an underline, not a colour, so the token colour

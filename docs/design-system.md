@@ -148,8 +148,16 @@ The accent is **split into two tokens** to resolve a contrast bind:
   (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
   the light card, brightened on the near-black dark canvas so it reads in both.
 - **`--primary-fill`** - solid button/badge backgrounds that carry a white
-  label (`bg-primary-fill`). Kept deep in **both** modes so white text clears
-  AA-large (a brightened dark accent would fail white-on-fill).
+  label (`bg-primary-fill`). One value in **both** modes, deep enough that
+  white text clears 4.5:1 (a brightened dark accent would fail white-on-fill).
+
+Both halves meet **4.5:1 in every scheme and both themes** (#3499): `--primary`
+as text on `--card`, `--panel`, `--background`, `--muted` and `--accent`, and
+white on `--primary-fill`. The light `--primary` is set by the darkest light
+surface (`--muted`, 93%) and the fill by the white label, so in six schemes
+the light fill sits three to six points lighter than the light text accent; they
+are two jobs, not one colour. `color-scheme-contrast.test.ts` measures every
+cell from the stylesheet.
 
 Rule: white-labelled solid fills use `bg-primary-fill` - a checked checkbox
 under its white check and an on switch under its thumb included (#2305);
@@ -157,17 +165,17 @@ everything else accent uses `--primary`. `--primary-foreground` (white) sits on 
 
 ```css
 /* Sunset (the values below; the default scheme is Ocean) */
---primary:       24 90% 46%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
---primary-fill:  24 90% 46%;   /* both modes - white-safe button fill */
+--primary:       24 90% 36%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
+--primary-fill:  24 90% 39%;   /* both modes - white-safe button fill */
 --primary-text:  var(--primary);   /* accent as a label - see below */
 --primary-foreground: 0 0% 100%;
 --ring / --variable: track --primary
 ```
 
 **`--primary-text` - the accent when the accent *is* the label.** Used by the
-section tabs for the active trigger (`text-primary-text`), where the accent has
-to separate not from the surface but from the `--muted-foreground` label beside
-it.
+section tabs for the active trigger (`text-primary-text`) and by a resolved
+`{{variable}}` token, where the accent has to separate not from the surface but
+from the `--muted-foreground` label (or empty token) beside it.
 
 It is not sufficient on its own, and the tabs pair it with a 2px underline on
 `--primary`. Colour plus weight leaves the active tab hard to find in graphite,
@@ -178,24 +186,32 @@ label takes `--primary-text` and the indicator takes `--primary`, because one is
 text and the other is an indicator.
 
 That separation is carried almost entirely by **saturation**, not lightness.
-Measured on `--card`, accent text and muted text sit within a **1.01-1.56**
+Measured on `--card`, accent text and muted text sit within a **1.01-1.45**
 contrast ratio of each other in every scheme - effectively the same brightness -
 so what the eye reads is "coloured vs grey". At 55-95% saturation against an
-inactive 4-5% that is plenty, which is why `--primary-text` defaults to
-`--primary` and seven of the eight schemes never override it.
+inactive 4-5% that is usually plenty, which is why `--primary-text` defaults
+to `--primary` and six of the eight schemes never override it.
 
 `graphite` overrides it, because it is the only desaturated scheme (S=12% light,
 15% dark) and so has no hue to spend: `220 12% 26%` light and `220 15% 86%`
-dark, which take its active-vs-inactive separation from 1.14 to 1.86 and 1.23 to
-1.81. Retuning graphite's `--primary` instead is not an option - that also
-paints its buttons, ring and `--chart-1`, and would give it near-black buttons.
+dark, which take its active-vs-inactive separation from 1.02 to 1.86 and 1.23 to
+1.81. Light `sky` overrides it as well, with `192 95% 22%`: a cyan dark enough
+to clear 4.5:1 on `--muted` has given up most of its chroma, and at its `--primary`
+it sits 0.088 OKLab from `--muted-foreground`, where under 0.10 reads as the
+same colour (#3499). Dark `sky` resets the alias to `var(--primary)`, because
+the light block's literal ties `.dark` on specificity and would otherwise reach
+dark too. Retuning graphite's `--primary` instead is not an option - that also
+paints its ring, `--chart-1` and every `text-primary`, near-black in light.
 This is the same bind `--primary-fill` exists to solve, answered the same way.
 
-**Adding a scheme:** override `--primary-text` only if the accent's saturation
-is under about 25%. `color-schemes.test.ts` derives that rule from the
+**Adding a scheme:** override `--primary-text` if the accent's saturation is
+under about 25%, or if the accent sits within 0.10 OKLab of
+`--muted-foreground`. `color-schemes.test.ts` derives the first rule from the
 stylesheet rather than naming graphite, so a new desaturated scheme fails until
-it declares one. It is deliberately *not* in that test's `REQUIRED` list -
-inheriting it is correct for a saturated scheme, not a forgotten block.
+it declares one; `color-scheme-contrast.test.ts` measures the second, as the
+resolved-versus-empty pair of the variable states. It is deliberately *not* in
+`color-schemes.test.ts`'s `REQUIRED` list - inheriting it is usually correct,
+not a forgotten block.
 
 Note the ratios above are between two *foreground* colours; neither WCAG nor
 APCA is defined for that, so treat them as a discriminability proxy rather than
@@ -218,6 +234,12 @@ These differ between light and dark mode.
 --info:               199 89% 55%;   /* brighter on a dark plot */
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
+
+There is no `--success-foreground`, `--warning-foreground` or `--info-foreground`:
+a white label on a bare `--warning` measures 2.14:1, and nothing read the other
+two. A solid status control takes the `-fill` token under a white label instead
+(`bg-status-warning-fill text-white`, 4.62:1 - the Restart engine button, the
+client-certificate chip).
 
 `--info` used to be one value in both modes, like `--warning` still is. It was
 never measured, and at `199 89% 48%` it scored **2.85** on a light card against
@@ -511,8 +533,9 @@ and holds the on switch's edge against the card at 3.0 in every dark scheme. The
 track fill alone stays under the bar on `aurora` (2.98), so the checked state
 also paints the reserved 2px border with `--primary` (`data-[state=checked]:border-primary`):
 that edge measures 5.79 on the card at its weakest (`coral`) and 6.47 on `aurora`,
-and it carries the 3:1. In light `--primary` equals `--primary-fill`, so the edge
-is invisible there and the light on-state is unchanged.
+and it carries the 3:1. In light `--primary` equals `--primary-fill` in `ocean`
+and `aurora`, where the edge is invisible; in the other six it is three to six
+points darker than the fill (#3499), a slightly deeper rim of the same hue.
 
 The focus ring needed no work, which is the one that matters most for keyboard
 users - worth knowing so nobody "fixes" it.
@@ -713,7 +736,9 @@ read as de-emphasised rather than as an outcome of its own.
 
 The history latency tiles are neutral and use `status-stopped` (P95) or
 `status-error` (P99, P999) only when the value exceeds the run's own SLO
-(`LatencyMetric.tsx`, #2245; a run that declared none stays neutral, #2939); the percentile lines in the time-series chart take
+(`LatencyMetric.tsx`, #2245; a run that declared none stays neutral, #2939), and a tile in a
+tier also carries an `AlertTriangle` and a screen-reader "Over SLO: " so the state is not
+colour alone (#3499); the percentile lines in the time-series chart take
 no status role at all, and the HDR distribution's p95 / p99 markers take
 `warning` / `destructive` only past the SLO (`hdrMarkers.ts`, #2263).
 
@@ -958,7 +983,7 @@ wash (`/10`, `/15`, `/30`) or a solid with no text on it - `Progress`'s bar
 
 Pinning `--primary` to its light value would look like a contrast fix and is in
 fact a regression: accent *text* on the dark card would fall from APCA Lc 44–69
-to Lc 22–37.
+to Lc 22–25.
 
 **Secondary text on the fill is a tint of `--primary-foreground`, never
 `--muted-foreground`.** The muted token is tuned against the canvas, so on the
@@ -967,12 +992,13 @@ which is not a de-emphasis but a disappearance. A tooltip's second line (a
 shortcut, a URL, the source of a value) therefore uses the `TooltipHint`
 primitive, which holds the one tint; the same argument `surface-sunken` makes
 for its `--rule`, on a filled surface instead of a raised one. The hint cannot
-out-read the label it is secondary to - white on `sunset` is the ceiling at
-3.6:1 - so the bar is 2.5:1 on every scheme, checked in
+out-read the label it is secondary to - white on `coral` is the ceiling at
+4.65:1 - so the bar is 2.5:1 on every scheme, checked in
 `tooltip-hint-contrast.test.ts`. The same file bans an `opacity-N` or a
 hand-written `text-primary-foreground/N` inside a `TooltipContent`: white at
-`opacity-70` on the fill is 2.50:1 on `sunset`, under the bar, and a second
-alpha is a second unmeasured tint.
+`opacity-70` measured 2.50:1 on `sunset` before #3499 deepened the fills, and a
+second alpha is a second unmeasured tint that the next fill retune can put back
+under the bar.
 
 **A shortcut tooltip is `TooltipShortcutLabel`.** The label, then the chord in a
 `TooltipHint`, in one `flex items-center gap-1.5` row - no parentheses, no
@@ -1021,30 +1047,36 @@ move happens to land outside it. `disableHoverableContent` closes on leave
 immediately instead, which is also the macOS system tooltip's own behaviour.
 → `tooltip-delay.test.tsx`
 
-| Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
+| Scheme | Light `--primary` | Dark `--primary` | `--primary-fill` (both themes) |
 |--------|-----------|----------|----------|
-| `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |
-| `sky` | `192 95% 36%` | `188 90% 52%` | `192 95% 36%` |
+| `sunset` | `24 90% 36%` | `24 95% 58%` | `24 90% 39%` |
+| `sky` | `192 95% 28%` | `188 90% 52%` | `192 95% 31%` |
 | `ocean` (default) | `217 80% 48%` | `217 90% 66%` | `217 80% 48%` |
-| `forest` | `142 72% 33%` | `142 65% 52%` | `142 72% 33%` |
+| `forest` | `142 72% 27%` | `142 65% 52%` | `142 72% 30%` |
 | `aurora` | `262 55% 54%` | `258 88% 76%` | `262 55% 54%` |
-| `coral` | `0 68% 54%` | `0 80% 68%` | `0 68% 54%` |
-| `magenta` | `305 72% 45%` | `305 85% 70%` | `305 72% 45%` |
-| `graphite` | `220 12% 46%` | `220 15% 72%` | `220 12% 46%` |
+| `coral` | `0 68% 47%` | `0 80% 68%` | `0 68% 53%` |
+| `magenta` | `305 72% 42%` | `305 85% 70%` | `305 72% 45%` |
+| `graphite` | `220 12% 43%` | `220 15% 72%` | `220 12% 46%` |
 
 Every scheme also resolves `--primary-text` (the accent as a label). It tracks
 `--primary` for all of these except `graphite`, which sets `220 12% 26%` light
-and `220 15% 86%` dark - see **Primary (Accent Color)** above for why.
+and `220 15% 86%` dark, and light `sky`, which sets `192 95% 22%` - see
+**Primary (Accent Color)** above for why.
 
 **Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` - nothing
 else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
 missing block fails silently: the picker offers a swatch that inherits `:root`
 and quietly does nothing.
 
-The value has to clear two bars. As a fill it carries a white label, so aim for
-the band the existing schemes occupy - **APCA Lc 68–84** - and keep the fill at
-**3.0+ against `--card`** so the button still reads as a control. The dark
-`--primary` is text, so it wants **Lc 44–69** against the dark card. Check the
+The values have to clear three bars, and `color-scheme-contrast.test.ts`
+measures the first two in both themes. The fill carries a white label at
+**4.5:1** (the existing fills land at APCA Lc 76–84); keep it at **3.0+ against
+`--card`** too, so the button still reads as a control. `--primary` is text at
+**4.5:1** on the opaque surfaces: `--card`, `--panel`, `--background`,
+`--muted` and `--accent`, so in light the darkest of them, `--muted`, sets it.
+Text on its own tint (`bg-primary/15` chips, `hover:bg-primary/20`) is not
+measured there and is tracked in #3515.
+The dark `--primary` also wants **Lc 44–69** against the dark card. Check the
 new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
 from the semantic status colours, or it will read as a duplicate in the picker.
 `magenta` sits at ΔE 0.153 from `aurora`; `graphite` is distinct by being the
@@ -1820,23 +1852,27 @@ a rounded hover fill, but its label button is 150px with square corners, so an
 outline on the button indicates the wrong shape in the wrong place.
 
 Put `.focus-row` on the element that paints the hover background. It then draws
-the indicator itself - at its own radius, so the roundedness control governs it -
-and adds the same accent fill hover uses, which is how native list selection
-reads. The inner control draws nothing.
+the indicator itself - at its own radius, so the roundedness control governs it.
+The inner control draws nothing.
 
 ```css
 :where(.focus-row):has(:focus-visible:not(.focus-self)) {
-  outline: 2px solid hsl(var(--primary) / 0.3);
+  outline: 2px solid hsl(var(--ring));
   outline-offset: -2px;
 }
 .focus-row :focus-visible:not(.focus-self) { outline: none; }
 ```
 
-The indicator mirrors the disclosure chevron's own ring (`ring-2
-ring-primary/30`) and the selected-row ring (`ring-1 ring-inset
-ring-primary/20`) so focus, selection and hover speak one language. It uses
-`outline` rather than `box-shadow` because Tailwind's ring utilities own
-`box-shadow` - a selected row already sets one, which would override it.
+The indicator is the full `--ring`, the same as the disclosure chevron's own
+ring (`ring-2 ring-ring`). A focus indicator is a UI component boundary and owes
+WCAG 1.4.11's 3:1; `--primary` at 30% composited onto a row measured 1.42-1.61
+in light and 1.56-2.00 in dark across the schemes, so it was a tint, not an
+indicator. `focus-ring-contrast.test.ts` holds the ring at 3:1 on card, panel and
+canvas for every scheme in both themes. The selected-row ring (`ring-1
+ring-inset ring-primary/20`) stays a tint: it marks selection beside a fill and
+is not a focus indicator. The focus indicator uses `outline` rather than
+`box-shadow` because Tailwind's ring utilities own `box-shadow` - a selected row
+already sets one, which would override it.
 
 **Auxiliary controls opt out with `.focus-self`.** A control inside the row that
 is its own target - the chevron toggles expansion rather than opening the
@@ -1917,19 +1953,35 @@ would move focus with nothing on screen saying where it went, which for a
 keyboard-only feature defeats the point of the key.
 
 **A `{{variable}}` inside an editor is painted from the same tokens as one
-outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
-`text-muted-foreground` / `text-destructive-text` for resolved, empty and
-undefined; Monaco draws its own text, so the same three colours (plus
-`text-muted-foreground` for a run-time token, `text-warning-text` for a
-`data.*` column no contract declares, and `text-muted-foreground` with a dashed
-underline for a name a pre-request script sets, #2741) are declared in
-`index.css` as six global classes its decorations can name -
-`vayu-variable-token-*`, under a `.monaco-editor` prefix so they outrank the
-theme rules Monaco injects at runtime. They are the one place a global class is the right answer rather than
-a utility string, for the same reason the scrollbar block is: no component
-stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
-the seventh, `vayu-time-token`: a dotted underline in `--muted-foreground`
-rather than a colour, so the language's own token colour still reads under it.
+outside it.** `EditableVariable` colours its overlay tokens `text-primary-text`
+/ `text-muted-foreground` / `text-destructive-text` for resolved, empty and
+undefined, and gives undefined a wavy underline as well; Monaco draws its own
+text, so the same three states (plus `text-muted-foreground` for a run-time
+token, `text-warning-text` with a double underline for a `data.*` column no
+contract declares, and `text-muted-foreground` with a dashed underline for a
+name a pre-request script sets, #2741) are declared in `index.css` as six global
+classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than a
+utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is the
+seventh, `vayu-time-token`: a dotted underline in `--muted-foreground` rather
+than a colour, so the language's own token colour still reads under it.
+
+**No variable state rests on a colour difference under 0.10 OKLab** (#3499).
+The accent is one of the colours, so a scheme can land it on a neighbour:
+coral's and sunset's accents sit under 0.10 from `--destructive-text`, light
+sunset's `--primary-text` 0.068 from `--warning-text`, and graphite's and light
+sky's `--primary` that close to `--muted-foreground`. The undefined state
+therefore carries a non-colour cue, a **wavy** underline, and the undeclared
+`data.*` column a **double** one (one style, one meaning: dashed is deferred,
+dotted is a time). The resolved state paints `--primary-text`, which graphite
+and light sky retune away from the grey. `color-scheme-contrast.test.ts`
+measures every pair of the five states in every scheme and theme from the
+Monaco classes, `EditableVariable.test.tsx` holds the field painter equal to
+them, and `variable-token-classes.test.ts` does the same for
+`DATA_TOKEN_TONE_CLASS`, the painter of the warning state in the overlay and the
+script panel's chips.
 → `variable-token-classes.test.ts`
 
 ---
