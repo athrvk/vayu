@@ -36,8 +36,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ListTree, Search, Text } from "lucide-react";
-import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
+import { Button, Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
 import { Callout } from "@/components/shared/Callout";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { rowInsetPx } from "@/constants/layout";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
@@ -389,28 +390,40 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				onScroll={(e) => setScrollTop(schemaKey, e.currentTarget.scrollTop)}
 			>
 				{/*
-				 * The two lines that stand in for the tree, and the group headings
-				 * below, take a root row's own inset rather than a padding of their
-				 * own: `rowInsetPx(0)` is where a branch row starts, so the pane keeps
-				 * one left edge whether it is holding rows or explaining why it is not
-				 * (#1378, the rule from #1372).
+				 * The loading line and the group headings below take a root row's own
+				 * inset rather than a padding of their own: `rowInsetPx(0)` is where a
+				 * branch row starts, so the pane keeps one left edge whether it is
+				 * holding rows or waiting for them (#1378, the rule from #1372). The
+				 * two empty lines are `EmptyState`, centred in the pane (#3501).
 				 */}
-				{!schema ? (
+				{!schema && status === "loading" ? (
 					<p
 						className="pr-2 py-2 m-0 text-label text-muted-foreground"
 						style={{ paddingLeft: rowInsetPx(0) }}
 					>
-						{status === "loading"
-							? "Loading the schema…"
-							: "No schema loaded. Refresh to introspect the endpoint."}
+						Loading the schema…
 					</p>
+				) : !schema ? (
+					<EmptyState
+						variant="inline"
+						compact
+						title="No schema loaded. Refresh to introspect the endpoint."
+					/>
 				) : rows.length === 0 ? (
-					<p
-						className="pr-2 py-2 m-0 text-label text-muted-foreground"
-						style={{ paddingLeft: rowInsetPx(0) }}
-					>
-						Nothing matches "{term}".
-					</p>
+					<EmptyState
+						variant="inline"
+						compact
+						title={`Nothing matches "${term}".`}
+						action={
+							<Button
+								variant="link"
+								size="sm"
+								onClick={() => setSearch(schemaKey, "")}
+							>
+								Clear the filter
+							</Button>
+						}
+					/>
 				) : (
 					// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it
 					<div

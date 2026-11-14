@@ -709,12 +709,12 @@ describe("the row picker as a dialog", () => {
 		expect(screen.getByText(/no rows match/i)).toBeTruthy();
 	});
 
-	it("offers Clear filter under the empty line, and the rows come back (#3501)", async () => {
+	it("offers Clear the filter under the empty line, and the rows come back (#3501)", async () => {
 		await openDialog();
 		const filter = screen.getByLabelText(/filter rows/i);
 		fireEvent.change(filter, { target: { value: "nosuchvalue" } });
 
-		fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+		fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
 
 		expect(filter).toHaveValue("");
 		expect(screen.queryByText(/no rows match/i)).toBeNull();

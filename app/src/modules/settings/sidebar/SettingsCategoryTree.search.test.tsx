@@ -256,11 +256,11 @@ describe("settings search", () => {
 		expect(screen.getByText("App settings")).toBeInTheDocument();
 	});
 
-	it("offers Clear filter under the empty line, and it empties the search (#3501)", () => {
+	it("offers Clear the filter under the empty line, and it empties the search (#3501)", () => {
 		renderTree();
 		fireEvent.change(search(), { target: { value: "zzzz" } });
 
-		fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+		fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
 
 		expect(search()).toHaveValue("");
 		expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument();

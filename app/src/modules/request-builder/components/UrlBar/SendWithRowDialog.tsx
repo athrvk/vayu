@@ -542,7 +542,7 @@ export default function SendWithRowDialog({
 											size="sm"
 											onClick={() => setFilter("")}
 										>
-											Clear filter
+											Clear the filter
 										</Button>
 									}
 								/>

@@ -188,7 +188,7 @@ export default function SettingsCategoryTree() {
 								title={`No settings match “${trimmedQuery}”.`}
 								action={
 									<Button variant="link" size="sm" onClick={() => setQuery("")}>
-										Clear filter
+										Clear the filter
 									</Button>
 								}
 							/>

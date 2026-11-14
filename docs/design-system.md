@@ -3541,7 +3541,7 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " in `modules/` or `components/`, #3501 |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. The context bar's `SectionEmpty` is this component (inline, compact), so every section's empty body is one. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " or "Nothing matches" in `modules/` or `components/`, and on a `SectionEmpty` that stops rendering one, #3501 |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
@@ -3558,10 +3558,12 @@ to the *same* handler that header button uses - never a second, parallel
 create path, which is what would drift. Where the surface genuinely has no
 create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
-user caused it undoes that ("Clear the filters", "Clear the filter"). A list that
-is empty because of what was typed says what was typed and offers the way out:
-Settings search's "No settings match" and the Send-with-row dialog's "No rows
-match" carry a `variant="link"` "Clear filter" that empties the field. The
+user caused it undoes that. The wording is one pattern: "Clear the filter" for
+a single search or filter field, "Clear the filters" where several narrow the
+list (History). A list that is empty because of what was typed says what was
+typed and offers the way out: Settings search's "No settings match", the
+Send-with-row dialog's "No rows match" and the schema explorer's "Nothing
+matches" carry a `variant="link"` "Clear the filter" that empties the field. The
 collections sidebar offers its create path plus Import as a two-`Button`
 `flex gap-2` wrapper ("New request", "Import") rather than a lone link
 (`CollectionTree.tsx`): with no collection to hold it, a new request is what

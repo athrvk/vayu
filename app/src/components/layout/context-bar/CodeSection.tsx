@@ -199,10 +199,10 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 			{mode === "resolved" && composed.isLoading && <SectionLoading />}
 			{mode === "resolved" && composed.isError && (
-				<SectionEmpty>
+				<p className="text-xs text-muted-foreground m-0">
 					Couldn't compose this request
 					{composed.error instanceof Error ? `: ${composed.error.message}` : ""}
-				</SectionEmpty>
+				</p>
 			)}
 
 			{snippet && (
