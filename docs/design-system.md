@@ -1075,7 +1075,7 @@ measures the first two in both themes. The fill carries a white label at
 **4.5:1** on the opaque surfaces: `--card`, `--panel`, `--background`,
 `--muted` and `--accent`, so in light the darkest of them, `--muted`, sets it.
 Text on its own tint (`bg-primary/15` chips, `hover:bg-primary/20`) is not
-measured there and is tracked in a follow-up.
+measured there and is tracked in #3515.
 The dark `--primary` also wants **Lc 44–69** against the dark card. Check the
 new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
 from the semantic status colours, or it will read as a duplicate in the picker.
