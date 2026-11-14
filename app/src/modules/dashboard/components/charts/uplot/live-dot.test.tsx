@@ -80,10 +80,11 @@ describe("live-dot animation resolves to a real keyframe", () => {
 		expect(definedKeyframes).toContain(animationName);
 	});
 
-	it("keeps the shipped keyframe and the Tailwind config's copy in step", () => {
-		// `vayu-pulse` is defined twice - in index.css, which ships, and in
-		// tailwind.config.js, which backs the utility class. Reading one and
-		// asserting nothing about the other is how the two drift apart.
+	it("defines the keyframe once, in index.css, with no copy in the Tailwind config", () => {
+		// The dot names `vayu-pulse` through an arbitrary `animate-[...]` class,
+		// which resolves against the global `@keyframes` in index.css. The Tailwind
+		// config used to carry a second definition behind aliases nothing used; a
+		// second copy is one that can drift from the one that ships (#3501).
 		const css = readFileSync(path.resolve(__dirname, "../../../../../index.css"), "utf-8");
 		const config = readFileSync(
 			path.resolve(__dirname, "../../../../../../tailwind.config.js"),
@@ -96,6 +97,6 @@ describe("live-dot animation resolves to a real keyframe", () => {
 		// satisfied by `@keyframes vayu-pulse-DELETED`, which is the rename this
 		// case exists to catch.
 		expect(css).toMatch(/@keyframes\s+vayu-pulse\s*\{/);
-		expect(config).toMatch(/["']vayu-pulse["']\s*:/);
+		expect(config).not.toMatch(/vayu-pulse/);
 	});
 });

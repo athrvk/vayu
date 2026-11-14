@@ -883,14 +883,10 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 --method-options: 240  5% 41%;   /* 240  5% 58% - gray   */
 ```
 
-**Utility classes** (defined in `index.css`, available as Tailwind class names):
-- Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
-- Background: `.bg-method-get`, `.bg-method-post`, etc.
-
-These exist but **nothing in `src/` currently uses them** - prefer
-`getMethodColor` below, which is the one path `MethodBadge`, the tab strip and
-the method selector all take. A second way to spell the same colour is a second
-place for it to drift.
+There is no `.method-get` or `.bg-method-get` utility class: the colour is
+read through `getMethodColor` below, the one path `MethodBadge`, the tab strip
+and the method selector all take. A second way to spell the same colour is a
+second place for it to drift.
 
 **`getMethodColor(method)`** in `app/src/lib/method-display.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
@@ -1107,7 +1103,7 @@ families - the weights bundled, the subsets, and why.
 
 ```css
 body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
-/* mono via font-mono Tailwind class, or .font-code utility */
+/* mono via the font-mono Tailwind class */
 ```
 
 The faces are bundled rather than fetched because a stylesheet in
@@ -1701,17 +1697,14 @@ for the same `min(token, %)` shape rather than relearning this.
 
 ## Animations
 
-Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animations have Tailwind shorthand aliases (`animate-vayu-spin`, `animate-vayu-pulse`, `animate-vayu-fadepulse`) in addition to the verbose arbitrary form.
+Defined in `index.css`. `tailwind.config.js` carries no keyframes or animation aliases, so a keyframe has
+one definition to keep in step. The live indicator reaches `vayu-pulse` through an arbitrary class
+(`animate-[vayu-pulse_1.6s_ease-in-out_infinite]`).
 
 | Name | Duration | Curve | Tailwind class | Use |
 |------|----------|-------|----------------|-----|
-| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Unused by the app; spinners are `Loader2` with Tailwind's `animate-spin` |
-| `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
-| `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
-| `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `vayu-pulse` | 1.6s | ease-in-out | `animate-[vayu-pulse_1.6s_ease-in-out_infinite]` | Live indicators (100→35% opacity) |
 | `collapsible-down/up` | 0.2s | `--ease-enter` / `--ease-exit` | `animate-collapsible-down/up` | `CollapsibleContent`'s height (from `tw-animate-css`) |
-| `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
-| `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
 | interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 | press feedback | 0.1s | ease-out | *(baseline, `[data-slot="button"]`)* | `scale: 0.98` on `:active` |
 
@@ -1807,7 +1800,7 @@ must carry `.panel-clip`; every focusable descendant then gets
 wrapper and the bordered cards in the load-test and run-collection dialogs;
 `rg panel-clip app/src` is the authoritative list. Put it on the
 element carrying the overflow - not on the rows. For a one-off outside such a
-container, use the `.focus-ring-inset` utility.
+container, use `focus-visible:-outline-offset-2`.
 
 Two limits worth knowing before reaching for it. **`overflow-y-auto` clips
 horizontally too** - it computes `overflow-x` to `auto`, so a box that only
@@ -1823,7 +1816,7 @@ their own ring.
 field inside a dialog needs nothing.
 
 **Which is why a primitive fixes its own clipping, with `ring-inset`.** Neither
-`.panel-clip` nor `.focus-ring-inset` reaches a Tailwind `ring` - both move
+`.panel-clip` nor an `outline-offset` utility reaches a Tailwind `ring` - both move
 `outline-offset`, and a primitive has already turned its outline off. `TabsTrigger`
 is the worked example: a trigger fills its list's height exactly (measured in the
 running app, both boxes were 74->98) and the three scrolling strips - the response
@@ -4151,23 +4144,19 @@ read as a fraction, and there is no fraction to report.
 | Selected state | `bg-accent-active` |
 | Success | `text-success-text`, `bg-success/10` |
 | Warning | `text-warning-text`, `bg-warning/10` |
-| Info | `text-info`, `bg-info/10` |
 | Error | `text-destructive-text`, `bg-destructive/10` |
-| Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
-| Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
-| Code font (utility) | `font-code` |
 | Thin scrollbar | nothing - 6px is the global baseline (see [Scrollbar](#scrollbar)) |
 | Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) - collection detail only; the request and response strips fit-and-overflow |
-| Variable color | `text-variable` or `.variable-highlight` |
+| Variable color | `text-variable` |
 
 ### Never use
 
 - `bg-gray-*`, `bg-zinc-*`, `bg-slate-*` - use `bg-card`, `bg-panel`, `bg-background`
-- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-info/10`, etc.
+- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-warning/10`, etc.
 - `dark:bg-*` hardcoded overrides - tokens handle both modes automatically
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
-- Hardcoded hex method colors like `text-[#22c55e]` - use `method-get` or `hsl(var(--method-get))`
+- Hardcoded hex method colors like `text-[#22c55e]` - use `getMethodColor` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
 - Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
 
@@ -4579,7 +4568,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | File | Purpose |
 |------|---------|
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
-| `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
+| `app/tailwind.config.js` | Color mapping, font families, border radii (no keyframes or animations: those live in `index.css`) |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - the ActivityRail, the drawer row, the content column (TabStrip, main, ContextBar, ContextRail), the Dock, and the window chords |
