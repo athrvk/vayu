@@ -432,15 +432,16 @@ above it.
 
 This is what makes the token states possible: with a contract in scope,
 `{{data.email}}` is *checkable*. A declared column paints informationally, a
-column no contract in scope declares paints **amber** with the declared list in
-its tooltip, and a chain that declares nothing keeps the neutral token above. It
-is authoring-time advice in every case - the run's file is the authority, and a
-run with a mismatched file is still the user's to start. Declared columns are
-also completed: `{{data.` offers them in the request fields and the body editors,
-and `pm.iterationData.get("` offers them in the script editors (see below). The
-body editors also colour and explain these tokens on hover, the same three
-states as the request fields; the script editors do not, for the same
-interpolation reason as everywhere else in this document (D16).
+column no contract in scope declares paints **amber** (double-underlined, so it
+stays apart from a close accent, #3499) with the declared list in its tooltip,
+and a chain that declares nothing keeps the neutral token above. It is
+authoring-time advice in every case - the run's file is the authority, and a run
+with a mismatched file is still the user's to start. Declared columns are also
+completed: `{{data.` offers them in the request fields and the body editors, and
+`pm.iterationData.get("` offers them in the script editors (see below). The body
+editors also colour and explain these tokens on hover, the same three states as
+the request fields; the script editors do not, for the same interpolation reason
+as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
 (issue #604). They used to paint a name red whenever no scope defined it, which

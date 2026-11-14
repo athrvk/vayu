@@ -6,18 +6,20 @@
  */
 
 /**
- * Every accent scheme reads at 4.5:1 in both themes, and keeps the three
+ * Every accent scheme reads at 4.5:1 in both themes, and keeps the
  * `{{variable}}` states apart (#3499).
  *
- * Two jobs, two tokens. `--primary` is accent text (`text-primary`) and has to
- * clear 4.5 on every surface it can sit on; in light the darkest of them,
- * `--muted` / `--accent` at 93%, is what sets it. `--primary-fill` is a solid
- * under a white label (`--primary-foreground`) and has to clear 4.5 under it.
- * `--primary-text`, the accent as a label, is held to the same bar: it
- * aliases `--primary` in most schemes and is a literal in the rest.
+ * Two jobs, two tokens. `--primary` is accent text (`text-primary`) and has
+ * to clear 4.5 on the opaque surfaces (card, panel, background, muted,
+ * accent); in light the darkest of them, `--muted` / `--accent` at 93%, is
+ * what sets it. `--primary-fill` is a solid under a white label
+ * (`--primary-foreground`) and has to clear 4.5 under it. `--primary-text`,
+ * the accent as a label, is held to the same bar: it aliases `--primary` in
+ * most schemes and is a literal in the rest.
  *
- * A variable token is resolved, empty or undefined, and the accent is one of
- * the three colours, so a scheme can move a state onto its neighbour. Two
+ * A variable token is resolved, empty, undefined, deferred or an undeclared
+ * `data.*` column (warning), and the accent is one of those colours, so a
+ * scheme can move a state onto its neighbour. Two
  * states under 0.10 OKLab apart read as one colour; such a pair has to differ
  * in a cue that is not colour (an underline style).
  *
@@ -37,6 +39,7 @@ import {
 	type Theme,
 } from "@/lib/contrast-math.testkit";
 import { variableTokenClass } from "@/lib/monaco-variable-tokens";
+import type { VariableTokenKind } from "@/lib/variable-token-kind";
 import { COLOR_SCHEMES } from "./color-schemes";
 
 const BAR = 4.5;
@@ -80,11 +83,25 @@ describe("the white label on the fill", () => {
 
 /**
  * The painter's own answer for each state: Monaco's class, which
- * `EditableVariable.test.tsx` holds the field painter equal to.
+ * `EditableVariable.test.tsx` holds the field painter equal to, and for the
+ * undeclared `data.*` column `variable-token-classes.test.ts` holds
+ * `DATA_TOKEN_TONE_CLASS` equal to. The runtime-muted class is left out: it
+ * is `empty`'s colour and cue by design (nothing to define, so muted), which
+ * the rule below would call a collision.
  */
-const STATES = (["resolved", "empty", "undefined"] as const).map((state) => ({
+const KINDS: { state: string; kind: VariableTokenKind }[] = [
+	{ state: "resolved", kind: { state: "resolved", info: null } },
+	{ state: "empty", kind: { state: "empty", info: null } },
+	{ state: "undefined", kind: { state: "undefined", info: null } },
+	{ state: "deferred", kind: { state: "deferred", info: null } },
+	{
+		state: "warning",
+		kind: { state: "runtime", tone: "warning", description: "", note: "" },
+	},
+];
+const STATES = KINDS.map(({ state, kind }) => ({
 	state,
-	...monacoTokenPaint(variableTokenClass({ state, info: null })),
+	...monacoTokenPaint(variableTokenClass(kind)),
 }));
 
 const SAME_COLOUR = 0.1;
@@ -110,7 +127,7 @@ function closePairs(scheme: string | null, theme: Theme) {
 	return out;
 }
 
-describe("the three variable states", () => {
+describe("the variable states", () => {
 	it("read a colour for every state", () => {
 		for (const { state, colour } of STATES) expect(colour, state).not.toBeNull();
 	});

@@ -3277,7 +3277,7 @@ collection chain declares, resolved leaf-to-root by `resolveDataContract`:
 | In scope | Paint | Tooltip |
 |----------|-------|---------|
 | the column is declared | muted | "Data column - bound per iteration", naming the declaring collection |
-| a contract exists, the column is not in it | **amber** (`text-warning-text`) | "Not a declared column of X", listing what is declared |
+| a contract exists, the column is not in it | **amber, double-underlined** (`text-warning-text`, #3499) | "Not a declared column of X", listing what is declared |
 | no contract anywhere in the chain | muted | "Bound by the run's data file / per iteration" |
 
 Amber rather than the destructive red an unknown variable gets: an undeclared

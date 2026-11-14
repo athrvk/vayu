@@ -1950,31 +1950,35 @@ would move focus with nothing on screen saying where it went, which for a
 keyboard-only feature defeats the point of the key.
 
 **A `{{variable}}` inside an editor is painted from the same tokens as one
-outside it.** `EditableVariable` colours its overlay tokens `text-primary-text` /
-`text-muted-foreground` / `text-destructive-text` for resolved, empty and
+outside it.** `EditableVariable` colours its overlay tokens `text-primary-text`
+/ `text-muted-foreground` / `text-destructive-text` for resolved, empty and
 undefined, and gives undefined a wavy underline as well; Monaco draws its own
 text, so the same three states (plus `text-muted-foreground` for a run-time
-token, `text-warning-text` for a `data.*` column no contract declares, and
-`text-muted-foreground` with a dashed underline for a name a pre-request script
-sets, #2741) are declared in `index.css` as six global classes its decorations
-can name - `vayu-variable-token-*`, under a `.monaco-editor` prefix so they
-outrank the theme rules Monaco injects at runtime. They are the one place a
-global class is the right answer rather than a utility string, for the same
-reason the scrollbar block is: no component stylesheet reaches what Monaco
-renders. A time in an editor (issue #1786) is the seventh, `vayu-time-token`: a
-dotted underline in `--muted-foreground` rather than a colour, so the
-language's own token colour still reads under it.
+token, `text-warning-text` with a double underline for a `data.*` column no
+contract declares, and `text-muted-foreground` with a dashed underline for a
+name a pre-request script sets, #2741) are declared in `index.css` as six global
+classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than a
+utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is the
+seventh, `vayu-time-token`: a dotted underline in `--muted-foreground` rather
+than a colour, so the language's own token colour still reads under it.
 
 **No variable state rests on a colour difference under 0.10 OKLab** (#3499).
-The accent is one of the three colours, so a scheme can land it on a neighbour:
-coral's and sunset's accents sit under 0.10 from `--destructive-text`, and
-graphite's and light sky's `--primary` that close to `--muted-foreground`. The
-undefined state therefore carries a non-colour cue, a **wavy** underline (one
-style, one meaning: dashed is deferred, dotted is a time), and the resolved
-state paints `--primary-text`, which those two schemes retune away from the
-grey. `color-scheme-contrast.test.ts` measures every pair in every scheme and
-theme from the Monaco classes, and `EditableVariable.test.tsx` holds the field
-painter equal to them.
+The accent is one of the colours, so a scheme can land it on a neighbour:
+coral's and sunset's accents sit under 0.10 from `--destructive-text`, light
+sunset's `--primary-text` 0.068 from `--warning-text`, and graphite's and light
+sky's `--primary` that close to `--muted-foreground`. The undefined state
+therefore carries a non-colour cue, a **wavy** underline, and the undeclared
+`data.*` column a **double** one (one style, one meaning: dashed is deferred,
+dotted is a time). The resolved state paints `--primary-text`, which graphite
+and light sky retune away from the grey. `color-scheme-contrast.test.ts`
+measures every pair of the five states in every scheme and theme from the
+Monaco classes, `EditableVariable.test.tsx` holds the field painter equal to
+them, and `variable-token-classes.test.ts` does the same for
+`DATA_TOKEN_TONE_CLASS`, the painter of the warning state in the overlay and the
+script panel's chips.
 → `variable-token-classes.test.ts`
 
 ---

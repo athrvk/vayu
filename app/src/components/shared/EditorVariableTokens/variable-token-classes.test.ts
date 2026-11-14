@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { VARIABLE_TOKEN_CLASSES, variableTokenClass } from "@/lib/monaco-variable-tokens";
 import { TIME_TOKEN_CLASS } from "@/lib/monaco-time-tokens";
 import { monacoTokenPaint } from "@/lib/css-tokens.testkit";
+import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
 
 const indexCss = readFileSync(new URL("../../../index.css", import.meta.url), "utf8");
 
@@ -54,5 +55,31 @@ describe("the Monaco token classes", () => {
 		const styles = [undefinedCue, deferredCue, timeCue].map((p) => p.underline);
 		expect(styles).not.toContain(null);
 		expect(new Set(styles).size).toBe(styles.length);
+	});
+
+	it("double-underline an undeclared data column, in a style no other underlined token uses (#3499)", () => {
+		const warningCue = monacoTokenPaint(
+			variableTokenClass({ state: "runtime", tone: "warning", description: "", note: "" })
+		);
+		const others = [
+			monacoTokenPaint(variableTokenClass({ state: "undefined", info: null })),
+			monacoTokenPaint(variableTokenClass({ state: "deferred", info: null })),
+			monacoTokenPaint(TIME_TOKEN_CLASS),
+		].map((p) => p.underline);
+		expect(warningCue.underline).toBe("double");
+		expect(others).not.toContain("double");
+	});
+
+	it("paint an undeclared data column the same in the editor and in the chip painters", () => {
+		const paint = monacoTokenPaint(
+			variableTokenClass({ state: "runtime", tone: "warning", description: "", note: "" })
+		);
+		expect(DATA_TOKEN_TONE_CLASS.warning.split(" ")).toEqual(
+			expect.arrayContaining([
+				`text-${paint.colour}`,
+				"underline",
+				`decoration-${paint.underline}`,
+			])
+		);
 	});
 });

@@ -2861,9 +2861,15 @@
 	.monaco-editor .vayu-variable-token-runtime {
 		@apply text-[hsl(var(--muted-foreground))];
 	}
-	/* A `data.*` name no contract in scope declares - `describeColumnToken`. */
+	/*
+	 * A `data.*` name no contract in scope declares - `describeColumnToken`.
+	 * Double-underlined as well as amber: light sunset's --primary-text sits
+	 * 0.068 OKLab from --warning-text (#3499). Double, because dashed is the
+	 * deferred state's, dotted the time token's and wavy the undefined one's.
+	 * `DATA_TOKEN_TONE_CLASS.warning` paints the same.
+	 */
 	.monaco-editor .vayu-variable-token-warning {
-		@apply text-[hsl(var(--warning-text))];
+		@apply text-[hsl(var(--warning-text))] underline decoration-double underline-offset-[3px];
 	}
 	/*
 	 * A time (issue #1786): an underline, not a colour, so the token colour
