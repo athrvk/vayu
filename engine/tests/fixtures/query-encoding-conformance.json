@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for how a query row is written into a URL (issue #1771). Read by BOTH the engine gtest suite (engine/tests/query_encoding_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/query-encoding.conformance.test.ts). The rule is Postman's own, checked against postman-url-encoder 3.0.8 `toNodeUrl` (index.js:204-215) over postman-collection 5.3.1's `Url`: the query string is `QueryParam.unparse` (query-param.js:268-287), whose `normalizeParam` (:57-96) encodes `&` and `#` in a value and `&`, `#` and `=` in a key, skipping every whole `{{...}}` token (/{{[^{}]*}}/); then `encodeQueryParam` (encoder/index.js:203-210) applies QUERY_ENCODE_SET (encoder/encode-set.js:30, 111-115, 183-191): the C0 controls, DEL, every byte above `~` (each UTF-8 byte, `%XX` uppercase), space, `\"`, `#`, `'`, `<`, `>`. Nothing else is encoded: `%` passes as written, so an escape is never encoded twice, and `+`, `|`, `/`, `?`, `[`, `]`, `{`, `}` and the rest go out as typed. `components`: `text` encoded as a key (`key`) and as a value (`value`). `queries`: a request's query rows (`rows`), joined into `https://x/` with the rule above, or as typed when `encode` is false (Postman's `disableUrlEncoding`); `query` is what follows the `?`, empty meaning no `?` at all. An empty value writes `key=` and a row with `valueless: true` (Postman's `\"value\": null`, `?flag` in a URL) a bare `key`, as `unparseSingle` writes a string and a null. One Vayu rule differs from Postman and is pinned here as it stands: a row whose key is empty or whitespace is skipped (Postman writes `=value`).",
+  "$comment": "Cross-language conformance fixture for how a query row is written into a URL (issue #1771). Read by BOTH the engine gtest suite (engine/tests/query_encoding_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/utils/query-encoding.conformance.test.ts). The rule is Postman's own, checked against postman-url-encoder 3.0.8 `toNodeUrl` (index.js:204-215) over postman-collection 5.3.1's `Url`: the query string is `QueryParam.unparse` (query-param.js:268-287), whose `normalizeParam` (:57-96) encodes `&` and `#` in a value and `&`, `#` and `=` in a key, skipping every whole `{{...}}` token (/{{[^{}]*}}/); then `encodeQueryParam` (encoder/index.js:203-210) applies QUERY_ENCODE_SET (encoder/encode-set.js:30, 111-115, 183-191): the C0 controls, DEL, every byte above `~` (each UTF-8 byte, `%XX` uppercase), space, `\"`, `#`, `'`, `<`, `>`. Nothing else is encoded: `%` passes as written, so an escape is never encoded twice, and `+`, `|`, `/`, `?`, `[`, `]`, `{`, `}` and the rest go out as typed. `components`: `text` encoded as a key (`key`) and as a value (`value`). `queries`: a request's query rows (`rows`), joined into `https://x/` with the rule above, or as typed when `encode` is false (Postman's `disableUrlEncoding`); `query` is what follows the `?`, empty meaning no `?` at all. An empty value writes `key=` and a row with `valueless: true` (Postman's `\"value\": null`, `?flag` in a URL) a bare `key`, as `unparseSingle` writes a string and a null. One Vayu rule differs from Postman and is pinned here as it stands: a row whose key is empty or whitespace is skipped (Postman writes `=value`). `urlComponents`: `text` as a URL's path (`path`), fragment (`fragment`), user name (`userinfo`, split at its first colon outside a token) and password (`password`, whole) writes a substituted value, which is how the secret-value mask recognises one there (`encode_path_variable_value`, `encode_outside_tokens` with `FRAGMENT_ENCODE_SET` and `USERINFO_ENCODE_SET` - PATH_ENCODE_SET plus `/ : ; = @ [ \\ ] ^ |` - and `encode_userinfo_as_postman`), read by the engine's `masked_secret_forms` and its MCP mirror `secretForms`.",
   "components": [
     {
       "name": "unreserved characters pass",
@@ -150,6 +150,96 @@
       "text": "",
       "key": "",
       "value": ""
+    }
+  ],
+  "urlComponents": [
+    {
+      "name": "unreserved characters pass",
+      "text": "abcXYZ019-_.~",
+      "path": "abcXYZ019-_.~",
+      "fragment": "abcXYZ019-_.~",
+      "userinfo": "abcXYZ019-_.~",
+      "password": "abcXYZ019-_.~"
+    },
+    {
+      "name": "a space and a slash",
+      "text": "a b/c",
+      "path": "a%20b/c",
+      "fragment": "a%20b/c",
+      "userinfo": "a%20b%2Fc",
+      "password": "a%20b%2Fc"
+    },
+    {
+      "name": "a brace is encoded in a path and user info only",
+      "text": "a b{c@d&e",
+      "path": "a%20b%7Bc@d&e",
+      "fragment": "a%20b{c@d&e",
+      "userinfo": "a%20b%7Bc%40d&e",
+      "password": "a%20b%7Bc%40d&e"
+    },
+    {
+      "name": "a colon is raw until user info's own colon",
+      "text": "a b:c@d&e",
+      "path": "a%20b:c@d&e",
+      "fragment": "a%20b:c@d&e",
+      "userinfo": "a%20b:c%40d&e",
+      "password": "a%20b%3Ac%40d&e"
+    },
+    {
+      "name": "a ? and a # end a path but not a fragment",
+      "text": "p?q#r",
+      "path": "p%3Fq%23r",
+      "fragment": "p?q#r",
+      "userinfo": "p%3Fq%23r",
+      "password": "p%3Fq%23r"
+    },
+    {
+      "name": "a quote, angle brackets and a backtick",
+      "text": "a\"b<c>d`e",
+      "path": "a%22b%3Cc%3Ed%60e",
+      "fragment": "a%22b%3Cc%3Ed%60e",
+      "userinfo": "a%22b%3Cc%3Ed%60e",
+      "password": "a%22b%3Cc%3Ed%60e"
+    },
+    {
+      "name": "user info's own set",
+      "text": "a[b]^|\\;=c",
+      "path": "a[b]^|\\;=c",
+      "fragment": "a[b]^|\\;=c",
+      "userinfo": "a%5Bb%5D%5E%7C%5C%3B%3Dc",
+      "password": "a%5Bb%5D%5E%7C%5C%3B%3Dc"
+    },
+    {
+      "name": "each UTF-8 byte of a non-ASCII text",
+      "text": "ünï",
+      "path": "%C3%BCn%C3%AF",
+      "fragment": "%C3%BCn%C3%AF",
+      "userinfo": "%C3%BCn%C3%AF",
+      "password": "%C3%BCn%C3%AF"
+    },
+    {
+      "name": "a whole token is kept verbatim",
+      "text": "a {{k b}} c",
+      "path": "a%20{{k b}}%20c",
+      "fragment": "a%20{{k b}}%20c",
+      "userinfo": "a%20{{k b}}%20c",
+      "password": "a%20{{k b}}%20c"
+    },
+    {
+      "name": "a colon inside a token does not split user info",
+      "text": "{{a:b}}:c d",
+      "path": "{{a:b}}:c%20d",
+      "fragment": "{{a:b}}:c%20d",
+      "userinfo": "{{a:b}}:c%20d",
+      "password": "{{a:b}}%3Ac%20d"
+    },
+    {
+      "name": "a percent passes, so nothing is encoded twice",
+      "text": "50%25 off",
+      "path": "50%25%20off",
+      "fragment": "50%25%20off",
+      "userinfo": "50%25%20off",
+      "password": "50%25%20off"
     }
   ],
   "queries": [
