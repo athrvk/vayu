@@ -97,8 +97,11 @@ header `X-Vayu-Grant-Secret` to carry the engine's per-start secret, and answer
 - The app's main process generates the secret and passes it in the engine's
   environment as `VAYU_GRANT_SECRET`. The engine reads it once at start,
   before any thread exists, and removes it from its own environment, so
-  nothing it later reads or starts sees it. A value shorter than 32 characters
-  is ignored with a warning that does not print it.
+  nothing it later reads or starts sees it. On Linux and macOS it also
+  overwrites the bytes the kernel passed (what `/proc/<pid>/environ` shows
+  on Linux), which `unsetenv` alone leaves readable; on Windows the
+  environment block is private to the process. A value shorter than 32
+  characters is ignored with a warning that does not print it.
 - The header is compared in constant time (both sides hashed with SHA-256, the
   digests compared with `sodium_memcmp`). A missing header, an empty one and a
   wrong one are the same `403`. The secret is never logged (the request log

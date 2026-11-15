@@ -1257,7 +1257,10 @@ logged as a warning: it means a client skipped composition.
   `GrantSecret` (`http/grant_secret.hpp`: SHA-256 digests compared with
   `sodium_memcmp`, at least 32 characters). `daemon.cpp` takes it from
   `VAYU_GRANT_SECRET`, which the app's main process sets, and removes the
-  variable before any thread starts; it reaches the routes through `Server`'s
+  variable before any thread starts - on POSIX after overwriting the bytes
+  `getenv` returned, because they are the block `/proc/<pid>/environ` shows
+  and `unsetenv` leaves them (`file_grants_route_test.cpp` re-runs itself as
+  a child to prove it); it reaches the routes through `Server`'s
   constructor and `RouteContext::grant_secret`, so a test hands one in without
   the environment. An engine with no
   secret refuses all four writes. **Trust is derived, never read**: a body's `unresolved` is ignored

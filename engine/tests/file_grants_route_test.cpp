@@ -22,6 +22,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -30,6 +31,11 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+
+#if defined(__linux__)
+#include <spawn.h>
+#include <sys/wait.h>
+#endif
 
 #include "optional_assert.hpp"
 #include "scoped_env.hpp"
@@ -431,6 +437,87 @@ TEST (GrantSecret, AShortOrMissingVariableIsNoSecretAndIsRemovedToo) {
     }
     ASSERT_FALSE (vayu::tests::ScopedEnv::read (GRANT_SECRET_ENV));
     EXPECT_FALSE (take_grant_secret_from_environment ().configured ());
+}
+
+#if defined(__linux__)
+/// Names the process that runs `GrantSecretEnvironChild` as the helper, not
+/// the test that spawns it.
+constexpr const char* ENVIRON_CHILD_MARKER = "VAYU_TEST_GRANT_SECRET_CHILD";
+
+/// The whole of this process's `/proc/self/environ`: the environment block
+/// the kernel handed it, which `unsetenv` does not touch.
+std::string read_initial_environment () {
+    std::ifstream in ("/proc/self/environ", std::ios::binary);
+    return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char> () };
+}
+
+/// The helper's body: take the secret as the daemon does, then look for it in
+/// the kernel's view of the environment.
+void expect_secret_gone_from_initial_environment () {
+    const std::string before = read_initial_environment ();
+    ASSERT_NE (before.find (SECRET), std::string::npos)
+    << "the secret was never in /proc/self/environ, so absence proves nothing";
+
+    const GrantSecret secret = take_grant_secret_from_environment ();
+    EXPECT_TRUE (secret.admits (SECRET));
+    EXPECT_FALSE (vayu::tests::ScopedEnv::read (GRANT_SECRET_ENV));
+    EXPECT_EQ (read_initial_environment ().find (SECRET), std::string::npos)
+    << "unsetenv left the value in the environment block";
+}
+
+/// Re-runs this test binary on one test with the secret in its initial
+/// environment, which a `setenv` inside this process cannot reproduce: only
+/// a variable the kernel passed at exec lives in the block `/proc` shows.
+int run_environ_child () {
+    const std::string exe = fs::read_symlink ("/proc/self/exe").string ();
+    const std::string filter =
+    "--gtest_filter=GrantSecret."
+    "WipesTheInitialEnvironmentBlockNotJustTheVariable";
+    const std::string secret_entry = std::string (GRANT_SECRET_ENV) + "=" + SECRET;
+    const std::string marker_entry = std::string (ENVIRON_CHILD_MARKER) + "=1";
+    std::vector<std::string> argv_text{ exe, filter };
+    std::vector<std::string> envp_text{ secret_entry, marker_entry };
+    const auto pointers = [] (std::vector<std::string>& text) {
+        std::vector<char*> out;
+        out.reserve (text.size () + 1);
+        for (auto& item : text) {
+            out.push_back (item.data ());
+        }
+        out.push_back (nullptr);
+        return out;
+    };
+    auto argv = pointers (argv_text);
+    auto envp = pointers (envp_text);
+
+    pid_t child = 0;
+    if (::posix_spawn (&child, exe.c_str (), nullptr, nullptr, argv.data (),
+        envp.data ()) != 0) {
+        return -1;
+    }
+    int status = 0;
+    if (::waitpid (child, &status, 0) != child || !WIFEXITED (status)) {
+        return -1;
+    }
+    return WEXITSTATUS (status);
+}
+#endif
+
+// `unsetenv` removes the variable from `environ` and leaves its bytes in the
+// block the kernel exposes as `/proc/<pid>/environ`, where any process of the
+// same user can still read them (#2356 says the engine removes the secret).
+// Mutation check: drop the `sodium_memzero` in `read_environment` and the
+// child fails on the last expectation.
+TEST (GrantSecret, WipesTheInitialEnvironmentBlockNotJustTheVariable) {
+#if !defined(__linux__)
+    GTEST_SKIP () << "/proc/<pid>/environ is Linux's view of the initial block";
+#else
+    if (vayu::tests::ScopedEnv::read (ENVIRON_CHILD_MARKER)) {
+        expect_secret_gone_from_initial_environment ();
+        return;
+    }
+    EXPECT_EQ (run_environ_child (), 0)
+    << "the helper process reported a failure above, or did not run";
+#endif
 }
 
 } // namespace
