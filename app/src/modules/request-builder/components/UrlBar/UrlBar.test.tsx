@@ -282,7 +282,7 @@ describe("button hover states", () => {
 	it("steps the Load Test tint up rather than down", () => {
 		renderBar(true);
 		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
-			"hover:bg-primary/20"
+			"hover:bg-primary-tint-hover"
 		);
 	});
 
@@ -304,7 +304,7 @@ describe("button hover states", () => {
 	it("does not offer a hover on a button that cannot be clicked", () => {
 		renderBar(true);
 		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
-			"disabled:hover:bg-primary/10"
+			"disabled:hover:bg-primary-tint"
 		);
 	});
 });

@@ -137,7 +137,7 @@ export default function SettingsCategoryTree() {
 					// dead CSS that looks wired up.
 					"group w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
 					"data-[active=false]:text-foreground data-[active=false]:hover:bg-accent",
-					"data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
+					"data-[active=true]:bg-primary-tint data-[active=true]:text-primary data-[active=true]:font-medium"
 				)}
 			>
 				<Icon className="size-icon shrink-0" data-icon-motion={motion} />

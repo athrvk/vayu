@@ -181,7 +181,7 @@ function ServiceRow({
 				"group flex h-8 cursor-pointer items-center gap-1 px-3 transition-colors hover:bg-muted/50",
 				// Not a selection - the drawer has none - so a background tint
 				// rather than the accent fill a selected row would carry.
-				flashed && "bg-primary/10"
+				flashed && "bg-primary-tint"
 			)}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) onActivate();

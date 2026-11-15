@@ -438,12 +438,16 @@ function EnvSwitcher() {
 								 * scheme `--primary` is a neutral and would read as grey on
 								 * a grey tint.
 								 *
+								 * `--primary-tint` and its hover rather than an alpha of the
+								 * accent: the label sits on this ground, so it has to be one
+								 * the contrast test measures.
+								 *
 								 * What it replaces is `bg-accent`, the **hover** background
 								 * token (`--accent-active` is the selected one), used as a
 								 * resting fill and hovered to an alpha of itself - so the
 								 * control got lighter under the pointer, not stronger.
 								 */
-								"bg-primary/10 text-primary-text border-primary/30 hover:bg-primary/20"
+								"bg-primary-tint text-primary-text border-primary/30 hover:bg-primary-tint-hover"
 							: "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
 					)}
 					// Per-control opt-out, the pattern AppIcon and CommandSearchBar's

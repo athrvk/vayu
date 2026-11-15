@@ -253,13 +253,13 @@ describe("the services drawer", () => {
 
 		const flashedRow = await waitFor(() => {
 			const row = screen.getByText("Port 41230").closest("div.flex.h-8");
-			expect(row?.className).toContain("bg-primary/10");
+			expect(row?.className).toContain("bg-primary-tint");
 			return row;
 		});
 		// And only that row - the highlight names one inbox, not the group.
 		expect(screen.getByText("Port 41234").closest("div.flex.h-8")).not.toBe(flashedRow);
 		expect(screen.getByText("Port 41234").closest("div.flex.h-8")?.className).not.toContain(
-			"bg-primary/10"
+			"bg-primary-tint"
 		);
 	});
 
