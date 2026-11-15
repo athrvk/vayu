@@ -30,11 +30,24 @@
  * keystroke by keystroke and re-keying on it would re-introspect the endpoint
  * as the user types. A hand-typed `Authorization` therefore still needs the
  * Refresh button, exactly as before this cache learned about auth.
+ *
+ * **Loading on its own is conditional; loading on request is not.**
+ * `ensureSchema` only introspects an endpoint the user has already contacted
+ * (`approved-endpoints.ts`), judged on the URL the introspection would be sent
+ * to. `refreshSchema` is the user asking, so it always goes and, in doing so,
+ * approves the endpoint it reached.
  */
 
 import { create } from "zustand";
 import type { GraphQLSchema } from "graphql";
-import { introspectSchema, IntrospectionError, type IntrospectionTarget } from "./introspect";
+import type { ComposedRequest } from "@/types";
+import {
+	composeIntrospection,
+	introspectSchema,
+	IntrospectionError,
+	type IntrospectionTarget,
+} from "./introspect";
+import { approveEndpoint, isEndpointApproved } from "./approved-endpoints";
 
 export type SchemaStatus = "idle" | "loading" | "ready" | "error";
 
@@ -138,6 +151,12 @@ interface SchemaCacheState {
 	lru: string[];
 	activeKey: string | null;
 	/**
+	 * Keys `ensureSchema` declined to load on its own - the endpoint is not
+	 * approved, or could not be composed - so the badge offers Load schema.
+	 * Left by `refreshSchema`, which is that offer taken up.
+	 */
+	awaitingLoad: Record<string, true>;
+	/**
 	 * Point at a target, by the key it hashes to.
 	 *
 	 * The target itself was kept beside the key for a while, because a surface
@@ -160,10 +179,18 @@ interface SchemaCacheState {
 	getActiveEntry: () => SchemaEntry | null;
 	getActiveSchema: () => GraphQLSchema | null;
 	getActiveStatus: () => SchemaStatus;
-	/** Introspect only if this target has not been attempted yet. */
+	/**
+	 * Introspect only if this target has not been attempted yet, and only if its
+	 * endpoint is one the user has already contacted. Otherwise the key is
+	 * recorded in `awaitingLoad` and nothing is sent.
+	 */
 	ensureSchema: (target: SchemaTarget) => Promise<void>;
-	/** Force a re-introspection regardless of any cached result for this target. */
-	refreshSchema: (target: SchemaTarget) => Promise<void>;
+	/**
+	 * Force a re-introspection regardless of any cached result for this target,
+	 * and approve the endpoint it reaches. `composed` is the composition the
+	 * caller already judged, so the request goes to exactly that.
+	 */
+	refreshSchema: (target: SchemaTarget, composed?: ComposedRequest) => Promise<void>;
 }
 
 /**
@@ -192,6 +219,7 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 	byKey: {},
 	lru: [],
 	activeKey: null,
+	awaitingLoad: {},
 
 	setActiveTarget: (target) =>
 		set({ activeKey: target && target.url ? schemaCacheKey(target) : null }),
@@ -211,12 +239,32 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 
 	ensureSchema: async (target) => {
 		if (!target.url) return;
-		const existing = get().byKey[schemaCacheKey(target)];
-		if (existing && existing.status !== "idle") return;
-		await get().refreshSchema(target);
+		const key = schemaCacheKey(target);
+		const attempted = () => {
+			const existing = get().byKey[key];
+			return !!existing && existing.status !== "idle";
+		};
+		if (attempted()) return;
+		const decline = () =>
+			set((s) =>
+				s.awaitingLoad[key] ? s : { awaitingLoad: { ...s.awaitingLoad, [key]: true } }
+			);
+
+		let composed: ComposedRequest;
+		try {
+			composed = await composeIntrospection(target);
+		} catch {
+			// Nothing to judge, so nothing is sent; Load schema composes again
+			// and puts the engine's answer on the badge.
+			return decline();
+		}
+		// Composing is async: a Refresh pressed meanwhile has the key loading.
+		if (attempted()) return;
+		if (!isEndpointApproved(composed.url)) return decline();
+		await get().refreshSchema(target, composed);
 	},
 
-	refreshSchema: async (target) => {
+	refreshSchema: async (target, composed) => {
 		if (!target.url) return;
 		const key = schemaCacheKey(target);
 		/*
@@ -230,16 +278,21 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 		const previous = get().byKey[key];
 		const lastGood = previous?.schema ?? null;
 		const lastGoodAt = lastGood ? (previous?.fetchedAt ?? null) : null;
-		set((s) =>
-			withEntry(s, key, {
+		set((s) => ({
+			...withEntry(s, key, {
 				status: "loading",
 				schema: lastGood,
 				error: null,
 				fetchedAt: lastGoodAt,
-			})
-		);
+			}),
+			awaitingLoad: Object.fromEntries(
+				Object.entries(s.awaitingLoad).filter(([k]) => k !== key)
+			),
+		}));
 		try {
-			const schema = await introspectSchema(target);
+			const request = composed ?? (await composeIntrospection(target));
+			approveEndpoint(request.url);
+			const schema = await introspectSchema(target, request);
 			set((s) =>
 				withEntry(s, key, { status: "ready", schema, error: null, fetchedAt: Date.now() })
 			);

@@ -43,12 +43,25 @@ the auth's query parameter, if the request has one (#3437).
 
 ## The schema
 
-The moment a GraphQL body is on screen with a URL in the bar, Vayu introspects
-the endpoint. The request it sends is **your** request, composed by the engine
-first: `{{variables}}` resolved, and the Auth panel's configuration applied -
-including `inherit` walked up the collection chain, and OAuth 2.0. Two
-environments pointing the same URL at different credentials are two different
-schemas, and Vayu keeps them apart.
+Once a GraphQL body is on screen with a URL in the bar, Vayu introspects the
+endpoint - if it is one you have already contacted. The request it sends is
+**your** request, composed by the engine first: `{{variables}}` resolved, and
+the Auth panel's configuration applied - including `inherit` walked up the
+collection chain, and OAuth 2.0. Two environments pointing the same URL at
+different credentials are two different schemas, and Vayu keeps them apart.
+
+**It waits for your first contact with an endpoint.** Introspection sends your
+variables and credentials, so a request that arrived in an imported file
+introspects nothing until you have chosen to reach its server. An endpoint
+counts as contacted, by its origin (scheme, host and port), once you press
+**Send** or **Load test** on a request that goes there, or load its schema by
+hand with **Load schema** or **Refresh**; Vayu remembers the origin across
+restarts (Settings › General › Reset to defaults forgets them). The origin is
+judged on the URL the request composes to, not on the text in the bar, so a
+`{{baseUrl}}` that points somewhere new is a new origin - and a URL that cannot
+be composed is never introspected on its own. Until then the badge reads **Load
+schema**; pressing it loads the schema and counts as that first contact. Press
+Send on the request and the schema loads by itself.
 
 The badge in the Query pane's header says which state it is in:
 
@@ -57,10 +70,12 @@ The badge in the Query pane's header says which state it is in:
 | **Schema** (spinner) | Introspecting. |
 | **Schema** (tick) | Loaded. Completion, validation and hover are live. |
 | **Schema stale** | A refresh failed over a schema that had loaded. The editors still use the older one; the tooltip says how old it is and what went wrong. |
+| **Load schema** | Not loaded yet, because Vayu has not contacted this endpoint. It is a button: press it to introspect. |
 | **No schema** | Nothing loaded. The editor still checks syntax. The tooltip names the reason - rejected credentials and an endpoint with introspection switched off are different problems with different fixes. |
 
-Introspection happens on the body tab's own lifecycle and when you press
-**Refresh**, and never leaves a run, a trace or a History entry behind. A
+Introspection happens on the body tab's own lifecycle (for an endpoint you have
+contacted) and whenever you press **Load schema** or **Refresh**, which are
+never held back, and never leaves a run, a trace or a History entry behind. A
 header you typed by hand is not part of the schema's identity, so after editing
 an `Authorization` row directly, press Refresh.
 

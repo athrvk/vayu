@@ -41,12 +41,15 @@ export const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
 	unknown: "Couldn't complete introspection.",
 };
 
-export function schemaStatusTitle(entry: SchemaEntry | null): string {
+export function schemaStatusTitle(entry: SchemaEntry | null, awaitingLoad = false): string {
 	const age = entry?.fetchedAt
 		? `Schema loaded ${formatInstant(entry.fetchedAt, "relative")}.`
 		: null;
 	const status = entry?.status ?? "idle";
 
+	if (status === "idle" && awaitingLoad) {
+		return "Vayu has not contacted this endpoint yet, so its schema has not been loaded. Load it to validate and complete the query.";
+	}
 	if (status === "idle") return "The schema has not been loaded yet.";
 	if (status === "loading") return age ?? "Loading the schema.";
 	if (status === "ready") return age ?? "Schema loaded.";
