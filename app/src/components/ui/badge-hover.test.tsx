@@ -16,9 +16,9 @@
  * asymmetry, not a bad class: `cn()` is tailwind-merge, which resolves `bg-*`
  * against `bg-*` but files `hover:bg-*` under a *different* key. So
  *
- *     cn("bg-primary-fill hover:bg-primary-fill/80", "bg-status-success-fill")
+ *     cn("bg-primary-fill hover:bg-primary-fill-hover", "bg-status-success-fill")
  *
- * drops `bg-primary-fill` and keeps `hover:bg-primary-fill/80`. At rest the chip
+ * drops `bg-primary-fill` and keeps `hover:bg-primary-fill-hover`. At rest the chip
  * was green; on hover `--primary-fill` won, animated by the `transition-colors`
  * in the base. On Forest it faded green-to-green, on Magenta green-to-pink.
  *
@@ -66,11 +66,11 @@ describe("the merge asymmetry that caused this", () => {
 	 */
 	it("still drops the base background but keeps the hover one", () => {
 		const merged = cn(
-			"bg-primary-fill text-primary-foreground hover:bg-primary-fill/80",
+			"bg-primary-fill text-primary-foreground hover:bg-primary-fill-hover",
 			"bg-status-success-fill"
 		);
 		expect(merged).not.toMatch(/(^|\s)bg-primary-fill(\s|$)/);
-		expect(merged).toContain("hover:bg-primary-fill/80");
+		expect(merged).toContain("hover:bg-primary-fill-hover");
 	});
 });
 

@@ -414,7 +414,7 @@ export default function SendWithRowDialog({
 								// control beside it - with the shared edge transparent so the
 								// two do not draw a 2px line between them.
 								"bg-primary-fill text-white border border-primary-fill border-l-white/25",
-								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
 								lastInGroup ? "rounded-r-md rounded-l-none" : "rounded-none"
 							)}

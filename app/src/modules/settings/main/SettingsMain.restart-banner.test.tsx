@@ -146,7 +146,7 @@ describe("the restart-required banner", () => {
 		expect(restart.className).toContain("bg-status-warning-fill");
 		expect(restart.className).toContain("text-white");
 		expect(restart.className).not.toMatch(/(^|\s)(hover:)?bg-warning/);
-		// The default variant's `hover:bg-primary-fill/90` survives tailwind-merge
+		// The default variant's `hover:bg-primary-fill-hover` survives tailwind-merge
 		// (it files `hover:bg-*` apart from `bg-*`) and would turn the button the
 		// accent colour on hover.
 		expect(restart.className).toContain("hover:bg-status-warning-fill/90");

@@ -292,14 +292,14 @@ export default function UrlBar() {
 								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
 								"border border-primary-fill",
 								/*
-								 * There was no hover state at all. `hover:bg-primary-fill/90` is
-								 * the `Button` primitive's own `default` variant - these are
+								 * There was no hover state at all. `hover:bg-primary-fill-hover`
+								 * is the `Button` primitive's own `default` variant - these are
 								 * hand-rolled so the pair can share an edge, which means they
 								 * carry the convention rather than inherit it. The border moves
 								 * with the fill, or a lighter ring appears around a darkening
 								 * button.
 								 */
-								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill",
 								// Hand-rolled rather than the `Button` primitive (see the
 								// comment above), so it doesn't carry `[data-slot="button"]`
