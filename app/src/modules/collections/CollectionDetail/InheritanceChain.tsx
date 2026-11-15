@@ -39,7 +39,7 @@ interface InheritanceChainProps {
 }
 
 /** The "This" / "Source" tag beside a row. `chip` leaves the fill to the caller, with no hover. */
-const TAG_CLASS = "text-micro bg-primary/10 text-primary px-1.5 py-px shrink-0";
+const TAG_CLASS = "text-micro bg-primary-tint text-primary px-1.5 py-px shrink-0";
 
 /**
  * The auth *type*, never its value.

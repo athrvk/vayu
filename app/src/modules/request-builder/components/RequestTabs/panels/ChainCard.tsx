@@ -42,7 +42,7 @@ export interface ChainCardProps {
 
 export function ChainCard({ summary, caption, children }: ChainCardProps) {
 	return (
-		<div className="enter-fade rounded-md border border-primary/30 bg-primary/10">
+		<div className="enter-fade rounded-md border border-primary/30 bg-primary-tint">
 			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
 				{/*
 				 * `size-icon` (16px), not `size-icon-sm`: matches `Callout.tsx`'s own

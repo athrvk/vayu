@@ -696,7 +696,7 @@ function ExplorerRow({
 							 */}
 							{name.before}
 							{name.match && (
-								<mark className="rounded-sm bg-primary/20 text-inherit">
+								<mark className="rounded-sm bg-primary-tint text-inherit">
 									{name.match}
 								</mark>
 							)}
@@ -737,7 +737,7 @@ function ExplorerRow({
 					>
 						{description.before}
 						{description.match && (
-							<mark className="rounded-sm bg-primary/20 text-inherit">
+							<mark className="rounded-sm bg-primary-tint text-inherit">
 								{description.match}
 							</mark>
 						)}
