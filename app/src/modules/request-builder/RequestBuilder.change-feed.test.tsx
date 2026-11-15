@@ -107,6 +107,7 @@ beforeEach(() => {
 	// and a refused connection would only add noise.
 	vi.stubGlobal("fetch", () => new Promise<Response>(() => {}));
 	stored = STORED;
+	vi.spyOn(apiService, "createChangeSubscription").mockResolvedValue("sub_1");
 	vi.spyOn(apiService, "getRequest").mockImplementation(async () => ({ ...stored }));
 	// The edit must stay a draft: an autosave would make the field agree with
 	// the server and leave nothing to conflict over.
@@ -125,21 +126,22 @@ afterEach(() => {
 });
 
 /** The tab, open on `req_1`, and the change feed it follows, not yet serving. */
-function renderOpenRequest() {
+async function renderOpenRequest() {
 	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	const wrapper = ({ children }: { children: ReactNode }) => (
 		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 	);
 	render(<RequestBuilder />, { wrapper });
 	service.start(queryClient);
-	return MockEventSource.instances[MockEventSource.instances.length - 1];
+	await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+	return MockEventSource.instances[0];
 }
 
 const shown = (testId: string) => screen.getByTestId(testId).textContent;
 
 describe("a write to the open request by another client", () => {
 	it("adopts an untouched field and keeps a typed one as a conflict", async () => {
-		const feed = renderOpenRequest();
+		const feed = await renderOpenRequest();
 		feed.emit("ready", 100, { lastEventId: 100 });
 		expect(await screen.findByTestId("url")).toHaveProperty("textContent", STORED.url);
 
@@ -166,7 +168,7 @@ describe("a write to the open request by another client", () => {
 	it("is caught up even when the write landed before the feed was listening", async () => {
 		// The launch window: the tab has read its request, the stream has not
 		// yet opened, and a write in between is one the feed never reports.
-		const feed = renderOpenRequest();
+		const feed = await renderOpenRequest();
 		expect(await screen.findByTestId("url")).toHaveProperty("textContent", STORED.url);
 		stored = { ...STORED, url: "https://api.test/v2" };
 

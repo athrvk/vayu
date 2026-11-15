@@ -1232,6 +1232,17 @@ export const apiService = {
 		);
 	},
 
+	/**
+	 * The single-use id one `GET /changes` stream opens with. A `POST`, so a web
+	 * page cannot ask for it and cannot fill the engine's stream slots.
+	 */
+	async createChangeSubscription(): Promise<string> {
+		const { subscription } = await httpClient.post<{ subscription: string }>(
+			API_ENDPOINTS.CHANGE_SUBSCRIPTIONS
+		);
+		return subscription;
+	},
+
 	async getOAuth2AuthorizeStatus(attemptId: string): Promise<OAuth2AuthorizeStatusResponse> {
 		return await httpClient.get<OAuth2AuthorizeStatusResponse>(
 			API_ENDPOINTS.OAUTH2_AUTHORIZE_STATUS(attemptId)
