@@ -860,8 +860,13 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks
-  nothing the user types and never fetches Hunspell dictionaries, which it
-  otherwise downloads from a Google CDN at first use on Windows and Linux.
+  nothing the user types. That option alone does not stop the Hunspell
+  dictionary download (Google's CDN, on Windows and Linux), which belongs to
+  each session rather than each window; `electron/spellcheck.ts` therefore
+  empties the spellchecker language list of every session as it is created
+  (`app.on("session-created")`, registered before `app.whenReady` so the
+  default session and the OAuth partition are both covered), and nothing is
+  fetched.
   Monaco's editors are unaffected either way; they own their own text area.
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
   SQLite, the same way every other stored credential is. Settings draws that
