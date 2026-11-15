@@ -59,8 +59,10 @@ from pages, so every page in the browser can reach it and, by default, read
 what it answers (CORS `*`, never with your cookies). Starting one with
 `allowedOrigins` restricts reading to the origins you list, but those replies
 carry `Access-Control-Allow-Credentials`, so "never with your cookies" holds only
-for the default, and the listener still answers every request: the list decides
-who may read the reply, not who may send. A mock binds to loopback only. An
+for the default, and the listener still answers every request addressed to its
+own loopback name: the list decides who may read the reply, not who may send. A
+mock with a list also refuses a `Host` that is not its own loopback name, which
+a page reaching it through DNS rebinding would send. A mock binds to loopback only. An
 inbox can bind past loopback only through an explicit `bind` plus
 `confirmNonLoopback` from the engine API, never from an MCP agent, and once
 it does, anyone on that network can post to it. Since a mock replays saved
