@@ -21,30 +21,6 @@ namespace {
 
 constexpr std::size_t npos = std::string_view::npos;
 
-/// `USERINFO_ENCODE_SET`: `PATH_ENCODE_SET` extended with `/ : ; = @ [ \ ] ^ |`.
-bool in_postman_userinfo_encode_set (unsigned char byte) {
-    if (in_postman_fragment_encode_set (byte)) {
-        return true;
-    }
-    switch (byte) {
-    case '#':
-    case '?':
-    case '{':
-    case '}':
-    case '/':
-    case ':':
-    case ';':
-    case '=':
-    case '@':
-    case '[':
-    case '\\':
-    case ']':
-    case '^':
-    case '|': return true;
-    default: return false;
-    }
-}
-
 /// Where each separator sits in @p text with every `{{...}}` token skipped,
 /// so a separator inside a variable name splits nothing - the parser's own
 /// masking (`normalizeVariables`).
@@ -104,17 +80,6 @@ std::string encode_query (std::string_view query) {
     }
 }
 
-std::string encode_userinfo (std::string_view userinfo) {
-    const std::size_t colon = Scanner (userinfo).find (':', 0, userinfo.size ());
-    std::string out =
-    encode_outside_tokens (userinfo.substr (0, colon), in_postman_userinfo_encode_set);
-    if (colon != npos) {
-        out += ':';
-        out += encode_outside_tokens (userinfo.substr (colon + 1), in_postman_userinfo_encode_set);
-    }
-    return out;
-}
-
 /// @p text with each ASCII letter outside a token lowercased, and each
 /// backslash outside one made a `/` when @p slashes.
 std::string rewrite_outside_tokens (std::string_view text, bool lowercase, bool slashes) {
@@ -152,6 +117,17 @@ std::string postman_host (std::string_view host_port) {
 }
 
 } // namespace
+
+std::string encode_userinfo_as_postman (std::string_view userinfo) {
+    const std::size_t colon = Scanner (userinfo).find (':', 0, userinfo.size ());
+    std::string out =
+    encode_outside_tokens (userinfo.substr (0, colon), in_postman_userinfo_encode_set);
+    if (colon != npos) {
+        out += ':';
+        out += encode_outside_tokens (userinfo.substr (colon + 1), in_postman_userinfo_encode_set);
+    }
+    return out;
+}
 
 std::string encode_url_as_postman (std::string_view url) {
     const std::size_t first = url.find_first_not_of (" \t\n\v\f\r");
@@ -193,7 +169,7 @@ std::string encode_url_as_postman (std::string_view url) {
     const std::size_t at_sign = head_scan.rfind ('@', authority, path_at);
     std::size_t host          = authority;
     if (at_sign != npos) {
-        out += encode_userinfo (
+        out += encode_userinfo_as_postman (
         std::string_view (head).substr (authority, at_sign - authority));
         out += '@';
         host = at_sign + 1;

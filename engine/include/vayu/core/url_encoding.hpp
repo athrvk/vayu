@@ -45,4 +45,15 @@ namespace vayu::core {
  */
 [[nodiscard]] std::string encode_url_as_postman (std::string_view url);
 
+/**
+ * @brief @p userinfo as `encode_url_as_postman` writes a URL's user info:
+ *        split at the first `:` (not inside a `{{...}}` token), each side
+ *        written by `USERINFO_ENCODE_SET`, the colon kept.
+ *
+ * A secret that lands in the user name can take this spelling, one that
+ * lands after the user's own colon the whole-text `USERINFO_ENCODE_SET`
+ * spelling (`encode_outside_tokens` with `in_postman_userinfo_encode_set`).
+ */
+[[nodiscard]] std::string encode_userinfo_as_postman (std::string_view userinfo);
+
 } // namespace vayu::core

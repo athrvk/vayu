@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <latch>
 #include <memory>
@@ -1636,6 +1637,66 @@ TEST_F (MockServerTest, AnOriginMatchesItsListedEntryWhateverItsSpelling) {
         EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), spelling);
         EXPECT_EQ (
         listed->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    }
+}
+
+// DNS rebinding makes a hostile page same-origin with a mock, so a mock that
+// names its readers must also name its own host. Mutation check: drop the
+// `names_this_listener` guard in serve_mock_request and the foreign-Host case
+// goes red.
+TEST_F (MockServerTest, AMockWithAnAllowedOriginsListAnswersOnlyItsOwnLoopbackName) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const std::string port = std::to_string (started.info.port);
+    const auto foreign =
+    client.Get ("/pets", httplib::Headers{ { "Host", "evil.example:" + port } });
+    ASSERT_TRUE (foreign);
+    EXPECT_EQ (foreign->status, 403) << foreign->body;
+    EXPECT_FALSE (has_cors_header (*foreign));
+
+    // The refusal is the Host's, not a general breakage: the same listener
+    // answers each of its own spellings.
+    for (const std::string name : { "127.0.0.1", "localhost", "[::1]" }) {
+        const auto own = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
+        ASSERT_TRUE (own) << name;
+        EXPECT_EQ (own->status, 200) << name << ": " << own->body;
+    }
+
+    const auto wrong_port = client.Get ("/pets",
+    httplib::Headers{ { "Host", "127.0.0.1:" + std::to_string (started.info.port + 1) } });
+    ASSERT_TRUE (wrong_port);
+    EXPECT_EQ (wrong_port->status, 403);
+}
+
+TEST_F (MockServerTest, AMockWithNoAllowedOriginsListAnswersAnyHost) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const std::string port = std::to_string (started.info.port);
+    for (const std::string name : { "evil.example", "127.0.0.1", "localhost" }) {
+        const auto answered = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
+        ASSERT_TRUE (answered) << name;
+        EXPECT_EQ (answered->status, 200) << name << ": " << answered->body;
     }
 }
 

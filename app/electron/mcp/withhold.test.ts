@@ -650,11 +650,43 @@ describe("secretForms", () => {
 				"p%40ss%20%22w%2Frd%22%26%3Cx%3E",
 				// `encode_query_component`, a value: Postman's set, `@` and `/` raw.
 				"p@ss%20%22w/rd%22%26%3Cx%3E",
+				// A URL's path and fragment (`@`, `/` and `&` raw), and its user info (`@`
+				// and `/` encoded, `&` raw).
+				"p@ss%20%22w/rd%22&%3Cx%3E",
+				"p%40ss%20%22w%2Frd%22&%3Cx%3E",
 				'p@ss \\"w/rd\\"&<x>',
 				'p@ss "w/rd"&amp;&lt;x&gt;',
 				"p@ss &quot;w/rd&quot;&amp;&lt;x&gt;",
 			])
 		);
+	});
+
+	// Each value is spelled by one component's encoder alone (the engine's request_builder_test.cpp
+	// holds the same table): drop one of the forms and its row reds.
+	test.each([
+		["a path", "a b{c@d", "a%20b%7Bc@d"],
+		["a fragment", "a b{c@d&e", "a%20b{c@d&e"],
+		["a user name before its colon", "a b:c@d&e", "a%20b:c%40d&e"],
+		["a password after the user's colon", "a b:c@d&e", "a%20b%3Ac%40d&e"],
+	])("holds the spelling %s writes", (_, value, form) => {
+		expect(secretForms([value])).toContain(form);
+	});
+
+	// The URL composition writes for each secret, as the engine's request_builder_test.cpp builds it.
+	test.each([
+		["a path", "https://api.example.com/v1/", "a b/c", "a%20b/c", "/items"],
+		["a path", "https://api.example.com/v1/", "a b{c@d", "a%20b%7Bc@d", "/items"],
+		["user info", "https://", "p@ss w&rd", "p%40ss%20w&rd", "@api.example.com/"],
+		["a password", "https://admin:", "a b:c@d&e", "a%20b%3Ac%40d&e", "@api.example.com/"],
+		["a fragment", "https://api.example.com/v1#", "a b{c@d&e", "a%20b{c@d&e", ""],
+		["a URL-safe secret", "https://api.example.com/v1/", "s3cr3t-value", "s3cr3t-value", "/x"],
+	])("masks a secret written into %s", (_, before, secret, composed, after) => {
+		// `location` rather than `url`: a `url` member also drops its userinfo password
+		// (#3520), which would hide whether the password form itself masks.
+		const rule: RunOutputRule = { forms: secretForms([secret]), apiKeyHeaders: [] };
+		expect(withholdRunOutput({ location: `${before}${composed}${after}` }, rule)).toEqual({
+			location: `${before}${REDACTED_MARKER}${after}`,
+		});
 	});
 
 	test("escapes control characters the way a JSON string holds them", () => {

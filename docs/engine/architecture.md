@@ -212,6 +212,9 @@ read it and none can read one sent with the user's cookies. With a list, a liste
 echoed with `Access-Control-Allow-Credentials: true` and every other origin gets no CORS header at
 all. The policy decides what a page can *read*, not what it can send: any page can still make a
 mock or an inbox answer a request.
+A mock with a list also answers `403` to a `Host` that is not a loopback spelling of its own port
+(`names_this_listener`, `routes.hpp`, the management API's rule), against DNS rebinding; a mock
+with no list and the inbox, which may bind wide, answer any `Host`.
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
@@ -487,7 +490,8 @@ Manages the lifecycle of load test runs:
   step's send, its late OAuth 2.0 token request and its scripts'
   `pm.sendRequest`, so Stop and shutdown end the step in flight at the next
   progress tick instead of after its timeout, and the runner records that
-  step as `stopped`, never `errored`. The auxiliary threads keep `aux_cancel`: a replay or
+  step as `stopped`, never `errored`. A token request whose flag is already
+  set is never sent, so a stopping server does not reach the endpoint. The auxiliary threads keep `aux_cancel`: a replay or
   teardown after a natural end must still send. A call it cancels is the run
   ending, never a failure: a cancelled token request ends the run `Stopped`; a
   lifecycle or inline step script whose send it cancelled is `skipped` (so a

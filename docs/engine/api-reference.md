@@ -6889,6 +6889,11 @@ pages may read it is the caller's to state:
   response from the page. `Vary: Origin` is on every response under a list.
   Origins are compared canonically: scheme and host case-folded, a default port
   dropped, so `https://App.Example:443` matches a listed `https://app.example`.
+  A list also pins the **`Host`**: the mock answers `403` to any request, a
+  preflight included, whose `Host` is not `127.0.0.1:<port>`, `localhost:<port>`
+  or `[::1]:<port>` of its own port (the management API's rule), so a page that
+  DNS rebinding has made same-origin with the mock cannot read it. A mock with
+  no list answers any `Host`.
 
 A header the example itself carries under `Access-Control-*` or `Vary` is
 dropped rather than echoed, since the engine already answered those and a
@@ -12707,7 +12712,9 @@ chain of `requestId`'s request, else of the composed `collectionId`, issue
 #3461; for a scenario run, the chain of the run
 collection and of every folder a step sits in, so a recursive run masks a
 secret held on a sub-folder, issue #3270) is written as `<redacted>` wherever
-it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded,
+it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded
+(strictly, and as composition writes a query value, a path, a fragment and
+user info, which leave `/ @ & : + '` raw where the strict form escapes them),
 JSON-escaped and XML-escaped forms (a JSON body holds `pa"ss` as `pa\"ss`). A
 value under four characters is not masked. `result.trace` is the record of
 what was sent and keeps it all. A run stored before this change returns its
