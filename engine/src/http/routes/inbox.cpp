@@ -169,8 +169,9 @@ class AnyPathServer final : public httplib::Server {
     /// already spells.
     static constexpr const char* ROUTE = "/";
 
-    /// Prefixed to a form Content-Type by `mask_form_body`, so the media type is
-    /// no longer one cpp-httplib parses and it leaves the body alone.
+    /// Prefixed to a form Content-Type by `mask_form_body` and to a
+    /// Content-Encoding by `mask_content_encoding`, so the value is no longer
+    /// one cpp-httplib acts on and it leaves the body alone.
     static constexpr std::string_view MASK = "x-vayu-raw+";
 
     /**
@@ -198,12 +199,33 @@ class AnyPathServer final : public httplib::Server {
         it->second.insert (0, MASK);
     }
 
+    /**
+     * Keep a compressed body as the sender wrote it. cpp-httplib answers
+     * a bare 415 to a Content-Encoding it knows (gzip, deflate, br, zstd) but
+     * was not built to decompress, and engine/vcpkg.json builds it without any
+     * of them, so a compressing sender - an OpenTelemetry exporter, a Sentry
+     * SDK, a log shipper - would get a refusal and leave no capture. A masked
+     * coding is an unrecognised one, which the library passes through as bytes;
+     * `sender_headers` strips the mask for the capture. Every Content-Encoding
+     * line is masked, since the library reads them joined.
+     */
+    static void mask_content_encoding (httplib::Request& req) {
+        const auto [first, last] = req.headers.equal_range ("Content-Encoding");
+        for (auto it = first; it != last; ++it) {
+            it->second.insert (0, MASK);
+        }
+    }
+
     /// The request's headers as the sender wrote them.
     static httplib::Headers sender_headers (const httplib::Request& req) {
         httplib::Headers headers = req.headers;
-        const auto it            = headers.find ("Content-Type");
-        if (it != headers.end () && it->second.starts_with (MASK)) {
-            it->second.erase (0, MASK.size ());
+        for (const char* name : { "Content-Type", "Content-Encoding" }) {
+            const auto [first, last] = headers.equal_range (name);
+            for (auto it = first; it != last; ++it) {
+                if (it->second.starts_with (MASK)) {
+                    it->second.erase (0, MASK.size ());
+                }
+            }
         }
         return headers;
     }
@@ -250,6 +272,7 @@ class AnyPathServer final : public httplib::Server {
                 [] (httplib::Request& req) {
                     req.path = ROUTE;
                     mask_form_body (req);
+                    mask_content_encoding (req);
                 },
                 &websocket_upgraded);
             });
