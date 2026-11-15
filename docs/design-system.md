@@ -146,9 +146,11 @@ The accent is **split into two tokens** to resolve a contrast bind, and three
 opaque companions (below) give its hover and its tint a solid colour of their
 own:
 
-- **`--primary`** - the accent used for text, borders, rings, tints, indicators
-  (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
-  the light card, brightened on the near-black dark canvas so it reads in both.
+- **`--primary`** - the accent used for text, borders, rings, indicators
+  (`text-primary`, `border-primary`, `ring-primary/20`). A chip or row ground
+  under text is not an alpha of it but `--primary-tint` (below). Mode-adaptive:
+  deep on the light card, brightened on the near-black dark canvas so it reads
+  in both.
 - **`--primary-fill`** - solid button/badge backgrounds that carry a white
   label (`bg-primary-fill`). One value in **both** modes, deep enough that
   white text clears 4.5:1 (a brightened dark accent would fail white-on-fill).
@@ -173,9 +175,16 @@ three solids, plain `H S% L%` triples the contrast guard parses:
   `magenta` are the binding cases: their `--primary` was set by the surfaces
   and sits barely above 4.5:1 on white, so their tint is the palest.
 
-A translucent alpha stays right under *no* text: a dot, a ring, a selection
-outline, a chart area. The per-scheme values are in the second table under
-[Color Schemes](#color-schemes-accent-themes).
+**The rule: an alpha of the accent (`bg-primary/<n>`, `bg-primary-fill/<n>`,
+and their `hover:` / `disabled:` / `data-[...]:` forms) is allowed only where no
+text sits on it** - a dot, a ring, a selection outline, a chart area, a
+text-selection highlight over transparent text. An element that renders text,
+its own or its children's, uses the opaque tokens: `bg-primary-tint` at rest,
+`hover:bg-primary-tint-hover` when it is already tinted and
+`hover:bg-primary-tint` when it is not. `accent-alpha-under-text.test.ts` scans
+every non-test source file and fails on any other use; a genuinely text-free one
+goes in its allow-list with the reason. The per-scheme values are in the second
+table under [Color Schemes](#color-schemes-accent-themes).
 
 Both halves meet **4.5:1 in every scheme and both themes** (#3499): `--primary`
 as text on `--card`, `--panel`, `--background`, `--muted` and `--accent`, and
@@ -2073,6 +2082,7 @@ see.
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
+| An element that renders text never paints a translucent accent (`bg-primary/<n>`) behind it; the opaque `--primary-tint` family is held to 4.5:1 per scheme instead | `accent-alpha-under-text.test.ts`, `color-scheme-contrast.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
 
 **A tree row is named by its name, not by what is inside it.** A `treeitem`
@@ -4137,7 +4147,10 @@ surface-card` field, then Send and Load test attached as a pair. Send is the
 solid action on `bg-primary-fill` with a white label, reads "Send" (or
 "Sending…" while in flight) and carries no leading glyph; Load test is the
 outlined action on the same accent and reads "Load test". Both are token-based:
-no hardcoded purple, no bracketed pixel heights.
+no hardcoded purple, no bracketed pixel heights. Each hover is an opaque step of
+its own ground: Send goes `hover:bg-primary-fill-hover` (border with it), Load
+test goes `bg-primary-tint` to `hover:bg-primary-tint-hover`, and a disabled
+Load test pins `disabled:hover:bg-primary-tint` so it does not step at all.
 
 ### Dashboard Header (Compact 52px)
 
@@ -4222,7 +4235,8 @@ read as a fraction, and there is no fraction to report.
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
 - Hardcoded hex method colors like `text-[#22c55e]` - use `getMethodColor` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
-- Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
+- Hardcoded purple for Load test / secondary actions - use `text-primary-text`/`border-primary`/`bg-primary-tint`
+- `bg-primary/10`, `hover:bg-primary/20` and every other alpha of the accent behind text - use `bg-primary-tint` / `hover:bg-primary-tint-hover` (see [Primary](#primary-accent-color))
 
 These rules are enforced by `palette-tokens.test.ts` (under
 `modules/request-builder/components/ResponseViewer/`) over every `.tsx` in
