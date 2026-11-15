@@ -331,7 +331,10 @@ Three rules make that the whole story:
 The feed is a bounded ring (`change_feed::MAX_RETAINED_EVENTS`); a reader whose resume point it no
 longer covers is sent a `reset` and refetches everything. It owns no thread: each stream is a
 management-API handler polling the ring on the relay cadence `GET /runs/:id/events` uses, at most
-`change_feed::MAX_READERS` at once, and it ends on `server_stopping` like every other relay. The
+`change_feed::MAX_READERS` at once, and it ends on `server_stopping` like every other relay. A
+stream is admitted only on a single-use subscription id that `POST /changes/subscriptions` issues
+(`ChangeFeed::issue_subscription`, libsodium random, at most `MAX_PENDING_SUBSCRIPTIONS` unspent):
+a page can send no `POST` without an `Origin`, so it cannot hold the slots a plain `GET` would take. The
 feed lives in the `Database`, which outlives `Server::stop()`'s handler join, so nothing has to be
 drained before it. The startup repair passes rewrite rows before the engine listens and publish
 nothing; a client resuming from an earlier process is reset anyway, because ids start from the

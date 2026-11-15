@@ -995,9 +995,17 @@ namespace change_feed {
 /// which costs it the same refetch the bulk write would have asked for anyway.
 constexpr std::size_t MAX_RETAINED_EVENTS = 1024;
 /// Streams read at once. Each parks a management-API pool thread (at least 8,
-/// growing to 4x), and the route needs no id, so a page's no-cors `fetch`
-/// could otherwise take every thread. One app window holds one stream.
+/// growing to 4x). A stream needs a subscription id only `POST
+/// /changes/subscriptions` hands out, so a page's no-cors `fetch` cannot take
+/// a slot; the cap bounds what a client that can ask for ids holds. One app
+/// window holds one stream.
 constexpr int MAX_READERS = 8;
+/// Entropy of a subscription id, in bytes (256 bits, unguessable).
+constexpr std::size_t SUBSCRIPTION_ID_BYTES = 32;
+/// Subscription ids issued and not yet used. Past it the oldest is dropped, so
+/// a client that asks for ids and never opens a stream cannot grow the engine;
+/// a client that opens straight after asking is never near it.
+constexpr std::size_t MAX_PENDING_SUBSCRIPTIONS = 64;
 } // namespace change_feed
 
 /**

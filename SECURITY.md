@@ -26,7 +26,11 @@ engine does not answer to. What a page can still do is a scriptless `GET` - an
 `<img>`, `<script>` or `<link>`, a `no-cors` `fetch`, a top-level navigation -
 which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
 The page gets an opaque response it cannot read, and no `GET` route changes
-anything. A request the engine itself sends - a Send, a run, a script's
+anything. The one `GET` that holds a resource, the change feed's stream
+(`GET /changes`), opens only on a single-use id that `POST
+/changes/subscriptions` issues and a page cannot send, so a page can neither
+read the feed nor fill its fixed number of stream slots to stop the app hearing
+about outside edits. A request the engine itself sends - a Send, a run, a script's
 `pm.sendRequest`, a redirect it follows - never reaches the engine's own port
 or the MCP port, whatever spelling, redirect or DNS name leads there.
 
