@@ -681,9 +681,11 @@ describe("secretForms", () => {
 		["a fragment", "https://api.example.com/v1#", "a b{c@d&e", "a%20b{c@d&e", ""],
 		["a URL-safe secret", "https://api.example.com/v1/", "s3cr3t-value", "s3cr3t-value", "/x"],
 	])("masks a secret written into %s", (_, before, secret, composed, after) => {
+		// `location` rather than `url`: a `url` member also drops its userinfo password
+		// (#3520), which would hide whether the password form itself masks.
 		const rule: RunOutputRule = { forms: secretForms([secret]), apiKeyHeaders: [] };
-		expect(withholdRunOutput({ url: `${before}${composed}${after}` }, rule)).toEqual({
-			url: `${before}${REDACTED_MARKER}${after}`,
+		expect(withholdRunOutput({ location: `${before}${composed}${after}` }, rule)).toEqual({
+			location: `${before}${REDACTED_MARKER}${after}`,
 		});
 	});
 
