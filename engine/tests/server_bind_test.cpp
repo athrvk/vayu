@@ -39,6 +39,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include "held_request.hpp"
+#include "idle_connections.hpp"
 #include "mock_server.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
@@ -754,6 +755,43 @@ TEST_F (ServerBindTest, StopWakesAnInboxCaptureInsideItsCannedDelay) {
 
     expect_stop_ends_the_held_handler (server, inbox_port);
     EXPECT_EQ (held_status_once_ended (held), 202);
+}
+
+// An inbox bound past loopback takes connections from anyone on its network,
+// and they share the engine's descriptors. Every connection here sends a
+// request the inbox holds in its canned delay, so a worker is never freed by a
+// read timeout: the pool is full, 64 more wait in its queue, and the rest are
+// closed at accept while the management API keeps answering. Healthy: the
+// surplus is closed within milliseconds. Broken (an unbounded queue): none is,
+// and the wait runs out its 20s deadline. Mutation check: remove
+// `bound_connections` from `ManagedListener`'s constructor.
+TEST_F (ServerBindTest, ASaturatedInboxClosesTheSurplusAndTheEngineStillAnswers) {
+    constexpr std::size_t SURPLUS = 16;
+    constexpr std::size_t HELD = vayu::core::constants::listener::MAX_THREADS +
+    vayu::core::constants::listener::MAX_QUEUED_CONNECTIONS;
+
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const auto inbox = post_to_engine (port, "/inbox/start",
+    { { "port", 0 }, { "response", { { "status", 202 }, { "delayMs", HELD_DELAY_MS } } } });
+    ASSERT_TRUE (inbox.is_object ());
+    const int inbox_port = inbox.value ("port", 0);
+
+    {
+        vayu::tests::IdleConnections senders (inbox_port, HELD + SURPLUS,
+        vayu::tests::opener_request ("POST", "/hook", "Content-Length: 0\r\n"));
+        ASSERT_EQ (senders.opened (), HELD + SURPLUS);
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&senders] { return senders.closed_by_peer () >= SURPLUS; }))
+        << "connections past the inbox's pool and queue were held, not closed";
+
+        httplib::Client control ("127.0.0.1", port);
+        const auto health = control.Get ("/health");
+        ASSERT_TRUE (health) << httplib::to_string (health.error ());
+        EXPECT_EQ (health->status, 200);
+    }
+    server.stop ();
 }
 
 TEST_F (ServerBindTest, StopWakesAMockIssuerInSlowMode) {

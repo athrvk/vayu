@@ -6459,7 +6459,13 @@ stopped with it in one notice (`app/src/lib/services-stopped-by-restart.ts`).
 is refused unless the caller also sends `"confirmNonLoopback": true`, and the
 inbox reports `loopback: false` from then on so a client can badge it. See
 [architecture.md](architecture.md#listeners) for why only the inbox listener may
-bind wide and the management API never may.
+bind wide and the management API never may. An inbox holds at most 96
+connections at once: 32 being served (a canned `delayMs` wait occupies one for
+its whole duration) and 64 waiting for one. A connection past that is closed at
+accept, which the sender sees as a reset, so an inbox bound past loopback
+cannot be held open by idle connections until the engine runs out of file
+descriptors. Every other on-demand listener (mock server, mock issuer, OAuth
+callback) has the same bound.
 
 **Bounds.** Three are settings (`GET`/`POST /config`, category *Services*),
 read once when an inbox starts - so a change applies to the next inbox
