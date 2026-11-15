@@ -180,7 +180,7 @@ describe("RunItem baseline pin", () => {
 
 		const chip = screen.getByText(BASELINE_CHIP).closest("[data-slot='badge']");
 		expect(chip).not.toBeNull();
-		expect(chip!.className).toContain("bg-primary/15");
+		expect(chip!.className).toContain("bg-primary-tint");
 		expect(chip!.className).not.toMatch(/hover:bg-/);
 	});
 

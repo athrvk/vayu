@@ -142,14 +142,49 @@ to `--foreground`, so this is a known limit rather than an oversight - prefer
 
 Set by the `[data-color-scheme]` attribute; the default is **Ocean**
 (`DEFAULT_COLOR_SCHEME` in `constants/color-schemes.ts` is the source of truth).
-The accent is **split into two tokens** to resolve a contrast bind:
+The accent is **split into two tokens** to resolve a contrast bind, and three
+opaque companions (below) give its hover and its tint a solid colour of their
+own:
 
-- **`--primary`** - the accent used for text, borders, rings, tints, indicators
-  (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
-  the light card, brightened on the near-black dark canvas so it reads in both.
+- **`--primary`** - the accent used for text, borders, rings, indicators
+  (`text-primary`, `border-primary`, `ring-primary/20`). A chip or row ground
+  under text is not an alpha of it but `--primary-tint` (below). Mode-adaptive:
+  deep on the light card, brightened on the near-black dark canvas so it reads
+  in both.
 - **`--primary-fill`** - solid button/badge backgrounds that carry a white
   label (`bg-primary-fill`). One value in **both** modes, deep enough that
   white text clears 4.5:1 (a brightened dark accent would fail white-on-fill).
+
+**The opaque companions (#3515).** A translucent accent alpha puts text on a
+colour that depends on whatever is behind it, so `hover:bg-primary-fill/90`
+measured 4.03-4.09:1 under a white label on six schemes and `bg-primary/15`
+under `text-primary` 4.32-4.42:1 on a white card. Each scheme instead declares
+three solids, plain `H S% L%` triples the contrast guard parses:
+
+- **`--primary-fill-hover`** - the fill's hover (`hover:bg-primary-fill-hover`
+  on `Button`'s default variant, `Badge`'s default variant and the URL bar's
+  Send pair; the border moves with it). A few points darker than the fill, so
+  the white label *gains* contrast on hover instead of losing it. Pinned across
+  themes with the fill.
+- **`--primary-tint`** and **`--primary-tint-hover`** - a solid chip background
+  and its hover (`bg-primary-tint`, `hover:bg-primary-tint-hover`) under
+  `--primary-text`, in place of `bg-primary/15` and `hover:bg-primary/20`
+  wherever the element carries text. A light solid in light, a dark solid in
+  dark, so unlike the fill they differ per theme. `--primary-text`, `--primary`
+  and `--foreground` all clear 4.5:1 on both. Light `ocean`, `coral` and
+  `magenta` are the binding cases: their `--primary` was set by the surfaces
+  and sits barely above 4.5:1 on white, so their tint is the palest.
+
+**The rule: an alpha of the accent (`bg-primary/<n>`, `bg-primary-fill/<n>`,
+and their `hover:` / `disabled:` / `data-[...]:` forms) is allowed only where no
+text sits on it** - a dot, a ring, a selection outline, a chart area, a
+text-selection highlight over transparent text. An element that renders text,
+its own or its children's, uses the opaque tokens: `bg-primary-tint` at rest,
+`hover:bg-primary-tint-hover` when it is already tinted and
+`hover:bg-primary-tint` when it is not. `accent-alpha-under-text.test.ts` scans
+every non-test source file and fails on any other use; a genuinely text-free one
+goes in its allow-list with the reason. The per-scheme values are in the second
+table under [Color Schemes](#color-schemes-accent-themes).
 
 Both halves meet **4.5:1 in every scheme and both themes** (#3499): `--primary`
 as text on `--card`, `--panel`, `--background`, `--muted` and `--accent`, and
@@ -167,6 +202,9 @@ everything else accent uses `--primary`. `--primary-foreground` (white) sits on 
 /* Sunset (the values below; the default scheme is Ocean) */
 --primary:       24 90% 36%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
 --primary-fill:  24 90% 39%;   /* both modes - white-safe button fill */
+--primary-fill-hover: 24 90% 34%;   /* both modes - the fill's hover, white-safe */
+--primary-tint:       24 100% 97%;  /* light - solid chip ground */  /* dark: 24 50% 14% */
+--primary-tint-hover: 24 100% 93%;  /* light - its hover */          /* dark: 24 50% 18% */
 --primary-text:  var(--primary);   /* accent as a label - see below */
 --primary-foreground: 0 0% 100%;
 --ring / --variable: track --primary
@@ -204,7 +242,12 @@ dark too. Retuning graphite's `--primary` instead is not an option - that also
 paints its ring, `--chart-1` and every `text-primary`, near-black in light.
 This is the same bind `--primary-fill` exists to solve, answered the same way.
 
-**Adding a scheme:** override `--primary-text` if the accent's saturation is
+**Adding a scheme:** declare all three opaque tokens in the scheme's light block
+*and* its dark block (`:root` and `.dark` carry Sunset's), because a token a
+`.dark[data-color-scheme]` block leaves out falls through to the light value of
+its scheme; `color-schemes.test.ts`
+lists them in `REQUIRED` and `color-scheme-contrast.test.ts` measures them.
+Then override `--primary-text` if the accent's saturation is
 under about 25%, or if the accent sits within 0.10 OKLab of
 `--muted-foreground`. `color-schemes.test.ts` derives the first rule from the
 stylesheet rather than naming graphite, so a new desaturated scheme fails until
@@ -963,7 +1006,8 @@ takes the series' role too (`ChartLegend`), never a token typed beside it.
 ## Color Schemes (Accent Themes)
 
 Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
-`--primary`, `--primary-fill`, `--primary-foreground`, `--ring`, `--variable`,
+`--primary`, `--primary-fill`, `--primary-fill-hover`, `--primary-tint`,
+`--primary-tint-hover`, `--primary-foreground`, `--ring`, `--variable`,
 and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
 accent) live in `app/src/index.css`; the table below is an approximate guide.
 
@@ -1054,6 +1098,28 @@ immediately instead, which is also the macOS system tooltip's own behaviour.
 | `magenta` | `305 72% 42%` | `305 85% 70%` | `305 72% 45%` |
 | `graphite` | `220 12% 43%` | `220 15% 72%` | `220 12% 46%` |
 
+The opaque fill hover and tints (#3515) are in their own table, because the one
+above is parsed against the stylesheet column by column. The tint columns are
+light and dark values, since a tint is a solid ground and each theme needs the
+ground that suits it; `--primary-fill-hover` is one value in both themes, like
+the fill.
+
+| Scheme | `--primary-fill-hover` (both themes) | Light `--primary-tint` | Light `--primary-tint-hover` | Dark `--primary-tint` | Dark `--primary-tint-hover` |
+|--------|-----------|----------|----------|----------|----------|
+| `sunset` | `24 90% 34%` | `24 100% 97%` | `24 100% 93%` | `24 50% 14%` | `24 50% 18%` |
+| `sky` | `192 95% 26%` | `192 100% 91%` | `192 100% 87%` | `188 50% 14%` | `188 50% 18%` |
+| `ocean` (default) | `217 80% 43%` | `217 90% 98%` | `217 90% 95%` | `217 50% 14%` | `217 50% 18%` |
+| `forest` | `142 72% 25%` | `142 82% 87%` | `142 82% 83%` | `142 50% 14%` | `142 50% 18%` |
+| `aurora` | `262 55% 49%` | `262 65% 97%` | `262 65% 93%` | `258 50% 14%` | `258 50% 18%` |
+| `coral` | `0 68% 48%` | `0 78% 98%` | `0 78% 95%` | `0 50% 14%` | `0 50% 18%` |
+| `magenta` | `305 72% 40%` | `305 82% 98%` | `305 82% 95%` | `305 50% 14%` | `305 50% 18%` |
+| `graphite` | `220 12% 41%` | `220 14% 97%` | `220 14% 93%` | `220 15% 14%` | `220 15% 18%` |
+
+Light `sky` and `forest` tints are the strongest because their `--primary` is
+the deepest; light `ocean`, `coral` and `magenta` the palest, because theirs is
+the lightest. The ceiling is the text, not taste: `--primary-text` on the hover
+tint is what sets how dark a light tint can go, and the guard holds it.
+
 Every scheme also resolves `--primary-text` (the accent as a label). It tracks
 `--primary` for all of these except `graphite`, which sets `220 12% 26%` light
 and `220 15% 86%` dark, and light `sky`, which sets `192 95% 22%` - see
@@ -1065,13 +1131,17 @@ missing block fails silently: the picker offers a swatch that inherits `:root`
 and quietly does nothing.
 
 The values have to clear three bars, and `color-scheme-contrast.test.ts`
-measures the first two in both themes. The fill carries a white label at
+measures them in both themes. The fill carries a white label at
 **4.5:1** (the existing fills land at APCA Lc 76–84); keep it at **3.0+ against
 `--card`** too, so the button still reads as a control. `--primary` is text at
 **4.5:1** on the opaque surfaces: `--card`, `--panel`, `--background`,
 `--muted` and `--accent`, so in light the darkest of them, `--muted`, sets it.
-Text on its own tint (`bg-primary/15` chips, `hover:bg-primary/20`) is not
-measured there and is tracked in #3515.
+The opaque tokens are measured there too (#3515): white on
+`--primary-fill-hover` at **4.5:1** and darker than the fill, and
+`--primary-text`, `--primary` and `--foreground` each at **4.5:1** on
+`--primary-tint` and `--primary-tint-hover`, with the two tints a visible step
+apart. Pick the tints last, from the accent text: the darkest a light tint can
+be is set by the lightest text on it.
 The dark `--primary` also wants **Lc 44–69** against the dark card. Check the
 new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
 from the semantic status colours, or it will read as a duplicate in the picker.
@@ -2012,6 +2082,7 @@ see.
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
+| An element that renders text never paints a translucent accent (`bg-primary/<n>`) behind it; the opaque `--primary-tint` family is held to 4.5:1 per scheme instead | `accent-alpha-under-text.test.ts`, `color-scheme-contrast.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
 
 **A tree row is named by its name, not by what is inside it.** A `treeitem`
@@ -4076,7 +4147,10 @@ surface-card` field, then Send and Load test attached as a pair. Send is the
 solid action on `bg-primary-fill` with a white label, reads "Send" (or
 "Sending…" while in flight) and carries no leading glyph; Load test is the
 outlined action on the same accent and reads "Load test". Both are token-based:
-no hardcoded purple, no bracketed pixel heights.
+no hardcoded purple, no bracketed pixel heights. Each hover is an opaque step of
+its own ground: Send goes `hover:bg-primary-fill-hover` (border with it), Load
+test goes `bg-primary-tint` to `hover:bg-primary-tint-hover`, and a disabled
+Load test pins `disabled:hover:bg-primary-tint` so it does not step at all.
 
 ### Dashboard Header (Compact 52px)
 
@@ -4140,6 +4214,7 @@ read as a fraction, and there is no fraction to report.
 | Secondary text | `text-muted-foreground` |
 | De-emphasized text | `text-subtle-foreground` |
 | Primary accent | `text-primary`, `bg-primary`, `border-primary` |
+| Solid accent chip and its hover (text on it) | `bg-primary-tint`, `hover:bg-primary-tint-hover`, with `text-primary-text` on it |
 | Default border | `border-border` |
 | Strong border | `border-border-strong` |
 | Hover state | `hover:bg-accent` |
@@ -4160,7 +4235,8 @@ read as a fraction, and there is no fraction to report.
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
 - Hardcoded hex method colors like `text-[#22c55e]` - use `getMethodColor` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
-- Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
+- Hardcoded purple for Load test / secondary actions - use `text-primary-text`/`border-primary`/`bg-primary-tint`
+- `bg-primary/10`, `hover:bg-primary/20` and every other alpha of the accent behind text - use `bg-primary-tint` / `hover:bg-primary-tint-hover` (see [Primary](#primary-accent-color))
 
 These rules are enforced by `palette-tokens.test.ts` (under
 `modules/request-builder/components/ResponseViewer/`) over every `.tsx` in

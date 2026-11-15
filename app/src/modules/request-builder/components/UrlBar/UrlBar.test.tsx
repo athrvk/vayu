@@ -267,22 +267,22 @@ describe("the bar in a narrow pane (#3494)", () => {
  *
  * All three shipped with `transition-opacity` and no `hover:` rule at all - a
  * transition for a change that never happened. `Button`'s `default` variant is
- * `hover:bg-primary-fill/90`; these are hand-rolled so the pair can share an
+ * `hover:bg-primary-fill-hover`; these are hand-rolled so the pair can share an
  * edge, which means they carry that convention rather than inherit it.
  */
 describe("button hover states", () => {
 	it("darkens the Send fill, matching the Button primitive", () => {
 		renderBar(true);
 		const send = screen.getByRole("button", { name: /send/i });
-		expect(send.className).toContain("hover:bg-primary-fill/90");
+		expect(send.className).toContain("hover:bg-primary-fill-hover");
 		// The border has to move with the fill or a lighter ring is left behind.
-		expect(send.className).toContain("hover:border-primary-fill/90");
+		expect(send.className).toContain("hover:border-primary-fill-hover");
 	});
 
 	it("steps the Load Test tint up rather than down", () => {
 		renderBar(true);
 		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
-			"hover:bg-primary/20"
+			"hover:bg-primary-tint-hover"
 		);
 	});
 
@@ -304,7 +304,7 @@ describe("button hover states", () => {
 	it("does not offer a hover on a button that cannot be clicked", () => {
 		renderBar(true);
 		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
-			"disabled:hover:bg-primary/10"
+			"disabled:hover:bg-primary-tint"
 		);
 	});
 });

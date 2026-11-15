@@ -17,6 +17,12 @@
  * the accent as a label, is held to the same bar: it aliases `--primary` in
  * most schemes and is a literal in the rest.
  *
+ * Three opaque tokens answer the same two jobs where a translucent alpha used
+ * to (#3515): `--primary-fill-hover` is the fill's hover, under the same white
+ * label, and `--primary-tint` / `--primary-tint-hover` are the surfaces accent
+ * text sits on in a chip and its hover. Accent text (`--primary-text`,
+ * `--primary`) and `--foreground` have to clear 4.5 on both tints.
+ *
  * A variable token is resolved, empty, undefined, deferred or an undeclared
  * `data.*` column (warning), and the accent is one of those colours, so a
  * scheme can move a state onto its neighbour. Two
@@ -35,6 +41,7 @@ import {
 	THEMES,
 	contrastRatio,
 	oklabDistance,
+	relativeLuminance,
 	resolveToken,
 	type Theme,
 } from "@/lib/contrast-math.testkit";
@@ -43,8 +50,11 @@ import type { VariableTokenKind } from "@/lib/variable-token-kind";
 import { COLOR_SCHEMES } from "./color-schemes";
 
 const BAR = 4.5;
+/** Under this OKLab distance a hover tint reads as no change (the smallest shipped is 0.027). */
+const MIN_TINT_STEP = 0.02;
 const SURFACES = ["card", "panel", "background", "muted", "accent"] as const;
 const TEXT_TOKENS = ["primary", "primary-text"] as const;
+const TINTS = ["primary-tint", "primary-tint-hover"] as const;
 
 const SCHEMES: (string | null)[] = [...COLOR_SCHEMES.map((s) => s.value), null];
 const CASES = SCHEMES.flatMap((scheme) =>
@@ -78,6 +88,40 @@ describe("the white label on the fill", () => {
 		const label = resolveToken("primary-foreground", scheme, theme);
 		const fill = resolveToken("primary-fill", scheme, theme);
 		expect(contrastRatio(label, fill)).toBeGreaterThanOrEqual(BAR);
+	});
+});
+
+describe("the white label on the hover fill", () => {
+	it.each(CASES)("%s %s clears 4.5:1 and is darker than the fill", (_label, theme, scheme) => {
+		const label = resolveToken("primary-foreground", scheme, theme);
+		const hover = resolveToken("primary-fill-hover", scheme, theme);
+		expect(contrastRatio(label, hover)).toBeGreaterThanOrEqual(BAR);
+		// A hover that is not darker than the fill is no state change.
+		expect(relativeLuminance(hover)).toBeLessThan(
+			relativeLuminance(resolveToken("primary-fill", scheme, theme))
+		);
+	});
+});
+
+describe("text on the accent tints", () => {
+	it.each(CASES)("%s %s clears 4.5:1 on both tints", (_label, theme, scheme) => {
+		const misses: string[] = [];
+		for (const tint of TINTS) {
+			const ground = resolveToken(tint, scheme, theme);
+			for (const token of [...TEXT_TOKENS, "foreground"]) {
+				const ratio = contrastRatio(resolveToken(token, scheme, theme), ground);
+				if (ratio < BAR) misses.push(`--${token} on --${tint}: ${ratio.toFixed(2)}`);
+			}
+		}
+		expect(misses).toEqual([]);
+	});
+
+	it.each(CASES)("%s %s: the hover tint is a step from the tint", (_label, theme, scheme) => {
+		const distance = oklabDistance(
+			resolveToken("primary-tint", scheme, theme),
+			resolveToken("primary-tint-hover", scheme, theme)
+		);
+		expect(distance).toBeGreaterThanOrEqual(MIN_TINT_STEP);
 	});
 });
 

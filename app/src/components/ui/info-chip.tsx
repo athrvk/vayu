@@ -53,7 +53,7 @@ export function InfoChip({ tip, className }: InfoChipProps) {
 				<button
 					type="button"
 					className={cn(
-						"relative ml-1.5 inline-flex size-icon-sm items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle after:absolute after:left-1/2 after:top-1/2 after:size-target after:-translate-x-1/2 after:-translate-y-1/2",
+						"relative ml-1.5 inline-flex size-icon-sm items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary-tint hover:text-primary transition-colors cursor-help align-middle after:absolute after:left-1/2 after:top-1/2 after:size-target after:-translate-x-1/2 after:-translate-y-1/2",
 						className
 					)}
 					aria-label="More information"

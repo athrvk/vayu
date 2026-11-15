@@ -125,7 +125,7 @@ export function rowDndClasses(row: RowDnd): string {
 		"relative",
 		row.isDragging && "opacity-50",
 		row.isBlocked && "opacity-40",
-		row.isDropInto && "ring-1 ring-inset ring-primary/50 bg-primary/10",
+		row.isDropInto && "ring-1 ring-inset ring-primary/50 bg-primary-tint",
 	]
 		.filter(Boolean)
 		.join(" ");

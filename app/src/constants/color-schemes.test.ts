@@ -26,10 +26,16 @@ import { COLOR_SCHEMES, DEFAULT_COLOR_SCHEME, isColorScheme } from "./color-sche
 
 // Every token a scheme block is expected to set. `--primary-fill` is the one
 // that carries a white label, so it must be present even though it is the only
-// token that deliberately does *not* change between themes.
+// token that deliberately does *not* change between themes. The fill's hover and
+// the two tints are opaque per-scheme values (#3515), and a dark block that
+// leaves one out inherits the light scheme block's, which reads on the wrong
+// ground.
 const REQUIRED = [
 	"--primary",
 	"--primary-fill",
+	"--primary-fill-hover",
+	"--primary-tint",
+	"--primary-tint-hover",
 	"--primary-foreground",
 	"--ring",
 	"--variable",
@@ -76,17 +82,21 @@ describe("accent colour schemes", () => {
 		for (const token of REQUIRED) expect(b).toContain(`${token}:`);
 	});
 
-	it("keeps --primary-fill pinned across themes, and lets --primary diverge", () => {
+	it("keeps --primary-fill and its hover pinned across themes, and lets --primary diverge", () => {
 		// This split is the whole reason white labels stay legible: the fill is
 		// one value in both themes, while --primary brightens in dark because it
-		// is text, ring and chart-series colour on a near-black card.
+		// is text, ring and chart-series colour on a near-black card. The hover
+		// carries the same white label, so it is pinned with it.
 		for (const { value } of COLOR_SCHEMES) {
 			const light = block(value, false) ?? "";
 			const dark = block(value, true) ?? "";
-			const fill = (b: string) => /--primary-fill:\s*([^;]+);/.exec(b)?.[1].trim();
-			expect(fill(dark), `${value}: --primary-fill must not change between themes`).toBe(
-				fill(light)
-			);
+			for (const token of ["primary-fill", "primary-fill-hover"]) {
+				const read = (b: string) =>
+					new RegExp(`--${token}:\\s*([^;]+);`).exec(b)?.[1].trim();
+				expect(read(dark), `${value}: --${token} must not change between themes`).toBe(
+					read(light)
+				);
+			}
 		}
 	});
 

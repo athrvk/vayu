@@ -346,7 +346,7 @@ function RunItem({
 					// so the selected state would snap rather than fade in.
 					"focus-row group relative flex flex-col gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-[background-color,border-color,box-shadow]",
 					isSelected
-						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+						? "bg-primary-tint ring-1 ring-inset ring-primary/20 hover:bg-primary-tint-hover"
 						: "hover:bg-accent"
 				)}
 			>
@@ -408,7 +408,7 @@ function RunItem({
 					{run.baseline && (
 						<Badge
 							variant="chip"
-							className="min-w-0 max-w-1/2 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
+							className="min-w-0 max-w-1/2 gap-1 bg-primary-tint px-1.5 py-0 text-micro font-semibold text-primary"
 							title={pinChipText}
 						>
 							<Pin className="size-icon-sm shrink-0" />
