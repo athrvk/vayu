@@ -175,8 +175,12 @@ import {
 } from "./constants.js";
 import { isDevelopmentBuild } from "./dev-mode.js";
 import { denyDevicePermissions } from "./permissions.js";
+import { suppressDictionaryDownloads } from "./spellcheck.js";
 
 const isDev = isDevelopmentBuild();
+
+// Before any session exists, so the default session is covered (#1355).
+suppressDictionaryDownloads(app);
 
 // Use an in-memory mock keychain for Chromium's OSCrypt instead of the real
 // macOS Keychain. Without this, Chromium stores its cookie/safeStorage
@@ -622,10 +626,10 @@ function createWindow() {
 				...(legacyStorage.hasPending() ? [LEGACY_STORAGE_ARG] : []),
 			],
 			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
-			// header values, {{tokens}} and JSON keys all draw squiggles - and on
-			// Windows and Linux the checker fetches Hunspell dictionaries from a
-			// Google CDN the first time it runs, which a tool pointed at internal
-			// APIs should not do for a feature it does not want.
+			// header values, {{tokens}} and JSON keys all draw squiggles. This
+			// only silences the checker: the Hunspell download a tool pointed at
+			// internal APIs must not make is stopped per session, by
+			// `suppressDictionaryDownloads` above.
 			spellcheck: false,
 		},
 		title: "Vayu",
