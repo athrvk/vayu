@@ -240,9 +240,9 @@ describe("the schema badge holds its own width", () => {
 	it("reserves every word it can say, whatever it is saying now", () => {
 		seed({ status: "ready", schema, fetchedAt: Date.now() });
 		renderBody();
-		// The set, not a hand-picked widest - which of the three is widest is a
+		// The set, not a hand-picked widest - which of them is widest is a
 		// measurement, and a measurement written into a class rots.
-		expect(reservedWords()).toEqual(["No schema", "Schema", "Schema stale"]);
+		expect(reservedWords()).toEqual(["Load schema", "No schema", "Schema", "Schema stale"]);
 	});
 
 	it("keeps a glyph box in every state, empty only while idle", () => {

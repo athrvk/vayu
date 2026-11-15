@@ -22,7 +22,7 @@
  */
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import { LabelSwap } from "@/components/ui";
+import { Button, LabelSwap } from "@/components/ui";
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
 import { schemaStatusTitle } from "@/lib/graphql/schema-status";
 import { cn } from "@/lib/utils";
@@ -57,7 +57,7 @@ export function BadgeText({
  * being a finite set at all is why `LabelSwap` fits here and does not fit a
  * `TabCount` - see the `LabelSwap` paragraph in `docs/design-system.md`.
  */
-const SCHEMA_WORDS = ["Schema", "Schema stale", "No schema"] as const;
+const SCHEMA_WORDS = ["Schema", "Schema stale", "No schema", "Load schema"] as const;
 
 type SchemaBadgeFace = {
 	tone: string;
@@ -66,8 +66,14 @@ type SchemaBadgeFace = {
 	glyph: React.ReactNode;
 };
 
-function schemaBadgeFace(entry: SchemaEntry | null): SchemaBadgeFace {
+function schemaBadgeFace(entry: SchemaEntry | null, awaitingLoad: boolean): SchemaBadgeFace {
 	const status = entry?.status ?? "idle";
+
+	// The action is the face while nothing has loaded and the cache is holding
+	// off; once an entry says anything else, what it says is the truth.
+	if (awaitingLoad && status === "idle") {
+		return { tone: "text-muted-foreground", word: "Load schema", glyph: null };
+	}
 
 	// No status has been established yet, and inventing one reads as a claim -
 	// so this is the one face with no glyph and the neutral word.
@@ -142,11 +148,24 @@ function schemaBadgeFace(entry: SchemaEntry | null): SchemaBadgeFace {
  * remember a fallback, and the fallback the Query header used to hand-roll for
  * that case (a plain `Schema` label) is now this component's `idle` face.
  */
-export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
-	const { tone, word, glyph } = schemaBadgeFace(entry);
-
-	return (
-		<BadgeText slot="schema-status-badge" className={tone} title={schemaStatusTitle(entry)}>
+export function SchemaStatusBadge({
+	entry,
+	awaitingLoad = false,
+	onLoad,
+}: {
+	entry: SchemaEntry | null;
+	/**
+	 * The cache declined to load this schema on its own (the endpoint is not
+	 * one the user has contacted). The badge then says **Load schema** as a
+	 * button running `onLoad`, which is the one place the badge is a target - the
+	 * Refresh beside it stays unconditional and is the other way to ask.
+	 */
+	awaitingLoad?: boolean;
+	onLoad?: () => void;
+}) {
+	const { tone, word, glyph } = schemaBadgeFace(entry, awaitingLoad);
+	const face = (
+		<>
 			<span
 				data-slot="schema-status-glyph"
 				aria-hidden="true"
@@ -155,6 +174,26 @@ export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 				{glyph}
 			</span>
 			<LabelSwap label={word} states={SCHEMA_WORDS} />
+		</>
+	);
+
+	return (
+		<BadgeText
+			slot="schema-status-badge"
+			className={tone}
+			title={schemaStatusTitle(entry, awaitingLoad)}
+		>
+			{word === "Load schema" && onLoad ? (
+				<Button
+					variant="link"
+					className="h-auto gap-1 p-0 text-micro font-semibold"
+					onClick={onLoad}
+				>
+					{face}
+				</Button>
+			) : (
+				face
+			)}
 		</BadgeText>
 	);
 }

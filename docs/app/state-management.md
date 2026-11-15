@@ -1433,6 +1433,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   systemNotifications: boolean   // opt-in for OS notifications while Vayu is in the background; default off
   notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
   loadTestCeilings: LoadTestCeilings
+  approvedEndpoints: string[]    // origins the user has contacted; the GraphQL schema loads on its own only for these
 }
 ```
 
@@ -1463,6 +1464,13 @@ default, and it is persisted through `partialize` like the rest of this store's
 top-level preferences.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
+
+`approvedEndpoints` is the list of origins (scheme, host, port) the user has chosen
+to contact: `useEngine().composeRequest` adds the composed URL's origin on every
+Send, Load test and History re-run, and a manual schema load adds the one it
+reached (`lib/graphql/approved-endpoints.ts`). The GraphQL body's automatic
+introspection reads it and nothing else does. It is a list of strings, not an
+object, so the rehydrate merge filters it to strings rather than completing it.
 
 **Persisted** to localStorage (via `zustand/persist`), `version: 1` with a
 pass-through `migrate`; workspace/session state (open tabs, layout, active
