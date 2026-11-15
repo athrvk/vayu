@@ -140,7 +140,8 @@ secret variable's value, a credential typed into a saved auth block, a
 credential header's value, the token or key Vayu itself placed in the URL's
 query or a header, or the value of a credential query parameter (`api_key`,
 `token` and the like) in a request's URL appears, whatever encoding it went
-out in. If Vayu cannot read the values it masks against, the agent gets an
+out in; the password of a URL's `user:password@host` is dropped from a run's
+`url` and a report's `requestUrl` as it is from a saved request's. If Vayu cannot read the values it masks against, the agent gets an
 error in place of the record, never a partly masked one. The text of an engine
 refusal an agent reads (`Engine error (400): ...`) is masked the same way (the engine
 also words its refusals to avoid quoting a resolved variable value). Requests an

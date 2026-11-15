@@ -95,7 +95,7 @@ function toneClass({
 		return "text-destructive-text underline decoration-wavy underline-offset-[3px] hover:bg-destructive-text/10";
 	}
 	if (!value) return "text-muted-foreground hover:bg-muted";
-	return "text-primary-text hover:bg-primary/10";
+	return "text-primary-text hover:bg-primary-tint";
 }
 
 /** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */

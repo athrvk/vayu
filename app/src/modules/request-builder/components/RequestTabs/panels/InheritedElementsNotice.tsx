@@ -134,7 +134,7 @@ export default function InheritedElementsNotice({
 						</span>
 						<Badge
 							variant="chip"
-							className="bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary"
+							className="bg-primary-tint px-1.5 py-0.5 text-micro font-medium text-primary"
 						>
 							{kindLabel(entry.kind)}
 						</Badge>

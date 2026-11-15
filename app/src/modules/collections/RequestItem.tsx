@@ -187,7 +187,7 @@ function RequestItemRow({
 				"focus-row flex h-8 items-center gap-2 pr-3 group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
-					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+					? "bg-primary-tint ring-1 ring-inset ring-primary/20 hover:bg-primary-tint-hover"
 					: "hover:bg-accent",
 				// Last, so a drop target's ring wins over the selected row's - the
 				// two are the same colour and the drop is the transient one.

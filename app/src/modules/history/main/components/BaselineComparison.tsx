@@ -104,7 +104,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 				    every other variant would drag a `hover:bg-*` along with it. */}
 				<Badge
 					variant="chip"
-					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-micro font-semibold"
+					className="gap-1 bg-primary-tint text-primary px-1.5 py-0 text-micro font-semibold"
 				>
 					<Pin className="size-icon-sm" />
 					<TimeValue value={baselineRun.startTime} />

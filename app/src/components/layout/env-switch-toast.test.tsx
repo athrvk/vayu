@@ -221,7 +221,7 @@ describe("environment selector tokens", () => {
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
 		renderTitleBar(TitleBar);
 		const cls = trigger().className;
-		expect(cls).toContain("bg-primary/10");
+		expect(cls).toContain("bg-primary-tint");
 		expect(cls).toContain("border-primary/30");
 		// --primary-text, not --primary: on graphite the accent is a neutral and
 		// would read as grey text on a grey tint.

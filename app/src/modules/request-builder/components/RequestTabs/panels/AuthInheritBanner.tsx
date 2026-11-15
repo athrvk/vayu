@@ -167,7 +167,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						</span>
 
 						{isSource && (
-							<span className="text-micro font-semibold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-micro font-semibold bg-primary-tint text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}

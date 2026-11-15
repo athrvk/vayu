@@ -1325,6 +1325,82 @@ describe("withholdRunOutput: a credential-named query value (#1909)", () => {
 	});
 });
 
+describe("withholdRunOutput: a run URL's userinfo password and requestUrl", () => {
+	const rule: RunOutputRule = { forms: [], apiKeyHeaders: [] };
+
+	test("drops the password of a run row's url and keeps the user", () => {
+		expect(withholdRunOutput({ url: "http://u:LIT@h/p" }, rule)).toEqual({
+			url: "http://u@h/p",
+		});
+	});
+
+	test("drops it in a trace, a redirect hop and a list of rows", () => {
+		const out = withholdRunOutput(
+			[
+				{ request: { url: "http://u:LIT@h/p" } },
+				{ response: { redirects: [{ url: "http://u:LIT@h/q" }] } },
+			],
+			rule
+		);
+		expect(JSON.stringify(out)).not.toContain("LIT");
+	});
+
+	test("treats metadata.requestUrl as a url: password dropped, credential query masked", () => {
+		const report = { metadata: { requestUrl: "http://u:LIT@h/p?api_key=LIT2&page=2" } };
+		expect(withholdRunOutput(report, rule)).toEqual({
+			metadata: { requestUrl: "http://u@h/p?api_key=<redacted>&page=2" },
+		});
+	});
+
+	test("masks requestUrl by the auth-written name its record names", () => {
+		const record = { authQueryParam: "session", requestUrl: "http://h/p?session=LIT" };
+		expect(withholdRunOutput(record, rule)).toEqual({
+			...record,
+			requestUrl: "http://h/p?session=<redacted>",
+		});
+	});
+
+	test("leaves a url with no password, a lone {{variable}} password and a path @ as written", () => {
+		for (const url of ["http://u@h/p", "http://u:{{pw}}@h/p", "http://h/p@x:y", "/p?x=1"]) {
+			expect(withholdRunOutput({ url }, rule)).toEqual({ url });
+		}
+	});
+
+	test("leaves a query or fragment @ alone while dropping the authority's password", () => {
+		expect(withholdRunOutput({ url: "http://u:LIT@h/p?e=a:b@c#f:g@h" }, rule)).toEqual({
+			url: "http://u@h/p?e=a:b@c#f:g@h",
+		});
+		expect(withholdRunOutput({ url: "http://h?e=a:b@c" }, rule)).toEqual({
+			url: "http://h?e=a:b@c",
+		});
+	});
+
+	test("the projection applies it with reveal off and leaves the answer as it was with reveal on", async () => {
+		const client = {
+			getGlobals: vi.fn().mockResolvedValue({}),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+			listCollections: vi.fn().mockResolvedValue([]),
+			listAllRequests: vi.fn().mockResolvedValue([]),
+		};
+		const answer = {
+			url: "http://u:LIT@h/p",
+			metadata: { requestUrl: "http://u:LIT@h/p?api_key=LIT2" },
+		};
+		const off = await runOutputShape({
+			client,
+			config: resolveSafetyConfig({ revealSecretsToAgents: false }),
+		});
+		const masked = JSON.stringify(off(answer));
+		expect(masked).not.toContain("LIT");
+		expect(masked).toContain("http://u@h/p");
+		const on = await runOutputShape({
+			client,
+			config: resolveSafetyConfig({ revealSecretsToAgents: true }),
+		});
+		expect(on(answer)).toBe(answer);
+	});
+});
+
 describe("runOutputShape", () => {
 	const scopes = () => ({
 		getGlobals: vi.fn().mockResolvedValue({

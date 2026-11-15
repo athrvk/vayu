@@ -220,7 +220,7 @@ function CollectionItemRow({
 				// list (`CollectionTreeRows`), which knows which they are.
 				isDeleting && "opacity-50",
 				isSelected
-					? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
+					? "bg-primary-tint hover:bg-primary-tint-hover ring-1 ring-inset ring-primary/20"
 					: "hover:bg-accent",
 				// Last, so a drop target's ring wins over the selected row's -
 				// same colour, and the drop is the transient one.

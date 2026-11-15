@@ -1287,6 +1287,27 @@ function maskUrlQuery(url: string, authNames: readonly string[]): string {
 	return `${url.slice(0, queryAt + 1)}${query}${url.slice(end)}`;
 }
 
+/**
+ * The members of a run record that hold a request URL: a trace's and a row's
+ * `url` (a redirect hop's and a monitor's too) and the report metadata's
+ * `requestUrl`, which the engine copies from the snapshot's `url`.
+ */
+const RUN_URL_MEMBERS: ReadonlySet<string> = new Set(["url", "requestUrl"]);
+
+/**
+ * A run record's URL with its userinfo password dropped, as a stored request's
+ * is ({@link withholdRequestUrl}), and its credential query values masked
+ * ({@link maskUrlQuery}).
+ */
+function maskRunUrl(url: string, authNames: readonly string[]): string {
+	const headEnd = url.search(/[?#]/);
+	const unlocked =
+		headEnd === -1
+			? dropUserinfoPassword(url)
+			: dropUserinfoPassword(url.slice(0, headEnd)) + url.slice(headEnd);
+	return maskUrlQuery(unlocked, authNames);
+}
+
 /** The ` HTTP/1.1` a request line ends with, which is not part of its target. */
 const REQUEST_LINE_VERSION = / HTTP\/[\d.]+$/;
 
@@ -1387,7 +1408,7 @@ function withholdRunMember(
 	);
 	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, here.apiKeyHeaders);
 	if (typeof masked !== "string") return masked;
-	if (key === "url") return maskUrlQuery(masked, here.authQueryNames);
+	if (RUN_URL_MEMBERS.has(key)) return maskRunUrl(masked, here.authQueryNames);
 	if (key !== "rawRequest") return masked;
 	return withholdWireHeaders(maskRequestLine(masked, here.authQueryNames), here.apiKeyHeaders);
 }
@@ -1399,7 +1420,9 @@ function withholdRunMember(
  * `authHeaders`) also has that query value masked in its sibling `url` and
  * `rawRequest` request line, and those headers masked in its siblings; a
  * credential-named query value ({@link SENSITIVE_PARAM_NAMES}) is masked in
- * those two places on every record, auth-written or typed.
+ * those two places on every record, auth-written or typed. A URL member
+ * ({@link RUN_URL_MEMBERS}) also has its userinfo password dropped, as a
+ * stored request's is.
  * Keys are left alone, as the engine leaves them: a header or field *name* is
  * not a value. Numbers are never touched, so a size the engine reported still
  * describes what it measured.

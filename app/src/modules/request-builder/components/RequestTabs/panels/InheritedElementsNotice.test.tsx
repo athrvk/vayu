@@ -128,7 +128,7 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		expect(chip).toHaveAttribute("data-slot", "badge");
 		expect(chip.className).not.toContain("rounded-full");
 		expect(chip.className).toContain("rounded-md");
-		expect(chip.className).toContain("bg-primary/15");
+		expect(chip.className).toContain("bg-primary-tint");
 		expect(chip.className).not.toMatch(/hover:bg-/);
 	});
 
