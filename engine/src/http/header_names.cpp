@@ -22,9 +22,10 @@ const std::string& written) {
 }
 
 std::string describe_header_name_collision (const HeaderNameCollision& collision) {
-    return "header \"" + collision.written + "\" and header \"" +
-    collision.other + "\" resolve to one name (\"" + collision.produced +
-    "\", compared without case)"
+    // The name they landed on is not quoted: it is what a variable produced,
+    // and a variable can hold a secret.
+    return "header \"" + collision.written + "\" and header \"" + collision.other +
+    "\" resolve to one name (compared without case)"
     " - the request would carry that header twice where its rows show two"
     " different names, so it is refused rather than sent as nobody wrote it";
 }
@@ -84,18 +85,22 @@ std::string with_tokens_as_placeholders (std::string_view name) {
 
 } // namespace
 
-std::optional<std::string> invalid_header_name_refusal (std::string_view name) {
+std::optional<std::string>
+invalid_header_name_refusal (std::string_view name, std::string_view written) {
     // A `{{token}}` nothing has answered is sent as written (issue #1009), so
     // it is not what is judged: the text around it is. A `{{` that closes no
     // token is ordinary text, and `{` is not a token character.
-    const auto reason = invalid_header_token (with_tokens_as_placeholders (name), name);
-    if (!reason) {
+    const auto offending =
+    offending_header_name_byte (with_tokens_as_placeholders (name));
+    if (!offending) {
         return std::nullopt;
     }
-    return "header " + *reason +
-    " - spaces and tabs around a name are trimmed, but a name with anything "
-    "else"
-    " in it is refused rather than rewritten into a header nobody wrote";
+    const std::string subject =
+    written.empty () ? std::string ("the name") : "'" + std::string (written) + "'";
+    return "header " + subject + " is not a header name: " + *offending +
+    " cannot appear in one - spaces and tabs around a name are trimmed, but a "
+    "name with anything else in it is refused rather than rewritten into a "
+    "header nobody wrote";
 }
 
 } // namespace vayu::http

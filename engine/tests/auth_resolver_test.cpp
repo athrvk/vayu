@@ -132,7 +132,11 @@ TEST (AuthResolver, ApiKeyHeaderNameThatIsNotATokenIsRefused) {
     EXPECT_FALSE (result.ok);
     EXPECT_EQ (result.code, vayu::ErrorCode::AuthFailed);
     EXPECT_EQ (result.detail_code, "invalid_header_name");
-    EXPECT_NE (result.message.find ("'X Key'"), std::string::npos) << result.message;
+    // The key arrives resolved, so it may be a secret: the byte is named, the
+    // key is not. Mutation check: quote `key` in `apply_api_key`'s refusal.
+    EXPECT_NE (result.message.find ("' ' cannot appear"), std::string::npos)
+    << result.message;
+    EXPECT_EQ (result.message.find ("X Key"), std::string::npos) << result.message;
     EXPECT_TRUE (req.headers.empty ());
     EXPECT_TRUE (req.secret_header_names.empty ());
 }
@@ -148,8 +152,9 @@ TEST (AuthResolver, ApiKeyHeaderNameWithBracesIsJudgedAroundItsTokens) {
         nullptr);
         EXPECT_FALSE (result.ok) << key;
         EXPECT_EQ (result.detail_code, "invalid_header_name") << key;
-        EXPECT_NE (result.message.find ("'" + key + "'"), std::string::npos)
+        EXPECT_NE (result.message.find ("cannot appear"), std::string::npos)
         << result.message;
+        EXPECT_EQ (result.message.find (key), std::string::npos) << result.message;
         EXPECT_TRUE (req.headers.empty ()) << key;
     }
 

@@ -50,8 +50,10 @@
  * than the other. Sending both is what libcurl would do, since its header list
  * carries any number of lines under one name (issue #2466) - but then the
  * request carries a repeated header no row in the editor shows. So the request
- * is refused, and the message names the header as written beside the name it
- * produced, which is the pair the author has to go and look at.
+ * is refused, and the message names both headers as written, which is the pair
+ * the author has to go and look at. It never repeats the name they produced:
+ * what a variable produced can be a secret, and a refusal reaches whoever reads
+ * the run.
  *
  * ## Which collisions this is about
  *
@@ -170,6 +172,10 @@
  * - **A script's own `pm.sendRequest`** (`runtime/pm/pm_send_request.cpp`) throws
  *   it with the call named in front.
  *
+ * The refusals quote the name as written, never what a variable made of it: a
+ * refusal travels to whoever reads the run, and a variable can hold a secret.
+ * The offending byte is the one thing about the produced name a message says.
+ *
  * An auth credential is trimmed on the same set, and an API key's header name
  * judged by the same rule (`http/auth_resolver.cpp`).
  */
@@ -180,14 +186,15 @@ namespace vayu::http {
 /// them.
 struct HeaderNameCollision {
     /// One of the two names as the request carries it, before resolution - the
-    /// text the author has to go and fix, so the message names what was
-    /// written rather than only what it produced.
+    /// text the author has to go and fix.
     std::string written;
     /// The other one, also as written. Which of the two is which follows the
     /// order the names were walked in and carries no meaning: neither is more
     /// at fault than the other, which is why neither is repaired.
     std::string other;
-    /// The one name they both landed on.
+    /// The one name they both landed on. No message of this header's quotes it
+    /// (see `describe_header_name_collision`); a layer whose variables are
+    /// data-file cells rather than secrets may.
     std::string produced;
 };
 
@@ -272,11 +279,19 @@ inline constexpr std::string_view OPTIONAL_WHITESPACE = " \t";
  * @p name is the name as it will be sent: already trimmed
  * (`trim_optional_whitespace`) and not empty - an empty one is
  * `describe_empty_header_name`'s. A `{{token}}` in it is not judged, the text
- * around it is (see the rule above). The message quotes the name as given and
- * says which character cannot appear in one. One wording for every layer that
- * reads a name, on the same reasoning as the two above: a layer may name itself
- * in front of it, never inside it.
+ * around it is (see the rule above). One wording for every layer that reads a
+ * name, on the same reasoning as the two above: a layer may name itself in
+ * front of it, never inside it.
+ *
+ * @p written is the name as the request carries it, before this layer resolved
+ * it, and is the only name the message quotes: what a variable produced can be
+ * a secret, and a refusal travels to whoever reads the run. For a name nothing
+ * resolved, pass @p name again. Empty quotes nothing - for a layer that was
+ * handed the resolved name and never had the written one (`API key auth`). The
+ * message always says which byte cannot appear, which is the one thing about
+ * the produced name it repeats.
  */
-[[nodiscard]] std::optional<std::string> invalid_header_name_refusal (std::string_view name);
+[[nodiscard]] std::optional<std::string>
+invalid_header_name_refusal (std::string_view name, std::string_view written);
 
 } // namespace vayu::http

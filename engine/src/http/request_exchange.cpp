@@ -867,7 +867,8 @@ resolve_header_names (vayu::HeaderList& headers, const ResidualLookup& lookup) {
             return refusal_of (vayu::http::describe_empty_header_name (name),
             vayu::http::EMPTY_HEADER_NAME_CODE);
         }
-        if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
+        if (auto invalid = vayu::http::invalid_header_name_refusal (
+            resolved_name, vayu::http::trim_optional_whitespace (name))) {
             return refusal_of (std::move (*invalid), vayu::http::INVALID_HEADER_NAME_CODE);
         }
         // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.

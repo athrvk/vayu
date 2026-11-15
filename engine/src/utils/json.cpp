@@ -1215,7 +1215,7 @@ Result<std::string> stored_header_name (std::string_view written) {
     if (name.empty ()) {
         return name;
     }
-    if (auto refusal = vayu::http::invalid_header_name_refusal (name)) {
+    if (auto refusal = vayu::http::invalid_header_name_refusal (name, name)) {
         return Error{ ErrorCode::InvalidHeaderName, std::move (*refusal) };
     }
     return name;

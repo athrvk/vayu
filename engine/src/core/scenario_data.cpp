@@ -170,7 +170,8 @@ void settle_bound_header_name (std::string& bound, const std::string& written, H
     if (bound.empty () || faults.invalid) {
         return;
     }
-    faults.invalid = vayu::http::invalid_header_name_refusal (bound);
+    faults.invalid = vayu::http::invalid_header_name_refusal (
+    bound, vayu::http::trim_optional_whitespace (written));
 }
 
 /**

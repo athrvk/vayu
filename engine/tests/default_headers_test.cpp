@@ -408,15 +408,34 @@ TEST (DefaultHeadersTest, TheRefusalSpellsTheOffendingByteSafely) {
 TEST (DefaultHeadersTest, ATokenInAHeaderNameIsSetAsideAndTheRestJudged) {
     using vayu::http::invalid_header_name_refusal;
     for (const char* ok : { "{{h}}", "X-{{a}}-b", "{{a}}{{b}}", "X-{{ $guid }}" }) {
-        EXPECT_FALSE (invalid_header_name_refusal (ok).has_value ()) << ok;
+        EXPECT_FALSE (invalid_header_name_refusal (ok, ok).has_value ()) << ok;
     }
     for (const char* bad : { "Evil: injected{{", "X Bad {{x}}", "{{", "X-{{}}",
          "X-{{a}", "{{{x}}}", "{{a}}:" }) {
-        const auto refusal = invalid_header_name_refusal (bad);
+        const auto refusal = invalid_header_name_refusal (bad, bad);
         ASSERT_HAS_VALUE (refusal) << bad;
         EXPECT_NE (refusal->find (std::string ("'") + bad + "'"), std::string::npos)
         << *refusal;
     }
+}
+
+// The refusal quotes the text it is told was written, never the name it judged,
+// and quotes nothing when told nothing was. Mutation check: quote `name` in
+// `invalid_header_name_refusal`.
+TEST (DefaultHeadersTest, TheHeaderNameRefusalQuotesOnlyTheWrittenName) {
+    using vayu::http::invalid_header_name_refusal;
+    const auto written = invalid_header_name_refusal ("X Secret", "{{h}}");
+    ASSERT_HAS_VALUE (written);
+    EXPECT_NE (written->find ("'{{h}}'"), std::string::npos) << *written;
+    EXPECT_NE (written->find ("' ' cannot appear"), std::string::npos) << *written;
+    EXPECT_EQ (written->find ("Secret"), std::string::npos) << *written;
+
+    const auto unquoted = invalid_header_name_refusal ("X Secret", {});
+    ASSERT_HAS_VALUE (unquoted);
+    EXPECT_NE (unquoted->find ("' ' cannot appear"), std::string::npos) << *unquoted;
+    EXPECT_EQ (unquoted->find ("Secret"), std::string::npos) << *unquoted;
+
+    EXPECT_FALSE (invalid_header_name_refusal ("X-Fine", "{{h}}").has_value ());
 }
 
 // Only SP and HTAB are padding, and only at the ends (issue #2467): CR and LF

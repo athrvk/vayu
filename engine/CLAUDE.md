@@ -1326,7 +1326,10 @@ invalid_header_name`), and `resolve_header_names` in the residual pass. A blank
 name is the `empty_header_name` rule's, and a `{{token}}` still in a name is
 left to the layer that resolves it while the text around it is judged (each
 token stands in as one token character, a stray `{{` is ordinary text). Refuse
-what trimming cannot settle, never repair it. It also writes a request's
+what trimming cannot settle, never repair it. **A refusal never quotes what a
+variable produced** - it can be a secret and the message reaches whoever reads
+the run: `invalid_header_name_refusal (name, written)` quotes `written` and the
+one offending byte, and the collision message names both names as written. It also writes a request's
 `:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;

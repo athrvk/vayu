@@ -1400,7 +1400,8 @@ struct ResolvedHeaders {
  * around it is): the residual pass resolves it against what a pre-request
  * script defines and judges what it produces (`http/request_exchange.cpp`).
  *
- * @param key the name as written, for the nameless message.
+ * @param key the name as written: the nameless message and the invalid one
+ *        quote it, never @p name, which a variable may have made of a secret.
  */
 void settle_header_name (std::string& name, const std::string& key, ResolvedHeaders& out) {
     name = std::string (vayu::http::trim_optional_whitespace (name));
@@ -1413,7 +1414,8 @@ void settle_header_name (std::string& name, const std::string& key, ResolvedHead
         return;
     }
     if (!out.invalid_name) {
-        out.invalid_name = vayu::http::invalid_header_name_refusal (name);
+        out.invalid_name = vayu::http::invalid_header_name_refusal (
+        name, vayu::http::trim_optional_whitespace (key));
     }
 }
 

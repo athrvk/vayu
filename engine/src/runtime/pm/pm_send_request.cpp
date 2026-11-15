@@ -599,7 +599,8 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
             // the same move the collision beside it already made.
             return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
         }
-        if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
+        if (auto invalid = vayu::http::invalid_header_name_refusal (
+            resolved_name, vayu::http::trim_optional_whitespace (name))) {
             return "pm.sendRequest: " + *invalid;
         }
         // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.
