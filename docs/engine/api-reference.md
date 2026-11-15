@@ -6502,6 +6502,16 @@ the same way up to the 8 MiB transport ceiling rather than refused at 8192 bytes
 with an empty `413` (issue #3111). The capture's `Content-Type` header is the
 sender's.
 
+A **compressed body is stored as sent**. A sender that declares
+`Content-Encoding: gzip`, `deflate`, `br` or `zstd` (an OpenTelemetry or Sentry
+exporter, a log shipper) is captured and answered with the canned response like
+any other; the inbox does not decompress, so `body` holds the compressed bytes
+(base64, as any non-text body is), `bodyBytes` is their compressed size, the cut
+at `inboxMaxBodyBytes` applies to them, and the capture's `Content-Encoding`
+header is the sender's. Only the inbox listener does this: the management API
+refuses a compressed request body, and an unrecognised coding such as
+`identity` was always passed through.
+
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
 sender can read the canned response:
