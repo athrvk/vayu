@@ -323,7 +323,12 @@ the host and port the document itself came from, but it does not refuse
 private-network or public hosts, so import only specs you trust. A sibling file
 must sit under the folder of the file you picked. A Postman or Insomnia file can
 carry scripts, auth, variables and environments of its own (see the scripts note
-under "What Vayu defends"). A request in an imported file that has a GraphQL body
+under "What Vayu defends"). A Postman file can also turn certificate
+verification off: `protocolProfileBehavior.strictSSL: false` on a request, folder
+or the collection imports as that request's `verifySSL: false` (see
+[docs/app/import-collections/postman.md](docs/app/import-collections/postman.md)),
+so check the TLS setting of an imported request before it carries credentials. A
+request in an imported file that has a GraphQL body
 is not introspected on its own either: the app loads a schema automatically only
 for an origin you have already contacted, by pressing Send or Load test on a
 request to it or by loading its schema yourself, and judges that origin on the
