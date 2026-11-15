@@ -270,6 +270,11 @@ const std::string& key,
 const TokenDeadline& deadline,
 double* network_ms,
 const std::atomic<bool>* cancel) {
+    if (cancel != nullptr && cancel->load (std::memory_order_acquire)) {
+        // libcurl reads the flag only at its first progress tick, which a fast
+        // endpoint answers before: a stopping server must not start the request.
+        return transport_failure (vayu::ErrorCode::Cancelled, "Request cancelled", deadline);
+    }
     const int remaining_ms = deadline.remaining_ms ();
     if (remaining_ms <= 0) {
         // Never handed to curl, which reads a zero timeout as no bound at all.

@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Copyright (c) 2026 Atharva Kusumbia
  *
  * This source code is licensed under the Apache 2.0 license found in the
@@ -10,9 +13,12 @@ import { buildSchema } from "graphql";
 
 vi.mock("./introspect", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./introspect")>()),
+	composeIntrospection: vi.fn(),
 	introspectSchema: vi.fn(),
 }));
-import { introspectSchema, IntrospectionError } from "./introspect";
+import { composeIntrospection, introspectSchema, IntrospectionError } from "./introspect";
+import { useClientSettingsStore } from "@/stores/client-settings-store";
+import type { ComposedRequest } from "@/types";
 import {
 	schemaCacheKey,
 	useSchemaCache,
@@ -26,16 +32,29 @@ const TARGET: SchemaTarget = { url: URL, resolvedUrl: URL, headers: {}, resolved
 
 const entry = (target: SchemaTarget) => useSchemaCache.getState().byKey[schemaCacheKey(target)];
 
+/** What the engine composes: the target's URL, as typed (no variables in these). */
+const composedTo = (url: string) => ({ method: "POST", url, headers: [] }) as ComposedRequest;
+const approved = () => useClientSettingsStore.getState().approvedEndpoints;
+
 beforeEach(() => {
 	vi.clearAllMocks();
-	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null });
+	vi.mocked(composeIntrospection).mockImplementation(async (t) => composedTo(t.url));
+	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null, awaitingLoad: {} });
+	useClientSettingsStore.setState({ approvedEndpoints: ["https://api.test"] });
 });
 
 describe("schema cache", () => {
 	it("transitions idle → loading → ready on success", async () => {
-		vi.mocked(introspectSchema).mockResolvedValue(schema);
+		let release!: (s: typeof schema) => void;
+		vi.mocked(introspectSchema).mockReturnValue(
+			new Promise((resolve) => {
+				release = resolve;
+			})
+		);
 		const p = useSchemaCache.getState().ensureSchema(TARGET);
-		expect(entry(TARGET).status).toBe("loading");
+		// Composing comes first, so loading is reached a tick after the call.
+		await vi.waitFor(() => expect(entry(TARGET).status).toBe("loading"));
+		release(schema);
 		await p;
 		expect(entry(TARGET).status).toBe("ready");
 		expect(entry(TARGET).schema).toBe(schema);
@@ -277,5 +296,83 @@ describe("clearActiveTarget", () => {
 		useSchemaCache.getState().setActiveTarget(next);
 		useSchemaCache.getState().clearActiveTarget(TARGET);
 		expect(useSchemaCache.getState().activeKey).toBe(schemaCacheKey(next));
+	});
+});
+
+/*
+ * Introspection composes the request with the user's variables and auth and
+ * sends it, so the automatic path only reaches an origin the user has already
+ * contacted, judged on the URL the request would go to.
+ */
+describe("the automatic path and approval", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ approvedEndpoints: [] });
+	});
+
+	it("sends nothing to an endpoint the user has not contacted, and records that it waits", async () => {
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		expect(introspectSchema).not.toHaveBeenCalled();
+		expect(entry(TARGET)).toBeUndefined();
+		expect(useSchemaCache.getState().awaitingLoad[schemaCacheKey(TARGET)]).toBe(true);
+	});
+
+	it("introspects an approved endpoint, and sends to exactly the URL it judged", async () => {
+		useClientSettingsStore.setState({ approvedEndpoints: ["https://api.test"] });
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		const composed = await vi.mocked(composeIntrospection).mock.results[0].value;
+		expect(introspectSchema).toHaveBeenCalledWith(TARGET, composed);
+		expect(composeIntrospection).toHaveBeenCalledTimes(1);
+		expect(entry(TARGET).status).toBe("ready");
+	});
+
+	it("judges the composed URL, not the text with its variables", async () => {
+		const typed: SchemaTarget = {
+			...TARGET,
+			url: "{{base}}/gql",
+			resolvedUrl: "https://elsewhere.test/gql",
+		};
+		vi.mocked(composeIntrospection).mockResolvedValue(composedTo("https://elsewhere.test/gql"));
+		await useSchemaCache.getState().ensureSchema(typed);
+		expect(introspectSchema).not.toHaveBeenCalled();
+
+		useClientSettingsStore.setState({ approvedEndpoints: ["https://elsewhere.test"] });
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
+		await useSchemaCache.getState().ensureSchema(typed);
+		expect(introspectSchema).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not introspect when the request cannot be composed or names no origin", async () => {
+		vi.mocked(composeIntrospection).mockRejectedValue(new Error("engine down"));
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		vi.mocked(composeIntrospection).mockResolvedValue(composedTo("https://{{host}}/gql"));
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		expect(introspectSchema).not.toHaveBeenCalled();
+		expect(useSchemaCache.getState().awaitingLoad[schemaCacheKey(TARGET)]).toBe(true);
+	});
+
+	it("refreshSchema loads regardless, approves the origin and stops waiting", async () => {
+		await useSchemaCache.getState().ensureSchema(TARGET);
+		vi.mocked(introspectSchema).mockResolvedValue(schema);
+		await useSchemaCache.getState().refreshSchema(TARGET);
+		expect(introspectSchema).toHaveBeenCalledTimes(1);
+		expect(approved()).toEqual(["https://api.test"]);
+		expect(useSchemaCache.getState().awaitingLoad).toEqual({});
+	});
+
+	it("approves what the request was composed to, even when the load then fails", async () => {
+		vi.mocked(introspectSchema).mockRejectedValue(new Error("refused"));
+		await useSchemaCache.getState().refreshSchema(TARGET);
+		expect(approved()).toEqual(["https://api.test"]);
+		expect(entry(TARGET).status).toBe("error");
+	});
+
+	it("approves nothing when composing fails on an explicit load", async () => {
+		vi.mocked(composeIntrospection).mockRejectedValue(
+			new IntrospectionError("network", "engine down")
+		);
+		await useSchemaCache.getState().refreshSchema(TARGET);
+		expect(approved()).toEqual([]);
+		expect(entry(TARGET).error).toEqual({ kind: "network", message: "engine down" });
 	});
 });
