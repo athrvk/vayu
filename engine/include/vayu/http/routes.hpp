@@ -452,6 +452,39 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 }
 
 /**
+ * @brief True when @p req names a listener on @p port by one of its loopback
+ *        spellings (`127.0.0.1`, `localhost`, `[::1]`, any case) and nothing
+ *        else, with exactly one `Host` header.
+ *
+ * The rule the management API and a mock server with an `allowedOrigins` list
+ * share. DNS rebinding makes a hostile page same-origin with a listener, so a
+ * request carries no `Origin` and only the name the page dialled - never a
+ * loopback literal - gives it away.
+ */
+inline bool names_this_listener (const httplib::Request& req, int port) {
+    if (req.get_header_value_count ("Host") != 1) {
+        return false;
+    }
+    const std::string host   = req.get_header_value ("Host");
+    const std::string suffix = ":" + std::to_string (port);
+    if (!host.ends_with (suffix)) {
+        return false;
+    }
+    const std::string_view name =
+    std::string_view (host).substr (0, host.size () - suffix.size ());
+    return vayu::utils::ascii_lower_equal (name, "127.0.0.1") ||
+    vayu::utils::ascii_lower_equal (name, "localhost") ||
+    vayu::utils::ascii_lower_equal (name, "[::1]");
+}
+
+/// The 403 body for a request `names_this_listener` refused.
+inline std::string foreign_host_message (int port) {
+    const std::string suffix = ":" + std::to_string (port);
+    return "Refused by the Host check: the engine answers only Host 127.0.0.1" +
+    suffix + ", localhost" + suffix + " or [::1]" + suffix;
+}
+
+/**
  * @brief Which browser origins a mock server or a webhook inbox grants CORS
  *        access to (#2367). Built once when the listener starts and never
  *        written again, so a handler reads it with no lock.
