@@ -902,14 +902,14 @@ TEST_F (SendRequestTest, TwoHeaderNamesResolvingAlikeAreRefused) {
     "}, function () {});");
 
     EXPECT_FALSE (result.success);
-    // Both spellings as written and the name they produced, because either is
-    // the one the author may have meant - the call names them and repairs
-    // neither, in composition's words with the call named in front of them.
+    // Both spellings as written, because either is the one the author may have
+    // meant - the call names them and repairs neither, in composition's words
+    // with the call named in front of them. Not the name they produced.
     EXPECT_NE (result.error_message.find ("pm.sendRequest:"), std::string::npos)
     << result.error_message;
     EXPECT_NE (result.error_message.find ("{{a}}"), std::string::npos) << result.error_message;
     EXPECT_NE (result.error_message.find ("{{b}}"), std::string::npos) << result.error_message;
-    EXPECT_NE (result.error_message.find ("X-Tenant"), std::string::npos)
+    EXPECT_EQ (result.error_message.find ("X-Tenant"), std::string::npos)
     << result.error_message;
     EXPECT_EQ (server.hit_count (), 0) << "a request went out a header short";
 }

@@ -92,7 +92,9 @@ AuthApplyResult apply_api_key (vayu::Request& req, const ApiKeyAuth& auth) {
         req.auth_query_param = key;
         return {};
     }
-    if (auto invalid = vayu::http::invalid_header_name_refusal (key)) {
+    // The key reaches here already resolved, so there is no written name to
+    // quote and the resolved one may be a secret: the refusal quotes neither.
+    if (auto invalid = vayu::http::invalid_header_name_refusal (key, {})) {
         return { false, vayu::ErrorCode::AuthFailed, "API key auth: " + *invalid,
             std::string (vayu::http::INVALID_HEADER_NAME_CODE) };
     }

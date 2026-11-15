@@ -154,12 +154,21 @@ const DefaultHeaderPolicy& policy);
  * rule below - which refuses the names the engine derives - must never be
  * applied to them.
  *
- * @param quoted_as the text the message quotes, when that is not @p name: the
- *        name as the author wrote it, for a caller that judged a stand-in for it
- *        (`invalid_header_name_refusal`). Empty quotes @p name.
+ * The message quotes @p name, so it is for a name the author typed; a name a
+ * variable produced is judged by `invalid_header_name_refusal`, which quotes
+ * what was written instead.
  */
-[[nodiscard]] std::optional<std::string>
-invalid_header_token (std::string_view name, std::string_view quoted_as = {});
+[[nodiscard]] std::optional<std::string> invalid_header_token (std::string_view name);
+
+/**
+ * @brief The first byte of @p name that cannot appear in a header name, spelled
+ *        for a message (`' '`, or `byte 0xC3` for one that is not printable
+ *        ASCII), or nothing when every byte can.
+ *
+ * Says nothing of an empty name. It carries the byte and never the name, which
+ * is what a refusal of a name a variable produced is allowed to repeat.
+ */
+[[nodiscard]] std::optional<std::string> offending_header_name_byte (std::string_view name);
 
 /**
  * @brief Why @p name cannot be the name the engine adds the correlation id

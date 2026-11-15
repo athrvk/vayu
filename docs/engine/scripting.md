@@ -2425,7 +2425,8 @@ Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
 names written differently that resolve to one name would send that header twice
 where the script wrote two different ones, so the call throws naming both
-spellings and the name they produced, and nothing goes out. Names are compared
+spellings (never the name they produced, which can be a secret), and nothing
+goes out. Names are compared
 without case. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the

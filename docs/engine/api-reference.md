@@ -7116,7 +7116,8 @@ refusal: it is sent as written and counted like any other unresolved token
 
 An `apikey` with `in: "header"` whose key is not a header name once trimmed
 (`X Key`) is refused, with nothing written: the failure is `AUTH_FAILED` with an
-`authErrorCode` of `invalid_header_name`. An `apikey` whose key is empty or
+`authErrorCode` of `invalid_header_name`. The message names the offending byte
+and not the key, which arrives already resolved and may be a secret. An `apikey` whose key is empty or
 only padding, in the header or the query, and a `bearer` token that is empty or
 only padding are not refused: nothing is written (never `Authorization: Bearer `
 with nothing after it), the request is sent without that credential, and the
@@ -8000,8 +8001,8 @@ with specific codes:
   `X-Tenant` lines once the variable answers `X-Tenant`, and no row says so.
   Names are compared **without case**, so a `{{h}}` resolving to
   `authorization` refuses beside an `Authorization` the caller typed. The
-  message names both spellings as written and the name they produced; nothing
-  is repaired, for the reason a forged header is refused rather than stripped.
+  message names both spellings as written, never the name they produced (a
+  variable can hold a secret); nothing is repaired, for the reason a forged header is refused rather than stripped.
 
   Only a collision **resolution produced** is refused. Two names the caller
   *wrote* alike - `X-Dup` and `x-dup` typed on two rows, or one `{{h}}` typed
@@ -8047,8 +8048,9 @@ with specific codes:
 - `400` `{"error": {"code": "invalid_header_name", "message": "..."}}` - a
   header name that is not an RFC 9110 `token` once the spaces and tabs around
   it are trimmed (issue #2467): `X Bad` (an interior space), `X:Bad` (a colon),
-  `X-é` (a byte outside ASCII). The message quotes the name and says which
-  character cannot appear in one. Nothing is rewritten into a different
+  `X-é` (a byte outside ASCII). The message quotes the name as written -
+  `{{h}}`, not what the variable resolved to, which can be a secret - and says
+  which character cannot appear in one. Nothing is rewritten into a different
   header: the trim below is for padding, which has one reading, and this
   refusal is for what has none. The same refusal, under the same code, answers
   a `headers` name posted to `POST /execute` or `POST /runs` and the

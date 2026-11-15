@@ -33,7 +33,7 @@ import {
 	runOutputShape,
 	secretsShape,
 	withholdRowSecrets,
-	type MaskingIncompleteError,
+	MaskingIncompleteError,
 } from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 import {
@@ -177,6 +177,44 @@ function recognisedEngineFailure(err: unknown, ctx: ToolContext): Failure | unde
 	return undefined;
 }
 
+/**
+ * @p result with the engine's text in its failure masked as a run's output is:
+ * every secret variable's value and literal credential reads `<redacted>`.
+ * Unchanged for a result that holds no engine text, and for a user who chose to
+ * reveal secrets, with no engine call made.
+ *
+ * Fails closed like every other masking read: when the lookups the secret values
+ * come from fail, the answer is the masking error and none of the engine's text,
+ * never the text unmasked.
+ */
+export async function maskEngineText(
+	result: ToolResult,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<ToolResult> {
+	const failure = FAILURES.get(result);
+	if (!failure?.engineText || ctx.config.revealSecretsToAgents) return result;
+	let mask: (value: unknown) => unknown;
+	try {
+		mask = await runOutputShape(ctx, signal);
+	} catch (err) {
+		if (err instanceof MaskingIncompleteError) return maskingIncompleteResult(err, ctx);
+		throw err;
+	}
+	const { engineNotFound } = failure;
+	const masked: Failure = {
+		...failure,
+		message: String(mask(failure.message)),
+		...(engineNotFound === undefined ? {} : { engineNotFound: String(mask(engineNotFound)) }),
+	};
+	const out: ToolResult = {
+		...result,
+		content: [{ type: "text", text: masked.message }, ...result.content.slice(1)],
+	};
+	FAILURES.set(out, masked);
+	return out;
+}
+
 const MASKING_WITHHELD_NOTE =
 	"Nothing is returned: a result that may carry a secret is withheld whole until the engine answers.";
 
@@ -228,14 +266,24 @@ function maskingOutage(err: MaskingIncompleteError, ctx: ToolContext): Failure |
 	return { ...outage, message: `${outage.message} ${MASKING_WITHHELD_NOTE}` };
 }
 
+/**
+ * An error result worded from the engine's own refusal text, marked so
+ * `dispatchTool` masks that text ({@link maskEngineText}). For a site that
+ * answers an engine body without going through {@link engineFailure}.
+ */
+export function engineTextResult(message: string, failureClass: FailureClass): ToolResult {
+	return failureResult({ failureClass, message, engineText: true });
+}
+
 /** An HTTP refusal the engine answered. */
 function engineRefusal(err: EngineRequestError, ctx: ToolContext): Failure {
 	// A streaming send refuses its final URL before the stream opens (#2521).
 	const refused = targetPolicyRefusalOfErrorBody(err.body, ctx.host);
-	if (refused) return { message: refused, failureClass: "policy" };
+	if (refused) return { message: refused, failureClass: "policy", engineText: true };
 	const failure: Failure = {
 		message: `Engine error (${err.status}): ${compactBody(err.body) || err.message}${retryHint(err)}`,
 		failureClass: engineRefusalClass(err),
+		engineText: true,
 	};
 	// Kept apart from the message so the one words layer can name the missing
 	// object for a tool that declared what its ids are (#2778).

@@ -723,8 +723,8 @@ second credential beside an `Authorization` typed next to it.
 That is the same quiet wrong request as the one above with the fault reversed -
 there a value forges a header, here a name repeats one the author did not
 repeat - so it gets the same answer: a `400` with code
-`colliding_header_names`, naming both spellings as written and the name they
-produced. Repair is not on offer for the reason it is not offered above: the two
+`colliding_header_names`, naming both spellings as written. It never repeats the
+name they produced, which can be a secret. Repair is not on offer for the reason it is not offered above: the two
 names are equally the author's, so choosing one is inventing an intention.
 
 **Only a collision resolution made is refused.** Two names *written* alike -
@@ -796,7 +796,8 @@ this order. It **trims** the spaces and tabs around it (SP and HTAB, nothing
 else), an obvious paste error with one reading; then it requires what is left to
 be an RFC 9110 token, and **refuses** anything that is not - an interior space,
 a colon, a byte outside ASCII - with a `400` and code `invalid_header_name` whose
-message quotes the name and says which character cannot appear in one. That is
+message quotes the name as written (`{{h}}`, never what the variable held) and
+says which character cannot appear in one. That is
 the line this page draws throughout: repair what has one reading, refuse what
 has none, never guess.
 
