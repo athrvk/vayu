@@ -630,13 +630,15 @@ TEST_F (DeferredCompositionTest, OAuth2ALateFetchIsTimedAndACachedTokenIsNot) {
 
 // The token a scripted send acquires after its script carries the handler's
 // stop flag (#2683), on both transports, so `Server::stop()` ends that request
-// as it ends the send's own. A flag already set aborts the token request at
-// libcurl's first progress tick, so the send is refused with the token's
-// error, no token is cached, and nothing reaches the target. Mutation check:
-// drop `cancel` from the `LateTokenAcquisition` in `execute_exchange` (the
-// buffered send) or in `refuse_before_stream` (the stream), and the token is
-// acquired and cached; the buffered send is then cancelled with no
-// `refusalCode`, and the stream opens with a 202.
+// as it ends the send's own. A flag already set means the token request is
+// never started, so the send is refused with the token's error, the endpoint
+// sees no hit, no token is cached, and nothing reaches the target. Mutation
+// checks: drop `cancel` from the `LateTokenAcquisition` in `execute_exchange`
+// (the buffered send) or in `refuse_before_stream` (the stream), and the token
+// is acquired and cached; the buffered send is then cancelled with no
+// `refusalCode`, and the stream opens with a 202. Drop the pre-send check in
+// `post_token_request` and the endpoint is hit before libcurl's first progress
+// tick cancels the transfer.
 TEST_F (DeferredCompositionTest, OAuth2ALateTokenRequestEndsWithTheServer) {
     const vayu::tests::EchoServer echo;
     const MockTokenServer tokens;
@@ -664,6 +666,7 @@ TEST_F (DeferredCompositionTest, OAuth2ALateTokenRequestEndsWithTheServer) {
     EXPECT_FALSE (db_->get_oauth_token (vayu::http::oauth::cache_key (config)).has_value ())
     << "a token request the stop flag should have ended completed";
     EXPECT_EQ (echo.requests_seen (), 0);
+    EXPECT_EQ (tokens.hits (), 0);
 }
 
 // A token endpoint that never answers fails the send at the request's own

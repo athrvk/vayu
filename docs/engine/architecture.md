@@ -487,7 +487,8 @@ Manages the lifecycle of load test runs:
   step's send, its late OAuth 2.0 token request and its scripts'
   `pm.sendRequest`, so Stop and shutdown end the step in flight at the next
   progress tick instead of after its timeout, and the runner records that
-  step as `stopped`, never `errored`. The auxiliary threads keep `aux_cancel`: a replay or
+  step as `stopped`, never `errored`. A token request whose flag is already
+  set is never sent, so a stopping server does not reach the endpoint. The auxiliary threads keep `aux_cancel`: a replay or
   teardown after a natural end must still send. A call it cancels is the run
   ending, never a failure: a cancelled token request ends the run `Stopped`; a
   lifecycle or inline step script whose send it cancelled is `skipped` (so a
