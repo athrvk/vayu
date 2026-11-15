@@ -133,6 +133,32 @@ TEST (ChangeFeedTest, TheReaderSlotsAreBounded) {
     EXPECT_TRUE (feed.try_add_reader ()) << "a released slot is taken again";
 }
 
+TEST (ChangeFeedTest, ASubscriptionIsSpentByItsFirstRedemption) {
+    ChangeFeed feed (0);
+    const auto id = feed.issue_subscription ();
+    EXPECT_FALSE (feed.redeem_subscription (id + "x"));
+    EXPECT_FALSE (feed.redeem_subscription (id.substr (1)));
+    EXPECT_FALSE (feed.redeem_subscription (""));
+    EXPECT_TRUE (feed.redeem_subscription (id));
+    EXPECT_FALSE (feed.redeem_subscription (id)) << "an id opens one stream";
+}
+
+// Mutation check: drop the `pop_front` from `issue_subscription`, and the
+// first id is still redeemable after the bound is passed.
+TEST (ChangeFeedTest, UnspentSubscriptionsAreBoundedOldestDroppedFirst) {
+    ChangeFeed feed (0);
+    const auto oldest = feed.issue_subscription ();
+    std::vector<std::string> kept;
+    kept.reserve (feed_constants::MAX_PENDING_SUBSCRIPTIONS);
+    for (std::size_t issued = 0;
+    issued < feed_constants::MAX_PENDING_SUBSCRIPTIONS; ++issued) {
+        kept.push_back (feed.issue_subscription ());
+    }
+    EXPECT_FALSE (feed.redeem_subscription (oldest));
+    EXPECT_TRUE (feed.redeem_subscription (kept.front ()));
+    EXPECT_TRUE (feed.redeem_subscription (kept.back ()));
+}
+
 TEST (ChangeFeedTest, TheWireShapeCarriesOnlyTheOwnerTheKindNames) {
     EXPECT_EQ (vayu::db::change_json (request_change ("req_1", ChangeOp::Create)),
     json ({ { "kind", "request" }, { "id", "req_1" }, { "op", "create" },
@@ -570,6 +596,32 @@ class ChangeFeedRouteTest : public ChangeFeedDatabaseTest {
         return answer ("DELETE " + path, client.Delete (path));
     }
 
+    /// A fresh subscription id, as a client asks for one before each stream.
+    std::string subscribe () const {
+        return post ("/changes/subscriptions").value ("subscription", "");
+    }
+
+    /// The path of one stream, on a subscription of its own.
+    std::string stream_path (const std::string& query = "") const {
+        return "/changes?subscription=" + subscribe () + query;
+    }
+
+    /// The status a `GET` of @p path answers with, hung up on as soon as it
+    /// arrives: a regression that admits the stream is a failed assertion, not
+    /// a read that waits on a stream that never ends.
+    int status_of_get (const std::string& path) const {
+        httplib::Client client ("127.0.0.1", port_);
+        int status = 0;
+        static_cast<void> (client.Get (
+        path,
+        [&status] (const httplib::Response& response) {
+            status = response.status;
+            return false;
+        },
+        [] (const char*, size_t) { return false; }));
+        return status;
+    }
+
     static std::string text_of (const json& body) {
         return body.is_null () ? std::string{} : body.dump ();
     }
@@ -693,7 +745,7 @@ TEST_F (ChangeFeedRouteTest, AStreamOpensReadyThenRelaysAChangeAsItCommits) {
     make_request ("req_1", "col_1");
     const auto newest = db_->change_feed ().last_id ();
 
-    FeedReader reader (port_, "/changes");
+    FeedReader reader (port_, stream_path ());
     const auto opening = reader.await_frames (1);
     ASSERT_EQ (opening.size (), 1U);
     EXPECT_EQ (opening.front ().event, "ready");
@@ -716,7 +768,8 @@ TEST_F (ChangeFeedRouteTest, AResumeReplaysTheChangesMissedWhileAway) {
     make_request ("req_1", "col_1");
     make_request ("req_2", "col_1");
 
-    FeedReader reader (port_, "/changes", { { "Last-Event-ID", std::to_string (seen) } });
+    FeedReader reader (
+    port_, stream_path (), { { "Last-Event-ID", std::to_string (seen) } });
     const auto frames = reader.await_frames (3);
     ASSERT_EQ (frames.size (), 3U);
     EXPECT_EQ (frames[0].event, "ready");
@@ -734,7 +787,7 @@ TEST_F (ChangeFeedRouteTest, AReaderTooFarBehindIsToldToResetAndThenTails) {
     db_->change_feed ().publish (std::move (flood));
     const auto newest = db_->change_feed ().last_id ();
 
-    FeedReader reader (port_, "/changes?lastEventId=" + std::to_string (seen));
+    FeedReader reader (port_, stream_path ("&lastEventId=" + std::to_string (seen)));
     const auto opening = reader.await_frames (1);
     ASSERT_EQ (opening.size (), 1U);
     EXPECT_EQ (opening.front ().event, "reset");
@@ -750,7 +803,7 @@ TEST_F (ChangeFeedRouteTest, AReaderTooFarBehindIsToldToResetAndThenTails) {
 // A connected reader that falls a whole ring behind between two polls is told
 // so mid-stream, rather than handed a gap.
 TEST_F (ChangeFeedRouteTest, AConnectedReaderOverrunByABulkWriteIsToldToReset) {
-    FeedReader reader (port_, "/changes");
+    FeedReader reader (port_, stream_path ());
     ASSERT_EQ (reader.await_frames (1).size (), 1U);
 
     // One publish, so the relay sees the whole flood or none of it.
@@ -765,7 +818,7 @@ TEST_F (ChangeFeedRouteTest, AConnectedReaderOverrunByABulkWriteIsToldToReset) {
 TEST_F (ChangeFeedRouteTest, AMalformedLastEventIdIsRefused) {
     httplib::Client client ("127.0.0.1", port_);
     const auto result =
-    client.Get ("/changes", httplib::Headers{ { "Last-Event-ID", "soon" } });
+    client.Get (stream_path (), httplib::Headers{ { "Last-Event-ID", "soon" } });
     ASSERT_TRUE (result) << httplib::to_string (result.error ());
     EXPECT_EQ (result->status, 400);
     EXPECT_EQ (json::parse (result->body)["error"].value ("code", ""), "invalid_last_event_id");
@@ -776,7 +829,7 @@ TEST_F (ChangeFeedRouteTest, AFeedWithEveryReaderSlotTakenRefusesAnother) {
         ASSERT_TRUE (db_->change_feed ().try_add_reader ());
     }
     httplib::Client client ("127.0.0.1", port_);
-    const auto refused = client.Get ("/changes");
+    const auto refused = client.Get (stream_path ());
     ASSERT_TRUE (refused) << httplib::to_string (refused.error ());
     EXPECT_EQ (refused->status, 503);
     EXPECT_EQ (json::parse (refused->body)["error"].value ("code", ""), "change_feed_full");
@@ -784,14 +837,80 @@ TEST_F (ChangeFeedRouteTest, AFeedWithEveryReaderSlotTakenRefusesAnother) {
     std::to_string (vayu::core::constants::sse::RELAY_KEEPALIVE_MS / 1000));
 
     db_->change_feed ().remove_reader ();
-    FeedReader reader (port_, "/changes");
+    FeedReader reader (port_, stream_path ());
     EXPECT_EQ (reader.await_frames (1).size (), 1U)
     << "a freed slot did not admit a stream";
 }
 
+// A page can send a POST only with an `Origin`, which the gate refuses, so it
+// cannot learn an id. Mutation check: drop the `Origin` rule from
+// `admit_management_request`, and the id is handed over.
+TEST_F (ChangeFeedRouteTest, ASubscriptionIsNotIssuedToAPage) {
+    httplib::Client client ("127.0.0.1", port_);
+    const auto refused = client.Post ("/changes/subscriptions",
+    httplib::Headers{ { "Origin", "https://example.test" } }, "", "application/json");
+    ASSERT_TRUE (refused) << httplib::to_string (refused.error ());
+    EXPECT_EQ (refused->status, 403);
+    EXPECT_EQ (refused->body.find ("subscription\":"), std::string::npos);
+}
+
+// A plain GET reaches loopback from any web page, so it must not take a slot.
+// Mutation check: have the GET skip
+// `redeem_subscription_param`, and the first request here is a stream that
+// takes a slot instead of a 400, and the app's own stream is the one refused.
+TEST_F (ChangeFeedRouteTest, GetsWithoutASubscriptionHoldNoSlotAndLeaveOneForAReader) {
+    for (int attempt = 0; attempt < feed_constants::MAX_READERS; ++attempt) {
+        ASSERT_EQ (status_of_get ("/changes"), 400) << "attempt " << attempt;
+    }
+    httplib::Client client ("127.0.0.1", port_);
+    const auto refused = client.Get ("/changes");
+    ASSERT_TRUE (refused) << httplib::to_string (refused.error ());
+    const auto error = json::parse (refused->body)["error"];
+    EXPECT_EQ (error.value ("code", ""), "subscription_required");
+    EXPECT_NE (error.value ("message", "").find ("subscription"), std::string::npos);
+
+    FeedReader reader (port_, stream_path ());
+    EXPECT_EQ (reader.await_frames (1).size (), 1U)
+    << "gets without an id took the slots a valid reader needs";
+}
+
+// Mutation check: have `redeem_subscription` answer true for anything, and
+// the unknown id is admitted as a stream (a 200 the client never finishes).
+TEST_F (ChangeFeedRouteTest, AnUnknownSubscriptionIsRefused) {
+    ASSERT_EQ (status_of_get ("/changes?subscription="), 403) << "an empty id";
+    ASSERT_EQ (status_of_get ("/changes?subscription=never-issued"), 403);
+    httplib::Client client ("127.0.0.1", port_);
+    const auto refused = client.Get ("/changes?subscription=never-issued");
+    ASSERT_TRUE (refused) << httplib::to_string (refused.error ());
+    EXPECT_EQ (refused->status, 403);
+    const auto error = json::parse (refused->body)["error"];
+    EXPECT_EQ (error.value ("code", ""), "unknown_subscription");
+    EXPECT_NE (error.value ("message", "").find ("subscription"), std::string::npos);
+}
+
+// An id opens one stream: a reconnect asks for another. Mutation check: have
+// `redeem_subscription` leave the id pending, and the second GET is admitted.
+TEST_F (ChangeFeedRouteTest, ASubscriptionOpensOneStreamOnly) {
+    const std::string subscription = subscribe ();
+    ASSERT_FALSE (subscription.empty ());
+    {
+        FeedReader first (port_, "/changes?subscription=" + subscription);
+        ASSERT_EQ (first.await_frames (1).size (), 1U);
+    }
+    EXPECT_EQ (status_of_get ("/changes?subscription=" + subscription), 403);
+}
+
+TEST_F (ChangeFeedRouteTest, EachSubscriptionIsADistinctUnguessableId) {
+    const std::string first  = subscribe ();
+    const std::string second = subscribe ();
+    EXPECT_NE (first, second);
+    // 32 random bytes, base64url without padding.
+    EXPECT_EQ (first.size (), 43U);
+}
+
 TEST_F (ChangeFeedRouteTest, EveryOpenStreamReceivesTheSameChange) {
-    FeedReader first (port_, "/changes");
-    FeedReader second (port_, "/changes");
+    FeedReader first (port_, stream_path ());
+    FeedReader second (port_, stream_path ());
     ASSERT_EQ (first.await_frames (1).size (), 1U);
     ASSERT_EQ (second.await_frames (1).size (), 1U);
 
@@ -809,7 +928,7 @@ TEST_F (ChangeFeedRouteTest, EveryOpenStreamReceivesTheSameChange) {
 // poll. Mutation check: drop `stopping` from the relay loop, and `stop()`
 // returns only once the reader hangs up after the 20s wait.
 TEST_F (ChangeFeedRouteTest, StopEndsAStreamItsClientIsStillReading) {
-    FeedReader reader (port_, "/changes");
+    FeedReader reader (port_, stream_path ());
     ASSERT_EQ (reader.await_frames (1).size (), 1U);
 
     auto stopped =

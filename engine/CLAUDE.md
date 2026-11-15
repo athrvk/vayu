@@ -469,11 +469,14 @@ top-level navigation) carries a loopback `Host` and no `Origin`, so the gate
 admits it; what keeps it harmless is that the page cannot read the opaque
 answer and that the route changes nothing. Anything that writes, starts,
 stops, deletes or sends is a `POST`, `PUT` or `DELETE`, which a page can only
-send with an `Origin`. An SSE route's single-reader claim (`/runs/:id/events`,
-`/inbox/:id/live`) lasts as long as the connection reading it and needs an id
-a page cannot know; `/changes` needs none, so its streams are capped instead
-(`change_feed::MAX_READERS`), which bounds the pool threads a page can park.
-The gate is deliberately not widened to `Sec-Fetch-Mode`.
+send with an `Origin`. An SSE route holds a pool thread per stream, so it
+needs an id a page cannot know: the claim of `/runs/:id/events` and
+`/inbox/:id/live` lasts as long as the connection reading it, and `/changes`
+opens only on a single-use id from `POST /changes/subscriptions` (#3420), which
+a page cannot send. Its streams are also capped (`change_feed::MAX_READERS`),
+which bounds what a client that can ask for ids holds. A stream route that
+takes a slot without such an id lets any page fill the slots and lock the app
+out. The gate is deliberately not widened to `Sec-Fetch-Mode`.
 
 Key endpoints:
 
@@ -484,7 +487,8 @@ Key endpoints:
 | POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
-| GET | `/changes` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams |
+| POST | `/changes/subscriptions` | A fresh unguessable, single-use id (libsodium random) for one `GET /changes` stream (`ChangeFeed::issue_subscription`; the oldest of `MAX_PENDING_SUBSCRIPTIONS` unspent ids is dropped); a `POST`, so a page cannot send it |
+| GET | `/changes?subscription=<id>` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams; a missing `subscription` is a 400 and an unknown or spent one a 403, neither holding a slot |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
 | GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
@@ -1257,7 +1261,10 @@ logged as a warning: it means a client skipped composition.
   `GrantSecret` (`http/grant_secret.hpp`: SHA-256 digests compared with
   `sodium_memcmp`, at least 32 characters). `daemon.cpp` takes it from
   `VAYU_GRANT_SECRET`, which the app's main process sets, and removes the
-  variable before any thread starts; it reaches the routes through `Server`'s
+  variable before any thread starts - on POSIX after overwriting the bytes
+  `getenv` returned, because they are the block `/proc/<pid>/environ` shows
+  and `unsetenv` leaves them (`file_grants_route_test.cpp` re-runs itself as
+  a child to prove it); it reaches the routes through `Server`'s
   constructor and `RouteContext::grant_secret`, so a test hands one in without
   the environment. An engine with no
   secret refuses all four writes. **Trust is derived, never read**: a body's `unresolved` is ignored

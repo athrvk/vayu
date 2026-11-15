@@ -276,6 +276,7 @@ sections themselves.
 
 - **`change-feed-service.ts`**: The engine's change feed (`GET /changes`, issue #3420), one stream for the app's life
   - Every committed write of a collection, request, example, environment, the globals or a trash entry, whoever made it, becomes an invalidation of the query keys that read it (`lib/change-feed-invalidation.ts`, through the MCP families of `lib/mcp-invalidation.ts`), coalesced over 200ms and held while a mutation is in flight
+  - Asks `POST /changes/subscriptions` for a single-use id before every connection and opens `GET /changes?subscription=<id>` (a page cannot hold the engine's stream slots, so the app's stream is never the one refused)
   - Reconnects on its own backoff and resumes by `?lastEventId=`, the inbox stream's shape; a `reset` refetches everything the feed covers. Opened by `useChangeFeed` only while the engine is connected. See `state-management.md`
 
 - **`http-client.ts`**: Low-level fetch wrapper

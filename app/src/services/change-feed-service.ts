@@ -20,7 +20,10 @@
  * terms: an `EventSource` treats any non-200 as fatal and never retries it, so
  * every drop is closed here and reconnected on a backoff of our own, resuming
  * from the last id by query parameter because no API sets `Last-Event-ID` on a
- * fresh connection. Unlike an inbox stream there is no surface to say it gave
+ * fresh connection. A stream opens on a single-use subscription id that only a
+ * `POST` hands out, so every connect, reconnects included, asks for a new one
+ * first: a page cannot hold the engine's stream slots, and the app's stream is
+ * never the one refused. Unlike an inbox stream there is no surface to say it gave
  * up, so it never does: `useChangeFeed` stops it while the engine is not
  * connected, and that is what keeps a downed engine from being asked forever.
  */
@@ -33,6 +36,7 @@ import {
 	parseChangeFeedChange,
 } from "@/lib/change-feed-invalidation";
 import { streamRetryDelayMs } from "@/lib/stream-backoff";
+import { apiService } from "./api";
 
 /** First backoff step; each attempt doubles it, up to the cap. */
 export const CHANGE_FEED_RETRY_BASE_MS = 500;
@@ -62,6 +66,10 @@ export function changeFeedRetryDelayMs(
 export class ChangeFeedService {
 	private source: EventSource | null = null;
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Started and not stopped: a stream is open, reconnecting, or being subscribed. */
+	private active = false;
+	/** Bumped by `stop()`, so a subscription still in flight is dropped on arrival. */
+	private epoch = 0;
 	/** Reconnects spent since a stream last delivered its opening frame. */
 	private attempts = 0;
 	/**
@@ -72,31 +80,49 @@ export class ChangeFeedService {
 	private lastEventId = "";
 	private batch: FeedInvalidationBatch | null = null;
 
-	/** Open the stream, unless it is already open or reconnecting. */
+	/** Open the stream, unless it is already open, reconnecting or being subscribed. */
 	start(queryClient: QueryClient): void {
-		if (this.source !== null || this.retryTimer !== null) return;
+		if (this.active) return;
 		if (this.batch?.queryClient !== queryClient)
 			this.batch = new FeedInvalidationBatch(queryClient);
+		this.active = true;
 		this.attempts = 0;
-		this.connect();
+		void this.connect();
 	}
 
 	/** Close the stream and any pending reconnect. Pending invalidations still land. */
 	stop(): void {
+		this.active = false;
+		this.epoch += 1;
 		if (this.retryTimer !== null) clearTimeout(this.retryTimer);
 		this.retryTimer = null;
 		this.source?.close();
 		this.source = null;
 	}
 
-	private connect(): void {
+	private async connect(): Promise<void> {
 		this.retryTimer = null;
+		const epoch = this.epoch;
+		let subscription: string;
+		try {
+			subscription = await apiService.createChangeSubscription();
+		} catch {
+			// The engine is down or restarting: the same drop as a refused stream.
+			if (epoch === this.epoch) this.recover();
+			return;
+		}
+		if (epoch !== this.epoch) return;
+		this.open(subscription);
+	}
+
+	private open(subscription: string): void {
 		// No resume point: nothing tells this stream what was written before it.
 		const fresh = this.lastEventId === "";
-		const query = this.lastEventId
-			? `?lastEventId=${encodeURIComponent(this.lastEventId)}`
-			: "";
-		const source = new EventSource(`${API_ENDPOINTS.BASE_URL}${API_ENDPOINTS.CHANGES}${query}`);
+		const params = new URLSearchParams({ subscription });
+		if (this.lastEventId) params.set("lastEventId", this.lastEventId);
+		const source = new EventSource(
+			`${API_ENDPOINTS.BASE_URL}${API_ENDPOINTS.CHANGES}?${params.toString()}`
+		);
 		this.source = source;
 		// Each listener checks it is still the current source: a closed one can
 		// still deliver what it had already read.
@@ -149,7 +175,10 @@ export class ChangeFeedService {
 		this.source?.close();
 		this.source = null;
 		this.attempts += 1;
-		this.retryTimer = setTimeout(() => this.connect(), changeFeedRetryDelayMs(this.attempts));
+		this.retryTimer = setTimeout(
+			() => void this.connect(),
+			changeFeedRetryDelayMs(this.attempts)
+		);
 	}
 }
 

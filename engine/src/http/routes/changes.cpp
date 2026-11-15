@@ -9,12 +9,15 @@
  * @file http/routes/changes.cpp
  * @brief `GET /changes` - the workspace change feed (issue #3420): one SSE
  *        event per committed write, so a client caching rows hears about a
- *        write any other client made.
+ *        write any other client made - and `POST /changes/subscriptions`, the
+ *        only way to get the id a stream needs.
  *
  * The relay is `GET /runs/:id/events`' poll-and-keep-alive loop over the
  * `ChangeFeed` `Database` publishes to, with the resume parsing of
- * `GET /inbox/:id/live`. It claims nothing: every client reads the same feed,
- * up to `MAX_READERS` at once.
+ * `GET /inbox/:id/live`. Every client reads the same feed, up to
+ * `MAX_READERS` at once, and each stream is opened with a single-use
+ * subscription id: a plain `GET` (all a web page can send without an
+ * `Origin`) holds no slot, so a page cannot fill the feed and lock the app out.
  */
 
 #include "vayu/core/constants.hpp"
@@ -152,6 +155,31 @@ httplib::DataSink& sink) {
     return false;
 }
 
+/**
+ * Spends the `subscription` query parameter. Answers the refusal itself and
+ * false when it is absent or names no unspent id: a request that holds no
+ * slot, so a loop of them cannot crowd out a reader with an id.
+ */
+bool redeem_subscription_param (ChangeFeed& feed,
+const httplib::Request& req,
+httplib::Response& res) {
+    if (!req.has_param ("subscription")) {
+        send_error (res, 400,
+        "The subscription query parameter is required: POST "
+        "/changes/subscriptions for one",
+        "subscription_required");
+        return false;
+    }
+    if (!feed.redeem_subscription (req.get_param_value ("subscription"))) {
+        send_error (res, 403,
+        "The subscription query parameter names no unused subscription: an "
+        "id opens one stream, so POST /changes/subscriptions for another",
+        "unknown_subscription");
+        return false;
+    }
+    return true;
+}
+
 void handle_changes (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const std::string header = req.get_header_value ("Last-Event-ID");
     const std::string param  = req.get_param_value ("lastEventId");
@@ -169,6 +197,9 @@ void handle_changes (RouteContext& ctx, const httplib::Request& req, httplib::Re
     }
 
     ChangeFeed& feed = ctx.db.change_feed ();
+    if (!redeem_subscription_param (feed, req, res)) {
+        return;
+    }
     if (!feed.try_add_reader ()) {
         // A slot whose client has gone is freed at its next keep-alive write.
         res.set_header ("Retry-After",
@@ -190,11 +221,28 @@ void handle_changes (RouteContext& ctx, const httplib::Request& req, httplib::Re
     [&feed] (bool) { feed.remove_reader (); });
 }
 
+void handle_subscribe (RouteContext& ctx, httplib::Response& res) {
+    send_json (res,
+    nlohmann::json{ { "subscription", ctx.db.change_feed ().issue_subscription () } });
+}
+
 } // namespace
 
 void register_change_feed_routes (RouteContext& ctx) {
     /**
-     * GET /changes
+     * POST /changes/subscriptions
+     *
+     * `{subscription}`: an unguessable, single-use id for one `GET /changes`.
+     * A `POST`, so a web page can send it only with an `Origin`, which the
+     * management-API gate refuses; the page cannot learn an id or hold a slot.
+     */
+    ctx.server.Post ("/changes/subscriptions",
+    [&ctx] (const httplib::Request&, httplib::Response& res) {
+        handle_subscribe (ctx, res);
+    });
+
+    /**
+     * GET /changes?subscription=<id>
      *
      * One `event: change` per committed write of a collection, request,
      * example, environment, the globals or a trash entry, data
@@ -202,7 +250,9 @@ void register_change_feed_routes (RouteContext& ctx) {
      * id. Opens with `event: ready` (or `reset`), resumes from
      * `Last-Event-ID` / `?lastEventId=`, and sends `event: reset` when the
      * events since that id are no longer retained: the reader refetches
-     * everything. Reads only: a stream changes nothing.
+     * everything. A missing `subscription` is a 400 and an unknown or spent
+     * one a 403, neither holding a slot; a full feed is a 503 that spends the
+     * id. Reads only: a stream changes nothing.
      */
     ctx.server.Get ("/changes", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_changes (ctx, req, res);

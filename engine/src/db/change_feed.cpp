@@ -12,9 +12,16 @@
 
 #include "vayu/db/change_feed.hpp"
 
+#include <sodium.h>
+
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <stdexcept>
 #include <utility>
+
+#include "vayu/utils/encoding.hpp"
+#include "vayu/utils/sodium_init.hpp"
 
 namespace vayu::db {
 
@@ -128,6 +135,38 @@ bool ChangeFeed::try_add_reader () {
 
 void ChangeFeed::remove_reader () {
     readers_.fetch_sub (1);
+}
+
+std::string ChangeFeed::issue_subscription () {
+    namespace feed_constants = vayu::core::constants::change_feed;
+    vayu::utils::ensure_sodium_initialized ();
+    std::array<char, feed_constants::SUBSCRIPTION_ID_BYTES> bytes{};
+    randombytes_buf (bytes.data (), bytes.size ());
+    std::string id =
+    vayu::utils::base64url_encode (std::string_view (bytes.data (), bytes.size ()));
+
+    const std::lock_guard<std::mutex> lock (subscription_mutex_);
+    subscriptions_.push_back (id);
+    if (subscriptions_.size () > feed_constants::MAX_PENDING_SUBSCRIPTIONS) {
+        subscriptions_.pop_front ();
+    }
+    return id;
+}
+
+bool ChangeFeed::redeem_subscription (std::string_view id) {
+    const std::lock_guard<std::mutex> lock (subscription_mutex_);
+    // A constant-time compare per pending id, so how long a refusal takes says
+    // nothing about how much of an id was right.
+    const auto spent =
+    std::ranges::find_if (subscriptions_, [id] (const std::string& pending) {
+        return pending.size () == id.size () &&
+        sodium_memcmp (pending.data (), id.data (), id.size ()) == 0;
+    });
+    if (spent == subscriptions_.end ()) {
+        return false;
+    }
+    subscriptions_.erase (spent);
+    return true;
 }
 
 int64_t change_feed_id_base_now () {

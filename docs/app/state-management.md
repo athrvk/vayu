@@ -3007,7 +3007,12 @@ The stream is the inbox stream's shape: every drop is closed and reconnected on
 the service's own backoff (`CHANGE_FEED_RETRY_BASE_MS` doubling to
 `CHANGE_FEED_RETRY_MAX_MS`, 15s, which is the `Retry-After` the engine sends
 with `503 change_feed_full`; an `EventSource` cannot read the status or the
-header), resuming by `?lastEventId=` from the last id seen. It never gives up,
+header), resuming by `?lastEventId=` from the last id seen. Each connection, a
+reconnect included, first asks `POST /changes/subscriptions` for a single-use id
+and opens `GET /changes?subscription=<id>`: the engine takes a stream slot only
+on such an id, so a web page cannot hold every slot and leave the app's stream
+refused; a failed request for the id is retried on the same backoff, and a
+`stop()` while one is in flight drops it on arrival. It never gives up,
 since nothing renders a stopped feed; the engine-status gate is what stops it
 asking a downed engine.
 

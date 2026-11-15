@@ -36,6 +36,13 @@ namespace {
 
 /// The value of @p name, copied out, or empty when it is unset. MSVC
 /// deprecates `std::getenv` (C4996), so Windows reads through `_dupenv_s`.
+///
+/// On POSIX the bytes `getenv` returns are the environment block the kernel
+/// handed this process (`/proc/<pid>/environ` is that memory, not the
+/// `environ` pointer array), so `unsetenv` alone leaves the value readable
+/// there for the process's life. The original is overwritten here, before the
+/// caller unsets it. Windows has no such view: `_dupenv_s` hands back a copy
+/// that is wiped below, and the block it came from is process-private.
 std::string read_environment (const char* name) {
 #ifdef _WIN32
     char* value        = nullptr;
@@ -52,7 +59,15 @@ std::string read_environment (const char* name) {
     // writing the environment underneath this read.
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* value = std::getenv (name);
-    return value == nullptr ? std::string () : std::string (value);
+    if (value == nullptr) {
+        return {};
+    }
+    std::string copy (value);
+    // The one write to a `getenv` result: the block is writable process
+    // memory, and `const` is only the standard's promise about the caller.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    sodium_memzero (const_cast<char*> (value), copy.size ());
+    return copy;
 #endif
 }
 
