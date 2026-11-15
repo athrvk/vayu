@@ -100,6 +100,14 @@ interface ClientSettingsState {
 	notifications: NotificationPrefs;
 	/** Upper bounds the load-test dialog offers. Read via `resolveLoadTestLimits`. */
 	loadTestCeilings: LoadTestCeilings;
+	/**
+	 * Origins (scheme, host, port) the user has already chosen to contact:
+	 * pressed Send or Load test on a request to one, or loaded a GraphQL schema
+	 * from it by hand. The schema is introspected on its own only for an origin
+	 * in this list (`lib/graphql/approved-endpoints.ts`), so a request that
+	 * arrived in an imported file contacts nothing until its user does.
+	 */
+	approvedEndpoints: string[];
 
 	setEditor: (patch: Partial<EditorPrefs>) => void;
 	setMonoFont: (font: MonoFontChoice) => void;
@@ -114,6 +122,8 @@ interface ClientSettingsState {
 	setSystemNotifications: (on: boolean) => void;
 	/** Patch one or more ceilings; each is clamped to what the engine accepts. */
 	setLoadTestCeilings: (patch: Partial<LoadTestCeilings>) => void;
+	/** Add an origin to `approvedEndpoints`; one already there leaves the store untouched. */
+	approveEndpoint: (origin: string) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
 	resetAll: () => void;
 }
@@ -169,6 +179,11 @@ function mergeWithNestedDefaults(
 		autoSave: completeNested(DEFAULT_AUTO_SAVE_PREFS, stored.autoSave),
 		notifications: completeNested(DEFAULT_NOTIFICATION_PREFS, stored.notifications),
 		loadTestCeilings: completeNested(DEFAULT_LOAD_TEST_CEILINGS, stored.loadTestCeilings),
+		// An array, not an object: a hand-edited payload that is not a list of
+		// strings would make every `includes` lookup throw or lie.
+		approvedEndpoints: Array.isArray(stored.approvedEndpoints)
+			? stored.approvedEndpoints.filter((o): o is string => typeof o === "string")
+			: [],
 	};
 }
 
@@ -211,6 +226,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			systemNotifications: false,
 			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
 			loadTestCeilings: { ...DEFAULT_LOAD_TEST_CEILINGS },
+			approvedEndpoints: [],
 
 			setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
 			setMonoFont: (font) => {
@@ -240,6 +256,12 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				set((s) => ({
 					loadTestCeilings: clampCeilings({ ...s.loadTestCeilings, ...patch }),
 				})),
+			approveEndpoint: (origin) =>
+				set((s) =>
+					s.approvedEndpoints.includes(origin)
+						? s
+						: { approvedEndpoints: [...s.approvedEndpoints, origin] }
+				),
 
 			resetAll: () => {
 				// The login item lives in the OS, not in a stored key, so clearing
@@ -271,6 +293,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				systemNotifications: s.systemNotifications,
 				notifications: s.notifications,
 				loadTestCeilings: s.loadTestCeilings,
+				approvedEndpoints: s.approvedEndpoints,
 			}),
 			onRehydrateStorage: () => (state) => {
 				// Re-assert persisted DOM-affecting prefs after rehydrate.

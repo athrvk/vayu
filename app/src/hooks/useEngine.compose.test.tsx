@@ -14,8 +14,9 @@
  * note about the composition for the Code section) must not be in it.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { useClientSettingsStore } from "@/stores/client-settings-store";
 import { useEngine } from "./useEngine";
 
 const composeRequest = vi.fn();
@@ -24,6 +25,8 @@ vi.mock("@/services", () => ({
 	ApiError: class ApiError extends Error {},
 	apiService: { composeRequest: (...args: unknown[]) => composeRequest(...args) },
 }));
+
+beforeEach(() => useClientSettingsStore.setState({ approvedEndpoints: [] }));
 
 describe("useEngine().composeRequest", () => {
 	it("hands on the composed request without deferredVariables", async () => {
@@ -74,5 +77,41 @@ describe("useEngine().composeRequest", () => {
 			method: "GET",
 			url: "https://a.test/",
 		});
+	});
+});
+
+/*
+ * Composing here is composing to send (Send, Load test, a History re-run), so
+ * it is the user choosing to contact the origin: the GraphQL body may then
+ * introspect it on its own (`lib/graphql/approved-endpoints.ts`).
+ */
+describe("useEngine().composeRequest and approved endpoints", () => {
+	it("approves the origin the composed request goes to, not the typed text", async () => {
+		composeRequest.mockResolvedValue({ method: "POST", url: "https://api.test/gql?q=1" });
+		const { result } = renderHook(() => useEngine());
+
+		await result.current.composeRequest({
+			request: { method: "POST", url: "{{base}}/gql?q=1" },
+		});
+
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual(["https://api.test"]);
+	});
+
+	it("approves nothing for a composition that names no origin", async () => {
+		composeRequest.mockResolvedValue({ method: "POST", url: "https://{{host}}/gql" });
+		const { result } = renderHook(() => useEngine());
+
+		await result.current.composeRequest({ requestId: "req_1" });
+
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual([]);
+	});
+
+	it("approves nothing when composing fails", async () => {
+		composeRequest.mockRejectedValue(new Error("collection not found"));
+		const { result } = renderHook(() => useEngine());
+
+		await expect(result.current.composeRequest({ requestId: "req_1" })).rejects.toThrow();
+
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual([]);
 	});
 });

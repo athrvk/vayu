@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -204,6 +205,65 @@ TEST (SanitizeConfigSnapshot, MasksTheSecretsPercentEncodedForms) {
     const json cfg = { { "url", "https://x/a?u=p%40ss%20word%2F1&q=p@ss%20word/1&r=keep" } };
     const auto parsed = sanitized (cfg, { secret });
     EXPECT_EQ (parsed["url"], "https://x/a?u=<redacted>&q=<redacted>&r=keep");
+}
+
+// Composition writes a URL through `encode_url_as_postman`, whose path,
+// user info and fragment sets leave `/ @ & : + '` raw where the strict and
+// query spellings write them `%XX`. A secret holding a space and one of those
+// lands in the URL in a spelling only the component's own encoder writes.
+struct UrlSecretCase {
+    const char* name;
+    std::string before;
+    std::string secret;
+    std::string after;
+    /// What composition writes for the secret there.
+    std::string composed;
+};
+
+class SanitizeUrlComponentSecret : public ::testing::TestWithParam<UrlSecretCase> {};
+
+TEST_P (SanitizeUrlComponentSecret, MasksTheSecretAsThatComponentWritesIt) {
+    const auto& c = GetParam ();
+    const std::string url =
+    vayu::core::encode_url_as_postman (c.before + c.secret + c.after);
+    // The input is what composition writes, and it is not the raw secret.
+    ASSERT_EQ (url, c.before + c.composed + c.after);
+    ASSERT_NE (c.composed, c.secret);
+
+    const auto parsed = sanitized ({ { "url", url } }, { c.secret });
+    EXPECT_EQ (parsed["url"], c.before + "<redacted>" + c.after);
+}
+
+// Each case is spelled by one component's encoder alone: a brace is `%7B` in a
+// path and user info but raw in a fragment, `@` and `&` are raw in a path and
+// a fragment (a query value writes `&` as `%26`), `@` is `%40` in user info
+// but `&` stays raw there (the strict spelling writes both `%XX`), and a colon is raw in a user name, in a path
+// and in a fragment but `%3A` after the user's own colon. Drop any one form
+// from `masked_secret_forms` and its case reds.
+INSTANTIATE_TEST_SUITE_P (Components,
+SanitizeUrlComponentSecret,
+::testing::Values (UrlSecretCase{ "PathSpaceAndSlash",
+                   "https://api.example.com/v1/", "a b/c", "/items", "a%20b/c" },
+UrlSecretCase{ "PathBraceAndAt", "https://api.example.com/v1/", "a b{c@d", "/items", "a%20b%7Bc@d" },
+UrlSecretCase{ "UserInfoAtAndAmpersand", "https://", "p@ss w&rd", "@api.example.com/", "p%40ss%20w&rd" },
+UrlSecretCase{ "UserNameWithAColon", "https://", "a b:c@d&e", "@api.example.com/", "a%20b:c%40d&e" },
+UrlSecretCase{ "PasswordWithAColon", "https://admin:", "a b:c@d&e",
+"@api.example.com/", "a%20b%3Ac%40d&e" },
+UrlSecretCase{ "FragmentSpaceAndSlash", "https://api.example.com/v1#", "a b/c", "", "a%20b/c" },
+UrlSecretCase{ "FragmentBraceAndAmpersand", "https://api.example.com/v1#",
+"a b{c@d&e", "", "a%20b{c@d&e" }),
+[] (const ::testing::TestParamInfo<UrlSecretCase>& info) {
+    return info.param.name;
+});
+
+// A URL-safe secret is written the same everywhere, so the one raw spelling
+// still masks it.
+TEST (SanitizeConfigSnapshot, MasksAUrlSafeSecretInEveryUrlComponent) {
+    const std::string secret = "s3cr3t-value";
+    const json cfg           = { { "url",
+    "https://" + secret + "@x/" + secret + "?q=" + secret + "#" + secret } };
+    EXPECT_EQ (sanitized (cfg, { secret })["url"],
+    "https://<redacted>@x/<redacted>?q=<redacted>#<redacted>");
 }
 
 // A JSON body is stored as text, so a secret holding `"` or `\` sits in it in

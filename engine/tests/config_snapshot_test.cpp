@@ -53,6 +53,9 @@ constexpr const char* ENV_SECRET        = "env-secret-7f3a";
 constexpr const char* COLLECTION_SECRET = "collection-secret-91c2";
 // A value a JSON body holds escaped: `"` and `\` become `\"` and `\\`.
 constexpr const char* QUOTED_SECRET = R"(pa"ss\word-12345)";
+// A value whose path spelling (`a%20b%7Bc@d&e`) is neither its raw text nor
+// its strict or query percent-encoding.
+constexpr const char* SPACED_SECRET = "a b{c@d&e";
 
 class ConfigSnapshotExecuteTest : public ::testing::Test {
     protected:
@@ -105,6 +108,7 @@ class ConfigSnapshotExecuteTest : public ::testing::Test {
         collection.variables = json{
             { "signing", { { "value", COLLECTION_SECRET }, { "secret", true } } },
             { "quoted", { { "value", QUOTED_SECRET }, { "secret", true } } },
+            { "spaced", { { "value", SPACED_SECRET }, { "secret", true } } },
             { "region", { { "value", "eu-west-1" } } }
         }.dump ();
         collection.auth = "{}";
@@ -234,6 +238,23 @@ TEST_F (ConfigSnapshotExecuteTest, ALoadRunsSnapshotHoldsNoCollectionScopeSecret
     EXPECT_EQ (parsed["url"], echo.url () + "?sig=<redacted>");
     EXPECT_EQ (json::parse (parsed["body"]["content"].get<std::string> ()),
     (json{ { "sig", "<redacted>" }, { "q", "<redacted>" } }));
+}
+
+// Composition writes a URL's path through `encode_url_as_postman`, which
+// leaves `@` and `&` raw where the strict and query spellings escape them, so
+// the stored URL holds the secret in a spelling only that encoder writes.
+// Mutation check: drop the path spelling from `masked_secret_forms` in
+// `utils/json.cpp` and the secret stays in the stored URL.
+TEST_F (ConfigSnapshotExecuteTest, ADesignRunsSnapshotHoldsNoSecretWrittenIntoThePath) {
+    const vayu::tests::EchoServer echo;
+
+    execute ({ { "method", "GET" }, { "url", echo.url () + "/items/a%20b%7Bc@d&e/more" },
+    { "requestId", "req_1" }, { "environmentId", "env_1" } });
+
+    const std::string snapshot = stored_snapshot ();
+    ASSERT_FALSE (snapshot.empty ());
+    EXPECT_EQ (json::parse (snapshot)["url"], echo.url () + "/items/<redacted>/more")
+    << snapshot;
 }
 
 // A recursive scenario run composes each step through its own folder's chain

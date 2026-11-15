@@ -13,6 +13,7 @@ vi.mock("@/services/api", () => ({
 }));
 import { apiService } from "@/services/api";
 import {
+	composeIntrospection,
 	introspectSchema,
 	buildIntrospectionRequest,
 	IntrospectionError,
@@ -240,6 +241,37 @@ describe("introspectSchema", () => {
 		vi.mocked(apiService.composeRequest).mockRejectedValue(new Error("collection not found"));
 		await expect(introspectSchema(TARGET)).rejects.toThrow(/collection not found/);
 		expect(apiService.executeRequest).not.toHaveBeenCalled();
+	});
+
+	// The cache judges a composed URL and must send to that one, not to a
+	// second composition a variable edit could have changed in between.
+	it("sends to the composition it is handed, composing nothing itself", async () => {
+		const judged = { ...COMPOSED, url: "https://judged.test/gql" } as ComposedRequest;
+		vi.mocked(apiService.executeRequest).mockResolvedValue({
+			status: 200,
+			bodyRaw: JSON.stringify({ data: introspectionJSONFor(SDL) }),
+		} as SanityResult);
+		await introspectSchema(TARGET, judged);
+		expect(apiService.composeRequest).not.toHaveBeenCalled();
+		expect(vi.mocked(apiService.executeRequest).mock.calls[0][0].url).toBe(
+			"https://judged.test/gql"
+		);
+	});
+});
+
+describe("composeIntrospection", () => {
+	it("composes the target unresolved and sends nothing", async () => {
+		vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
+		await expect(composeIntrospection(TARGET)).resolves.toBe(COMPOSED);
+		expect(apiService.executeRequest).not.toHaveBeenCalled();
+	});
+
+	it("reports the engine's own failure as a network failure carrying its message", async () => {
+		vi.mocked(apiService.composeRequest).mockRejectedValue(new Error("collection not found"));
+		await expect(composeIntrospection(TARGET)).rejects.toMatchObject({
+			kind: "network",
+			message: "collection not found",
+		});
 	});
 });
 

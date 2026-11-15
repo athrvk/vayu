@@ -64,7 +64,7 @@ import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
 import { sendsGraphQLInTheUrl } from "./graphql-method";
-import { useLayoutStore } from "@/stores";
+import { useClientSettingsStore, useLayoutStore } from "@/stores";
 import {
 	GRAPHQL_PANE_HEADER_HEIGHT,
 	GRAPHQL_VARIABLES_MAX_SIZE,
@@ -294,11 +294,14 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
  */
 function SchemaControls({
 	entry,
+	awaitingLoad,
 	open,
 	onToggle,
 	onRefresh,
 }: {
 	entry: SchemaEntry | null;
+	/** The schema has not loaded because the endpoint is not yet one the user has contacted. */
+	awaitingLoad: boolean;
 	/** Whether the explorer pane is showing, for the toggle's icon and state. */
 	open: boolean;
 	onToggle: () => void;
@@ -325,7 +328,8 @@ function SchemaControls({
 			 * no second tooltip: a Radix tooltip over an element that already has a
 			 * native one is the same fact told twice. It is plain text rather than
 			 * a target - the two things a user does about the schema are the
-			 * buttons on either side of it.
+			 * buttons on either side of it - except while the schema is waiting
+			 * for the user to contact the endpoint, when it is Load schema.
 			 *
 			 * A schema nothing has been said about yet is the badge's own `idle`
 			 * face now, not a fallback spelled out here: the badge renders
@@ -334,7 +338,7 @@ function SchemaControls({
 			 * changes - Refresh, one element to the right, used to slide out from
 			 * under the pointer that had just pressed it.
 			 */}
-			<SchemaStatusBadge entry={entry} />
+			<SchemaStatusBadge entry={entry} awaitingLoad={awaitingLoad} onLoad={onRefresh} />
 			<TooltipIconButton
 				label="Refresh schema"
 				className="shrink-0"
@@ -367,6 +371,10 @@ export function GraphQLBody({
 	// read a render apart from each other.
 	const entry = useSchemaCache((s) => s.getActiveEntry());
 	const activeSchema = entry?.schema ?? null;
+	const awaitingLoad = useSchemaCache((s) => !!s.activeKey && !!s.awaitingLoad[s.activeKey]);
+	// Read so that approving this endpoint elsewhere (Send on this request) runs
+	// the effect below again, which then loads the schema.
+	const approvedEndpoints = useClientSettingsStore((s) => s.approvedEndpoints);
 
 	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
@@ -486,7 +494,8 @@ export function GraphQLBody({
 	/*
 	 * Track the endpoint as the active schema target and (debounced) introspect
 	 * it, so the editors' language providers can validate and autocomplete
-	 * against the real schema.
+	 * against the real schema. `ensureSchema` does so only for an endpoint the
+	 * user has already contacted; otherwise the badge offers Load schema.
 	 *
 	 * Keyed on the cache key rather than the URL: the credentials are part of
 	 * the target now, so changing environment - or the auth block, or a variable
@@ -516,8 +525,10 @@ export function GraphQLBody({
 		// comment above keys on; `schemaTarget` itself is rebuilt every render,
 		// so depending on it would re-introspect the same endpoint on every
 		// keystroke.
+		// `approvedEndpoints` is not read in the body: it re-runs the effect when
+		// the user contacts this endpoint, so a declined schema then loads.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [targetKey]);
+	}, [targetKey, approvedEndpoints]);
 
 	/*
 	 * Everything the envelope carries, derived from the body. The query and
@@ -808,6 +819,7 @@ export function GraphQLBody({
 						{schemaTarget.url && (
 							<SchemaControls
 								entry={entry}
+								awaitingLoad={awaitingLoad}
 								open={showExplorer}
 								onToggle={() => setExplorerOpen(!showExplorer)}
 								onRefresh={refresh}

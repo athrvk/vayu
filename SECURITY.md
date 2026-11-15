@@ -323,7 +323,12 @@ the host and port the document itself came from, but it does not refuse
 private-network or public hosts, so import only specs you trust. A sibling file
 must sit under the folder of the file you picked. A Postman or Insomnia file can
 carry scripts, auth, variables and environments of its own (see the scripts note
-under "What Vayu defends").
+under "What Vayu defends"). A request in an imported file that has a GraphQL body
+is not introspected on its own either: the app loads a schema automatically only
+for an origin you have already contacted, by pressing Send or Load test on a
+request to it or by loading its schema yourself, and judges that origin on the
+URL the request composes to. Until then the schema badge reads "Load schema" and
+nothing is sent.
 
 After a download on Windows or the Linux AppImage, the in-app updater contacts
 `api.github.com` for the installer's attestation and `tuf-repo-cdn.sigstore.dev`

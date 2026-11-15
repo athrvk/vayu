@@ -217,6 +217,36 @@ describe("client-settings rehydration", () => {
 		expect(n.minSeverity).toBe(DEFAULT_NOTIFICATION_PREFS.minSeverity);
 	});
 
+	it("keeps the approved endpoints a user accumulated, and only well-formed ones", async () => {
+		seed({
+			version: 1,
+			state: { approvedEndpoints: ["https://a.test", 7, null, "http://b.test:8080"] },
+		});
+		await useClientSettingsStore.persist.rehydrate();
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual([
+			"https://a.test",
+			"http://b.test:8080",
+		]);
+
+		seed({ version: 1, state: { approvedEndpoints: "https://a.test" } });
+		await useClientSettingsStore.persist.rehydrate();
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual([]);
+	});
+
+	it("approves an endpoint once, and persists it", () => {
+		useClientSettingsStore.setState({ approvedEndpoints: [] });
+		useClientSettingsStore.getState().approveEndpoint("https://a.test");
+		const afterFirst = useClientSettingsStore.getState();
+		useClientSettingsStore.getState().approveEndpoint("https://a.test");
+
+		expect(useClientSettingsStore.getState()).toBe(afterFirst);
+		expect(useClientSettingsStore.getState().approvedEndpoints).toEqual(["https://a.test"]);
+		expect(localStorage.getItem(STORAGE_KEYS.CLIENT_SETTINGS)).toContain("https://a.test");
+
+		// The enumeration test below reads this store's current shape.
+		useClientSettingsStore.setState({ approvedEndpoints: [] });
+	});
+
 	it("completes every object-valued preference, not only the ones named today", async () => {
 		// Enumerated rather than listed: a fifth nested preference that nobody
 		// wired into the merge fails here instead of shipping `undefined` keys.
