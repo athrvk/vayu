@@ -733,6 +733,17 @@ struct MockConfig {
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
 httplib::Response& res) {
+    // A mock that names its readers answers only requests addressed to its own
+    // loopback name, the management API's Host rule: a rebound page is
+    // same-origin with the mock and would otherwise read it with no Origin to
+    // check. `local_port` is the bound port, known even when the start asked
+    // for any. A mock with no list is readable by any page by design.
+    if (!mock.cors.allowed_origins.empty () &&
+    !routes::names_this_listener (req, req.local_port)) {
+        routes::send_error (res, 403, routes::foreign_host_message (req.local_port));
+        return;
+    }
+
     routes::apply_cors_headers (req, res, mock.cors);
 
     // A real preflight (Access-Control-Request-Method present) is browser

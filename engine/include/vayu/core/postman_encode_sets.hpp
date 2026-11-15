@@ -60,6 +60,26 @@ constexpr bool in_postman_path_encode_set (unsigned char byte) {
     }
 }
 
+/// `USERINFO_ENCODE_SET`: `PATH_ENCODE_SET` extended with `/ : ; = @ [ \ ] ^ |`.
+constexpr bool in_postman_userinfo_encode_set (unsigned char byte) {
+    if (in_postman_path_encode_set (byte)) {
+        return true;
+    }
+    switch (byte) {
+    case '/':
+    case ':':
+    case ';':
+    case '=':
+    case '@':
+    case '[':
+    case '\\':
+    case ']':
+    case '^':
+    case '|': return true;
+    default: return false;
+    }
+}
+
 /// `QUERY_ENCODE_SET`: the unsendable bytes, `"`, `#`, `'`, `<` and `>`.
 constexpr bool in_postman_query_encode_set (unsigned char byte) {
     if (is_unsendable_url_byte (byte)) {

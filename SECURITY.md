@@ -63,8 +63,10 @@ from pages, so every page in the browser can reach it and, by default, read
 what it answers (CORS `*`, never with your cookies). Starting one with
 `allowedOrigins` restricts reading to the origins you list, but those replies
 carry `Access-Control-Allow-Credentials`, so "never with your cookies" holds only
-for the default, and the listener still answers every request: the list decides
-who may read the reply, not who may send. A mock binds to loopback only. An
+for the default, and the listener still answers every request addressed to its
+own loopback name: the list decides who may read the reply, not who may send. A
+mock with a list also refuses a `Host` that is not its own loopback name, which
+a page reaching it through DNS rebinding would send. A mock binds to loopback only. An
 inbox can bind past loopback only through an explicit `bind` plus
 `confirmNonLoopback` from the engine API, never from an MCP agent, and once
 it does, anyone on that network can post to it. Since a mock replays saved
@@ -325,7 +327,12 @@ the host and port the document itself came from, but it does not refuse
 private-network or public hosts, so import only specs you trust. A sibling file
 must sit under the folder of the file you picked. A Postman or Insomnia file can
 carry scripts, auth, variables and environments of its own (see the scripts note
-under "What Vayu defends"). A request in an imported file that has a GraphQL body
+under "What Vayu defends"). A Postman file can also turn certificate
+verification off: `protocolProfileBehavior.strictSSL: false` on a request, folder
+or the collection imports as that request's `verifySSL: false` (see
+[docs/app/import-collections/postman.md](docs/app/import-collections/postman.md)),
+so check the TLS setting of an imported request before it carries credentials. A
+request in an imported file that has a GraphQL body
 is not introspected on its own either: the app loads a schema automatically only
 for an origin you have already contacted, by pressing Send or Load test on a
 request to it or by loading its schema yourself, and judges that origin on the

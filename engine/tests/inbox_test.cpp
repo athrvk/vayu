@@ -492,6 +492,63 @@ TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndC
     EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
 }
 
+TEST_F (InboxListenerTest, ACompressedBodyIsCapturedAsSentWithItsEncodingHeader) {
+    // The engine builds cpp-httplib without compression, and the library
+    // answers a bare 415 to a Content-Encoding it knows but cannot decode, so
+    // a gzip-compressing sender got no capture at all. Read the request
+    // without masking Content-Encoding and every case below is a 415 with
+    // nothing recorded. The bytes are not a valid stream and need not be: the
+    // inbox stores what arrived and never decodes it.
+    using namespace std::string_literals;
+    const std::string body = "\x1f\x8b\x08\x00\x00\x00\x00\x00\xff\xfe not text \x00\x01"s;
+
+    // Mixed case is the same coding (RFC 9110 8.4.1), and the library matches
+    // it that way.
+    for (const char* coding : { "gzip", "deflate", "br", "zstd", "GZIP" }) {
+        SCOPED_TRACE (coding);
+        InboxStartRequest request;
+        request.response.status = 202;
+        auto started            = start (request);
+        auto client             = client_for (started.info);
+
+        auto posted = client.Post ("/otlp", { { "Content-Encoding", coding } },
+        body, "application/x-protobuf");
+        ASSERT_TRUE (posted) << "POST to the inbox failed";
+        EXPECT_EQ (posted->status, 202);
+
+        auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+        ASSERT_EQ (captures.size (), 1u);
+        const auto& capture = captures.front ();
+        EXPECT_EQ (capture.body, body);
+        EXPECT_EQ (capture.body_bytes, static_cast<int64_t> (body.size ()));
+        EXPECT_FALSE (capture.body_truncated);
+        const auto stored_headers = json::parse (capture.headers);
+        EXPECT_EQ (stored_headers.value ("Content-Encoding", ""), coding);
+        EXPECT_EQ (stored_headers.value ("Content-Type", ""), "application/x-protobuf");
+    }
+}
+
+TEST_F (InboxListenerTest, AnIdentityOrUnknownContentEncodingStillRecordsAsBefore) {
+    for (const char* coding : { "identity", "UTF-8" }) {
+        SCOPED_TRACE (coding);
+        auto started = start ();
+        auto client  = client_for (started.info);
+
+        auto posted = client.Post ("/hook", { { "Content-Encoding", coding } },
+        "{\"id\":7}", "application/json");
+        ASSERT_TRUE (posted) << "POST to the inbox failed";
+        EXPECT_EQ (posted->status, 200);
+
+        auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+        ASSERT_EQ (captures.size (), 1u);
+        const auto& capture = captures.front ();
+        EXPECT_EQ (capture.body, "{\"id\":7}");
+        EXPECT_EQ (capture.body_bytes, 8);
+        const auto stored_headers = json::parse (capture.headers);
+        EXPECT_EQ (stored_headers.value ("Content-Encoding", ""), coding);
+    }
+}
+
 TEST_F (InboxListenerTest, RecordsThePathRawAsTheSenderSpelledIt) {
     // %2F and %20 survive: decoding them would make the stored path, and the URL
     // the app rebuilds from it, a different request from the one received.

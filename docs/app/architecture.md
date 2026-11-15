@@ -76,8 +76,11 @@ The main process is responsible for:
 
 - **Window Management**: Creates and manages the Electron `BrowserWindow`. Its
   `webPreferences` hold the renderer's security posture - no Node integration,
-  context isolation on, and Chromium's spellchecker off, so no field in the
-  request builder draws underlines and no dictionary is fetched over the network.
+  context isolation on, and Chromium's spellchecker off (`spellcheck: false`),
+  so no field in the request builder draws underlines. No dictionary is fetched
+  over the network either, but that is a session setting, not the window
+  option: `electron/spellcheck.ts` empties every session's spellchecker language
+  list from a `session-created` listener registered before `app.whenReady`.
   Bounds, maximised and full-screen state are remembered across launches in
   `window-state.json` under the user-data directory (`window-state.ts`, issue
   #2100); a maximised or full-screen window keeps its previous normal bounds, and

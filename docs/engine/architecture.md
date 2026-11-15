@@ -212,6 +212,9 @@ read it and none can read one sent with the user's cookies. With a list, a liste
 echoed with `Access-Control-Allow-Credentials: true` and every other origin gets no CORS header at
 all. The policy decides what a page can *read*, not what it can send: any page can still make a
 mock or an inbox answer a request.
+A mock with a list also answers `403` to a `Host` that is not a loopback spelling of its own port
+(`names_this_listener`, `routes.hpp`, the management API's rule), against DNS rebinding; a mock
+with no list and the inbox, which may bind wide, answer any `Host`.
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
