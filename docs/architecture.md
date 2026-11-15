@@ -136,7 +136,12 @@ reaches the UI by exactly one path.
 ```
 Manager                              Engine
    │                                    │
-   │  GET /changes[?lastEventId=N]      │
+   │  POST /changes/subscriptions       │
+   ├───────────────────────────────────►│
+   │  {subscription}                    │
+   │◄───────────────────────────────────┤
+   │  GET /changes?subscription=ID      │
+   │      [&lastEventId=N]              │
    ├───────────────────────────────────►│
    │                                    │
    │  event: ready (or reset)           │
@@ -148,8 +153,9 @@ Manager                              Engine
    │                          (repeated) │
 ```
 
-A dropped stream reconnects from the last id it saw and the engine replays what
-was missed; a resume the engine can no longer cover (too far behind, or an id
+A stream opens on a single-use subscription id, which the Manager asks for with a
+`POST` before every connection, a reconnect included. A dropped stream reconnects
+from the last id it saw and the engine replays what was missed; a resume the engine can no longer cover (too far behind, or an id
 from before an engine restart) opens with `reset` instead, and the Manager
 refetches everything the feed describes. The stream is open only while the
 health poll says the engine is connected. The renderer side is described in
@@ -794,8 +800,11 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   with nothing else. A web page in the user's browser can neither read the
   engine nor change it: a scriptless `GET` (an `<img>`, a navigation) still
   reaches a `GET` route, gets an opaque answer, and no `GET` route has a side
-  effect. Local tools (the MCP server, `curl`, a script) send no `Origin` and
-  are unaffected
+  effect, bar one resource it could hold: a change-feed stream takes a pool
+  thread, so `GET /changes` opens only on a single-use id from
+  `POST /changes/subscriptions`, which a page cannot send, and a page cannot
+  fill the stream slots to lock the app out. Local tools (the MCP server,
+  `curl`, a script) send no `Origin` and are unaffected
   ([Who may call the API](engine/api-reference.md#who-may-call-the-api)).
 - **The shell carries the renderer past that gate**: the renderer is a browser
   context too. The Electron shell (`app/electron/engine-origin.ts`), on the
@@ -860,8 +869,13 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks
-  nothing the user types and never fetches Hunspell dictionaries, which it
-  otherwise downloads from a Google CDN at first use on Windows and Linux.
+  nothing the user types. That option alone does not stop the Hunspell
+  dictionary download (Google's CDN, on Windows and Linux), which belongs to
+  each session rather than each window; `electron/spellcheck.ts` therefore
+  empties the spellchecker language list of every session as it is created
+  (`app.on("session-created")`, registered before `app.whenReady` so the
+  default session and the OAuth partition are both covered), and nothing is
+  fetched.
   Monaco's editors are unaffected either way; they own their own text area.
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
   SQLite, the same way every other stored credential is. Settings draws that

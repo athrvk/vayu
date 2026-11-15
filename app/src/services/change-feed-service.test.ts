@@ -12,11 +12,12 @@
  * stream. `EventSource` is replaced by a recorder whose frames the test sends.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { CHANGE_FEED_COALESCE_MS } from "@/lib/change-feed-invalidation";
 import { queryKeys } from "@/queries/keys";
+import { apiService } from "./api";
 import {
 	CHANGE_FEED_RETRY_BASE_MS,
 	CHANGE_FEED_RETRY_MAX_MS,
@@ -54,6 +55,12 @@ class MockEventSource {
 }
 
 const FEED_URL = `${API_ENDPOINTS.BASE_URL}${API_ENDPOINTS.CHANGES}`;
+
+/** The URL of a stream opened on subscription @p n (the n-th id the engine issued), resuming from @p resume. */
+function feedUrl(n: number, resume?: number): string {
+	const resumeParam = resume === undefined ? "" : `&lastEventId=${resume}`;
+	return `${FEED_URL}?subscription=sub_${n}${resumeParam}`;
+}
 // Ids the size the engine issues: a process start in microseconds.
 const FIRST_ID = 1_789_000_000_000_000;
 
@@ -74,9 +81,14 @@ function requestChange(id = "req_1") {
 let queryClient: QueryClient;
 let invalidated: () => unknown[][];
 let service: ChangeFeedService;
+let subscribe: MockInstance<typeof apiService.createChangeSubscription>;
 
 beforeEach(() => {
 	vi.useFakeTimers();
+	let issued = 0;
+	subscribe = vi
+		.spyOn(apiService, "createChangeSubscription")
+		.mockImplementation(async () => `sub_${(issued += 1)}`);
 	MockEventSource.instances = [];
 	vi.stubGlobal("EventSource", MockEventSource);
 	queryClient = new QueryClient();
@@ -102,26 +114,77 @@ function lastDelay(timeouts: { mock: { calls: unknown[][] } }): number {
 	return calls[calls.length - 1][1] as number;
 }
 
-/** Fail the current stream and let its reconnect fire. */
+/** Start the feed and let its subscription request answer, so the stream is open. */
+async function startFeed() {
+	service.start(queryClient);
+	await vi.advanceTimersByTimeAsync(0);
+}
+
+/** Fail the current stream and let its reconnect fire and be subscribed. */
 async function dropAndReconnect(source = latest()) {
 	source.onerror?.();
 	await vi.advanceTimersByTimeAsync(CHANGE_FEED_RETRY_MAX_MS * 2);
 }
 
 describe("ChangeFeedService", () => {
-	it("subscribes with no resume point the first time", () => {
-		service.start(queryClient);
-		expect(sources().map((s) => s.url)).toEqual([FEED_URL]);
+	it("subscribes with no resume point the first time", async () => {
+		await startFeed();
+		expect(sources().map((s) => s.url)).toEqual([feedUrl(1)]);
 	});
 
-	it("does not open a second stream while one is open", () => {
+	it("asks for a subscription before it opens a stream, and for a new one before each reconnect", async () => {
+		// The engine's stream slots are taken only on an id a web page cannot ask
+		// for; an id opens one stream, so a reused one would be refused.
+		service.start(queryClient);
+		expect(subscribe).toHaveBeenCalledTimes(1);
+		expect(sources()).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(sources().map((s) => s.url)).toEqual([feedUrl(1)]);
+
+		await dropAndReconnect();
+		await dropAndReconnect();
+		expect(subscribe).toHaveBeenCalledTimes(3);
+		expect(sources().map((s) => s.url)).toEqual([feedUrl(1), feedUrl(2), feedUrl(3)]);
+	});
+
+	it("retries on the backoff when the subscription cannot be had, and opens once it can", async () => {
+		subscribe.mockRejectedValueOnce(new Error("engine unreachable"));
+		await startFeed();
+		expect(sources()).toHaveLength(0);
+
+		await vi.advanceTimersByTimeAsync(CHANGE_FEED_RETRY_MAX_MS * 2);
+		expect(subscribe).toHaveBeenCalledTimes(2);
+		expect(sources()).toHaveLength(1);
+	});
+
+	it("opens nothing for a subscription that arrives after stop", async () => {
+		let release: (id: string) => void = () => {};
+		subscribe.mockImplementationOnce(
+			() => new Promise<string>((resolve) => (release = resolve))
+		);
+		service.start(queryClient);
+		service.stop();
+		release("sub_late");
+		await vi.advanceTimersByTimeAsync(CHANGE_FEED_RETRY_MAX_MS * 2);
+		expect(sources()).toHaveLength(0);
+	});
+
+	it("asks once for a start made while the subscription is still in flight", async () => {
 		service.start(queryClient);
 		service.start(queryClient);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(subscribe).toHaveBeenCalledTimes(1);
+		expect(sources()).toHaveLength(1);
+	});
+
+	it("does not open a second stream while one is open", async () => {
+		await startFeed();
+		await startFeed();
 		expect(sources()).toHaveLength(1);
 	});
 
 	it("invalidates what a change names, once the coalescing window has passed", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		latest().emit("change", FIRST_ID + 1, requestChange());
 
@@ -131,7 +194,7 @@ describe("ChangeFeedService", () => {
 	});
 
 	it("re-reads the open rows, and not the request lists, on a fresh subscription's ready", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
 
@@ -145,7 +208,7 @@ describe("ChangeFeedService", () => {
 	});
 
 	it("asks nothing of the cache for a resume's ready: the missed events follow it", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
 		const before = invalidated().length;
@@ -157,7 +220,7 @@ describe("ChangeFeedService", () => {
 	});
 
 	it("refetches everything the feed covers on a reset", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("reset", FIRST_ID + 2000, { lastEventId: FIRST_ID + 2000 });
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
 
@@ -170,7 +233,7 @@ describe("ChangeFeedService", () => {
 	});
 
 	it("resumes from the last id it saw after a drop", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		latest().emit("change", FIRST_ID + 1, requestChange());
 		latest().emit("change", FIRST_ID + 2, requestChange("req_2"));
@@ -180,18 +243,18 @@ describe("ChangeFeedService", () => {
 
 		expect(dropped.closed).toBe(true);
 		expect(sources()).toHaveLength(2);
-		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID + 2}`);
+		expect(latest().url).toBe(feedUrl(2, FIRST_ID + 2));
 	});
 
 	it("resumes from the ready's id when the stream drops before any change", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		await dropAndReconnect();
-		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID}`);
+		expect(latest().url).toBe(feedUrl(2, FIRST_ID));
 	});
 
 	it("passes over a kind it does not know, and still advances the resume point", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		latest().emit("change", FIRST_ID + 1, { kind: "dashboard", id: "d_1", op: "create" });
 		latest().emit("change", FIRST_ID + 2, "not json");
@@ -201,11 +264,11 @@ describe("ChangeFeedService", () => {
 		// The stream kept going past both: the change after them was applied.
 		expect(includesKey(queryKeys.requests.detail("req_1"))).toBe(true);
 		await dropAndReconnect();
-		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID + 3}`);
+		expect(latest().url).toBe(feedUrl(2, FIRST_ID + 3));
 	});
 
 	it("ignores what a source it has already closed still delivers", async () => {
-		service.start(queryClient);
+		await startFeed();
 		const first = latest();
 		first.emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		await dropAndReconnect(first);
@@ -215,14 +278,14 @@ describe("ChangeFeedService", () => {
 		expect(includesKey(queryKeys.requests.detail("req_1"))).toBe(false);
 		// Nor did its id become the resume point.
 		await dropAndReconnect();
-		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID}`);
+		expect(latest().url).toBe(feedUrl(3, FIRST_ID));
 	});
 
 	it("keeps retrying a refused stream on a backoff that tops out at the engine's Retry-After", async () => {
 		// A 503 `change_feed_full` reaches an EventSource as a bare error before
 		// any frame. Spy on the delay the service asks for rather than the clock.
 		const timeouts = vi.spyOn(globalThis, "setTimeout");
-		service.start(queryClient);
+		await startFeed();
 		const delays: number[] = [];
 		for (let attempt = 0; attempt < 10; attempt += 1) {
 			timeouts.mockClear();
@@ -244,7 +307,7 @@ describe("ChangeFeedService", () => {
 
 	it("starts the ladder over once a stream serves again", async () => {
 		const timeouts = vi.spyOn(globalThis, "setTimeout");
-		service.start(queryClient);
+		await startFeed();
 		for (let attempt = 0; attempt < 6; attempt += 1) await dropAndReconnect();
 
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
@@ -254,7 +317,7 @@ describe("ChangeFeedService", () => {
 	});
 
 	it("stops reconnecting once stopped, and resumes from where it was when started again", async () => {
-		service.start(queryClient);
+		await startFeed();
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		latest().emit("change", FIRST_ID + 4, requestChange());
 		latest().onerror?.();
@@ -262,9 +325,9 @@ describe("ChangeFeedService", () => {
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_RETRY_MAX_MS * 2);
 		expect(sources()).toHaveLength(1);
 
-		service.start(queryClient);
+		await startFeed();
 		expect(sources()).toHaveLength(2);
-		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID + 4}`);
+		expect(latest().url).toBe(feedUrl(2, FIRST_ID + 4));
 	});
 });
 

@@ -26,7 +26,11 @@ engine does not answer to. What a page can still do is a scriptless `GET` - an
 `<img>`, `<script>` or `<link>`, a `no-cors` `fetch`, a top-level navigation -
 which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
 The page gets an opaque response it cannot read, and no `GET` route changes
-anything. A request the engine itself sends - a Send, a run, a script's
+anything. The one `GET` that holds a resource, the change feed's stream
+(`GET /changes`), opens only on a single-use id that `POST
+/changes/subscriptions` issues and a page cannot send, so a page can neither
+read the feed nor fill its fixed number of stream slots to stop the app hearing
+about outside edits. A request the engine itself sends - a Send, a run, a script's
 `pm.sendRequest`, a redirect it follows - never reaches the engine's own port
 or the MCP port, whatever spelling, redirect or DNS name leads there.
 
@@ -323,7 +327,12 @@ the host and port the document itself came from, but it does not refuse
 private-network or public hosts, so import only specs you trust. A sibling file
 must sit under the folder of the file you picked. A Postman or Insomnia file can
 carry scripts, auth, variables and environments of its own (see the scripts note
-under "What Vayu defends"). A request in an imported file that has a GraphQL body
+under "What Vayu defends"). A Postman file can also turn certificate
+verification off: `protocolProfileBehavior.strictSSL: false` on a request, folder
+or the collection imports as that request's `verifySSL: false` (see
+[docs/app/import-collections/postman.md](docs/app/import-collections/postman.md)),
+so check the TLS setting of an imported request before it carries credentials. A
+request in an imported file that has a GraphQL body
 is not introspected on its own either: the app loads a schema automatically only
 for an origin you have already contacted, by pressing Send or Load test on a
 request to it or by loading its schema yourself, and judges that origin on the

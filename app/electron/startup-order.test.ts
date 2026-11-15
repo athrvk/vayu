@@ -63,6 +63,20 @@ describe("startup ordering", () => {
 		expect(main.match(/\bstartEngine\(\);/g)).toHaveLength(1);
 	});
 
+	it("stops spellcheck dictionary downloads before app.whenReady, ahead of any session", () => {
+		// The download starts when a session is created, so a `session-created`
+		// listener registered once the app is ready misses the default session.
+		// Mutation check: drop the call, or move it into the handler.
+		const registeredAt = main.indexOf("\nsuppressDictionaryDownloads(app);");
+		const readyAt = main.indexOf("app.whenReady().then(");
+		const defaultSessionAt = main.indexOf("session.defaultSession");
+
+		expect(registeredAt).toBeGreaterThan(-1);
+		expect(registeredAt).toBeLessThan(readyAt);
+		expect(registeredAt).toBeLessThan(defaultSessionAt);
+		expect(main.match(/suppressDictionaryDownloads\(app\)/g)).toHaveLength(1);
+	});
+
 	it("waits for a ready app before it reports a failed start", () => {
 		// A start begun before `whenReady` can fail before it; a dialog cannot
 		// be shown until then.

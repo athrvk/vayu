@@ -129,3 +129,15 @@ describe("resource writes use POST to create and PUT to update", () => {
 		});
 	});
 });
+
+// The engine admits a change stream only on an id a web page cannot ask for:
+// the `POST` is what keeps the page out. Mutation check: make the call a `get`
+// and the path assertion below fails (and the engine answers it 404/405).
+describe("createChangeSubscription", () => {
+	it("asks for the id with a POST and returns it", async () => {
+		vi.clearAllMocks();
+		post.mockResolvedValue({ subscription: "sub_abc" } as never);
+		await expect(apiService.createChangeSubscription()).resolves.toBe("sub_abc");
+		expect(post).toHaveBeenCalledWith("/changes/subscriptions");
+	});
+});

@@ -5872,9 +5872,26 @@ an array) had the same effect and is now a `400` - see
 
 ## Change feed
 
+### POST /changes/subscriptions
+
+Issues the id one [`GET /changes`](#get-changes) stream opens with.
+
+```json
+{ "subscription": "k3Zq...43 base64url characters" }
+```
+
+The id is 32 random bytes from libsodium, **single-use**: the first `GET
+/changes` that presents it spends it, whether that stream is then refused for
+a full feed or served, and a second `GET` with it is a `403`. A client asks for
+a new one before every connection, a reconnect included. At most 64 issued ids
+wait unspent (`change_feed::MAX_PENDING_SUBSCRIPTIONS`); asking for more drops
+the oldest. This is a `POST` so a web page cannot send it: a page's request
+carries an `Origin`, which [the gate](#who-may-call-the-api) refuses, so a page
+can neither learn an id nor open a stream.
+
 ### GET /changes
 
-Server-Sent Events, one `change` event per committed write of a collection, a
+`GET /changes?subscription=<id>`: Server-Sent Events, one `change` event per committed write of a collection, a
 request, an example, an environment, the globals or a trash entry, whoever made
 it: the app, the MCP server (in-app or stdio), `vayu-cli` or a script against
 this API (#3420). A client that caches those rows subscribes once and refetches
@@ -5942,12 +5959,20 @@ reader that falls a whole ring behind between two polls (an import larger than
 the ring) is sent one mid-stream. The stream then continues from the reset's
 id. Treat it as "every cached row may be stale".
 
+**A stream needs a subscription.** `subscription` is the id
+[`POST /changes/subscriptions`](#post-changessubscriptions) issued. Without it
+the answer is a `400` with code `subscription_required`; an id that was never
+issued, was dropped or is already spent is a `403` with code
+`unknown_subscription`. Neither holds a reader slot. A scriptless `GET` is all
+a web page can send without an `Origin`, so a page can neither read the feed nor
+fill its slots to lock the app out.
+
 **Several readers, a bounded number.** There is no single-reader claim: every
-stream reads the same feed. Each one parks a pool thread, and the route needs no
-id a web page cannot know, so at most 8 are open at once
-(`change_feed::MAX_READERS`); another is a `503` with code `change_feed_full` and
-`Retry-After: 15`, the keep-alive interval within which a closed stream's slot
-is noticed and freed.
+stream reads the same feed. Each one parks a pool thread, so at most 8 are open
+at once (`change_feed::MAX_READERS`); another is a `503` with code
+`change_feed_full` and `Retry-After: 15`, the keep-alive interval within which a
+closed stream's slot is noticed and freed. The id of a refused stream is spent:
+ask for another.
 
 A stream writes `: keep-alive` after 15 quiet seconds and ends when the client
 goes or the engine stops. It reads only; opening one changes nothing.
