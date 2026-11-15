@@ -69,7 +69,8 @@ mock with a list also refuses a `Host` that is not its own loopback name, which
 a page reaching it through DNS rebinding would send. A mock binds to loopback only. An
 inbox can bind past loopback only through an explicit `bind` plus
 `confirmNonLoopback` from the engine API, never from an MCP agent, and once
-it does, anyone on that network can post to it. Since a mock replays saved
+it does, anyone on that network can post to it, though it holds at most 96
+connections at once and closes the rest at accept. Since a mock replays saved
 examples verbatim, do not save examples from production responses into a
 collection you mock.
 

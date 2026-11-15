@@ -297,6 +297,15 @@ connections across both accept loops - two inboxes on one port, each capturing a
 webhooks and neither list showing the rest. An ephemeral request needs no check, since the kernel
 does not hand out a port it is already using.
 
+The same helper bounds the connections a listener holds (`constants::listener`): 8 worker threads
+that grow to 32 for a burst, and a queue of 64 accepted connections waiting for one. cpp-httplib's
+default queue is unbounded, and a listener shares the process's file descriptors with the management
+API, every libcurl transfer and the database, so an inbox bound past loopback could otherwise be held
+open by idle connections until a descriptor ran out and every send failed with a misleading "Out of
+memory". httplib runs a whole connection as one task, so a connection past thread plus queue is
+refused at accept and closed. The management API's own server is not on this helper and keeps
+cpp-httplib's defaults.
+
 The management API answers that same `SO_REUSEPORT` problem the other way round, because it is the
 one listener whose port is a *contract* rather than a detail: it clears the option (Windows, which
 has no `SO_REUSEPORT` and lets `SO_REUSEADDR` step over a live listener, gets `SO_EXCLUSIVEADDRUSE`

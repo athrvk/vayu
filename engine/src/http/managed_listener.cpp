@@ -14,6 +14,7 @@
 
 #include "vayu/http/managed_listener.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/listener_registry.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -26,6 +27,8 @@
 namespace vayu::http {
 
 namespace {
+
+namespace constants = vayu::core::constants;
 
 /// How long `start()` waits for the accept loop, in 1ms steps. A local bind is
 /// live in well under a millisecond; the bound only matters so a pathological
@@ -57,6 +60,19 @@ ClaimRegistry& registry () {
     return instance;
 }
 
+/// Replace httplib's unbounded task queue with a pool that refuses a
+/// connection past `constants::listener`'s bounds, so the surplus is closed at
+/// accept instead of holding a descriptor.
+void bound_connections (httplib::Server& server) {
+    server.new_task_queue = [] () -> httplib::TaskQueue* {
+        // httplib owns and deletes what this factory returns: it is called
+        // once per `listen_after_bind ()`, and the pool dies with that call.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        return new httplib::ThreadPool (constants::listener::BASE_THREADS,
+        constants::listener::MAX_THREADS, constants::listener::MAX_QUEUED_CONNECTIONS);
+    };
+}
+
 } // namespace
 
 ManagedListener::ManagedListener ()
@@ -70,6 +86,7 @@ ManagedListener::ManagedListener (std::unique_ptr<httplib::Server> server)
         "ManagedListener was handed no server - every accessor would then read "
         "as a listener stop() had already released");
     }
+    bound_connections (*server_);
 }
 
 ManagedListener::~ManagedListener () {

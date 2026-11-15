@@ -982,6 +982,29 @@ constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 } // namespace inbox
 
 /**
+ * @brief Connection bounds of every on-demand listener (`ManagedListener`)
+ *
+ * Rails, not settings. A listener's connections share the process's file
+ * descriptors with the management API, every libcurl transfer and the
+ * database, and an inbox bound past loopback takes connections from anyone on
+ * its network. cpp-httplib's default queue is unbounded, so idle connections
+ * could hold descriptors until none were left and every transfer failed.
+ * httplib runs a whole connection as one task, so these bound the connections
+ * a listener holds open at once: at most `MAX_THREADS + MAX_QUEUED_CONNECTIONS`.
+ */
+namespace listener {
+/// Worker threads kept for a listener's whole life.
+constexpr size_t BASE_THREADS = 8;
+/// Ceiling on worker threads; the ones above `BASE_THREADS` are started for a
+/// burst and retired when idle. Each is one connection being served, a canned
+/// `delayMs` wait included.
+constexpr size_t MAX_THREADS = 32;
+/// Accepted connections allowed to wait for a worker. A connection past it is
+/// closed at accept, which the client sees as a connection reset.
+constexpr size_t MAX_QUEUED_CONNECTIONS = 64;
+} // namespace listener
+
+/**
  * @brief The workspace change feed, `GET /changes` (issue #3420)
  *
  * Rails, not settings: both bound what the engine holds for clients it cannot
