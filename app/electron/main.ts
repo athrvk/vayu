@@ -628,7 +628,7 @@ function createWindow() {
 			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
 			// header values, {{tokens}} and JSON keys all draw squiggles. This
 			// only silences the checker: the Hunspell download a tool pointed at
-			// internal APIs must not make is stopped per session, by
+			// internal APIs must not make is stopped by
 			// `suppressDictionaryDownloads` above.
 			spellcheck: false,
 		},
