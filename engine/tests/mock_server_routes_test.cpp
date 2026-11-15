@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <latch>
 #include <memory>
@@ -1666,8 +1667,8 @@ TEST_F (MockServerTest, AMockWithAnAllowedOriginsListAnswersOnlyItsOwnLoopbackNa
     // The refusal is the Host's, not a general breakage: the same listener
     // answers each of its own spellings.
     for (const std::string name : { "127.0.0.1", "localhost", "[::1]" }) {
-        const auto own =
-        client.Get ("/pets", httplib::Headers{ { "Host", name + ":" + port } });
+        const auto own = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
         ASSERT_TRUE (own) << name;
         EXPECT_EQ (own->status, 200) << name << ": " << own->body;
     }
@@ -1692,8 +1693,8 @@ TEST_F (MockServerTest, AMockWithNoAllowedOriginsListAnswersAnyHost) {
 
     const std::string port = std::to_string (started.info.port);
     for (const std::string name : { "evil.example", "127.0.0.1", "localhost" }) {
-        const auto answered =
-        client.Get ("/pets", httplib::Headers{ { "Host", name + ":" + port } });
+        const auto answered = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
         ASSERT_TRUE (answered) << name;
         EXPECT_EQ (answered->status, 200) << name << ": " << answered->body;
     }
