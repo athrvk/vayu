@@ -2845,6 +2845,19 @@ lookup failure that is not an outage yields to the read's own failure (a 404
 for an unknown run). A cancelled read says so without a tool call's "may have
 completed" advice, since a read sent nothing.
 
+**An engine refusal's text is masked too.** The engine words its refusals to
+quote no resolved variable value (a header name is quoted as written, with the
+one byte at fault), but that is the engine's rule to keep, so a tool error built
+from an engine refusal body (`Engine error (400): ...`, a `restore_trash_entry`
+404 or 409, the engine's 404 sentence) reads each secret form as `<redacted>`
+under the rule above, in its text and in `structuredContent.error.advice`. The
+mask is applied in `dispatchTool` (`maskEngineText`, `kit.ts`), keyed on the
+failure's `engineText` mark, so an error that holds no engine text (a missing
+argument, a policy refusal) makes no lookup and an outage needs none. It fails
+closed like the reads above: when a lookup fails the answer is the masking error
+and none of the refusal text. With reveal on nothing is masked and no lookup is
+made.
+
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.
 

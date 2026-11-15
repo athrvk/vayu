@@ -20,6 +20,7 @@ import {
 	confirmedInput,
 	echoShape,
 	engineErrorResult,
+	engineTextResult,
 	errorResult,
 	isRecord,
 	jsonResult,
@@ -95,7 +96,7 @@ export const TRASH_TOOLS: McpTool[] = [
 					err instanceof EngineRequestError &&
 					(err.status === 404 || err.status === 409)
 				) {
-					return errorResult(trashRefusalMessage(err), engineRefusalClass(err));
+					return engineTextResult(trashRefusalMessage(err), engineRefusalClass(err));
 				}
 				return engineErrorResult(err, ctx);
 			}

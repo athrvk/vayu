@@ -51,6 +51,13 @@ export interface Failure {
 	failureClass: FailureClass;
 	/** Complete on its own: for a reader with no tool in hand, the generic advice. */
 	message: string;
+	/**
+	 * The message carries text the engine wrote (a refusal body). The engine
+	 * words refusals so they quote no resolved value, but that is its rule to
+	 * keep, not this server's to assume: `dispatchTool` masks such a message as
+	 * it masks a run's output (`maskEngineText`).
+	 */
+	engineText?: true;
 	interrupted?: Interrupted;
 	/**
 	 * The engine's sentence for a 404 ("Run not found"). Present only on an

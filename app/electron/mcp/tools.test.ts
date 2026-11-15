@@ -17853,6 +17853,88 @@ describe("secret withholding", () => {
 	});
 
 	/*
+	 * An engine refusal reaches the agent in the tool's error text. The engine
+	 * words its refusals to quote no resolved value, and this server does not
+	 * rely on that: the text is masked as a run's output is, or answered whole as
+	 * the masking error. Mutation check: drop `maskEngineText` from
+	 * `dispatchTool`, and the first two cases leak.
+	 */
+	describe("an engine refusal's text", () => {
+		const secretRefusal = (status: number) =>
+			new EngineRequestError(
+				`Engine responded ${status}`,
+				status,
+				engineErrorBody("invalid_header_name", `header 'X ${RUN_SECRET}' is not a name`)
+			);
+		const refusedClient = (overrides: Partial<Record<keyof EngineClient, unknown>> = {}) =>
+			runClient({
+				getRunReport: vi.fn().mockRejectedValue(secretRefusal(400)),
+				restoreTrashEntry: vi.fn().mockRejectedValue(secretRefusal(404)),
+				...overrides,
+			});
+		const calls: Array<[string, Record<string, unknown>, Partial<McpSafetyConfig>]> = [
+			["get_run_report", { runId: "run_1" }, {}],
+			["restore_trash_entry", { entryId: "t1" }, { allowWrites: true }],
+		];
+
+		test.each(calls)(
+			"%s is masked, keeping its class and its status",
+			async (tool, args, safety) => {
+				const res = await dispatchTool(tool, args, ctxWith(refusedClient(), safety));
+
+				expect(res.isError).toBe(true);
+				const text = firstText(res);
+				for (const leak of RUN_SECRET_CORES) expect(text, leak).not.toContain(leak);
+				expect(text).toContain("<redacted>");
+				expect(text).toContain("is not a name");
+				const { error } = res.structuredContent as {
+					error: { class: string; advice: string };
+				};
+				expect(error.advice).toBe(text);
+				expect(error.class).toBe(tool === "get_run_report" ? "input" : "not_found");
+			}
+		);
+
+		test.each(calls)(
+			"%s arrives untouched when the user chose to reveal",
+			async (tool, args, safety) => {
+				const client = refusedClient();
+				const res = await dispatchTool(
+					tool,
+					args,
+					ctxWith(client, { ...safety, revealSecretsToAgents: true })
+				);
+
+				expect(firstText(res)).toContain("p@ss");
+				expect(client.getGlobals).not.toHaveBeenCalled();
+			}
+		);
+
+		test.each(calls)(
+			"%s fails closed when a secret lookup fails",
+			async (tool, args, safety) => {
+				const client = refusedClient({
+					getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+				});
+				const res = await dispatchTool(tool, args, ctxWith(client, safety));
+
+				const text = firstText(res);
+				expect(text).toMatch(/masking .* could not complete, because the globals lookup/);
+				expect(text).not.toContain("is not a name");
+				for (const leak of RUN_SECRET_CORES) expect(text, leak).not.toContain(leak);
+			}
+		);
+
+		test("an error holding no engine text needs no secret lookup", async () => {
+			const client = refusedClient({ getGlobals: vi.fn().mockRejectedValue(new Error("x")) });
+			const res = await dispatchTool("get_run_report", {}, ctxWith(client));
+
+			expect(firstText(res)).toBe('"runId" is required.');
+			expect(client.getGlobals).not.toHaveBeenCalled();
+		});
+	});
+
+	/*
 	 * With the engine down the masking lookup is the first thing to fail, but the
 	 * outage is the news: a Reveal secrets setting must never read as its remedy
 	 * (#2780).
