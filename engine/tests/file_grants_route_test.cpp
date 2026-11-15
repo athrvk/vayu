@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -445,10 +446,18 @@ TEST (GrantSecret, AShortOrMissingVariableIsNoSecretAndIsRemovedToo) {
 constexpr const char* ENVIRON_CHILD_MARKER = "VAYU_TEST_GRANT_SECRET_CHILD";
 
 /// The whole of this process's `/proc/self/environ`: the environment block
-/// the kernel handed it, which `unsetenv` does not touch.
+/// the kernel handed it, which `unsetenv` does not touch. Read in chunks
+/// rather than through `istreambuf_iterator`, which GCC 13's release build
+/// flags with a false `-Wnull-dereference` inside libstdc++.
 std::string read_initial_environment () {
     std::ifstream in ("/proc/self/environ", std::ios::binary);
-    return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char> () };
+    std::string whole;
+    std::array<char, 4096> chunk{};
+    while (in.read (chunk.data (), static_cast<std::streamsize> (chunk.size ())) ||
+    in.gcount () > 0) {
+        whole.append (chunk.data (), static_cast<std::size_t> (in.gcount ()));
+    }
+    return whole;
 }
 
 /// The helper's body: take the secret as the daemon does, then look for it in
