@@ -14,14 +14,17 @@
  * same file's `sensitiveParamNames` (#1837). The run-output
  * mask's query form against the engine's `encode_query_component`, over
  * `engine/tests/fixtures/query-encoding-conformance.json`, for the same
- * reason (#1809). The renderer's credential parameter predicate, which the
+ * reason (#1809), and its path, fragment and user info spellings, which the
+ * secret-value mask also holds, over the same file's `urlComponents`. The
+ * renderer's credential parameter predicate, which the
  * token cache key reads (`src/services/oauth/credential-params.ts`, #2536),
  * against this module's, list for list and name for name.
  *
  * Mutation check: drop `x-csrf-token` from `SENSITIVE_HEADER_NAMES` in
  * `withhold.ts` and the list-equality case reds; add a name to
  * `SENSITIVE_PARAM_NAMES` and its list-equality case reds; drop `&` from the
- * query value set and the cases holding one red; drop `assertion` from the
+ * query value set and the cases holding one red; drop `|` from the user info
+ * set and the `urlComponents` case holding one reds; drop `assertion` from the
  * renderer's `CREDENTIAL_PARAM_KEYS` and its list case reds, and stop its
  * `namesCredentialParam` folding case and the upper-cased predicate cases red.
  */
@@ -34,8 +37,12 @@ import * as rendererCredentialParams from "@/services/oauth/credential-params";
 import {
 	CREDENTIAL_AUTH_MEMBERS,
 	CREDENTIAL_PARAM_KEYS,
+	encodeFragmentValue,
+	encodePathValue,
 	encodeQueryKey,
 	encodeQueryValue,
+	encodeUserinfo,
+	encodeUserinfoValue,
 	namesCredentialParam,
 	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
 	SENSITIVE_PARAM_NAMES,
@@ -246,6 +253,14 @@ describe("Credential parameter predicate: the renderer's copy against this one (
 const [queryFixturePath] = ENGINE_READING_GUARDS.mcpQueryEncoding.paths.map(fromRepoRoot);
 const queryFixture = JSON.parse(readFileSync(queryFixturePath, "utf8")) as {
 	components: { name: string; text: string; key: string; value: string }[];
+	urlComponents: {
+		name: string;
+		text: string;
+		path: string;
+		fragment: string;
+		userinfo: string;
+		password: string;
+	}[];
 };
 
 describe("MCP query value encoding conformance", () => {
@@ -259,5 +274,18 @@ describe("MCP query value encoding conformance", () => {
 
 	it.each(queryFixture.components)("encodes $name as the engine writes a key", (row) => {
 		expect(encodeQueryKey(row.text)).toBe(row.key);
+	});
+});
+
+describe("MCP secret-value URL component conformance", () => {
+	it("read a non-empty fixture", () => {
+		expect(queryFixture.urlComponents.length).toBeGreaterThan(8);
+	});
+
+	it.each(queryFixture.urlComponents)("writes $name as the engine does", (row) => {
+		expect(encodePathValue(row.text)).toBe(row.path);
+		expect(encodeFragmentValue(row.text)).toBe(row.fragment);
+		expect(encodeUserinfo(row.text)).toBe(row.userinfo);
+		expect(encodeUserinfoValue(row.text)).toBe(row.password);
 	});
 });

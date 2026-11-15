@@ -1977,7 +1977,10 @@ with its credentials withheld. Composition has already written every
   in either shape `headers` arrives in, an object's member or each
   `{name, value}` line's `value` (issue #2466), and a repeated line every time;
 - every occurrence of a value of a variable marked `secret` - raw, strictly
-  percent-encoded (RFC 3986), as composition writes a query value, JSON-escaped
+  percent-encoded (RFC 3986), as composition writes a query value, as it
+  writes a URL's path, fragment and user info (a space is `%20` while
+  `/ @ & : + '` stay raw there, so `a b/c` in a path is `a%20b/c`; a user name
+  and a password are spelled alike except at the user's own colon), JSON-escaped
   (a JSON body is stored as text, so `pa"ss\word` is `pa\"ss\\word` inside
   it) and XML-escaped (character data, and each attribute delimiter) - inside
   `url`, `params`, `headers`, `body.content` and `body.fields` becomes
