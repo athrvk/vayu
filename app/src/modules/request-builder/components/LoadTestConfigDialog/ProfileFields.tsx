@@ -6,14 +6,10 @@
  */
 
 import type { LoadTestLimits } from "@/constants/load-test";
-import {
-	CONCURRENCY_LABEL,
-	CONCURRENCY_UNIT,
-	loadTestModeLabel,
-} from "@/constants/load-test-modes";
+import { CONCURRENCY_LABEL, loadTestModeLabel } from "@/constants/load-test-modes";
 import { NumberField } from "@/components/shared";
 import { StreamCapFields } from "./StreamCapFields";
-import { usesDuration } from "./profile";
+import { concurrencyLabel, durationLabel, usesDuration } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 interface ProfileFieldsProps {
@@ -60,13 +56,7 @@ export function ProfileFields({
 			{mode !== "constant_rps" && (
 				<NumberField
 					id="lt-concurrency"
-					label={
-						mode === "ramp_up"
-							? `Target ${CONCURRENCY_UNIT}`
-							: mode === "capacity"
-								? `Maximum ${CONCURRENCY_UNIT}`
-								: CONCURRENCY_LABEL
-					}
+					label={concurrencyLabel(mode)}
 					value={profile.concurrency}
 					onChange={set("concurrency")}
 					min={limits.CONCURRENCY.MIN}
@@ -93,13 +83,7 @@ export function ProfileFields({
 			{usesDuration(mode) && (
 				<NumberField
 					id="lt-duration"
-					label={
-						mode === "ramp_up"
-							? "Total duration"
-							: mode === "capacity"
-								? "Give up after"
-								: "Duration"
-					}
+					label={durationLabel(mode)}
 					unit="s"
 					value={profile.duration}
 					onChange={set("duration")}

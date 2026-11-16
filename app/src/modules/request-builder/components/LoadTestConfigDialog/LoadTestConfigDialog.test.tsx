@@ -1165,6 +1165,88 @@ describe("ceilings from Settings", () => {
 		pickProfile("Constant virtual users");
 		expect(Number(virtualUsers().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
+
+	/*
+	 * `min` and `max` on the inputs are advisory: a typed value reaches the draft
+	 * and, before #3542, started the run. Each case asserts the message names the
+	 * field and its range and that Start is off, which the notice alone would not
+	 * prove (a message beside an enabled button blocks nothing).
+	 */
+	describe("a typed value outside the range it shows (#3542)", () => {
+		const startButton = () => screen.getByRole("button", { name: "Start" });
+		const type = (label: RegExp, value: string) =>
+			fireEvent.change(screen.getByLabelText(label), { target: { value } });
+		const refused = (message: RegExp) => {
+			expect(screen.getByText(message)).toBeInTheDocument();
+			expect(startButton()).toBeDisabled();
+		};
+
+		it("refuses a duration above the Settings ceiling", () => {
+			open();
+			type(/^duration/i, "100000");
+			refused(/Duration must be a number from 1 to 3,600, the ceiling set in Settings\./);
+		});
+
+		it("measures against the ceiling the user set, not the shipped one", () => {
+			useClientSettingsStore.getState().setLoadTestCeilings({ rps: 1000 });
+			const { onStart } = open();
+			type(/target rate/i, "900");
+			expect(started(onStart).rps).toBe(900);
+			cleanup();
+
+			open();
+			type(/target rate/i, "1001");
+			refused(/Target rate must be a number from 1 to 1,000, the ceiling set in Settings\./);
+		});
+
+		it("refuses a target rate above the ceiling", () => {
+			open();
+			type(/target rate/i, "900000");
+			refused(/Target rate must be a number from 1 to 50,000/);
+		});
+
+		it("refuses a duration of zero, which was sent as no duration and ran 60 seconds", () => {
+			open();
+			type(/^duration/i, "0");
+			refused(/Duration must be a number from 1 to 3,600/);
+		});
+
+		it("refuses a negative duration before the engine does", () => {
+			open();
+			type(/^duration/i, "-5");
+			refused(/Duration must be a number from 1 to 3,600/);
+		});
+
+		it("refuses a fraction of a virtual user", () => {
+			open();
+			pickProfile("Constant virtual users");
+			type(/^virtual users/i, "9000.5");
+			refused(/Virtual users must be a whole number from 1 to 1,000/);
+			type(/^virtual users/i, "9.5");
+			refused(/Virtual users must be a whole number from 1 to 1,000/);
+		});
+
+		it("refuses a ramp start above the ceiling, in the words of the field it shows", () => {
+			open();
+			pickProfile("Ramp-up");
+			type(/start from/i, "5000");
+			refused(/Start from must be a whole number from 1 to 1,000/);
+		});
+
+		it("refuses a value in the recording section, which is folded away", () => {
+			open();
+			fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+			type(/slow request threshold/i, "-1");
+			refused(/Slow request threshold must be a number from 0 to 60,000\./);
+			type(/slow request threshold/i, "0");
+			expect(startButton()).toBeEnabled();
+
+			type(/max in-flight requests/i, "0");
+			refused(/Max in-flight requests must be a whole number from 1 to 1,000,000\./);
+			type(/max in-flight requests/i, "");
+			expect(startButton()).toBeEnabled();
+		});
+	});
 });
 
 /**

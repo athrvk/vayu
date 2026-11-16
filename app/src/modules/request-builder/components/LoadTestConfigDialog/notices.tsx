@@ -71,6 +71,7 @@ export function buildNotices({
 	startFloorError,
 	startConcurrencyError,
 	capacityRangeError,
+	profileRangeError,
 	budgetsError,
 	monitoringError,
 	scenarioOnlyError,
@@ -150,6 +151,18 @@ export function buildNotices({
 			node: (
 				<Callout severity="blocking" title="Start is at or above the maximum">
 					{capacityRangeError}
+				</Callout>
+			),
+		});
+	}
+
+	if (profileRangeError) {
+		list.push({
+			key: "profile-range",
+			severity: "blocking",
+			node: (
+				<Callout severity="blocking" title="A value is outside its range">
+					{profileRangeError}
 				</Callout>
 			),
 		});

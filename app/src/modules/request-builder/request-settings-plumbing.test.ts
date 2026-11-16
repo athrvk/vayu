@@ -204,7 +204,9 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		// drop: without the caps the run is bounded by the engine's
 		// `sseMaxStreamDurationMs` setting, which the dialog never showed.
 		expect(source).toContain("maxStreamEvents: config.stream_max_events");
-		expect(source).toContain("config.stream_duration_seconds * 1000");
+		// The duration cap's conversion to milliseconds is `wireTimings`, pinned by
+		// `buildLoadTestConfig.test.ts`; here it is that the request spreads it.
+		expect(source).toContain("...wireTimings(config)");
 	});
 
 	it("takes the load test's protocol from the request, never from the dialog's config", () => {

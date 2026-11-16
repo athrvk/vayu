@@ -6,6 +6,7 @@
  */
 
 import type { LoadTestConfig } from "@/types";
+import type { StartLoadTestRequest } from "@/types/api";
 import { successSamplePeriod } from "@/constants/load-test";
 import { runDataFileName } from "@/lib/run-data-file";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
@@ -156,4 +157,30 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 	// config claim something untrue about it.
 	Object.assign(config, engineFields(profileParams(profile, draft.maxInFlight)));
 	return config;
+}
+
+type WireTimings = Pick<
+	StartLoadTestRequest,
+	"duration" | "rampUpDuration" | "stepDuration" | "maxStreamDurationMs"
+>;
+
+/**
+ * The config's second-valued fields in the run request's spelling (`"Ns"`
+ * strings, and milliseconds for the stream cap). A field is absent because the
+ * mode does not send it, never because it is zero: a falsy test here turned a
+ * duration of 0 into no duration, which the engine ran for its 60 s default
+ * (#3542). Every key is present, `undefined` when absent, so it overrides a
+ * stale one in the composed request it is spread over.
+ */
+export function wireTimings(config: LoadTestConfig): WireTimings {
+	const seconds = (value: number | undefined) => (value !== undefined ? `${value}s` : undefined);
+	return {
+		duration: seconds(config.duration_seconds),
+		rampUpDuration: seconds(config.ramp_duration_seconds),
+		stepDuration: seconds(config.step_duration_seconds),
+		maxStreamDurationMs:
+			config.stream_duration_seconds !== undefined
+				? config.stream_duration_seconds * 1000
+				: undefined,
+	};
 }

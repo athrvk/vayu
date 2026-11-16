@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildLoadTestConfig, SCRIPTS_DEFAULT, type LoadTestDraft } from "./buildLoadTestConfig";
+import {
+	buildLoadTestConfig,
+	SCRIPTS_DEFAULT,
+	wireTimings,
+	type LoadTestDraft,
+} from "./buildLoadTestConfig";
 import { emptyBudgetDraft } from "./budgets";
 import { emptyMonitorDraft } from "./monitor";
 import { judgeRun } from "@/components/shared/run-outcome";
@@ -241,5 +246,69 @@ describe("buildLoadTestConfig", () => {
 				reason: "No budgets set",
 			});
 		});
+	});
+});
+
+describe("wireTimings (#3542)", () => {
+	it("spells each second-valued field as the run request reads it", () => {
+		expect(
+			wireTimings({
+				mode: "ramp_up",
+				duration_seconds: 30,
+				ramp_duration_seconds: 10,
+				step_duration_seconds: 5,
+				stream_duration_seconds: 20,
+			})
+		).toEqual({
+			duration: "30s",
+			rampUpDuration: "10s",
+			stepDuration: "5s",
+			maxStreamDurationMs: 20_000,
+		});
+	});
+
+	it("leaves a field the mode does not send undefined, with the key present", () => {
+		// Present so it overrides a stale value in the composed request it is spread over.
+		const timings = wireTimings({ mode: "iterations" });
+		expect(timings).toEqual({
+			duration: undefined,
+			rampUpDuration: undefined,
+			stepDuration: undefined,
+			maxStreamDurationMs: undefined,
+		});
+		expect(Object.keys(timings).sort()).toEqual([
+			"duration",
+			"maxStreamDurationMs",
+			"rampUpDuration",
+			"stepDuration",
+		]);
+	});
+
+	// A zero is a value the user typed, not an absent field: the falsy test it
+	// replaces sent a duration of 0 as no duration, and the engine ran 60 s.
+	it("does not turn a zero into an absent field", () => {
+		expect(
+			wireTimings({
+				mode: "ramp_up",
+				duration_seconds: 0,
+				ramp_duration_seconds: 0,
+				step_duration_seconds: 0,
+				stream_duration_seconds: 0,
+			})
+		).toEqual({
+			duration: "0s",
+			rampUpDuration: "0s",
+			stepDuration: "0s",
+			maxStreamDurationMs: 0,
+		});
+	});
+
+	it("carries a zero duration from the draft to the run request", () => {
+		const config = buildLoadTestConfig({
+			...DRAFT,
+			profile: { ...DRAFT.profile, duration: 0 },
+		});
+		expect(config.duration_seconds).toBe(0);
+		expect(wireTimings(config).duration).toBe("0s");
 	});
 });

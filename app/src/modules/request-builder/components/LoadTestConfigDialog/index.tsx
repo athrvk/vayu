@@ -272,6 +272,9 @@ export default function LoadTestConfigDialog({
 		maxSeries: monitorSettings.maxSeries,
 		scenarioOnly: scenarioOnlyElements,
 		isStreamingRequest,
+		limits,
+		slowThreshold,
+		maxInFlight,
 	});
 	// A file the parser refused leaves no rows behind, so starting the run would
 	// send the request with its `{{data.*}}` tokens written as they stand - the

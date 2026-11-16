@@ -10,6 +10,30 @@
  * component-free so they can be unit-tested in isolation.
  */
 
+import type { LimitRange } from "@/constants/load-test";
+
+/**
+ * The one range rule both load dialogs refuse a field by: a finite number inside
+ * `range`, and an integer when `whole`. A number input's own `min`/`max` are
+ * advisory (a typed value still reaches state), so without this check an
+ * over-ceiling value starts a run the user's Settings forbid.
+ *
+ * `engineBound` is for a range Settings cannot move, so the message does not
+ * point there.
+ */
+export function rangeError(
+	label: string,
+	value: number,
+	range: LimitRange,
+	{ whole, engineBound = false }: { whole: boolean; engineBound?: boolean }
+): string | null {
+	const shape = whole ? "a whole number" : "a number";
+	const within = Number.isFinite(value) && value >= range.MIN && value <= range.MAX;
+	if (within && (!whole || Number.isInteger(value))) return null;
+	const source = engineBound ? "" : ", the ceiling set in Settings";
+	return `${label} must be ${shape} from ${range.MIN.toLocaleString("en-US")} to ${range.MAX.toLocaleString("en-US")}${source}.`;
+}
+
 /**
  * For ramp_up runs, `duration` is the TOTAL test time and must include the
  * ramp. A total shorter than the ramp would end the test mid-ramp, so it is

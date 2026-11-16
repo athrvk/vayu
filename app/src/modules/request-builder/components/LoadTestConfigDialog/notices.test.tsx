@@ -17,6 +17,7 @@ const CLEAN: NoticeInputs = {
 	startFloorError: null,
 	startConcurrencyError: null,
 	capacityRangeError: null,
+	profileRangeError: null,
 	budgetsError: null,
 	monitoringError: null,
 	scenarioOnlyError: null,
@@ -44,6 +45,28 @@ describe("buildNotices", () => {
 				budgetsError: "p99 is out of range",
 			})
 		).toEqual(["budgets", "pre-script", "default-headers"]);
+	});
+
+	describe("a field outside its range (#3542)", () => {
+		const profileRangeError =
+			"Duration must be a number from 1 to 3,600, the ceiling set in Settings.";
+
+		it("raises a blocking notice that carries the message, above the advisories", () => {
+			expect(keys({ profileRangeError, hasPreRequestScript: true })).toEqual([
+				"profile-range",
+				"pre-script",
+			]);
+			const [notice] = buildNotices({ ...CLEAN, profileRangeError });
+			expect(notice.severity).toBe("blocking");
+			render(<>{notice.node}</>);
+			expect(screen.getByText("A value is outside its range")).toBeInTheDocument();
+			expect(screen.getByText(profileRangeError, { exact: false })).toBeInTheDocument();
+			cleanup();
+		});
+
+		it("says nothing when every field is in range", () => {
+			expect(keys({ profileRangeError: null })).toEqual([]);
+		});
 	});
 
 	it("raises the off-network advisory as info, below every blocking notice", () => {

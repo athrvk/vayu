@@ -374,6 +374,50 @@ describe("a load run started with carried budgets", () => {
 });
 
 /*
+ * A zero a field holds is a value, not an absent field (#3542): the falsy
+ * mapping this guards sent `duration: undefined` for 0, and the engine ran its
+ * 60 s default while the dashboard showed no duration.
+ */
+describe("a load run's second-valued fields", () => {
+	async function startLoadRun(config: LoadTestConfig) {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)(REQUEST);
+		});
+		await act(async () => {
+			await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(config);
+		});
+		return startLoadTest.mock.calls[0][0] as Record<string, unknown>;
+	}
+
+	it("never turns a duration of 0 into an omitted duration", async () => {
+		const sent = await startLoadRun({ ...LOAD_CONFIG, duration_seconds: 0 });
+		expect(sent.duration).toBe("0s");
+	});
+
+	it("sends the ramp, step and stream cap at 0 as values", async () => {
+		const sent = await startLoadRun({
+			mode: "ramp_up",
+			duration_seconds: 20,
+			ramp_duration_seconds: 0,
+			step_duration_seconds: 0,
+			stream_duration_seconds: 0,
+		});
+		expect(sent).toMatchObject({
+			duration: "20s",
+			rampUpDuration: "0s",
+			stepDuration: "0s",
+			maxStreamDurationMs: 0,
+		});
+	});
+
+	it("leaves a field the mode does not send absent", async () => {
+		const sent = await startLoadRun({ mode: "iterations", iterations: 5 });
+		expect(sent.duration).toBeUndefined();
+	});
+});
+
+/*
  * Not `dataColumns`, but the same two compose sites and the same harness: an
  * inline compose carries the editor's path rows (#1764), because the engine
  * fills `:name` segments from them and the editor may be ahead of the saved
