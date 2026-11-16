@@ -230,17 +230,38 @@ struct SendingTotals {
     std::optional<size_t> completed_while_sending;
 };
 
+// A load run's assertion block (#3537), what every verdict reads as a failed
+// check. A member is empty when the summary recorded no such figure: a summary
+// stored before the block yields only what `read_run_assertions` derives.
+struct RunAssertions {
+    std::optional<vayu::core::AssertionTotals> exact;
+    std::optional<vayu::core::AssertionTotals> sampled;
+    std::optional<size_t> errored;
+    std::optional<size_t> teardown_failed;
+
+    // Over both populations: the list row's flat `assertionsPassed` /
+    // `assertionsFailed`, kept for readers older than the block.
+    [[nodiscard]] size_t passed () const {
+        return exact.value_or (vayu::core::AssertionTotals{}).passed +
+        sampled.value_or (vayu::core::AssertionTotals{}).passed;
+    }
+    [[nodiscard]] size_t failed () const {
+        return exact.value_or (vayu::core::AssertionTotals{}).failed +
+        sampled.value_or (vayu::core::AssertionTotals{}).failed;
+    }
+};
+
 // Report fields that live outside the DetailedReport struct: whole-run counters
 // the report injects into its `summary` object. Filled from the run's stored
 // summary, or a live load run's collector (apply_live_counters).
 //
 // `optin.performance.Padding` is right that size-ordering these fields would
-// save 44 bytes, and the trade is refused deliberately: the layout is by report
+// save 48 bytes, and the trade is refused deliberately: the layout is by report
 // section - each `has_*` flag sits with the block it gates and the paragraph
 // explaining why absent is not zero - and size order interleaves all six
 // sections, leaving every comment describing fields that no longer follow it.
 // One of these exists per `GET /runs/:id/report` call, on the stack, so the
-// 44 bytes buy nothing measurable; the grouping is read by everyone who touches
+// 48 bytes buy nothing measurable; the grouping is read by everyone who touches
 // the report. Revisit if this is ever held per run or per result.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct ReportExtras {
@@ -377,10 +398,12 @@ struct ReportExtras {
     // (`scenario_runner.cpp`, `scenario_load.cpp`). Empty for a run with no
     // `control.transaction` element, or one whose folder never closed.
     nlohmann::json transactions = nlohmann::json::array ();
-    // A scenario load run's exact assertion population (#2820). Empty for a run
-    // that asserted nothing, one stored before it and a sequential collection
-    // run, which leaves `scenario.assertions` out rather than reading "0 failed".
-    std::optional<vayu::core::AssertionTotals> scenario_assertions;
+    // The load run's assertion block (#3537), the report's top-level
+    // `assertions`; its `exact` is also a scenario load run's
+    // `scenario.assertions` (#2820). Empty for a run that asserted nothing and
+    // errored nowhere, a sequential collection run, and a run stored before
+    // either figure, which leaves both out rather than reading "0 failed".
+    std::optional<RunAssertions> assertions;
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
@@ -501,16 +524,12 @@ std::optional<ThresholdOutcome> read_threshold_outcome (const nlohmann::json& su
     return outcome;
 }
 
-// The stored `summary.scenario.assertions` (#2820), or nothing unless both
-// counts are there. The one reader of it, for the report and the list row.
-std::optional<vayu::core::AssertionTotals> read_scenario_assertions (
-const nlohmann::json& summary) {
-    const auto scenario = summary.find ("scenario");
-    if (scenario == summary.end () || !scenario->is_object ()) {
-        return std::nullopt;
-    }
-    const auto stored = scenario->find ("assertions");
-    if (stored == scenario->end () || !stored->is_object ()) {
+// A stored `{passed, failed}` pair under @p key, or nothing unless both counts
+// are there.
+std::optional<vayu::core::AssertionTotals>
+read_assertion_totals (const nlohmann::json& parent, const char* key) {
+    const auto stored = parent.find (key);
+    if (stored == parent.end () || !stored->is_object ()) {
         return std::nullopt;
     }
     const auto passed = stored->find ("passed");
@@ -523,37 +542,103 @@ const nlohmann::json& summary) {
         .failed                                 = failed->get<size_t> () };
 }
 
-// A single-request load run's failed assertions (#3458), or nothing when the
-// summary recorded none of the two places they live: the top-level `elements`
-// rows (`failed` is `assert.*` and inline `script.*` outcomes, tallied exactly
-// per submission) and the replay's `tests` (sampled). The two never overlap: a
-// script that ran inline is tallied in its element row and skipped by the
-// replay, one that did not is `deferred` in its row and counted by the replay
-// alone. An element that is only missing or errored is not a failed assertion
-// and stays out. A scenario run keeps these per step under `scenario`, so the
-// caller reads this for a summary with none.
-std::optional<size_t> read_single_request_failed_assertions (const nlohmann::json& summary) {
-    std::optional<size_t> failed;
-    const auto add_failed = [&failed] (const nlohmann::json& source) {
-        const auto count = source.find ("failed");
-        if (count == source.end () || !count->is_number_unsigned ()) {
-            return;
-        }
-        failed = failed.value_or (0) + count->get<size_t> ();
-    };
+std::optional<size_t> read_count (const nlohmann::json& parent, const char* key) {
+    const auto stored = parent.find (key);
+    if (stored == parent.end () || !stored->is_number_unsigned ()) {
+        return std::nullopt;
+    }
+    return stored->get<size_t> ();
+}
+
+// An element row whose `failed` is a failed assertion: an `assert.*` outcome,
+// or a `script.*` run whose `pm.test` failed.
+bool is_assertion_row (const nlohmann::json& row) {
+    const auto kind = row.find ("kind");
+    if (kind == row.end () || !kind->is_string ()) {
+        return false;
+    }
+    const auto& name = kind->get_ref<const std::string&> ();
+    return name.starts_with ("assert.") || name.starts_with ("script.");
+}
+
+// A single-request summary stored before the block: its `elements` rows,
+// counted per execution as #3458's row read them. A required `extract.*` miss
+// is `missing` there and stays out; the stored block counts it.
+std::optional<vayu::core::AssertionTotals> legacy_element_assertions (
+const nlohmann::json& summary) {
     const auto elements = summary.find ("elements");
-    if (elements != summary.end () && elements->is_array ()) {
-        for (const auto& element : *elements) {
-            if (element.is_object ()) {
-                add_failed (element);
-            }
+    if (elements == summary.end () || !elements->is_array ()) {
+        return std::nullopt;
+    }
+    vayu::core::AssertionTotals totals;
+    bool recorded = false;
+    for (const auto& row : *elements) {
+        const auto failed = read_count (row, "failed");
+        if (!failed || !is_assertion_row (row)) {
+            continue;
         }
+        recorded = true;
+        totals.failed += *failed;
+        totals.passed += read_count (row, "passed").value_or (0);
     }
-    const auto tests = summary.find ("tests");
-    if (tests != summary.end () && tests->is_object ()) {
-        add_failed (*tests);
+    if (!recorded) {
+        return std::nullopt;
     }
-    return failed;
+    return totals;
+}
+
+// What the readers before the block derived (#2820, #3458), and only that, so
+// a stored run keeps the reading it had: a scenario load run's exact pair, its
+// replay unread; a single-request run's element rows and replay. Neither
+// derives `errored` or `teardownFailed`, which no verdict read then.
+std::optional<RunAssertions> derive_legacy_assertions (const nlohmann::json& summary) {
+    RunAssertions derived;
+    if (const auto scenario = summary.find ("scenario"); scenario != summary.end ()) {
+        derived.exact = read_assertion_totals (*scenario, "assertions");
+    } else {
+        derived.exact   = legacy_element_assertions (summary);
+        derived.sampled = read_assertion_totals (summary, "tests");
+    }
+    if (!derived.exact && !derived.sampled) {
+        return std::nullopt;
+    }
+    return derived;
+}
+
+// The run's `assertions` block (#3537), or nothing when it recorded none. The
+// one reader of it, for the report, its `scenario.assertions` and the list
+// row, and the one place a summary stored before the block is read for it.
+std::optional<RunAssertions> read_run_assertions (const nlohmann::json& summary) {
+    const auto block = summary.find ("assertions");
+    if (block == summary.end () || !block->is_object ()) {
+        return derive_legacy_assertions (summary);
+    }
+    return RunAssertions{ .exact = read_assertion_totals (*block, "exact"),
+        .sampled                 = read_assertion_totals (*block, "sampled"),
+        .errored                 = read_count (*block, "errored"),
+        .teardown_failed         = read_count (*block, "teardownFailed") };
+}
+
+nlohmann::json assertion_totals_json (const vayu::core::AssertionTotals& totals) {
+    return { { "passed", totals.passed }, { "failed", totals.failed } };
+}
+
+// @p assertions in the stored block's shape, each member only when recorded.
+nlohmann::json run_assertions_json (const RunAssertions& assertions) {
+    nlohmann::json block = nlohmann::json::object ();
+    if (const auto& exact = assertions.exact) {
+        block["exact"] = assertion_totals_json (*exact);
+    }
+    if (const auto& sampled = assertions.sampled) {
+        block["sampled"] = assertion_totals_json (*sampled);
+    }
+    if (const auto& errored = assertions.errored) {
+        block["errored"] = *errored;
+    }
+    if (const auto& teardown_failed = assertions.teardown_failed) {
+        block["teardownFailed"] = *teardown_failed;
+    }
+    return block;
 }
 
 // Read a boolean out of a JSON object as an optional, so a key an older engine
@@ -908,7 +993,6 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         if (scenario.contains ("transactions") && scenario["transactions"].is_array ()) {
             extras.transactions = scenario["transactions"];
         }
-        extras.scenario_assertions = read_scenario_assertions (summary);
     }
 }
 
@@ -930,6 +1014,7 @@ void apply_summary_observations (const nlohmann::json& summary, ReportExtras& ex
         }
         read_number (summary["tests"], "consoleDropped", extras.tests_console_dropped);
     }
+    extras.assertions = read_run_assertions (summary);
 
     if (summary.contains ("auth") && summary["auth"].is_object ()) {
         const auto& auth = summary["auth"];
@@ -1083,29 +1168,21 @@ void record_verdict (const nlohmann::json& summary, nlohmann::json& outcome) {
     }
 }
 
-// The assertion counts a load row carries: a scenario run's stored pair, both
-// keys or neither (#2820), and for a run with no `scenario` block only
-// `assertionsFailed`, derived from what a single-request run stored (#3458).
-// No `assertionsPassed` there: an element row counts executions, a replay
-// counts `pm.test` calls, and their sum is no one population.
+// The assertion block a load row carries (#3537), the report's own, beside
+// `assertionsPassed` / `assertionsFailed` over both populations for readers
+// older than it (#2820, #3458). All three or none.
 void record_assertions (const nlohmann::json& summary, nlohmann::json& outcome) {
-    if (summary.contains ("scenario")) {
-        if (const auto assertions = read_scenario_assertions (summary)) {
-            outcome["assertionsPassed"] = assertions->passed;
-            outcome["assertionsFailed"] = assertions->failed;
-        }
-        return;
-    }
-    if (const auto failed = read_single_request_failed_assertions (summary)) {
-        outcome["assertionsFailed"] = *failed;
+    if (const auto assertions = read_run_assertions (summary)) {
+        outcome["assertions"]       = run_assertions_json (*assertions);
+        outcome["assertionsPassed"] = assertions->passed ();
+        outcome["assertionsFailed"] = assertions->failed ();
     }
 }
 
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate, budget verdict and, for a scenario load run, its exact assertion
- * counts (#2820), for a single-request run its failed-assertion count (#3458)
- * or, for a capacity run, the search's headline (#2930), read from the run's
+ * error rate, budget verdict, its assertion block (#3537) or, for a capacity
+ * run, the search's headline (#2930), read from the run's
  * stored `summary` - the load-run counterpart of a design row's
  * `{statusCode, latencyMs}`.
  *
@@ -1998,10 +2075,12 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
         section["transactions"] = extras.transactions;
     }
     // Beside the step outcomes, never folded into them: those count step
-    // executions, this counts assertions.
-    if (const auto& assertions = extras.scenario_assertions) {
-        section["assertions"] = { { "passed", assertions->passed },
-            { "failed", assertions->failed } };
+    // executions, this counts assertions. Absent at zero, the stored rule
+    // (#2820), though the block's own `exact` is written whenever it is.
+    if (const auto& assertions = extras.assertions) {
+        if (const auto& exact = assertions->exact; exact && exact->total () > 0) {
+            section["assertions"] = assertion_totals_json (*exact);
+        }
     }
     return section;
 }
@@ -2095,6 +2174,13 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["thresholdValidation"] = { { "checks", thresholds->checks },
             { "passed", thresholds->passed }, { "failed", thresholds->failed },
             { "verdict", thresholds->verdict () } };
+    }
+
+    // Every failed check a verdict reads (#3537): both assertion populations,
+    // the element executions that errored and the failed teardowns. Absent for
+    // a run that recorded none of them.
+    if (const auto& assertions = extras.assertions) {
+        json_report["assertions"] = run_assertions_json (*assertions);
     }
 
     // This run's custom trends, counters and rates (issue #1500), by name -

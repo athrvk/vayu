@@ -1859,7 +1859,12 @@ script's throw is not in it, since the replay counts it in `tests.failed`. `tear
 the `lifecycle.teardown` rows whose `outcome` is `failed` or `error`; a failed setup fails the
 run instead. Absent when the run made no assertion and nothing errored, and every member is
 written once the block is, zeros included. The failed run's summary never writes it. A summary
-stored before the issue has none.
+stored before the issue has none; the report's `assertions`, its `scenario.assertions` and the
+list row's `resultSummary` read it through `read_run_assertions` (`http/routes/runs.cpp`), the
+one place such a summary is derived from: a scenario load run's `scenario.assertions` as
+`exact`, and a single-request run's `assert.*` and `script.*` rows of `elements` as `exact`
+and its `tests` as `sampled`, which is what each read before. Nothing derives `errored` or
+`teardownFailed` for it.
 
 `schemaValidation`
 follows the rule `tests` does (issue #682): omitted when the deferred pass over the run's sampled
@@ -1898,9 +1903,9 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
 this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
-`thresholds` verdict, for a scenario load run `scenario.assertions` as
-`assertionsPassed` / `assertionsFailed`, for a single-request run the summed
-`failed` of `elements` and `tests` as `assertionsFailed` (#3458), and for a capacity run the
+`thresholds` verdict, the `assertions` block as `assertions`, with its two
+populations summed as `assertionsPassed` / `assertionsFailed` (#2820, #3458,
+#3537), and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`
@@ -1969,9 +1974,10 @@ adds **`assertions`**, `{passed, failed}` (issue #2820): the exact assertion
 population `exact_assertion_totals` reads, every `assert.*` outcome, required
 `extract.*` miss and inline `pm.test` call, never the deferred sampled replay
 under `tests`. Absent, never zeros, for a run that made none; a sequential
-collection run never writes it and nothing backfills a run stored before it. The
-report serves it as `scenario.assertions` and the list row as
-`assertionsPassed` / `assertionsFailed`.
+collection run never writes it and nothing backfills a run stored before it. It is
+the same figure as the top-level `assertions` block's `exact`, which the report
+serves as `scenario.assertions` (absent at zero, as stored); the list row reads
+the block.
 
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full

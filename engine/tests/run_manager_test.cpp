@@ -3033,7 +3033,7 @@ TEST_F (LoadRunToTerminalTest, AnAssertionThatCannotRunIsInTheExactPopulation) {
 
 // #3537 end to end: a required `extract.json` that misses on every completion
 // is a failed assertion in the stored block's exact population, the count the
-// budget's `assertionsExact` reports.
+// budget's `assertionsExact` reports and the report's `assertions` serves.
 // Mutation check: pass a default `AssertionPopulations` to the block in
 // `build_run_assertions_payload` and its `exact` reads 0 failed.
 TEST_F (LoadRunToTerminalTest, ARequiredExtractorMissIsTheBlocksAndTheBudgetsExactCount) {
@@ -3055,6 +3055,12 @@ TEST_F (LoadRunToTerminalTest, ARequiredExtractorMissIsTheBlocksAndTheBudgetsExa
     << summary.dump ();
     ASSERT_TRUE (summary.contains ("assertions")) << summary.dump ();
     EXPECT_EQ (summary["assertions"]["exact"], budget_exact);
+
+    const auto report =
+    vayu::http::routes::run_report_response (*db, "run-required-miss-e2e").second;
+    EXPECT_EQ (
+    report.value ("assertions", nlohmann::json ()).value ("exact", nlohmann::json ()), budget_exact)
+    << report.dump ();
 }
 
 // #3537 end to end: an inline script that throws on every completion is an
