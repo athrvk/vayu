@@ -74,8 +74,9 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 get_request_response (vayu::db::Database& db, const std::string& id);
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
-std::pair<int, nlohmann::json>
-get_run_response (vayu::db::Database& db, const std::string& run_id);
+std::pair<int, nlohmann::json> get_run_response (vayu::db::Database& db,
+const std::string& run_id,
+vayu::core::RunManager* live_runs);
 // Defined in file_roots.cpp; each is the testable core of one route.
 std::pair<int, nlohmann::json> create_file_root_response (vayu::db::Database& db,
 const nlohmann::json& json,
@@ -1796,14 +1797,15 @@ TEST_F (StoredTrustTest, ARunSnapshotStoresNoTrustAndAnswersTheDerivedOne) {
     << run.config_snapshot;
     db_->create_run (run);
 
-    const auto [status, answered] = routes::get_run_response (*db_, "run_trust");
+    const auto [status, answered] = routes::get_run_response (*db_, "run_trust", nullptr);
     ASSERT_EQ (status, 200) << answered.dump ();
     EXPECT_EQ (trust_of (answered.at ("configSnapshot")), true) << answered.dump ();
 
     grant (outside);
-    EXPECT_EQ (trust_of (routes::get_run_response (*db_, "run_trust").second.at ("configSnapshot")),
+    EXPECT_EQ (
+    trust_of (routes::get_run_response (*db_, "run_trust", nullptr).second.at ("configSnapshot")),
     false);
-    EXPECT_EQ (routes::get_run_response (*db_, "run_missing").first, 404);
+    EXPECT_EQ (routes::get_run_response (*db_, "run_missing", nullptr).first, 404);
 }
 
 // ===========================================================================

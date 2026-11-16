@@ -19,6 +19,9 @@
  * between, so both live in one atomic word that only compare-exchange loops
  * write: every advance and the latching Stop are totally ordered, and whichever
  * came first is what the other one sees.
+ *
+ * The phase is published, never stored: on every live `metrics` frame and on
+ * `GET /runs/:id` while the run is active (#3568).
  */
 
 #include <atomic>
@@ -43,6 +46,19 @@ enum class RunPhase : std::uint8_t {
     /// `RunManager::retain_run` has run: the terminal status is written.
     settled,
 };
+
+/// Wire spelling of a phase: the live frame's and `GET /runs/:id`'s `phase`
+/// (#3568). The app matches on these exact strings.
+[[nodiscard]] constexpr const char* to_string (RunPhase phase) noexcept {
+    switch (phase) {
+    case RunPhase::sending: return "sending";
+    case RunPhase::draining: return "draining";
+    case RunPhase::summarising: return "summarising";
+    case RunPhase::settled: return "settled";
+    case RunPhase::setup: break;
+    }
+    return "setup";
+}
 
 /**
  * The phase and the phase the first Stop landed in, packed into one byte.

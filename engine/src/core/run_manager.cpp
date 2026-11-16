@@ -3513,6 +3513,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // `requestsSent - totalRequests`.
         const size_t backpressure = context->in_flight ();
         stats["backpressure"]     = backpressure;
+        // Beside `backpressure` so a client can tell transfers still being
+        // sent from ones a natural-end drain is waiting out (#3568).
+        stats["phase"]            = to_string (context->phase ());
         stats["runId"]            = context->run_id;
         stats["timestamp"]        = now_wall_ms;
         stats["requestsSent"]     = requests_sent;

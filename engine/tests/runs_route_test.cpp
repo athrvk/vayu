@@ -71,6 +71,10 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
 const std::string& body);
+// Defined in runs.cpp; GET /runs/:id, returns {http_status, json_body}.
+std::pair<int, nlohmann::json> get_run_response (vayu::db::Database& db,
+const std::string& run_id,
+vayu::core::RunManager* live_runs);
 // Defined in runs.cpp; the GET /runs filters off the query string.
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
 // Defined in runs.cpp; DELETE /runs, returns {http_status, json_body}.
@@ -2902,6 +2906,38 @@ TEST_F (RunsRouteTest, ALiveLoadRunWithNoContextIsReportedAsZerosWithoutARowRead
         EXPECT_FALSE (report.contains ("latency"));
         EXPECT_EQ (report["resultsStored"].get<size_t> (), 0u);
     }
+}
+
+// #3568: an active run's row carries its worker's phase, read from the context
+// at the request. The phase is never stored, so the same row once the run is
+// retained, or asked with no manager, has no `phase` key at all. Mutation
+// check: drop the `phase` write in `get_run_response` and the live assertion
+// fails.
+TEST_F (RunsRouteTest, GetRunCarriesTheLivePhaseOnlyWhileTheRunIsActive) {
+    seed ({ .id = "run_phased", .status = vayu::RunStatus::Running, .start_time = 1000 });
+
+    vayu::core::RunManager runs;
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run_phased", nlohmann::json::object ());
+    context->advance_phase (vayu::core::RunPhase::draining);
+    runs.register_run ("run_phased", context);
+
+    const auto [live_status, live] =
+    vayu::http::routes::get_run_response (*db_, "run_phased", &runs);
+    ASSERT_EQ (live_status, 200);
+    EXPECT_EQ (live.value ("phase", ""), "draining") << live.dump ();
+
+    const auto [bare_status, bare] =
+    vayu::http::routes::get_run_response (*db_, "run_phased", nullptr);
+    ASSERT_EQ (bare_status, 200);
+    EXPECT_FALSE (bare.contains ("phase")) << bare.dump ();
+
+    runs.retain_run ("run_phased");
+    const auto [stored_status, stored] =
+    vayu::http::routes::get_run_response (*db_, "run_phased", &runs);
+    ASSERT_EQ (stored_status, 200);
+    EXPECT_FALSE (stored.contains ("phase"))
+    << "a run no longer active answered a phase: " << stored.dump ();
 }
 
 // #2679: the live poll is answered while another thread holds the DB mutex, as

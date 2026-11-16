@@ -26,6 +26,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -51,6 +52,18 @@ RunPhase::draining, RunPhase::summarising, RunPhase::settled });
 std::unique_ptr<RunContext> make_context () {
     return std::make_unique<RunContext> ("run-phase",
     nlohmann::json{ { "mode", "constant_rps" }, { "duration", "1s" } });
+}
+
+// The spellings the live frame and `GET /runs/:id` publish (#3568); the app
+// matches on them, so a rename is a wire break.
+TEST (RunPhase, WireNamesAreTheEnumeratorNames) {
+    constexpr auto NAMES = std::to_array<std::string_view> (
+    { "setup", "sending", "draining", "summarising", "settled" });
+    static_assert (NAMES.size () == PHASES.size ());
+    for (size_t i = 0; i < PHASES.size (); ++i) {
+        EXPECT_EQ (
+        std::string_view{ vayu::core::to_string (PHASES.at (i)) }, NAMES.at (i));
+    }
 }
 
 TEST (RunPhaseLatch, StartsInSetupWithNoStop) {
