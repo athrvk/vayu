@@ -455,6 +455,14 @@ export const ENGINE_READING_GUARDS = {
 		paths: ["engine/tests/fixtures/run-compare-conformance.json"],
 	},
 	/*
+	 * One run verdict, two readers (#3537): the run-report export's `verdict`
+	 * and its Markdown/HTML line, and the app's `reportOutcome`.
+	 */
+	runVerdict: {
+		reader: "app/src/components/shared/run-outcome.test.ts",
+		paths: ["engine/tests/fixtures/run-verdict-conformance.json"],
+	},
+	/*
 	 * The formats the run-report export can write (#2139): the renderer's
 	 * registry and the MCP server's list each read the fixture the engine's
 	 * `RUN_EXPORT_FORMATS` table is held to. `electron/` cannot import

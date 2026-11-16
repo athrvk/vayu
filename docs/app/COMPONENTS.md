@@ -1697,8 +1697,10 @@ element row and skipped by the replay); a row's flat `assertionsFailed` as exact
   but 4,580 assertions failed" ("1 assertion failed" in the singular); a
   sampled-replay failure reads "4 assertions failed in the sampled replay", a
   run with both "150 assertions failed, 4 more in the sampled replay"; then "3
-  elements errored" and "1 teardown script failed". The success rate stays
-  HTTP-based.
+  elements errored" and "1 teardown script failed".
+  `engine/tests/fixtures/run-verdict-conformance.json` holds the state and these
+  phrases to the export's verdict, replayed by `run-outcome.test.ts`. The
+  success rate stays HTTP-based.
 - **`null`** - still pending or running, or no report: the banner renders
   nothing, because "Not judged" over a report that has not arrived is a claim
   about a run nobody has looked at.

@@ -30,16 +30,20 @@
  * `teardownsFailed` phrase from `failedCheckPhrases` and the errored-only or
  * teardown-only cases redden, on both branches; make `rowOutcome` read the
  * flat `assertionsFailed` instead of `rowAssertionsOf` and the row block cases
- * redden.
+ * redden. The conformance replay below reddens on any reason worded apart from
+ * the engine's.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { Run, RunReport } from "@/types";
 import {
 	formatErrorRate,
 	judgeRun,
 	reportOutcome,
 	rowOutcome,
+	type RunJudgement,
 	type RunOutcomeInput,
 } from "./run-outcome";
 
@@ -691,5 +695,72 @@ describe("rowOutcome", () => {
 			expect(rowOutcome(row({ type: "scenario" }))).toBeNull();
 			expect(rowOutcome(collection({ failed: 2 }, "stopped"))).toBeNull();
 		});
+	});
+});
+
+/**
+ * The engine's run-report export and this verdict answer one table (#3537):
+ * `run-verdict-conformance.json`, whose engine half is `run_export_test.cpp`.
+ * The app exposes no reason code, so the code is read off the judgement: the
+ * fixed sentences, the outcome, and for met budgets the first clause after
+ * "but", which is the first thing that undercut them.
+ */
+describe("run verdict conformance", () => {
+	interface VerdictCase {
+		name: string;
+		report: RunReport;
+		expected: { state: "passed" | "failed" | "not_judged"; reason: string; names?: string[] };
+	}
+
+	const [fixturePath] = ENGINE_READING_GUARDS.runVerdict.paths.map(fromRepoRoot);
+	const CASES = (JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: VerdictCase[] }).cases;
+
+	const UNDERCUT_CODES: ReadonlyArray<[pattern: RegExp, code: string]> = [
+		[/^\S+% errors/, "budgets_met_with_errors"],
+		[/^\S+ assertions? failed/, "budgets_met_with_assertion_failures"],
+		[/^\S+ elements? errored/, "budgets_met_with_element_errors"],
+		[/^\S+ teardown scripts? failed/, "budgets_met_with_teardown_failures"],
+	];
+
+	function reasonCodeOf({ outcome, reason }: RunJudgement): string | undefined {
+		if (reason === "Stopped before it finished") return "stopped";
+		if (reason === "The run failed before it finished") return "run_failed";
+		if (outcome === "failed") return "budgets_missed";
+		if (reason.startsWith("No budgets set")) return "no_budgets";
+		if (outcome === "passed") return "budgets_met";
+		const undercut = reason.split(", but ")[1] ?? "";
+		return UNDERCUT_CODES.find(([pattern]) => pattern.test(undercut))?.[1];
+	}
+
+	/** Each of @p names in @p reason, in order, or the first one missing. */
+	function missingName(reason: string, names: string[]): string | undefined {
+		let from = 0;
+		for (const name of names) {
+			const at = reason.indexOf(name, from);
+			if (at < 0) return name;
+			from = at + name.length;
+		}
+		return undefined;
+	}
+
+	const FAILED_CHECK = /assertions? failed|elements? errored|teardown scripts? failed/;
+
+	it("replays every case of the fixture", () => {
+		expect(CASES.length).toBeGreaterThanOrEqual(22);
+	});
+
+	it.each(CASES.map((c) => [c.name, c] as const))("%s", (_name, { report, expected }) => {
+		const judged = reportOutcome(report);
+		expect(judged).not.toBeNull();
+		if (!judged) return;
+		expect(judged.outcome).toBe(
+			expected.state === "not_judged" ? "not-judged" : expected.state
+		);
+		expect(reasonCodeOf(judged)).toBe(expected.reason);
+		if (expected.names) {
+			expect(missingName(judged.reason, expected.names)).toBeUndefined();
+		} else {
+			expect(judged.reason).not.toMatch(FAILED_CHECK);
+		}
 	});
 });
