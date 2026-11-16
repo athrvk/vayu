@@ -2068,19 +2068,21 @@ export interface LoadResultSummary {
 	errorRate?: number;
 	verdict?: "passed" | "failed";
 	/**
-	 * Assertion outcomes of a load run. A **scenario load run** that made at least
-	 * one carries both keys, exact (#2820): `assert.*` outcomes, required
-	 * `extract.*` misses and inline `pm.test` calls; neither is ever zeroed, and
-	 * both are absent for a run that asserted nothing, a collection run and a run
-	 * stored before the field. A **single-request run** carries `assertionsFailed`
-	 * alone (#3458), summed from its inline element tallies and its sampled
-	 * replay, so the row cannot say which population a failure came from; its
-	 * `assertionsPassed` stays absent because the two are not one population.
-	 *
-	 * `assertionsFailed` is what a row's verdict and subtitle read (`rowOutcome`,
-	 * `resultSubtitle`); `errorRate` and `verdict` stay HTTP-and-budget only.
-	 * `assertionsPassed` has no renderer reader - the MCP `list_runs` row, which
-	 * passes the summary through, is its consumer.
+	 * The run's assertion block (#3537), the report's own, on both load run
+	 * kinds; absent with the two flat keys for a run that asserted nothing and
+	 * errored nowhere. What a row's verdict and subtitle read, through
+	 * `rowAssertionsOf` (`rowOutcome`, `resultSubtitle`); `errorRate` and
+	 * `verdict` stay HTTP-and-budget only.
+	 */
+	assertions?: RunAssertions;
+	/**
+	 * `assertions.exact` plus `assertions.sampled`, for readers older than the
+	 * block. An engine before #3537 sent these alone: a scenario load run's
+	 * exact pair (#2820), a single-request run's `assertionsFailed` summed over
+	 * both populations (#3458). `rowAssertionsOf` reads that row's
+	 * `assertionsFailed` as exact, the reading it had; `assertionsPassed` has
+	 * no other renderer reader - the MCP `list_runs` row, which passes the
+	 * summary through, is its consumer.
 	 */
 	assertionsPassed?: number;
 	assertionsFailed?: number;
@@ -3136,6 +3138,26 @@ export interface AssertionPopulation {
 	failed: number;
 }
 
+/**
+ * A load run's assertion block (#3537): every failed check its verdict reads,
+ * in one shape for a single-request and a scenario load run, on the report
+ * ({@link RunReport.assertions}) and the list row
+ * ({@link LoadResultSummary.assertions}). A member the engine could not derive
+ * is absent, not `0`: a run stored before the block carries only `exact` (and,
+ * for a single-request run, `sampled`). Read it through `reportAssertionsOf` /
+ * `rowAssertionsOf`.
+ */
+export interface RunAssertions {
+	/** Every `assert.*` outcome, required `extract.*` miss and inline `pm.test` call. */
+	exact?: AssertionPopulation;
+	/** The deferred `pm.test` replay over the sampled responses (`testValidation`). */
+	sampled?: AssertionPopulation;
+	/** Element executions that ended in error: an inline script that threw, an element that could not run. */
+	errored?: number;
+	/** `lifecycle.teardown` rows whose outcome is `failed` or `error`. */
+	teardownFailed?: number;
+}
+
 export interface RunReport {
 	/**
 	 * What this run did not do (issue #1503): a request sent with an
@@ -3577,6 +3599,14 @@ export interface RunReport {
 		failed: number;
 		verdict: "passed" | "failed";
 	};
+	/**
+	 * A load run's assertion block (#3537): both assertion populations, the
+	 * element executions that errored and the failed teardowns, judged or not.
+	 * Absent for a run that asserted nothing and errored nowhere, for a
+	 * sequential collection run, and from an engine before the block, whose
+	 * fields `reportAssertionsOf` derives it from instead.
+	 */
+	assertions?: RunAssertions;
 	/**
 	 * Custom trends, counters and rates the run recorded through a
 	 * `metric.record` element or `pm.metrics.trend` / `.counter` / `.rate`

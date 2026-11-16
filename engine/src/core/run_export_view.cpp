@@ -440,28 +440,79 @@ ReportText errored_text (const ordered& document) {
     return words (format_run_percent (rate) + "% of requests errored");
 }
 
-/// `68 assertions failed` from the scenario's exact assertion population
-/// (#2820), or empty when none did.
-ReportText assertions_failed_text (const ordered& document) {
-    const double failed =
-    number_at (document, { "report", "scenario", "assertions", "failed" }).value_or (0);
-    if (failed <= 0) {
+/// `68 assertions failed` for a positive @p count of @p noun, or empty.
+std::string counted_phrase (double count, std::string_view noun, std::string_view verb) {
+    if (count <= 0) {
         return {};
     }
-    return words (format_run_count (failed) +
-    (failed == 1 ? " assertion failed" : " assertions failed"));
+    return format_run_count (count) + ' ' + std::string (noun) +
+    (count == 1 ? "" : "s") + ' ' + std::string (verb);
 }
 
-/// What undercut met budgets when requests errored: the error rate, then the
-/// failed assertions when the run has any, as the app's `judgeRun` joins them.
-ReportText errors_undercut_text (const ordered& document) {
-    ReportText out = errored_text (document);
-    if (const ReportText assertions = assertions_failed_text (document);
-    !assertions.empty ()) {
-        out += ", ";
-        out += assertions;
+/// The failed assertions of the report's `assertions` block (#3537), as the
+/// app's `failedAssertionsReason` words them: `150 assertions failed`,
+/// `4 assertions failed in the sampled replay`, or
+/// `150 assertions failed, 4 more in the sampled replay`. Empty when none did.
+std::string assertions_failed_phrase (const ordered& block) {
+    const double sampled = number_at (block, { "sampled", "failed" }).value_or (0);
+    std::string exact = counted_phrase (
+    number_at (block, { "exact", "failed" }).value_or (0), "assertion", "failed");
+    if (sampled <= 0) {
+        return exact;
+    }
+    if (exact.empty ()) {
+        return counted_phrase (sampled, "assertion", "failed") + " in the sampled replay";
+    }
+    return exact + ", " + format_run_count (sampled) + " more in the sampled replay";
+}
+
+/// Every failed check the `assertions` block counts, joined in the verdict's
+/// order: assertions, `3 elements errored`, `1 teardown script failed`. Empty
+/// when it counts none.
+ReportText failed_checks_text (const ordered& document) {
+    const ordered& block = at_path (document, { "report", "assertions" });
+    const auto phrases = std::to_array<std::string> ({ assertions_failed_phrase (block),
+    counted_phrase (number_at (block, { "errored" }).value_or (0), "element", "errored"),
+    counted_phrase (number_at (block, { "teardownFailed" }).value_or (0),
+    "teardown script", "failed") });
+    std::string joined;
+    for (const std::string& phrase : phrases) {
+        if (phrase.empty ()) {
+            continue;
+        }
+        joined += (joined.empty () ? "" : ", ") + phrase;
+    }
+    return words (std::move (joined));
+}
+
+/// What undercut met budgets: the error rate when requests errored, then every
+/// failed check, as the app's `judgeRun` joins them.
+ReportText undercut_text (const ordered& document, bool requests_errored) {
+    ReportText out = requests_errored ? errored_text (document) : ReportText ();
+    if (const ReportText checks = failed_checks_text (document); !checks.empty ()) {
+        if (!out.empty ()) {
+            out += ", ";
+        }
+        out += checks;
     }
     return out;
+}
+
+/// `no budgets declared`, then the failed checks when the run has any.
+ReportText no_budgets_text (const ordered& document) {
+    ReportText out = "no budgets declared";
+    if (const ReportText checks = failed_checks_text (document); !checks.empty ()) {
+        out += "; ";
+        out += checks;
+    }
+    return out;
+}
+
+/// A met-budget reason that the failed checks undercut (#2820, #3537).
+bool is_failed_check_reason (std::string_view reason) {
+    return reason == "budgets_met_with_assertion_failures" ||
+    reason == "budgets_met_with_element_errors" ||
+    reason == "budgets_met_with_teardown_failures";
 }
 
 /// The words after the verdict's label, chosen by the document's own `reason`.
@@ -473,14 +524,12 @@ ReportText verdict_detail (const ordered& document, std::string_view reason) {
         ReportText missed = missed_budgets (document);
         return missed.empty () ? ReportText ("budgets missed") : missed;
     }
-    if (reason == "budgets_met_with_errors") {
-        return budgets_met_text (document) + ", but " + errors_undercut_text (document);
-    }
-    if (reason == "budgets_met_with_assertion_failures") {
-        return budgets_met_text (document) + ", but " + assertions_failed_text (document);
+    if (reason == "budgets_met_with_errors" || is_failed_check_reason (reason)) {
+        return budgets_met_text (document) + ", but " +
+        undercut_text (document, reason == "budgets_met_with_errors");
     }
     if (reason == "no_budgets") {
-        return "no budgets declared";
+        return no_budgets_text (document);
     }
     if (reason == "run_failed") {
         return "the run failed before it finished";

@@ -5348,7 +5348,7 @@ breaking change bumps the integer and is noted here):
 | `run` | `id`, `reference`, `type` (`load`), `status`, `startTime`, `endTime`, `name` (the request name, or `null`), `comment` (or `null`), `baseline` |
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
-| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
+| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `assertions` (the run's assertion block, #3537), `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
@@ -5365,19 +5365,34 @@ app would print it in: `Vayu run "Create order" (run_5a7c...) - load test, POST
 unless it is the default `New Request`, else the collection a collection load
 run ran, else the method and path; the URL is cut to its path.
 
-`verdict` is the app's run verdict (`judgeRun` in
-`app/src/components/shared/run-outcome.ts`) over the same report fields, so the
-file and the screen it came from agree. It adds no rule of its own:
+`verdict` reads the report fields the app's run verdict reads (`judgeRun` in
+`app/src/components/shared/run-outcome.ts`): `status`, `summary.totalRequests`
+and `summary.errorRate`, `thresholdValidation`, and the report's top-level
+[`assertions`](#get-runsrunidreport) block, for a single-request run and a
+scenario load run alike (#3537). A failed check is a failed assertion of
+either population (`exact.failed` or `sampled.failed`), an errored element
+execution (`errored`) or a failed teardown (`teardownFailed`); like an errored
+request, it keeps met budgets from reading `passed` without failing a run that
+declared no budget for it. The first matching row wins:
 
 | `status` and budgets | `state` | `reason` |
 |----------------------|---------|----------|
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
-| Every budget met, `summary.errorRate` 0, no exact assertion failed | `passed` | `budgets_met` |
-| Every budget met, some requests errored (failed assertions too, if any) | `not_judged` | `budgets_met_with_errors` |
-| Every budget met, no request errored, `scenario.assertions.failed > 0` (#2820) | `not_judged` | `budgets_met_with_assertion_failures` |
 | No budget declared | `not_judged` | `no_budgets` |
+| Every budget met, some requests errored (`summary.errorRate > 0`) | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, an assertion failed (`assertions.exact.failed` or `assertions.sampled.failed` > 0; #2820, #3458) | `not_judged` | `budgets_met_with_assertion_failures` |
+| Every budget met, an element execution errored (`assertions.errored > 0`) | `not_judged` | `budgets_met_with_element_errors` |
+| Every budget met, a teardown failed (`assertions.teardownFailed > 0`) | `not_judged` | `budgets_met_with_teardown_failures` |
+| Every budget met, none of the above | `passed` | `budgets_met` |
+
+`reason` names the first failed check; the Markdown and HTML line names every
+one (below). A report with no `assertions` block (a run that asserted nothing
+and errored nowhere, or one stored before the block whose old fields derive
+none) has no failed check. `engine/tests/fixtures/run-verdict-conformance.json`
+pins this table to the app's: the engine's suite replays it through the export
+and the app's through `reportOutcome`.
 
 `stoppedEarly` is `status == "stopped"`.
 
@@ -5466,7 +5481,14 @@ The sections, in order:
    `**Passed** - 3 of 3 budgets met`,
    `**Failed** - p95 <= 30 ms missed (41 ms)` (every missed budget, or `not
    evaluated` for one the run could not measure), `**Not judged** - no budgets
-   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
+   declared`. Met budgets that did not pass, and no budgets, name every failed
+   check of `report.assertions` in this order, after the error rate when
+   requests errored: `150 assertions failed`, `4 assertions failed in the
+   sampled replay` or `150 assertions failed, 4 more in the sampled replay`;
+   `3 elements errored`; `1 teardown script failed` (`**Not judged** - 3 of 3
+   budgets met, but 0.4% of requests errored, 68 assertions failed`,
+   `**Not judged** - no budgets declared; 91 assertions failed in the sampled
+   replay`, #3537). For a stopped run a line `Stopped early at 3 s of 20 s` follows,
    and for a run with `summary.partial` or `summary.summaryMissing` one
    sentence each follows that, saying the totals are the last saved tick's or
    not whole-run totals, and that latency was not recorded (the latency table
@@ -11098,7 +11120,9 @@ assertion failed against `200`s reads an `errorRate` of 0, a non-zero
 un-inlined script is the sampled population (the step's `tests`, the report's
 `testValidation`) and is never in it. **Absent**, never `{0, 0}`, for a run that
 made no such assertion, for a sequential collection run and for a run stored
-before the field existed.
+before the field existed. The report's top-level `assertions` (#3537) carries
+it as `exact`, beside the sampled replay, the errored element executions and
+the failed teardowns.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
@@ -12573,20 +12597,25 @@ run stored, never from its result rows, which are many and unbounded:
 | `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
-| `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
-| `assertionsFailed` (alone) | A single-request load run's failed assertions (#3458), derived from what the run stored: the `failed` of every row of the report's top-level `elements` (an `assert.*` or inline `script.*` outcome counted per submission) plus `testValidation.testsFailed` (the sampled replay of the scripts that did not run inline, so no outcome is counted twice). A required `extract.*` miss is reported `missing`, not `failed`, and is not in it. There is no `assertionsPassed` beside it: an element row counts executions and the replay counts `pm.test` calls |
+| `assertions` | The run's assertion block (#3537), the report's top-level [`assertions`](#get-runsrunidreport) as it serves it, for both load run kinds: `exact` and `sampled` (each `{passed, failed}`), `errored` and `teardownFailed`. Beside `errorRate`, not folded into it |
+| `assertionsPassed`, `assertionsFailed` | `assertions.exact` plus `assertions.sampled`, for readers older than the block (#2820, #3458). A required `extract.*` miss is in `assertionsFailed`, the count a `maxAssertionFailureRatePct` check's `assertionsExact` reports. `errored` and `teardownFailed` are not in it |
 | `capacity` | A capacity run's headline (#2930), the same three keys of the report's [`capacity` section](#get-runsrunidreport): `stopReason`, and `maxHealthyConcurrency` / `kneeConcurrency` each only when the search found that level |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
-which is not the same claim as passing. The two assertion counts are absent
-for a scenario load run that made no assertion and one stored before #2820; a
-single-request run carries `assertionsFailed` alone, absent when it stored
-neither `elements` nor `testValidation` (and `0` when it stored them and nothing
-failed). A scenario load run whose every assertion failed against
-`200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
-"assertionsPassed": 0, "assertionsFailed": 4580 }`. `capacity` is absent on
+which is not the same claim as passing. The three assertion keys are absent
+together, for a run that made no assertion and errored nowhere. A run stored
+before #3537 reads as it did: a scenario load run's `assertions` is its
+`scenario.assertions` as `exact` alone, absent on a run stored before #2820,
+and a single-request run's is its `assert.*` and `script.*` rows of `elements`
+as `exact` (counted per execution, a required `extract.*` miss not in it) and
+its `testValidation` as `sampled`; neither has `errored` or `teardownFailed`.
+A scenario load run whose every deferred `pm.test` failed against `200`s
+reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
+"assertions": { "exact": { "passed": 0, "failed": 0 }, "sampled": { "passed": 0,
+"failed": 91 }, "errored": 0, "teardownFailed": 0 }, "assertionsPassed": 0,
+"assertionsFailed": 91 }`. `capacity` is absent on
 every run that was not a capacity search; inside it, `maxHealthyConcurrency`
 is absent when the very first level already breached the budget and
 `kneeConcurrency` when the search ended without the target giving out, the
@@ -12955,7 +12984,8 @@ run's report once it reports a terminal status. A scenario **load** run is a
 Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
 only when a test script ran, `thresholdValidation` only when the run declared
-[budgets](#the-thresholds-block-passfail-budgets), `capacity` only for a
+[budgets](#the-thresholds-block-passfail-budgets), `assertions` only when a load
+run asserted or an element errored, `capacity` only for a
 `capacity` run, `auth` only when the run's OAuth 2.0 credential could be
 refreshed mid-run, `coverage` only for a run measured against a bound spec,
 `schemaValidation` only for a run that checked at least one response against
@@ -13266,6 +13296,10 @@ are HTTP-only, the same rule a failed assertion follows
     ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
+  "assertions": {
+    "exact": { "passed": 0, "failed": 0 }, "sampled": { "passed": 498, "failed": 2 },
+    "errored": 0, "teardownFailed": 0
+  },
   "customMetrics": {
     "ttfb2": { "type": "trend", "count": 42, "p50": 10.0, "p95": 40.0, "p99": 47.0, "max": 50.0 },
     "bytesOut": { "type": "counter", "count": 4, "value": 4096.0 },
@@ -13462,6 +13496,23 @@ the same way on every sampled response is one entry with a count, not one entry 
 `testsFailed`, at `sampleRate`, and `assertionsExact` is the inline
 assertions counted on every completion that `testValidation` does not see.
 `actual` is the worse of the two failure rates.
+
+**`assertions`** (issue #3537) is every failed check a load run's verdict
+reads, in one shape for both load run kinds, judged or not:
+
+| Key | Meaning |
+|-----|---------|
+| `exact` | `{passed, failed}`: every `assert.*` outcome, required `extract.*` miss and inline `pm.test` call, counted on each completion. A `maxAssertionFailureRatePct` check's `assertionsExact`, and a scenario load run's `scenario.assertions` |
+| `sampled` | `{passed, failed}`: the deferred replay, `testValidation`'s `testsPassed` and `testsFailed`. A replayed script that threw is one failed test here |
+| `errored` | Element executions that ended in error: an inline script that threw, an element that could not run. The summed `error` of the `elements` rows (a scenario load run's `scenario.steps[].elements`), never `scenario.errored`, which also counts a step with no response |
+| `teardownFailed` | The `lifecycle.teardown` rows whose `outcome` is `failed` or `error`. A failed setup fails the run instead |
+
+**Absent** for a run that made no assertion and errored nowhere, and for a
+sequential collection run. A run stored before the block gets one derived from
+what it stored, carrying only what the readers then read: a scenario load run's
+`scenario.assertions` as `exact`, a single-request run's `assert.*` and
+`script.*` element rows as `exact` and its `testValidation` as `sampled`, never
+`errored` or `teardownFailed`. A member it could not derive is absent, not `0`.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/
@@ -13751,8 +13802,9 @@ before it.
 `assertions` (#2820) is the other way round: a scenario load run's alone,
 `{ passed, failed }` over the exact population (every `assert.*` outcome,
 required `extract.*` miss and inline `pm.test` call, never the sampled replay
-`testValidation` reports). It counts assertions where `failed` above counts
-step executions, so an execution that failed three is one `failed` step and
+`testValidation` reports), the report's top-level `assertions.exact`. It
+counts assertions where `failed` above counts step executions, so an
+execution that failed three is one `failed` step and
 three `assertions.failed`. It is **absent** for a run that made no such assertion, a collection run in
 design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
 has the rest.

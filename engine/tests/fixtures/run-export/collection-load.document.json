@@ -121,6 +121,18 @@
       "passed": 1,
       "failed": 0,
       "verdict": "passed"
+    },
+    "assertions": {
+      "exact": {
+        "passed": 8352,
+        "failed": 68
+      },
+      "sampled": {
+        "passed": 0,
+        "failed": 0
+      },
+      "errored": 0,
+      "teardownFailed": 0
     }
   },
   "comparison": null,

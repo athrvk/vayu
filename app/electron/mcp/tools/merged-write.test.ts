@@ -436,3 +436,85 @@ describe("update_request under a concurrent edit (#3549)", () => {
 		);
 	});
 });
+
+describe("update_request_example under a concurrent edit (#3550)", () => {
+	const cookie = (value: string) => ({ key: "Set-Cookie", value, enabled: true });
+	const savedExample = () => ({
+		id: "exa_1",
+		requestId: "req_1",
+		name: "cookies",
+		headers: [cookie("a=1")],
+		updatedAt: 1_792_359_304_896,
+	});
+
+	/**
+	 * The one example listed at `/requests/req_1/examples` and written at
+	 * `<list>/exa_1`: a `PUT` first applies the next queued edit, judges
+	 * `If-Match` as above, then merge-patches and moves the version on.
+	 */
+	function fakeExampleEngine(edits: ((row: Row) => Row)[]) {
+		let row = savedExample() as unknown as Row;
+		const engine = engineWith((method, path, init) => {
+			if (method === "GET" && path === "/requests/req_1/examples") return answer(200, [row]);
+			if (method !== "PUT" || path !== "/requests/req_1/examples/exa_1") {
+				return answer(404, NOT_FOUND);
+			}
+			const edit = edits.shift();
+			if (edit) row = edit(row);
+			const refused = refusal(row, init);
+			if (refused) return refused;
+			row = {
+				...row,
+				...(JSON.parse(String(init?.body)) as Row),
+				updatedAt: row.updatedAt + 1,
+			};
+			return answer(200, row);
+		});
+		return { ...engine, stored: () => row as unknown as ReturnType<typeof savedExample> };
+	}
+
+	// Mutation check: send no `If-Match` from `updateRequestExample` and the first
+	// PUT lands the header list merged before the other client's edit, so the
+	// cookie it added is gone and no 412 is seen.
+	test("a withheld row written back re-reads once on a 412 and keeps the row added in between", async () => {
+		const engine = fakeExampleEngine([
+			(row) => ({
+				...row,
+				headers: [...(row.headers as unknown[]), cookie("b=2")],
+				updatedAt: row.updatedAt + 1,
+			}),
+		]);
+
+		const res = await dispatchTool(
+			"update_request_example",
+			{
+				requestId: "req_1",
+				exampleId: "exa_1",
+				headers: [{ key: "Set-Cookie", valueWithheld: true }],
+			},
+			engine.ctx
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(
+			engine.calls.map(({ method, ifMatch, status }) => [method, ifMatch, status])
+		).toEqual([
+			["GET", null, 200],
+			["PUT", 'W/"1792359304896"', 412],
+			["GET", null, 200],
+			["PUT", 'W/"1792359304897"', 200],
+		]);
+		expect(engine.stored().headers).toEqual([cookie("a=1")]);
+	});
+
+	test("a write naming only stated fields reads nothing and sends no If-Match", async () => {
+		const engine = fakeExampleEngine([]);
+		const res = await dispatchTool(
+			"update_request_example",
+			{ requestId: "req_1", exampleId: "exa_1", status: 500 },
+			engine.ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(engine.calls).toEqual([{ method: "PUT", ifMatch: null, status: 200 }]);
+	});
+});

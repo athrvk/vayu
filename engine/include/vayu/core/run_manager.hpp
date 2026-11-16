@@ -1620,7 +1620,10 @@ struct RunSummaryInputs {
     // What `maxAssertionFailureRatePct` judges (#1497, #2892): the exact
     // population (`exact_assertion_totals`) beside the sampled one (`tests`
     // above). Absent when the run made no assertion at all, which keeps that
-    // metric unevaluated rather than a trivial pass at 0/0.
+    // metric unevaluated rather than a trivial pass at 0/0. Also the two
+    // populations of the summary's `assertions` block (#3537), beside the
+    // errors `build_run_summary_payload` counts off `elements`, `scenario`
+    // and `lifecycle`.
     std::optional<AssertionPopulations> assertions;
     // A single-request run's own `requestElements` outcomes (issue #1594),
     // under the summary's top-level `elements` key - the single-request

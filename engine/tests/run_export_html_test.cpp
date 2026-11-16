@@ -289,10 +289,33 @@ TEST (RunExportHtmlTest, TheVerdictNamesFailedAssertions) {
     ordered_json document         = read_document ("healthy-passed");
     document["verdict"]["state"]  = "not_judged";
     document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
-    document["report"]["scenario"]["assertions"] = { { "passed", 0 }, { "failed", 4580 } };
+    ordered_json& block           = document["report"]["assertions"];
+    block = { { "exact", { { "passed", 0 }, { "failed", 4580 } } } };
     EXPECT_NE (render_run_export_html (document).find (
                "<strong>Not judged</strong> - 3 of 3 budgets met, but 4,580 "
                "assertions failed</p>"),
+    std::string::npos);
+
+    // #3537: the sampled replay, errored elements and failed teardowns too.
+    block = { { "exact", { { "passed", 0 }, { "failed", 150 } } },
+        { "sampled", { { "passed", 0 }, { "failed", 4 } } }, { "errored", 3 },
+        { "teardownFailed", 1 } };
+    EXPECT_NE (render_run_export_html (document).find (
+               "<strong>Not judged</strong> - 3 of 3 budgets met, but 150 "
+               "assertions failed, 4 more in the sampled replay, 3 elements "
+               "errored, 1 teardown script failed</p>"),
+    std::string::npos);
+
+    block = { { "sampled", { { "passed", 0 }, { "failed", 1 } } } };
+    EXPECT_NE (render_run_export_html (document).find (
+               "budgets met, but 1 assertion failed in the sampled replay</p>"),
+    std::string::npos);
+
+    document["verdict"]["reason"] = "no_budgets";
+    block = { { "errored", 2202 }, { "teardownFailed", 0 } };
+    EXPECT_NE (render_run_export_html (document).find (
+               "<strong>Not judged</strong> - no budgets declared; 2,202 "
+               "elements errored</p>"),
     std::string::npos);
 }
 

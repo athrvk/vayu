@@ -344,6 +344,7 @@ describe("server instructions, per host", () => {
 			"empty value or a pure {{variable}} reference is shown as written",
 			"refused as `auth` by every tool that takes one",
 			"written back as the read showed it keeps its stored value",
+			"or example's header row written back as read, `valueWithheld: true` and no `value`, keeps its stored value",
 			"(`?api_key=&page=2`)",
 			"`params` row naming one reads `valueWithheld: true`",
 			"a smoke test row's, composed or else stored",

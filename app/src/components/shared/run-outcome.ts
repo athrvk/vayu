@@ -16,21 +16,25 @@
  * detail's banner and the history list's row glyph cannot disagree.
  *
  * - **failed** - the run's status is `failed`, or a declared budget was missed.
- * - **passed** - every declared budget was met and no request errored.
+ * - **passed** - every declared budget was met, no request errored and no check
+ *   failed.
  * - **not-judged** - nothing declared a pass/fail line, or the run's own errors
  *   undercut the budgets that passed (a latency ceiling can be met by a run whose
  *   responses are all instant 500s). Never green: absence of a failure is not a
  *   pass.
  *
- * A failed assertion (#2820) is the same kind of evidence as an error: a scenario
- * load run whose every `assert.*` failed against `200`s has a 0% error rate and
- * met its latency budget, and drawing it green says the checks held. It is
+ * A failed check is the same kind of evidence as an error: a scenario load run
+ * whose every `assert.*` failed against `200`s has a 0% error rate and met its
+ * latency budget, and drawing it green says the checks held (#2820). It is
  * **not-judged**, not **failed**, because **failed** is reserved for a line the
  * run declared and missed - a run that declared `maxAssertionFailureRatePct`
- * and broke it is already `failed` through its budgets. The reason names the
- * count either way. That holds for a single-request run too (#3458), whose
- * failures are counted two ways the reason keeps apart: exactly, off its inline
- * `elements`, and from the sampled replay's `testValidation`.
+ * and broke it is already `failed` through its budgets. The failed checks are
+ * the run's assertion block (#3537), the same for every load run kind: a failed
+ * assertion of either population, exact or the sampled replay's (#3458), an
+ * element execution that errored and a teardown script that failed. The reason
+ * names every one, on the met-budgets and the no-budgets line alike, in the
+ * words and order of the run-report export's verdict line
+ * (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
  * A budget the run could not measure (`evaluated: false`, issue #1484) is
  * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
@@ -45,7 +49,13 @@
 import { formatNumber } from "@/lib/format-number";
 import type { CollectionResultSummary, Run, RunReport } from "@/types";
 import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
-import { failedAssertionsOf, failedAssertionsReason } from "./run-assertions";
+import {
+	failedCheckPhrases,
+	failedChecksOf,
+	reportAssertionsOf,
+	rowAssertionsOf,
+	type FailedChecks,
+} from "./run-assertions";
 import { budgetName } from "./threshold-metrics";
 
 export type RunOutcome = "passed" | "failed" | "not-judged";
@@ -63,7 +73,11 @@ export interface RunJudgement {
 	reason: string;
 }
 
-export interface RunOutcomeInput {
+/**
+ * The failed checks (#3537) are optional: absent or 0 changes nothing, any
+ * positive count keeps met budgets from reading `passed`.
+ */
+export interface RunOutcomeInput extends Partial<FailedChecks> {
 	status: string;
 	/**
 	 * The report's budget block - carries the metric names, so the reason can
@@ -77,19 +91,6 @@ export interface RunOutcomeInput {
 	verdict?: "passed" | "failed";
 	/** Percent, 0-100. Absent when the run recorded no request. */
 	errorRate?: number;
-	/**
-	 * Failed assertions counted exactly: a scenario load run's (#2820) or a
-	 * single-request run's inline elements (#3458). A list row's single count
-	 * lands here too, since the row cannot tell the two populations apart. Any
-	 * positive count keeps the run from reading `passed`; absent or 0 changes
-	 * nothing.
-	 */
-	assertionsFailed?: number;
-	/**
-	 * Failed assertions of a single-request run's sampled replay (#3458), apart
-	 * from {@link assertionsFailed} so the reason can say they are a sample.
-	 */
-	sampledAssertionsFailed?: number;
 }
 
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
@@ -147,13 +148,10 @@ export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 
 	const errors =
 		errorRate !== undefined && errorRate > 0 ? `${formatErrorRate(errorRate)} errors` : null;
-	const assertions = failedAssertionsReason(
-		input.assertionsFailed,
-		input.sampledAssertionsFailed
-	);
+	const checks = failedCheckPhrases(input);
 	if (budgets.state === "met") {
 		const met = metReason(budgets);
-		const undercut = [errors, assertions].filter(Boolean).join(", ");
+		const undercut = [errors, ...checks].filter(Boolean).join(", ");
 		return undercut
 			? { outcome: "not-judged", reason: `${met}, but ${undercut}` }
 			: { outcome: "passed", reason: met };
@@ -161,7 +159,7 @@ export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 
 	const noBudgets = "No budgets set";
 	const measured = errorRate === undefined ? null : (errors ?? "0.0% errors");
-	const facts = [measured, assertions].filter(Boolean).join(", ");
+	const facts = [measured, ...checks].filter(Boolean).join(", ");
 	return { outcome: "not-judged", reason: facts ? `${noBudgets}. ${facts}` : noBudgets };
 }
 
@@ -173,12 +171,10 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 	const status = report?.metadata?.status;
 	if (!report || !status) return null;
 	const { totalRequests, errorRate } = report.summary ?? {};
-	const { exact, sampled } = failedAssertionsOf(report);
 	return judgeRun({
 		status,
 		thresholdValidation: report.thresholdValidation,
-		assertionsFailed: exact,
-		sampledAssertionsFailed: sampled,
+		...failedChecksOf(reportAssertionsOf(report)),
 		// A run that sent nothing has no error rate; the report's 0 there is
 		// an empty denominator, not 0.0% measured.
 		errorRate: totalRequests && totalRequests > 0 ? errorRate : undefined,
@@ -233,6 +229,11 @@ export function rowOutcome(run: Run): RunJudgement | null {
 	if (!run.resultSummary) return null;
 	if (run.type === "scenario") return collectionRowOutcome(run.status, run.resultSummary);
 	if (run.type !== "load") return null;
-	const { verdict, errorRate, assertionsFailed } = run.resultSummary;
-	return judgeRun({ status: run.status, verdict, errorRate, assertionsFailed });
+	const { verdict, errorRate } = run.resultSummary;
+	return judgeRun({
+		status: run.status,
+		verdict,
+		errorRate,
+		...failedChecksOf(rowAssertionsOf(run.resultSummary)),
+	});
 }
