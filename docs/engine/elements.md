@@ -246,7 +246,9 @@ even though validation does not refuse a combination.
 It runs in `step.between`, after this step's own outcome is decided and before the next step
 begins, so the wait never counts against either step's latency, and it polls the run's stop signal
 every 50ms so a `Stop` mid-wait lands promptly rather than at the end of a multi-second think. A
-run's `elements.seed` (below) makes the random draw reproducible.
+run's `elements.seed` (below) makes the random draw reproducible. It holds back the next request
+on a sequential collection run, a scenario load run and every closed-loop single-request mode. A `constant_rps` run sends on a schedule instead, so it skips the
+timer, tallies it `skipped` and reports a `think_timer_skipped_open_loop` warning (#3541).
 
 `timer.pacing` (issue #1498) holds a request, a folder or the whole collection to a steady
 start-to-start cadence across iterations - `everyMs` (required) between one pass's entry into that
@@ -701,7 +703,12 @@ hold a mutex-guarded multiset of release deadlines folded into
 `RunContext::in_flight()`, so the existing `maintain_concurrency` closed-loop
 poll throttles a reserved-but-not-yet-released submission the same way it
 already throttles an in-flight one - no new thread, no change to any load
-strategy's own polling loop. What issue #1573 wires for this run shape stays
+strategy's own polling loop. An open-loop (`constant_rps`) run reserves
+nothing: its `step.between` dispatch skips a `timer.*` kind through the
+pipeline's skip hook (`RunContext::open_loop_timer_skip_reason`, read through
+the registry's `category`), because its pacer's `maxInFlight` headroom reads
+the same `in_flight()` and would drop arrivals for slots no request holds
+(#3541). What issue #1573 wires for this run shape stays
 separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
 not a step's. `validate_request_elements_run_override` refuses a `control.*`
 kind, `timer.pacing` and `timer.throughput` outright (a `400` naming the

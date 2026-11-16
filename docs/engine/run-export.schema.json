@@ -300,6 +300,10 @@
               "effective": {
                 "description": "per_host_limit_raised: the per-host limit each event-loop worker ran with.",
                 "type": "number"
+              },
+              "timers": {
+                "description": "think_timer_skipped_open_loop: the enabled timers a constant-rate run skipped.",
+                "type": "number"
               }
             }
           }

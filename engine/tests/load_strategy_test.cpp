@@ -3712,6 +3712,93 @@ TEST_F (LoadStrategyTest, AThinkTimerHoldsTheRunBackByItsWait) {
     EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
 }
 
+namespace {
+
+constexpr int64_t MINUTE_THINK_MS = 60000;
+
+/// A single-request run in @p mode against @p url for one second, carrying
+/// one `timer.think` of a minute, which outlives the run.
+nlohmann::json minute_think_payload (const std::string& url, nlohmann::json mode) {
+    nlohmann::json config = std::move (mode);
+    config["duration"]    = "1s";
+    config["url"]         = url;
+    config["method"]      = "GET";
+    config["timeout"]     = 5000;
+    config["requestElements"] =
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_think" },
+    { "kind", "timer.think" }, { "config", { { "ms", MINUTE_THINK_MS } } } } });
+    return config;
+}
+
+/// The `summary["warnings"]` entry carrying @p code, or a null json.
+nlohmann::json warning_entry (const nlohmann::json& summary, std::string_view code) {
+    for (const auto& warning : summary.value ("warnings", nlohmann::json::array ())) {
+        if (warning.value ("code", "") == code) {
+            return warning;
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+// #3541: a think timer on a constant-rate run is skipped and reserves nothing.
+// Fifty arrivals at 50/s against /fast under a cap of twenty: a minute's
+// reservation per completion fills the cap after twenty, so the broken run
+// drops thirty and peaks at twenty; the healthy run's requests hold a slot
+// for about a millisecond, so it drops none and peaks at what a catch-up
+// burst stacks (at most 100 ms of arrivals, five). Mutation check: drop the
+// skip predicate from the `step.between` dispatch in load_strategy.cpp and the
+// drop, peak and tally expectations fail; drop the warning from
+// `build_run_warnings` and the warning expectation fails.
+TEST_F (LoadStrategyTest, AThinkTimerOnAConstantRateRunIsSkippedAndReservesNothing) {
+    constexpr size_t MAX_IN_FLIGHT = 20;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-think-open-loop",
+    minute_think_payload (mock_server->fast_url (),
+    { { "mode", "constant_rps" }, { "rps", 50 }, { "maxInFlight", MAX_IN_FLIGHT } }));
+
+    EXPECT_EQ (summary.value ("dropped_requests", size_t{ 1 }), 0u) << summary.dump ();
+    EXPECT_LT (summary.value ("peak_concurrency", MAX_IN_FLIGHT), MAX_IN_FLIGHT)
+    << summary.dump ();
+
+    const auto entry = element_entry (summary, "el_think");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    const auto completed = summary.value ("total_requests", size_t{ 0 });
+    EXPECT_GT (completed, 0u) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], completed) << summary.dump ();
+    EXPECT_EQ (entry["passed"], 0u) << summary.dump ();
+
+    const auto warning = warning_entry (summary, "think_timer_skipped_open_loop");
+    ASSERT_FALSE (warning.is_null ()) << summary.dump ();
+    EXPECT_EQ (warning.value ("message", ""), vayu::core::RunContext::OPEN_LOOP_TIMER_SKIP_REASON);
+    EXPECT_EQ (warning["timers"], 1u);
+}
+
+// The closed loop keeps the reservation #3541 takes off the open one. Two
+// users at constant_concurrency against /fast with a minute's think: each
+// slot stays held past the run's end once its first request settles, so the
+// run sends exactly two (without the reservation, hundreds) and says nothing
+// about a skipped timer.
+TEST_F (LoadStrategyTest, AThinkTimerOnAConstantConcurrencyRunStillHoldsItsSlot) {
+    constexpr size_t CONCURRENCY = 2;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-think-closed-loop",
+    minute_think_payload (mock_server->fast_url (),
+    { { "mode", "constant_concurrency" }, { "concurrency", CONCURRENCY } }));
+
+    EXPECT_EQ (summary.value ("requests_sent", size_t{ 0 }), CONCURRENCY)
+    << summary.dump ();
+    const auto entry = element_entry (summary, "el_think");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], CONCURRENCY) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
+    EXPECT_TRUE (warning_entry (summary, "think_timer_skipped_open_loop").is_null ())
+    << summary.dump ();
+}
+
 // The live frame's `backpressure` and the stored tick's are one number (#1921):
 // both read `RunContext::in_flight ()`, which counts a slot a `timer.think`
 // wait still holds. Driven through `collect_metrics` with the counters set by
