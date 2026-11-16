@@ -14151,7 +14151,7 @@ diff needs, so a comparison lists `type=load` alongside `baseline=true`
 treating any pinned row as its baseline - otherwise a more-recently-pinned
 design or scenario run of the same request would shadow it.
 
-Several runs may be pinned at once (one per request is the expected use). The
+Several runs may be pinned at once (one per request or collection is the expected use). The
 engine records the pin and holds no opinion about which baseline applies to
 which run - that selection is the client's, so a pin never unpins anything else.
 

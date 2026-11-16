@@ -531,7 +531,7 @@ export default function HistoryList() {
 									isNarrowed
 										? "Try widening the search or clearing the filters."
 										: pinnedOnly
-											? "Pin a run as its request's baseline to keep it here."
+											? "Pin a run to keep it here."
 											: "Every send, collection run and load test is recorded here."
 								}
 								action={

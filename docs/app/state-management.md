@@ -2745,7 +2745,7 @@ what a request delete needs, and what a restored example needs, since
 `runs.requestRun` (and the `collectionBaseline` / `collectionRun` keys beside
 them) sit under `runs.all` but deliberately **not** under `runs.lists()` - see below.
 
-`runs.baseline(requestId)` caches the run pinned as that request's baseline
+`runs.baseline(requestId)` caches the run pinned as that request's (or collection's) baseline
 (`GET /runs?baseline=true&requestId=&limit=1`), which the history report's
 vs-baseline strip reads. A collection load run has no `requestId`, so its pin is
 cached under `runs.collectionBaseline(collectionId)`

@@ -1637,7 +1637,7 @@ reconciliation, so it reports the end it kept, or its `start_time`.
 
 **`baseline`** is the pin set by
 [`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
-known-good run later runs of the same request are compared against. Several rows
+known-good run later runs of the same request (or, for a load run, the same collection) are compared against. Several rows
 may carry it at once - the engine records the pin and leaves the choice of which
 baseline applies to a given run to the client. NOT NULL with a `default_value`,
 which is what lets `sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing

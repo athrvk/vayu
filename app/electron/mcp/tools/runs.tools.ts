@@ -128,7 +128,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: ["run"],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Pin a run as the baseline for its saved request or collection, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request or collection - pinning another run moves it. A run of neither (an unsaved request's) has nothing to be the baseline of, so pinning it changes what nothing reads. " +
+			"Pin a run as the baseline for its saved request or collection, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. Pinning another run does not unpin this one: the newest-started pin is the baseline. A run of neither (an unsaved request's) has nothing to be the baseline of, so pinning it changes what nothing reads. " +
 			GUARDED_WRITE_SENTENCE +
 			"." +
 			withheldPointer(config, "recorded"),
