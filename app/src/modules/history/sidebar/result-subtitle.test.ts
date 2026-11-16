@@ -27,8 +27,9 @@ afterAll(restoreIntl);
 import { capacitySubtitle, collectionSubtitle, resultSubtitle } from "./result-subtitle";
 
 /**
- * Mutation check (#2820): drop the `assertionsFailed` push in `resultSubtitle`
- * and the three assertion rows redden.
+ * Mutation check (#2820): drop the failed-check push in `resultSubtitle` and
+ * the assertion rows redden. The block (#3537): read the flat
+ * `assertionsFailed` instead of `rowAssertionsOf` and the block rows redden.
  *
  * Capacity (#2930): drop the `summary.capacity` guard in `resultSubtitle` and
  * the average-rate case reddens; make `capacitySubtitle` ignore `finding` and
@@ -53,6 +54,41 @@ describe("resultSubtitle", () => {
 		[{ assertionsFailed: 4580 }, "4,580 assertions failed"],
 		// Zero failed is not worth a clause, and passed alone is never printed.
 		[{ errorRate: 0, assertionsPassed: 10, assertionsFailed: 0 }, "0.0% errors"],
+		// The block names the population, and what else failed, in the verdict's words.
+		[
+			{
+				errorRate: 0,
+				assertions: {
+					exact: { passed: 4400, failed: 0 },
+					sampled: { passed: 0, failed: 91 },
+				},
+				assertionsPassed: 4400,
+				assertionsFailed: 91,
+			},
+			"0.0% errors · 91 assertions failed in the sampled replay",
+		],
+		[
+			{
+				assertions: {
+					exact: { passed: 8, failed: 150 },
+					sampled: { passed: 96, failed: 4 },
+					errored: 3,
+					teardownFailed: 1,
+				},
+				assertionsPassed: 104,
+				assertionsFailed: 154,
+			},
+			"150 assertions failed, 4 more in the sampled replay · 3 elements errored · 1 teardown script failed",
+		],
+		[
+			{
+				errorRate: 0,
+				assertions: { exact: { passed: 0, failed: 0 }, errored: 2202 },
+				assertionsPassed: 0,
+				assertionsFailed: 0,
+			},
+			"0.0% errors · 2,202 elements errored",
+		],
 	])("%j reads %j", (summary, line) => {
 		expect(resultSubtitle(summary)).toBe(line);
 	});

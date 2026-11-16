@@ -13,6 +13,11 @@
  * The one read of `scenario.assertions` and the card name that follows from it
  * (#2820), and the deferred row's pointer at that card.
  *
+ * The assertion block (#3537): make `exactAssertionsOf` read
+ * `scenario.assertions` alone and the block case reddens; drop its zero-total
+ * guard and the empty-block cases redden; drop its scenario guard and the
+ * single-request case reddens.
+ *
  * Mutation-check: make `testValidationTitleOf` always answer "Test validation"
  * and the retitled case fails; always "Sampled replay" and the other two fail;
  * hard-code the pointer in `ElementTally` and the replay-card case fails.
@@ -42,6 +47,28 @@ const withoutAssertions = { scenario: { passed: 3 } } as unknown as RunReport;
 describe("exactAssertionsOf", () => {
 	it("reads the report's scenario.assertions", () => {
 		expect(exactAssertionsOf(withAssertions)).toEqual({ passed: 3, failed: 1 });
+	});
+
+	// #3537: the block's `exact` is the tile's and the verdict's one source.
+	it("reads the report's assertion block before scenario.assertions", () => {
+		const report = {
+			scenario: { assertions: { passed: 3, failed: 1 } },
+			assertions: { exact: { passed: 3, failed: 2 } },
+		} as unknown as RunReport;
+		expect(exactAssertionsOf(report)).toEqual({ passed: 3, failed: 2 });
+	});
+
+	it.each([
+		["a block whose exact population is empty", { exact: { passed: 0, failed: 0 } }],
+		["a block with no exact population", { sampled: { passed: 0, failed: 91 } }],
+	])("is undefined for a scenario run with %s", (_name, assertions) => {
+		const report = { scenario: { passed: 3 }, assertions } as unknown as RunReport;
+		expect(exactAssertionsOf(report)).toBeUndefined();
+	});
+
+	it("is undefined for a single-request run, whatever its block says", () => {
+		const report = { assertions: { exact: { passed: 0, failed: 150 } } } as RunReport;
+		expect(exactAssertionsOf(report)).toBeUndefined();
 	});
 
 	it.each([

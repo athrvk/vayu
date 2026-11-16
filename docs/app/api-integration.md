@@ -1162,10 +1162,12 @@ assertions, where `scenario.failed` counts step executions in which one failed
 (#2824, once however many), and the report's error rate stays HTTP-only, so a
 run of `200`s that failed every assertion reads a 0% error rate and a non-zero
 `assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
-such assertion, a collection run and a report stored before the field. Three
-renderer readers go through `exactAssertionsOf` (`components/shared/run-assertions.ts`):
-the verdict (`reportOutcome`), `RunKeyMetrics`' fourth tile and the Overview's
-Assertions card.
+such assertion, a collection run and a report stored before the field. It is
+the report's top-level `assertions.exact` too (#3537), and the renderer reads
+that block, falling back to `scenario.assertions` from an older engine, through
+`reportAssertionsOf` (`components/shared/run-assertions.ts`): the verdict
+(`reportOutcome`) directly, `RunKeyMetrics`' fourth tile and the Overview's
+Assertions card through `exactAssertionsOf`.
 
 A step's `errors` is the run's one error definition (a response outside 2xx/3xx,
 or no response) and equals `httpErrors + noResponse`. Only a `noResponse`
@@ -1199,12 +1201,13 @@ failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
 the consumer of the rest. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
-[GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
-`assertionsFailed` (both or neither) on a scenario load run that made an exact
-assertion (#2820), or `assertionsFailed` alone on a single-request run that
-stored `elements` or a test replay (#3458). The renderer reads `assertionsFailed` (the row's verdict and
-its result line); `assertionsPassed` has no renderer reader and is there for the
-MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
+[GET /runs](../engine/api-reference.md#get-runs)), plus, on a run that asserted
+or errored, the stored `assertions` block (`{exact, sampled, errored,
+teardownFailed}`, #3537) with `assertionsPassed` and `assertionsFailed` summed
+over its two populations (#2820, #3458). The renderer reads the block (the row's
+verdict and its result line, through `rowAssertionsOf`), and an older engine's
+flat `assertionsFailed` as exact in its place; `assertionsPassed` has no
+renderer reader and is there for the MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
 when the search found no such level, #2930), which the row's result line reads
 in place of the run-average `rps`; an engine that predates it sends none.

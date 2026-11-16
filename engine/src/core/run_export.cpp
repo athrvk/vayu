@@ -156,6 +156,10 @@ const json& member (const json& source, std::string_view key) {
     return found == source.end () ? absent : *found;
 }
 
+bool has_number_above_zero (const json& value) {
+    return value.is_number () && value.get<double> () > 0;
+}
+
 // --- report sections ---------------------------------------------------------
 
 constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
@@ -245,6 +249,8 @@ constexpr auto THRESHOLD_CHECK_KEYS = std::to_array<std::string_view> (
 { "metric", "limit", "actual", "passed", "evaluated", "sampleRate" });
 constexpr auto ASSERTION_POPULATION_KEYS =
 std::to_array<std::string_view> ({ "passed", "failed" });
+constexpr auto ASSERTION_COUNT_KEYS =
+std::to_array<std::string_view> ({ "errored", "teardownFailed" });
 constexpr auto CUSTOM_METRIC_KEYS = std::to_array<std::string_view> (
 { "type", "count", "p50", "p95", "p99", "max", "value" });
 
@@ -410,6 +416,18 @@ ordered threshold_section (const json& thresholds) {
     return out;
 }
 
+/// The report's `assertions` block (#3537), each member only when it holds one.
+ordered assertions_section (const json& assertions) {
+    ordered out = ordered::object ();
+    for (const char* population : { "exact", "sampled" }) {
+        if (const json& totals = member (assertions, population); totals.is_object ()) {
+            out[population] = pick (totals, ASSERTION_POPULATION_KEYS);
+        }
+    }
+    out.update (pick (assertions, ASSERTION_COUNT_KEYS));
+    return out;
+}
+
 using SectionBuilder = ordered (*) (const json&);
 
 struct ReportSection {
@@ -439,6 +457,7 @@ constexpr auto REPORT_SECTIONS = std::to_array<ReportSection> ({
 { "lifecycle", lifecycle_section },
 { "elements", element_tallies },
 { "thresholdValidation", threshold_section },
+{ "assertions", assertions_section },
 { "customMetrics",
 [] (const json& s) { return pick_named (s, CUSTOM_METRIC_KEYS); } },
 });
@@ -639,19 +658,31 @@ ordered run_section (const RunExportRun& run) {
 
 // --- verdict -------------------------------------------------------------------
 
-/// Whether the scenario's exact assertion population (#2820) counts a failure.
-bool any_assertion_failed (const json& report) {
-    const json& failed =
-    member (member (member (report, "scenario"), "assertions"), "failed");
-    return failed.is_number () && failed.get<double> () > 0;
+/// What keeps met budgets with no errored request from passing, read off the
+/// report's `assertions` block (#3537), first match wins: a failed assertion of
+/// either population, an errored element execution, a failed teardown. Empty
+/// when none did.
+std::string_view failed_check_reason (const json& report) {
+    const json& block = member (report, "assertions");
+    if (has_number_above_zero (member (member (block, "exact"), "failed")) ||
+    has_number_above_zero (member (member (block, "sampled"), "failed"))) {
+        return "budgets_met_with_assertion_failures";
+    }
+    if (has_number_above_zero (member (block, "errored"))) {
+        return "budgets_met_with_element_errors";
+    }
+    if (has_number_above_zero (member (block, "teardownFailed"))) {
+        return "budgets_met_with_teardown_failures";
+    }
+    return {};
 }
 
 /**
- * `{state, stoppedEarly, reason}`, the app's `judgeRun` (`run-outcome.ts`)
- * over the same report fields, so a file and the screen it came from agree:
- * a stopped run is not judged; a failed run, or a missed budget, fails; met
- * budgets pass only when no request errored and no exact assertion failed
- * (#2820); no budgets is not judged.
+ * `{state, stoppedEarly, reason}`: a stopped run is not judged; a failed run,
+ * or a missed budget, fails; met budgets pass only when no request errored and
+ * the `assertions` block counts no failed check; no budgets is not judged. The
+ * app's `judgeRun` (`run-outcome.ts`) reads the same report fields, and
+ * `tests/fixtures/run-verdict-conformance.json` holds the two to one answer.
  */
 ordered verdict_section (const json& report, std::string_view status) {
     const bool stopped = status == "stopped";
@@ -681,9 +712,9 @@ ordered verdict_section (const json& report, std::string_view status) {
     if (any_errors) {
         return verdict ("not_judged", "budgets_met_with_errors");
     }
-    return any_assertion_failed (report) ?
-    verdict ("not_judged", "budgets_met_with_assertion_failures") :
-    verdict ("passed", "budgets_met");
+    const std::string_view failed_check = failed_check_reason (report);
+    return failed_check.empty () ? verdict ("passed", "budgets_met") :
+                                   verdict ("not_judged", failed_check);
 }
 
 // --- time series -----------------------------------------------------------------
@@ -746,10 +777,6 @@ ordered comparison_section (const RunExportInput& input) {
 }
 
 // --- not carried -------------------------------------------------------------------
-
-bool has_number_above_zero (const json& value) {
-    return value.is_number () && value.get<double> () > 0;
-}
 
 bool any_has_member (const json& entries, std::string_view key) {
     return entries.is_array () && std::ranges::any_of (entries, [key] (const json& entry) {

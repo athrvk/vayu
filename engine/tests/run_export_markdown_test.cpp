@@ -233,13 +233,14 @@ TEST (RunExportMarkdownTest, TheVerdictNamesFailedAssertionsWithAndWithoutErrors
     ordered_json document         = read_document ("healthy-passed");
     document["verdict"]["state"]  = "not_judged";
     document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
-    document["report"]["scenario"]["assertions"] = { { "passed", 0 }, { "failed", 4580 } };
+    ordered_json& block           = document["report"]["assertions"];
+    block = { { "exact", { { "passed", 0 }, { "failed", 4580 } } } };
     EXPECT_NE (
     render_run_export_markdown (document).find (
     "**Not judged** - 3 of 3 budgets met, but 4,580 assertions failed\n"),
     std::string::npos);
 
-    document["report"]["scenario"]["assertions"]["failed"] = 1;
+    block["exact"]["failed"] = 1;
     EXPECT_NE (render_run_export_markdown (document).find (
                "budgets met, but 1 assertion failed\n"),
     std::string::npos);
@@ -251,11 +252,64 @@ TEST (RunExportMarkdownTest, TheVerdictNamesFailedAssertionsWithAndWithoutErrors
     "budgets met, but 0.4% of requests errored, 1 assertion failed\n"),
     std::string::npos);
 
-    document["report"]["scenario"]["assertions"]["failed"] = 0;
+    block["exact"]["failed"]      = 0;
     const std::string errors_only = render_run_export_markdown (document);
     EXPECT_NE (errors_only.find ("budgets met, but 0.4% of requests errored\n"),
     std::string::npos);
     EXPECT_EQ (errors_only.find ("assertion"), std::string::npos);
+}
+
+// #3537: the sampled replay, errored elements and failed teardowns are named
+// as the app's `judgeRun` names them, on the met-budgets and no-budgets lines.
+// Mutation check: drop a phrase from `failed_checks_text`
+// (run_export_view.cpp) and its expectation fails.
+TEST (RunExportMarkdownTest, TheVerdictNamesEveryFailedCheck) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
+    ordered_json& block           = document["report"]["assertions"];
+    block = { { "exact", { { "passed", 0 }, { "failed", 0 } } },
+        { "sampled", { { "passed", 0 }, { "failed", 4 } } }, { "errored", 0 },
+        { "teardownFailed", 0 } };
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "budgets met, but 4 assertions failed in the sampled replay\n"),
+    std::string::npos);
+
+    block["exact"]["failed"] = 150;
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "budgets met, but 150 assertions failed, 4 more in the sampled replay\n"),
+    std::string::npos);
+
+    block["exact"]["failed"]      = 0;
+    block["sampled"]["failed"]    = 0;
+    block["errored"]              = 2202;
+    document["verdict"]["reason"] = "budgets_met_with_element_errors";
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "**Not judged** - 3 of 3 budgets met, but 2,202 elements errored\n"),
+    std::string::npos);
+
+    block["errored"]        = 1;
+    block["teardownFailed"] = 1;
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "budgets met, but 1 element errored, 1 teardown script failed\n"),
+    std::string::npos);
+
+    block["errored"]              = 0;
+    block["teardownFailed"]       = 2;
+    document["verdict"]["reason"] = "budgets_met_with_teardown_failures";
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "budgets met, but 2 teardown scripts failed\n"),
+    std::string::npos);
+
+    document["verdict"]["reason"] = "no_budgets";
+    block["sampled"]["failed"]    = 91;
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "**Not judged** - no budgets declared; 91 assertions failed in "
+               "the sampled replay, 2 teardown scripts failed\n"),
+    std::string::npos);
 }
 
 TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {

@@ -3693,6 +3693,43 @@ TEST_F (ScenarioLoadTest, ScenarioAssertionsCountAnInlinePmTestAndNotADeferredOn
     << report["testValidation"].dump ();
 }
 
+// #3537: an inline script that throws is an errored element execution, and a
+// deferred `pm.test` that fails is the sampled population, both in the report's
+// `assertions` beside the exact population this run left empty. The step count
+// `scenario.errored` is not read for it. Mutation check: drop the `assertions`
+// write in `build_run_summary_payload` and the member is absent.
+TEST_F (ScenarioLoadTest, AThrownInlineScriptAndAFailedReplayReachTheReportsAssertions) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/echo") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
+    "el_throws", "script.post", "JSON.parse('not json');", /*inline_script=*/true) });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_deferred", "script.post",
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });") });
+
+    constexpr size_t ITERATIONS = 3;
+    const json report =
+    run_to_report (json{ { "mode", "iterations" }, { "iterations", ITERATIONS },
+                   { "concurrency", 1 }, { "response_sample_rate", 1 } },
+    execution);
+    ASSERT_TRUE (report.contains ("assertions")) << report.dump ();
+    const json& assertions = report.at ("assertions");
+    EXPECT_EQ (assertions.value ("errored", 0u), ITERATIONS) << assertions.dump ();
+    EXPECT_EQ (assertions.value ("teardownFailed", 1u), 0u) << assertions.dump ();
+    EXPECT_EQ (assertions.value ("exact", json ()),
+    (json{ { "passed", 0 }, { "failed", 0 } }))
+    << assertions.dump ();
+    ASSERT_TRUE (report.contains ("testValidation"))
+    << "the deferred replay never ran";
+    const auto replay_failed = report["testValidation"].value ("testsFailed", 0);
+    EXPECT_GT (replay_failed, 0) << report["testValidation"].dump ();
+    EXPECT_EQ (assertions.value ("sampled", json ()).value ("failed", -1), replay_failed)
+    << assertions.dump ();
+    EXPECT_FALSE (report.at ("scenario").contains ("assertions"))
+    << report.at ("scenario").dump ();
+}
+
 // A run that asserted nothing has no figure, never `{0, 0}`. Mutation check:
 // drop the `total () > 0` guard in `collect_summary_inputs` and the key appears.
 TEST_F (ScenarioLoadTest, AScenarioRunThatAssertedNothingHasNoScenarioAssertions) {

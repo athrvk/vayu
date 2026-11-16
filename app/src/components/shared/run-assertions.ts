@@ -7,58 +7,126 @@
 
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import type { RunReport, RunScenarioStepElementTally, RunScenarioStepStat } from "@/types";
+import type {
+	AssertionPopulation,
+	LoadResultSummary,
+	RunAssertions,
+	RunReport,
+	RunScenarioStepElementTally,
+	RunScenarioStepStat,
+} from "@/types";
 
-export type ExactAssertions = NonNullable<NonNullable<RunReport["scenario"]>["assertions"]>;
+export type ExactAssertions = AssertionPopulation;
+
+/** The report fields a run's assertion block is read from, or derived from before #3537. */
+type AssertionSources = Pick<RunReport, "assertions" | "scenario" | "elements" | "testValidation">;
+
+/**
+ * A load run's assertion block (#3537): the report's own `assertions`, or, from
+ * an engine before the block, what its fields said then. A scenario run's
+ * `scenario.assertions` is `exact` alone, its sampled replay unread; a
+ * single-request run's top-level `elements` failures are `exact` and its
+ * `testValidation` is `sampled` (#3458). Neither derives `errored` or
+ * `teardownFailed`, so an old report keeps the verdict it had. `undefined`
+ * when the report states none.
+ *
+ * The one read of the block for a report: the verdict (`reportOutcome`), the
+ * key-metrics tile and the Overview's Assertions card (`exactAssertionsOf`)
+ * all go through it, so a pill and a tile cannot come from two fields.
+ */
+export function reportAssertionsOf(report: AssertionSources): RunAssertions | undefined {
+	if (report.assertions) return report.assertions;
+	if (report.scenario) {
+		const exact = report.scenario.assertions;
+		return exact ? { exact } : undefined;
+	}
+	return singleRequestAssertionsBeforeBlock(report);
+}
+
+function singleRequestAssertionsBeforeBlock({
+	elements,
+	testValidation,
+}: AssertionSources): RunAssertions | undefined {
+	if (!elements && !testValidation) return undefined;
+	const block: RunAssertions = {};
+	if (elements) {
+		block.exact = elements.reduce(
+			(total, element) => ({
+				passed: total.passed + element.passed,
+				failed: total.failed + element.failed,
+			}),
+			{ passed: 0, failed: 0 }
+		);
+	}
+	if (testValidation) {
+		block.sampled = { passed: testValidation.testsPassed, failed: testValidation.testsFailed };
+	}
+	return block;
+}
+
+/**
+ * The list row's assertion block (#3537), the row-side twin of
+ * {@link reportAssertionsOf}. A row from an engine before the block carries
+ * the flat `assertionsFailed` alone, read as `exact` - the reading it had,
+ * since that row could not say which population a failure came from.
+ */
+export function rowAssertionsOf(summary: LoadResultSummary): RunAssertions | undefined {
+	if (summary.assertions) return summary.assertions;
+	if (summary.assertionsFailed === undefined) return undefined;
+	return { exact: { passed: summary.assertionsPassed ?? 0, failed: summary.assertionsFailed } };
+}
 
 /**
  * A scenario load run's exact assertion population (#2820), or `undefined` when
  * the run made none: no `assert.*` element, no required `extract.*` and no
  * inline `pm.test`, or a collection run, or a report stored before the field.
- *
- * The one read of `scenario.assertions`: the key-metrics tile, the Overview's
- * Assertions block and the run's verdict (`reportOutcome`) all go through it,
- * so what a pill says and what a tile says cannot come from two fields.
+ * A single-request run answers `undefined` too, which is how the cards know
+ * there is no Assertions block: its exact tallies are the Overview's element
+ * rows. The block's `exact` is written at zero; the card is not.
  */
 export function exactAssertionsOf(
-	report: Pick<RunReport, "scenario"> | null | undefined
+	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
 ): ExactAssertions | undefined {
-	return report?.scenario?.assertions;
+	if (!report?.scenario) return undefined;
+	const exact = reportAssertionsOf(report)?.exact;
+	return exact && exact.passed + exact.failed > 0 ? exact : undefined;
+}
+
+/** `3 elements errored` for a positive @p count of @p noun, or `null`. */
+function countedPhrase(count: number | undefined, noun: string, verb: string): string | null {
+	if (count === undefined || count <= 0) return null;
+	return `${formatNumber(count)} ${pluralize(count, noun)} ${verb}`;
 }
 
 /** `4,580 assertions failed`, or `null` when none did - the phrase a row line and a verdict reason share. */
 export function assertionsFailedPhrase(failed: number | undefined): string | null {
-	if (failed === undefined || failed <= 0) return null;
-	return `${formatNumber(failed)} ${pluralize(failed, "assertion")} failed`;
-}
-
-/** A load run's failed assertions, split by how they were counted. */
-export interface FailedAssertions {
-	/** Every response: a scenario's `assertions`, or a single request's inline `elements`. */
-	exact: number;
-	/** Only the responses the post-run replay was drawn over (`testValidation`). */
-	sampled: number;
+	return countedPhrase(failed, "assertion", "failed");
 }
 
 /**
- * The failed assertions a report states, kept as two populations because the
- * verdict's wording has to say which one it is (#3458).
- *
- * A scenario run's exact count is `scenario.assertions`. A single-request run
- * has no `scenario`: its exact tallies are the failed counts of the top-level
- * `elements` and its sampled ones `testValidation.testsFailed`. The two never
- * overlap - a script that ran inline is tallied in its element row and skipped
- * by the replay, one that did not is `deferred` there and counted by the replay
- * alone - so summing within a population is safe and across them is not done.
- * `exactAssertionsOf` stays the card-facing read: it answers `undefined` for a
- * single-request run, which is how the cards know there is no Assertions block.
+ * A load run's failed checks, by kind: what keeps met budgets from reading
+ * passed (#3537). The two assertion populations stay apart because the reason
+ * has to say which one failed (#3458).
  */
-export function failedAssertionsOf(
-	report: Pick<RunReport, "scenario" | "elements" | "testValidation">
-): FailedAssertions {
-	if (report.scenario) return { exact: exactAssertionsOf(report)?.failed ?? 0, sampled: 0 };
-	const exact = (report.elements ?? []).reduce((total, element) => total + element.failed, 0);
-	return { exact, sampled: report.testValidation?.testsFailed ?? 0 };
+export interface FailedChecks {
+	/** Every response: `assertions.exact.failed`. */
+	assertionsFailed: number;
+	/** Only the responses the post-run replay was drawn over: `assertions.sampled.failed`. */
+	sampledAssertionsFailed: number;
+	/** Element executions that ended in error. */
+	elementsErrored: number;
+	/** Teardown scripts that failed or errored. */
+	teardownsFailed: number;
+}
+
+/** The failed checks an assertion block counts; every count `0` when there is no block. */
+export function failedChecksOf(assertions: RunAssertions | undefined): FailedChecks {
+	return {
+		assertionsFailed: assertions?.exact?.failed ?? 0,
+		sampledAssertionsFailed: assertions?.sampled?.failed ?? 0,
+		elementsErrored: assertions?.errored ?? 0,
+		teardownsFailed: assertions?.teardownFailed ?? 0,
+	};
 }
 
 /**
@@ -77,6 +145,22 @@ export function failedAssertionsReason(
 	return `${exactPhrase}, ${formatNumber(sampled)} more in the sampled replay`;
 }
 
+/**
+ * Every failed check, worded and in the verdict's order: assertions, then
+ * `3 elements errored`, then `1 teardown script failed`. The run-report
+ * export's verdict line words them the same (`failed_checks_text`,
+ * `engine/src/core/run_export_view.cpp`), held to this by
+ * `engine/tests/fixtures/run-verdict-conformance.json`. Empty when none failed.
+ */
+export function failedCheckPhrases(checks: Partial<FailedChecks>): string[] {
+	const phrases = [
+		failedAssertionsReason(checks.assertionsFailed, checks.sampledAssertionsFailed),
+		countedPhrase(checks.elementsErrored, "element", "errored"),
+		countedPhrase(checks.teardownsFailed, "teardown script", "failed"),
+	];
+	return phrases.filter((phrase): phrase is string => phrase !== null);
+}
+
 export const TEST_VALIDATION_TITLE = "Test validation";
 export const SAMPLED_REPLAY_TITLE = "Sampled replay";
 
@@ -87,7 +171,7 @@ export const SAMPLED_REPLAY_TITLE = "Sampled replay";
  * row) asks here too, so the pointer names a card that exists.
  */
 export function testValidationTitleOf(
-	report: Pick<RunReport, "scenario"> | null | undefined
+	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
 ): string {
 	return exactAssertionsOf(report) ? SAMPLED_REPLAY_TITLE : TEST_VALIDATION_TITLE;
 }
@@ -136,7 +220,7 @@ export interface ReplayScope {
  * test script at all, so they are not "not kept".
  */
 export function replayScopeOf(
-	report: Pick<RunReport, "scenario"> | null | undefined
+	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
 ): ReplayScope | undefined {
 	const steps = report?.scenario?.steps ?? [];
 	let responses = 0;

@@ -3388,12 +3388,15 @@ TEST_F (RunsRouteTest, TerminalLoadRowCarriesItsResultSummary) {
     const auto& row = body["data"][0];
     ASSERT_TRUE (row.contains ("resultSummary"));
     const auto& outcome = row["resultSummary"];
-    // The fixture's replay recorded one failed test (#3458).
-    EXPECT_EQ (outcome.size (), 5u);
-    for (const char* key : { "rps", "p95Ms", "errorRate", "verdict", "assertionsFailed" }) {
+    // The fixture's replay recorded one failed test (#3458), read off a
+    // summary with no `assertions` block as the row read it before #3537.
+    EXPECT_EQ (outcome.size (), 7u);
+    for (const char* key : { "rps", "p95Ms", "errorRate", "verdict",
+         "assertions", "assertionsPassed", "assertionsFailed" }) {
         ASSERT_TRUE (outcome.contains (key)) << key;
     }
     EXPECT_EQ (outcome["assertionsFailed"], 1);
+    EXPECT_EQ (outcome["assertionsPassed"], 9);
     EXPECT_DOUBLE_EQ (outcome["rps"].get<double> (), 50.0);
     EXPECT_DOUBLE_EQ (outcome["p95Ms"].get<double> (), 25.0);
     // 7 server errors and 3 with no response, of 100: a percentage, not 0.1.
@@ -3450,7 +3453,8 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 
     const auto unjudged = row_of (body, "run_unjudged");
     ASSERT_TRUE (unjudged.contains ("resultSummary"));
-    EXPECT_EQ (unjudged["resultSummary"].size (), 4u); // + the replay's failed test
+    // rps, p95Ms, errorRate and the replay's assertion keys.
+    EXPECT_EQ (unjudged["resultSummary"].size (), 6u);
     EXPECT_FALSE (unjudged["resultSummary"].contains ("verdict"));
 
     const auto no_codes_row = row_of (body, "run_no_codes");
@@ -3497,7 +3501,11 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
     const auto asserted = row_of (body, "run_asserted")["resultSummary"];
     EXPECT_EQ (asserted.value ("assertionsFailed", -1), 4) << asserted.dump ();
     EXPECT_EQ (asserted.value ("assertionsPassed", -1), 1) << asserted.dump ();
-    EXPECT_EQ (asserted.size (), 6u) << asserted.dump ();
+    // Stored before the `assertions` block: the exact pair alone, as read then.
+    EXPECT_EQ (asserted.value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "exact", { { "passed", 1 }, { "failed", 4 } } } }))
+    << asserted.dump ();
+    EXPECT_EQ (asserted.size (), 7u) << asserted.dump ();
 
     for (const char* id : { "run_unasserted", "run_malformed" }) {
         const auto outcome = row_of (body, id)["resultSummary"];
@@ -3515,12 +3523,13 @@ nlohmann::json single_request_summary () {
     return stored;
 }
 
-// A single-request load run has no `scenario` block, so its row derives
-// `assertionsFailed` from the two places it stored failures (#3458): the
-// exact `elements` rows and the replay's `tests`. A run that stored neither
-// carries no key, and a stored zero is a recorded zero.
-// Mutation check: drop `record_assertions`' non-scenario branch and the first
-// three rows lose the key.
+// A single-request load run stored before the `assertions` block (#3537) keeps
+// the row #3458 gave it, derived from the two places it stored failures: the
+// `assert.*` and `script.*` rows of `elements` as `exact` and the replay's
+// `tests` as `sampled`. A run that stored neither carries no key, and a stored
+// zero is a recorded zero.
+// Mutation check: drop the single-request half of `derive_legacy_assertions`
+// and the first three rows lose the key.
 TEST_F (RunsRouteTest, SingleRequestLoadRowDerivesItsFailedAssertions) {
     auto inline_failures        = single_request_summary ();
     inline_failures["elements"] = nlohmann::json::array (
@@ -3563,11 +3572,16 @@ TEST_F (RunsRouteTest, SingleRequestLoadRowDerivesItsFailedAssertions) {
     EXPECT_EQ (failed_of ("run_both"), 9);
     EXPECT_EQ (failed_of ("run_clean"), 0);
     EXPECT_EQ (failed_of ("run_unasserted"), -1);
-    for (const char* id : { "run_inline", "run_replayed", "run_both", "run_clean" }) {
-        EXPECT_FALSE (
-        row_of (body, id)["resultSummary"].contains ("assertionsPassed"))
-        << id;
-    }
+    const auto passed_of = [&body] (const char* id) {
+        return row_of (body, id)["resultSummary"].value ("assertionsPassed", -1);
+    };
+    EXPECT_EQ (passed_of ("run_inline"), 0);
+    EXPECT_EQ (passed_of ("run_replayed"), 4);
+    EXPECT_EQ (passed_of ("run_both"), 4);
+    EXPECT_EQ (passed_of ("run_clean"), 8);
+    EXPECT_EQ (row_of (body, "run_both")["resultSummary"]["assertions"],
+    (nlohmann::json{ { "exact", { { "passed", 0 }, { "failed", 5 } } },
+    { "sampled", { { "passed", 4 }, { "failed", 4 } } } }));
 }
 
 // What a stored summary can hold that is not a count: a non-numeric `failed`,
@@ -3593,6 +3607,175 @@ TEST_F (RunsRouteTest, SingleRequestLoadRowIgnoresMalformedAssertionTallies) {
         row_of (body, id)["resultSummary"].contains ("assertionsFailed"))
         << id;
     }
+}
+
+/// The stored `assertions` block (#3537) with these counts.
+nlohmann::json assertion_block (vayu::core::AssertionPopulations populations,
+size_t errored,
+size_t teardown_failed) {
+    return { { "exact",
+             { { "passed", populations.exact.passed },
+             { "failed", populations.exact.failed } } },
+        { "sampled",
+        { { "passed", populations.sampled.passed },
+        { "failed", populations.sampled.failed } } },
+        { "errored", errored }, { "teardownFailed", teardown_failed } };
+}
+
+// The writer's `assertions` block reaches the list row and the report as
+// stored (#3537): both populations, the element executions that errored and
+// the teardowns that failed, with the row's flat counts over both populations.
+// Mutation check: drop the `assertions` write in `build_run_summary_payload`
+// and both reads lose `errored` and `teardownFailed`.
+TEST_F (RunsRouteTest, TheAssertionBlockRoundTripsToTheRowAndTheReport) {
+    auto inputs  = summary_inputs ();
+    inputs.tests = vayu::core::ScriptValidationTotals{ 7, 5, 2, {}, 0 };
+    const vayu::core::AssertionPopulations populations{
+        .exact = { .passed = 3, .failed = 1 }, .sampled = { .passed = 5, .failed = 2 }
+    };
+    inputs.assertions = populations;
+    inputs.elements   = nlohmann::json::array ({ { { "id", "el_post" },
+    { "kind", "script.post" }, { "passed", 2 }, { "failed", 1 }, { "error", 4u } } });
+    inputs.lifecycle  = nlohmann::json{ { "teardown",
+    nlohmann::json::array ({ { { "kind", "script.teardown" }, { "outcome", "failed" } } }) } };
+    seed ({ .id = "run_block" });
+    db_->update_run_summary (
+    "run_block", vayu::core::build_run_summary_payload (inputs).dump ());
+    const auto block = assertion_block (populations, 4, 1);
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    const auto outcome = row_of (body, "run_block")["resultSummary"];
+    EXPECT_EQ (outcome.value ("assertions", nlohmann::json ()), block)
+    << outcome.dump ();
+    EXPECT_EQ (outcome.value ("assertionsFailed", -1), 3);
+    EXPECT_EQ (outcome.value ("assertionsPassed", -1), 8);
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_block");
+    ASSERT_EQ (report_status, 200);
+    EXPECT_EQ (report.value ("assertions", nlohmann::json ()), block) << report.dump ();
+}
+
+// A scenario load run whose deferred `pm.test` failed on every replayed sample
+// carries the failure on its row and its report (#3537), though its exact
+// population is empty and `scenario.assertions` stays absent at zero (#2820).
+// Mutation check: put back `record_assertions`' early return for a summary
+// with a `scenario` block, reading only `scenario.assertions`, and the row
+// loses the failure.
+TEST_F (RunsRouteTest, AScenarioLoadRowCarriesItsSampledReplayFailures) {
+    auto inputs = summary_inputs ();
+    inputs.scenario = nlohmann::json{ { "iterations", 4 }, { "steps_executed", 91 },
+        { "passed", 91 }, { "steps", nlohmann::json::array () } };
+    inputs.tests = vayu::core::ScriptValidationTotals{ 91, 0, 91, {}, 0 };
+    const vayu::core::AssertionPopulations populations{ .exact = {},
+        .sampled = { .passed = 0, .failed = 91 } };
+    inputs.assertions = populations;
+    seed ({ .id = "run_scenario_replay" });
+    db_->update_run_summary ("run_scenario_replay",
+    vayu::core::build_run_summary_payload (inputs).dump ());
+    const auto block = assertion_block (populations, 0, 0);
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    const auto outcome = row_of (body, "run_scenario_replay")["resultSummary"];
+    EXPECT_EQ (outcome.value ("assertionsFailed", -1), 91) << outcome.dump ();
+    EXPECT_EQ (outcome.value ("assertionsPassed", -1), 0) << outcome.dump ();
+    EXPECT_EQ (outcome.value ("assertions", nlohmann::json ()), block)
+    << outcome.dump ();
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_scenario_replay");
+    ASSERT_EQ (report_status, 200);
+    EXPECT_EQ (report.value ("assertions", nlohmann::json ()), block) << report.dump ();
+    ASSERT_TRUE (report.contains ("scenario")) << report.dump ();
+    EXPECT_FALSE (report["scenario"].contains ("assertions"))
+    << report["scenario"].dump ();
+}
+
+// A required `extract.*` that misses on every response is a failed assertion
+// in the exact population the budget judges (#3537), so the row's failed count
+// is the report's `assertionsExact.failed`, not the element row's `failed`,
+// where a miss is `missing`. Mutation check: have `read_run_assertions` ignore
+// the stored block and derive it, and the row reads 0.
+TEST_F (RunsRouteTest, ARequiredExtractorMissCountsOnTheRowAsTheBudgetCountsIt) {
+    auto inputs = summary_inputs ();
+    inputs.tests.reset ();
+    inputs.elements = nlohmann::json::array (
+    { { { "id", "el_tok" }, { "kind", "extract.json" }, { "required", true },
+    { "passed", 0 }, { "failed", 0 }, { "missing", 4227 }, { "error", 0 } } });
+    inputs.assertions =
+    vayu::core::AssertionPopulations{ .exact = { .passed = 0, .failed = 4227 },
+        .sampled                             = {} };
+    inputs.thresholds = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "maxAssertionFailureRatePct", 0 } } } }, inputs);
+    seed ({ .id = "run_required_miss" });
+    db_->update_run_summary (
+    "run_required_miss", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_required_miss");
+    ASSERT_EQ (report_status, 200);
+    ASSERT_TRUE (report.contains ("thresholdValidation")) << report.dump ();
+    const auto budget_failed =
+    report["thresholdValidation"]["checks"][0]["assertionsExact"]["failed"];
+    EXPECT_EQ (budget_failed, 4227);
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    const auto outcome = row_of (body, "run_required_miss")["resultSummary"];
+    EXPECT_EQ (outcome.value ("assertionsFailed", nlohmann::json ()), budget_failed)
+    << outcome.dump ();
+    EXPECT_EQ (report["assertions"]["exact"]["failed"], budget_failed) << report.dump ();
+}
+
+// A summary stored before the block reads as it did (#3537): a scenario load
+// run's exact pair alone, its replay's failures unread as they were, and
+// nothing derived for `errored` or `teardownFailed`, which no verdict read
+// then. A run that stored no assertion gains no `assertions` member.
+// Mutation check: derive `sampled` off `tests` for a scenario summary in
+// `derive_legacy_assertions` and the first expectation fails.
+TEST_F (RunsRouteTest, ASummaryStoredBeforeTheBlockReadsAsItDidThen) {
+    seed ({ .id = "run_old_scenario", .start_time = 1 });
+    db_->update_run_summary ("run_old_scenario",
+    nlohmann::json{
+    { "scenario",
+    { { "iterations", 2 }, { "errored", 6 },
+    { "assertions", { { "passed", 3 }, { "failed", 0 } } },
+    { "steps",
+    nlohmann::json::array ({ { { "elements",
+    nlohmann::json::array ({ { { "kind", "script.post" }, { "error", 6 } } }) } } }) } } },
+    { "tests", { { "sampled", 4 }, { "passed", 0 }, { "failed", 4 } } },
+    { "lifecycle", { { "teardown", nlohmann::json::array ({ { { "outcome", "failed" } } }) } } } }
+    .dump ());
+    seed ({ .id = "run_old_unasserted", .start_time = 2 });
+    db_->update_run_summary ("run_old_unasserted",
+    nlohmann::json{ { "scenario", { { "iterations", 2 } } }, { "rps", 5 } }.dump ());
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_old_scenario");
+    ASSERT_EQ (report_status, 200);
+    const nlohmann::json exact_only = { { "exact", { { "passed", 3 }, { "failed", 0 } } } };
+    EXPECT_EQ (report.value ("assertions", nlohmann::json ()), exact_only)
+    << report.dump ();
+    EXPECT_EQ (report["scenario"].value ("assertions", nlohmann::json ()),
+    exact_only["exact"]);
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    const auto outcome = row_of (body, "run_old_scenario")["resultSummary"];
+    EXPECT_EQ (outcome.value ("assertionsFailed", -1), 0) << outcome.dump ();
+    EXPECT_EQ (outcome.value ("assertions", nlohmann::json ()), exact_only);
+
+    auto [plain_status, plain] =
+    vayu::http::routes::run_report_response (*db_, "run_old_unasserted");
+    ASSERT_EQ (plain_status, 200);
+    EXPECT_FALSE (plain.contains ("assertions")) << plain.dump ();
+    EXPECT_FALSE (row_of (body, "run_old_unasserted")["resultSummary"].contains ("assertions"));
 }
 
 /// The fixture's summary with the capacity search @p levels ended in, against
@@ -3635,8 +3818,9 @@ TEST_F (RunsRouteTest, CapacityRowCarriesTheHeldAndKneeLevels) {
     EXPECT_EQ (knee["capacity"],
     (nlohmann::json{ { "stopReason", "slo_exceeded" },
     { "maxHealthyConcurrency", 16 }, { "kneeConcurrency", 32 } }));
-    // The rest of the row is untouched beside it.
-    EXPECT_EQ (knee.size (), 5u) << knee.dump ();
+    // The rest of the row is untouched beside it: rps, p95Ms, errorRate and
+    // the fixture replay's three assertion keys.
+    EXPECT_EQ (knee.size (), 7u) << knee.dump ();
 
     auto [report_status, report] =
     vayu::http::routes::run_report_response (*db_, "run_capacity_knee");
@@ -3681,7 +3865,8 @@ TEST_F (RunsRouteTest, LoadRowWithoutACapacitySearchCarriesNoCapacity) {
     for (const char* id : { "run_plain", "run_capacity_scalar", "run_capacity_no_levels" }) {
         const auto outcome = row_of (body, id)["resultSummary"];
         EXPECT_FALSE (outcome.contains ("capacity")) << id << ": " << outcome.dump ();
-        EXPECT_EQ (outcome.size (), 5u) << id << ": " << outcome.dump ();
+        // rps, p95Ms, errorRate, verdict and the replay's three assertion keys.
+        EXPECT_EQ (outcome.size (), 7u) << id << ": " << outcome.dump ();
     }
 }
 

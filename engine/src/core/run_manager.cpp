@@ -2890,6 +2890,84 @@ const std::optional<std::array<double, TIMING_PHASE_COUNT>>& means) {
     return phases;
 }
 
+/// The summed `error` of the element rows in @p rows: each a script that threw
+/// or an element that could not run, once per execution.
+size_t element_row_errors (const nlohmann::json& rows) {
+    if (!rows.is_array ()) {
+        return 0;
+    }
+    size_t errors = 0;
+    for (const auto& row : rows) {
+        const auto error = row.find ("error");
+        if (error != row.end () && error->is_number_unsigned ()) {
+            errors += error->get<size_t> ();
+        }
+    }
+    return errors;
+}
+
+/// The element executions that ended in error, read off the rows the summary
+/// stores: a single-request run's top-level `elements`, a scenario load run's
+/// `scenario.steps[].elements`. Not `scenario.errored`, which also counts a
+/// step that got no response, the error rate's subject. A deferred script's
+/// throw is not here: the replay already counts it in `tests.failed`.
+size_t errored_element_runs (const RunSummaryInputs& inputs) {
+    if (inputs.elements) {
+        return element_row_errors (*inputs.elements);
+    }
+    if (!inputs.scenario) {
+        return 0;
+    }
+    const auto steps = inputs.scenario->find ("steps");
+    if (steps == inputs.scenario->end () || !steps->is_array ()) {
+        return 0;
+    }
+    size_t errors = 0;
+    for (const auto& step : *steps) {
+        if (const auto rows = step.find ("elements"); rows != step.end ()) {
+            errors += element_row_errors (*rows);
+        }
+    }
+    return errors;
+}
+
+/// The `script.teardown` rows of `lifecycle` whose outcome failed or errored.
+size_t failed_teardowns (const RunSummaryInputs& inputs) {
+    if (!inputs.lifecycle) {
+        return 0;
+    }
+    const auto teardown = inputs.lifecycle->find ("teardown");
+    if (teardown == inputs.lifecycle->end () || !teardown->is_array ()) {
+        return 0;
+    }
+    return static_cast<size_t> (
+    std::ranges::count_if (*teardown, [] (const nlohmann::json& row) {
+        const auto outcome = row.find ("outcome");
+        return outcome != row.end () && (*outcome == "failed" || *outcome == "error");
+    }));
+}
+
+nlohmann::json assertion_totals_payload (const AssertionTotals& totals) {
+    return { { "passed", totals.passed }, { "failed", totals.failed } };
+}
+
+/// The summary's `assertions` block (#3537): everything a verdict reads as a
+/// failed check, for both load run kinds. Absent when the run made no
+/// assertion and nothing errored; once present every member is written, so a
+/// zero is a count, never a figure the run did not record.
+std::optional<nlohmann::json> build_run_assertions_payload (const RunSummaryInputs& inputs) {
+    const size_t errored         = errored_element_runs (inputs);
+    const size_t teardown_failed = failed_teardowns (inputs);
+    if (!inputs.assertions && errored == 0 && teardown_failed == 0) {
+        return std::nullopt;
+    }
+    const auto populations = inputs.assertions.value_or (AssertionPopulations{});
+    nlohmann::json block = { { "exact", assertion_totals_payload (populations.exact) },
+        { "sampled", assertion_totals_payload (populations.sampled) },
+        { "errored", errored }, { "teardownFailed", teardown_failed } };
+    return std::optional<nlohmann::json> (std::in_place, std::move (block));
+}
+
 } // namespace
 
 nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
@@ -3019,6 +3097,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {
         summary["tests"] = test_totals_payload (*inputs.tests);
+    }
+    if (auto assertions = build_run_assertions_payload (inputs)) {
+        summary["assertions"] = std::move (*assertions);
     }
     // The run's verdict against the budgets it declared. Omitted when it
     // declared none, for the same reason `tests` is: "no budget" and "a budget
