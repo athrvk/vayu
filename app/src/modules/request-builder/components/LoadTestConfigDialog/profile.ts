@@ -6,6 +6,7 @@
  */
 
 import type { LoadTestConfig } from "@/types";
+import { CONCURRENCY_LABEL, CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
@@ -19,6 +20,23 @@ import type { LoadTestProfile } from "./useSavedLoadTestConfig";
  */
 export function usesDuration(mode: LoadTestConfig["mode"]): boolean {
 	return mode !== "iterations";
+}
+
+/**
+ * What the dialog calls the virtual-user count in each mode. Shared with the
+ * range message, so the field a refusal names is the one on screen.
+ */
+export function concurrencyLabel(mode: LoadTestConfig["mode"]): string {
+	if (mode === "ramp_up") return `Target ${CONCURRENCY_UNIT}`;
+	if (mode === "capacity") return `Maximum ${CONCURRENCY_UNIT}`;
+	return CONCURRENCY_LABEL;
+}
+
+/** What the dialog calls the duration in each mode that sends one. */
+export function durationLabel(mode: LoadTestConfig["mode"]): string {
+	if (mode === "ramp_up") return "Total duration";
+	if (mode === "capacity") return "Give up after";
+	return "Duration";
 }
 
 /**

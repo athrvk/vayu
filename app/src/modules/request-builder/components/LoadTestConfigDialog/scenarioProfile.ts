@@ -17,15 +17,11 @@
  * while the run is live cannot drift from what the engine was sent.
  */
 
-import {
-	type LimitRange,
-	type LoadTestLimits,
-	LOAD_TEST_DEFAULTS,
-	LOAD_TEST_LIMITS,
-} from "@/constants/load-test";
+import { type LoadTestLimits, LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
 import { CONCURRENCY_LABEL } from "@/constants/load-test-modes";
 import type { StartScenarioRunRequest } from "@/types/api";
 import {
+	rangeError,
 	validateRampDuration,
 	validateStartConcurrency,
 	validateStartConcurrencyFloor,
@@ -111,20 +107,6 @@ export function scenarioLoadFields(profile: ScenarioLoadProfile): ScenarioLoadFi
 	};
 }
 
-function rangeError(
-	label: string,
-	value: number,
-	range: LimitRange,
-	{ whole, engineBound = false }: { whole: boolean; engineBound?: boolean }
-): string | null {
-	const shape = whole ? "a whole number" : "a number";
-	const within = Number.isFinite(value) && value >= range.MIN && value <= range.MAX;
-	if (within && (!whole || Number.isInteger(value))) return null;
-	// The stream caps are the engine's fixed bounds, not a ceiling Settings moves.
-	const source = engineBound ? "" : ", the ceiling set in Settings";
-	return `${label} must be ${shape} from ${range.MIN.toLocaleString("en-US")} to ${range.MAX.toLocaleString("en-US")}${source}.`;
-}
-
 /**
  * The message that stops Run, or null. Bounded by the user's Settings ceilings
  * (`limits`) so an over-ceiling value is refused here, before the request,
@@ -152,7 +134,10 @@ export function scenarioProfileError(
  * fields are hidden otherwise, and a value the user cannot see must not hold Run.
  */
 export function scenarioStreamCapError(
-	{ streamDuration, streamMaxEvents }: ScenarioLoadProfile,
+	{
+		streamDuration,
+		streamMaxEvents,
+	}: Pick<LoadTestProfile, "streamDuration" | "streamMaxEvents">,
 	limits: LoadTestLimits
 ): string | null {
 	return (
