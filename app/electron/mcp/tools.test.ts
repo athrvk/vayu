@@ -4651,6 +4651,55 @@ describe("run_collection_smoke", () => {
 		expect(res.structuredContent).toMatchObject({ passed: 0, failed: 2 });
 	});
 
+	describe("the engine's error on a row (#3552)", () => {
+		const smokeWith = (answer: Record<string, unknown>) =>
+			dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1" },
+				ctxWith(
+					fakeClient({
+						listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+						composeRequest: vi.fn().mockResolvedValue({
+							method: "GET",
+							url: "https://api.example.com/ok",
+						}),
+						executeRequest: vi.fn().mockResolvedValue(answer),
+					}),
+					{ allowlist: ["api.example.com"] }
+				)
+			);
+		const firstRow = (res: Awaited<ReturnType<typeof smokeWith>>) =>
+			(res.structuredContent as { results: Array<Record<string, unknown>> }).results[0];
+
+		test("a status 0 answer with an errorCode names the code and the message", async () => {
+			const row = firstRow(
+				await smokeWith({
+					status: 0,
+					errorCode: "TIMEOUT",
+					errorMessage: "no response within 30000ms",
+					testResults: [],
+				})
+			);
+			expect(row).toMatchObject({
+				ok: false,
+				statusCode: 0,
+				error: "TIMEOUT: no response within 30000ms",
+			});
+		});
+
+		test("an errorCode with no message is the code alone", async () => {
+			expect(firstRow(await smokeWith({ status: 0, errorCode: "DNS_ERROR" })).error).toBe(
+				"DNS_ERROR"
+			);
+		});
+
+		test("an answer with no errorCode leaves error unset", async () => {
+			const row = firstRow(await smokeWith({ status: 500, testResults: [] }));
+			expect(row).toMatchObject({ ok: false, statusCode: 500 });
+			expect(row).not.toHaveProperty("error");
+		});
+	});
+
 	test("a collection bound to no document reports no schema field at all", async () => {
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
@@ -18308,6 +18357,36 @@ describe("secret withholding", () => {
 		expect(revealed.text).toContain(QUERY_FORM);
 		expect(revealed.body.results[1].url).toBe("https://elsewhere.test/?k=glob-secret-1");
 		expect(revealed.body.results[2].error).toContain(QUERY_FORM);
+	});
+
+	test("run_collection_smoke masks a secret in the engine's own error message (#3552)", async () => {
+		const client = runClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r_ok", name: "Times out" }]),
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: `https://api.example.com/v1?key=${QUERY_FORM}`,
+			}),
+			executeRequest: vi.fn().mockImplementation((payload: { url: string }) =>
+				Promise.resolve({
+					status: 0,
+					errorCode: "TIMEOUT",
+					errorMessage: `no answer from ${payload.url}`,
+				})
+			),
+		});
+		const withheld = await read("run_collection_smoke", client, ALLOW_API, {
+			collectionId: "c1",
+		});
+		expect(withheld.body.results[0].error).toBe(
+			"TIMEOUT: no answer from https://api.example.com/v1?key=<redacted>"
+		);
+		const revealed = await read(
+			"run_collection_smoke",
+			client,
+			{ ...ALLOW_API, ...REVEAL },
+			{ collectionId: "c1" }
+		);
+		expect(revealed.body.results[0].error).toContain(QUERY_FORM);
 	});
 
 	test("run_collection_smoke reads no secret to return its matrix with reveal on", async () => {

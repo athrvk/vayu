@@ -1075,6 +1075,10 @@ Notes:
   engine caps a schema verdict's failures at, while `failed` stays the true
   count. A response that
   ran no assertions carries no `tests` node: none ran is not all passed.
+  A request the engine could not complete (`status: 0`, a timeout, DNS or TLS
+  failure) carries the engine's own account as `error`, `"<errorCode>:
+  <errorMessage>"` (issue #3552), the field a thrown send already uses, masked
+  with the rest of the row; an answer with no `errorCode` leaves it unset.
   For a collection **bound to an OpenAPI document** each row also carries a
   `schema` verdict (issue #681) and folds it into `ok` the way `testResults`
   folds: a response the document declares a schema for and that does not match

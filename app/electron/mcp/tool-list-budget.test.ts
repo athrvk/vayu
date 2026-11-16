@@ -205,6 +205,10 @@
  * row, which on top of #3449 and #3458 takes them to 150,690 / 148,094 /
  * 221,845 / 217,578 B; only the third cap moved, to 221,900, because the other
  * three still hold their rows.
+ *
+ * #3552's `error` clause in `run_collection_smoke` (an engine failure rides the
+ * row) added 67 B to every row, taking them to 150,757 / 148,161 / 221,912 /
+ * 217,645 B; the four caps went to 150,800 / 148,200 / 222,000 / 217,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -224,10 +228,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_900 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_800 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_200 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 222_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_700 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
