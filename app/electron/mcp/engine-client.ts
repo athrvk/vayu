@@ -777,10 +777,23 @@ export class EngineClient {
 	/**
 	 * Update a saved request: `PUT /requests/:id`. Merge-patch engine-side, the
 	 * same as {@link updateCollection} - a body naming only `name` leaves the
-	 * stored url, headers and scripts alone.
+	 * stored url, headers and scripts alone. @p ifMatch makes it a 412 when the
+	 * row has moved since the read it names, as on {@link updateCollection}.
 	 */
-	updateRequest(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("PUT", `/requests/${encodeURIComponent(id)}`, payload, signal);
+	updateRequest(
+		id: string,
+		payload: unknown,
+		signal?: AbortSignal,
+		ifMatch?: string
+	): Promise<unknown> {
+		return this.request(
+			"PUT",
+			`/requests/${encodeURIComponent(id)}`,
+			payload,
+			signal,
+			this.timeoutMs,
+			ifMatchHeader(ifMatch)
+		);
 	}
 
 	/** Delete a saved request: `DELETE /requests/:id`. */

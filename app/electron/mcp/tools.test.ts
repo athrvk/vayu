@@ -963,6 +963,103 @@ describe("data-write tools", () => {
 		expect(payload).toEqual({ name: "Renamed" });
 	});
 
+	// Mutation check: call `updateRequest` without `ifMatch` in the merged write.
+	test("update_request's script edit is written under the version it read", async () => {
+		const client = fakeClient({
+			getRequest: vi.fn().mockResolvedValue({ ...storedWithElements(), updatedAt: 5 }),
+		});
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", preRequestScript: "pre2();" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [, , , ifMatch] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(ifMatch).toBe('W/"5"');
+	});
+
+	test("update_request's script edit re-reads once on a 412, then reports a conflict", async () => {
+		const moved = () =>
+			new EngineRequestError(
+				"precondition failed",
+				412,
+				engineErrorBody("precondition_failed", "The record changed after it was read")
+			);
+		const client = fakeClient({
+			getRequest: vi.fn().mockResolvedValue({ ...storedWithElements(), updatedAt: 5 }),
+			updateRequest: vi.fn().mockRejectedValueOnce(moved()).mockRejectedValueOnce(moved()),
+		});
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", preRequestScript: "pre2();" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/^Nothing was written: request "req_1" was changed/);
+		expect(client.getRequest).toHaveBeenCalledTimes(2);
+		expect(client.updateRequest).toHaveBeenCalledTimes(2);
+	});
+
+	describe("a URL written back while secrets are withheld (#3549)", () => {
+		const storedUrl = () =>
+			fakeClient({
+				getRequest: vi.fn().mockResolvedValue({
+					id: "req_1",
+					name: "Get users",
+					url: "https://u:PW@h/x?api_key=S&page=2",
+					elements: [],
+					updatedAt: 7,
+				}),
+			});
+		const writtenOf = (client: EngineClient) =>
+			(client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+
+		// Mutation check: write `payload.url` as given in the merge and the
+		// stored password and key are gone from the PUT.
+		test("keeps the password and the key the read emptied, and says so", async () => {
+			const client = storedUrl();
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", url: "https://u@h/x?api_key=&page=3" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			const [, payload, , ifMatch] = writtenOf(client);
+			expect(payload).toEqual({ url: "https://u:PW@h/x?api_key=S&page=3" });
+			expect(ifMatch).toBe('W/"7"');
+			const notes = res.content.map((c) => c.text).join("\n");
+			expect(notes).toContain(
+				"api_key kept its stored value; remove the parameter to drop it."
+			);
+			expect(notes).toContain("The URL's userinfo password kept its stored value");
+		});
+
+		test("a removed parameter is removed", async () => {
+			const client = storedUrl();
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", url: "https://u@h/x?page=3" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(writtenOf(client)[1]).toEqual({ url: "https://u:PW@h/x?page=3" });
+			expect(res.content.map((c) => c.text).join("\n")).not.toContain("api_key kept");
+		});
+
+		test("with reveal on, the URL is written as given and nothing is read", async () => {
+			const client = storedUrl();
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", url: "https://u@h/x?api_key=&page=3" },
+				ctxWith(client, { allowWrites: true, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.getRequest).not.toHaveBeenCalled();
+			expect(writtenOf(client)[1]).toEqual({ url: "https://u@h/x?api_key=&page=3" });
+			expect(res.content).toHaveLength(1);
+		});
+	});
+
 	test("the CRUD tools name a stored script once, without the run tools' alias", () => {
 		// `tests` is the engine's spelling for an ad-hoc run body; a second name
 		// for a stored field would be a second name to keep in step.

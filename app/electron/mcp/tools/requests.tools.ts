@@ -11,8 +11,14 @@
  */
 
 import { z } from "zod";
-import { secretsShape, withholdRequestUrl, withheldPointer } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import {
+	restoreWithheldRequestUrl,
+	secretsShape,
+	withholdRequestUrl,
+	withheldPointer,
+	type KeptUrlSlot,
+} from "../withhold.js";
+import type { McpTool, ToolContext, ToolResult } from "./contract.js";
 import {
 	callEngine,
 	confirmDestructive,
@@ -21,8 +27,10 @@ import {
 	elementsArg,
 	engineErrorResult,
 	errorResult,
+	mergeAndWrite,
 	requireStr,
 	str,
+	withCaveat,
 	writesDisabled,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
@@ -270,37 +278,10 @@ export const REQUEST_TOOLS: McpTool[] = [
 					"input"
 				);
 			}
-			// Scripts are `elements` now (issue #1514), and `PUT /requests/:id`
-			// replaces that list whole rather than patching inside it - so a
-			// script edit is a read-merge-write, or it would drop every other
-			// element the request holds. Read only when one was actually named:
-			// an update that touches no script must not pay for a GET. An
-			// explicit `elements` argument has already stated the whole list
-			// the caller wants, so no fetch is needed there.
-			if (scriptEdits.length > 0) {
-				let stored: Record<string, unknown>;
-				try {
-					stored = ((await ctx.client.getRequest(requestId, signal)) ?? {}) as Record<
-						string,
-						unknown
-					>;
-				} catch (err) {
-					return engineErrorResult(err, ctx);
-				}
-				let elements = stored.elements;
-				for (const [which, script] of scriptEdits) {
-					elements = upsertScriptElement(elements, which, script);
-				}
-				payload.elements = elements;
-			}
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			return callEngine(
-				ctx,
-				() => ctx.client.updateRequest(requestId, payload, signal),
-				echoShape(ctx)
-			);
+			return writeRequestEdits(ctx, requestId, payload, scriptEdits, signal);
 		},
 	},
 	{
@@ -361,3 +342,70 @@ export const REQUEST_TOOLS: McpTool[] = [
 		},
 	},
 ];
+
+/**
+ * `update_request`'s write. `PUT /requests/:id` merge-patches, so a payload of
+ * stated fields is sent as it is, with no read. Two edits need the stored row
+ * and become one read-merge-write under its version (`mergeAndWrite`): a
+ * script edit, because the engine replaces the `elements` list whole (#1514),
+ * and a `url` while secrets are withheld, because the URL the agent read had
+ * its credentials emptied and writing it back verbatim would delete them
+ * (#3549).
+ */
+async function writeRequestEdits(
+	ctx: ToolContext,
+	requestId: string,
+	payload: Record<string, unknown>,
+	scriptEdits: ScriptEdit[],
+	signal: AbortSignal | undefined
+): Promise<ToolResult> {
+	const restoresUrl = typeof payload.url === "string" && !ctx.config.revealSecretsToAgents;
+	if (scriptEdits.length === 0 && !restoresUrl) {
+		return callEngine(
+			ctx,
+			() => ctx.client.updateRequest(requestId, payload, signal),
+			echoShape(ctx)
+		);
+	}
+	let kept: KeptUrlSlot[] = [];
+	const result = await mergeAndWrite(ctx, {
+		subject: `request "${requestId}"`,
+		read: () => ctx.client.getRequest(requestId, signal),
+		merge: (stored) => {
+			const body: Record<string, unknown> = { ...payload };
+			if (restoresUrl) {
+				const restored = restoreWithheldRequestUrl(
+					stored.url,
+					String(payload.url),
+					stored.auth
+				);
+				body.url = restored.url;
+				kept = restored.kept;
+			}
+			if (scriptEdits.length > 0) {
+				let elements = stored.elements;
+				for (const [which, script] of scriptEdits) {
+					elements = upsertScriptElement(elements, which, script);
+				}
+				body.elements = elements;
+			}
+			return body;
+		},
+		write: (body, ifMatch) => ctx.client.updateRequest(requestId, body, signal, ifMatch),
+		shape: echoShape(ctx),
+	});
+	return result.isError ? result : withCaveat(result, keptUrlSlotsCaveat(kept));
+}
+
+type ScriptEdit = ReturnType<typeof readScriptEdits>[number];
+
+/** One line per slot of the written URL that kept its stored credential. */
+function keptUrlSlotsCaveat(kept: KeptUrlSlot[]): string {
+	return kept
+		.map((slot) =>
+			slot.part === "userinfo"
+				? "The URL's userinfo password kept its stored value; remove the userinfo to drop it."
+				: `${slot.name}${slot.part === "fragment" ? " (in the fragment)" : ""} kept its stored value; remove the parameter to drop it.`
+		)
+		.join("\n");
+}
