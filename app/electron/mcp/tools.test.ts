@@ -551,22 +551,16 @@ describe("tool registry", () => {
 		expect(description).toContain("same failure definition");
 	});
 
-	// Mutation check (#2820): drop the assertionsPassed / assertionsFailed
-	// sentence from list_runs in reads.tools.ts and this fails.
-	test("list_runs names the assertion counts a scenario load row carries and says errorRate excludes them", () => {
-		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
-		expect(description).toContain("`assertionsPassed` and `assertionsFailed`");
-		expect(description).toContain("never folded into errorRate");
-		expect(description).toContain("omitted for every other run");
-	});
-
-	// Mutation check (#3458): drop the single-request clause from list_runs in
-	// reads.tools.ts and this fails.
-	test("list_runs says a single-request load row carries assertionsFailed alone", () => {
+	// Mutation check (#2820, #3537): drop the assertion sentence from list_runs
+	// in reads.tools.ts, or the block's keys from it, and this fails.
+	test("list_runs names the assertion block and counts a load row carries and says errorRate excludes them", () => {
 		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
 		expect(description).toContain(
-			"a single-request load run carries `assertionsFailed` alone (inline plus sampled-replay failures)"
+			"A load run that asserted or errored also carries `assertions` {exact, sampled, errored, teardownFailed}"
 		);
+		expect(description).toContain("`assertionsPassed`/`assertionsFailed` over both");
+		expect(description).toContain("never folded into errorRate");
+		expect(description).toContain("omitted for every other run");
 	});
 
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
