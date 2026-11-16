@@ -648,28 +648,59 @@ function withholdQuery(query: string, apiKeyParam: string | undefined): string {
 }
 
 /**
- * The scheme-and-authority-and-path part of a URL with the password of its
- * userinfo dropped (`user:pass@host` becomes `user@host`). The engine's
- * `drop_userinfo_password`: a first segment holding spaces is a path, not an
- * authority, and the userinfo ends at the *last* `@`, so a password containing
- * one is still wholly dropped. Not {@link stripUserinfo}, which removes the user
- * too and takes any `@` in a path for one.
+ * Where the userinfo of a URL's scheme-and-authority-and-path part sits:
+ * @p start is its first character and `userinfo` runs up to the `@`. The
+ * engine's `drop_userinfo_password` reading: a first segment holding spaces is
+ * a path, not an authority, and the userinfo ends at the *last* `@`, so a
+ * password containing one is wholly inside it. Undefined when there is none.
  */
-function dropUserinfoPassword(head: string): string {
+function userinfoSpan(head: string): { start: number; userinfo: string } | undefined {
 	const schemeEnd = head.indexOf("://");
 	const hasScheme = schemeEnd !== -1 && !/[/ \t]/.test(head.slice(0, schemeEnd));
-	const authorityStart = hasScheme ? schemeEnd + 3 : 0;
-	const authorityEnd = head.indexOf("/", authorityStart);
-	const authority = head.slice(authorityStart, authorityEnd === -1 ? undefined : authorityEnd);
+	const start = hasScheme ? schemeEnd + 3 : 0;
+	const authorityEnd = head.indexOf("/", start);
+	const authority = head.slice(start, authorityEnd === -1 ? undefined : authorityEnd);
 	const at = authority.lastIndexOf("@");
-	if (at === -1 || (!hasScheme && /[ \t]/.test(authority))) return head;
-	const userinfo = authority.slice(0, at);
+	if (at === -1 || (!hasScheme && /[ \t]/.test(authority))) return undefined;
+	return { start, userinfo: authority.slice(0, at) };
+}
+
+/** The user and the password of @p userinfo when the read drops that password, else undefined. */
+function withheldPassword(userinfo: string): { user: string; password: string } | undefined {
 	const colon = userinfo.indexOf(":");
-	if (colon === -1 || colon + 1 === userinfo.length) return head;
-	if (isVariableReference(userinfo.slice(colon + 1))) return head;
-	return (
-		head.slice(0, authorityStart) + userinfo.slice(0, colon) + head.slice(authorityStart + at)
-	);
+	if (colon === -1 || colon + 1 === userinfo.length) return undefined;
+	const password = userinfo.slice(colon + 1);
+	if (isVariableReference(password)) return undefined;
+	return { user: userinfo.slice(0, colon), password };
+}
+
+/**
+ * The scheme-and-authority-and-path part of a URL with the password of its
+ * userinfo dropped (`user:pass@host` becomes `user@host`), as
+ * {@link userinfoSpan} finds it. Not {@link stripUserinfo}, which removes the
+ * user too and takes any `@` in a path for one.
+ */
+function dropUserinfoPassword(head: string): string {
+	const span = userinfoSpan(head);
+	const held = span && withheldPassword(span.userinfo);
+	if (!span || !held) return head;
+	return head.slice(0, span.start) + held.user + head.slice(span.start + span.userinfo.length);
+}
+
+/**
+ * A URL cut where {@link withholdRequestUrl} cuts it: the fragment at the first
+ * `#`, the query at the first `?` before it. Absent parts are undefined, so an
+ * empty `?` stays apart from no query at all.
+ */
+function urlParts(url: string): { head: string; query?: string; fragment?: string } {
+	const fragmentAt = url.indexOf("#");
+	const beforeFragment = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
+	const queryAt = beforeFragment.indexOf("?");
+	return {
+		head: queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt),
+		query: queryAt === -1 ? undefined : beforeFragment.slice(queryAt + 1),
+		fragment: fragmentAt === -1 ? undefined : url.slice(fragmentAt + 1),
+	};
 }
 
 /**
@@ -688,15 +719,117 @@ export function withholdRequestUrl(url: unknown, auth: unknown): unknown {
 /** {@link withholdRequestUrl} for a caller that already holds the API-key query name. */
 function withholdUrlFor(url: unknown, apiKeyParam: string | undefined): unknown {
 	if (typeof url !== "string") return url;
-	const fragmentAt = url.indexOf("#");
-	const beforeFragment = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
-	const queryAt = beforeFragment.indexOf("?");
-	let out = dropUserinfoPassword(
-		queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt)
-	);
-	if (queryAt !== -1) out += `?${withholdQuery(beforeFragment.slice(queryAt + 1), apiKeyParam)}`;
-	if (fragmentAt !== -1) out += `#${withholdQuery(url.slice(fragmentAt + 1), apiKeyParam)}`;
+	const { head, query, fragment } = urlParts(url);
+	let out = dropUserinfoPassword(head);
+	if (query !== undefined) out += `?${withholdQuery(query, apiKeyParam)}`;
+	if (fragment !== undefined) out += `#${withholdQuery(fragment, apiKeyParam)}`;
 	return out;
+}
+
+/**
+ * A credential slot of a saved request's URL that {@link withholdRequestUrl}
+ * empties and {@link restoreWithheldRequestUrl} carried forward: the userinfo
+ * password, or a named query or fragment pair.
+ */
+export type KeptUrlSlot = { part: "userinfo" } | { part: "query" | "fragment"; name: string };
+
+/** @p url as {@link restoreWithheldRequestUrl} answers it, with the slots it filled from the stored URL. */
+export interface RestoredUrl {
+	url: string;
+	kept: KeptUrlSlot[];
+}
+
+/**
+ * The inverse of {@link withholdRequestUrl} for a URL an agent writes back
+ * (#3549): @p incoming with each slot the read emptied carried forward from
+ * @p stored, so editing one thing in a read URL does not delete the credential
+ * the read hid. A slot is carried only while @p incoming still holds it in the
+ * read's form: the same user with no `:`, or the same-named pair, counted by
+ * occurrence, written `name=`. A slot the caller filled, or removed, stays as
+ * written; this is why a slot cannot be set to literally empty over a stored
+ * value. @p auth is the stored row's, the one the read withheld under.
+ */
+export function restoreWithheldRequestUrl(
+	stored: unknown,
+	incoming: string,
+	auth: unknown
+): RestoredUrl {
+	if (typeof stored !== "string") return { url: incoming, kept: [] };
+	const apiKeyParam = apiKeyParamName(auth);
+	const from = urlParts(stored);
+	const to = urlParts(incoming);
+	const kept: KeptUrlSlot[] = [];
+	const head = restorePassword(from.head, to.head);
+	if (head !== undefined) kept.push({ part: "userinfo" });
+	let url = head ?? to.head;
+	if (to.query !== undefined) {
+		const query = restoreQuery(from.query, to.query, apiKeyParam);
+		kept.push(...query.kept.map((name) => ({ part: "query" as const, name })));
+		url += `?${query.text}`;
+	}
+	if (to.fragment !== undefined) {
+		const fragment = restoreQuery(from.fragment, to.fragment, apiKeyParam);
+		kept.push(...fragment.kept.map((name) => ({ part: "fragment" as const, name })));
+		url += `#${fragment.text}`;
+	}
+	return { url, kept };
+}
+
+/** @p head with @p storedHead's withheld password put back after the same user, or undefined when none is. */
+function restorePassword(storedHead: string, head: string): string | undefined {
+	const storedSpan = userinfoSpan(storedHead);
+	const held = storedSpan && withheldPassword(storedSpan.userinfo);
+	const span = userinfoSpan(head);
+	if (!held || !span || span.userinfo !== held.user) return undefined;
+	const at = span.start + span.userinfo.length;
+	return `${head.slice(0, at)}:${held.password}${head.slice(at)}`;
+}
+
+/** A query pair's name: everything before its first `=`, or the whole pair. */
+function pairName(pair: string): string {
+	const equals = pair.indexOf("=");
+	return equals === -1 ? pair : pair.slice(0, equals);
+}
+
+/**
+ * Per pair name, by occurrence, the value {@link withholdQueryPair} empties
+ * from @p query, or undefined for an occurrence it leaves as written.
+ */
+function withheldPairValues(
+	query: string,
+	apiKeyParam: string | undefined
+): Map<string, (string | undefined)[]> {
+	const held = new Map<string, (string | undefined)[]>();
+	for (const pair of query.split("&")) {
+		const name = pairName(pair);
+		const values = held.get(name) ?? [];
+		const emptied = withholdQueryPair(pair, apiKeyParam) !== pair;
+		values.push(emptied ? pair.slice(name.length + 1) : undefined);
+		held.set(name, values);
+	}
+	return held;
+}
+
+/** @p query with each pair still written `name=` given the value @p storedQuery's same occurrence had withheld. */
+function restoreQuery(
+	storedQuery: string | undefined,
+	query: string,
+	apiKeyParam: string | undefined
+): { text: string; kept: string[] } {
+	if (storedQuery === undefined) return { text: query, kept: [] };
+	const held = withheldPairValues(storedQuery, apiKeyParam);
+	const seen = new Map<string, number>();
+	const kept: string[] = [];
+	const pairs = query.split("&").map((pair) => {
+		const name = pairName(pair);
+		const occurrence = seen.get(name) ?? 0;
+		seen.set(name, occurrence + 1);
+		const value = held.get(name)?.[occurrence];
+		if (value === undefined || pair !== `${name}=`) return pair;
+		kept.push(name);
+		return pair + value;
+	});
+	return { text: pairs.join("&"), kept };
 }
 
 // --- Rows ---------------------------------------------------------------------
@@ -788,6 +921,38 @@ function withholdEntryCredentials(entry: unknown): unknown {
 export function withholdConfigCredentials(answer: unknown): unknown {
 	if (!isRecord(answer) || !Array.isArray(answer.entries)) return answer;
 	return { ...answer, entries: answer.entries.map(withholdEntryCredentials) };
+}
+
+/** Whether @p key names a config entry whose userinfo {@link withholdConfigCredentials} strips. */
+export function isUrlConfigKey(key: string): boolean {
+	return URL_CONFIG_KEY.test(key);
+}
+
+/**
+ * The inverse of {@link withholdConfigCredentials} for a batch an agent writes
+ * (#3549): a URL entry written exactly as the read showed it - the stored
+ * value with its userinfo stripped - is written as the stored value, so the
+ * stored credentials stay. Any other value is written as given: a different
+ * address is a different proxy, and the old one's credentials do not follow
+ * it. @p current is the `GET /config` answer; `kept` names the keys carried.
+ */
+export function restoreConfigCredentials(
+	entries: Record<string, string>,
+	current: unknown
+): { entries: Record<string, string>; kept: string[] } {
+	const storedEntries =
+		isRecord(current) && Array.isArray(current.entries) ? current.entries : [];
+	const kept: string[] = [];
+	const restored = { ...entries };
+	for (const [key, value] of Object.entries(entries)) {
+		if (!isUrlConfigKey(key)) continue;
+		const stored: unknown = storedEntries.find((entry) => isRecord(entry) && entry.key === key);
+		const storedValue = isRecord(stored) ? stored.value : undefined;
+		if (typeof storedValue !== "string" || stripUserinfo(storedValue) !== value) continue;
+		restored[key] = storedValue;
+		kept.push(key);
+	}
+	return { entries: restored, kept };
 }
 
 /**
