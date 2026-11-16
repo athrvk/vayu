@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -30,6 +31,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/run_compare.hpp"
 #include "vayu/core/run_export.hpp"
+#include "vayu/core/run_export_view.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/types.hpp"
@@ -800,12 +802,12 @@ TEST_F (RunExportTest, RefusesAMalformedBody) {
 
 // --- the builder, without a database -----------------------------------------
 
-/// @p assertions is the scenario's exact population (`{passed, failed}`); null
-/// leaves the report without a `scenario` section, as a single-request run has.
+/// @p sections are merged into the report as they stand (a top-level
+/// `assertions` block, `elements`, `scenario`, ...); null adds none.
 RunExportRun judged_run (const std::string& status,
 const json& thresholds,
 double error_rate,
-const json& assertions = json ()) {
+const json& sections = json ()) {
     RunExportRun run;
     run.id     = "run_v";
     run.status = status;
@@ -814,8 +816,8 @@ const json& assertions = json ()) {
     if (!thresholds.is_null ()) {
         run.report["thresholdValidation"] = thresholds;
     }
-    if (!assertions.is_null ()) {
-        run.report["scenario"] = { { "assertions", assertions } };
+    if (sections.is_object ()) {
+        run.report.update (sections);
     }
     return run;
 }
@@ -858,39 +860,88 @@ TEST (RunExportBuilder, VerdictFollowsTheBudgetsAndTheStatus) {
     }
 }
 
-/// A failed exact assertion keeps met budgets from reading `passed`, as
-/// `judgeRun` does (#2820). Mutation check: drop `any_assertion_failed` from
-/// `verdict_section` and the first two rows answer `passed`/`budgets_met`.
+/// The report's `assertions` block (#3537) with @p exact and @p sampled failed
+/// assertions, @p errored element executions and @p teardown_failed teardowns.
+json assertion_block (int exact, int sampled, int errored, int teardown_failed) {
+    return { { "assertions",
+    { { "exact", { { "passed", 10 }, { "failed", exact } } },
+    { "sampled", { { "passed", 10 }, { "failed", sampled } } },
+    { "errored", errored }, { "teardownFailed", teardown_failed } } } };
+}
+
+/// Any failed check of the `assertions` block keeps met budgets from reading
+/// `passed`, as `judgeRun` does (#2820, #3458, #3537), for a single-request run
+/// as for a scenario. Mutation check: read only `scenario.assertions.failed` in
+/// `verdict_section` (the reader before #3537) and the four single-request rows
+/// answer `passed`/`budgets_met`.
 TEST (RunExportBuilder, FailedAssertionsKeepMetBudgetsFromPassing) {
     const json met = { { "checks", json::array ({ { { "metric", "latencyP99Ms" } } }) },
         { "passed", 1 }, { "failed", 0 }, { "verdict", "passed" } };
-    const json some_failed = { { "passed", 8352 }, { "failed", 68 } };
-    const json none_failed = { { "passed", 8420 }, { "failed", 0 } };
+    json scenario_failed        = assertion_block (68, 0, 0, 0);
+    scenario_failed["scenario"] = { { "assertions",
+    { { "passed", 8352 }, { "failed", 68 } } } };
+    json inline_failed          = assertion_block (150, 0, 0, 0);
+    inline_failed["elements"]   = json::array ({ { { "kind", "script.post" },
+    { "passed", 0 }, { "failed", 150 }, { "error", 0 }, { "deferred", 0 } } });
+    json replay_failed          = assertion_block (0, 4, 0, 0);
+    replay_failed["testValidation"] = { { "samplesTested", 4 },
+        { "testsPassed", 0 }, { "testsFailed", 4 } };
+    json script_errored             = assertion_block (0, 0, 997, 0);
+    script_errored["elements"]   = json::array ({ { { "kind", "script.post" },
+    { "passed", 0 }, { "failed", 0 }, { "error", 997 }, { "deferred", 0 } } });
+    json teardown_failed         = assertion_block (0, 0, 0, 1);
+    teardown_failed["lifecycle"] = { { "teardown",
+    json::array ({ { { "kind", "script.teardown" }, { "outcome", "failed" } } }) } };
     struct Case {
         std::string status;
         json thresholds;
         double error_rate;
-        json assertions;
+        json sections;
         std::string state;
         std::string reason;
     };
     const auto cases = std::to_array<Case> ({
-    { "completed", met, 0.0, some_failed, "not_judged", "budgets_met_with_assertion_failures" },
-    { "completed", met, 0.0, json{ { "passed", 0 }, { "failed", 4580 } },
-    "not_judged", "budgets_met_with_assertion_failures" },
-    { "completed", met, 0.4, some_failed, "not_judged", "budgets_met_with_errors" },
-    { "completed", met, 0.0, none_failed, "passed", "budgets_met" },
+    { "completed", met, 0.0, scenario_failed, "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.0, inline_failed, "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.0, replay_failed, "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.0, script_errored, "not_judged", "budgets_met_with_element_errors" },
+    { "completed", met, 0.0, teardown_failed, "not_judged", "budgets_met_with_teardown_failures" },
+    { "completed", met, 0.4, scenario_failed, "not_judged", "budgets_met_with_errors" },
+    { "completed", met, 0.0, assertion_block (0, 0, 0, 0), "passed", "budgets_met" },
     { "completed", met, 0.0, json (), "passed", "budgets_met" },
-    { "completed", met, 0.0, json::object (), "passed", "budgets_met" },
-    { "completed", json (), 0.0, some_failed, "not_judged", "no_budgets" },
-    { "stopped", met, 0.0, some_failed, "not_judged", "stopped" },
+    { "completed", met, 0.0, json{ { "assertions", json::object () } }, "passed", "budgets_met" },
+    { "completed", json (), 0.0, inline_failed, "not_judged", "no_budgets" },
+    { "stopped", met, 0.0, inline_failed, "not_judged", "stopped" },
     });
     for (const Case& c : cases) {
         const json verdict =
-        verdict_of (judged_run (c.status, c.thresholds, c.error_rate, c.assertions));
-        EXPECT_EQ (verdict["state"], c.state) << c.reason << " " << c.assertions;
-        EXPECT_EQ (verdict["reason"], c.reason) << c.assertions;
+        verdict_of (judged_run (c.status, c.thresholds, c.error_rate, c.sections));
+        EXPECT_EQ (verdict["state"], c.state) << c.reason << " " << c.sections;
+        EXPECT_EQ (verdict["reason"], c.reason) << c.sections;
     }
+}
+
+/// The export carries the report's `assertions` block member by member, and
+/// only what the report holds (#3537).
+TEST (RunExportBuilder, CarriesTheAssertionBlock) {
+    RunExportRun run =
+    judged_run ("completed", json (), 0.0, assertion_block (1, 2, 3, 4));
+    run.report["assertions"]["exact"]["unlisted"] = "dropped";
+    RunExportInput input;
+    input.run = run;
+    vayu::core::RunExportNotes notes;
+    const json report = json::parse (
+    vayu::core::build_run_export_document (input, notes).at ("report").dump ());
+    EXPECT_EQ (report.value ("assertions", json ()),
+    (json{ { "exact", { { "passed", 10 }, { "failed", 1 } } },
+    { "sampled", { { "passed", 10 }, { "failed", 2 } } }, { "errored", 3 },
+    { "teardownFailed", 4 } }));
+
+    input.run.report["assertions"] = { { "exact", { { "passed", 1 }, { "failed", 0 } } } };
+    const json derived = json::parse (
+    vayu::core::build_run_export_document (input, notes).at ("report").dump ());
+    EXPECT_EQ (derived.value ("assertions", json ()),
+    (json{ { "exact", { { "passed", 1 }, { "failed", 0 } } } }));
 }
 
 TEST (RunExportBuilder, ReferenceAndFileNameFollowTheAppsRules) {
@@ -985,6 +1036,69 @@ TEST (RunCompareConformance, EveryCaseDiffsAsTheAppDiffsIt) {
         EXPECT_EQ (got, engine_shape (c.at ("expected")))
         << c.at ("name").get<std::string> () << "\n"
         << got.dump (2);
+    }
+}
+
+// --- the verdict against the app's -------------------------------------------
+
+/// `engine/tests/fixtures/run-verdict-conformance.json` (#3537), shared with
+/// the app's `run-outcome.test.ts`, which replays it through `reportOutcome`.
+json load_verdict_fixture () {
+    const auto path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
+    "fixtures" / "run-verdict-conformance.json";
+    std::ifstream in (path);
+    if (!in.good ()) {
+        ADD_FAILURE () << "fixture missing: " << path;
+        return json::object ();
+    }
+    return json::parse (in);
+}
+
+/// Whether @p detail holds every one of @p names, in order.
+bool names_in_order (const std::string& detail, const json& names) {
+    std::size_t from = 0;
+    for (const json& name : names) {
+        const std::size_t at = detail.find (name.get<std::string> (), from);
+        if (at == std::string::npos) {
+            return false;
+        }
+        from = at + name.get_ref<const std::string&> ().size ();
+    }
+    return true;
+}
+
+/// Mutation check: change one reason `failed_check_reason` answers in
+/// `run_export.cpp`, or one phrase in `run_export_view.cpp`, and the cases
+/// that reach it fail.
+TEST (RunVerdictConformance, EveryCaseJudgesAsTheAppJudgesIt) {
+    const json fixture = load_verdict_fixture ();
+    ASSERT_TRUE (fixture.contains ("cases"));
+    ASSERT_FALSE (fixture.at ("cases").empty ());
+    for (const json& c : fixture.at ("cases")) {
+        const std::string name = c.at ("name").get<std::string> ();
+        const json& expected   = c.at ("expected");
+        RunExportInput input;
+        input.run.id = "run_conformance";
+        input.run.status =
+        c.at ("report").at ("metadata").at ("status").get<std::string> ();
+        input.run.report = c.at ("report");
+        vayu::core::RunExportNotes notes;
+        const auto document = vayu::core::build_run_export_document (input, notes);
+        const json verdict = json::parse (document.at ("verdict").dump ());
+        EXPECT_EQ (verdict.at ("state"), expected.at ("state")) << name;
+        EXPECT_EQ (verdict.at ("reason"), expected.at ("reason")) << name;
+
+        const std::string detail =
+        vayu::core::build_run_report_view (document).verdict.detail.flat ();
+        const json names = expected.value ("names", json::array ());
+        EXPECT_TRUE (names_in_order (detail, names)) << name << "\n" << detail;
+        if (names.empty ()) {
+            for (const char* phrase : { "assertion failed", "assertions failed",
+                 "elements errored", "element errored", "teardown script" }) {
+                EXPECT_EQ (detail.find (phrase), std::string::npos) << name << "\n"
+                                                                    << detail;
+            }
+        }
     }
 }
 

@@ -497,7 +497,12 @@ export const SENSITIVE_HEADER_NAMES: readonly string[] = [
  */
 function apiKeyHeaderName(auth: unknown): string | undefined {
 	if (!isRecord(auth) || auth.mode !== "apikey") return undefined;
-	return typeof auth.key === "string" ? auth.key.trim().toLowerCase() : undefined;
+	return typeof auth.key === "string" ? foldHeaderName(auth.key) : undefined;
+}
+
+/** A header name as the credential rules compare it: trimmed, lower-cased. */
+export function foldHeaderName(name: string): string {
+	return name.trim().toLowerCase();
 }
 
 /**
@@ -511,7 +516,7 @@ function isCredentialHeader(
 	apiKeyHeaders: readonly string[]
 ): boolean {
 	if (typeof name !== "string" || !holdsCredential(value)) return false;
-	const folded = name.trim().toLowerCase();
+	const folded = foldHeaderName(name);
 	if (folded === "") return false;
 	return SENSITIVE_HEADER_NAMES.includes(folded) || apiKeyHeaders.includes(folded);
 }
@@ -520,6 +525,11 @@ function isSensitiveHeaderRow(row: unknown, apiKeyHeader: string | undefined): b
 	return (
 		isRecord(row) && isCredentialHeader(row.key, row.value, apiKeyHeader ? [apiKeyHeader] : [])
 	);
+}
+
+/** Whether the read of a stored row whose auth is @p auth withholds header row @p row's value. */
+export function withholdsHeaderRow(row: unknown, auth: unknown): boolean {
+	return isSensitiveHeaderRow(row, apiKeyHeaderName(auth));
 }
 
 /**

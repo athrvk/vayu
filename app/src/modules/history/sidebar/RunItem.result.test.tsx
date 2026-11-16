@@ -25,6 +25,10 @@
  * and the glyph and accessible-name cases redden; drop it from `resultSubtitle`
  * and the line case reddens.
  *
+ * The assertion block (#3537): read the flat `assertionsFailed` in
+ * `rowOutcome` and `resultSubtitle` instead of `rowAssertionsOf` and the
+ * errored-elements cases redden.
+ *
  * Capacity (#2930): drop the `summary.capacity` guard in `resultSubtitle` and
  * the capacity line case reddens; make `showsRunBounds` always true and the
  * duration and virtual-user cases redden.
@@ -168,6 +172,36 @@ describe("a load run whose assertions failed (#2820)", () => {
 		expect(glyphShape(loadRun({ resultSummary: ASSERTED }))).not.toBe(tick);
 
 		renderRow(loadRun({ resultSummary: ASSERTED }));
+		expect(
+			screen.getByRole("button", { name: /^Open Load test, completed, verdict not judged/ })
+		).toBeInTheDocument();
+	});
+});
+
+describe("a load run whose elements errored and whose assertions held (#3537)", () => {
+	const ERRORED = {
+		...RESULT,
+		verdict: "passed" as const,
+		assertions: {
+			exact: { passed: 4400, failed: 0 },
+			sampled: { passed: 0, failed: 0 },
+			errored: 3,
+			teardownFailed: 0,
+		},
+		assertionsPassed: 4400,
+		assertionsFailed: 0,
+	};
+
+	it("ends the result line with the errored elements", () => {
+		renderRow(loadRun({ resultSummary: ERRORED }));
+
+		expect(
+			screen.getByText("485 req/s · p95 42ms · 0.0% errors · 3 elements errored")
+		).toBeInTheDocument();
+	});
+
+	it("says not judged in the name, never passed", () => {
+		renderRow(loadRun({ resultSummary: ERRORED }));
 		expect(
 			screen.getByRole("button", { name: /^Open Load test, completed, verdict not judged/ })
 		).toBeInTheDocument();

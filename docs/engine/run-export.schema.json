@@ -46,7 +46,8 @@
         "reason": {
           "enum": [
             "stopped", "run_failed", "budgets_missed", "budgets_met", "budgets_met_with_errors",
-            "budgets_met_with_assertion_failures", "no_budgets"
+            "budgets_met_with_assertion_failures", "budgets_met_with_element_errors",
+            "budgets_met_with_teardown_failures", "no_budgets"
           ]
         }
       }
@@ -548,6 +549,29 @@
             "passed": {"type": "number"},
             "failed": {"type": "number"},
             "verdict": {"enum": ["passed", "failed"]}
+          }
+        },
+        "assertions": {
+          "description": "Every failed check a load run's verdict reads (issue #3537), the report's top-level assertions block. Each member is absent when the report does not hold it: a run stored before the block derives exact (and a single-request run's sampled) alone.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exact": {
+              "description": "assert.* outcomes, required extract.* misses and inline pm.test calls, counted on every completion.",
+              "$ref": "#/definitions/assertionPopulation"
+            },
+            "sampled": {
+              "description": "The deferred pm.test replay over sampled responses, testValidation's testsPassed and testsFailed.",
+              "$ref": "#/definitions/assertionPopulation"
+            },
+            "errored": {
+              "description": "Element executions that ended in error: an inline script that threw, an element that could not run.",
+              "type": "number"
+            },
+            "teardownFailed": {
+              "description": "lifecycle.teardown rows whose outcome is failed or error.",
+              "type": "number"
+            }
           }
         },
         "customMetrics": {
