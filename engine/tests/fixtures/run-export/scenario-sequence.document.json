@@ -207,6 +207,18 @@
           }
         }
       ]
+    },
+    "assertions": {
+      "exact": {
+        "passed": 4185,
+        "failed": 18
+      },
+      "sampled": {
+        "passed": 0,
+        "failed": 0
+      },
+      "errored": 0,
+      "teardownFailed": 0
     }
   },
   "comparison": null,

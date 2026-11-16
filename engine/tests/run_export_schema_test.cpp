@@ -94,6 +94,10 @@ json healthy_summary () {
         { "series",
         { { "node_cpu", { { "min", 1.0 }, { "max", 2.0 }, { "avg", 1.5 }, { "count", 10 } } } } } } },
         { "tests", { { "sampled", 10 }, { "passed", 10 }, { "failed", 0 } } },
+        { "assertions",
+        { { "exact", { { "passed", 18 }, { "failed", 2 } } },
+        { "sampled", { { "passed", 10 }, { "failed", 0 } } }, { "errored", 1 },
+        { "teardownFailed", 0 } } },
         { "capacity",
         { { "slo_ms", 200 }, { "max_error_pct", 1.0 }, { "stop_reason", "slo_exceeded" },
         { "levels",
@@ -260,10 +264,11 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     seed ("run_healthy", vayu::RunStatus::Completed, healthy_summary ());
     json document = expect_valid (json{ { "runId", "run_healthy" } });
     // Validating an absent section proves nothing about its shape.
-    for (const char* section : { "summary", "latency", "statusCodes", "rateControl",
-         "errors", "timingBreakdown", "stream", "slowRequests", "sampling", "warnings",
-         "scenario", "monitor", "testValidation", "capacity", "coverage", "schemaValidation",
-         "lifecycle", "elements", "thresholdValidation", "customMetrics" }) {
+    for (const char* section : { "summary", "latency", "statusCodes",
+         "rateControl", "errors", "timingBreakdown", "stream", "slowRequests",
+         "sampling", "warnings", "scenario", "monitor", "testValidation",
+         "capacity", "coverage", "schemaValidation", "lifecycle", "elements",
+         "thresholdValidation", "assertions", "customMetrics" }) {
         EXPECT_TRUE (document["report"].contains (section)) << section;
     }
     // The optional members validate only if they are written (#2392).
@@ -309,6 +314,13 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // fails; drop it from the schema and the validation does.
     EXPECT_EQ (document["report"]["scenario"].value ("assertions", json ()),
     (json{ { "passed", 18 }, { "failed", 2 } }));
+    // The report's assertion block (#3537), every member. Mutation check: drop
+    // "errored" from ASSERTION_COUNT_KEYS and this fails; drop the block from
+    // the schema and the validation does.
+    EXPECT_EQ (document["report"].value ("assertions", json ()),
+    (json{ { "exact", { { "passed", 18 }, { "failed", 2 } } },
+    { "sampled", { { "passed", 10 }, { "failed", 0 } } }, { "errored", 1 },
+    { "teardownFailed", 0 } }));
     // A step's extractor misses (#3053). Mutation check: drop
     // "extractorMisses" from STEP_KEYS and this fails; from the schema and the
     // validation does.

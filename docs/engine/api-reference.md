@@ -5320,7 +5320,7 @@ breaking change bumps the integer and is noted here):
 | `run` | `id`, `reference`, `type` (`load`), `status`, `startTime`, `endTime`, `name` (the request name, or `null`), `comment` (or `null`), `baseline` |
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
-| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
+| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `assertions` (the run's assertion block, #3537), `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
@@ -5337,19 +5337,32 @@ app would print it in: `Vayu run "Create order" (run_5a7c...) - load test, POST
 unless it is the default `New Request`, else the collection a collection load
 run ran, else the method and path; the URL is cut to its path.
 
-`verdict` is the app's run verdict (`judgeRun` in
-`app/src/components/shared/run-outcome.ts`) over the same report fields, so the
-file and the screen it came from agree. It adds no rule of its own:
+`verdict` reads the report fields the app's run verdict reads (`judgeRun` in
+`app/src/components/shared/run-outcome.ts`): `status`, `summary.totalRequests`
+and `summary.errorRate`, `thresholdValidation`, and the report's top-level
+[`assertions`](#get-runsrunidreport) block, for a single-request run and a
+scenario load run alike (#3537). A failed check is a failed assertion of
+either population (`exact.failed` or `sampled.failed`), an errored element
+execution (`errored`) or a failed teardown (`teardownFailed`); like an errored
+request, it keeps met budgets from reading `passed` without failing a run that
+declared no budget for it. The first matching row wins:
 
 | `status` and budgets | `state` | `reason` |
 |----------------------|---------|----------|
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
-| Every budget met, `summary.errorRate` 0, no exact assertion failed | `passed` | `budgets_met` |
-| Every budget met, some requests errored (failed assertions too, if any) | `not_judged` | `budgets_met_with_errors` |
-| Every budget met, no request errored, `scenario.assertions.failed > 0` (#2820) | `not_judged` | `budgets_met_with_assertion_failures` |
 | No budget declared | `not_judged` | `no_budgets` |
+| Every budget met, some requests errored (`summary.errorRate > 0`) | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, an assertion failed (`assertions.exact.failed` or `assertions.sampled.failed` > 0; #2820, #3458) | `not_judged` | `budgets_met_with_assertion_failures` |
+| Every budget met, an element execution errored (`assertions.errored > 0`) | `not_judged` | `budgets_met_with_element_errors` |
+| Every budget met, a teardown failed (`assertions.teardownFailed > 0`) | `not_judged` | `budgets_met_with_teardown_failures` |
+| Every budget met, none of the above | `passed` | `budgets_met` |
+
+`reason` names the first failed check; the Markdown and HTML line names every
+one (below). A report with no `assertions` block (a run that asserted nothing
+and errored nowhere, or one stored before the block whose old fields derive
+none) has no failed check.
 
 `stoppedEarly` is `status == "stopped"`.
 
@@ -5438,7 +5451,14 @@ The sections, in order:
    `**Passed** - 3 of 3 budgets met`,
    `**Failed** - p95 <= 30 ms missed (41 ms)` (every missed budget, or `not
    evaluated` for one the run could not measure), `**Not judged** - no budgets
-   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
+   declared`. Met budgets that did not pass, and no budgets, name every failed
+   check of `report.assertions` in this order, after the error rate when
+   requests errored: `150 assertions failed`, `4 assertions failed in the
+   sampled replay` or `150 assertions failed, 4 more in the sampled replay`;
+   `3 elements errored`; `1 teardown script failed` (`**Not judged** - 3 of 3
+   budgets met, but 0.4% of requests errored, 68 assertions failed`,
+   `**Not judged** - no budgets declared; 91 assertions failed in the sampled
+   replay`, #3537). For a stopped run a line `Stopped early at 3 s of 20 s` follows,
    and for a run with `summary.partial` or `summary.summaryMissing` one
    sentence each follows that, saying the totals are the last saved tick's or
    not whole-run totals, and that latency was not recorded (the latency table

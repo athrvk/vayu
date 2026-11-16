@@ -2,7 +2,7 @@
 
 `Vayu run "Checkout flow" (run_5e0a42) - load test, collection "Checkout flow", 2026-10-05T08:10:00Z, completed`
 
-**Not judged** - no budgets declared
+**Not judged** - no budgets declared; 18 assertions failed
 
 ## Run
 
