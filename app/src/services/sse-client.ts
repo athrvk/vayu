@@ -9,7 +9,7 @@
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
-import { isRunTerminal, type TerminalRunStatus } from "@/lib/run-status";
+import { isRunTerminal, runPhaseOf, type TerminalRunStatus } from "@/lib/run-status";
 import type {
 	LiveCapacityState,
 	LiveLatencyDistribution,
@@ -42,6 +42,8 @@ interface RawSseMetrics {
 	/** Mean requests on the wire over the window; `0` for one with no completion (issue #2821). */
 	windowAvgInFlight?: number | null;
 	activeConnections?: number;
+	/** The worker's phase (issue #3568); absent from an older engine. */
+	phase?: string;
 	/** The tick's window; `null` for a window with no completion (issue #2386). */
 	latencyP50Ms?: number | null;
 	latencyP95Ms?: number | null;
@@ -106,6 +108,9 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		window_avg_in_flight: m.windowAvgInFlight,
 		current_concurrency: m.activeConnections || 0,
 		live: true,
+		// Never defaulted: absent is "the engine sent none", and a guessed phase
+		// would draw a state the run is not in. An unrecognised one reads as absent.
+		phase: runPhaseOf(m.phase),
 		// Every percentile is passed through as sent, never `|| 0`: a null is an
 		// interval with no completion, an absent second is "not a gate frame",
 		// and a 0 would read as a measured instant answer.

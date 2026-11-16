@@ -113,4 +113,25 @@ describe("DashboardHeader render count", () => {
 		h.rerender({ ...target });
 		expect(h.count()).toBe(before + 1);
 	});
+
+	// The drain's props are primitives (#3568): the in-flight count moves on
+	// every tick of the drain and re-renders the header then, and nothing else.
+	it("re-renders as the drain's in-flight count moves, and not for the same count again", () => {
+		const h = mount();
+		const before = h.count();
+		h.rerender({ draining: true, waitingOn: 10 });
+		expect(h.count()).toBe(before + 1);
+		h.rerender({ draining: true, waitingOn: 10 });
+		expect(h.count()).toBe(before + 1);
+		h.rerender({ draining: true, waitingOn: 9 });
+		expect(h.count()).toBe(before + 2);
+	});
+
+	it("does not re-render for a planned duration it already has", () => {
+		const h = mount();
+		h.rerender({ plannedSeconds: 15 });
+		const before = h.count();
+		h.rerender({ plannedSeconds: 15 });
+		expect(h.count()).toBe(before);
+	});
 });
