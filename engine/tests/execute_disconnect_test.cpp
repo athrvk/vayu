@@ -77,6 +77,19 @@ TEST (DisconnectWatchTest, AStoppingServerRaisesTheFlagWithoutBlamingTheCaller) 
 // `caller_left` reads the connection itself, so a caller that hung up after
 // the last poll still stops the send. Mutation check: answer only the latched
 // flag and this reads false.
+// A server that is already stopping hands out a raised flag from the
+// constructor, not from the watch thread's first poll, so a transfer started
+// at once cannot read it down. The probe reports an open connection and the
+// thread is held off by it never being asked: the flag must already be up.
+// Mutation check: drop the constructor's `stopping ()` check and this is
+// racy red, the flag rising only once the thread has run.
+TEST (DisconnectWatchTest, AServerAlreadyStoppingRaisesTheFlagBeforeTheFirstPoll) {
+    std::atomic<bool> stopping{ true };
+    DisconnectWatch watch ([] { return false; }, stopping);
+    EXPECT_TRUE (watch.cancel ().load ());
+    EXPECT_FALSE (watch.caller_left ());
+}
+
 TEST (DisconnectWatchTest, ACallerThatLeftSinceTheLastPollIsStillSeen) {
     std::atomic<bool> closed{ false };
     const std::atomic<bool> stopping{ false };
