@@ -15,6 +15,7 @@
 import {
 	DEFAULT_RUN_PAGE_LIMIT,
 	MAX_ENGINE_PAGE_LIMIT,
+	type RunIdentity,
 	type RunListQuery,
 } from "../engine-client.js";
 import type { RunComparison } from "../compare.js";
@@ -207,52 +208,75 @@ export async function pagedRead(
 }
 
 /**
- * The run pinned as baseline for whatever saved request @p targetRunId ran -
- * `compare_runs`'s answer when the caller named no base, tool and prompt alike:
- * the prompt asked for both ids while the tool resolved one, so the same
- * question reached the agent two ways (issue #760). Exported for the prompt
- * rather than copied into it, since a second resolution rule would be a second
- * definition of "the baseline".
+ * What @p run is a run of: its saved request, else the collection a load run
+ * drove (`configSnapshot.scenario.collectionId`, #3544), else `null` - an
+ * unsaved request's run names neither. Restated from the renderer's
+ * `runIdentity` for the reason `RUN_TYPES` is (`electron/` shares no module
+ * graph with `app/src/`).
+ */
+function runIdentity(run: unknown): RunIdentity | null {
+	if (!isRecord(run)) return null;
+	if (typeof run.requestId === "string" && run.requestId) return { requestId: run.requestId };
+	const scenario = isRecord(run.configSnapshot) ? run.configSnapshot.scenario : undefined;
+	const collectionId = isRecord(scenario) ? scenario.collectionId : undefined;
+	return typeof collectionId === "string" && collectionId ? { collectionId } : null;
+}
+
+/** "request req_1" or "collection col_1", for a message naming what a pin belongs to. */
+function describeIdentity(identity: RunIdentity): string {
+	return "requestId" in identity
+		? `request ${identity.requestId}`
+		: `collection ${identity.collectionId}`;
+}
+
+/**
+ * The run pinned as baseline for whatever saved request or collection
+ * @p targetRunId ran - `compare_runs`'s answer when the caller named no base,
+ * tool and prompt alike: the prompt asked for both ids while the tool resolved
+ * one, so the same question reached the agent two ways (issue #760). Exported
+ * for the prompt rather than copied into it, since a second resolution rule
+ * would be a second definition of "the baseline".
  *
  * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&
- * requestId=...` is ordered newest-first, so "the baseline" is its first row.
- * That is the same question the history view's vs-baseline strip asks, so an
- * agent and the UI compare a run against the same pin.
+ * requestId=...` (or `collectionId=...` for a load run over a collection) is
+ * ordered newest-first, so "the baseline" is its first row. That is the same
+ * question the history view's vs-baseline strip asks, so an agent and the UI
+ * compare a run against the same pin.
  *
  * Every way this can fail to find one throws a message naming the fix, because
  * the alternative - silently comparing against some other run - is a wrong
- * answer presented as a right one. A run that has no saved request behind it
- * (an ad-hoc load run) has nothing to resolve *through*, which is a different
- * problem from a request with no pin, and says so.
+ * answer presented as a right one. A run that has neither a saved request nor
+ * a collection behind it (an ad-hoc load run) has nothing to resolve *through*,
+ * which is a different problem from an identity with no pin, and says so.
  */
 export async function resolveBaseline(
 	targetRunId: string,
 	ctx: ToolContext,
 	signal?: AbortSignal
 ): Promise<string> {
-	const run = (await ctx.client.getRun(targetRunId, signal)) as Record<string, unknown> | null;
-	const requestId = run && typeof run.requestId === "string" ? run.requestId : null;
-	if (!requestId) {
+	const identity = runIdentity(await ctx.client.getRun(targetRunId, signal));
+	if (!identity) {
 		throw new ToolArgError(
-			`Run ${targetRunId} did not run a saved request, so it has no baseline to resolve. ` +
-				`Pass "baseRunId" explicitly.`
+			`Run ${targetRunId} did not run a saved request or a collection, so it has no baseline ` +
+				`to resolve. Pass "baseRunId" explicitly.`
 		);
 	}
+	const subject = describeIdentity(identity);
 
-	const page = (await ctx.client.listBaselineRuns(requestId, signal)) as {
+	const page = (await ctx.client.listBaselineRuns(identity, signal)) as {
 		data?: Array<Record<string, unknown>>;
 	} | null;
 	const baseline = page?.data?.[0];
 	const baseRunId = baseline && typeof baseline.id === "string" ? baseline.id : null;
 	if (!baseRunId) {
 		throw new ToolArgError(
-			`No run is pinned as the baseline for request ${requestId}. Pin one in Vayu's ` +
+			`No run is pinned as the baseline for ${subject}. Pin one in Vayu's ` +
 				`history sidebar, or pass "baseRunId" explicitly.`
 		);
 	}
 	if (baseRunId === targetRunId) {
 		throw new ToolArgError(
-			`Run ${targetRunId} is itself the baseline for request ${requestId}; there is ` +
+			`Run ${targetRunId} is itself the baseline for ${subject}; there is ` +
 				`nothing to compare it against. Pass "baseRunId" to compare it with another run.`
 		);
 	}

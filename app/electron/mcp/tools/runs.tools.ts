@@ -128,7 +128,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: ["run"],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. " +
+			"Pin a run as the baseline for its saved request or collection, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request or collection - pinning another run moves it. A run of neither (an unsaved request's) has nothing to be the baseline of, so pinning it changes what nothing reads. " +
 			GUARDED_WRITE_SENTENCE +
 			"." +
 			withheldPointer(config, "recorded"),
@@ -281,7 +281,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: ["baseRunId", "targetRunId"] },
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. Two runs of different types (list_runs' type) are refused, not compared. Read comparability before the deltas: each entry (code, message, base, target) is a way the two runs were not the same experiment - run type, mode, virtual users, target rate, duration (more than 2x apart), status (a stopped run against a completed one), HTTP version, data file, request, compression negotiation, or whether Expect: 100-continue was allowed (expect_continue). An empty list means like for like. When it is not empty, say so before calling anything a regression: a short stopped run always looks slower and lower-throughput than a long one. compressionNegotiationDiffers is the compression entry on its own. " +
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request or collection. Two runs of different types (list_runs' type) are refused, not compared. Read comparability before the deltas: each entry (code, message, base, target) is a way the two runs were not the same experiment - run type, mode, virtual users, target rate, duration (more than 2x apart), status (a stopped run against a completed one), HTTP version, data file, request, compression negotiation, or whether Expect: 100-continue was allowed (expect_continue). An empty list means like for like. When it is not empty, say so before calling anything a regression: a short stopped run always looks slower and lower-throughput than a long one. compressionNegotiationDiffers is the compression entry on its own. " +
 			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Compare runs",
@@ -294,7 +294,7 @@ export const RUN_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Baseline run ID (e.g. main). Omit to use the run pinned as baseline for the target's saved request."
+					"Baseline run ID (e.g. main). Omit to use the run pinned as baseline for the target's saved request or collection."
 				),
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},
@@ -357,7 +357,7 @@ export const RUN_TOOLS: McpTool[] = [
 				.boolean()
 				.optional()
 				.describe(
-					"true compares against the run pinned as baseline for this run's saved request. Not together with baseRunId."
+					"true compares against the run pinned as baseline for this run's saved request or collection. Not together with baseRunId."
 				),
 		},
 		handler: async (args, ctx, signal) => {
