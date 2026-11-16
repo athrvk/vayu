@@ -218,6 +218,11 @@
  * tools that take one, and the sentence saying to write them back as read on
  * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
  * went to 223,200 / 218,900.
+ *
+ * #3568's `phase` clause in `get_live_metrics` (the five phases and what
+ * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
+ * rows to 150,824 / 148,228 / 223,275 / 219,008 B; the four caps went to
+ * 150,900 / 148,300 / 223,300 / 219,100.
  */
 
 import { describe, it, expect } from "vitest";
@@ -237,10 +242,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_200 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 218_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_300 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_100 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
