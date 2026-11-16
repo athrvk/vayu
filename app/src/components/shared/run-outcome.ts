@@ -36,6 +36,11 @@
  * words and order of the run-report export's verdict line
  * (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
+ * A collection run's list row is judged by `collectionRowOutcome`, not by the
+ * rules above: it is **failed** when a step failed or errored or its budgets
+ * were missed (#3539), and otherwise says nothing (`null`), met budgets
+ * included.
+ *
  * A budget the run could not measure (`evaluated: false`, issue #1484) is
  * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
  * **failed** here and is named like any other missed budget.
@@ -206,24 +211,33 @@ export function stepCountsPhrase(
 
 /**
  * A completed collection run is not clean when a step failed or errored
- * (#3458): `completed` says the sequence ran to its end, not that its steps
- * held. A clean run answers `null` and keeps the status glyph; `verdict`, the
- * run's budgets, is not read here.
+ * (#3458) or when it missed a budget (#3539): `completed` says the sequence ran
+ * to its end, not that its steps or its budgets held. Either one makes the row
+ * `failed`, and the reason names both when both apply ("Budgets missed, 1
+ * failed"). A clean run answers `null` and keeps the status glyph, whether its
+ * budgets were met (`verdict: "passed"`) or it declared none: a collection run
+ * is never judged `passed` from a row, since the row holds no error rate or
+ * check count that could undercut a met budget, and {@link judgeRun} is the
+ * load run's judge, not this one's.
  */
 function collectionRowOutcome(
 	status: string,
 	summary: CollectionResultSummary
 ): RunJudgement | null {
 	if (status !== "completed") return null;
-	const unclean = stepCountsPhrase(summary, UNCLEAN_STEP_COUNTS);
-	return unclean ? { outcome: "failed", reason: unclean } : null;
+	const reasons = [
+		// The row names no budget, so the reason is the unnamed form.
+		summary.verdict === "failed" ? failedReason({ state: "missed", names: [] }) : null,
+		stepCountsPhrase(summary, UNCLEAN_STEP_COUNTS),
+	].filter(Boolean);
+	return reasons.length > 0 ? { outcome: "failed", reason: reasons.join(", ") } : null;
 }
 
 /**
  * The verdict a history list row can state from its own `resultSummary`. Only a
  * terminal load or collection run's row carries one; every other row, and a row
  * from an engine that predates the summary, answers `null` and keeps its status
- * glyph. A clean collection row also answers `null`.
+ * glyph. A clean collection row also answers `null`, met budgets included.
  */
 export function rowOutcome(run: Run): RunJudgement | null {
 	if (!run.resultSummary) return null;

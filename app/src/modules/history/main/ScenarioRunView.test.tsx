@@ -19,9 +19,11 @@
  * stopped from here while a finished one offers nothing to stop.
  */
 
+import type { ReactElement } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import ScenarioRunView from "./ScenarioRunView";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDataFileStore, useScenarioRunStore, useToastStore } from "@/stores";
 import { formatNumber } from "@/lib/format-number";
 import type { Run, RunReport, StepOutcome } from "@/types";
@@ -1231,5 +1233,80 @@ describe("a run whose setup refused it (#3455)", () => {
 
 		expect(screen.getByText("setup assertion failed: token missing")).toBeTruthy();
 		expect(screen.getByText("No steps recorded")).toBeTruthy();
+	});
+});
+
+/** The budgets card's per-budget "Copy for agent" button needs the provider the app mounts at its root. */
+function renderWithTooltips(ui: ReactElement) {
+	return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
+
+describe("the run's budgets (#3539)", () => {
+	const missed: RunReport["thresholdValidation"] = {
+		checks: [{ metric: "latencyP99Ms", limit: 50, actual: 212, passed: false }],
+		passed: 0,
+		failed: 1,
+		verdict: "failed",
+	};
+
+	const runMetadata = (status: string): NonNullable<RunReport["metadata"]> => ({
+		runId: "run-1",
+		runType: "scenario",
+		status,
+		startTime: 1,
+		endTime: 2,
+	});
+
+	it("draws the budgets card with the missed budget and its measured value", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed")],
+			thresholdValidation: missed,
+		});
+
+		renderWithTooltips(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText("Pass/fail budgets")).toBeTruthy();
+		expect(screen.getByText("Failed")).toBeTruthy();
+		expect(screen.getByText("p99 latency")).toBeTruthy();
+		expect(screen.getByText("212ms")).toBeTruthy();
+		expect(screen.getByText(/0 of 1 budgets met/)).toBeTruthy();
+	});
+
+	it("draws no card for a run that declared no budgets", () => {
+		reportQuery.data = report({ results: [storedStep(0, 0, "passed")] });
+
+		renderWithTooltips(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText("Pass/fail budgets")).toBeNull();
+	});
+
+	it("draws no card before the report has arrived", () => {
+		renderWithTooltips(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		expect(screen.queryByText("Pass/fail budgets")).toBeNull();
+	});
+
+	it("says the verdict covers only what ran for a stopped run", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed")],
+			thresholdValidation: missed,
+			metadata: runMetadata("stopped"),
+		});
+
+		renderWithTooltips(<ScenarioRunView run={{ ...RUN, status: "stopped" }} />);
+
+		expect(screen.getByText(/Judged on what was measured up to that point/)).toBeTruthy();
+	});
+
+	it("leaves the stopped note off a run that ended on its own", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed")],
+			thresholdValidation: missed,
+			metadata: runMetadata("completed"),
+		});
+
+		renderWithTooltips(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/Judged on what was measured/)).toBeNull();
 	});
 });

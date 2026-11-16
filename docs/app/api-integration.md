@@ -1196,9 +1196,10 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer reads `failed` and `errored` (a completed run with either gets the
-failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
-the consumer of the rest. A load run's results are
+renderer reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
+run with any of them gets the failed glyph and a line naming the missed budgets
+and the step counts, #3458, #3539) and the MCP `list_runs` rows read the whole
+summary. A `"passed"` verdict changes nothing on the row. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus, on a run that asserted
@@ -2420,7 +2421,10 @@ when the check is unmeasurable, or on an older report. `thresholds.failRun: true
 `BUDGET_FIELDS` - it is a flag over the budgets, not one itself) changes what a
 missed budget *does*: the run's terminal status becomes `"failed"` instead of
 `"completed"`, so the history list and the taskbar failure cue pick it up, not
-only the verdict section.
+only the verdict section. A collection run's list row is marked failed by a
+missed budget with or without that flag (#3539): its `resultSummary.verdict` is
+what the row reads, and `ScenarioRunView` draws the `ThresholdVerdict` card that
+names the budget.
 
 **A collection (design-mode) run is judged too** (issue #1564):
 `RunCollectionDialog`'s own Pass/fail budgets disclosure sends the identical
@@ -2429,7 +2433,8 @@ only the verdict section.
 a second copy. It is **not** gated by the dialog's Load test switch - the
 engine evaluates `thresholds` for a design-mode run and a load run of the same
 folder alike - so the same `thresholdValidation` section and `ThresholdVerdict`
-rendering apply whichever executor ran the sequence. See
+rendering apply whichever executor ran the sequence: the history Overview for a
+load run, `ScenarioRunView` above its step list for a collection run. See
 [POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for
 how a collection run's error rate, latency percentiles and throughput are
 derived from the steps it actually sent.
