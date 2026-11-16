@@ -155,7 +155,12 @@ also words its refusals to avoid quoting a resolved variable value). Requests an
 agent sends
 still use the real values; the engine fills them in. Clearing a variable's
 secret flag, the one write that would hand the value back on the next read, is
-refused while reveal is off.
+refused while reveal is off. A saved request's URL or a proxy URL an agent
+writes back as it read it keeps the password and credential query values the
+read hid, rather than storing them empty, and the tool says which it kept. So
+an agent cannot set such a value to empty over the stored one: removing the
+query parameter or the `user:password@` part deletes it, and a proxy URL's
+credentials go when the agent clears it or changes its address.
 
 An agent can also ask which tab and environment you have open (`get_app_focus`).
 The answer is names and ids only - a tab's type, id and saved name, and the
@@ -262,7 +267,9 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   password dropped and its credential query values emptied, credential
   `params` rows as `valueWithheld: true`, cookie values as
   `valueWithheld: true` and proxy URL credentials stripped; write tools answer
-  with the same projection of the row they changed; run output (reports,
+  with the same projection of the row they changed, and a URL written back as
+  it was read keeps the credentials the read hid (removing the parameter or the
+  userinfo deletes one); run output (reports,
   samples, run rows, inbox captures, the run resources and prompts) reads
   `<redacted>` in place of a secret variable's value and a credential header's
   value; and `secret: false` over a stored secret is refused. Reveal in Settings

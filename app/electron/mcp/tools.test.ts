@@ -665,6 +665,81 @@ describe("engine config tools", () => {
 		expect(client.updateConfig).toHaveBeenCalledWith({ entries }, undefined);
 	});
 
+	describe("a proxyUrl written back while secrets are withheld (#3549)", () => {
+		const network = { allowWrites: true, allowNetworkSettings: true };
+		const storedProxy = () =>
+			fakeClient({
+				getConfig: vi.fn().mockResolvedValue({
+					entries: [{ key: "proxyUrl", value: "http://alice:pw@proxy.corp:8080" }],
+				}),
+			});
+
+		// Mutation check: send `entries` to `updateConfig` instead of the
+		// restored batch, and the stored password is gone.
+		test("keeps the stored credentials of the address the read showed", async () => {
+			const client = storedProxy();
+			const res = await dispatchTool(
+				"update_engine_config",
+				{ entries: { proxyMode: "manual", proxyUrl: "http://proxy.corp:8080" } },
+				ctxWith(client, network)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.updateConfig).toHaveBeenCalledWith(
+				{ entries: { proxyMode: "manual", proxyUrl: "http://alice:pw@proxy.corp:8080" } },
+				undefined
+			);
+			expect((res.structuredContent as { changedKeys: string[] }).changedKeys).toEqual([
+				"proxyMode",
+				"proxyUrl",
+			]);
+			expect(res.content[res.content.length - 1].text).toMatch(
+				/^proxyUrl kept the user:password of its stored value/
+			);
+		});
+
+		test("another address is written as given", async () => {
+			const client = storedProxy();
+			const res = await dispatchTool(
+				"update_engine_config",
+				{ entries: { proxyUrl: "http://other.corp:8080" } },
+				ctxWith(client, network)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.updateConfig).toHaveBeenCalledWith(
+				{ entries: { proxyUrl: "http://other.corp:8080" } },
+				undefined
+			);
+			expect(res.content).toHaveLength(1);
+		});
+
+		test("with reveal on, the value is written as given and read only for the restart check", async () => {
+			const client = storedProxy();
+			await dispatchTool(
+				"update_engine_config",
+				{ entries: { proxyUrl: "http://proxy.corp:8080" } },
+				ctxWith(client, { ...network, revealSecretsToAgents: true })
+			);
+			expect(client.updateConfig).toHaveBeenCalledWith(
+				{ entries: { proxyUrl: "http://proxy.corp:8080" } },
+				undefined
+			);
+			expect(client.getConfig).toHaveBeenCalledTimes(1);
+		});
+
+		test("a failed read writes nothing", async () => {
+			const client = fakeClient({
+				getConfig: vi.fn().mockRejectedValue(new Error("fetch failed")),
+			});
+			const res = await dispatchTool(
+				"update_engine_config",
+				{ entries: { proxyUrl: "http://proxy.corp:8080" } },
+				ctxWith(client, network)
+			);
+			expect(res.isError).toBe(true);
+			expect(client.updateConfig).not.toHaveBeenCalled();
+		});
+	});
+
 	test("the network gate grants nothing without write access", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
