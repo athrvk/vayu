@@ -2177,7 +2177,9 @@ URL's query, the rule the app's Params table follows on every URL keystroke
 Rows that already state the URL's query are left byte for byte, so a host or
 path edit sent as `url` alone rewrites nothing. A body that states `params`
 stores them as sent, whatever `url` says, and a body that states neither keeps
-the stored rows. So a request created from a URL alone (every MCP request)
+the stored rows. `POST /import/apply` and `POST /specs/sync` reach the same
+applier: a sync update that applies a request's `url` without its `params`
+reconciles the kept rows with the new URL's query. So a request created from a URL alone (every MCP request)
 reads back with one row per query pair, and the
 [OpenAPI export](#post-specsexport), the [spec diff](#post-specsdiff) and the
 [Postman export](#post-exportpostman) see its query. Rows stored before the
