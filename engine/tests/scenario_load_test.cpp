@@ -4321,6 +4321,76 @@ TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
 }
 
 // ============================================================================
+// A skipped step puts nothing in flight (#3540)
+// ============================================================================
+
+namespace {
+
+/// A `control.once`: the step runs in a virtual user's first iteration only.
+std::shared_ptr<const std::vector<vayu::core::CompiledElement>> once_elements () {
+    return vayu::tests::compiled_elements ({ json{ { "id", "el_once" },
+    { "kind", "control.once" }, { "enabled", true }, { "config", json::object () } } });
+}
+
+} // namespace
+
+// After each virtual user's first iteration every step is skipped, so no
+// refill pass puts anything in flight. Healthy, each pass that sent nothing
+// waits a controller tick: about users x duration / 50 ms iterations, 40 here
+// (42 measured). Broken, the producer re-enters at once on an already-true
+// predicate and spins: about 100,000 here (the issue's 3 s run read 215,883).
+// Mutation check: drop `idle_pass` from `maintain_concurrency`'s bounded-wait
+// condition and this reads 106,628.
+TEST_F (ScenarioLoadTest, AnAllSkippedPlanWaitsATickPerPassInsteadOfSpinning) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements = once_elements ();
+
+    const size_t VUS  = 2;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", VUS } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), VUS)
+    << "control.once must still send its step once per virtual user";
+    const size_t iterations = state->iterations_started.load ();
+    EXPECT_GT (iterations, VUS) << "the skipped iterations never ran";
+    EXPECT_LT (iterations, 2000u)
+    << "the producer spun on a pass that sent nothing: " << iterations
+    << " iterations in 1s";
+}
+
+// A skipped step in front of one that sends is not a pass without work: the
+// claim walks the virtual user on to the send, so one user with a skipped
+// login sends about as often as one without it. Healthy, the ratio of the two
+// runs' sends is about 1. Broken, each skip costs a 50 ms tick, so it is
+// round trip / (round trip + 50 ms): about 0.01 on a loopback mock, and under
+// 0.2 on a runner whose round trip is 10 ms. A slow runner slows both runs, so
+// the ratio holds where a count would not. Mutation check: make `submit_one`
+// submit one step and return, and it reads 20 sends against 2,215 (0.98
+// healthy).
+TEST_F (ScenarioLoadTest, ASkippedStepInFrontOfASendCostsTheVirtualUserNoWait) {
+    ScenarioMockServer server;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", 1 } };
+
+    run (config, plan_over ({ server.url ("/s1") }));
+    const size_t sends_alone = server.hits_for ("/s1").size ();
+
+    auto behind_a_skip = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    behind_a_skip.plan.steps[0].elements = once_elements ();
+    run (config, behind_a_skip);
+    const size_t sends_behind_a_skip = server.hits_for ("/s1").size () - sends_alone;
+
+    ASSERT_GT (sends_alone, 0u);
+    EXPECT_EQ (server.hits_for ("/s0").size (), 1u);
+    const double ratio =
+    static_cast<double> (sends_behind_a_skip) / static_cast<double> (sends_alone);
+    EXPECT_GT (ratio, 0.4) << sends_behind_a_skip << " sends behind a skipped step against "
+                           << sends_alone << " without one";
+}
+
+// ============================================================================
 // Cross-VU shared pacing (issue #1570)
 // ============================================================================
 

@@ -161,7 +161,11 @@ const StepDataTemplate& bind_template);
  * @param submit_one   attempts one submission and increments requests_sent;
  *                     returns whether it actually submitted (a scenario load
  *                     run's virtual users can all be deferred by a timer, in
- *                     which case it does neither - issue #1596)
+ *                     which case it does neither - issue #1596). A scenario
+ *                     claim may answer true and send nothing, a virtual user
+ *                     whose steps were all skipped: a pass owed work that
+ *                     leaves requests_sent unchanged waits like a deferral
+ *                     rather than re-entering at once (#3540)
  * @param target_fn    desired in-flight at elapsed_ms
  * @param budget_fn    remaining submission budget (SIZE_MAX for time-bounded)
  * @param should_continue  whether to keep refilling at elapsed_ms

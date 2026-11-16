@@ -1243,9 +1243,13 @@ std::optional<int64_t> run_end_ms) {
     }
     update_peak (context);
 
+    // Answers whether the pass was owed a submission and put none in flight:
+    // a scenario VU whose every step was skipped (#3540). The strategy thread
+    // is `requests_sent`'s only writer, so an unchanged count is exact.
     auto refill_toward = [&] (size_t target) {
         const size_t deficit =
         compute_refill_deficit (target, context->in_flight (), budget_fn ());
+        const size_t sent_before = context->requests_sent.load ();
         for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
             // A false return means the remaining candidates are all deferred
             // or busy; retrying immediately just re-scans the same VUs for
@@ -1255,32 +1259,35 @@ std::optional<int64_t> run_end_ms) {
             }
         }
         update_peak (context);
+        return deficit > 0 && context->requests_sent.load () == sent_before;
     };
 
-    int64_t el = 0;
+    int64_t el     = 0;
+    bool idle_pass = false;
     while (!context->should_stop) {
         // `deferred_wait_ms_fn` answers only right after a cycle where
         // `submit_one` returned false because every eligible candidate was
         // deferred (issue #1596) - not merely because none had budget, which
         // the plain `in_flight() < target` predicate below already handles by
         // blocking until a completion raises it. A deferred user is never
-        // in flight, so while one is outstanding that predicate is true the
-        // whole time and `wait_for` would return at once no matter what
-        // duration it is given - the timeout has to come from the wait call
-        // itself, and the predicate has to become something a deferral does
-        // not already satisfy: a real completion, tracked here as
-        // `in_flight()` changing from its value when the wait began (the
-        // strategy thread is `requests_sent`'s only writer, so between here
-        // and the wait returning it can only fall, never rise).
+        // in flight, and neither is the work of a pass that sent nothing
+        // (#3540), so in either case that predicate is still true and
+        // `wait_for` would return at once no matter what duration it is
+        // given - the timeout has to come from the wait call itself, and the
+        // predicate has to become something neither already satisfies: a
+        // real completion, tracked here as `in_flight()` changing from its
+        // value when the wait began (the strategy thread is `requests_sent`'s
+        // only writer, so between here and the wait returning it can only
+        // fall, never rise).
         const size_t in_flight_before = context->in_flight ();
         std::optional<int64_t> defer_wait_ms =
         deferred_wait_ms_fn ? deferred_wait_ms_fn () : std::nullopt;
 
         {
             std::unique_lock<std::mutex> lk (context->refill_mtx);
-            if (defer_wait_ms) {
-                const auto bound = std::chrono::milliseconds (
-                std::min (CONTROLLER_TICK_MS, *defer_wait_ms));
+            if (defer_wait_ms || idle_pass) {
+                const auto bound = std::chrono::milliseconds (std::min (
+                CONTROLLER_TICK_MS, defer_wait_ms.value_or (CONTROLLER_TICK_MS)));
                 context->refill_cv.wait_for (lk, bound, [&] () {
                     return context->should_stop.load () ||
                     context->in_flight () != in_flight_before;
@@ -1298,7 +1305,7 @@ std::optional<int64_t> run_end_ms) {
         if (context->should_stop || !should_continue (el)) {
             break;
         }
-        refill_toward (target_fn (el));
+        idle_pass = refill_toward (target_fn (el));
     }
 
     // Only a run the clock ended: a stop owes nothing more, and a loop that

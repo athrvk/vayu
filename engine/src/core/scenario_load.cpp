@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <limits>
 #include <optional>
@@ -884,7 +885,15 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * The next step of the next ready virtual user, submitted.
+     * The next ready virtual user, claimed and walked to its next send.
+     *
+     * A step a controller skipped puts nothing in flight, so the claim carries
+     * on to the same VU's next step rather than ending a refill pass on a
+     * skipped login in front of the request that does go out. The walk stops
+     * at the first step that goes out, and after one whole iteration with
+     * nothing sent: that claim leaves `requests_sent` unchanged, which is how
+     * `maintain_concurrency` tells a pass that did no work from one that did
+     * and waits it out instead of re-entering at once (#3540).
      *
      * @return whether a VU was actually claimed. `false` means every VU is
      *         deferred, in flight or retired; `maintain_concurrency` waits
@@ -898,7 +907,41 @@ class ScenarioLoadDriver {
         if (vu == nullptr) {
             return false;
         }
+        // A claim that lands mid-iteration may walk into the next one, so a
+        // trailing skipped step still reaches the first step of the next
+        // iteration; a claim never walks past the end of an iteration it began.
+        const size_t last_iteration =
+        vu->iteration + (vu->steps_this_iteration == 0 ? 0 : 1);
+        while (submit_step (vu) == StepSubmission::Skipped && !context_->should_stop &&
+        vu->iteration <= last_iteration && try_claim (*vu)) {
+        }
+        return true;
+    }
 
+    /**
+     * Ms until the earliest deferred VU `take_ready_vu` last skipped over
+     * becomes ready, or `nullopt` when its last scan found no deferral -
+     * either it found a VU (this cycle submitted), or every VU it skipped
+     * was busy or retired rather than deferred, which `maintain_concurrency`'s
+     * plain `in_flight() < target` wait already handles correctly (issue
+     * #1596). Recomputed against the current time on every call, not cached
+     * from the scan, so a wait started slightly after the scan still ends on
+     * time.
+     */
+    [[nodiscard]] std::optional<int64_t> deferred_wait_ms () const {
+        if (!earliest_deferred_ready_at_ms_) {
+            return std::nullopt;
+        }
+        return std::max<int64_t> (0, *earliest_deferred_ready_at_ms_ - steady_now_ms ());
+    }
+
+    private:
+    /// What `submit_step` did with the step: `Submitted` covers a send and a
+    /// bind failure recorded in its place, both counted in `requests_sent`.
+    enum class StepSubmission : std::uint8_t { Submitted, Skipped };
+
+    /// @p vu's current step, which `take_ready_vu` or `try_claim` claimed.
+    StepSubmission submit_step (VirtualUser* vu) {
         const size_t step_index         = vu->step;
         const ScenarioStep& step        = execution_.plan.steps[step_index];
         const std::optional<size_t> row = vu->data_row;
@@ -952,7 +995,7 @@ class ScenarioLoadDriver {
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
                 ResultAnnotations{ row, step_index, iteration, vu_index });
-                return true;
+                return StepSubmission::Submitted;
             }
         }
 
@@ -981,7 +1024,7 @@ class ScenarioLoadDriver {
             StepSignals{ .script_threw = before_result.script_threw,
             .assertion_failed          = before_result.assertion_failed },
             nullptr, {});
-            return true;
+            return StepSubmission::Skipped;
         }
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
         {
@@ -1059,27 +1102,9 @@ class ScenarioLoadDriver {
             ResultAnnotations{ row, step_index, iteration, vu_index, script_ms });
         });
         context_->requests_sent++;
-        return true;
+        return StepSubmission::Submitted;
     }
 
-    /**
-     * Ms until the earliest deferred VU `take_ready_vu` last skipped over
-     * becomes ready, or `nullopt` when its last scan found no deferral -
-     * either it found a VU (this cycle submitted), or every VU it skipped
-     * was busy or retired rather than deferred, which `maintain_concurrency`'s
-     * plain `in_flight() < target` wait already handles correctly (issue
-     * #1596). Recomputed against the current time on every call, not cached
-     * from the scan, so a wait started slightly after the scan still ends on
-     * time.
-     */
-    [[nodiscard]] std::optional<int64_t> deferred_wait_ms () const {
-        if (!earliest_deferred_ready_at_ms_) {
-            return std::nullopt;
-        }
-        return std::max<int64_t> (0, *earliest_deferred_ready_at_ms_ - steady_now_ms ());
-    }
-
-    private:
     /// Puts the current value of the OAuth 2.0 credential step @p step_index
     /// follows (#3199) on @p request; a step that follows none is untouched.
     void follow_refreshed_auth (size_t step_index, vayu::Request& request) {
@@ -1109,54 +1134,62 @@ class ScenarioLoadDriver {
         for (size_t scanned = 0; scanned < state_->vus.size (); ++scanned) {
             VirtualUser& vu = *state_->vus[cursor_];
             cursor_         = (cursor_ + 1) % state_->vus.size ();
-            if (vu.retired) {
-                continue;
+            if (try_claim (vu)) {
+                return &vu;
             }
-            // Acquire pairs with the completion's release store, so the step,
-            // iteration, cookies and scope overlay this VU was left with are
-            // visible here.
-            if (vu.busy.load (std::memory_order_acquire)) {
-                continue;
-            }
-            // `timer.pacing` / gaussian `timer.think` (issues #1498, #1570,
-            // #1571) defer a VU by stamping this in the future. A deferred VU
-            // is never in flight, so `maintain_concurrency` cannot tell "wait
-            // for a completion" and "wait for this VU" apart from
-            // `in_flight()` alone; recording the soonest one here is what lets
-            // `deferred_wait_ms` bound the wait instead of busy-spinning
-            // (issue #1596). Read after the acquire above for the same reason
-            // `step` and `iteration` are.
-            if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
-                if (!earliest_deferred_ready_at_ms_ ||
-                vu.ready_at_ms < *earliest_deferred_ready_at_ms_) {
-                    earliest_deferred_ready_at_ms_ = vu.ready_at_ms;
-                }
-                continue;
-            }
-            if (vu.iteration_boundary) {
-                if (max_iterations_ > 0 &&
-                state_->iterations_started.load (std::memory_order_relaxed) >= max_iterations_) {
-                    vu.retired = true;
-                    --live_vus_;
-                    continue;
-                }
-                state_->iterations_started.fetch_add (1, std::memory_order_relaxed);
-                vu.iteration_boundary = false;
-                if (state_->data_row_count > 0) {
-                    // One claim per iteration off the run-wide cursor, wrapping
-                    // always. Claimed here rather than per step so every step
-                    // of the iteration binds the same row - a checkout that
-                    // used a different row than its login is not a user.
-                    vu.data_row = state_->data_cursor++ % state_->data_row_count;
-                }
-            }
-            // The producer is the only writer of this edge, so a plain store is
-            // enough - no compare-exchange, and nothing on the completion path
-            // has to loop.
-            vu.busy.store (true, std::memory_order_relaxed);
-            return &vu;
         }
         return nullptr;
+    }
+
+    /// Claims @p vu for one step when it is neither retired, busy nor
+    /// deferred, starting its next iteration when it stands at a boundary.
+    bool try_claim (VirtualUser& vu) {
+        if (vu.retired) {
+            return false;
+        }
+        // Acquire pairs with the completion's release store, so the step,
+        // iteration, cookies and scope overlay this VU was left with are
+        // visible here.
+        if (vu.busy.load (std::memory_order_acquire)) {
+            return false;
+        }
+        // `timer.pacing` / gaussian `timer.think` (issues #1498, #1570,
+        // #1571) defer a VU by stamping this in the future. A deferred VU
+        // is never in flight, so `maintain_concurrency` cannot tell "wait
+        // for a completion" and "wait for this VU" apart from
+        // `in_flight()` alone; recording the soonest one here is what lets
+        // `deferred_wait_ms` bound the wait instead of busy-spinning
+        // (issue #1596). Read after the acquire above for the same reason
+        // `step` and `iteration` are.
+        if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
+            if (!earliest_deferred_ready_at_ms_ ||
+            vu.ready_at_ms < *earliest_deferred_ready_at_ms_) {
+                earliest_deferred_ready_at_ms_ = vu.ready_at_ms;
+            }
+            return false;
+        }
+        if (vu.iteration_boundary) {
+            if (max_iterations_ > 0 &&
+            state_->iterations_started.load (std::memory_order_relaxed) >= max_iterations_) {
+                vu.retired = true;
+                --live_vus_;
+                return false;
+            }
+            state_->iterations_started.fetch_add (1, std::memory_order_relaxed);
+            vu.iteration_boundary = false;
+            if (state_->data_row_count > 0) {
+                // One claim per iteration off the run-wide cursor, wrapping
+                // always. Claimed here rather than per step so every step
+                // of the iteration binds the same row - a checkout that
+                // used a different row than its login is not a user.
+                vu.data_row = state_->data_cursor++ % state_->data_row_count;
+            }
+        }
+        // The producer is the only writer of this edge, so a plain store is
+        // enough - no compare-exchange, and nothing on the completion path
+        // has to loop.
+        vu.busy.store (true, std::memory_order_relaxed);
+        return true;
     }
 
     /**
