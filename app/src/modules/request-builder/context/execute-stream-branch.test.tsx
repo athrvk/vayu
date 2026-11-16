@@ -322,7 +322,9 @@ describe("the streaming send branch", () => {
 		// Mutation check: drop `...warningsFromTrace` from `responseFromRunResult`
 		// and the events swap in but this never appears.
 		expect(await screen.findByText(warning.message, { exact: false })).toBeDefined();
-		expect(ctx().response?.warnings).toEqual([warning]);
+		// The pane and the context snapshot are written by different effects, so
+		// the text can be on screen a render before `ctx()` shows it (CI hit it).
+		await waitFor(() => expect(ctx().response?.warnings).toEqual([warning]));
 		expect(ctx().response?.events).toEqual([{ event: "token", data: "stored" }]);
 		const stored = useResponseStore.getState().getResponse("A") as ResponseState | null;
 		expect(stored?.warnings).toEqual([warning]);

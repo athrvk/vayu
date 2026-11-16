@@ -34,6 +34,7 @@
 
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useToastStore } from "@/stores";
@@ -198,7 +199,9 @@ function renderSync(
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
 	const wrapper = ({ children }: { children: ReactNode }) => (
-		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+		<QueryClientProvider client={client}>
+			<TooltipProvider>{children}</TooltipProvider>
+		</QueryClientProvider>
 	);
 	return render(
 		<SpecSync

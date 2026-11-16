@@ -143,6 +143,14 @@ class ChangeFeed {
     /// Give back a slot `try_add_reader` took.
     void remove_reader ();
 
+    /// A fresh, unguessable subscription id (libsodium random). `GET /changes`
+    /// admits a stream only on one, and an id admits one: `redeem_subscription`
+    /// spends it. At most `MAX_PENDING_SUBSCRIPTIONS` wait unspent; issuing
+    /// past that drops the oldest.
+    [[nodiscard]] std::string issue_subscription ();
+    /// Spend @p id; false when it was never issued, was dropped, or is spent.
+    [[nodiscard]] bool redeem_subscription (std::string_view id);
+
     private:
     void append_locked (Change change);
 
@@ -153,6 +161,9 @@ class ChangeFeed {
     /// Guarded by `mutex_`.
     int64_t last_id_ = 0;
     std::atomic<int> readers_{ 0 };
+    mutable std::mutex subscription_mutex_;
+    /// Guarded by `subscription_mutex_`; the oldest at the front.
+    std::deque<std::string> subscriptions_;
 };
 
 /// The id base `Database` constructs its feed with: now, in microseconds.

@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -65,7 +66,15 @@ namespace {
 using vayu::http::routes::load_script_variable_scopes;
 using vayu::http::routes::persist_script_variables;
 using vayu::http::routes::RunVariableScopes;
+using vayu::http::routes::scope_collection_id;
 using vayu::http::routes::ScriptVariableScopes;
+
+/// The scopes a send linking @p run's request and environment reads, as
+/// `POST /execute` loads them for a payload naming no `collectionId`.
+ScriptVariableScopes scopes_of (vayu::db::Database& db, const vayu::db::Run& run) {
+    return load_script_variable_scopes (db, run.environment_id,
+    scope_collection_id (db, run.request_id, std::nullopt));
+}
 
 // A blob in the shape the app writes: every field, including the ordering key.
 constexpr const char* APP_BLOB =
@@ -447,6 +456,148 @@ TEST_F (ScriptVariablesTest, SetWithAnObjectOptionDeclaresTypeAndSecretTogether)
     EXPECT_TRUE (variable.secret);
 }
 
+// ---------------------------------------------------------------------------
+// A name no `{{name}}` can read back is refused, as the write API and the
+// extractors refuse it (#3461)
+// ---------------------------------------------------------------------------
+
+// One way of writing a variable from a script, and what its refusal names.
+struct SetCall {
+    const char* call;     // the JavaScript before `(name, 'x')`
+    const char* named_in; // what the TypeError's message must name
+};
+
+constexpr std::array<SetCall, 6> SET_CALLS = { {
+{ "pm.environment.set", "pm.environment.set" },
+{ "pm.globals.set", "pm.globals.set" },
+{ "pm.collectionVariables.set", "pm.collectionVariables.set" },
+{ "pm.variables.set", "pm.variables.set" },
+// The legacy aliases delegate to the scope's own set.
+{ "postman.setEnvironmentVariable", "pm.environment.set" },
+{ "postman.setGlobalVariable", "pm.globals.set" },
+} };
+
+// The script catches what the call throws and fails unless it is a TypeError
+// whose message names @p named_in and quotes @p reason.
+std::string
+refused_set_script (const SetCall& set, const std::string& name, const std::string& reason) {
+    const std::string literal = json (name).dump ();
+    return std::string ("let thrown = null;\n") + "try { " + set.call + "(" +
+    literal + ", 'x'); } catch (e) { thrown = e; }\n" +
+    "if (!(thrown instanceof TypeError)) throw new Error('not refused: ' + " +
+    json (set.call).dump () + ");\n" + "if (!thrown.message.includes(" +
+    json (set.named_in).dump () +
+    ")) throw new Error('does not name the call: ' + thrown.message);\n" +
+    "if (!thrown.message.includes(" + json (reason).dump () +
+    ")) throw new Error('does not give the reason: ' + thrown.message);\n";
+}
+
+// Mutation check: remove the refusal in `js_pm_scope_set` and every case runs
+// to `not refused`; the stored maps then also differ.
+TEST_F (ScriptVariablesTest, ANameNoTokenCanReadBackThrowsAndStoresNothing) {
+    constexpr const char* BRACES    = "cannot contain '{' or '}'";
+    constexpr const char* PADDING   = "cannot start or end with whitespace";
+    constexpr const char* EMPTINESS = "cannot be empty";
+    struct BadName {
+        const char* name;
+        const char* reason;
+    };
+    const std::array<BadName, 9> bad_names = { {
+    { "", EMPTINESS },
+    { " pad ", PADDING },
+    { "  ", PADDING },
+    { "\t", PADDING },
+    { "tail\n", PADDING },
+    { "a}}b", BRACES },
+    { "{", BRACES },
+    { "}", BRACES },
+    { "{{x}}", BRACES },
+    } };
+
+    scopes_.environment["kept"] = vayu::Variable{ "e", false, true, "string" };
+    scopes_.globals["kept"]     = vayu::Variable{ "g", false, true, "string" };
+    scopes_.collection["kept"]  = vayu::Variable{ "c", false, true, "string" };
+    scopes_.local["kept"]       = vayu::Variable{ "l", false, true, "string" };
+    const auto environment      = scopes_.environment;
+    const auto globals          = scopes_.globals;
+    const auto collection       = scopes_.collection;
+    const auto local            = scopes_.local;
+
+    for (const auto& set : SET_CALLS) {
+        for (const auto& bad : bad_names) {
+            run (refused_set_script (set, bad.name, bad.reason));
+            ASSERT_EQ (scopes_.environment, environment)
+            << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.globals, globals) << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.collection, collection) << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.local, local) << set.call << " " << bad.name;
+        }
+    }
+}
+
+// A refused call that nothing catches fails the script, like any TypeError.
+TEST_F (ScriptVariablesTest, AnUncaughtRefusalFailsTheScript) {
+    vayu::runtime::ScriptContext ctx;
+    vayu::http::routes::bind_variable_scopes (ctx, scopes_);
+    vayu::runtime::ScriptEngine engine;
+
+    const auto result = engine.execute ("pm.environment.set('a}b', 'x');", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.environment.set"), std::string::npos)
+    << result.error_message;
+    EXPECT_TRUE (scopes_.environment.empty ());
+}
+
+TEST_F (ScriptVariablesTest, AnyOtherNameStillStoresInEveryScope) {
+    run (R"JS(
+        const names = ['my var', 'a.b-c_d', 'ключ', '日本', '$x', 'data.id', '5'];
+        for (const name of names) {
+            pm.environment.set(name, 'e');
+            pm.globals.set(name, 'g');
+            pm.collectionVariables.set(name, 'c');
+            pm.variables.set(name, 'l');
+        }
+        postman.setEnvironmentVariable('legacy var', 'e');
+        postman.setGlobalVariable('legacy var', 'g');
+    )JS");
+
+    for (const char* name : { "my var", "a.b-c_d", "ключ", "日本", "$x", "data.id", "5" }) {
+        EXPECT_EQ (scopes_.environment.at (name).value, "e") << name;
+        EXPECT_EQ (scopes_.globals.at (name).value, "g") << name;
+        EXPECT_EQ (scopes_.collection.at (name).value, "c") << name;
+        EXPECT_EQ (scopes_.local.at (name).value, "l") << name;
+    }
+    EXPECT_EQ (scopes_.environment.at ("legacy var").value, "e");
+    EXPECT_EQ (scopes_.globals.at ("legacy var").value, "g");
+}
+
+// `unset` does not check, so a name an older engine or a hand-edited blob left
+// behind can still be removed.
+TEST_F (ScriptVariablesTest, AStoredNameTheSetRefusesCanStillBeUnset) {
+    for (vayu::Environment* scope :
+    { &scopes_.environment, &scopes_.globals, &scopes_.collection, &scopes_.local }) {
+        (*scope)[" pad "] = vayu::Variable{ "x", false, true, "string" };
+        (*scope)["a}b"]   = vayu::Variable{ "x", false, true, "string" };
+        (*scope)["keep"]  = vayu::Variable{ "x", false, true, "string" };
+    }
+
+    run (R"JS(
+        for (const name of [' pad ', 'a}b']) {
+            pm.environment.unset(name);
+            pm.globals.unset(name);
+            pm.collectionVariables.unset(name);
+            pm.variables.unset(name);
+        }
+    )JS");
+
+    for (const vayu::Environment* scope :
+    { &scopes_.environment, &scopes_.globals, &scopes_.collection, &scopes_.local }) {
+        EXPECT_EQ (scope->size (), 1U);
+        EXPECT_EQ (scope->count ("keep"), 1U);
+    }
+}
+
 // Postman's `object` and `array` are Vayu's `json`; its `any` and `default`,
 // and a word it has no type for, declare nothing.
 TEST_F (ScriptVariablesTest, SetMapsPostmanTypeNamesOntoVayuTypes) {
@@ -776,7 +927,7 @@ class PersistScriptVariablesTest : public ::testing::Test {
     }
 
     ScriptVariableScopes load () {
-        return load_script_variable_scopes (*db_, run_);
+        return scopes_of (*db_, run_);
     }
 
     /// A folder under @p parent_id holding no variables.
@@ -1062,7 +1213,7 @@ TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyG
     bare.request_id.reset ();
     bare.environment_id.reset ();
 
-    auto scopes               = load_script_variable_scopes (*db_, bare);
+    auto scopes               = scopes_of (*db_, bare);
     scopes.globals["g"].value = "1";
 
     persist_script_variables (*db_, scopes);
@@ -1585,7 +1736,7 @@ class ScriptVariableScopesTest : public ::testing::Test {
 // of the chain arrives root-first and separate. Revert the walk to the old
 // single get_collection and `collection_ancestors` is empty here.
 TEST_F (ScriptVariableScopesTest, TheChainArrivesRootFirstWithTheLeafHeldSeparately) {
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
 
     ASSERT_EQ (scopes.collection_ancestors.size (), 1U);
     EXPECT_EQ (scopes.collection_ancestors[0].at ("token").value, "root-token");
@@ -1614,10 +1765,44 @@ TEST_F (ScriptVariableScopesTest, ARequestOutsideAnyCollectionGetsEmptyCollectio
     run.id            = "run_loose";
     run.request_id    = "req_loose";
 
-    auto scopes = load_script_variable_scopes (*db_, run);
+    auto scopes = scopes_of (*db_, run);
 
     EXPECT_TRUE (scopes.collection.empty ());
     EXPECT_TRUE (scopes.collection_ancestors.empty ());
+}
+
+// The send's collection (#3461), composition's precedence: a request row's own
+// collection over the composed `collectionId`, which answers whenever no live
+// row names one. Mutation check: return `collection_id` first in
+// `scope_collection_id` and the row loses; drop the fallback and the rest are
+// empty.
+TEST_F (ScriptVariableScopesTest, ARequestRowsCollectionWinsAndTheComposedOneIsTheFallback) {
+    EXPECT_EQ (scope_collection_id (*db_, "req_1", "col_root"), "col_leaf");
+    EXPECT_EQ (scope_collection_id (*db_, std::nullopt, "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, "", "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, "req_unknown", "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, std::nullopt, std::nullopt), "");
+
+    db_->delete_request ("req_1");
+    EXPECT_EQ (scope_collection_id (*db_, "req_1", "col_root"), "col_root")
+    << "a trashed request names no collection, as composition 404s on it";
+}
+
+// An inline send's chain loads like a stored request's: the leaf writable, the
+// ancestors beside it. A collection naming nothing is an empty scope.
+TEST_F (ScriptVariableScopesTest, AComposedCollectionLoadsItsWholeChain) {
+    auto scopes = load_script_variable_scopes (
+    *db_, std::nullopt, scope_collection_id (*db_, std::nullopt, "col_leaf"));
+
+    EXPECT_EQ (scopes.baseline.collection_id, "col_leaf");
+    EXPECT_EQ (scopes.collection.at ("page_size").value, "25");
+    ASSERT_EQ (scopes.collection_ancestors.size (), 1U);
+    EXPECT_EQ (scopes.collection_ancestors[0].at ("token").value, "root-token");
+
+    db_->delete_collection ("col_root");
+    auto trashed = load_script_variable_scopes (*db_, std::nullopt, "col_leaf");
+    EXPECT_TRUE (trashed.collection.empty ());
+    EXPECT_TRUE (trashed.collection_ancestors.empty ());
 }
 
 // The issue in one assertion: the same `{{token}}`, defined only on an
@@ -1629,7 +1814,7 @@ TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInThe
     const std::string composed_url = composed["url"].get<std::string> ();
     ASSERT_NE (composed_url.find ("root-token"), std::string::npos) << composed_url;
 
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
     vayu::runtime::ScriptContext ctx;
     ctx.environment         = &scopes.environment;
     ctx.globals             = &scopes.globals;
@@ -1657,7 +1842,7 @@ TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInThe
 TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnlyTheLeaf) {
     const std::string root_before = stored_variables ("col_root");
 
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
     vayu::runtime::ScriptContext ctx;
     ctx.environment         = &scopes.environment;
     ctx.globals             = &scopes.globals;

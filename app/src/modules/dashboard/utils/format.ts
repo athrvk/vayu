@@ -5,6 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatFixed } from "@/lib/format-number";
+
 /**
  * Dashboard formatting helpers.
  */
@@ -109,7 +111,8 @@ export function formatClock(ms: number): string {
  * stays `0.0`, the one value that is neutral.
  */
 export function formatErrorPercent(percent: number, digits = 1): string {
-	const fixed = percent.toFixed(digits);
-	if (percent <= 0 || Number(fixed) > 0) return fixed;
-	return `<${(10 ** -digits).toFixed(digits)}`;
+	const fixed = formatFixed(percent, digits);
+	// The raw rounded figure, not the locale string: "0,1" does not parse back.
+	if (percent <= 0 || Math.round(percent * 10 ** digits) > 0) return fixed;
+	return `<${formatFixed(10 ** -digits, digits)}`;
 }

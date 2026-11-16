@@ -22,7 +22,9 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_encode_sets.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
@@ -1215,7 +1217,7 @@ Result<std::string> stored_header_name (std::string_view written) {
     if (name.empty ()) {
         return name;
     }
-    if (auto refusal = vayu::http::invalid_header_name_refusal (name)) {
+    if (auto refusal = vayu::http::invalid_header_name_refusal (name, name)) {
         return Error{ ErrorCode::InvalidHeaderName, std::move (*refusal) };
     }
     return name;
@@ -1851,8 +1853,10 @@ constexpr size_t kMinMaskedSecretLength = 4;
 
 // Each secret value as the snapshot can hold it: raw, RFC 3986's strict form
 // (`url_encode`, what a client escaping a component writes), Postman's query
-// form (what composition writes, `encode_query_component`), the JSON string
-// escape (a JSON body is stored as text, so `pa"ss` is `pa\"ss` inside it) and
+// form (what composition writes, `encode_query_component`), Postman's path,
+// fragment and user info forms (what `encode_url_as_postman` writes there: a
+// space is `%20` while `/ @ & : + '` stay raw, so none of the query or strict
+// spellings match), the JSON string escape (a JSON body is stored as text, so `pa"ss` is `pa\"ss` inside it) and
 // the XML escapes of character data and of each attribute delimiter. Longest
 // first, so a secret that contains another is masked whole rather than around
 // the shorter one.
@@ -1866,6 +1870,14 @@ std::vector<std::string> masked_secret_forms (const std::vector<std::string>& va
         forms.push_back (vayu::utils::url_encode (value));
         forms.push_back (
         vayu::core::encode_query_component (value, vayu::core::QueryPart::Value));
+        forms.push_back (vayu::core::encode_path_variable_value (value));
+        forms.push_back (vayu::core::encode_outside_tokens (
+        value, vayu::core::in_postman_fragment_encode_set));
+        // The user name splits at its first colon; what follows the user's own
+        // colon (a password) is encoded whole.
+        forms.push_back (vayu::core::encode_userinfo_as_postman (value));
+        forms.push_back (vayu::core::encode_outside_tokens (
+        value, vayu::core::in_postman_userinfo_encode_set));
         forms.push_back (vayu::utils::escape_json_string_content (value));
         for (const char quote : { '\0', '"', '\'' }) {
             forms.push_back (vayu::utils::escape_xml_content (value, quote));

@@ -29,7 +29,7 @@ function List() {
 			<button data-history-activate tabIndex={-1}>
 				run one
 			</button>
-			<input placeholder="Search runs by api..." />
+			<input placeholder="Search runs" />
 			<button data-history-activate tabIndex={-1}>
 				run two
 			</button>
@@ -89,7 +89,7 @@ describe("useHistoryListFocus", () => {
 
 	it("leaves the search box alone - arrow keys there are for text editing", () => {
 		render(<List />);
-		const search = screen.getByPlaceholderText("Search runs by api...");
+		const search = screen.getByPlaceholderText("Search runs");
 		search.focus();
 
 		fireEvent.keyDown(search, { key: "ArrowDown" });

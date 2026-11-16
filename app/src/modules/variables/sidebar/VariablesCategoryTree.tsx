@@ -39,8 +39,10 @@
  *     button is the second.
  */
 
-import { useId, useRef, useState } from "react";
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
+import { useId, useMemo, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
+import { collectionPath } from "@/modules/collections/tree-utils";
 import { useDeleteRefocus } from "@/modules/collections/useDeleteRefocus";
 import { useTabsStore, useSaveStore, useLayoutStore, useToastStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
@@ -190,13 +192,32 @@ export default function VariablesCategoryTree() {
 	// header row claims its list with `aria-owns` instead.
 	const environmentsGroupId = useId();
 	const collectionsGroupId = useId();
+	const treeId = useId();
+	/**
+	 * The element a row's `aria-labelledby` points at (#3450): the row's own
+	 * name, so its accessible name is not computed from the ⋯ menu's label and
+	 * the variable-count badge inside it.
+	 */
+	const nameIdFor = (scope: string, id = "") => `${treeId}-${scope}-${id}-name`;
+
+	// A sub-collection's ancestors, so two folders called "v1" can be told apart.
+	// Built once per list: `collectionPath` takes the map for that reason.
+	const ancestorPaths = useMemo(() => {
+		const byId = new Map(collections.map((c) => [c.id, c]));
+		return new Map(
+			collections.map((c) => [c.id, c.parentId ? collectionPath(c.parentId, byId) : ""])
+		);
+	}, [collections]);
 
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
+
+	const onItemOpened = useDrawerItemOpened();
 
 	// Selecting a scope must also surface the variables editor in the main view
 	const selectCategory = (category: VariableCategory) => {
 		setSelectedCategory(category);
 		openTab({ type: "variables", entityId: null });
+		onItemOpened();
 	};
 	const [environmentsExpanded, setEnvironmentsExpanded] = useState(true);
 
@@ -272,6 +293,7 @@ export default function VariablesCategoryTree() {
 	 */
 	const rename = useInlineRename({
 		active: renamingEnvId !== null,
+		label: "Environment name",
 		initialValue: environments.find((e) => e.id === renamingEnvId)?.name ?? "",
 		onCommit: (name) => {
 			if (renamingEnvId) void submitRenameEnvironment(renamingEnvId, name);
@@ -441,6 +463,7 @@ export default function VariablesCategoryTree() {
 							aria-level={1}
 							aria-posinset={1}
 							aria-setsize={SCOPE_SECTIONS}
+							aria-labelledby={nameIdFor("globals")}
 							data-tree-label="Globals"
 							className={cn(
 								// h-8: shared drawer row height (see CollectionItem).
@@ -461,7 +484,9 @@ export default function VariablesCategoryTree() {
 								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
 							>
 								<Globe className="size-icon-sm" />
-								<span className="cap-centred">Globals</span>
+								<span id={nameIdFor("globals")} className="cap-centred">
+									Globals
+								</span>
 							</button>
 						</div>
 					</div>
@@ -606,7 +631,7 @@ export default function VariablesCategoryTree() {
 												onSelect: () => void copy(reference, "Reference"),
 											},
 											{
-												label: "Export as Postman Environment",
+												label: "Export as Postman environment",
 												icon: FileOutput,
 												onSelect: () => void exportEnvironment(environment),
 											},
@@ -664,6 +689,16 @@ export default function VariablesCategoryTree() {
 													aria-level={2}
 													aria-posinset={index + 1}
 													aria-setsize={environments.length}
+													// Omitted while renaming: the name element is
+													// then the field, with no text to point at.
+													aria-labelledby={
+														isRenaming
+															? undefined
+															: nameIdFor(
+																	"environment",
+																	environment.id
+																)
+													}
 													onClick={(e) => {
 														if (e.target !== e.currentTarget) return;
 														if (isDeleting) return;
@@ -713,7 +748,13 @@ export default function VariablesCategoryTree() {
 															// collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
-															<TruncatedText className="cap-centred flex-1">
+															<TruncatedText
+																id={nameIdFor(
+																	"environment",
+																	environment.id
+																)}
+																className="cap-centred flex-1"
+															>
 																{environment.name}
 															</TruncatedText>
 															{/* `chip`: `secondary` brings
@@ -856,6 +897,15 @@ export default function VariablesCategoryTree() {
 										const variableCount = collection.variables
 											? Object.keys(collection.variables).length
 											: 0;
+										const ancestors = ancestorPaths.get(collection.id) ?? "";
+										const fullPath = ancestors
+											? `${ancestors} / ${collection.name}`
+											: collection.name;
+										const nameId = nameIdFor("collection", collection.id);
+										const ancestorsId = nameIdFor(
+											"collection-path",
+											collection.id
+										);
 										return (
 											<div
 												key={collection.id}
@@ -869,6 +919,11 @@ export default function VariablesCategoryTree() {
 												aria-level={2}
 												aria-posinset={index + 1}
 												aria-setsize={collections.length}
+												// A sub-collection is named by its whole path, ancestors
+												// first; typeahead (`data-tree-label`) stays the name.
+												aria-labelledby={
+													ancestors ? `${ancestorsId} ${nameId}` : nameId
+												}
 												className={cn(
 													"focus-row flex h-8 items-center hover:bg-accent transition-colors",
 													isSelected({
@@ -897,9 +952,30 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													<TruncatedText className="flex-1">
-														{collection.name}
-													</TruncatedText>
+													{/* The name keeps a floor and the prefix gives way
+													    first, at half the row (the palette's two-span
+													    rule); the tooltip of either is the full path. */}
+													<span className="flex min-w-0 flex-1 items-center gap-1">
+														{ancestors && (
+															<TruncatedText
+																id={ancestorsId}
+																title={fullPath}
+																className="min-w-0 max-w-[50%] text-xs text-muted-foreground"
+															>
+																{`${ancestors} /`}
+															</TruncatedText>
+														)}
+														<TruncatedText
+															id={nameId}
+															title={fullPath}
+															className={cn(
+																"flex-1",
+																ancestors && "min-w-[12ch]"
+															)}
+														>
+															{collection.name}
+														</TruncatedText>
+													</span>
 													{/* `chip` - same reason as the environment
 													    badge above. */}
 													{variableCount > 0 && (

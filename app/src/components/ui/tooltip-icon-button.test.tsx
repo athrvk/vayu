@@ -75,6 +75,37 @@ describe("TooltipIconButton", () => {
 		}
 	});
 
+	it("shows `tooltip` in place of the name while the name stays the label", async () => {
+		renderButton(
+			<TooltipIconButton
+				label="Restore Login"
+				tooltip="Restore"
+				icon={<svg />}
+				tooltipHint="Ctrl+Z"
+			/>
+		);
+
+		// Focus is the keyboard path a native `title` never had.
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Restore Login" }));
+		});
+
+		const tooltip = await screen.findByRole("tooltip");
+		expect(tooltip).toHaveTextContent("Restore");
+		expect(tooltip).toHaveTextContent("Ctrl+Z");
+		expect(tooltip).not.toHaveTextContent("Login");
+	});
+
+	it("shows the label when no `tooltip` is given", async () => {
+		renderButton(<TooltipIconButton label="Refresh schema" icon={<svg />} />);
+
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Refresh schema" }));
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("Refresh schema");
+	});
+
 	it("forwards arbitrary button props such as aria-pressed", () => {
 		renderButton(<TooltipIconButton label="Reveal" icon={<svg />} aria-pressed={true} />);
 		expect(screen.getByRole("button", { name: "Reveal" })).toHaveAttribute(

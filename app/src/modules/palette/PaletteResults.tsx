@@ -31,6 +31,7 @@ import { useLayoutEffect, useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { TimeValue } from "@/components/shared/TimeValue";
+import { TruncatedText } from "@/components/shared/TruncatedText";
 import { getMethodColor } from "@/lib/method-display";
 import { formatNumber } from "@/lib/format-number";
 import { chordKeys } from "@/lib/platform";
@@ -258,11 +259,15 @@ function PaletteRow({
 				/>
 			)}
 			{Icon && <Icon className="size-icon-sm shrink-0 text-muted-foreground" />}
-			<span className="min-w-0 flex-1 truncate">{item.title}</span>
+			{/* The title is what the user searched for, so it keeps a floor, and the
+			    subtitle (a collection path, often the longer of the two) gives way
+			    at half the row. A `shrink-0` subtitle never truncated: it took the
+			    whole row and left the title nothing (#3495). */}
+			<TruncatedText className="min-w-[12ch] flex-1">{item.title}</TruncatedText>
 			{item.subtitle && (
-				<span className="ml-auto shrink-0 truncate pl-3 text-xs text-muted-foreground">
+				<TruncatedText className="ml-auto min-w-0 max-w-[50%] pl-3 text-xs text-muted-foreground">
 					{item.subtitle}
-				</span>
+				</TruncatedText>
 			)}
 			{/* One of the two trailing slots below draws, never both, and the
 			    chord is the one that wins: a stamp is why a row is in Recents,

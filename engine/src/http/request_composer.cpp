@@ -383,6 +383,23 @@ bool is_addressable_variable_name (std::string_view key) {
     return !key.empty () && trim_variable_name (key) == key;
 }
 
+std::optional<std::string_view> variable_name_refusal (std::string_view name) {
+    if (name.empty ()) {
+        return "cannot be empty - a {{name}} reference needs at least one "
+               "character";
+    }
+    // A token is `{{` then one or more characters but braces, trimmed.
+    if (name.find_first_of ("{}") != std::string_view::npos) {
+        return "cannot contain '{' or '}' - a {{name}} reference stops at a "
+               "brace, so nothing could read it back";
+    }
+    if (!is_addressable_variable_name (name)) {
+        return "cannot start or end with whitespace - a {{name}} reference "
+               "trims the name it reads, so nothing could read it back";
+    }
+    return std::nullopt;
+}
+
 bool is_dynamic_variable_name (const std::string& name) {
     return !name.empty () && name.front () == '$';
 }
@@ -896,6 +913,15 @@ collection_chain (vayu::db::Database& db, const std::string& leaf_id) {
     return chain;
 }
 
+nlohmann::json collection_element_origin (const vayu::db::Collection& collection, bool is_root) {
+    nlohmann::json origin = { { "kind", "collection" },
+        { "scope", is_root ? "collection" : "folder" }, { "id", collection.id } };
+    if (!collection.name.empty ()) {
+        origin["name"] = collection.name;
+    }
+    return origin;
+}
+
 namespace {
 
 // Fetch the "mode" of an auth JSON, "" when absent or not a string.
@@ -1001,27 +1027,19 @@ const std::unordered_set<std::string>& disabled) {
 }
 
 // One level's composed elements (`is_composed_element`), each stamped with
-// where it came from. `origin_scope` adds the folder level `origin_kind` does
-// not distinguish (#2522); `kind` keeps its two values because its readers
-// branch on them.
+// @p origin, where it came from. `origin.scope` adds the folder level
+// `origin.kind` does not distinguish (#2522); `kind` keeps its two values
+// because its readers branch on them.
 void emit_level (nlohmann::json& out,
 const nlohmann::json& elements,
 const std::unordered_set<std::string>& disabled,
-const char* origin_kind,
-const char* origin_scope,
-const std::string& origin_id,
-const std::string& origin_name) {
+const nlohmann::json& origin) {
     for (const auto& element : elements) {
         if (!is_composed_element (element, disabled)) {
             continue;
         }
         nlohmann::json stamped = element;
-        nlohmann::json origin  = { { "kind", origin_kind },
-            { "scope", origin_scope }, { "id", origin_id } };
-        if (!origin_name.empty ()) {
-            origin["name"] = origin_name;
-        }
-        stamped["origin"] = origin;
+        stamped["origin"]      = origin;
         out.push_back (std::move (stamped));
     }
 }
@@ -1048,10 +1066,11 @@ const vayu::db::Request& request) {
     nlohmann::json out = nlohmann::json::array ();
     for (size_t i = 0; i < chain.size (); ++i) {
         // The chain runs root first, so every collection after it is a folder.
-        emit_level (out, levels[i], disabled, "collection",
-        i == 0 ? "collection" : "folder", chain[i].id, chain[i].name);
+        emit_level (
+        out, levels[i], disabled, collection_element_origin (chain[i], i == 0));
     }
-    emit_level (out, levels.back (), disabled, "request", "request", request.id, "");
+    emit_level (out, levels.back (), disabled,
+    { { "kind", "request" }, { "scope", "request" }, { "id", request.id } });
     return out;
 }
 
@@ -1381,7 +1400,8 @@ struct ResolvedHeaders {
  * around it is): the residual pass resolves it against what a pre-request
  * script defines and judges what it produces (`http/request_exchange.cpp`).
  *
- * @param key the name as written, for the nameless message.
+ * @param key the name as written: the nameless message and the invalid one
+ *        quote it, never @p name, which a variable may have made of a secret.
  */
 void settle_header_name (std::string& name, const std::string& key, ResolvedHeaders& out) {
     name = std::string (vayu::http::trim_optional_whitespace (name));
@@ -1394,7 +1414,8 @@ void settle_header_name (std::string& name, const std::string& key, ResolvedHead
         return;
     }
     if (!out.invalid_name) {
-        out.invalid_name = vayu::http::invalid_header_name_refusal (name);
+        out.invalid_name = vayu::http::invalid_header_name_refusal (
+        name, vayu::http::trim_optional_whitespace (key));
     }
 }
 
@@ -1836,6 +1857,28 @@ read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
     return std::nullopt;
 }
 
+// What this composition read, written onto the payload as its own answer.
+// None of these fields is an input: an inline `request` carrying one from an
+// earlier composition does not speak for this one, so each is cleared first.
+void stamp_composition_answers (nlohmann::json& payload,
+const std::string& environment_id,
+const std::vector<vayu::db::Collection>& chain,
+const std::set<std::string>& deferred) {
+    if (!environment_id.empty ()) {
+        payload["environmentId"] = environment_id;
+    }
+    // The leaf of the chain, which `/execute` and `/runs` read the scripts'
+    // collection scope from when no request row names one (#3461).
+    payload.erase ("collectionId");
+    if (!chain.empty ()) {
+        payload["collectionId"] = chain.back ().id;
+    }
+    payload.erase ("deferredVariables");
+    if (!deferred.empty ()) {
+        payload["deferredVariables"] = deferred;
+    }
+}
+
 } // namespace
 
 nlohmann::json stored_request_elements (vayu::db::Database& db,
@@ -1944,15 +1987,7 @@ VariableDeferral deferral) {
     // user JavaScript, and rewriting it cannot tell a string literal from
     // code. They pass through exactly as supplied/stored.
 
-    if (!environment_id.empty ()) {
-        payload["environmentId"] = environment_id;
-    }
-    // Composition's own answer, never an input: an inline `request` carrying
-    // the field from an earlier composition does not speak for this one.
-    payload.erase ("deferredVariables");
-    if (!deferred.empty ()) {
-        payload["deferredVariables"] = deferred;
-    }
+    stamp_composition_answers (payload, environment_id, chain, deferred);
 
     return { 200, payload };
 }

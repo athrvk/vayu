@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useEngineStore, useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import {
 	INBOX_LIVE_MAX_RETRIES,
 	INBOX_LIVE_RETRY_MAX_MS,
@@ -117,6 +117,9 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useToastStore.setState({ toasts: [] });
 	useInboxNotifyStore.setState({ enabled: { inbox_a: true } });
+	// The rows read as running only while the engine is up (`useEngineServing`),
+	// and a list that answered at all came from an engine that was.
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 });
 
 afterEach(() => {

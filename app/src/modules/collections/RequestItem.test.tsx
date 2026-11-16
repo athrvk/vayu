@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RequestItem from "./RequestItem";
 import { withCollectionTreeContext } from "@/test/collection-tree-context";
 import type { Request } from "@/types";

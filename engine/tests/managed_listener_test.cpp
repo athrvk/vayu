@@ -16,6 +16,8 @@
 #include <string>
 #include <thread>
 
+#include "idle_connections.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/managed_listener.hpp"
 #include "wait_until.hpp"
 
@@ -235,6 +237,57 @@ TEST (ManagedListener, StartingATwiceStartedListenerRefusesRatherThanLeaking) {
     httplib::Client client ("127.0.0.1", port);
     EXPECT_TRUE (client.Get ("/"))
     << "the original listener is still accepting";
+}
+
+/// Holds @p listener's workers and queue with idle connections, and checks the
+/// surplus is closed at accept and the listener serves again once they are
+/// gone. Healthy: the surplus is closed within milliseconds, so the wait ends
+/// at once. Broken (httplib's unbounded queue): every connection is held, the
+/// server's timeouts (a minute, past the wait) close none of them, and the
+/// wait runs out its 20s deadline.
+void expect_connections_past_the_bounds_are_closed (ManagedListener& listener) {
+    constexpr std::size_t SURPLUS = 16;
+    constexpr std::size_t HELD = vayu::core::constants::listener::MAX_THREADS +
+    vayu::core::constants::listener::MAX_QUEUED_CONNECTIONS;
+    // Past the 5s default a worker closes a connection that sends no request
+    // line, which would read as the cap. The first request is awaited under
+    // the keep-alive timeout, so that is lifted with the read timeout.
+    constexpr time_t IDLE_TIMEOUT_S = 60;
+
+    listener.server ().Get ("/ping", [] (const httplib::Request&, httplib::Response& res) {
+        res.set_content ("pong", "text/plain");
+    });
+    listener.server ().set_read_timeout (IDLE_TIMEOUT_S);
+    listener.server ().set_keep_alive_timeout (IDLE_TIMEOUT_S);
+    const int port = listener.start ("127.0.0.1").port;
+    ASSERT_GT (port, 0);
+
+    vayu::tests::IdleConnections idle (port, HELD + SURPLUS);
+    ASSERT_EQ (idle.opened (), HELD + SURPLUS);
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&idle] { return idle.closed_by_peer () >= SURPLUS; }))
+    << "connections past the pool and its queue were held, not closed";
+
+    idle.close_all ();
+    httplib::Client client ("127.0.0.1", port);
+    EXPECT_TRUE (vayu::tests::wait_until ([&client] {
+        const auto response = client.Get ("/ping");
+        return response && response->status == 200;
+    }))
+    << "the listener never answered again after the idle connections left";
+}
+
+// Mutation check: remove `bound_connections` from the constructor and the
+// surplus is held, so the wait runs out.
+TEST (ManagedListener, ConnectionsPastThePoolAndItsQueueAreClosedAtAccept) {
+    ManagedListener listener;
+    expect_connections_past_the_bounds_are_closed (listener);
+}
+
+// The inbox builds its own server (#1140); the bound has to reach it too.
+TEST (ManagedListener, AServerHandedInIsBoundedToo) {
+    ManagedListener listener (std::make_unique<httplib::Server> ());
+    expect_connections_past_the_bounds_are_closed (listener);
 }
 
 } // namespace

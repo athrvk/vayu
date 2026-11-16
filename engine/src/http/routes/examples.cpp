@@ -447,14 +447,19 @@ bool is_create) {
         return outcome;
     }
 
-    apply_string_field (json, "body", x.body, "", is_create);
+    if (auto outcome = apply_string_field (json, "body", x.body, "", is_create); !outcome) {
+        return outcome;
+    }
     if (x.body.size () > vayu::core::constants::request_example::MAX_BODY_BYTES) {
         return route_error (400,
         "Example body is " + std::to_string (x.body.size ()) + " bytes, over the " +
         std::to_string (vayu::core::constants::request_example::MAX_BODY_BYTES) + "-byte limit");
     }
 
-    apply_string_field (json, "contentType", x.content_type, "", is_create);
+    if (auto outcome = apply_string_field (json, "contentType", x.content_type, "", is_create);
+    !outcome) {
+        return outcome;
+    }
     apply_int_field (json, "order", x.order, 0, is_create);
     // Defaults to false, which is the honest answer for every caller that does
     // not claim otherwise: only the client that captured the response knows it

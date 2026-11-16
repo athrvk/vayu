@@ -30,6 +30,7 @@
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
+import { formatBytes } from "@/lib/format-number";
 import { headerLinesOf } from "@/lib/header-lines";
 import type { ComposedRequest, ExecuteRequestRequest, HeaderLine, KeyValueEntry } from "@/types";
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
@@ -169,16 +170,20 @@ function notJson(): IntrospectionError {
 	);
 }
 
-export async function introspectSchema(target: IntrospectionTarget): Promise<GraphQLSchema> {
-	// A throw from compose or execute is the engine's own failure - it is down,
-	// the collection is gone, a variable didn't resolve. The endpoint refusing
-	// the connection is not one of them: that comes back as `status: 0` below.
-	// The engine's message already names what failed, so it passes through
-	// rather than being framed as the endpoint being unreachable.
-	let res;
-	let url: string;
+/**
+ * Compose the endpoint's request without sending it.
+ *
+ * Its own step because the URL it answers is the one the introspection will
+ * contact, and the caller that decides *whether to* (`schema-cache.ts`) has to
+ * judge that URL and then send to exactly it - composing twice could give two
+ * answers when a variable moved in between. A throw here is the engine's own
+ * failure (it is down, the collection is gone, a variable didn't resolve), so
+ * its message passes through as the failure rather than being framed as the
+ * endpoint being unreachable.
+ */
+export async function composeIntrospection(target: IntrospectionTarget): Promise<ComposedRequest> {
 	try {
-		const composed = await apiService.composeRequest({
+		return await apiService.composeRequest({
 			request: {
 				method: "POST",
 				url: target.url,
@@ -189,9 +194,28 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 			collectionId: target.collectionId,
 			environmentId: target.environmentId,
 		});
-		url = composed.url;
+	} catch (e) {
+		throw new IntrospectionError("network", e instanceof Error ? e.message : String(e));
+	}
+}
+
+/**
+ * Send the introspection query. `composed` is what `composeIntrospection`
+ * answered when the caller already has it; absent, it is composed here.
+ */
+export async function introspectSchema(
+	target: IntrospectionTarget,
+	composed?: ComposedRequest
+): Promise<GraphQLSchema> {
+	const request = composed ?? (await composeIntrospection(target));
+	const url = request.url;
+	// An execute that throws is the engine's own failure too. The endpoint
+	// refusing the connection is not one of them: that comes back as
+	// `status: 0` below.
+	let res;
+	try {
 		res = await apiService.executeRequest(
-			buildIntrospectionRequest(composed, target.environmentId)
+			buildIntrospectionRequest(request, target.environmentId)
 		);
 	} catch (e) {
 		throw new IntrospectionError("network", e instanceof Error ? e.message : String(e));
@@ -229,7 +253,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 	if (res.bodyRaw.length > MAX_INTROSPECTION_CHARS) {
 		throw new IntrospectionError(
 			"too-large",
-			`The introspection response is ${Math.round(res.bodyRaw.length / (1024 * 1024))}MB, over the ${MAX_INTROSPECTION_CHARS / (1024 * 1024)}MB limit.`
+			`The introspection response is ${formatBytes(res.bodyRaw.length)}, over the ${formatBytes(MAX_INTROSPECTION_CHARS)} limit.`
 		);
 	}
 

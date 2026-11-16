@@ -715,10 +715,25 @@ button, and while the restart runs the button reads Restarting... through
 yields to a push that landed while it was in flight and to a restart that
 opened a new start window, so a late reply cannot put a crash back over the
 engine replacing it. **It is a fact, not a status: `useHealthQuery` stays the
-only classifier of `engineStatus`**, and `engineCrash` never writes it. It
-explains an unreachable engine and lets the Dock offer Restart, so that button
-can appear a poll before the light turns. The Dock reads it for the connection
-tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
+only classifier of `engineStatus`**, and `engineCrash` never writes it. A
+`crashed` push invalidates `queryKeys.health.status()`, and nothing else, so the
+poll's verdict follows within a retry rather than a whole healthy interval
+(issue #3493). For the gap until it does, `selectKnownEngineStatus` (exported
+beside the store) derives the status the app shows: `unreachable` when a crash
+was pushed after the poll's last verdict and that verdict is `connected`,
+`engineStatus` itself otherwise. `engineCrashAheadOfPoll` carries the "after":
+`setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
+including the one `useHealthQuery` makes for each answered poll, an unchanged
+answer too (structural sharing would otherwise keep the sync effect from
+running). The crash alone cannot decide, because it stays until `ready`, which
+can trail the poll that already sees a restarted engine answer. The Dock's light and `useEngineServing` (the gate behind the
+running-services count, the Services drawer's rows, and the inbox and mock-server
+tabs' Running/Stopped state and Stop action, issue #3506) read it, as do the
+dirty-tab close guards in `tabs-store` and the change feed's open/close
+(`useChangeFeed`), so none of them says "connected" beside the Restart a crash
+put there. The health poll's own gating (`queries/health.ts`) and the store's
+internals read `engineStatus` directly: they are the poll's own verdict. The Dock reads `engineCrash`
+for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
 `engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
 both the tooltip and the button (Retry, not Restart).
@@ -825,9 +840,14 @@ flush of a pane that has already unregistered still reaches the Dock.
 its context id (`globals-editor`, `environment-<id>`, `collection-<id>`),
 `SettingsMain` under `settings`, the inbox reply under `inbox-reply`, and the
 context bar's variables section under `context-bar-variables`. A surface that
-drops its draft discards its id: `useDraftSaveContext` and `VariableTableEditor`
-when the id changes or they unmount (the draft is component state, so nothing
-holds it after that), `SettingsMain` when its staged edits are gone (reverted,
+drops its draft discards its id: `VariableTableEditor`, and `useDraftSaveContext`
+for an editor that passes no `stored` draft (the inbox reply), when the id changes
+or they unmount (the draft is component state, so nothing holds it after that),
+`useDraftSaveContext` for a stored draft (the collection editors, #3459) when
+that stored draft is dropped or its entity is gone, which an unmount alone does
+not do (see
+[`entity-draft-store.ts`](#entity-draft-storets---unsaved-collection-drafts-that-outlive-their-editor)),
+`SettingsMain` when its staged edits are gone (reverted,
 or flushed with every one of them invalid) and no write is in flight, and
 `useSaveManager` when the request's edit is gone without a save (reverted, or
 the request deleted elsewhere while dirty) and no write is in flight, which also
@@ -978,6 +998,27 @@ Every registered context is safe to flush here, unlike the quit flush's
 urgency: a context with nothing pending is a no-op, and one that has never
 failed loses nothing by saving now instead of on its own schedule.
 
+**A reconnect also names the services the outage stopped** (issue #3493).
+Inboxes, mock servers and OAuth issuers live in the engine process, so the
+engine that comes back runs none of them. `recordServicesBeforeOutage`
+(`lib/services-stopped-by-restart.ts`) reads `queryKeys.inbox.list()`,
+`queryKeys.mockIssuer.list()` and `queryKeys.mockServer.list()` out of the
+cache at the outage's first sign, `useHealthQuery`'s first failed poll or
+`useEngineRestart` before it asks for the restart, because the lists' own
+poll can reach the new engine before any reconnect is noticed. What counts as
+running is `runningServicesIn`, the definition `useRunningServices` shares.
+Both reconnect branches then call `reportServicesStoppedByOutage`, which takes
+the one pending snapshot (the second caller finds none), fetches the three
+lists fresh, and raises one warning toast for the services that were running
+and are absent or `running: false` now, compared by id: it names at most three
+and counts the rest ("and 2 more"). A list read that another refetch cancels
+(the reconnect's own invalidate, a mutation's) is read again, up to three
+times. A failed fetch raises nothing and puts the snapshot back, marked
+restored, for the other path's report of the same outage; the next outage's
+first record replaces it. A list change with the engine up (an MCP stop, a
+Stop in the drawer) records nothing on its own; only one the cached lists had
+not shown yet when an outage began is named as if the restart had done it.
+
 **`triggerSave` will not report a success the context did not have.** A
 registered context can report its own failure under its id and then *resolve*
 rather than reject (`SettingsMain`), so `runSave` cannot take a resolved promise
@@ -1075,38 +1116,76 @@ Between them every dirty editor in the app is in this registry, which is what
 `flushAll` walks on quit - a surface that is not registered is not merely
 unsaved on quit, it is invisible.
 
-The registry has a second reader: the collection tree refuses to *drag* a
-request whose open tab still has unsaved edits (`contexts.get("request-<id>")
-?.hasPendingChanges`, keyed the way `useSaveManager` registers it). Two writers
-on one row - a save carrying the row's contents while a reorder rewrites its
-owner and order - is the clobber family #237 belongs to, and the drag is the
-half that can simply wait.
+The collection tree does not read the registry: a request whose open tab has
+unsaved edits drags like any other row (#3447). A move rewrites the row's owner
+and order, and the builder's save is a merge-patch of the fields that changed,
+so neither writer carries what the other owns and neither needs to wait.
 
-#### `collection-auth-draft-store.ts` - A Collection's Live Auth-Tab Draft
+#### `entity-draft-store.ts` - Unsaved Collection Drafts That Outlive Their Editor
 
-A `Map<collectionId, CollectionAuth>` mirroring `AuthTab`'s in-progress draft
-outside the component (#1483).
+A `Map<entityKey, { draft, baseline }>` holding every `useEntityDraft` draft
+outside the component that edits it (#3459). `Shell.tsx` mounts only the tab on
+screen, so a look at a request unmounted the whole collection screen, and a
+draft in component state went with it: no prompt, the Dock idle, the old
+script still sent.
 
 **Key Methods:**
 
 ```typescript
-const draftAuth = useCollectionAuthDraft(collectionId); // undefined = no tab open, or clean
+entityDraftKey(collectionId, "elements")    // "<entityId>:<field>"; also "info", collectionAuthDraftKey(id) for "auth"
+put(key, { draft, baseline })               // useEntityDraft's setDraft / adopt, while the draft is dirty
+drop(key, only?)                            // reset, a draft edited back clean, a save that landed
+dropForEntities(entityIds)                  // closing a collection tab, deleting a collection subtree
+const draftAuth = useCollectionAuthDraft(collectionId); // the Auth tab's unsaved pick, mounted or not
 ```
 
-**Non-persisted.** `AuthTab`'s draft is component-local `useEntityDraft` state,
-invisible to anything that is not `AuthTab` - including the Inheritance Chain
-card it renders as a child, and the context bar's `CollectionAuthSection`,
-mounted in a different part of the tree and backed by `useCollectionsQuery`
-directly. Both used to describe the last-saved mode while the picker sat on an
-unsaved one. `AuthTab` writes its current draft here on every render and clears
-its entry on unmount; `withDraftAuth` (`modules/request-builder/utils/auth-resolution.ts`)
-substitutes it into an ancestor chain before either reader calls
-`resolveAuthSource`, so a dirty pick and its own inheritance chain agree.
-The entry is also published while the tab is clean, equal to the stored value,
-so a reader tells "unsaved" from "open" with `isUnsavedAuthDraft` (same module),
-which compares the way the tab's `isDirty` does; both readers append "(unsaved)"
-to what they describe only while that holds, because the engine composes from the
-stored row and a request below sends that until Save.
+**Clean is absence.** An entry exists only while its draft differs from the
+persisted value. `baseline` is the persisted value the draft diverged from, so
+a change that lands while the editor is unmounted still arrives on the remount
+as `externalValue`, a conflict, rather than replacing the draft; an entry whose
+draft the persisted value has caught up with is a save that landed and is
+dropped.
+
+**Who drops an entry.** The editor (`useEntityDraft`'s `reset`, an edit back
+to the persisted value, the persisted value catching up after a save, or
+`markSaved` for a save that lands once the editor has gone), the save context's
+detached save once it lands (`useDraftSaveContext`), and `tabs-store`:
+every close path (`closeTabsNow`, LRU eviction) drops the closed collection
+tabs' drafts, and `closeTabsForEntities` drops every id the delete names,
+descendants included, beside `clearEntity`. The delete path cannot rely on
+`markRemoved`, whose ids are request-scoped, and a draft left behind would
+send its save at the deleted row on quit.
+
+**A detached draft is read against the collections list.** Once its editor is
+gone, nothing on screen compares the draft with what is stored, so the
+detached context does (`useDraftSaveContext`'s `stored`, built by
+`useStoredCollectionDraft` in `CollectionDetail/collection-drafts.ts`, which
+also defines the value each editor drafts against). It watches the
+`collections.list` cache: a collection that leaves the list (an MCP
+`delete_collection`, a trash purge, another window) or a stored value that
+catches up with the draft drops the entry and discards the id, and a 404 from
+the detached save does the same after its failure toast. A stored value that
+moved away from the draft's `baseline` is a conflict (#1437): the detached
+save declines as `pending` rather than write over it unseen, so the quit asks
+and the remount shows "Changed elsewhere".
+
+**It replaced `collection-auth-draft-store.ts` (#1483).** The Inheritance Chain
+card and the context bar's `CollectionAuthSection` read the stored collection,
+which says nothing about a mode picked and not yet saved. `AuthTab` used to
+mirror its draft into a store of its own and clear it on unmount, so with the
+draft now outliving the tab the context bar would have described the saved
+auth while the tab stayed dirty. Both read the entity draft store through
+`useCollectionAuthDraft` instead; `withDraftAuth`
+(`modules/request-builder/utils/auth-resolution.ts`) substitutes the pick into
+an ancestor chain before either reader calls `resolveAuthSource`, so a dirty
+pick and its own inheritance chain agree. A reader tells "unsaved" from a
+just-saved entry with `isUnsavedAuthDraft` (same module), which compares the
+way the tab's `isDirty` does; both readers append "(unsaved)" only while that
+holds, because the engine composes from the stored row and a request below
+sends that until Save.
+
+**Non-persisted**, deliberately: a draft can carry a credential, and an unsaved
+edit does not outlive the app - the quit flush saves it or asks.
 
 #### `response-store.ts` - Response Cache
 
@@ -1354,6 +1433,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   systemNotifications: boolean   // opt-in for OS notifications while Vayu is in the background; default off
   notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
   loadTestCeilings: LoadTestCeilings
+  approvedEndpoints: string[]    // origins the user has contacted; the GraphQL schema loads on its own only for these
 }
 ```
 
@@ -1384,6 +1464,13 @@ default, and it is persisted through `partialize` like the rest of this store's
 top-level preferences.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
+
+`approvedEndpoints` is the list of origins (scheme, host, port) the user has chosen
+to contact: `useEngine().composeRequest` adds the composed URL's origin on every
+Send, Load test and History re-run, and a manual schema load adds the one it
+reached (`lib/graphql/approved-endpoints.ts`). The GraphQL body's automatic
+introspection reads it and nothing else does. It is a list of strings, not an
+object, so the rehydrate merge filters it to strings rather than completing it.
 
 **Persisted** to localStorage (via `zustand/persist`), `version: 1` with a
 pass-through `migrate`; workspace/session state (open tabs, layout, active
@@ -1598,7 +1685,7 @@ normalize, as `host-sleep-store` does.
 
 The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
 
-It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. **Every other writer - `addSteps`, `setPlan`, `setStreaming`, `streamLost` - names its run and is dropped for any other** (issue #3351), as `execution-events-store` does: the stream is replayable, so a step from a replaced run can still land on a socket that has not finished closing, and a release for one run must not lower a successor's flag. `ScenarioRunService` builds its step batcher per run for the same reason, the shape `useExecutionEvents` uses: `handleClose` flushes after it has let go of `activeRunId`, so the commit carries the run it was built for.
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. **Every other writer - `addSteps`, `setPlan`, `setStreaming`, `streamLost`, `runEnded` - names its run and is dropped for any other** (issue #3351), as `execution-events-store` does: the stream is replayable, so a step from a replaced run can still land on a socket that has not finished closing, and a release for one run must not lower a successor's flag. `ScenarioRunService` builds its step batcher per run for the same reason, the shape `useExecutionEvents` uses: `handleClose` flushes after it has let go of `activeRunId`, so the commit carries the run it was built for.
 
 **State:**
 ```typescript
@@ -1613,8 +1700,11 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
                              // iterations, stepsExpected. Null until it arrives
   isStreaming: boolean       // Between startRun and the stream closing or failing
   error: string | null       // A transport failure on the stream
+  endedAs: TerminalRunStatus | null  // How the run ended, once this window knows
 }
 ```
+
+`runEnded(runId, status)` records `endedAs` and lowers `isStreaming` in one write. `ScenarioRunService.handleClose` calls it with the engine's completion frame, or, for a stream that closed without one (#1415), with the stored report's status once the refetch below reads it as terminal; a run the report still calls running only lost its stream, and `endedAs` stays null. Its reader is `RunAnnouncer` (#3498), which says how the run ended; the run tab reads the stored record, not this field.
 
 `streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `useRunLiveness(run.id, run.status)`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
 
@@ -2207,7 +2297,10 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
   when the write is sent
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
-  also invalidates the trash list so the Trash view picks it up. It writes no
+  also invalidates the trash list so the Trash view picks it up, and the
+  running-mock list (`mockServer.list()`): the engine stops the mocks of the
+  subtree as part of the delete, whichever client sent it (#3449), so the app
+  sends no stop of its own and only refreshes what it shows. It writes no
   file binding: the spec-file and data-file bindings stay on the trashed row
   (#2765), the stores that mirror the list drop the entry with the row, and the
   tree's Undo - a restore - brings them back with nothing captured
@@ -2764,7 +2857,7 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request`, `environment` and `clientCertificate` too). A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `mockServer.list()`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request`, `environment` and `clientCertificate` too). A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `mockServer.list()` because the engine stops the mocks of a deleted collection and its descendants as part of the delete (#3449), so the Dock's and the Services drawer's running-mock list must refetch rather than show a mock that is gone; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
 | `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open, and it is also the prefix the request's examples list sits under, so `delete_request_example` reaches an open Examples panel through it. `trash.all` because `delete_request` and `delete_request_example` (a saved example goes to the Trash since #2971) declare this family alone and stamp a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `trash.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader. `trash.all` because `delete_environment` declares this family alone and, since #2970, stamps a row the drawer lists; `restore_trash_entry` and `purge_trash_entry` declare it beside `collection` and `request`, so a restored environment reappears in the Variables tree. An `update_environment` pays a refetch of the trash list while the drawer is open - the trade the `request` family takes |
@@ -2914,7 +3007,12 @@ The stream is the inbox stream's shape: every drop is closed and reconnected on
 the service's own backoff (`CHANGE_FEED_RETRY_BASE_MS` doubling to
 `CHANGE_FEED_RETRY_MAX_MS`, 15s, which is the `Retry-After` the engine sends
 with `503 change_feed_full`; an `EventSource` cannot read the status or the
-header), resuming by `?lastEventId=` from the last id seen. It never gives up,
+header), resuming by `?lastEventId=` from the last id seen. Each connection, a
+reconnect included, first asks `POST /changes/subscriptions` for a single-use id
+and opens `GET /changes?subscription=<id>`: the engine takes a stream slot only
+on such an id, so a web page cannot hold every slot and leave the app's stream
+refused; a failed request for the id is retried on the same backoff, and a
+`stop()` while one is in flight drops it on arrival. It never gives up,
 since nothing renders a stopped feed; the engine-status gate is what stops it
 asking a downed engine.
 
@@ -3379,10 +3477,11 @@ const {
   reset: () => void                        // Discard the draft, adopting the persisted value
   adopt: Dispatch<SetStateAction<T>>       // setDraft for taking a persisted value; landing on it from a dirty draft is a discard (#2033)
   consumeDiscard: () => boolean            // Was the last clean edge a reset or an adopt? Clears the answer (#1931)
+  markSaved: (sent: T) => void             // Call from the editor's save once it lands; drops the stored draft if the editor has gone meanwhile (#3459)
   baseline: T                              // The value the draft last agreed with the server on
   externalValue: T | null                  // A persisted change pending while the draft is dirty
 } = useEntityDraft<T>({
-  entityKey: string                        // Identity of the thing being edited
+  entityKey: string                        // Identity of the thing being edited, and its entity-draft-store key
   value: T                                 // The persisted value
   mutation: { reset: () => void }          // The save mutation this editor reports through
 });
@@ -3390,32 +3489,38 @@ const {
 
 **Behaviour:**
 - **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
-- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose. Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too): `adopt` leaves `baseline` and `externalValue` alone, so the other key's conflict survives, and it marks a discard only when the result equals the persisted value and the draft differed from it before - with the other field still dirty no clean edge follows to consume the mark, and the later real save would read as a discard.
+- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose. Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too): while the draft stays dirty `adopt` leaves `baseline` and `externalValue` alone, so the other key's conflict survives, and it marks a discard only when the result equals the persisted value and the draft differed from it before - with the other field still dirty no clean edge follows to consume the mark, and the later real save would read as a discard.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
-- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ElementsTab` passes `${collection.id}:elements`, one entity key for the whole element list under one collection id (the retired `ScriptTab` passed `${collection.id}:${fieldKey}`, since pre- and post-request scripts were two separate things to edit).
+- **`entityKey` is a switch, not an edit:** a change shows that entity's own draft (its stored one, or its persisted value) *and* calls `mutation.reset()`. The entity switched away from keeps its draft in the store, so going back to it restores the edit (#3459). These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. The keys come from `entityDraftKey`: `<collectionId>:elements` for the whole element list, `:info`, and `:auth` (`collectionAuthDraftKey`, which the context bar reads too).
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
 
 **Usage:**
 ```typescript
 const { draft, setDraft, isDirty, reset } = useEntityDraft({
-  entityKey: collection.id,
+  entityKey: collectionAuthDraftKey(collection.id),
   value: collection.auth,
   mutation: updateCollection,
 });
 ```
 
-**The draft lives in component state, so its panel must not unmount.** Radix
-unmounts an inactive `TabsContent`; `CollectionDetail` therefore force-mounts the
-four draft-holding tabs (Info, Auth, Pre-request, Post-request) from their first
-visit onwards, so an intra-collection tab switch stops discarding the draft.
-This is the same call, for the same reason, as the request builder's body drafts
-living in `RequestBuilderProvider` rather than in `BodyPanel` (see
-`request-builder/utils/body-drafts.ts`). The Variables tab is deliberately not
+**The draft lives in `entity-draft-store`, not in the component (#3459).**
+`Shell.tsx` mounts only the tab on screen, so clicking a request unmounted the
+whole collection screen and, with the draft in component state, threw an
+unsaved script away without a prompt. The hook reads the draft from the store
+by `entityKey` (falling back to `value` when there is none) and writes it there
+on `setDraft`, `adopt`, `reset` and `markSaved`, so a remount picks up the edit
+where it was, dirty, with `baseline` intact: a change that landed meanwhile
+arrives as `externalValue`. `useDraftSaveContext`'s `draftKey` keeps the save reachable
+while the editor is gone; see
+[`entity-draft-store.ts`](#entity-draft-storets---unsaved-collection-drafts-that-outlive-their-editor)
+for who drops an entry.
+
+`CollectionDetail` still force-mounts the three draft-holding tabs (Info, Auth,
+Elements) from their first visit onwards. The draft no longer needs it; what
+does is what the store does not hold, the editors' own undo history and scroll
+position, across a look at a sibling. The Variables tab is deliberately not
 force-mounted: it autosaves and claims the store's active context on mount, so
 keeping it alive behind another tab would point Ctrl/Cmd+S at the wrong editor.
-
-A *collection* switch still reseeds and discards, deliberately - it is the
-hook's documented behaviour above, and pinned by `useEntityDraft.test.ts`.
 
 ### `useDraftSaveContext()` - Registering a Manual Draft
 
@@ -3430,6 +3535,8 @@ useDraftSaveContext({
   isDirty,                                 // From useEntityDraft
   isActive: active,                        // Is this the tab on screen?
   save: persist,                           // Rejecting is how failure is reported
+  consumeDiscard,                          // From useEntityDraft
+  draftKey,                                // The entityKey: the context outlives the editor
 });
 ```
 
@@ -3462,9 +3569,26 @@ useDraftSaveContext({
   `isDirty` turns true and `reportSaved(id)` the moment it turns false again,
   mirroring `useSaveManager`'s autosave editors. Edge-triggered, and reset
   rather than fired across an `id` change, so switching the entity a mounted
-  editor describes never reports the previous entity's save as this one's. The
-  draft goes with its id, so the hook discards the id's report when the id
-  changes or the editor unmounts.
+  editor describes never reports the previous entity's save as this one's.
+- **A stored draft keeps its context after the editor goes (#3459).** On an
+  unmount or an id switch, an editor that passed a `draftKey` and was dirty
+  leaves its context registered (`detach`): still `hasPendingChanges`, so
+  `isTabDirty` holds the tab and the quit flush and Ctrl/Cmd+S's fallback still
+  reach it, and its id stays reported, so the Dock keeps "Unsaved changes". Its
+  save is the editor's last `save`, which closed over the draft and over a
+  mutation observer that still works unmounted. When that save lands the
+  context and the stored draft both go; when the stored draft is dropped
+  another way (the tab closed, the collection deleted) the context goes and the
+  id is discarded. That includes a save the editor started on screen and that
+  landed after it went: the editor's save calls `useEntityDraft`'s
+  `markSaved`, which drops the entry only when no editor shows it (one that does
+  sees the persisted value catch up instead, and dropping first would paint the
+  old value for a frame, since the query cache notifies on a later tick). A
+  remount under the same id takes the context back. Without
+  a `draftKey` (the inbox reply, whose draft is component state), or for a
+  clean draft or an id `markRemoved` names, the goodbye discards the id's
+  report as before. On a remount over a dirty stored draft the rising edge
+  reports it pending again.
 - **A discard is not a save (#1931, #2033).** The clean edge is a save landing,
   a `useEntityDraft` `reset` (the Reset button, an external change's "Take
   theirs") or an `adopt` that lands on the persisted value (`InfoTab`'s

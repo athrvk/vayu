@@ -371,7 +371,7 @@ TEST (FileRule, APathIsSentFromUnderAnAllowedFolderOrAsAPickedFile) {
     const auto refused = unsendable_file_ref (ref (outside), "Body file", policy);
     ASSERT_HAS_VALUE (refused);
     EXPECT_NE (refused->find (UNTRUSTED), std::string::npos) << *refused;
-    EXPECT_NE (refused->find ("Settings > Files"), std::string::npos) << *refused;
+    EXPECT_NE (refused->find ("Settings › Files"), std::string::npos) << *refused;
     EXPECT_NE (refused->find (outside), std::string::npos) << *refused;
 
     const FileAccessPolicy picked (

@@ -22,9 +22,16 @@
  * `[data-tree-menu]` (`useRovingTreeFocus`). Every menu-only row action was
  * mouse-only for as long as that went unnoticed. The `detail === 0` test below
  * is what separates that click from a real one; see the handler.
+ *
+ * **The trigger shows its label on focus, but not on the focus the menu hands
+ * back** (#3498). It is icon-only, so it takes the app's `Tooltip` like every
+ * other icon button. A menu closing returns focus to its trigger, and a tooltip
+ * opening on that focus would cover the row the user just acted on, every time;
+ * so the close marks the hand-back and the trigger's focus handler declines to
+ * open the tooltip for it.
  */
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useRef, useState, type FocusEvent } from "react";
 import { MoreVertical } from "lucide-react";
 import {
 	Button,
@@ -33,6 +40,9 @@ import {
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAfterMenuClose } from "./useAfterMenuClose";
@@ -77,37 +87,55 @@ export function RowActionsMenu({
 }: RowActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const trigger = useRef<HTMLButtonElement>(null);
+	// True only while the closing menu hands focus back to the trigger. Radix
+	// focuses it synchronously inside the close's `onCloseAutoFocus`, so the
+	// flag is cleared on a microtask: a close that sends focus elsewhere (a
+	// field, a tree row, a click outside) leaves no stale flag behind.
+	const focusReturning = useRef(false);
 	const { onSelectOf, runDeferred } = useAfterMenuClose();
 
 	if (actions.length === 0) return null;
 
+	// Runs before Radix's own focus handler, which opens the tooltip only when
+	// the event is not default-prevented.
+	const declineReturnedFocus = (e: FocusEvent) => {
+		if (focusReturning.current) e.preventDefault();
+	};
+
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
-			<DropdownMenuTrigger asChild>
-				<Button
-					ref={trigger}
-					variant="rowAction"
-					size="icon"
-					tabIndex={tabIndex}
-					data-tree-menu
-					aria-label={label}
-					className={cn("size-target shrink-0", className)}
-					onClick={(e) => {
-						e.stopPropagation();
-						// A click with no pointer behind it - `.click()` from the
-						// tree's key handler, or an assistive-tech activation -
-						// reports `detail === 0`. A mouse click reports 1, and Radix
-						// has already toggled on its pointerdown by the time it
-						// arrives, so opening again here would close it on the way
-						// down. Keyboard focus on the trigger itself is Radix's
-						// keydown path, which preventDefaults and so never reaches
-						// this handler at all.
-						if (e.detail === 0) setOpen(true);
-					}}
-				>
-					<MoreVertical className="size-icon-sm" />
-				</Button>
-			</DropdownMenuTrigger>
+			<Tooltip>
+				<TooltipTrigger asChild onFocus={declineReturnedFocus}>
+					<DropdownMenuTrigger asChild>
+						<Button
+							ref={trigger}
+							variant="rowAction"
+							size="icon"
+							tabIndex={tabIndex}
+							data-tree-menu
+							aria-label={label}
+							className={cn("size-target shrink-0", className)}
+							onClick={(e) => {
+								e.stopPropagation();
+								// A click with no pointer behind it - `.click()` from the
+								// tree's key handler, or an assistive-tech activation -
+								// reports `detail === 0`. A mouse click reports 1, and Radix
+								// has already toggled on its pointerdown by the time it
+								// arrives, so opening again here would close it on the way
+								// down. Keyboard focus on the trigger itself is Radix's
+								// keydown path, which preventDefaults and so never reaches
+								// this handler at all.
+								if (e.detail === 0) setOpen(true);
+							}}
+						>
+							<MoreVertical className="size-icon-sm" />
+						</Button>
+					</DropdownMenuTrigger>
+				</TooltipTrigger>
+				{/* The verb alone: the name carries the row ("More actions for Get
+				    users"), as `TooltipIconButton`'s `tooltip` does for row buttons. */}
+				<TooltipContent>More actions</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent
 				align="end"
 				// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the
@@ -118,6 +146,10 @@ export function RowActionsMenu({
 				// floor with a smaller, density-scaled one.
 				className="min-w-[10rem]"
 				onCloseAutoFocus={(e) => {
+					focusReturning.current = true;
+					queueMicrotask(() => {
+						focusReturning.current = false;
+					});
 					// A field the action opens takes the focus; the row must not.
 					const handedToField = runDeferred(e);
 					// Radix hands focus back to the trigger. In a roving-tabindex

@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Edit2, Copy, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
+import type { QueryClient } from "@tanstack/react-query";
 import { useTabsStore, useSaveStore, useToastStore } from "@/stores";
 import { isFailedOutcome } from "@/stores/save-store";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
@@ -19,12 +20,14 @@ import {
 	useDeleteRequestMutation,
 	useUpdateRequestMutation,
 	useMockServersQuery,
-	useStopMockServerMutation,
 	requestDetailOptions,
 } from "@/queries";
+import { apiService } from "@/services/api";
+import { queryKeys } from "@/queries/keys";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
 import { collectionEntity } from "./tree-rows";
 import type { TreeEntity } from "./drop-position";
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { useCopy } from "@/hooks/useCopy";
 import { useStableCallback } from "@/hooks/useStableCallback";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
@@ -59,6 +62,54 @@ async function flushOpenEditor(requestId: string): Promise<boolean> {
 		throw new Error("the open editor's latest edit is not saved yet");
 	}
 	return true;
+}
+
+/**
+ * Copy a request's saved examples onto its duplicate, in the source's order,
+ * and point a fixed mock example at the copy's own twin (#3450).
+ *
+ * Examples are a nested resource, so the create of the request copies none of
+ * them. The list is read fresh: the Examples tab may be holding a stale one.
+ * The writes are sequential because the engine appends, so the order they
+ * arrive in is the order the copy keeps. Each copy is the user's own, so it is
+ * written with origin `user`: an `import` row is one the next spec sync may
+ * replace.
+ *
+ * Throws on the first failure, after doing as much as it could. The caller
+ * keeps the copy - a request without all its examples is still a request.
+ */
+async function copyExamples(
+	queryClient: QueryClient,
+	source: Request,
+	copyId: string,
+	repointFixedExample: (copyId: string, exampleId: string) => Promise<unknown>
+): Promise<void> {
+	try {
+		const examples = await queryClient.fetchQuery({
+			queryKey: queryKeys.requests.examples(source.id),
+			queryFn: () => apiService.listRequestExamples(source.id),
+			staleTime: 0,
+		});
+		const twins = new Map<string, string>();
+		for (const example of examples) {
+			const twin = await apiService.createRequestExample(copyId, {
+				name: example.name,
+				status: example.status,
+				headers: example.headers,
+				body: example.body,
+				contentType: example.contentType,
+				bodyTruncated: example.bodyTruncated ?? false,
+				origin: "user",
+			});
+			twins.set(example.id, twin.id);
+		}
+		const fixedTwin = source.mockExampleId && twins.get(source.mockExampleId);
+		if (source.mockResponseMode === "fixed" && fixedTwin) {
+			await repointFixedExample(copyId, fixedTwin);
+		}
+	} finally {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.examples(copyId) });
+	}
 }
 
 export interface TreeCrudOptions {
@@ -118,11 +169,12 @@ export interface DeleteConfirmTarget {
 	name: string;
 	/**
 	 * Mocks running for this collection or any descendant sub-collection, only
-	 * ever populated for `type: "collection"` - stopping them is a one-way
-	 * side effect of the delete, not something Undo brings back (a running
-	 * mock is engine-process state, not a database row).
+	 * ever populated for `type: "collection"`, so the dialog can say they will
+	 * be stopped. The engine stops them as part of the delete, whichever client
+	 * sent it (#3449), and Undo does not start them again (a running mock is
+	 * engine-process state, not a database row).
 	 */
-	runningMocks?: { mockId: string; collectionName: string; port: number }[];
+	runningMocks?: { collectionName: string; port: number }[];
 }
 
 export interface TreeCrud {
@@ -171,7 +223,6 @@ export function useTreeCrud({
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
-	const stopMockServerMutation = useStopMockServerMutation();
 	const { data: mockServers = [] } = useMockServersQuery();
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
@@ -192,16 +243,23 @@ export function useTreeCrud({
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 	const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
 
+	const onItemOpened = useDrawerItemOpened();
+
 	// Memoised because the callbacks below list them as dependencies: redefined
 	// each render, they would rebuild every handler that opens a tab.
 	const navigateToRequest = useCallback(
-		(_collectionId: string, requestId: string) =>
-			openTab({ type: "request", entityId: requestId }),
-		[openTab]
+		(_collectionId: string, requestId: string) => {
+			openTab({ type: "request", entityId: requestId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 	const navigateToCollection = useCallback(
-		(collectionId: string) => openTab({ type: "collection", entityId: collectionId }),
-		[openTab]
+		(collectionId: string) => {
+			openTab({ type: "collection", entityId: collectionId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 
 	/**
@@ -413,12 +471,12 @@ export function useTreeCrud({
 	});
 
 	/**
-	 * Duplicate a request, the whole record. Collections deliberately have no
-	 * equivalent: copying one means recursing through nested folders and
-	 * issuing a create per request, which is its own feature. The previous
-	 * collection "Duplicate" only created an empty folder named "(Copy)",
-	 * which read as a working clone and was not one, so it was removed rather
-	 * than left misleading.
+	 * Duplicate a request: the whole record, then its saved examples (#3450).
+	 * Collections deliberately have no equivalent: copying one means recursing
+	 * through nested folders and issuing a create per request, which is its own
+	 * feature. The previous collection "Duplicate" only created an empty folder
+	 * named "(Copy)", which read as a working clone and was not one, so it was
+	 * removed rather than left misleading.
 	 *
 	 * The copy is made from `GET /requests/:id`, never from the tree's row: that
 	 * row is a summary (#2546), and the detail route answers every column whole
@@ -428,6 +486,12 @@ export function useTreeCrud({
 	 * The open editor's pending save lands first (#3426), and the detail is then
 	 * read past its `staleTime: Infinity` cache: the copy is of what the engine
 	 * now holds, never of the record as it stood before the edit.
+	 *
+	 * The examples follow the create (`copyExamples`). A copy created in `fixed`
+	 * mode would name an example of the source, which the engine does not check,
+	 * so it is created in `first` mode and switched to `fixed` only once its own
+	 * twin of that example exists. A failure while copying the examples keeps the
+	 * copy and opens it, and says what is missing.
 	 */
 	const handleDuplicateRequest = useStableCallback(async (row: RequestSummary) => {
 		if (createRequestMutation.isPending) return;
@@ -442,17 +506,36 @@ export function useTreeCrud({
 			// written, which is how the previous version silently reset
 			// verifySSL, httpVersion and specOperation on every copy. `id`,
 			// `createdAt` and `updatedAt` are the only fields a copy must not
-			// carry; `order` is kept deliberately - it lands the copy directly
+			// carry, and `mockExampleId` names the source's example, never the
+			// copy's; `order` is kept deliberately - it lands the copy directly
 			// *after* the source, the tie falling to `createdAt` (see
 			// `compareTreeOrder`, pinned to the engine's SQL).
-			const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
+			const {
+				id: _id,
+				createdAt: _createdAt,
+				updatedAt: _updatedAt,
+				mockExampleId: _mockExampleId,
+				...rest
+			} = request;
 			const copy = await createRequestMutation.mutateAsync({
 				...rest,
+				...(rest.mockResponseMode === "fixed" && { mockResponseMode: "first" as const }),
 				// The derived flag is stripped from a body the row has; a row
 				// without one copies none rather than throwing here.
 				...(rest.body ? { body: withoutBodyFileTrust(rest.body) } : {}),
 				name: `${request.name} (Copy)`,
 			});
+			try {
+				await copyExamples(queryClient, request, copy.id, (copyId, exampleId) =>
+					updateRequestMutation.mutateAsync({
+						id: copyId,
+						mockResponseMode: "fixed",
+						mockExampleId: exampleId,
+					})
+				);
+			} catch (error) {
+				reportFailure(error, "Duplicated the request, but couldn't copy all its examples");
+			}
 			openTab({ type: "request", entityId: copy.id });
 		} catch (error) {
 			reportFailure(error, "Couldn't duplicate the request");
@@ -472,7 +555,6 @@ export function useTreeCrud({
 		const runningMocks = mockServers
 			.filter((mock) => affected.has(mock.collectionId))
 			.map((mock) => ({
-				mockId: mock.mockId,
 				collectionName: mock.collectionName,
 				port: mock.port,
 			}));
@@ -529,11 +611,7 @@ export function useTreeCrud({
 	// the time the undo toast is raised the delete has already invalidated the
 	// collections cache, so the row it would have been read from is gone.
 	const handleDeleteCollection = useCallback(
-		async (
-			collectionId: string,
-			name: string,
-			runningMocks?: DeleteConfirmTarget["runningMocks"]
-		) => {
+		async (collectionId: string, name: string) => {
 			setDeletingCollectionId(collectionId);
 			// Gather the collection, its descendant folders, and every request they
 			// contain: deleting a collection cascades, so all their tabs go stale.
@@ -565,26 +643,6 @@ export function useTreeCrud({
 				);
 				setDeletingCollectionId(null);
 			}
-
-			// Best-effort, after the collection is already gone: the mock is
-			// engine-process state, not a database row, so it does not come back
-			// on Undo and a failure to stop it here must not fail (or re-run) the
-			// delete that already succeeded. Parallel, not sequential - one mock
-			// refusing to stop must not hold up the others.
-			if (runningMocks && runningMocks.length > 0) {
-				const results = await Promise.allSettled(
-					runningMocks.map((mock) => stopMockServerMutation.mutateAsync(mock.mockId))
-				);
-				const failedCount = results.filter((r) => r.status === "rejected").length;
-				if (failedCount > 0) {
-					showToast(
-						failedCount === 1
-							? "Couldn't stop a mock server for the deleted collection."
-							: `Couldn't stop ${failedCount} mock servers for the deleted collection.`,
-						"error"
-					);
-				}
-			}
 		},
 		[
 			deleteCollectionMutation,
@@ -595,8 +653,6 @@ export function useTreeCrud({
 			captureClientState,
 			offerUndo,
 			reportFailure,
-			stopMockServerMutation,
-			showToast,
 		]
 	);
 
@@ -640,11 +696,7 @@ export function useTreeCrud({
 		// the next render on; this covers the frame before that.
 		if (deletingCollectionId || deletingRequestId) return;
 		if (deleteConfirm.type === "collection") {
-			void handleDeleteCollection(
-				deleteConfirm.id,
-				deleteConfirm.name,
-				deleteConfirm.runningMocks
-			);
+			void handleDeleteCollection(deleteConfirm.id, deleteConfirm.name);
 		} else {
 			void handleDeleteRequest(deleteConfirm.id, deleteConfirm.name);
 		}

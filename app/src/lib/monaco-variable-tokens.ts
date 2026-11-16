@@ -20,10 +20,11 @@
  * in `components/shared/EditorVariableTokens/`, which is where React is.
  *
  * **The states, and their classes, are `EditableVariable`'s.** The overlay
- * strip paints `text-destructive-text` / `text-muted-foreground` / `text-primary`
- * through Tailwind; Monaco's `inlineClassName` needs a plain global class, so
- * `index.css` declares one per state built from the same tokens. A reader who
- * sees the same `{{name}}` in a URL and in the body beneath it sees one colour.
+ * strip paints `text-destructive-text` (wavy-underlined) /
+ * `text-muted-foreground` / `text-primary-text` through Tailwind; Monaco's
+ * `inlineClassName` needs a plain global class, so `index.css` declares one
+ * per state built from the same tokens. A reader who sees the same `{{name}}`
+ * in a URL and in the body beneath it sees one paint.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";

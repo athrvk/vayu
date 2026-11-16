@@ -29,13 +29,27 @@ import { cn } from "@/lib/utils";
 interface TruncatedTextProps {
 	/** The full text. Shown inline, and as the tooltip when it does not fit. */
 	children: string;
+	/**
+	 * What the tooltip says instead, for a piece of a longer label: a name or an
+	 * ancestor prefix whose tooltip is the whole path. Same rule, shown only
+	 * while this element is clipped.
+	 */
+	title?: string;
 	className?: string;
+	/** For an `aria-labelledby` that names a row by this text. */
+	id?: string;
 	/** Element to render as. Defaults to `span`. */
 	as?: "span" | "div" | "h1" | "h2" | "h3" | "p";
 }
 
-export function TruncatedText({ children, className, as: Tag = "span" }: TruncatedTextProps) {
-	const ref = useOverflowTitle<HTMLElement>(children);
+export function TruncatedText({
+	children,
+	title,
+	className,
+	id,
+	as: Tag = "span",
+}: TruncatedTextProps) {
+	const ref = useOverflowTitle<HTMLElement>(title ?? children);
 
 	return (
 		// `truncate` is not optional - `scrollWidth > clientWidth` only means
@@ -45,7 +59,7 @@ export function TruncatedText({ children, className, as: Tag = "span" }: Truncat
 		// under a non-flex parent (the Trash row) ran past its column, clipped
 		// mid-word by the row with no ellipsis and no tooltip. A flex or grid
 		// child is blockified anyway, so this changes nothing there.
-		<Tag ref={ref as React.Ref<never>} className={cn("block truncate", className)}>
+		<Tag ref={ref as React.Ref<never>} id={id} className={cn("block truncate", className)}>
 			{children}
 		</Tag>
 	);

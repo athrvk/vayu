@@ -6,14 +6,16 @@
  */
 
 /**
- * Every window Vayu opens has the spellchecker off (issue #1355).
+ * Vayu never spellchecks and never fetches a dictionary (issue #1355).
  *
  * Electron enables Chromium's spellchecker by default, so every editable field
  * in the request builder - URL bar, header keys and values, query parameters,
  * variable values - drew red underlines under things that are not prose, while
  * Monaco (which owns its own text area) did not. On Windows and Linux the
- * checker also fetches Hunspell dictionaries from a Google CDN the first time
- * it runs, which is a network request the app never disclosed.
+ * checker also fetches Hunspell dictionaries from a Google CDN, which is a
+ * network request the app never disclosed. The window option only silences the
+ * checker; the fetch belongs to each session, so `spellcheck.ts` empties every
+ * session's language list as it is created.
  *
  * The guard is written over *every* `new BrowserWindow` in `app/electron`
  * rather than over the main window's options alone, because the app has two -
@@ -28,10 +30,12 @@
  * default is still on, so none may come back.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import { readFileSync, globSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dropSpellCheckerLanguages, suppressDictionaryDownloads } from "./spellcheck.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -84,14 +88,50 @@ describe("every window the app opens", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	it("keeps the setting on the window rather than a session override", () => {
+	it("empties the languages rather than redirecting the download", () => {
 		// `setSpellCheckerDictionaryDownloadURL` would keep the checker on and
 		// only move the download; the app has no field where a spellchecked word
 		// helps, so there is nothing to redirect.
 		const main = readFileSync(join(here, "main.ts"), "utf8");
 
 		expect(main).not.toContain("setSpellCheckerDictionaryDownloadURL");
-		expect(main).not.toContain("setSpellCheckerLanguages");
+	});
+});
+
+function fakeSession() {
+	return { setSpellCheckerLanguages: vi.fn() };
+}
+
+describe("dropSpellCheckerLanguages", () => {
+	it("gives the session an empty language list", () => {
+		const session = fakeSession();
+
+		dropSpellCheckerLanguages(session);
+
+		expect(session.setSpellCheckerLanguages).toHaveBeenCalledExactlyOnceWith([]);
+	});
+});
+
+describe("suppressDictionaryDownloads", () => {
+	it("empties the language list of every session the app creates", () => {
+		const app = new EventEmitter();
+		const defaultSession = fakeSession();
+		const oauthPartition = fakeSession();
+
+		suppressDictionaryDownloads(app as never);
+		app.emit("session-created", defaultSession);
+		app.emit("session-created", oauthPartition);
+
+		expect(defaultSession.setSpellCheckerLanguages).toHaveBeenCalledWith([]);
+		expect(oauthPartition.setSpellCheckerLanguages).toHaveBeenCalledWith([]);
+	});
+
+	it("registers on session-created and does nothing until a session appears", () => {
+		const app = { on: vi.fn() };
+
+		suppressDictionaryDownloads(app);
+
+		expect(app.on).toHaveBeenCalledExactlyOnceWith("session-created", expect.any(Function));
 	});
 });
 

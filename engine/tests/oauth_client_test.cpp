@@ -926,6 +926,46 @@ TEST_F (OAuthClientTest, ACancelledFollowerStopsWithoutWaitingForItsLeader) {
     EXPECT_EQ (access_token_of (finished (leader, "the leading call")), "AT-REFRESHED-1");
 }
 
+std::string error_message_of (const TokenResult& result) {
+    const auto* err = std::get_if<oauth::TokenError> (&result);
+    return err == nullptr ? "token" : err->message;
+}
+
+// A stop flag already set means no token request is started: libcurl reads it
+// only at its first progress tick, which a fast endpoint answers before. The
+// zero-hit assertions hold on any runner; whether the endpoint is reached
+// when the check is missing depends on that race, so the out-of-range port
+// below pins the check itself: libcurl rejects the URL before any tick, and
+// only the pre-send check reports the cancel.
+TEST_F (OAuthClientTest, ATokenRequestIsNotStartedOnceTheServerIsStopping) {
+    MockTokenServer idp;
+    const std::atomic<bool> stopping{ true };
+    const auto config = cc_config (idp);
+
+    const auto fetched = oauth::acquire_token (
+    *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS, nullptr, &stopping);
+
+    EXPECT_EQ (error_code_of (fetched), "oauth2_network_error");
+    EXPECT_EQ (error_message_of (fetched), "Token request failed: Request cancelled");
+    EXPECT_FALSE (db_->get_oauth_token (oauth::cache_key (config)).has_value ());
+
+    const auto key = oauth::cache_key (config);
+    db_->save_oauth_token (seeded_row (config, 7'200'000));
+    const auto refreshed = oauth::acquire_token (
+    *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS, nullptr, &stopping);
+
+    EXPECT_EQ (error_code_of (refreshed), "oauth2_network_error");
+    EXPECT_TRUE (db_->get_oauth_token (key).has_value ())
+    << "a cancelled refresh leaves the row for the next send";
+    EXPECT_EQ (idp.hits (), 0);
+
+    json unreachable              = config;
+    unreachable["accessTokenUrl"] = "http://127.0.0.1:99999/token";
+    const auto refused = oauth::acquire_token (*db_, unreachable, false,
+    std::nullopt, TOKEN_TIMEOUT_MS, nullptr, &stopping);
+    EXPECT_EQ (error_message_of (refused), "Token request failed: Request cancelled");
+}
+
 // The leader's cancel is the leader's: the call waiting on it makes its own
 // refresh from the row the leader left, rather than reporting the cancel.
 TEST_F (OAuthClientTest, ALeadersErrorIsNotItsFollowersError) {

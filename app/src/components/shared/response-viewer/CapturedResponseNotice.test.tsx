@@ -15,8 +15,9 @@
  * paths that exist because a body was too big to keep.
  *
  * This component used to format them with a private copy of `formatBytes` that
- * stopped at MB, so a 2 GB response read "2048.0 MB". The copy was the defect;
- * these assert the shared formatter's GB branch is the one in use.
+ * stopped at MB, so a 2 GB response read "2048.0 MB"; the response viewer's own
+ * `formatSize` had the same cap until both became `lib/format-number`'s
+ * `formatBytes` (#3497). These assert its GB branch is the one in use.
  */
 
 import { describe, it, expect } from "vitest";
@@ -50,7 +51,7 @@ describe("sizes past a gigabyte", () => {
 	});
 });
 
-describe("the smaller units the private copy did get right", () => {
+describe("the smaller units", () => {
 	it("still reads bytes and MB as before", () => {
 		expect(noticeFor({ headers: {}, bodyBytes: 34, bodyDropped: true })).toContain("34 B");
 		expect(noticeFor({ headers: {}, bodyBytes: 5 * 1024 * 1024, bodyDropped: true })).toContain(

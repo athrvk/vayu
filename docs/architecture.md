@@ -136,7 +136,12 @@ reaches the UI by exactly one path.
 ```
 Manager                              Engine
    │                                    │
-   │  GET /changes[?lastEventId=N]      │
+   │  POST /changes/subscriptions       │
+   ├───────────────────────────────────►│
+   │  {subscription}                    │
+   │◄───────────────────────────────────┤
+   │  GET /changes?subscription=ID      │
+   │      [&lastEventId=N]              │
    ├───────────────────────────────────►│
    │                                    │
    │  event: ready (or reset)           │
@@ -148,8 +153,9 @@ Manager                              Engine
    │                          (repeated) │
 ```
 
-A dropped stream reconnects from the last id it saw and the engine replays what
-was missed; a resume the engine can no longer cover (too far behind, or an id
+A stream opens on a single-use subscription id, which the Manager asks for with a
+`POST` before every connection, a reconnect included. A dropped stream reconnects
+from the last id it saw and the engine replays what was missed; a resume the engine can no longer cover (too far behind, or an id
 from before an engine restart) opens with `reset` instead, and the Manager
 refetches everything the feed describes. The stream is open only while the
 health poll says the engine is connected. The renderer side is described in
@@ -512,15 +518,28 @@ which case the app picks a fallback (below).
   keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
   how the engine left (signal, exit code or error, with the last lines it
   printed) and offers **Restart**, which a crash never did. The lifecycle is
-  facts only: the light itself is still the renderer's `/health` poll, so the
-  Restart button can appear a poll before the light turns "Engine disconnected".
+  facts only: the `/health` poll is still the one writer of the renderer's
+  `engineStatus`, and a `crashed` push asks it to look again (it invalidates
+  the health query alone) rather than waiting out its 30 s healthy interval
+  (issue #3493). The Dock, the Services drawer, the inbox and
+  mock-server tabs, the dirty-tab close guards and the change feed read
+  `selectKnownEngineStatus`, which lets a crash outrank a `connected` verdict
+  the poll gave before the push, so the light reads "Engine disconnected"
+  beside Restart and the drawer shows its services stopped, never "Engine
+  connected" and green dots on listeners the crash took with it. The poll's
+  next verdict ends the override, whatever it says: the crash itself stays
+  recorded until `ready`, which can trail the poll that sees a restarted engine
+  answer, and that engine is connected. A crash pushed inside a
+  restart's start window refetches like any poll there and reads "Starting…".
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
   fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
   held port with Retry), which takes precedence over a crash. One restart runs
-  at a time across the Dock button and the Settings banner.
+  at a time across the Dock button and the Settings banner. The engine that
+  comes back is running none of the services the old one held, so the
+  reconnect names them (local services, below).
 - **A dirty editor flushes itself the moment the engine comes back**, on an
   automatic reconnect (`useHealthQuery`) or a manual restart
   (`useEngineRestart`) alike - both invalidate every query and then flush
@@ -573,6 +592,15 @@ which case the app picks a fallback (below).
   an answer nobody is there to give (issue #1363). The flush-failure dialog above
   is no exception: a signal quit that cannot save its edits would stall on it
   until `install.sh` killed the app and orphaned the engine (issue #1908).
+  An engine restart stops them too, whether a crash ended the old engine or
+  the user pressed Restart, and neither asks first. What it does instead is
+  say so afterwards: the renderer keeps what the cached Services lists said
+  was running when the outage began, and once the health poll or the Restart
+  sees the engine back it compares that by id with the engine's fresh lists
+  and raises one toast naming what is no longer running (three by name, then a
+  count), with a View services action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
+  reconnect paths report, and one snapshot is pending per outage, so the user
+  hears it once.
 - **A taken port is a loud failure, not a silent one.** The engine binds its
   port (`--port`, default 9876) before it serves, so anything already holding
   it makes it print `Could not bind 127.0.0.1:<port> - ...` to stderr and exit
@@ -772,8 +800,11 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   with nothing else. A web page in the user's browser can neither read the
   engine nor change it: a scriptless `GET` (an `<img>`, a navigation) still
   reaches a `GET` route, gets an opaque answer, and no `GET` route has a side
-  effect. Local tools (the MCP server, `curl`, a script) send no `Origin` and
-  are unaffected
+  effect, bar one resource it could hold: a change-feed stream takes a pool
+  thread, so `GET /changes` opens only on a single-use id from
+  `POST /changes/subscriptions`, which a page cannot send, and a page cannot
+  fill the stream slots to lock the app out. Local tools (the MCP server,
+  `curl`, a script) send no `Origin` and are unaffected
   ([Who may call the API](engine/api-reference.md#who-may-call-the-api)).
 - **The shell carries the renderer past that gate**: the renderer is a browser
   context too. The Electron shell (`app/electron/engine-origin.ts`), on the
@@ -838,8 +869,13 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks
-  nothing the user types and never fetches Hunspell dictionaries, which it
-  otherwise downloads from a Google CDN at first use on Windows and Linux.
+  nothing the user types. That option alone does not stop the Hunspell
+  dictionary download (Google's CDN, on Windows and Linux), which belongs to
+  each session rather than each window; `electron/spellcheck.ts` therefore
+  empties the spellchecker language list of every session as it is created
+  (`app.on("session-created")`, registered before `app.whenReady` so the
+  default session and the OAuth partition are both covered), and nothing is
+  fetched.
   Monaco's editors are unaffected either way; they own their own text area.
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
   SQLite, the same way every other stored credential is. Settings draws that

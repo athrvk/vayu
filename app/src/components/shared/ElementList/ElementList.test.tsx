@@ -30,7 +30,8 @@
 
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useLayoutStore } from "@/stores";
 import { DEFAULT_SCRIPT_EDITOR_HEIGHT } from "@/constants/layout";
 import type { ElementDef, ElementKindSchema } from "@/types";
@@ -654,7 +655,25 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 	});
 });
 
+describe("ElementList - the Add element menu", () => {
+	it("is a dialog with a name (#3498)", () => {
+		renderList([]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+
+		expect(screen.getByRole("dialog", { name: "Add element" })).toBeInTheDocument();
+	});
+});
+
 describe("ElementList - rename", () => {
+	it("names the field after what it renames, not only its placeholder (#3498)", async () => {
+		renderList([extractElement("e1")]);
+
+		await chooseRowAction("Extract JSON", "Rename");
+
+		expect(await screen.findByRole("textbox", { name: "Element name" })).toBeInTheDocument();
+	});
+
 	it("reveals the name input, commits on Enter, and shows the new name", async () => {
 		const onChange = renderList([extractElement("e1")]);
 
@@ -943,6 +962,14 @@ describe("ElementList - empty state", () => {
 		// `script.setup` is not in `KINDS` here (it is `collectionOnly` and this
 		// fixture models a request tab's addable set) - no chip for it.
 		expect(screen.queryByRole("button", { name: "Setup script" })).not.toBeInTheDocument();
+	});
+
+	it("draws the quick-add buttons on the radius setting, not as pills (#3501)", () => {
+		renderList([]);
+
+		const button = screen.getByRole("button", { name: "Extract from JSON" });
+		expect(button.className).not.toContain("rounded-full");
+		expect(button.className).toContain("rounded-md");
 	});
 
 	it("hides the chips once an element exists", () => {

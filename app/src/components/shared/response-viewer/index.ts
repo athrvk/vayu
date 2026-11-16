@@ -105,7 +105,6 @@ export type { SampledExchangeProps, ExchangeState } from "./SampledExchange";
 export {
 	detectBodyType,
 	formatBody,
-	formatSize,
 	// Where the pane stops formatting a body and shows a raw prefix. Exported
 	// because the mapping that builds `ResponseState` reads it too: above this
 	// size the indented copy it used to build is one nothing will ever render.

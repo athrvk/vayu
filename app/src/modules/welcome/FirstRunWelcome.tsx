@@ -63,7 +63,7 @@ export function FirstRunWelcome({
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">
 					<img src={iconUrl} alt="" className="h-6 w-6" />
-					<span className="text-md font-semibold text-foreground">Vayu</span>
+					<h1 className="text-md font-semibold text-foreground">Vayu</h1>
 				</div>
 				<p className="text-sm text-muted-foreground">
 					Send requests and run load tests on a fast native engine, with a built-in MCP

@@ -16,14 +16,14 @@
  */
 
 import { FileUp } from "lucide-react";
-import { formatSize } from "./response-viewer/utils";
+import { formatBytes } from "@/lib/format-number";
 import { SHORT_SHA_LENGTH, type SentBodyFile } from "@/lib/sent-body-file";
 import { cn } from "@/lib/utils";
 
 export function SentBodyFileNote({ file, className }: { file: SentBodyFile; className?: string }) {
 	const parts = [
 		file.fileName ?? "file",
-		file.size !== undefined ? formatSize(file.size) : null,
+		file.size !== undefined ? formatBytes(file.size) : null,
 	].filter(Boolean);
 	return (
 		<span

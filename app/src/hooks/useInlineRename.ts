@@ -8,11 +8,12 @@
 /**
  * One inline rename editor for every tree that has one.
  *
- * The app had three, with three commit models: the collections tree committed
- * on a bare `e.key === "Enter"`, `ElementList` used `isCommitEnter` and trimmed
- * in its own commit, and the variables tree kept a third branch. Three copies
- * of one keyboard contract is three chances to miss a case, and each had missed
- * a different one (issue #1684).
+ * Four call sites (the collection and request rows, the variables tree's
+ * environment rows, `ElementList`) once had three commit models: the
+ * collections tree committed on a bare `e.key === "Enter"`, `ElementList` used
+ * `isCommitEnter` and trimmed in its own commit, and the variables tree kept a
+ * third branch. Three copies of one keyboard contract is three chances to miss
+ * a case, and each had missed a different one (issue #1684).
  *
  * The contract this owns:
  *
@@ -37,16 +38,26 @@
  *   The refocus waits for the row to stop renaming rather than running inline:
  *   focusing the row while the field is still mounted *blurs* the field, and
  *   that blur commits.
+ * - **The field opens with the whole name selected** (#3450), as Finder,
+ *   Explorer and VS Code do, so typing replaces the name rather than appending
+ *   to it. The caller's `autoFocus` focuses the field on mount, which is what
+ *   fires `onFocus`.
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, FocusEvent, KeyboardEvent } from "react";
 
 import { isCommitEnter } from "@/lib/keyboard";
 
 export interface UseInlineRenameOptions {
 	/** True while this row's rename field is mounted. */
 	active: boolean;
+	/**
+	 * What the field names, as a screen reader hears it ("Request name"). The
+	 * field replaces a row's name and has no visible label, so without this it
+	 * is announced as a bare "edit text" holding the old name (#3498).
+	 */
+	label: string;
 	/** The name the field opens with; read once, when `active` turns true. */
 	initialValue: string;
 	/** Called with the trimmed, non-empty name. */
@@ -78,15 +89,18 @@ export interface InlineRename {
 	setValue: (value: string) => void;
 	/** Spread onto the rename `<Input>`; the caller keeps `autoFocus` and styling. */
 	inputProps: {
+		"aria-label": string;
 		value: string;
 		onChange: (e: ChangeEvent<HTMLInputElement>) => void;
 		onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
 		onBlur: () => void;
+		onFocus: (e: FocusEvent<HTMLInputElement>) => void;
 	};
 }
 
 export function useInlineRename({
 	active,
+	label,
 	initialValue,
 	onCommit,
 	onCancel,
@@ -95,6 +109,17 @@ export function useInlineRename({
 	stopPropagation = false,
 }: UseInlineRenameOptions): InlineRename {
 	const [value, setValue] = useState(initialValue);
+	const [wasActive, setWasActive] = useState(active);
+	if (active !== wasActive) {
+		setWasActive(active);
+		// A fresh open, not a re-render: `initialValue` is read here and nowhere
+		// else, so a rename that lands and changes the row's name cannot reach
+		// back into a draft the user is still typing. It is set during render, not
+		// in an effect, because a hook shared by every row (the variables tree's)
+		// would otherwise mount the field empty: `autoFocus` selects the empty
+		// value and the effect's value then lands with the caret at its end.
+		if (active) setValue(initialValue);
+	}
 	/** Set the moment the editor closes, so the blur that close causes is a no-op. */
 	const closedRef = useRef(false);
 	const wasActiveRef = useRef(active);
@@ -102,10 +127,6 @@ export function useInlineRename({
 
 	useEffect(() => {
 		if (active && !wasActiveRef.current) {
-			// A fresh open, not a re-render: `initialValue` is read here and
-			// nowhere else, so a rename that lands and changes the row's name
-			// cannot reach back into a draft the user is still typing.
-			setValue(initialValue);
 			closedRef.current = false;
 			focusTargetRef.current = null;
 		}
@@ -144,6 +165,7 @@ export function useInlineRename({
 		value,
 		setValue,
 		inputProps: {
+			"aria-label": label,
 			value,
 			onChange: (e) => setValue(e.target.value),
 			onKeyDown: (e) => {
@@ -157,6 +179,7 @@ export function useInlineRename({
 				}
 			},
 			onBlur: () => commit(false),
+			onFocus: (e) => e.currentTarget.select(),
 		},
 	};
 }

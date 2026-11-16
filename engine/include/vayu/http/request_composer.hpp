@@ -97,6 +97,17 @@ std::string trim_variable_name (std::string_view written);
  */
 bool is_addressable_variable_name (std::string_view key);
 
+/**
+ * Why a variable written under @p name could never be read back by a
+ * `{{name}}` token, as a phrase that completes "<subject> <phrase>"; `nullopt`
+ * when it can. The one wording shared by every writer that refuses such a name
+ * with a message of its own: an extractor's `variable` (#3055) and a script's
+ * `pm.*.set` (#3461). It is the union of `is_addressable_variable_name` (blank,
+ * edge whitespace) and the brace rule, since a reference stops at a brace and
+ * no stored name containing one is ever matched. The phrases are static.
+ */
+std::optional<std::string_view> variable_name_refusal (std::string_view name);
+
 /** True for a name written as a dynamic variable (`$...`), known or not. */
 bool is_dynamic_variable_name (const std::string& name);
 
@@ -560,6 +571,16 @@ const BoundColumnNames& bound_columns = {});
  */
 std::vector<vayu::db::Collection>
 collection_chain (vayu::db::Database& db, const std::string& leaf_id);
+
+/**
+ * The `origin` an element @p collection declared is stamped with:
+ * `{kind: "collection", scope, id, name?}`, `scope` being `"collection"` for
+ * the root of a chain (@p is_root) and `"folder"` below it (#2522). One stamp
+ * for a step's composed elements and a run's lifecycle set
+ * (`core::resolve_lifecycle_collections`, #3456), so a report names a folder
+ * the same way wherever its elements ran.
+ */
+nlohmann::json collection_element_origin (const vayu::db::Collection& collection, bool is_root);
 
 /**
  * The auth a descendant's `inherit` resolves to: walk the chain leaf->root and

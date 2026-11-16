@@ -16,38 +16,18 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/request_log.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/platform/platform.hpp"
-#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
 namespace vayu::http {
 
 namespace {
-
-/// True when @p req names this listener by one of its loopback spellings and
-/// nothing else, exactly once.
-bool names_this_listener (const httplib::Request& req, int port) {
-    if (req.get_header_value_count ("Host") != 1) {
-        return false;
-    }
-    const std::string host   = req.get_header_value ("Host");
-    const std::string suffix = ":" + std::to_string (port);
-    if (!host.ends_with (suffix)) {
-        return false;
-    }
-    const std::string_view name =
-    std::string_view (host).substr (0, host.size () - suffix.size ());
-    return vayu::utils::ascii_lower_equal (name, "127.0.0.1") ||
-    vayu::utils::ascii_lower_equal (name, "localhost") ||
-    vayu::utils::ascii_lower_equal (name, "[::1]");
-}
 
 /**
  * The management API serves no browser: no CORS header ever leaves this
@@ -75,11 +55,8 @@ bool names_this_listener (const httplib::Request& req, int port) {
  */
 httplib::Server::HandlerResponse
 admit_management_request (const httplib::Request& req, httplib::Response& res, int port) {
-    if (!names_this_listener (req, port)) {
-        routes::send_error (res, 403,
-        "Refused by the Host check: the engine answers only Host 127.0.0.1:" +
-        std::to_string (port) + ", localhost:" + std::to_string (port) +
-        " or [::1]:" + std::to_string (port));
+    if (!routes::names_this_listener (req, port)) {
+        routes::send_error (res, 403, routes::foreign_host_message (port));
         return httplib::Server::HandlerResponse::Handled;
     }
     if (req.method == "OPTIONS") {

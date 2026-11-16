@@ -646,13 +646,7 @@ ChangeOp upsert_op (Storage& storage, const std::string& id) {
 }
 
 inline Change collection_change (const Collection& row, ChangeOp op) {
-    Change change{ ChangeKind::Collection, op, row.id, std::nullopt, std::nullopt };
-    // An empty parent is the tree root, which `get_requests_in_subtree` reads
-    // the same way.
-    if (row.parent_id && !row.parent_id->empty ()) {
-        change.collection_id = row.parent_id;
-    }
-    return change;
+    return Change{ ChangeKind::Collection, op, row.id, row.parent_id, std::nullopt };
 }
 
 inline Change request_change (const Request& row, ChangeOp op) {

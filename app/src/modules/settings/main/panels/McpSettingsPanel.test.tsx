@@ -23,7 +23,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 
 import McpSettingsPanel from "./McpSettingsPanel";
 import { useToastStore } from "@/stores";
@@ -257,7 +259,25 @@ describe("McpSettingsPanel when the server is not listening", () => {
 	const connectionCard = () =>
 		screen.getByText("Connection").closest("[data-slot=card]") as HTMLElement;
 
-	function expectNoUsableEndpoint() {
+	/**
+	 * The reason a disabled Connect gives, read the way a keyboard user gets it:
+	 * the button is inert, so the tab stop is the `DisabledHint` wrapper around
+	 * it, and the reason opens there on focus.
+	 */
+	async function connectReason(button: HTMLElement): Promise<string | null> {
+		const stop = button.closest<HTMLElement>("[data-slot=disabled-hint]");
+		expect(stop).not.toBeNull();
+		await act(async () => {
+			fireEvent.focus(stop!);
+		});
+		const reason = (await screen.findByRole("tooltip")).textContent;
+		await act(async () => {
+			fireEvent.blur(stop!);
+		});
+		return reason;
+	}
+
+	async function expectNoUsableEndpoint() {
 		const card = within(connectionCard());
 		expect(card.queryByText(/^https?:\/\//)).toBeNull();
 		expect(card.queryByText(/127\.0\.0\.1:9877\/mcp/)).toBeNull();
@@ -271,7 +291,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		expect(connectButtons.length).toBeGreaterThan(0);
 		for (const button of connectButtons) {
 			expect(button).toBeDisabled();
-			expect(button).toHaveAttribute("title", "The MCP server isn't running");
+			expect(await connectReason(button)).toBe("The MCP server isn't running");
 		}
 	}
 
@@ -283,7 +303,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		expect(screen.getByText(/another program holds 127\.0\.0\.1:9877/i)).toBeInTheDocument();
 		expect(screen.getByText(/do not connect an agent until it is free/i)).toBeInTheDocument();
 		expect(screen.queryByText(/the port may be in use/i)).not.toBeInTheDocument();
-		expectNoUsableEndpoint();
+		await expectNoUsableEndpoint();
 	});
 
 	it("names the host and port the status reports, not a fixed one", async () => {
@@ -325,7 +345,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		expect(screen.getByText(/enabled but not listening/i)).toBeInTheDocument();
 		expect(screen.getByText(/config unreadable/i)).toBeInTheDocument();
 		expect(screen.queryByText(/another program holds/i)).not.toBeInTheDocument();
-		expectNoUsableEndpoint();
+		await expectNoUsableEndpoint();
 	});
 
 	it("falls back to the generic notice when main reported no reason", async () => {
@@ -334,7 +354,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		await renderPanel();
 
 		expect(screen.getByText(/the port may be in use/i)).toBeInTheDocument();
-		expectNoUsableEndpoint();
+		await expectNoUsableEndpoint();
 	});
 
 	it("leaves a healthy server's endpoint, Copy and Connect usable", async () => {
@@ -360,7 +380,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 			name: /^connect$/i,
 		})) {
 			expect(button).toBeDisabled();
-			expect(button).toHaveAttribute("title", "Enable the MCP server first");
+			expect(await connectReason(button)).toBe("Enable the MCP server first");
 		}
 	});
 });
@@ -497,6 +517,15 @@ describe("McpSettingsPanel copy that described only half its mechanism", () => {
 
 		// It described only the OFF state, on a switch that ships on.
 		expect(screen.getByText(/on by default/i)).toBeInTheDocument();
+	});
+
+	it("says what an allowed host's remove button does on keyboard focus (#3498)", async () => {
+		await renderPanel();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove api.example.com" }),
+			"Remove host"
+		);
 	});
 
 	it("states the allowlist rule the normalizer actually has", async () => {

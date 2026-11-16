@@ -30,6 +30,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	EmptyState,
@@ -46,12 +47,14 @@ import {
 	useStopMockServerMutation,
 } from "@/queries";
 import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
+import { useEngineServing } from "@/modules/services/useRunningServices";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
 import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
-import { formatLatency } from "@/lib/format-number";
+import { formatLatency, formatNumber } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -66,6 +69,9 @@ export default function MockServerView() {
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { data: mocks = [], isError, error, refetch } = useMockServersQuery();
 	const stopMock = useStopMockServerMutation();
+	// Every listed mock is running while its engine is; the cached list outlives
+	// a crashed one (#3506), so the tab reads the same gate the drawer does.
+	const serving = useEngineServing();
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const addressedMockId = activeTab?.type === "mock-server" ? activeTab.entityId : null;
@@ -109,26 +115,31 @@ export default function MockServerView() {
 			<header className="flex flex-col gap-1 border-b border-border px-3 py-2">
 				<div className="flex flex-wrap items-center gap-2">
 					<MockIcon className="size-icon text-muted-foreground" aria-hidden="true" />
-					<code className="font-mono text-xs">{mock.url}</code>
-					<Button
-						variant="ghost"
+					{/* The tab's `h1` is the address, the mock's identity; the hidden
+					    prefix says what it is the address of (#3498). */}
+					<h1>
+						<span className="sr-only">Mock server </span>
+						<code className="font-mono text-xs">{mock.url}</code>
+					</h1>
+					<TooltipIconButton
 						size="sm"
-						aria-label="Copy mock server URL"
+						label="Copy mock server URL"
 						onClick={() => void copyUrl(mock.url, "Mock server URL")}
-					>
-						<IconSwap
-							state={urlCopied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-								copied: (
-									<Check
-										className="size-icon-sm text-status-success-text"
-										aria-hidden="true"
-									/>
-								),
-							}}
-						/>
-					</Button>
+						icon={
+							<IconSwap
+								state={urlCopied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+									copied: (
+										<Check
+											className="size-icon-sm text-status-success-text"
+											aria-hidden="true"
+										/>
+									),
+								}}
+							/>
+						}
+					/>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -139,6 +150,7 @@ export default function MockServerView() {
 						Copy for agent
 					</Button>
 					<Badge variant="outline">{mock.collectionName}</Badge>
+					{!serving && <Badge variant="outline">Stopped</Badge>}
 					<Button
 						variant="ghost"
 						size="sm"
@@ -167,27 +179,30 @@ export default function MockServerView() {
 						</Select>
 					)}
 
-					<div className="ml-auto">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() =>
-								stopMock.mutate(mock.mockId, {
-									onError: (e) =>
-										showToast(
-											e instanceof Error
-												? e.message
-												: "Couldn't stop the mock server",
-											"error"
-										),
-								})
-							}
-							disabled={stopMock.isPending}
-						>
-							<Square className="size-icon-sm" aria-hidden="true" />
-							Stop
-						</Button>
-					</div>
+					{/* Nothing left to stop once the engine that held the listener is gone. */}
+					{serving && (
+						<div className="ml-auto">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() =>
+									stopMock.mutate(mock.mockId, {
+										onError: (e) =>
+											showToast(
+												e instanceof Error
+													? e.message
+													: "Couldn't stop the mock server",
+												"error"
+											),
+									})
+								}
+								disabled={stopMock.isPending}
+							>
+								<Square className="size-icon-sm" aria-hidden="true" />
+								Stop
+							</Button>
+						</div>
+					)}
 				</div>
 				<p className="pl-6 text-xs text-muted-foreground">
 					{mock.latencyMs > 0
@@ -205,9 +220,9 @@ export default function MockServerView() {
 
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="border-b border-border px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">
 						Routes ({routesQuery.isLoading ? "-" : routes.length})
-					</h3>
+					</h2>
 					{routesQuery.isError ? (
 						<ErrorState
 							variant="inline"
@@ -249,7 +264,8 @@ export default function MockServerView() {
 												(route.hasExample ? "varies" : "no example")}
 										</span>
 										<span className="shrink-0 tabular-nums text-muted-foreground">
-											{route.hits}
+											{formatNumber(route.hits)}{" "}
+											{pluralize(route.hits, "hit")}
 										</span>
 									</div>
 									{route.shadowedBy && (
@@ -265,7 +281,7 @@ export default function MockServerView() {
 				</section>
 
 				<section className="flex-1 px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h3>
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h2>
 					{activityQuery.isError ? (
 						<ErrorState
 							variant="inline"

@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useImportModalStore } from "@/stores";
 import { RequestBuilderContext } from "../../../context/RequestBuilderContext";
@@ -147,7 +148,12 @@ describe("an example row's actions", () => {
 		});
 		// The shared button's compact hit area; the hand-rolled one was `size-target`.
 		expect(copy.className).toContain("size-control-sm");
-		expect(copy.getAttribute("title")).toBe("Copy for agent");
+		// A tooltip that opens on focus, not a native `title` a keyboard never sees.
+		expect(copy).not.toHaveAttribute("title");
+		await act(async () => {
+			fireEvent.focus(copy);
+		});
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("Copy for agent");
 	});
 
 	it("hovers Delete's glyph to destructive, not the ghost fill", async () => {

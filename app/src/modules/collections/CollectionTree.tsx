@@ -26,6 +26,7 @@ import {
 import CollectionTreeRows, { type TreeRowWindow } from "./CollectionTreeRows";
 import { CollectionTreeContextMenu } from "./CollectionTreeContextMenu";
 import {
+	dropLineBeside,
 	entityRowKey,
 	flattenVisibleRows,
 	folderIdOfRowKey,
@@ -262,12 +263,18 @@ export default function CollectionTree() {
 		[rowState]
 	);
 
+	const dropLineBesideRow = useCallback(
+		(key: string, position: "before" | "after") => dropLineBeside(rows, key, position),
+		[rows]
+	);
+
 	const { dnd, treeHandlers, announcement, moveTarget, closeMoveDialog, moveToOwner } =
 		useTreeDnd({
 			collections,
 			getRequestsByCollection,
 			treeRef,
 			entityAt,
+			dropLineBeside: dropLineBesideRow,
 			isRowBusy,
 			revealEntity,
 		});

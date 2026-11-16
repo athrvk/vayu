@@ -35,14 +35,16 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 
 interface EmptyStateBaseProps {
 	/**
 	 * Sentence case. A `pane` title is a heading, so no trailing period ("No
 	 * run selected"); an `inline` title is the whole message and may be a
-	 * sentence. A node is phrasing content only (text, `code`, `span`): it
-	 * renders inside a `<p>` in the `pane` variant.
+	 * sentence. A node is phrasing content only (text, `code`, `span`): the
+	 * `pane` variant renders it inside a heading at the outline's level, or a
+	 * `<p>` outside the main pane (`heading-level.tsx`, #3498).
 	 */
 	title: ReactNode;
 	/**
@@ -70,6 +72,7 @@ interface PaneEmptyStateProps extends EmptyStateBaseProps {
 	 * run's report still in flight.
 	 */
 	iconClassName?: string;
+	compact?: never;
 }
 
 /**
@@ -81,6 +84,13 @@ interface InlineEmptyStateProps extends EmptyStateBaseProps {
 	description?: never;
 	icon?: never;
 	iconClassName?: never;
+	/**
+	 * For a line inside a dense surface (a drawer tree, a dialog's list box, a
+	 * settings card), where the default `p-8 text-sm` is bigger than the thing
+	 * it sits in. `p-3 text-xs`, the padding and size the bare lines this
+	 * replaced used.
+	 */
+	compact?: boolean;
 }
 
 type EmptyStateProps = PaneEmptyStateProps | InlineEmptyStateProps;
@@ -92,6 +102,7 @@ export function EmptyState({
 	iconClassName,
 	action,
 	variant = "pane",
+	compact,
 	className,
 }: EmptyStateProps) {
 	if (variant === "inline") {
@@ -99,7 +110,8 @@ export function EmptyState({
 			<div
 				data-slot="empty-state"
 				className={cn(
-					"enter-fade p-8 text-center text-sm text-muted-foreground",
+					"enter-fade text-center text-muted-foreground",
+					compact ? "p-3 text-xs" : "p-8 text-sm",
 					className
 				)}
 			>
@@ -128,7 +140,9 @@ export function EmptyState({
 				/>
 			)}
 			<div className="max-w-sm">
-				<p className="text-md font-semibold text-foreground">{title}</p>
+				<Heading outside="p" className="text-md font-semibold text-foreground">
+					{title}
+				</Heading>
 				{description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
 			</div>
 			{action}

@@ -52,6 +52,8 @@ export interface RequestData {
 	url?: string;
 	headers?: Record<string, string>;
 	body?: string;
+	/** As `ResponseData.rawBytes`: the bytes of a body with no text view, drawn in place of `body`. */
+	rawBytes?: ResponseBytes;
 }
 
 // Props for response body component

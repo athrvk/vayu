@@ -79,6 +79,14 @@ describe("the chord registry", () => {
 		expect(listed).toContain(shortcuts.SETTINGS_CHORD);
 	});
 
+	it("lists F8, which Radix binds and nothing in the app does (#3498)", () => {
+		// The only keyboard path to a toast's Undo is a key no handler here
+		// listens for, so the registry entry is the whole of its discoverability.
+		const f8 = listed.filter((chord) => chord.key === "F8");
+		expect(f8).toEqual([shortcuts.FOCUS_NOTIFICATIONS_CHORD]);
+		expect(f8[0].label).toBe("Focus notifications");
+	});
+
 	it("gives every group a heading and something under it", () => {
 		expect(shortcuts.SHORTCUT_GROUPS.length).toBeGreaterThan(0);
 		for (const group of shortcuts.SHORTCUT_GROUPS) {

@@ -97,8 +97,11 @@ header `X-Vayu-Grant-Secret` to carry the engine's per-start secret, and answer
 - The app's main process generates the secret and passes it in the engine's
   environment as `VAYU_GRANT_SECRET`. The engine reads it once at start,
   before any thread exists, and removes it from its own environment, so
-  nothing it later reads or starts sees it. A value shorter than 32 characters
-  is ignored with a warning that does not print it.
+  nothing it later reads or starts sees it. On Linux and macOS it also
+  overwrites the bytes the kernel passed (what `/proc/<pid>/environ` shows
+  on Linux), which `unsetenv` alone leaves readable; on Windows the
+  environment block is private to the process. A value shorter than 32
+  characters is ignored with a warning that does not print it.
 - The header is compared in constant time (both sides hashed with SHA-256, the
   digests compared with `sodium_memcmp`). A missing header, an empty one and a
   wrong one are the same `403`. The secret is never logged (the request log
@@ -417,8 +420,8 @@ the highest `order` any sibling of either kind holds:
 | Write | `order` |
 |---|---|
 | Create, `order` absent or `null` | appended |
-| Create, `order` stated | as given |
-| Update, `order` stated | as given |
+| Create, `order` stated | as given, if an integer from `0` to `2147483647`; otherwise a `400` |
+| Update, `order` stated | as given, if an integer from `0` to `2147483647`; otherwise a `400` |
 | Update, `order` absent, no move | unchanged |
 | Update, `order` absent or `null`, **and** the row changes parent (a collection's `parentId`, a request's `collectionId`) | appended in the destination |
 | Update, `order` `null`, no move | appended among its current siblings |
@@ -427,6 +430,22 @@ A move that states no order therefore lands at the end of the destination rather
 than at whatever slot its position in the *old* list happened to name, after its
 folders and its requests alike. Ordering *within* a list is always the caller's
 to state, and a stated `order` may put a request between two sub-collections.
+
+**A stored `order` is an integer from `0` to `2147483647`** (#3451), so a
+negative, truncated or wrapped slot cannot be written. A stated `order` outside
+that range or that is not a JSON integer (`"3"`, `2.5`, `-1`, `2147483648`) is
+a `400` naming the field on every route that writes one
+(`POST`/`PUT /collections`, `POST`/`PUT /requests`,
+[`POST /reorder`](#post-reorder), `POST /import/apply`, `POST /specs/sync`),
+for example `Invalid 'order': must be an integer from 0 to 2147483647 (got 2.5)`,
+and nothing is written. An append under a parent where a sibling already holds
+`2147483647` has no slot left, so it is a `400` naming `order` too
+(`Cannot append: a sibling already holds 'order' 2147483647 ...`) rather than a
+row that wraps to the top; state an `order`, or renumber the parent with
+`POST /reorder`'s `normalize`, which frees the end again. An import document's
+own stated order (`x-vayu-request.order`, an `x-vayu-collection.folders`
+entry's `order`) outside the range counts as unstated, so the row takes the
+position an unordered one would.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
@@ -512,6 +531,9 @@ message `Invalid 'auth': must be a JSON object`.
 | `auth` (collection / request) | object |
 | `body` (request) | object - see [The request `body` union](#the-request-body-union) |
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
+| `order` (collection / request) | integer from `0` to `2147483647` - see [Ordering](#ordering) |
+| `parentId` (collection) | string: a collection id, or `null` or `""` for the root |
+| every other plain string field (`name`, `description`, `url`, `bodyType`, an example's `body` and `contentType`, a certificate's `host` and `passphrase`, ...) | string; the `400` is `Invalid '<field>': must be a string (got <type>)` |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
 quietly when it is not an object - `variables` reads back empty, a request `body`
@@ -519,6 +541,20 @@ is dropped, and `auth` resolves to none, so a request the caller believes carrie
 credentials goes out bare. The write is therefore rejected rather than stored:
 `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
 stored value is left untouched.
+
+**`parentId: ""` is the root, the same as `null`** (#3451). It is stored as
+`null` on `POST`/`PUT /collections` (a folder `POST /specs/sync` creates
+with `""` or `null` lands under the synced collection), and
+[`POST /reorder`](#post-reorder) reads it as `null` in a move and in a
+`normalize` scope, so the tree has one spelling of the root: a collection
+created with `""` is appended among the roots and lists with them. A value
+that is neither a string nor `null` (`5`, `true`, an object, an array) is a
+`400` such as
+`Invalid 'parentId': must be a collection id or null (got number)`. Rows an
+older engine stored with `""` are rewritten to `null` at startup
+([the empty-parent pass](db-schema.md#the-empty-parent-pass-issue-3451)), so a
+delete and restore of one comes back where it was instead of re-parented to the
+root.
 
 **A `variables` key must be one a `{{ name }}` token can reach (#3251).** A token
 is looked up with the spaces, tabs, CR and LF around its text cut, so a stored
@@ -560,6 +596,27 @@ its own: `POST /compose` resolves a request beneath it to the nearest ancestor's
 credential, and a `PUT` of other fields still succeeds. The MCP `create_` and
 `update_` collection tools refuse `inherit` as an input error before calling the
 engine.
+
+### Auth modes
+
+A stored `auth` object's `mode` is one of `none`, `noauth`, `inherit`,
+`bearer`, `basic`, `apikey`, `oauth2`, `digest`, `aws`, `ntlm`, `hawk`,
+`oauth1`, `edgegrid` and `jwt`, spelled exactly so (#3464). The last seven are
+stored and never executed: a send names the mode in `authNotice` and goes out
+without a credential. Modes match by exact lowercase string, so `Bearer`,
+`" inherit"` or a non-string `mode` would be stored and then read as a concrete
+credential that stops the inherit walk and is sent as none.
+`POST`/`PUT /collections` and `POST`/`PUT /requests` therefore answer `400`
+(`Invalid 'auth.mode': must be a string, one of: ...`) when the body states an
+`auth` object whose `mode` is missing, not a string, or outside that set, and
+write nothing. `inherit` stays valid for a request and is refused for a
+collection ([#3445](#collection-auth)). `"auth": null` and an absent `auth` are
+not judged, and an `auth` that is not an object is the
+[shape](#accepted-field-shapes) `400`. `POST /import/apply` and
+`POST /specs/sync` are not held to this, as with [blank names](#blank-names): an
+importer's unrecognised mode is stored as written, so one odd block cannot fail
+an atomic import. The MCP `create_` and `update_` tools for both resources refuse
+an unknown mode as an input error before calling the engine.
 
 ### The request `body` union
 
@@ -835,7 +892,7 @@ refuses the send:
 3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
 4. Untrusted: `"Body file '<path>' was not picked on this machine and is not
    under an allowed folder - pick it again in the request, or allow its folder
-   in Settings > Files"`.
+   in Settings › Files"`.
 5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
 6. It cannot be opened: refused, naming the path and the reason.
 
@@ -1657,8 +1714,8 @@ the null-vs-absent rule.
 ```json
 {
   "name": "My API",        // Required, no default (null is a 400)
-  "parentId": null,         // Optional, null for root; a trashed collection is a 409
-  "order": 0,               // Optional, appended after siblings if omitted - see Ordering
+  "parentId": null,         // Optional, null or "" for root (stored as null); a trashed collection is a 409
+  "order": 0,               // Optional, 0..2147483647; appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "auth": {"mode": "none"}, // Optional, default none; never mode "inherit" - see Collection auth
   "dataSchema": {},         // Optional, the declared data contract - see below
@@ -1675,8 +1732,13 @@ the null-vs-absent rule.
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
-([#3445](#collection-auth)), if an `openapi` binding names no stored spec
-(below), or on a cycle (below); `409` if `parentId` names a collection in the
+([#3445](#collection-auth)) or a mode outside the
+[known set](#auth-modes), if an `openapi` binding names no stored spec
+(below), if `parentId` is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), if `order` is not an integer
+from `0` to `2147483647` or an append finds no slot left
+([Ordering](#ordering)), or on a cycle (below); `409` if `parentId` names a
+collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -1696,8 +1758,8 @@ its value, an explicit `null` resets it to the default.
 ```json
 {
   "name": "Renamed",       // Optional; null is a 400 (no default)
-  "parentId": null,         // Optional, null moves it to the root; a trashed collection is a 409
-  "order": 3,               // Optional; a move with no order appends - see Ordering
+  "parentId": null,         // Optional, null or "" moves it to the root; a trashed collection is a 409
+  "order": 3,               // Optional, 0..2147483647; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "auth": null,             // Optional, null resets to {"mode":"none"}; never mode "inherit" - see Collection auth
   "dataSchema": null,       // Optional, null clears the declared contract
@@ -1711,6 +1773,25 @@ A `parentId` that changes the collection's parent and states no `order` appends
 the collection among its new siblings, rather than carrying a position from the
 list it just left. See [Ordering](#ordering).
 
+A `parentId` that takes the collection out of the spec contract that answers
+for the requests beneath it is removing them from that contract (#3470), the
+rule [`PUT /requests/:id`](#put-requestsid) applies to one request, with the
+same meaning of out: every request in the subtree that records an operation
+(`specOperation`) and whose nearest binding after the move names another
+document, none, or the same document from a collection outside the source's
+contract has its stamp cleared, and the operation is recorded as declined
+under the binding it left, in the same transaction as the collection's own
+row, so the source's [`POST /specs/diff`](#post-specsdiff) lists it under
+`declined` rather than `added`. The binding after is read against the tree the
+`PUT` writes, so an `openapi: null` in the same body counts: a bound
+collection unbound and moved out at once clears its requests' stamps, and the
+decline that records under it is forgotten with the binding's other records
+(below). A move within one contract keeps every stamp, and so does moving the
+bound collection itself. The response is the collection; the cleared requests
+are read back with [`GET /requests/:id`](#get-requestsid) or arrive on the
+[change feed](#get-changes). This is the decline
+[`POST /reorder`](#post-reorder) records for a moved folder.
+
 **Headers:** `If-Match` (optional), see
 [Conditional updates](#conditional-updates-with-if-match).
 
@@ -1720,9 +1801,14 @@ list it just left. See [Ordering](#ordering).
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
-`auth` that states mode `inherit` ([#3445](#collection-auth)), an
+`auth` that states mode `inherit` ([#3445](#collection-auth)) or a mode outside
+the [known set](#auth-modes), an
 `openapi` that is neither `null` nor `{}` (binding is
-[`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
+[`POST /specs/bind`](#post-specsbind), issue #3348, below), a `parentId`
+that is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), an `order`
+that is not an integer from `0` to `2147483647` or an append with no slot
+left ([Ordering](#ordering)) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1855,6 +1941,13 @@ ancestor, in the same transaction. Deleting a tag folder is the user declining
 everything in it. Deleting the bound collection itself records nothing - that
 is the whole contract going, not a choice about any operation of it - and a
 purge of a bound collection takes its records with it.
+
+**The delete stops every running [mock](#mock-server) of what it trashed**
+(issue #3449): a mock of the collection itself or of any folder under it,
+whichever client sent the delete, before the response is sent, so it is gone
+from [`GET /mock`](#get-mock) by then. A mock of a collection outside the
+subtree keeps running. Restoring the collection does not start its mock again;
+`POST /mock/start` does.
 
 **Response:**
 ```json
@@ -2030,12 +2123,12 @@ the null-vs-absent rule.
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
-  "auth": {},                        // Optional, authentication config
+  "auth": {"mode": "inherit"},       // Optional, default {"mode":"inherit"}; mode must be a known one - see Auth modes
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
-  "order": 0,                        // Optional, appended after the collection's sub-collections
-                                      // and requests if omitted - see Ordering
+  "order": 0,                        // Optional, 0..2147483647; appended after the collection's
+                                      // sub-collections and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "timeout": null,                   // Optional, this request's timeout in ms, 1..86400000.
@@ -2067,7 +2160,10 @@ in `params` only. A raw API, MCP or import caller that puts the query only in
 `params` stores a request that sends none of it (issue #590). The
 [Postman export](#post-exportpostman) writes the query the URL states as
 `url.query[]` even when `params` holds no row for it (issue #3242); a pair in
-`params` only is written there too, but it is still not sent.
+`params` only is written there too, but it is still not sent. The other
+direction is the app's to bridge: a request stored with its query only in `url`
+(`params` absent or `[]`) opens in the Params table with those pairs as rows,
+merged with any stored rows, and is not marked unsaved by it (issue #3491).
 
 **A path row is the one row composition reads** (issue #1764). A row carrying
 `"in": "path"` is a Postman-style path variable: `key` is the name without its
@@ -2208,6 +2304,9 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
 on a `mockExampleId` that is not a non-empty string or `null`,
+on an `order` that is not an integer from `0` to `2147483647` or an append
+that finds no slot left ([Ordering](#ordering)),
+on an `auth` whose `mode` is not a [known one](#auth-modes) (#3464),
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -2256,6 +2355,10 @@ A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 `timeout` is the exception among them: a value outside `1`-`86400000` or one
 that is not a number is a `400` naming `'timeout'`, and nothing is written.
+`order` is held the same way (#3451): a stated value that is not an integer
+from `0` to `2147483647` is a `400` naming `'order'`, so
+`{"collectionId": "col_2", "order": "9"}` refuses the move rather than making
+it at the old position - see [Ordering](#ordering).
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored
@@ -2310,7 +2413,8 @@ that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
 `methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
 not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
-non-empty string or `null`, a malformed protocol setting (see
+non-empty string or `null`, an `auth` whose `mode` is not a
+[known one](#auth-modes) (#3464), a malformed protocol setting (see
 [POST /requests](#post-requests)), or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
@@ -2342,7 +2446,9 @@ sync that creates the operation on purpose; purging the request, by hand or by
 Unbinding the collection, or binding it to a document with other bytes, forgets
 every record under it. A sync's own deletes record nothing. Moving the request
 out of the contract records the same decline (#3446, see
-[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder));
+[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder)),
+and so does moving a folder above it out with
+[`PUT /collections/:id`](#put-collectionsid) (#3470);
 the move clears the stamp, and a restore forgets only the record of a request
 that still records an operation, so deleting and restoring the moved request
 later leaves the source's record standing.
@@ -2439,7 +2545,10 @@ Two rules decide what a restore of a collection or request puts back:
 - **Re-parent.** A restored collection whose parent is gone, or is itself in the
   trash, comes back at the tree root (`parentId` cleared). A *request* has no
   such root - `collectionId` is required - so restoring one whose collection is
-  in the trash is a `409` naming the collection to restore first.
+  in the trash is a `409` naming the request and its collection by name, and
+  the trash root to restore first by name and id (issue #3449). That root is
+  the listed entry holding the collection: the collection itself, or the
+  ancestor whose delete took it.
 
 An environment needs neither: it owns no rows and hangs under nothing, so its
 delete stamps one row, it is always a root, and its restore is unconditional.
@@ -2453,8 +2562,10 @@ its collection, and follows the request's rule. Its delete stamps its one row.
 It is a root only while its request is live: under a trashed request it is part
 of what that request's entry stands for, and restoring the request leaves the
 example's own earlier delete in the trash as a root again. Restoring an example
-whose request is in the trash or gone is a `409` naming the request to restore
-first, and so is restoring one into a request that already holds the maximum of
+whose request is in the trash is a `409` naming the example and its request by
+name, and the trash root to restore first by name and id: the request, or the
+collection whose delete took it. One whose request is gone is a `409` saying
+so, and so is restoring one into a request that already holds the maximum of
 100 examples. A stamped example whose request row is gone entirely is listed
 nowhere. The delete clears the request's `mockExampleId` when it named the
 example, and the restore does not set it again: choosing it as the fixed mock
@@ -2479,8 +2590,10 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment and client
-certificate is a root; a deleted example is one while its request is live.
+`collections` and `requests` count, and `purgeCollections` and `purgeRequests`
+count what a purge would destroy. Every deleted environment and client
+certificate is a root; a deleted request is one while its collection is live,
+and a deleted example while its request is.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2500,7 +2613,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745600000,
       "parentId": null,
       "collections": 2,
-      "requests": 14
+      "requests": 14,
+      "purgeCollections": 3,
+      "purgeRequests": 16
     },
     {
       "id": "env_1234567890",
@@ -2510,6 +2625,8 @@ certificate is a root; a deleted example is one while its request is live.
       "parentId": null,
       "collections": 0,
       "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0,
       "variables": 6
     },
     {
@@ -2518,8 +2635,11 @@ certificate is a root; a deleted example is one while its request is live.
       "name": "200 - created",
       "deletedAt": 1787745400000,
       "parentId": "req_1234567890",
+      "parentName": "Create payment",
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     },
     {
       "id": "cert_1234567890",
@@ -2528,7 +2648,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745300000,
       "parentId": null,
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     }
   ],
   "total": 4
@@ -2540,9 +2662,23 @@ certificate is a root; a deleted example is one while its request is live.
 `host:port`, which is what `q` matches. `parentId` is a collection's parent
 (`null` at the tree root), a request's owning collection, an example's owning
 **request**, or `null` for an environment and a client certificate.
-`collections` and `requests` are `0` for every kind but a collection.
-`variables` is carried by an environment entry only - the number of variables
-its stored map holds - and is absent, not `0`, on the other four kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+`parentName` (issue #3449) is the name of the row `parentId` names, carried by
+a request and an example entry only, so two same-named entries tell apart by
+their owner. It is absent on the other three kinds, and on a request or
+example whose owner row is gone, which no write path leaves behind.
+
+`collections` and `requests` are the **cohort**: the sub-collections (the root
+not counted) and requests this delete took, which is exactly what a restore
+puts back. `purgeCollections` and `purgeRequests` (issue #3449) are what a
+[purge](#delete-trashid) destroys: every deleted sub-collection and request
+under the root, whichever delete stamped it, stopping at a live collection as
+the purge does. They are never below the cohort counts, and exceed them when
+an earlier delete inside the subtree - a request, or a folder with its
+requests - is waiting under the root, unlisted. All four are `0` for every
+kind but a collection. `variables` is carried by an environment entry only -
+the number of variables its stored map holds - and is absent, not `0`, on the
+other four kinds. An empty trash is `{"items": [], "total": 0}`, never a
+`404`.
 
 ### POST /trash/:id/restore
 
@@ -2566,6 +2702,8 @@ claimed again.
   "parentId": null,
   "collections": 2,
   "requests": 14,
+  "purgeCollections": 3,
+  "purgeRequests": 16,
   "restored": true,
   "reparentedToRoot": false
 }
@@ -2576,8 +2714,8 @@ claimed again.
 | Status | When |
 |--------|------|
 | `404` | Nothing in the trash carries that id - a live row, or one already purged |
-| `409` | A request whose collection is itself deleted or gone; restore the collection first |
-| `409` | An example whose request is itself deleted or gone; restore the request first |
+| `409` | A request whose collection is itself deleted or gone; the message names the request and its collection, and the trash root to restore first by name and id |
+| `409` | An example whose request is itself deleted or gone; the message names the example and its request, and the trash root to restore first by name and id |
 | `409` | An example whose request already holds the maximum of 100 examples; delete one first |
 | `409` | A client certificate whose host and port a live entry now claims; the message names that entry, to delete first |
 
@@ -2602,10 +2740,11 @@ emptying the trash, not changing one's mind. A purged *bound* collection takes
 the declined operations recorded under it, which nothing could read any more.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
-`collections` / `requests` are the deleted row's own cohort, so they are a floor
-here rather than the whole: a purge that also swept up an earlier delete's rows
-destroyed more than they count. A `404` if the trash does not hold that id -
-which is also what stops a mistyped id from destroying a live collection.
+`purgeCollections` / `purgeRequests` count what this purge destroyed, an
+earlier delete's rows under the root included; its `collections` /
+`requests` are still the deleted row's own cohort. A `404` if the trash does
+not hold that id - which is also what stops a mistyped id from destroying a
+live collection.
 
 ## Request examples
 
@@ -4009,8 +4148,8 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 |---|---|
 | `type` | `"collection"` or `"request"`; anything else is a `400` |
 | `id` | Non-empty string naming a **stored** row of that type |
-| `order` | Required, a non-negative integer. Not a float, not negative - this endpoint writes dense positions, and either would be a silently truncated or unreachable slot |
-| `parentId` (collection) | Absent keeps the current parent; `null` moves to the root; a string moves under that collection, which must exist |
+| `order` | Required, an integer from `0` to `2147483647`. Not a float, not negative, not past the column - this endpoint writes dense positions, and each would be a silently truncated, unreachable or wrapped slot. Anything else is a `400`, e.g. `Invalid move at index 0: 'order' must be an integer from 0 to 2147483647 (got 2147483648)` |
+| `parentId` (collection) | Absent keeps the current parent; `null` or `""` moves to the root; any other string moves under that collection, which must exist; anything else is a `400` naming `parentId` |
 | `collectionId` (request) | Absent keeps the current owner; a string moves to that collection, which must exist |
 
 A row may appear in `moves` at most once - two positions for one row is a `400`
@@ -4021,8 +4160,8 @@ renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
 applies. The children are the parent's sub-collections and its requests as one
 list (#2535), so a tie across the two kinds comes out as distinct numbers with
 the sub-collection first. An entry is `{"parentId": <collection id>}`, or
-`{"parentId": null}` for the root collections (the roots hold collections
-only). The named collection must exist, and `parentId` must be *stated* rather
+`{"parentId": null}` (`""` reads the same) for the root collections (the roots
+hold collections only). The named collection must exist, and `parentId` must be *stated* rather
 than omitted, so a renumber can never land on a scope the caller did not mean.
 The per-kind shapes engines before #2535 took, `{"type": "collection",
 "parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`
@@ -4045,7 +4184,8 @@ meaning of out. A request that records an operation (`specOperation`) and that
 the batch leaves outside its contract comes back with `specOperation: null`,
 and the operation is recorded as declined under the binding it left, in the
 batch's transaction. A moved collection does this for every stamped request
-beneath it. The binding after and the contract are read against the tree the
+beneath it, as a `parentId` sent to
+[`PUT /collections/:id`](#put-collectionsid) does (#3470). The binding after and the contract are read against the tree the
 batch writes, so a request moved into a folder the same batch moves away is
 judged by where the folder lands. A move within one contract keeps the stamp,
 and so does moving the bound collection itself. Each request this clears is in the
@@ -4545,9 +4685,9 @@ preview tree lists them in the same order.
 - `400` `Unrecognised format` - readable, and no format claims it. Kept as its
   own sentence: "Vayu does not read this kind of file" and "this file is broken"
   are different answers.
-- `400` `Could not read the document: <detail>` - neither JSON nor YAML, with
+- `400` `Couldn't read the document: <detail>` - neither JSON nor YAML, with
   the line named.
-- `400` `Could not read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
+- `400` `Couldn't read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
   that is not a collection or an environment: `<kind>` reads `design document
   (spec)` for `spec.insomnia.rest/`, `mock server` for `mock.insomnia.rest/`,
   and the `type`'s own prefix otherwise. A collection or environment in a
@@ -5160,9 +5300,10 @@ is absent here until it is added on purpose:
    parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts
    only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
-   `lifecycle` outcome drops its `message`, an element row (a step's or the
-   run's `elements`) drops `messages`, `console` and their dropped counts
-   (#3127), and the report's `auth` section (whose `lastError` is a token
+   `lifecycle` outcome drops its `message`, `messages`, `console` and their
+   dropped counts, an
+   element row (a step's or the run's `elements`) drops `messages`, `console`
+   and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
    display name, step, transaction, metric and series names) is carried as
@@ -5731,9 +5872,26 @@ an array) had the same effect and is now a `400` - see
 
 ## Change feed
 
+### POST /changes/subscriptions
+
+Issues the id one [`GET /changes`](#get-changes) stream opens with.
+
+```json
+{ "subscription": "k3Zq...43 base64url characters" }
+```
+
+The id is 32 random bytes from libsodium, **single-use**: the first `GET
+/changes` that presents it spends it, whether that stream is then refused for
+a full feed or served, and a second `GET` with it is a `403`. A client asks for
+a new one before every connection, a reconnect included. At most 64 issued ids
+wait unspent (`change_feed::MAX_PENDING_SUBSCRIPTIONS`); asking for more drops
+the oldest. This is a `POST` so a web page cannot send it: a page's request
+carries an `Origin`, which [the gate](#who-may-call-the-api) refuses, so a page
+can neither learn an id nor open a stream.
+
 ### GET /changes
 
-Server-Sent Events, one `change` event per committed write of a collection, a
+`GET /changes?subscription=<id>`: Server-Sent Events, one `change` event per committed write of a collection, a
 request, an example, an environment, the globals or a trash entry, whoever made
 it: the app, the MCP server (in-app or stdio), `vayu-cli` or a script against
 this API (#3420). A client that caches those rows subscribes once and refetches
@@ -5801,12 +5959,20 @@ reader that falls a whole ring behind between two polls (an import larger than
 the ring) is sent one mid-stream. The stream then continues from the reset's
 id. Treat it as "every cached row may be stale".
 
+**A stream needs a subscription.** `subscription` is the id
+[`POST /changes/subscriptions`](#post-changessubscriptions) issued. Without it
+the answer is a `400` with code `subscription_required`; an id that was never
+issued, was dropped or is already spent is a `403` with code
+`unknown_subscription`. Neither holds a reader slot. A scriptless `GET` is all
+a web page can send without an `Origin`, so a page can neither read the feed nor
+fill its slots to lock the app out.
+
 **Several readers, a bounded number.** There is no single-reader claim: every
-stream reads the same feed. Each one parks a pool thread, and the route needs no
-id a web page cannot know, so at most 8 are open at once
-(`change_feed::MAX_READERS`); another is a `503` with code `change_feed_full` and
-`Retry-After: 15`, the keep-alive interval within which a closed stream's slot
-is noticed and freed.
+stream reads the same feed. Each one parks a pool thread, so at most 8 are open
+at once (`change_feed::MAX_READERS`); another is a `503` with code
+`change_feed_full` and `Retry-After: 15`, the keep-alive interval within which a
+closed stream's slot is noticed and freed. The id of a refused stream is spent:
+ask for another.
 
 A stream writes `: keep-alive` after 15 quiet seconds and ends when the client
 goes or the engine stops. It reads only; opening one changes nothing.
@@ -6314,12 +6480,20 @@ applies to collections, requests and environments), ids are not restorable
 across restarts, and `POST /inbox/start` is a verb path for that reason. Stopping
 an inbox frees its listener but keeps the record - and therefore its captures -
 readable until the engine exits; `DELETE /inbox/:inboxId` is what removes both.
+After an engine restart the app names the inboxes, issuers and mocks that
+stopped with it in one notice (`app/src/lib/services-stopped-by-restart.ts`).
 
 **Binding is a trust decision.** The default is `127.0.0.1`. Any other address
 is refused unless the caller also sends `"confirmNonLoopback": true`, and the
 inbox reports `loopback: false` from then on so a client can badge it. See
 [architecture.md](architecture.md#listeners) for why only the inbox listener may
-bind wide and the management API never may.
+bind wide and the management API never may. An inbox holds at most 96
+connections at once: 32 being served (a canned `delayMs` wait occupies one for
+its whole duration) and 64 waiting for one. A connection past that is closed at
+accept, which the sender sees as a reset, so an inbox bound past loopback
+cannot be held open by idle connections until the engine runs out of file
+descriptors. Every other on-demand listener (mock server, mock issuer, OAuth
+callback) has the same bound.
 
 **Bounds.** Three are settings (`GET`/`POST /config`, category *Services*),
 read once when an inbox starts - so a change applies to the next inbox
@@ -6361,6 +6535,16 @@ other body (issue #3110). An `application/x-www-form-urlencoded` body is capture
 the same way up to the 8 MiB transport ceiling rather than refused at 8192 bytes
 with an empty `413` (issue #3111). The capture's `Content-Type` header is the
 sender's.
+
+A **compressed body is stored as sent**. A sender that declares
+`Content-Encoding: gzip`, `deflate`, `br` or `zstd` (an OpenTelemetry or Sentry
+exporter, a log shipper) is captured and answered with the canned response like
+any other; the inbox does not decompress, so `body` holds the compressed bytes
+(base64, as any non-text body is), `bodyBytes` is their compressed size, the cut
+at `inboxMaxBodyBytes` applies to them, and the capture's `Content-Encoding`
+header is the sender's. Only the inbox listener does this: the management API
+refuses a compressed request body, and an unrecognised coding such as
+`identity` was always passed through.
 
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
@@ -6634,7 +6818,11 @@ from Postman may expect. Resolving them would be a feature, not a docs fix.
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
-that outlives its listener, unlike an inbox and its captures.
+that outlives its listener, unlike an inbox and its captures. Trashing the
+collection a mock serves, or any collection above it, stops the mock the same
+way ([`DELETE /collections/:id`](#delete-collectionsid)), and a restore does
+not start it again. A mock an engine restart stopped is named in the app's
+restart notice, as an inbox is.
 
 **Load-testing against a mock is a supported workflow**, and it is the one this
 listener exists for as much as frontend development: a mock is a
@@ -6735,6 +6923,11 @@ pages may read it is the caller's to state:
   response from the page. `Vary: Origin` is on every response under a list.
   Origins are compared canonically: scheme and host case-folded, a default port
   dropped, so `https://App.Example:443` matches a listed `https://app.example`.
+  A list also pins the **`Host`**: the mock answers `403` to any request, a
+  preflight included, whose `Host` is not `127.0.0.1:<port>`, `localhost:<port>`
+  or `[::1]:<port>` of its own port (the management API's rule), so a page that
+  DNS rebinding has made same-origin with the mock cannot read it. A mock with
+  no list answers any `Host`.
 
 A header the example itself carries under `Access-Control-*` or `Vary` is
 dropped rather than echoed, since the engine already answered those and a
@@ -6972,7 +7165,8 @@ refusal: it is sent as written and counted like any other unresolved token
 
 An `apikey` with `in: "header"` whose key is not a header name once trimmed
 (`X Key`) is refused, with nothing written: the failure is `AUTH_FAILED` with an
-`authErrorCode` of `invalid_header_name`. An `apikey` whose key is empty or
+`authErrorCode` of `invalid_header_name`. The message names the offending byte
+and not the key, which arrives already resolved and may be a secret. An `apikey` whose key is empty or
 only padding, in the header or the query, and a `bearer` token that is empty or
 only padding are not refused: nothing is written (never `Authorization: Bearer `
 with nothing after it), the request is sent without that credential, and the
@@ -7358,7 +7552,7 @@ never re-resolved - see [POST /execute](#post-execute) and
     "auth": { "mode": "inherit" },
     "elements": []
   },
-  "collectionId": "col_1234567890", // Optional: chain scope for an inline request
+  "collectionId": "col_1234567890", // Optional: chain scope for an inline request, echoed on the answer
   "environmentId": "env_1234567890", // Optional: environment scope
   "dataColumns": ["username", "city"], // Optional: bare names a bound row will substitute
   "deferDynamicVariables": true      // Optional: this payload is for a run that repeats it
@@ -7485,6 +7679,29 @@ a deferred variable cannot be checked here, so the refusals described under
 at send time instead, in the same words and under the same codes: a buffered
 `POST /execute` answers `statusCode: 0` with the code as `refusalCode`, and a
 streaming send answers a `400` carrying it.
+
+#### collectionId on the answer
+
+The answer names the collection whose chain this composition read, as
+`collectionId`: the leaf, so a sub-folder's id rather than its root's. That is
+the stored request's own collection for `requestId`, else the body's
+`collectionId`, and the member is **omitted when composition read no chain**:
+an inline request with no `collectionId`, or one naming a collection that does
+not exist or is in the Trash (issue #3461). Like `deferredVariables` it is
+composition's own answer, never taken from the input: a `collectionId` inside
+`request` is dropped, so an inline request cannot claim a scope composition did
+not read.
+
+It is what lets an inline request keep its scope past composition. A request
+composed by `requestId`, or sent with one linked (the app's Send does both),
+carries the id onward and `POST /execute` reads the stored request's
+collection again; an inline one that links no row (MCP's ad-hoc `run_request`
+with a `collectionId`, a direct caller) has nothing else to name it, so without
+the member the names deferred past its pre-request script would meet no
+collection scope at the send, and the script would read an empty
+`pm.collectionVariables`. `POST /execute` and `POST /runs`
+read it as described under [POST /execute](#post-execute). An engine older
+than issue #3461 neither writes nor reads it, and ignores it in a body.
 
 #### Query encoding
 
@@ -7781,8 +7998,8 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 
 **Response:** `200` with the composed payload - the `POST /execute` body shape,
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
-unchanged, and `deferredVariables` when a pre-request script defers names
-(above). An auth that resolves to "send nothing" is an absent `auth` field.
+unchanged, the [`collectionId`](#collectionid-on-the-answer) whose chain it
+read, and `deferredVariables` when a pre-request script defers names (above). An auth that resolves to "send nothing" is an absent `auth` field.
 `headers` always comes back as the line array (issue #2466), whichever shape an
 inline request used, so a repeated header survives compose to execute; it is
 absent when there are no lines.
@@ -7833,8 +8050,8 @@ with specific codes:
   `X-Tenant` lines once the variable answers `X-Tenant`, and no row says so.
   Names are compared **without case**, so a `{{h}}` resolving to
   `authorization` refuses beside an `Authorization` the caller typed. The
-  message names both spellings as written and the name they produced; nothing
-  is repaired, for the reason a forged header is refused rather than stripped.
+  message names both spellings as written, never the name they produced (a
+  variable can hold a secret); nothing is repaired, for the reason a forged header is refused rather than stripped.
 
   Only a collision **resolution produced** is refused. Two names the caller
   *wrote* alike - `X-Dup` and `x-dup` typed on two rows, or one `{{h}}` typed
@@ -7880,8 +8097,9 @@ with specific codes:
 - `400` `{"error": {"code": "invalid_header_name", "message": "..."}}` - a
   header name that is not an RFC 9110 `token` once the spaces and tabs around
   it are trimmed (issue #2467): `X Bad` (an interior space), `X:Bad` (a colon),
-  `X-é` (a byte outside ASCII). The message quotes the name and says which
-  character cannot appear in one. Nothing is rewritten into a different
+  `X-é` (a byte outside ASCII). The message quotes the name as written -
+  `{{h}}`, not what the variable resolved to, which can be a secret - and says
+  which character cannot appear in one. Nothing is rewritten into a different
   header: the trim below is for padding, which has one reading, and this
   refusal is for what has none. The same refusal, under the same code, answers
   a `headers` name posted to `POST /execute` or `POST /runs` and the
@@ -7987,6 +8205,7 @@ never refuses: see [Authentication](#authentication) and
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by scripts as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, uses environment variables
+  "collectionId": "col_1234567890",   // Optional, the collection scope of a request no row names - see below
   "timeout": 30000,                    // Optional, ms, 1-86400000 - see below
   "elements": [                        // Optional, typed behaviours - see Elements. The only
                                        // script source; preRequestScript/postRequestScript(s)/tests
@@ -8068,10 +8287,25 @@ the send's scripts make, buffered or streamed; a call's own `timeout` option
 replaces it, and the script's remaining budget can only lower either
 ([Scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
 
-**`requestId` and `environmentId` must be strings** (issue #1917): an id of any
-other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
-must be a string (got number)` - before any run row exists. Absent and `null`
-mean no link. `POST /runs` reads the same two fields under the same rule.
+**`requestId`, `environmentId` and `collectionId` must be strings** (issue
+#1917, `collectionId` since #3461): an id of any other JSON type
+(`"requestId": 7`) is a `400` naming the field - `'requestId' must be a string
+(got number)` - before any run row exists. Absent and `null` mean no link.
+`POST /runs` reads the same three fields under the same rule.
+
+**The collection scope of a send is decided once** (issue #3461): the
+collection of the request row `requestId` names, when there is a live one, and
+otherwise `collectionId`, the member [`POST /compose`](#collectionid-on-the-answer)
+writes on an inline request's answer - composition's own precedence, so a
+request field and a script read one chain. Its chain is what the pre-request
+and post-request scripts read and write (`pm.collectionVariables` answers the
+leaf's names and its ancestors', and a `set()` is stored on the leaf alone,
+never on an ancestor), what the names deferred past the pre-request script
+resolve against, and what the run's `configSnapshot` is masked against. An id
+naming nothing, unknown or in the Trash since composition, is an empty
+collection scope and the send goes out, never a refusal, as composition treats
+it. The field rides into `configSnapshot` with the rest of the payload, which
+is how a stored run records the scope it sent under.
 
 **`disabledDefaultHeaders` refuses what the engine would add** (issue #1229).
 The engine adds a small declared set to every request that does not name it -
@@ -8679,7 +8913,10 @@ field carries no `scope` and is the request's own; so is one from a payload
 whose `elements` carry no `origin`. `success` folds the same way: a failing
 `pm.test` at any level is a failed assertion, and the first level that throws
 is the error. `preScriptError` / `postScriptError` hold the thrown message as
-they always have when the request's own script threw; when an inherited level
+they always have when the request's own script threw (never empty or a bare
+`null`: a script that runs out of memory reads `Script ran out of memory at the
+1 MiB limit`, see
+[Error Handling](scripting.md#error-handling)); when an inherited level
 threw, they name it - "Collection pre-request script failed - <message>",
 "Folder test script failed - <message>". An `assert.*` or `extract.*`
 element's entry carries the `scope` of the level that declared it.
@@ -9176,6 +9413,7 @@ Start a load test run (Vayu Mode).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
+  "collectionId": "col_1234567890",   // Optional, the composed collection scope when no requestId row names one - see below
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "targetPolicy": { "allowAll": false, "allowedHosts": ["api.example.com"] },  // Optional, the hosts this run may reach - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
@@ -9214,12 +9452,16 @@ explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
 
-**`requestId` / `environmentId` on `POST /runs`** are read exactly as on
-[`POST /execute`](#post-execute): a non-string is a `400` naming the field
-(`'environmentId' must be a string (got boolean)`) and no run row is created.
-A single-request run that names either resolves a `{{name}}` still in its URL,
-path values, headers or body against the same scopes a Send reads (the
-environment, the linked request's collection chain, globals) (#3253). It is one
+**`requestId` / `environmentId` / `collectionId` on `POST /runs`** are read
+exactly as on [`POST /execute`](#post-execute): a non-string is a `400` naming
+the field (`'environmentId' must be a string (got boolean)`) and no run row is
+created. A single-request run's collection scope is decided by the same rule
+(the linked request's collection, else the composed
+[`collectionId`](#collectionid-on-the-answer), issue #3461), for its scripts,
+its residual pass and its snapshot's masking alike. A single-request run that
+names any of the three resolves a `{{name}}` still in its URL, path values,
+headers or body against the same scopes a Send reads (the environment, that
+collection's chain, globals) (#3253). It is one
 pass at run start, over the request every submission shares, never one per
 submission, so a request holding no `{{` costs nothing more. An
 id naming nothing is an empty scope, as on `POST /execute`, never a refusal.
@@ -9803,14 +10045,14 @@ Nothing shares this overlay across submissions - each one gets its own,
 discarded after - which is what keeps many concurrent submissions from
 writing through one shared map.
 
-**`pm.info.requestName` is not bound for an inline element on this path.**
-The deferred replay (the un-inlined `script.post` case, `test_scripts`) reads
-`requestName` off the run's own config exactly as it always has; an inline
-`script.pre` / `script.post` element's `ScriptContext` does not carry it:
-this path's `bind_submission_identity` (`load_strategy.cpp`) binds the
-submission's iteration, its virtual user (`1`) and its data row (#3124), but
-not a name. An inline script reading `pm.info.requestName` sees `undefined`,
-not the name a deferred one on the same run would.
+**An inline element's `pm.info` carries the run's request identity** (#3460).
+`bind_submission_identity` (`load_strategy.cpp`) binds the submission's
+iteration, its virtual user (`1`) and its data row (#3124), and the run's
+`requestId` / `requestName`, resolved once when the run starts by the same
+`read_run_script_identity` (`run_manager.cpp`) the deferred replay reads - the
+payload's own fields, the linked row's name when only an id was sent. A run
+started from no saved request reads both as `undefined`, inline and deferred
+alike.
 
 #### The `lifecycleElements` array (a single-request run's own setup/teardown)
 
@@ -9842,15 +10084,17 @@ sources of truth for the same run boundary.
 `script.setup` runs once, before the run's first submission (before
 `test_start` is captured, so its own time is never folded into the run's
 duration figures, live or stored: the live stream's `elapsedSeconds` reads `0`
-until it ends); a throwing setup fails the run - `Failed`, nothing sent -
-the same as a collection-backed run. `script.teardown` runs once, after the
+until it ends); a throwing setup, or one that fails a `pm.test`, fails the
+run - `Failed`, nothing sent, its outcome under the report's
+`lifecycle.setup` - the same as a collection-backed run. `script.teardown` runs once, after the
 last submission settles, and sees `pm.info.run` (`requestsSent`,
 `errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's
 terminal status. Both read and write the same variable scopes every other
 script of the run shares - the environment named by `environmentId`, and the
-collection scope of the request `requestId` links, when the run links one;
-a bare URL run with no `requestId` gets no collection scope. Unlike a
+collection scope of the request `requestId` links, when the run links one,
+else of the composed `collectionId` (issue #3461); a bare URL run naming
+neither gets no collection scope. Unlike a
 collection-backed run, `script.setup` / `script.teardown` alone do not make
 what a script writes reach the request: the stored values do, through the
 start-of-run pass ([`POST /runs`](#post-runs), #3253), but that pass runs
@@ -10083,7 +10327,11 @@ the same request does, and the two cannot drift apart.
   collection is read once, so what one step writes into a folder is what a
   later step in that folder, or in a folder below it, reads; a sibling folder
   does not see it. A `script.setup` and `script.teardown` read and write the
-  collection being run. Every collection a script changed is written back to
+  collection that declares them (#3456): the run's lifecycle set is every
+  collection from the root down to the one being run and, on a `recursive`
+  run, every folder beneath it, set up root first and torn down in reverse
+  (see `lifecycle` under
+  [`GET /runs/:runId/report`](#get-runsrunidreport)). Every collection a script changed is written back to
   its own row in the one write at the end, which comes after `script.teardown`
   (#3249): a teardown's `pm.environment.set` / `pm.globals.set` is saved with
   the steps' writes. A load run persists no variable, a teardown's included.
@@ -10444,7 +10692,7 @@ that passed everything else. The run's rollup is
 | `errored`, step | The step did not run clean: the pre-request or test script threw, at any level (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
 | `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` (or `control.switch` / `control.loop`) target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
-| `stopped` | A Stop (`POST /runs/:id/stop`) or an engine shutdown cut the step short (#3397): its transfer, the late OAuth 2.0 token request ahead of it, or one of its scripts' `pm.sendRequest` was cancelled. The row carries the cancelled response (status `0`, `Request cancelled`). | **Ends the run.** No later step is sent or stored, and the step is no error: not in `errored`, `failed`, `stepsNotRun`, the status distribution, coverage or the assertion tally. |
+| `stopped` | A Stop (`POST /runs/:id/stop`) or an engine shutdown cut the step short (#3397): its transfer, the late OAuth 2.0 token request ahead of it, or one of its scripts' `pm.sendRequest` was cancelled, or one of its scripts was ended while it ran (#3460). The row carries the cancelled response (status `0`, `Request cancelled`). | **Ends the run.** No later step is sent or stored, and the step is no error: not in `errored`, `failed`, `stepsNotRun`, the status distribution, coverage or the assertion tally. |
 
 Either kind of `errored` is the same outcome on the row, in the summary's
 `errored` count and on the `step` frame, with the error in `results.error`; the
@@ -10604,12 +10852,16 @@ knob.
   users is not the thing being measured.
 - **Variables are each step's own folder's** (#3248), as in a design-mode
   collection run: the environment and globals the run loaded, and the chain
-  from the root collection down to the folder the step's request sits in, the
-  run collection's entry as `script.setup` left it. All of it is read once,
-  before the first request, so a recursive run sends a sub-folder's `{{name}}`
-  with that folder's value whether or not the plan carries a script. A
-  `script.setup` and `script.teardown` read the collection being run. Nothing
-  a load run's scripts write is saved.
+  from the root collection down to the folder the step's request sits in,
+  each entry as the run's `script.setup` scripts left it. All of it is read
+  once, before the first request, so a recursive run sends a sub-folder's
+  `{{name}}` with that folder's value whether or not the plan carries a
+  script. A `script.setup` and `script.teardown` read and write the collection
+  that declares them, from the same lifecycle set a design-mode run uses
+  (#3456; see `lifecycle` under
+  [`GET /runs/:runId/report`](#get-runsrunidreport)), so what a folder's setup
+  writes reaches the steps in that folder and the folders below it. Nothing a
+  load run's scripts write is saved.
 - **The element pipeline runs here too, per virtual user (issue #1495).**
   `extract.*` and `assert.*` always run - before the send (`step.before`) and
   after the response (`step.after`). A `script.pre` / `script.post` element
@@ -10851,8 +11103,9 @@ makes that element's `missing` a failed step. `deferred` (issue #2144) counts a
 assertions are the step's `tests`. `skipped` counts every other `skipped`
 outcome: a disabled element, an un-inlined `script.pre` (no replay to go to), a
 controller's skip, an optional `extract.json` over a body it could not
-read, and an inline `script.*` whose `pm.sendRequest` the run's Stop cancelled
-(#3371), whose tests and throw are then counted nowhere.
+read, and an inline `script.*` the run's Stop cut short, its `pm.sendRequest`
+cancelled (#3371) or the script itself ended (#3460), whose tests and throw are
+then counted nowhere.
 
 A `script.pre` or `script.post` that ran inline also says why it failed and
 what it logged (#3127), since a load run keeps no trace to read it from:
@@ -12293,14 +12546,17 @@ run stored, never from its result rows, which are many and unbounded:
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
+| `assertionsFailed` (alone) | A single-request load run's failed assertions (#3458), derived from what the run stored: the `failed` of every row of the report's top-level `elements` (an `assert.*` or inline `script.*` outcome counted per submission) plus `testValidation.testsFailed` (the sampled replay of the scripts that did not run inline, so no outcome is counted twice). A required `extract.*` miss is reported `missing`, not `failed`, and is not in it. There is no `assertionsPassed` beside it: an element row counts executions and the replay counts `pm.test` calls |
 | `capacity` | A capacity run's headline (#2930), the same three keys of the report's [`capacity` section](#get-runsrunidreport): `stopReason`, and `maxHealthyConcurrency` / `kneeConcurrency` each only when the search found that level |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
 which is not the same claim as passing. The two assertion counts are absent
-for a single-request run, a scenario load run that made no assertion and one
-stored before #2820. A scenario load run whose every assertion failed against
+for a scenario load run that made no assertion and one stored before #2820; a
+single-request run carries `assertionsFailed` alone, absent when it stored
+neither `elements` nor `testValidation` (and `0` when it stored them and nothing
+failed). A scenario load run whose every assertion failed against
 `200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
 "assertionsPassed": 0, "assertionsFailed": 4580 }`. `capacity` is absent on
 every run that was not a capacity search; inside it, `maxHealthyConcurrency`
@@ -12486,10 +12742,13 @@ into `sanitize_config_snapshot`.
 (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's `apikey` auth
 keeps its name with the value `"<redacted>"`, and every value of a variable
 marked secret in the payload's scopes (globals, `environmentId`, the collection
-chain of `requestId`'s request; for a scenario run, the chain of the run
+chain of `requestId`'s request, else of the composed `collectionId`, issue
+#3461; for a scenario run, the chain of the run
 collection and of every folder a step sits in, so a recursive run masks a
 secret held on a sub-folder, issue #3270) is written as `<redacted>` wherever
-it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded,
+it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded
+(strictly, and as composition writes a query value, a path, a fragment and
+user info, which leave `/ @ & : + '` raw where the strict form escapes them),
 JSON-escaped and XML-escaped forms (a JSON body holds `pa"ss` as `pa\"ss`). A
 value under four characters is not masked. `result.trace` is the record of
 what was sent and keeps it all. A run stored before this change returns its
@@ -12545,7 +12804,13 @@ in memory only, and the first Stop is latched with the phase it arrived in.
   `cancelled`, not as errors, because the operator asked for it. The run keeps
   its own end - `completed`, or `failed` when `thresholds.failRun` judges it
   so - and its sending window is what it would have been without the Stop,
-  since the Stop ended no sending.
+  since the Stop ended no sending. A Stop in either phase also ends the
+  deferred test replay and any script still running (#3460): the running
+  script stops at its next interrupt poll and no further sample is replayed,
+  so `testValidation.samplesTested` counts the samples the replay reached and
+  the worker settles within the 5s below instead of after each remaining
+  sample's `scriptTimeout`. `script.teardown` still runs after a Stop latched
+  before it (see [scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest), "A Stop ends the script itself").
 - **A drain that hits its deadline with no Stop** cancels what is still
   outstanding the same way, and because nobody asked for that one to stop, it
   is an error with no response, not a cancellation. Without that bound an
@@ -12997,7 +13262,9 @@ are HTTP-only, the same rule a failed assertion follows
   },
   "lifecycle": {
     "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
-    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
+                    "messages": [ { "kind": "error", "text": "Error: boom" } ],
+                    "console": [ { "level": "log", "text": "tearing down" } ] } ]
   },
   "elements": [
     { "id": "el_1", "kind": "assert.status", "name": "Is 200",
@@ -13129,7 +13396,7 @@ counts the submissions an un-inlined `script.post` was left to the completion re
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is every other skip: a disabled element, an un-inlined
 `script.pre`, an optional `extract.json` over a body it could not read, or an inline
-`script.*` whose `pm.sendRequest` the run's Stop cancelled (#3371). Absent, not `[]`, for a run that declared no
+`script.*` the run's Stop cut short, its `pm.sendRequest` cancelled (#3371) or the script itself ended (#3460). Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
@@ -13250,16 +13517,37 @@ scenario step report the same warning for the same mistake.
 **`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
-`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`); absent entirely,
-not `{}`, for a run whose collection (or, for a single-request run, whose own
-`lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
-other than `"ok"` or `"skipped"` already means the run never sent anything - `status` is
-`Failed` and every other section above is absent or zeroed - so a reader who
-finds one here knows why the rest of the report is empty. A `script.teardown`
+`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`, plus the two lists
+below); absent entirely,
+not `{}`, for a run whose collections (or, for a single-request run, whose own
+`lifecycleElements` array - issue #1573) declared neither. A collection run's
+elements come from its lifecycle set (#3456): every collection from the root
+down to the one being run and, on a `recursive` run, every folder beneath it in
+sidebar order, a folder before the folders nested in it. `setup` lists them in
+that order and `teardown` in reverse, and each row's `origin` is
+`{kind: "collection", scope: "collection" | "folder", id, name}`, naming whose
+script it was. A `script.setup` outcome
+other than `"ok"` or `"skipped"` means setup refused the run before it sent
+anything: `status` is `Failed`, no step ran, and the run still stores a summary
+whose `lifecycle.setup` holds every setup that ran up to and including that
+outcome with its `message` (#3455), every
+other section above absent or zeroed - so a reader who finds one here knows why
+the rest of the report is empty. The collections after the refusing one set up
+nothing. No teardown runs on such a run, so it has no
+`teardown` key. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
-teardown failure is reported, not fatal. A script whose `pm.sendRequest` the run's
-Stop cancelled is `"skipped"` (#3371), with a `message` saying so: the run ended
-under it, nothing failed, and the app shows the row muted rather than as a failure.
+teardown failure is reported, not fatal. A script that ran and failed only
+`pm.test`s is `"failed"`, its `message` the first failing test, as a `script.post`'s is.
+A script element's row also carries **`messages`** (what it threw, then each
+failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
+console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
+the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
+element row's lists (#3127), each key present only when the script said something.
+A script the run's Stop cut short is
+`"skipped"`, with a `message` saying which way: its `pm.sendRequest` was
+cancelled (#3371), or the script itself was ended while it ran (#3460). The run
+ended under it, nothing failed, and the app shows the row muted rather than as a
+failure.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 
@@ -13978,6 +14266,12 @@ signature keyed on those names, so a name off the shelf is a type error. Postman
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
 as the value it is.
+
+It also carries interface augmentations for standard-library members the runtime
+runs but the TypeScript bundled with the editor does not declare yet
+(`RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON`, `Uint8Array.fromBase64` and
+`toHex`, and their siblings), under their own banner; a row retires when that
+TypeScript declares its members (#3485).
 
 That is not padding: the app suppresses "Cannot find name" (2304), so a name that
 is merely undeclared draws nothing. A name typed `never` makes the call, member

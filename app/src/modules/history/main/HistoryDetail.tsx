@@ -35,7 +35,7 @@ import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { loadedRunReference } from "@/lib/run-reference-input";
 import { useCopy } from "@/hooks/useCopy";
 import { useTabsStore } from "@/stores";
-import { Button, IconSwap, TooltipIconButton } from "@/components/ui";
+import { Button, HeadingSection, IconSwap, TooltipIconButton } from "@/components/ui";
 import {
 	EmptyState,
 	ErrorState,
@@ -218,10 +218,18 @@ export default function HistoryDetail() {
 			 * drawer open/closed rather than navigating anywhere.
 			 */}
 			<div className="border-b border-border bg-card px-6 py-3 shrink-0">
-				<div className="flex items-center gap-3">
-					<div className="flex-1 min-w-0 flex items-center gap-2">
+				{/*
+				 * Wraps instead of squeezing (#3494). The name group keeps a floor
+				 * (`min-w-[12rem]`), so when the buttons would take it below that they drop
+				 * to a second line; inside the group the status pill and the timestamp
+				 * wrap under the name before the name is clipped. Without the floor a
+				 * long timestamp and two labelled buttons left the name a few
+				 * characters wide at a narrow pane or a 200% scale.
+				 */}
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+					<div className="flex min-w-[12rem] flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
 						<h1
-							className="min-w-0 truncate text-sm font-semibold text-foreground"
+							className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground"
 							title={title}
 						>
 							{title}
@@ -229,7 +237,7 @@ export default function HistoryDetail() {
 						<RunStatusPill status={run.status} outcome={judgement?.outcome} />
 						<TimeValue
 							value={run.startTime}
-							className="shrink-0 text-xs text-muted-foreground"
+							className="shrink-0 whitespace-nowrap text-xs text-muted-foreground"
 						/>
 					</div>
 					<Button
@@ -253,20 +261,26 @@ export default function HistoryDetail() {
 				<RunIdLine runId={selectedRunId} typeName={title === typeName ? null : typeName} />
 				<RunComment comment={runComment(run)} className="mt-1" />
 			</div>
-			{/* Detail Content */}
-			<div className="flex-1 min-h-0 overflow-hidden">
-				{/* Keyed on the run: these views hold per-run local state (active
+			{/* Detail Content, a section under the run's `h1` (#3498). */}
+			<HeadingSection>
+				<div className="flex-1 min-h-0 overflow-hidden">
+					{/* Keyed on the run: these views hold per-run local state (active
 				    tab, filters, dialogs) that must not carry over to the next run. */}
-				{isDesignRun ? (
-					<DesignRunView key={selectedRunId} run={run} />
-				) : isScenarioRun ? (
-					<ScenarioRunView key={selectedRunId} run={run} />
-				) : isLoadRunInProgress ? (
-					<LoadRunInProgress runId={selectedRunId} />
-				) : (
-					<LoadTestDetail key={selectedRunId} report={report!} runId={selectedRunId} />
-				)}
-			</div>
+					{isDesignRun ? (
+						<DesignRunView key={selectedRunId} run={run} />
+					) : isScenarioRun ? (
+						<ScenarioRunView key={selectedRunId} run={run} />
+					) : isLoadRunInProgress ? (
+						<LoadRunInProgress runId={selectedRunId} />
+					) : (
+						<LoadTestDetail
+							key={selectedRunId}
+							report={report!}
+							runId={selectedRunId}
+						/>
+					)}
+				</div>
+			</HeadingSection>
 		</div>
 	);
 }

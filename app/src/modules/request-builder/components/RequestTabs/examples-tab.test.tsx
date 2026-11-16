@@ -24,7 +24,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
+import { screen, within, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { RequestBuilderContextValue, RequestState } from "../../types";

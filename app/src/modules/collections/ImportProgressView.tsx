@@ -6,7 +6,7 @@
  */
 
 import { Progress } from "@/components/ui";
-import { formatBytes } from "@/modules/settings/utils/format-size";
+import { formatBytes } from "@/lib/format-number";
 import { IMPORT_STAGE_LABELS } from "@/constants/import";
 import { pluralize } from "@/modules/dashboard/utils/format";
 

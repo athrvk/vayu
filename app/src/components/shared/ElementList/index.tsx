@@ -303,6 +303,7 @@ function ElementRow({
 	 */
 	const rename = useInlineRename({
 		active: renaming,
+		label: "Element name",
 		initialValue: element.name ?? "",
 		commitEmpty: true,
 		onCommit: (name) => {
@@ -395,7 +396,7 @@ function ElementRow({
 						aria-expanded={open}
 						onClick={() => setOpen(!open)}
 						onKeyDown={handleRowKeyDown}
-						className="flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+						className="flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					>
 						<ChevronRight
 							className={cn("size-icon-sm transition-transform", open && "rotate-90")}
@@ -515,8 +516,10 @@ function ElementRow({
 							description={schema?.description ?? ""}
 							// The mode forms render their fields from the
 							// catalogue like the generic one does; a script form
-							// ignores it. Undefined only for a kind this engine
-							// build no longer serves - a bespoke form still
+							// reads it only for the advanced switch it draws under
+							// the editor (script.pre / script.post), and setup and
+							// teardown ignore it. Undefined only for a kind this
+							// engine build no longer serves - a bespoke form still
 							// renders there, as it always has.
 							schema={schema?.configSchema}
 							errors={fieldErrors}
@@ -637,7 +640,6 @@ export function ElementList({
 								type="button"
 								variant="outline"
 								size="sm"
-								className="rounded-full"
 								onClick={() => addElement(kind)}
 							>
 								{QUICK_ADD_LABELS[kind.kind]}
@@ -679,6 +681,7 @@ export function ElementList({
 				    `ScriptSnippets.tsx` uses for the same `Command`, one surface deep. */}
 				<PopoverContent
 					align="start"
+					aria-label="Add element"
 					// `w-sm`, not `w-96`: this holds a search list of element names, a
 					// text measure, and `w-96` rides `--spacing` - 288px at the Default
 					// density rather than the 384px `w-sm` (24rem) reads as.

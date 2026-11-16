@@ -28,7 +28,7 @@ import { cleanup, fireEvent, render as renderBare, screen, waitFor } from "@test
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useTabsStore } from "@/stores";
+import { useEngineStore, useTabsStore } from "@/stores";
 import type { Inbox } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
 
@@ -106,6 +106,8 @@ beforeEach(() => {
 	});
 	startInbox.mockReset().mockResolvedValue(second);
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
+	// The header reads running only while the engine is up (`useEngineServing`).
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn() } });
 	// jsdom has no layout, so the scroll the Select does to its checked item on
 	// open is absent rather than a no-op (same stub as `CodeSection.test.tsx`).

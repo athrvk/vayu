@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useSaveStore, useToastStore } from "@/stores";
 import { resetSaveStoreForTests } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";

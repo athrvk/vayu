@@ -107,11 +107,6 @@ std::to_array<std::string_view> ({ "api-key", "secret", "auth_token", "signature
 constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json", "text",
 "graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded", "binary" });
 
-/// Vayu's auth modes (`AuthMode` in `domain.ts`).
-constexpr auto AUTH_MODES =
-std::to_array<std::string_view> ({ "none", "noauth", "inherit", "bearer", "basic",
-"apikey", "oauth2", "digest", "aws", "ntlm", "hawk", "oauth1", "edgegrid", "jwt" });
-
 /// The `httpVersion` values the request routes accept.
 constexpr auto HTTP_VERSIONS =
 std::to_array<std::string_view> ({ "auto", "http1.1", "http2" });
@@ -723,7 +718,7 @@ std::optional<Json> auth_of (const Json& value, bool collection) {
         return std::nullopt;
     }
     const std::string mode = value.at ("mode").get<std::string> ();
-    if (!one_of (AUTH_MODES, mode) || (collection && mode == "inherit")) {
+    if (!vayu::http::is_known_auth_mode (mode) || (collection && mode == "inherit")) {
         return std::nullopt;
     }
     const auto config = value.find ("config");

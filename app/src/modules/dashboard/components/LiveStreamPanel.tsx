@@ -44,10 +44,10 @@ function LiveStreamPanel({ metrics, history, firstEvent }: LiveStreamPanelProps)
 	const { stream_events, events_per_second, streams_open } = metrics;
 	return (
 		<Card pad="sm" className="min-w-0 flex flex-col gap-3">
-			<h3 className="text-xs font-semibold text-foreground">
+			<h2 className="text-xs font-semibold text-foreground">
 				Stream events
 				<InfoChip tip={TOOLTIPS.liveStream} />
-			</h3>
+			</h2>
 			<div className="grid grid-cols-2 @2xl:grid-cols-4 gap-2.5">
 				{stream_events !== undefined && (
 					<StreamStat label="events so far" value={formatCount(stream_events)} />

@@ -45,7 +45,7 @@ import { containsVariableToken } from "@/constants/variables";
 import { fileBaseName, isUnderFolder } from "@/lib/file-path";
 import { flagAfterPick, isUnresolved, noFile } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
-import { formatSize } from "@/components/shared/response-viewer/utils";
+import { formatBytes } from "@/lib/format-number";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
 import { useFileRootsQuery } from "@/queries";
 import type { FileRef } from "@/types";
@@ -171,7 +171,7 @@ export default function BinaryBodyPanel() {
 				onDrop={onDrop}
 				className={cn(
 					"flex items-center gap-3 rounded-md border border-dashed border-input px-3 py-3",
-					dragging && "border-primary bg-primary/10"
+					dragging && "border-primary bg-primary-tint"
 				)}
 			>
 				<FileUp className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -191,7 +191,7 @@ export default function BinaryBodyPanel() {
 										: ""
 									: "missing" in size
 										? "Not found on this machine"
-										: formatSize(size.size)}
+										: formatBytes(size.size)}
 							</p>
 						</>
 					) : (

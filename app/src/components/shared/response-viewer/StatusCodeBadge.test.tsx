@@ -52,6 +52,20 @@ describe("what the chip says", () => {
 	});
 });
 
+describe("how the chip holds its shape in a narrow row (#3494)", () => {
+	it.each([
+		[200, "OK"],
+		[503, "Service Unavailable"],
+		[0, "Error"],
+	])("%i keeps its width and its one line", (status, text) => {
+		// A flex item that may shrink and wrap is what broke "503 Service
+		// Unavailable" into a column of fragments in a narrow status bar.
+		const classes = chipFor(status, text).className.split(/\s+/);
+		expect(classes).toContain("shrink-0");
+		expect(classes).toContain("whitespace-nowrap");
+	});
+});
+
 describe("what the chip looks like", () => {
 	it.each([
 		[200, "bg-status-success-fill"],

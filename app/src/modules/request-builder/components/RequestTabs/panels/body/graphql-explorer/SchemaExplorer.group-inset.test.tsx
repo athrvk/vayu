@@ -16,14 +16,16 @@
  * not - an uppercase eyebrow over a flat group reads as a label, not as a row
  * that escaped its level. What the app did show is that the pane drew three
  * left edges in 185px: rows on a private `4 + depth * INDENT_STEP`, the
- * headings and both stand-in lines on their own `px-2`, and neither of those
- * on the pane's search field above them.
+ * headings and the stand-in lines on their own `px-2`, and neither of those
+ * on the pane's search field above them. The two empty lines have since become
+ * `EmptyState` (#3501), centred rather than on the row edge; the loading line
+ * is the one stand-in that still holds the inset.
  *
  * So the rule the drawer trees state now holds here: everything that is not a
  * row takes a root row's own inset. Each case asserts equality against the
  * `paddingLeft` a rendered `treeitem` carries rather than naming 8px again -
  * the value may move, but a heading standing where no row would stand is the
- * defect. Restoring any one of the three to `px-2` leaves `style.paddingLeft`
+ * defect. Restoring either to `px-2` leaves `style.paddingLeft`
  * empty and fails its case.
  */
 
@@ -96,21 +98,11 @@ describe("everything the explorer draws that is not a row takes a row's left edg
 		expect(row.style.paddingLeft).toBe(expected);
 	});
 
-	it("starts the no-results line where the results it replaces would start", () => {
+	it("starts the loading line where the tree it replaces would start", () => {
 		const expected = rootRowPaddingLeft();
-		renderExplorer();
-		search("nothingmatchesthis");
+		renderExplorer({ status: "loading", schema: null });
 
-		const line = screen.getByText(/Nothing matches/);
-		expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
-		expect(line.style.paddingLeft).toBe(expected);
-	});
-
-	it("starts the no-schema line where the tree it replaces would start", () => {
-		const expected = rootRowPaddingLeft();
-		renderExplorer({ status: "idle", schema: null });
-
-		const line = screen.getByText(/No schema loaded/);
+		const line = screen.getByText(/Loading the schema/);
 		expect(line.style.paddingLeft).toBe(expected);
 	});
 });

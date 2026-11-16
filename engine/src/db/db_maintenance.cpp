@@ -795,7 +795,7 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
 }
 
 /// Says, once the step has committed or stamped, which allowed folders are
-/// gone and why, so a user who finds one missing from Settings > Files can see
+/// gone and why, so a user who finds one missing from Settings › Files can see
 /// it; how many picked files the stored bodies were turned into grants for;
 /// and which chosen files were not found and must be picked again.
 void log_file_trust_plan (const FileTrustPlan& plan) {
@@ -1247,7 +1247,7 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
     std::error_code ec;
     fs::create_directories (directory, ec);
     if (ec && !fs::is_directory (directory)) {
-        return std::unexpected ("Could not create the backup directory " +
+        return std::unexpected ("Couldn't create the backup directory " +
         directory.string () + ": " + ec.message ());
     }
 
@@ -1257,7 +1257,7 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
         const std::string name = backup_file_name (stamp, label);
         if (name.empty ()) {
             return std::unexpected (
-            "Could not name a backup for the instant " + std::to_string (stamp));
+            "Couldn't name a backup for the instant " + std::to_string (stamp));
         }
         std::error_code exists_ec;
         if (fs::path candidate = directory / name; !fs::exists (candidate, exists_ec)) {
@@ -1267,14 +1267,14 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
     }
     if (destination.empty ()) {
         return std::unexpected (
-        "Could not find an unused backup name in " + directory.string ());
+        "Couldn't find an unused backup name in " + directory.string ());
     }
 
     if (const std::string refusal = vacuum_into (db_path, destination.string ());
     !refusal.empty ()) {
         remove_db_file_set (destination);
         return std::unexpected (
-        "Could not write the backup to " + destination.string () + ": " + refusal);
+        "Couldn't write the backup to " + destination.string () + ": " + refusal);
     }
 
     // The file, then the entry that names it: a snapshot someone is told
@@ -1662,6 +1662,18 @@ void Database::init () {
         "Startup managed-header cleanup failed: " + std::string (e.what ()));
     }
 
+    // A collection stored with `parent_id = ''` (#3451). Best-effort, like the
+    // passes around it; the rows stay as they were and the next start retries.
+    try {
+        if (const int64_t cleared = clear_empty_parent_ids (); cleared > 0) {
+            vayu::utils::log_info ("db", "Rewrote collections stored with an empty parent as roots",
+            { { "collections", cleared } });
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "db", "Startup empty-parent repair failed: " + std::string (e.what ()));
+    }
+
     // No webhook inbox survives the process that opened it, so any capture row
     // still here belongs to an inbox nothing can list. Best-effort, like the
     // two passes around it.
@@ -1857,6 +1869,29 @@ int64_t Database::strip_stored_managed_headers () {
     mark_done ();
     strip_transaction.commit ();
     return stripped;
+}
+
+int64_t Database::clear_empty_parent_ids () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const auto empty_parent = c (&Collection::parent_id) == std::string ();
+    const int64_t candidates = impl_->storage.count<Collection> (where (empty_parent));
+    if (candidates == 0) {
+        return 0;
+    }
+    // The same copy, and the same refusal without one, as
+    // `strip_stored_managed_headers` (#2426).
+    const auto copy = snapshot_before_rewrite (impl_->opened_file, "pre-repair",
+    get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),
+    vayu::core::constants::database::MAX_BACKUPS_RETAINED));
+    if (!copy) {
+        throw std::runtime_error (
+        "no copy of the workspace could be saved before rewriting it: " + copy.error ());
+    }
+    // One statement, so one commit. `updated_at` is left alone: the row meant
+    // the root all along, and no one edited it.
+    impl_->storage.update_all (
+    set (c (&Collection::parent_id) = nullptr), where (empty_parent));
+    return candidates;
 }
 
 Database::BackupSlot::BackupSlot (Database& db) : db_ (db) {

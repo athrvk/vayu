@@ -285,6 +285,30 @@ nothing left to touch pays close to nothing for it:
   (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
   its way back, which is a no-op if the pass already handled it before the request was deleted.
 
+### The empty-parent pass (issue #3451)
+
+`Database::clear_empty_parent_ids()`, called from `init()`, rewrites every collection stored with
+`parent_id = ''` to `NULL`, trashed rows included. Until #3451, `POST`/`PUT /collections` stored a
+`parentId: ""` as written: a second spelling of the tree root that the change feed and
+`get_requests_in_subtree` read as root while the append scan, the root `normalize` of
+`POST /reorder` and a restore did not, so such a row tied with the first root, and a delete and
+restore of it came back with `reparentedToRoot: true`, as if its parent were gone. The write
+paths now store `""` as `NULL` (`read_parent_id_field`, see
+[Accepted field shapes](api-reference.md#accepted-field-shapes)); this pass is the rows written
+before.
+
+- **No done marker and no schema bump.** Both statements, the count and the `UPDATE`, are served
+  by [`idx_collections_parent_id`](#indexes), so a workspace with nothing to rewrite pays one
+  index probe per start, not the scan the [header-strip pass](#the-header-strip-pass-issues-1487-1491)
+  marks itself done to avoid. Running every start also catches a `''` an older engine writes
+  after a downgrade. An older engine reads `NULL` as the root, as it always did, so the rewrite
+  is nothing it must be stopped from reading past, which is what a bump is for
+  ([Schema versions](#schema-versions)).
+- **One statement**, so one commit. `updated_at` is left alone: the row meant the root all along.
+- **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first
+  rewrite, as the header-strip pass does. When it cannot be written the pass rewrites nothing, logs
+  a warning, and the next start tries again.
+
 ### The script-to-elements migration (issue #1514)
 
 Issue #1513 landed `elements` additively, beside the two script columns, with a startup repair pass
@@ -575,7 +599,7 @@ Stores folder/group hierarchy for requests.
 | Column               | Type    | Notes                                        |
 |----------------------|---------|----------------------------------------------|
 | `id`                 | TEXT PK | `col_` + UUID                                |
-| `parent_id`          | TEXT    | NULL for root collections                    |
+| `parent_id`          | TEXT    | NULL for root collections; never `''` ([the empty-parent pass](#the-empty-parent-pass-issue-3451)) |
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
 | `variables`          | TEXT    | JSON: `Record<string, VariableValue>`        |
@@ -1320,23 +1344,26 @@ each in the transaction of the write named:
   `Database` reads no binding itself). Deleting the bound collection itself
   writes nothing. A sync's own (hard) deletes write nothing.
 - **Written** too by a person's move out of the contract (#3446): a
-  `PUT /requests/:id` with a `collectionId`, or a `POST /reorder` batch (every
-  stamped request under a moved collection included), that leaves a stamped
-  request where the nearest binding is not the same contract
-  (`declined_by_move` in `routes.hpp`: another document, none, or the same
-  document bound by a collection outside the source's contract walk). The
-  collection is the source's nearest binding, read before the move, and the
-  same write clears the request's `spec_operation` (`Database::save_request` /
-  `apply_reorder`, given the decision by the route).
+  `PUT /requests/:id` with a `collectionId`, a `POST /reorder` batch (every
+  stamped request under a moved collection included), or a
+  `PUT /collections/:id` with a `parentId` (every stamped request in the moved
+  subtree, #3470), that leaves a stamped request where the nearest binding is
+  not the same contract (`declined_by_move` in `routes.hpp`: another document,
+  none, or the same document bound by a collection outside the source's
+  contract walk). The collection is the source's nearest binding, read before
+  the move, and the same write clears the request's `spec_operation`
+  (`Database::save_request` / `apply_reorder`, or `rebind_collection` when the
+  same `PUT` also unbinds, given the decision by the route).
 - **Forgotten** when the request comes back from the trash (by `request_id`,
   alone or with its collection's cohort) while it still records an operation
   (`forget_declined_by_locked`'s guard): a request a move unstamped claims
   nothing back, so its move's row stands; when a `POST /specs/sync` creates a
   request for the same operation (`core::declines_taken_back`, the diff's own
   identity rule run against the document being stored); when
-  `PUT /collections/:id` unbinds the collection, or `POST /specs/bind` binds it
-  to a document with another `specHash`; and when the bound collection
-  itself is purged.
+  `PUT /collections/:id` unbinds the collection (after the rows a move in the
+  same body wrote, so one written under the collection itself goes too), or
+  `POST /specs/bind` binds it to a document with another `specHash`; and when
+  the bound collection itself is purged.
 - **Kept** when the deleted request is purged, by hand or by
   `trashRetentionDays`: emptying the trash is not changing one's mind.
 
@@ -1852,7 +1879,8 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
 this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 `thresholds` verdict, for a scenario load run `scenario.assertions` as
-`assertionsPassed` / `assertionsFailed`, and for a capacity run the
+`assertionsPassed` / `assertionsFailed`, for a single-request run the summed
+`failed` of `elements` and `tests` as `assertionsFailed` (#3458), and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`
@@ -1949,7 +1977,10 @@ with its credentials withheld. Composition has already written every
   in either shape `headers` arrives in, an object's member or each
   `{name, value}` line's `value` (issue #2466), and a repeated line every time;
 - every occurrence of a value of a variable marked `secret` - raw, strictly
-  percent-encoded (RFC 3986), as composition writes a query value, JSON-escaped
+  percent-encoded (RFC 3986), as composition writes a query value, as it
+  writes a URL's path, fragment and user info (a space is `%20` while
+  `/ @ & : + '` stay raw there, so `a b/c` in a path is `a%20b/c`; a user name
+  and a password are spelled alike except at the user's own colon), JSON-escaped
   (a JSON body is stored as text, so `pa"ss\word` is `pa\"ss\\word` inside
   it) and XML-escaped (character data, and each attribute delimiter) - inside
   `url`, `params`, `headers`, `body.content` and `body.fields` becomes

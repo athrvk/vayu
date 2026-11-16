@@ -101,7 +101,7 @@ export function describeRunningService(service: RunningService): string {
 				? `the mock server for ${service.name}, on port ${service.port}`
 				: `the mock server on port ${service.port}`;
 		case "issuer":
-			return `the mock issuer on port ${service.port}`;
+			return `the mock OAuth issuer on port ${service.port}`;
 	}
 }
 

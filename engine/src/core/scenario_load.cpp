@@ -468,57 +468,39 @@ const std::string& run_collection_id) {
     return step.collection_id.empty () ? run_collection_id : step.collection_id;
 }
 
-namespace {
-
-/// The scopes a step in @p leaf_id reads: @p run's environment and globals,
-/// and @p leaf_id's chain read from @p db, with @p run's own collection
-/// (@p run_collection_id) where the chain holds it, as setup left it.
-vayu::http::routes::ScriptVariableScopes folder_scopes (vayu::db::Database& db,
-const vayu::http::routes::ScriptVariableScopes& run,
-const std::string& run_collection_id,
-const std::string& leaf_id) {
-    vayu::http::routes::ScriptVariableScopes scopes;
-    scopes.environment = run.environment;
-    scopes.globals     = run.globals;
-    scopes.local       = run.local;
-    const auto chain   = vayu::http::collection_chain (db, leaf_id);
-    for (size_t i = 0; i < chain.size (); ++i) {
-        auto variables = chain[i].id == run_collection_id ?
-        run.collection :
-        vayu::json::parse_variables (chain[i].variables);
-        if (i + 1 == chain.size ()) {
-            scopes.collection = std::move (variables);
-        } else {
-            scopes.collection_ancestors.push_back (std::move (variables));
-            scopes.collection_ancestor_ids.push_back (chain[i].id);
-        }
+vayu::http::routes::RunVariableScopes scenario_load_scopes (vayu::db::Database& db,
+const std::optional<std::string>& environment_id,
+const ScenarioExecution& execution,
+const std::vector<LifecycleCollection>& lifecycle) {
+    const std::string& run_collection_id = execution.request.collection_id;
+    std::vector<std::string> ids;
+    ids.reserve (1 + lifecycle.size () + execution.plan.steps.size ());
+    ids.push_back (run_collection_id);
+    for (const auto& collection : lifecycle) {
+        ids.push_back (collection.collection_id);
     }
-    scopes.baseline               = run.baseline;
-    scopes.baseline.collection_id = leaf_id;
-    scopes.baseline.collection    = scopes.collection;
-    return scopes;
+    for (const auto& step : execution.plan.steps) {
+        ids.push_back (load_step_collection_id (step, run_collection_id));
+    }
+    return vayu::http::routes::RunVariableScopes (db, environment_id, ids);
 }
 
-LoadScopeBases::Base flattened (vayu::http::routes::ScriptVariableScopes scopes) {
-    auto vars = vayu::http::routes::flatten_variable_scopes (scopes);
-    return { std::move (scopes), std::move (vars) };
-}
-
-} // namespace
-
-LoadScopeBases::LoadScopeBases (vayu::db::Database& db,
-vayu::http::routes::ScriptVariableScopes run_collection_scopes,
+LoadScopeBases::LoadScopeBases (vayu::http::routes::RunVariableScopes& run_scopes,
 const ScenarioExecution& execution) {
     const std::string& run_collection_id = execution.request.collection_id;
-    bases_.push_back (flattened (std::move (run_collection_scopes)));
-    std::unordered_map<std::string, size_t> base_of_collection{ { run_collection_id, 0 } };
+    std::unordered_map<std::string, size_t> base_of_collection;
     base_of_step_.reserve (execution.plan.steps.size ());
     for (const auto& step : execution.plan.steps) {
         const std::string id = load_step_collection_id (step, run_collection_id);
         const auto [at, added] = base_of_collection.try_emplace (id, bases_.size ());
         if (added) {
-            auto scopes = folder_scopes (db, run_scopes (), run_collection_id, id);
-            bases_.push_back (flattened (std::move (scopes)));
+            vayu::http::routes::ScriptVariableScopes scopes = run_scopes.bind (id);
+            // A virtual user's `ScopeOverlay` keys its collection writes by
+            // the baseline's id, so each base names its own leaf.
+            scopes.baseline.collection_id = id;
+            scopes.baseline.collection    = scopes.collection;
+            auto vars = vayu::http::routes::flatten_variable_scopes (scopes);
+            bases_.push_back ({ std::move (scopes), std::move (vars) });
         }
         base_of_step_.push_back (at->second);
     }
@@ -526,6 +508,35 @@ const ScenarioExecution& execution) {
 
 const LoadScopeBases::Base& LoadScopeBases::for_step (size_t step) const {
     return bases_.at (base_of_step_.at (step));
+}
+
+namespace {
+
+/// Whether @p step binds anything per iteration: a row or identity token in
+/// its request or credentials, or auth waiting on its scripts. A step that
+/// binds none is not walked at all, which keeps a token-free plan free.
+bool step_binds_per_iteration (const ScenarioStep& step) {
+    return !step.data_template.empty () || !step.auth_template.empty () || step.auth_after_scripts;
+}
+
+} // namespace
+
+vayu::Request step_request_as_submitted (const ScenarioExecution& execution,
+const LoadScopeBases& bases,
+size_t step_index,
+std::optional<size_t> row,
+IterationIdentity identity) {
+    const ScenarioStep& step = execution.plan.steps.at (step_index);
+    vayu::Request request    = step.request;
+    std::optional<vayu::http::Auth> late_auth;
+    if (step_binds_per_iteration (step) &&
+    !bind_step_iteration (request, step, execution.data_rows, row, identity, late_auth)
+    .ok) {
+        return request;
+    }
+    (void)vayu::http::routes::resolve_load_residuals (
+    request, bases.for_step (step_index).vars, std::move (late_auth));
+    return request;
 }
 
 // ============================================================================
@@ -915,8 +926,7 @@ class ScenarioLoadDriver {
         // its scripts, has empty templates and is not walked at all, which is
         // what makes a token-free plan free per iteration.
         std::optional<vayu::http::Auth> late_auth;
-        if (!step.data_template.empty () || !step.auth_template.empty () ||
-        step.auth_after_scripts) {
+        if (step_binds_per_iteration (step)) {
             // Every half through the one binder the single-request load path
             // also drives (issues #993, #994), so a request binds identically
             // whether it is repeated on its own or walked as a step - including
@@ -1670,7 +1680,7 @@ std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const ScenarioExecution& execution,
-vayu::http::routes::ScriptVariableScopes base_scopes) {
+vayu::http::routes::RunVariableScopes run_scopes) {
     const ScenarioPlan& plan = execution.plan;
     const size_t step_count  = plan.steps.size ();
     const auto& config       = context->config;
@@ -1708,11 +1718,12 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
     script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
 
-    // `base_scopes` already holds what `script.setup` wrote (#1499), so every
-    // folder base built from it does too.
+    // `run_scopes` already holds what every `script.setup` wrote (#1499,
+    // #3456), so every folder base built from it does too.
+    LoadScopeBases scope_bases (run_scopes, execution);
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
-    make_coverage_tally (execution),
-    LoadScopeBases (db, std::move (base_scopes), execution), script_config);
+    make_coverage_tally (execution), std::move (scope_bases),
+    std::move (run_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
     state->scripts_mode   = context->scripts_override;
     // The same cycle guard the sequential run's own `setNextRequest` walk

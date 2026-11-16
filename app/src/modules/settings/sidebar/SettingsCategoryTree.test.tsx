@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingsCategoryTree from "./SettingsCategoryTree";
+import { DrawerItemOpenedProvider } from "@/components/layout/drawer-item-opened";
 import { useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -53,6 +54,20 @@ describe("SettingsCategoryTree", () => {
 		const { openTabs } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(1);
 		expect(openTabs[0].type).toBe("settings");
+	});
+
+	// An overlay drawer leaves on a pick (#3507); the tree only has to say so.
+	it("tells the drawer after opening the settings tab", () => {
+		const onItemOpened = vi.fn();
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<DrawerItemOpenedProvider value={onItemOpened}>
+					<SettingsCategoryTree />
+				</DrawerItemOpenedProvider>
+			</QueryClientProvider>
+		);
+		fireEvent.click(screen.getByRole("button", { name: /Appearance/i }));
+		expect(onItemOpened).toHaveBeenCalledTimes(1);
 	});
 
 	/*

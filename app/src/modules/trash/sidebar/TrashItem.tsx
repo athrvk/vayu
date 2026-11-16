@@ -19,10 +19,13 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 
-import { Button, IconSwap, ICON_MOTION } from "@/components/ui";
-import { TruncatedText } from "@/components/shared";
+import { IconSwap, ICON_MOTION, TooltipIconButton } from "@/components/ui";
+import { ROW_ACTIONS_REVEAL, TruncatedText } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useCopy } from "@/hooks/useCopy";
+import { useOverflowTitle } from "@/hooks/useOverflowTitle";
+import { formatInstant } from "@/lib/time-value";
+import { cn } from "@/lib/utils";
 import { trashReference } from "@/lib/agent-reference";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { TrashEntry } from "@/types";
@@ -52,23 +55,24 @@ const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string
 };
 
 /**
- * What a delete took with it, as a phrase - "with 3 requests", "with 2
+ * What a purge of this entry destroys, as a phrase - "with 3 requests", "with 2
  * collections, 11 requests", "with 12 variables" - or nothing at all when the
  * entry stood alone.
  *
- * The counts are the engine's, over the cohort that single delete stamped (or,
- * for an environment, the variables on its own row), and they are the one thing
- * a trash row says that the tree could never have shown: a collection in the
- * trash looks exactly like an empty one otherwise, and restoring it is a
- * different-sized act depending on the answer.
+ * A collection reads the engine's **purge** totals, not the cohort counts
+ * (#3449): a purge also takes whatever an earlier delete left under the root, so
+ * the cohort is a floor, and "Delete forever" on a row that undercounts is the
+ * wrong moment for one. An environment's number is the variables on its own row.
+ * It is the one thing a trash row says that the tree could never have shown: a
+ * collection in the trash looks exactly like an empty one otherwise.
  */
 function contentsSummary(entry: TrashEntry): string | null {
 	const parts: string[] = [];
-	if (entry.collections > 0) {
-		parts.push(`${entry.collections} ${pluralize(entry.collections, "collection")}`);
+	if (entry.purgeCollections > 0) {
+		parts.push(`${entry.purgeCollections} ${pluralize(entry.purgeCollections, "collection")}`);
 	}
-	if (entry.requests > 0) {
-		parts.push(`${entry.requests} ${pluralize(entry.requests, "request")}`);
+	if (entry.purgeRequests > 0) {
+		parts.push(`${entry.purgeRequests} ${pluralize(entry.purgeRequests, "request")}`);
 	}
 	if (entry.variables) {
 		parts.push(`${entry.variables} ${pluralize(entry.variables, "variable")}`);
@@ -80,13 +84,11 @@ function contentsSummary(entry: TrashEntry): string | null {
  * One deleted root, with the two things that can happen to it and a copy of
  * its reference for an agent.
  *
- * **The actions are always visible, and that is deliberate.** The design
- * system hover-reveals row actions because a drawer row has a primary action of
- * its own - open the request, select the run - that the buttons must not
- * compete with. A trash row has none: it opens nothing, and Restore and Delete
- * forever are the entire reason it is on screen. Hiding them until the pointer
- * arrives would hide the whole surface's purpose, and leave a list of names
- * that appears inert.
+ * **The actions take no width until the row is hovered or focused** (#3495).
+ * Three always-visible buttons left the name about 105px of a 260px drawer and
+ * the meta line four wrapped lines. They stay in the DOM and keyboard-reachable
+ * (`ROW_ACTIONS_REVEAL`), and a device with no hover keeps them showing, since
+ * Restore and Delete forever are the entire reason a trash row is on screen.
  */
 export default function TrashItem({
 	entry,
@@ -99,13 +101,21 @@ export default function TrashItem({
 	const contents = contentsSummary(entry);
 	const busy = isRestoring || isPurging;
 	const { copy, copied } = useCopy({ feedback: "icon" });
+	// One line, with the full sentence on hover only while it is cut. The time is
+	// spelled out here for that title; the visible one is still a `TimeValue`.
+	const metaTitle = [
+		`${kindLabel}${entry.parentName ? ` · from ${entry.parentName}` : ""}`,
+		` · Deleted ${formatInstant(entry.deletedAt, "relative")}`,
+		contents ? `, ${contents}` : "",
+	].join("");
+	const metaRef = useOverflowTitle<HTMLParagraphElement>(metaTitle);
 
 	return (
 		// `surface-card` + `border-rule` rather than a border token: `--border` on
 		// `--card` is the same colour in dark, so the row would have no edge. See
 		// RunItem, which carries the same pair for the same reason.
-		// No `group`: nothing here reveals on hover, so a group class would be a
-		// hook with nothing hanging off it.
+		// `group relative`: the row is what the actions reveal on, and the
+		// collapsed cluster is absolutely positioned against it.
 		<div
 			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row
 			// a target for `.focus()` without adding a tab stop in front of the
@@ -116,7 +126,7 @@ export default function TrashItem({
 			// `focus-row`, not the baseline ring: this row is a composite the
 			// baseline would leave unmarked, since it is written
 			// `[tabindex]:not([tabindex="-1"])`.
-			className="focus-row surface-card border border-rule rounded-md overflow-hidden w-full"
+			className="focus-row group relative surface-card border border-rule rounded-md overflow-hidden w-full"
 		>
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
 				<KindIcon className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -131,59 +141,66 @@ export default function TrashItem({
 					 * a deleted request - and a sighted reader has to already
 					 * know which shape means which.
 					 */}
-					<p className="text-xs text-muted-foreground">
-						{kindLabel} · Deleted <TimeValue value={entry.deletedAt} style="relative" />
+					<p ref={metaRef} className="truncate text-xs text-muted-foreground">
+						{kindLabel}
+						{/* The owner is what tells two same-named entries apart (#3449). */}
+						{entry.parentName ? ` · from ${entry.parentName}` : ""} · Deleted{" "}
+						<TimeValue value={entry.deletedAt} style="relative" />
 						{contents ? `, ${contents}` : ""}
 					</p>
 				</div>
 
-				<div className="flex items-center gap-1 shrink-0">
-					<Button
+				<div
+					className={cn("flex items-center gap-1 shrink-0", !busy && ROW_ACTIONS_REVEAL)}
+				>
+					<TooltipIconButton
 						variant="rowAction"
-						size="icon"
 						onClick={() => void copy(trashReference(entry), "Reference")}
-						aria-label={`Copy ${entry.name} for agent`}
-						title="Copy for agent"
-					>
-						<IconSwap
-							state={copied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" />,
-								copied: <Check className="size-icon-sm text-status-success-text" />,
-							}}
-						/>
-					</Button>
-					<Button
+						label={`Copy ${entry.name} for agent`}
+						tooltip="Copy for agent"
+						icon={
+							<IconSwap
+								state={copied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon-sm" />,
+									copied: (
+										<Check className="size-icon-sm text-status-success-text" />
+									),
+								}}
+							/>
+						}
+					/>
+					<TooltipIconButton
 						variant="rowAction"
-						size="icon"
 						onClick={() => onRestore(entry)}
 						disabled={busy}
-						aria-label={`Restore ${entry.name}`}
-						title="Restore"
-					>
-						{isRestoring ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : (
-							<RotateCcw
-								className="size-icon-sm"
-								data-icon-motion={ICON_MOTION.spinBack}
-							/>
-						)}
-					</Button>
-					<Button
+						label={`Restore ${entry.name}`}
+						tooltip="Restore"
+						icon={
+							isRestoring ? (
+								<Loader2 className="size-icon-sm animate-spin" />
+							) : (
+								<RotateCcw
+									className="size-icon-sm"
+									data-icon-motion={ICON_MOTION.spinBack}
+								/>
+							)
+						}
+					/>
+					<TooltipIconButton
 						variant="rowActionDestructive"
-						size="icon"
 						onClick={() => onPurge(entry)}
 						disabled={busy}
-						aria-label={`Delete ${entry.name} forever`}
-						title="Delete forever"
-					>
-						{isPurging ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : (
-							<Trash2 className="size-icon-sm" />
-						)}
-					</Button>
+						label={`Delete ${entry.name} forever`}
+						tooltip="Delete forever"
+						icon={
+							isPurging ? (
+								<Loader2 className="size-icon-sm animate-spin" />
+							) : (
+								<Trash2 className="size-icon-sm" />
+							)
+						}
+					/>
 				</div>
 			</div>
 		</div>

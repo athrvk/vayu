@@ -178,7 +178,7 @@ export default function UrlBar() {
 	const sendAlone = !canStartLoadTest && !showRowCaret;
 
 	return (
-		<div className="flex min-h-band-md items-center gap-2 px-3 py-1 border-b border-rule bg-panel shrink-0">
+		<div className="flex min-h-band-md flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 border-b border-rule bg-panel shrink-0">
 			{/*
 			    One field holding both the method and the URL.
 			    `border-input`, not `border-border`. This is a text field, and
@@ -194,7 +194,10 @@ export default function UrlBar() {
 					// `bg-*` utility beside it wins the cascade - so both are written,
 					// per docs/design-system.md. The separator below inherits `--rule`
 					// from here.
-					"flex flex-1 min-w-0 items-center h-control rounded-md bg-card surface-card",
+					// `min-w-[12rem]` is the field's floor (#3494): below it the Send group
+					// wraps to a second line (the row is `flex-wrap`) rather than the URL
+					// being squeezed to a sliver in a narrow pane or at a 200% scale.
+					"flex flex-1 min-w-[12rem] items-center h-control rounded-md bg-card surface-card",
 					"border border-input transition-colors focus-within:border-primary"
 				)}
 			>
@@ -289,14 +292,14 @@ export default function UrlBar() {
 								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
 								"border border-primary-fill",
 								/*
-								 * There was no hover state at all. `hover:bg-primary-fill/90` is
-								 * the `Button` primitive's own `default` variant - these are
+								 * There was no hover state at all. `hover:bg-primary-fill-hover`
+								 * is the `Button` primitive's own `default` variant - these are
 								 * hand-rolled so the pair can share an edge, which means they
 								 * carry the convention rather than inherit it. The border moves
 								 * with the fill, or a lighter ring appears around a darkening
 								 * button.
 								 */
-								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill",
 								// Hand-rolled rather than the `Button` primitive (see the
 								// comment above), so it doesn't carry `[data-slot="button"]`
@@ -371,15 +374,18 @@ export default function UrlBar() {
 								className={cn(
 									"h-control px-4 inline-flex items-center shrink-0",
 									"text-xs font-semibold font-[inherit]",
-									// A tint steps *up* rather than down: /10 to /20 is the same
-									// "one more step of itself" that /90 gives the solid fill.
-									"text-primary-text bg-primary/10 hover:bg-primary/20",
+									// A tint steps *up* rather than down: `--primary-tint` to
+									// `--primary-tint-hover` is the same "one more step of itself"
+									// that `--primary-fill-hover` gives the solid fill. Opaque
+									// tokens, not an alpha of the accent: the label sits on this
+									// ground, and an alpha lands wherever the accent puts it.
+									"text-primary-text bg-primary-tint hover:bg-primary-tint-hover",
 									// The join: this member's own border, with the shared
 									// edge transparent. Two adjacent 1px borders would draw
 									// a 2px line and make the pair a pixel taller than Send.
 									"border border-primary/45 border-l-transparent",
 									"rounded-r-md rounded-l-none",
-									"disabled:opacity-50 disabled:hover:bg-primary/10",
+									"disabled:opacity-50 disabled:hover:bg-primary-tint",
 									// Hand-rolled, same as Send beside it - see Send's own
 									// comment above for why `scale` needs its own
 									// transition-property here rather than the baseline's.

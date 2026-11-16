@@ -27,7 +27,7 @@ namespace vayu::db::config_seeds {
 // =============================================================================
 void seed_limits (ConfigSeeder& seed, int64_t now) {
     seed (ConfigEntry{ "maxScenarioSteps",
-    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer", "Max scenario steps",
+    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer", "Max collection run steps",
     "Largest number of requests one collection run may resolve to. The whole "
     "sequence is composed before the first send and held in memory for the "
     "run, and a load-mode scenario allocates a latency histogram per step, so "
@@ -37,7 +37,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     "10000", std::nullopt, now });
 
     seed (ConfigEntry{ "maxScenarioDataRows",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer", "Max scenario data rows",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer", "Max collection run data rows",
     "Largest data set one collection run may carry. The app parses the CSV or "
     "JSON file and sends the rows on the run payload - the engine never reads "
     "a file from disk - so this bounds how big that payload may get. A larger "
@@ -46,7 +46,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     "1", "1000000", std::nullopt, now });
 
     seed (unit ("bytes") (ConfigEntry{ "maxScenarioDataBytes",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max scenario data size",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max collection run data size",
     "Largest data set one collection run may carry, measured over its JSON. "
     "The row limit alone does not bound the payload - one row is free to hold "
     "a megabyte in a single cell - and the engine's HTTP body cap, far above "

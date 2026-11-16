@@ -10,12 +10,16 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <latch>
 #include <regex>
+#include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -3164,6 +3168,83 @@ TEST_F (ScriptEngineTest, ConsoleRecordsTheLevelItWasCalledWith) {
 
     // The message must survive the level being carried beside it.
     EXPECT_EQ (result.console_output[3].message, "broken");
+}
+
+// `scriptEnableConsole: false` is the recommended load-test setting, and it
+// used to leave `console` undefined, so the first `console.log` threw a
+// ReferenceError and every later `pm.test` of the script never ran (#3461).
+// The console stays defined and its four methods record nothing.
+class ScriptEngineConsoleOffTest : public ScriptEngineTest {
+    protected:
+    static ScriptConfig console_off_config () {
+        ScriptConfig cfg;
+        cfg.enable_console = false;
+        return cfg;
+    }
+};
+
+TEST_F (ScriptEngineConsoleOffTest, LoggingScriptKeepsRunningItsTests) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx = ScriptContext::for_test (request, response);
+    auto result = quiet.execute ("console.log('x'); pm.test('t', () => {});", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+TEST_F (ScriptEngineConsoleOffTest, AllFourMethodsAreCallableAndRecordNothing) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = quiet.execute (R"JS(
+        console.log('a', { nested: [1, 2] });
+        console.info('b');
+        console.warn('c');
+        console.error('d');
+        pm.test('methods are functions', () => {
+            for (const name of ['log', 'info', 'warn', 'error']) {
+                pm.expect(typeof console[name]).to.equal('function');
+            }
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+// A rebuilt pooled context goes through the same `build_context`, so the
+// second execution on one engine proves the no-op console survives the reuse.
+TEST_F (ScriptEngineConsoleOffTest, PooledContextReuseKeepsTheNoOpConsole) {
+    ScriptEngine quiet (console_off_config ());
+    for (int run = 0; run < 2; ++run) {
+        auto ctx = ScriptContext::for_test (request, response);
+        auto result =
+        quiet.execute ("console.warn('again'); pm.test('t', () => {});", ctx);
+
+        ASSERT_TRUE (result.success) << "execution " << run << ": " << result.error_message;
+        ASSERT_EQ (result.tests.size (), 1u) << "execution " << run;
+        EXPECT_TRUE (result.console_output.empty ()) << "execution " << run;
+    }
+    EXPECT_EQ (quiet.idle_runtime_count (), 1U);
+}
+
+// The control: the flag's default still records, so the tests above cannot
+// pass by the console never recording at all.
+TEST_F (ScriptEngineConsoleOffTest, ConsoleOnStillRecordsEveryLevel) {
+    ScriptConfig cfg;
+    cfg.enable_console = true;
+    ScriptEngine loud (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = loud.execute ("console.log('x'); console.info('y'); "
+                                "console.warn('z'); console.error('w');",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.console_output.size (), 4u);
 }
 
 // The wire spellings are what the app matches on, so they are part of the
@@ -10431,4 +10512,369 @@ TEST_F (ScriptEngineTest, RequireShelfSignedHeaderReachesTheWire) {
         "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
     vayu::http::global_cleanup ();
+}
+
+// ============================================================================
+// What a script error reads as when the thrown value says nothing (#3461)
+// ============================================================================
+
+namespace {
+
+constexpr size_t ONE_MIB = size_t{ 1 } * 1024 * 1024;
+
+// `scriptMemoryLimit`'s floor, the one a library as large as lodash cannot be
+// loaded under.
+ScriptConfig minimum_memory_config () {
+    ScriptConfig cfg;
+    cfg.memory_limit = ONE_MIB;
+    return cfg;
+}
+
+// What the out-of-memory sentence reads as at @p limit bytes, with the limit
+// in the unit `scriptMemoryLimit` would be chosen in.
+std::string out_of_memory_sentence (size_t limit) {
+    std::string named = std::to_string (limit) + " bytes";
+    if (limit % ONE_MIB == 0) {
+        named = std::to_string (limit / ONE_MIB) + " MiB";
+    } else if (limit % 1024 == 0) {
+        named = std::to_string (limit / 1024) + " KiB";
+    }
+    return "Script ran out of memory at the " + named + " limit";
+}
+
+constexpr std::string_view ALLOCATION_LOOP =
+"const held = []; for (;;) { held.push(new Array(1000).fill(1)); }";
+
+} // namespace
+
+// Where the limit refuses moves with every allocation a context makes before
+// the script runs, and QuickJS words the refusal by where it lands: its own
+// out-of-memory error, a bare null when there was no room to build that, or a
+// `SyntaxError` its parser raises instead. The report is the script heap's
+// record of the refusal, so it is the one sentence at every layout: the
+// window of limits stands for layouts another platform's allocator makes.
+// Mutation check: drop `refused` from `restore_out_of_memory_error` and
+// limits in the window report `SyntaxError: invalid assignment left-hand side`.
+TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemory) {
+    constexpr size_t WINDOW = 32;
+    constexpr size_t STEP   = 64;
+    for (size_t i = 0; i < WINDOW; ++i) {
+        ScriptConfig cfg;
+        cfg.memory_limit = ONE_MIB + (i * STEP);
+        ScriptEngine bounded (cfg);
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = bounded.execute ("const _ = require('lodash');", ctx);
+        EXPECT_FALSE (result.success) << "at " << cfg.memory_limit << " bytes";
+        EXPECT_EQ (result.error_message, out_of_memory_sentence (cfg.memory_limit));
+    }
+}
+
+// The loop runs out at a different point at each limit, and with no room left
+// QuickJS throws a bare null, which reads as the out-of-memory sentence because
+// the heap refused. Mutation check: drop `refused && JS_IsNull` from
+// `thrown_value_message` and limits in the window read "Script threw null".
+TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsOutOfMemory) {
+    constexpr size_t WINDOW = 32;
+    constexpr size_t STEP   = 64;
+    for (size_t i = 0; i < WINDOW; ++i) {
+        ScriptConfig cfg;
+        cfg.memory_limit = ONE_MIB + (i * STEP);
+        ScriptEngine bounded (cfg);
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = bounded.execute (std::string (ALLOCATION_LOOP), ctx);
+        EXPECT_FALSE (result.success);
+        EXPECT_EQ (result.error_message, out_of_memory_sentence (cfg.memory_limit));
+    }
+}
+
+TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
+    ScriptConfig cfg;
+    cfg.memory_limit = size_t{ 2 } * 1024 * 1024;
+    ScriptEngine bounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute (std::string (ALLOCATION_LOOP), ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 2 MiB limit");
+}
+
+// A script whose bytecode alone needs more than the limit fails inside the
+// parser, where QuickJS can drop the refused write to its bytecode buffer and
+// then read the assignment it lost as `SyntaxError: invalid assignment
+// left-hand side` (what Linux measures). Whichever error QuickJS raised, the
+// sentence leads. Mutation check: return `text` whatever `refused` says in
+// `thrown_value_message` and the message is the bare `SyntaxError`.
+TEST_F (ScriptEngineTest, AScriptTooLargeToCompileUnderTheLimitReportsOutOfMemory) {
+    std::string script = "let a = 0;\n";
+    for (int i = 0; i < 200000; ++i) {
+        script += "a = 1;\n";
+    }
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx          = ScriptContext::for_test (request, response);
+    const auto result = bounded.execute (script, ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (result.error_message.starts_with (out_of_memory_sentence (ONE_MIB)))
+    << result.error_message;
+}
+
+// A test row that ran out of memory reports it, and the rows after it report
+// their own errors: the refusal belongs to the call that met it. Mutation
+// check: drop the `AllocationRefusalWatch` from `pm.test` and the second row
+// reads "... (then failed with: Error: boom)".
+TEST_F (ScriptEngineTest, ARowThatRanOutOfMemoryLeavesTheNextRowsErrorItsOwn) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test ("pm.test('a', () => { " +
+    std::string (ALLOCATION_LOOP) + " }); pm.test('b', () => { throw new Error('boom'); });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_EQ (result.tests[0].error_message, out_of_memory_sentence (ONE_MIB));
+    EXPECT_EQ (result.tests[1].error_message, "Error: boom");
+}
+
+// The same holds for the legacy `tests[name]` rows, whose getters run after
+// the script. Mutation check: drop the watch from `legacy_test_result`.
+TEST_F (ScriptEngineTest, ALegacyRowThatRanOutOfMemoryLeavesTheNextRowsErrorItsOwn) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test (
+    "Object.defineProperty(tests, 'a', { enumerable: true, get() { " +
+    std::string (ALLOCATION_LOOP) +
+    " } }); Object.defineProperty(tests, 'b', { enumerable: true, get() { "
+    "throw new Error('boom'); } });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_EQ (result.tests[0].error_message, out_of_memory_sentence (ONE_MIB));
+    EXPECT_EQ (result.tests[1].error_message, "Error: boom");
+}
+
+// A script's own `throw null` meets no refused allocation, so it reads as
+// what it is at any limit.
+TEST_F (ScriptEngineTest, AThrownNullIsNeverReportedAsABareNull) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("throw null;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, AThrownNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = unbounded.execute ("throw null;", ctx);
+    EXPECT_EQ (result.error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, AThrownUndefinedReadsAsASentence) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw undefined;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
+
+TEST_F (ScriptEngineTest, AnErrorWithAnEmptyMessageReadsAsItsType) {
+    auto plain       = ScriptContext::for_test (request, response);
+    auto plain_error = engine.execute ("throw new Error('');", plain);
+    EXPECT_EQ (plain_error.error_message, "Error");
+
+    auto typed      = ScriptContext::for_test (request, response);
+    auto type_error = engine.execute ("throw new TypeError('');", typed);
+    EXPECT_EQ (type_error.error_message, "TypeError");
+}
+
+TEST_F (ScriptEngineTest, AThrownErrorWithAMessageIsUnchanged) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw new Error('boom');", ctx);
+    EXPECT_EQ (result.error_message, "Error: boom");
+}
+
+TEST_F (ScriptEngineTest, AThrownValueWithNoTextReadsAsASentence) {
+    auto empty_string = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw '';", empty_string).error_message,
+    "Script threw an empty string");
+
+    auto blank = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { return ''; } };", blank).error_message,
+    "Script threw a value with no text");
+
+    // A `toString` that itself throws leaves nothing pending behind.
+    auto hostile = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { throw 1; } };", hostile).error_message,
+    "Script threw a value with no text");
+}
+
+TEST_F (ScriptEngineTest, ARejectionAndATimerThrowReadAsSentencesToo) {
+    auto rejected = ScriptContext::for_test (request, response);
+    auto result   = engine.execute ("Promise.reject(undefined);", rejected);
+    EXPECT_EQ (result.error_message, "Unhandled promise rejection: Script threw undefined");
+
+    auto timed = ScriptContext::for_test (request, response);
+    result = engine.execute ("setTimeout(() => { throw undefined; }, 0);", timed);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
+
+// A `pm.test` row names its failure the way a script error does (#3461): the
+// row is where a user reads it, so a bare `null` there is the same dead end.
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullReadsAsASentence) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result = unbounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsUndefinedOrAnEmptyErrorReadsAsASentence) {
+    EXPECT_EQ (verdict_of ("throw undefined"), "Script threw undefined");
+    EXPECT_EQ (verdict_of ("throw new Error('')"), "Error");
+    EXPECT_EQ (verdict_of ("throw ''"), "Script threw an empty string");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsAnErrorWithAMessageIsUnchanged) {
+    EXPECT_EQ (verdict_of ("throw new Error('boom')"), "Error: boom");
+}
+
+// The legacy `tests[name]` row can fail the same way: a getter the script
+// defined on the object is the row's verdict when it throws.
+TEST_F (ScriptEngineTest, ALegacyTestRowWhoseGetterThrowsNullReadsAsASentence) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result =
+    unbounded.execute_test ("Object.defineProperty(tests, 'x', { enumerable: "
+                            "true, get() { throw undefined; } });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw undefined");
+}
+
+namespace {
+
+/// What one execution's first `Math.random()` answers, as the string the
+/// script wrote to the environment; empty when the script did not run.
+std::string first_random_draw (ScriptEngine& engine, Request& request) {
+    Environment env;
+    const auto result = engine.execute_prerequest (
+    "pm.environment.set('draw', String(Math.random()));", request, env);
+    if (!result.success || env.find ("draw") == env.end ()) {
+        return {};
+    }
+    return env["draw"].value;
+}
+
+} // namespace
+
+// #3460: QuickJS seeds a context's `Math.random` from the microsecond clock,
+// and every execution builds a context. A draw is a number in [0, 1) and the
+// contexts of one thread continue one sequence rather than each restarting.
+TEST_F (ScriptEngineTest, MathRandomAnswersAUnitIntervalNumberThatDiffersBetweenContexts) {
+    const auto first  = first_random_draw (engine, request);
+    const auto second = first_random_draw (engine, request);
+
+    ASSERT_FALSE (first.empty ());
+    ASSERT_FALSE (second.empty ());
+    EXPECT_NE (first, second);
+    for (const auto& draw : { first, second }) {
+        const double value = std::stod (draw);
+        EXPECT_GE (value, 0.0) << draw;
+        EXPECT_LT (value, 1.0) << draw;
+    }
+}
+
+// Threads released together build their contexts in the same few microseconds,
+// which is when a clock-seeded generator hands two of them one sequence. Each
+// round starts fresh threads at a latch, with the runtime already built, so
+// the contexts are as close in time as the scheduler allows. A hit on the
+// clock-seeded generator is a matter of chance per round, so the rounds are
+// many and cheap. Mutation check: drop `setup_math_random` from
+// `build_context` and a round collides.
+TEST_F (ScriptEngineTest, MathRandomDoesNotRepeatAcrossThreadsStartingTogether) {
+    constexpr size_t THREADS = 4;
+    constexpr size_t ROUNDS  = 400;
+
+    size_t colliding_rounds = 0;
+    for (size_t round = 0; round < ROUNDS; ++round) {
+        std::latch released (THREADS);
+        std::vector<std::string> draws (THREADS);
+        std::vector<std::thread> threads;
+        threads.reserve (THREADS);
+        for (size_t i = 0; i < THREADS; ++i) {
+            threads.emplace_back ([&, i] {
+                ScriptEngine worker;
+                Request worker_request = request;
+                (void)first_random_draw (worker, worker_request);
+                released.arrive_and_wait ();
+                draws[i] = first_random_draw (worker, worker_request);
+            });
+        }
+        for (auto& thread : threads) {
+            thread.join ();
+        }
+
+        const std::set<std::string> distinct (draws.begin (), draws.end ());
+        if (distinct.size () != THREADS || distinct.contains ("")) {
+            ++colliding_rounds;
+        }
+    }
+    EXPECT_EQ (colliding_rounds, 0u);
+}
+
+// #3460: `ScriptContext::stop` ends the script itself, not only its sends, and
+// a script it ended is `cancelled`, never `timed_out`. Mutation check: drop the
+// `stop` check from `script_interrupt_handler` and the script runs out its
+// deadline instead.
+TEST_F (ScriptEngineTest, ARaisedStopEndsARunningScriptAsCancelled) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 2000;
+    ScriptEngine bounded (cfg);
+    const std::atomic<bool> stop{ true };
+    auto ctx = ScriptContext::for_test (request, response);
+    ctx.stop = &stop;
+
+    const auto result = bounded.execute ("while (true) {}", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (result.cancelled);
+    EXPECT_FALSE (result.timed_out);
+    EXPECT_TRUE (result.ended_by_stop ());
+}
+
+// The stop is read before every timer callback too, which runs no bytecode
+// before its first poll. Mutation check: drop the `stop` check from
+// `async_budget_spent` and the callback runs.
+TEST_F (ScriptEngineTest, ARaisedStopRunsNoTimerCallback) {
+    const std::atomic<bool> stop{ true };
+    Environment stopped_env;
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &stopped_env;
+    ctx.stop        = &stop;
+
+    const auto result =
+    engine.execute ("setTimeout(() => pm.environment.set('ran', 'yes'), 0);", ctx);
+
+    EXPECT_TRUE (result.cancelled);
+    EXPECT_EQ (stopped_env.find ("ran"), stopped_env.end ());
+}
+
+TEST_F (ScriptEngineTest, AScriptThatRunsOutItsDeadlineIsTimedOut) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 50;
+    ScriptEngine bounded (cfg);
+    auto ctx = ScriptContext::for_test (request, response);
+
+    const auto result = bounded.execute ("while (true) {}", ctx);
+
+    EXPECT_TRUE (result.timed_out);
+    EXPECT_FALSE (result.cancelled);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 50ms");
 }

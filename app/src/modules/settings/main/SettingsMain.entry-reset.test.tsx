@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { act, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingsMain from "./SettingsMain";
 import type { ConfigEntry } from "@/types";
@@ -161,6 +162,17 @@ describe("an engine entry's two ways back", () => {
 		// The saved value, which is not the default - the distinction the old
 		// single "Reset" could not express.
 		expect(timeoutField().value).toBe("4000");
+	});
+
+	it("says what Revert discards on keyboard focus (#3498)", async () => {
+		renderSettings();
+		fireEvent.change(timeoutField(), { target: { value: "9000" } });
+
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Revert" }));
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("Discard this staged change");
 	});
 
 	it("offers Revert only while something is staged", () => {

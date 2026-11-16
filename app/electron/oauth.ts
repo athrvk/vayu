@@ -52,10 +52,11 @@ function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowRes
 			sandbox: true,
 			partition,
 			// Off here for the same reason as the main window (#1355), and with
-			// more cause: this one loads the IdP's own login form, so a first
-			// keystroke in it would fetch Hunspell dictionaries from a Google CDN
-			// on Windows and Linux - during a sign-in, from a window the user did
-			// not know was a browser.
+			// more cause: this one loads the IdP's own login form, a window the
+			// user did not know was a browser. The option does not stop this
+			// partition's session fetching Hunspell dictionaries from a Google CDN
+			// on Windows and Linux; `suppressDictionaryDownloads` (main.ts) does,
+			// through `session-created`.
 			spellcheck: false,
 		},
 	});

@@ -650,11 +650,43 @@ describe("secretForms", () => {
 				"p%40ss%20%22w%2Frd%22%26%3Cx%3E",
 				// `encode_query_component`, a value: Postman's set, `@` and `/` raw.
 				"p@ss%20%22w/rd%22%26%3Cx%3E",
+				// A URL's path and fragment (`@`, `/` and `&` raw), and its user info (`@`
+				// and `/` encoded, `&` raw).
+				"p@ss%20%22w/rd%22&%3Cx%3E",
+				"p%40ss%20%22w%2Frd%22&%3Cx%3E",
 				'p@ss \\"w/rd\\"&<x>',
 				'p@ss "w/rd"&amp;&lt;x&gt;',
 				"p@ss &quot;w/rd&quot;&amp;&lt;x&gt;",
 			])
 		);
+	});
+
+	// Each value is spelled by one component's encoder alone (the engine's request_builder_test.cpp
+	// holds the same table): drop one of the forms and its row reds.
+	test.each([
+		["a path", "a b{c@d", "a%20b%7Bc@d"],
+		["a fragment", "a b{c@d&e", "a%20b{c@d&e"],
+		["a user name before its colon", "a b:c@d&e", "a%20b:c%40d&e"],
+		["a password after the user's colon", "a b:c@d&e", "a%20b%3Ac%40d&e"],
+	])("holds the spelling %s writes", (_, value, form) => {
+		expect(secretForms([value])).toContain(form);
+	});
+
+	// The URL composition writes for each secret, as the engine's request_builder_test.cpp builds it.
+	test.each([
+		["a path", "https://api.example.com/v1/", "a b/c", "a%20b/c", "/items"],
+		["a path", "https://api.example.com/v1/", "a b{c@d", "a%20b%7Bc@d", "/items"],
+		["user info", "https://", "p@ss w&rd", "p%40ss%20w&rd", "@api.example.com/"],
+		["a password", "https://admin:", "a b:c@d&e", "a%20b%3Ac%40d&e", "@api.example.com/"],
+		["a fragment", "https://api.example.com/v1#", "a b{c@d&e", "a%20b{c@d&e", ""],
+		["a URL-safe secret", "https://api.example.com/v1/", "s3cr3t-value", "s3cr3t-value", "/x"],
+	])("masks a secret written into %s", (_, before, secret, composed, after) => {
+		// `location` rather than `url`: a `url` member also drops its userinfo password
+		// (#3520), which would hide whether the password form itself masks.
+		const rule: RunOutputRule = { forms: secretForms([secret]), apiKeyHeaders: [] };
+		expect(withholdRunOutput({ location: `${before}${composed}${after}` }, rule)).toEqual({
+			location: `${before}${REDACTED_MARKER}${after}`,
+		});
 	});
 
 	test("escapes control characters the way a JSON string holds them", () => {
@@ -1292,6 +1324,82 @@ describe("withholdRunOutput: a credential-named query value (#1909)", () => {
 		expect(withholdRunOutput(trace, rule)).toEqual({
 			request: { url: "https://h/?access_token=<redacted>", method: "GET" },
 		});
+	});
+});
+
+describe("withholdRunOutput: a run URL's userinfo password and requestUrl", () => {
+	const rule: RunOutputRule = { forms: [], apiKeyHeaders: [] };
+
+	test("drops the password of a run row's url and keeps the user", () => {
+		expect(withholdRunOutput({ url: "http://u:LIT@h/p" }, rule)).toEqual({
+			url: "http://u@h/p",
+		});
+	});
+
+	test("drops it in a trace, a redirect hop and a list of rows", () => {
+		const out = withholdRunOutput(
+			[
+				{ request: { url: "http://u:LIT@h/p" } },
+				{ response: { redirects: [{ url: "http://u:LIT@h/q" }] } },
+			],
+			rule
+		);
+		expect(JSON.stringify(out)).not.toContain("LIT");
+	});
+
+	test("treats metadata.requestUrl as a url: password dropped, credential query masked", () => {
+		const report = { metadata: { requestUrl: "http://u:LIT@h/p?api_key=LIT2&page=2" } };
+		expect(withholdRunOutput(report, rule)).toEqual({
+			metadata: { requestUrl: "http://u@h/p?api_key=<redacted>&page=2" },
+		});
+	});
+
+	test("masks requestUrl by the auth-written name its record names", () => {
+		const record = { authQueryParam: "session", requestUrl: "http://h/p?session=LIT" };
+		expect(withholdRunOutput(record, rule)).toEqual({
+			...record,
+			requestUrl: "http://h/p?session=<redacted>",
+		});
+	});
+
+	test("leaves a url with no password, a lone {{variable}} password and a path @ as written", () => {
+		for (const url of ["http://u@h/p", "http://u:{{pw}}@h/p", "http://h/p@x:y", "/p?x=1"]) {
+			expect(withholdRunOutput({ url }, rule)).toEqual({ url });
+		}
+	});
+
+	test("leaves a query or fragment @ alone while dropping the authority's password", () => {
+		expect(withholdRunOutput({ url: "http://u:LIT@h/p?e=a:b@c#f:g@h" }, rule)).toEqual({
+			url: "http://u@h/p?e=a:b@c#f:g@h",
+		});
+		expect(withholdRunOutput({ url: "http://h?e=a:b@c" }, rule)).toEqual({
+			url: "http://h?e=a:b@c",
+		});
+	});
+
+	test("the projection applies it with reveal off and leaves the answer as it was with reveal on", async () => {
+		const client = {
+			getGlobals: vi.fn().mockResolvedValue({}),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+			listCollections: vi.fn().mockResolvedValue([]),
+			listAllRequests: vi.fn().mockResolvedValue([]),
+		};
+		const answer = {
+			url: "http://u:LIT@h/p",
+			metadata: { requestUrl: "http://u:LIT@h/p?api_key=LIT2" },
+		};
+		const off = await runOutputShape({
+			client,
+			config: resolveSafetyConfig({ revealSecretsToAgents: false }),
+		});
+		const masked = JSON.stringify(off(answer));
+		expect(masked).not.toContain("LIT");
+		expect(masked).toContain("http://u@h/p");
+		const on = await runOutputShape({
+			client,
+			config: resolveSafetyConfig({ revealSecretsToAgents: true }),
+		});
+		expect(on(answer)).toBe(answer);
 	});
 });
 

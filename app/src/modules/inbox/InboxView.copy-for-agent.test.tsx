@@ -21,6 +21,7 @@ import { cleanup, render as renderBare, screen, waitFor, fireEvent } from "@test
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { Inbox } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
@@ -115,6 +116,15 @@ describe("Copy for agent on the inbox tab", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(INBOX.url));
+	});
+
+	it("says what the URL button does on keyboard focus (#3498)", async () => {
+		render(<InboxView />);
+
+		await expectTooltipOnFocus(
+			await screen.findByRole("button", { name: "Copy inbox URL" }),
+			"Copy inbox URL"
+		);
 	});
 
 	// The two buttons share a header, so one shared `useCopy` would tie them

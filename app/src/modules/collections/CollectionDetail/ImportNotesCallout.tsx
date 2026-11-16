@@ -6,7 +6,7 @@
  */
 
 import { X } from "lucide-react";
-import { Button } from "@/components/ui";
+import { TooltipIconButton } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { selectImportReport, useImportReportStore } from "@/stores/import-report-store";
 import { FileReferenceNeedsView } from "../ImportFileFolders";
@@ -31,14 +31,11 @@ export function ImportNotesCallout({ rootId }: { rootId: string }) {
 		<Callout
 			severity="info"
 			action={
-				<Button
-					size="icon"
-					variant="ghost"
-					aria-label="Dismiss import notes"
+				<TooltipIconButton
+					label="Dismiss import notes"
 					onClick={() => dismiss(rootId)}
-				>
-					<X className="size-icon-sm" />
-				</Button>
+					icon={<X className="size-icon-sm" />}
+				/>
 			}
 		>
 			<div className="space-y-2">

@@ -12,7 +12,7 @@
  *
  *   constant_rps         Duration · Total requests · Peak in-flight requests
  *   constant_concurrency Duration · Total requests · Throughput per virtual user
- *   iterations           Elapsed  · Remaining (ETA) · Mean iter time
+ *   iterations           Elapsed  · Remaining (ETA) · Mean iteration time
  *   ramp_up              Peak virtual users · Breakpoint · p99 at peak · Total requests
  *   capacity             Peak virtual users · Breakpoint · p99 at peak · Total requests
  *

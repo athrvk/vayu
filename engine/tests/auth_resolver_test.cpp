@@ -9,6 +9,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -131,7 +132,11 @@ TEST (AuthResolver, ApiKeyHeaderNameThatIsNotATokenIsRefused) {
     EXPECT_FALSE (result.ok);
     EXPECT_EQ (result.code, vayu::ErrorCode::AuthFailed);
     EXPECT_EQ (result.detail_code, "invalid_header_name");
-    EXPECT_NE (result.message.find ("'X Key'"), std::string::npos) << result.message;
+    // The key arrives resolved, so it may be a secret: the byte is named, the
+    // key is not. Mutation check: quote `key` in `apply_api_key`'s refusal.
+    EXPECT_NE (result.message.find ("' ' cannot appear"), std::string::npos)
+    << result.message;
+    EXPECT_EQ (result.message.find ("X Key"), std::string::npos) << result.message;
     EXPECT_TRUE (req.headers.empty ());
     EXPECT_TRUE (req.secret_header_names.empty ());
 }
@@ -147,8 +152,9 @@ TEST (AuthResolver, ApiKeyHeaderNameWithBracesIsJudgedAroundItsTokens) {
         nullptr);
         EXPECT_FALSE (result.ok) << key;
         EXPECT_EQ (result.detail_code, "invalid_header_name") << key;
-        EXPECT_NE (result.message.find ("'" + key + "'"), std::string::npos)
+        EXPECT_NE (result.message.find ("cannot appear"), std::string::npos)
         << result.message;
+        EXPECT_EQ (result.message.find (key), std::string::npos) << result.message;
         EXPECT_TRUE (req.headers.empty ()) << key;
     }
 
@@ -554,6 +560,37 @@ TEST (ParseAuth, MapsModesToVariantAlternatives) {
     auto un = parse_auth (json{ { "mode", "ntlm" } });
     ASSERT_TRUE (std::holds_alternative<UnsupportedAuth> (un));
     EXPECT_EQ (std::get<UnsupportedAuth> (un).mode, "ntlm");
+}
+
+// The closed set the write routes hold a stored `auth` to (#3464). Mutation
+// check: drop a mode from `AUTH_MODES` and the first test reds; make
+// `is_known_auth_mode` fold case or trim and the second reds.
+TEST (AuthModes, EveryModeParseAuthExecutesIsKnown) {
+    using namespace vayu::http;
+    for (const std::string_view mode :
+    { "none", "inherit", "bearer", "basic", "apikey", "oauth2" }) {
+        EXPECT_TRUE (is_known_auth_mode (mode)) << mode;
+    }
+}
+
+TEST (AuthModes, OnlyTheExactLowercaseSpellingIsKnown) {
+    using namespace vayu::http;
+    for (const std::string_view mode : AUTH_MODES) {
+        EXPECT_TRUE (is_known_auth_mode (mode)) << mode;
+    }
+    for (const std::string_view mode : { "", "Inherit", "INHERIT", "Bearer",
+         " inherit", "bearer ", "oauth 2", "unknown" }) {
+        EXPECT_FALSE (is_known_auth_mode (mode)) << "'" << mode << "'";
+    }
+}
+
+// What `parse_auth` makes of a mode outside the set is the defect the routes
+// close: the request goes out with no credential and no refusal.
+TEST (AuthModes, AMisspelledModeParsesAsAnUnexecutedMode) {
+    using namespace vayu::http;
+    const auto parsed = parse_auth (json{ { "mode", "Bearer" }, { "token", "t" } });
+    ASSERT_TRUE (std::holds_alternative<UnsupportedAuth> (parsed));
+    EXPECT_FALSE (is_known_auth_mode (std::get<UnsupportedAuth> (parsed).mode));
 }
 
 } // namespace

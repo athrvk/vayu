@@ -40,6 +40,23 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 export type OutcomeCounts = Record<StepOutcome, number>;
 
 /**
+ * "41 passed, 2 failed" - what the run did, not that it is over (#1358): the
+ * line its notification and its spoken announcement both carry.
+ *
+ * Skipped, errored and stopped steps are named only when there are any: a
+ * clean run's line stays two numbers long, and a run that errored never reads
+ * as a pass. A step a Stop cut short (#3397) is named as stopped and is in no
+ * failure count, so a stopped run does not read as one that failed.
+ */
+export function stepOutcomeLine(counts: OutcomeCounts): string {
+	const parts = [`${counts.passed} passed`, `${counts.failed} failed`];
+	if (counts.errored > 0) parts.push(`${counts.errored} errored`);
+	if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
+	if (counts.stopped > 0) parts.push(`${counts.stopped} stopped`);
+	return parts.join(", ");
+}
+
+/**
  * One step execution, whichever source it came from.
  *
  * `result` is what separates the two: a live row has none, so the response

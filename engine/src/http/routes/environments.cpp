@@ -48,7 +48,10 @@ bool is_create) {
     if (auto outcome = apply_required_string_field (json, "name", e.name, is_create); !outcome) {
         return outcome;
     }
-    apply_string_field (json, "description", e.description, "", is_create);
+    if (auto outcome = apply_string_field (json, "description", e.description, "", is_create);
+    !outcome) {
+        return outcome;
+    }
     if (auto outcome = apply_variables_field (json, e.variables, is_create); !outcome) {
         return outcome;
     }

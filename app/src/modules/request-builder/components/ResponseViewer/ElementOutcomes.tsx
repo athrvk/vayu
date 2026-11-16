@@ -42,6 +42,7 @@ import { formatLatency } from "@/lib/format-number";
 import { notRunReason, type LeftOutElement } from "@/lib/elements";
 import type { ElementOutcome } from "@/types";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
+import { Heading } from "@/components/ui/heading";
 import { elementOriginLabel, REQUIRED_MISS_HINT } from "@/components/shared";
 
 export interface ElementOutcomesProps {
@@ -105,7 +106,10 @@ export default function ElementOutcomes({
 
 	return (
 		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
-			<h3 className={cn(EYEBROW_XS_CLASS, "mb-1.5")}>Elements</h3>
+			{/* The level is the host's: the response pane, a run's step in History. */}
+			<Heading outside="h3" className={cn(EYEBROW_XS_CLASS, "mb-1.5")}>
+				Elements
+			</Heading>
 			<div className="space-y-1.5">
 				{outcomes.map((outcome, i) => {
 					// A required miss failed the step, so it is painted as a failure.

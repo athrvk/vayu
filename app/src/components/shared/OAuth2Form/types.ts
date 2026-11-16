@@ -14,6 +14,14 @@ import type { OAuth2Config, VariableSupport } from "@/types";
  * supplies a plain Input - the shared form stays agnostic.
  */
 export type OAuth2TextInput = ComponentType<{
+	/** The id the field's visible `<Label htmlFor>` points at. */
+	id: string;
+	/**
+	 * That label's text. An input that names itself from something else (the
+	 * variable-aware one falls back to its placeholder) passes it as its
+	 * `aria-label`, which outranks the `<label for>`.
+	 */
+	label: string;
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;

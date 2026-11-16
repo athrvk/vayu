@@ -272,6 +272,55 @@ describe("the dialog's hasPostRequestScript", () => {
 });
 
 /**
+ * `hasPreRequestScript` and `hasInlinePreScript` on the dialog: the request's
+ * own pre-request scripts split by `config.inline`, because the engine runs a
+ * marked one at Scripts = As marked and skips an unmarked one.
+ */
+describe("the dialog's pre-request script props", () => {
+	const preScript = (config: Record<string, unknown>): ElementDef => ({
+		id: "el_pre",
+		kind: "script.pre",
+		enabled: true,
+		config: { script: "pm.variables.set('a', 1);", ...config },
+	});
+
+	async function preScriptProps(elements: ElementDef[]) {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)({
+				...REQUEST,
+				elements,
+			});
+		});
+		return {
+			hasPreRequestScript: dialogProps.hasPreRequestScript,
+			hasInlinePreScript: dialogProps.hasInlinePreScript,
+		};
+	}
+
+	it("flags an unmarked script as one the engine skips", async () => {
+		expect(await preScriptProps([preScript({})])).toEqual({
+			hasPreRequestScript: true,
+			hasInlinePreScript: false,
+		});
+	});
+
+	it("flags a script marked inline as one that runs, not one that is skipped", async () => {
+		expect(await preScriptProps([preScript({ inline: true })])).toEqual({
+			hasPreRequestScript: false,
+			hasInlinePreScript: true,
+		});
+	});
+
+	it("flags neither for a request with no pre-request script", async () => {
+		expect(await preScriptProps([])).toEqual({
+			hasPreRequestScript: false,
+			hasInlinePreScript: false,
+		});
+	});
+});
+
+/**
  * A switched-off element stays off the run (#3050): the pipeline skips it, and
  * the engine would otherwise refuse the run over a scenario-only kind nobody is
  * using. Send and code generation still carry disabled elements; only this

@@ -31,7 +31,11 @@ beforeEach(() => {
 		navIndex: -1,
 	});
 	useSaveStore.setState({ contexts: new Map() });
-	useEngineStore.setState({ engineStatus: "connected" });
+	useEngineStore.setState({
+		engineStatus: "connected",
+		engineCrash: null,
+		engineCrashAheadOfPoll: false,
+	});
 	useToastStore.setState({ toasts: [] });
 });
 
@@ -261,6 +265,19 @@ describe.each([
 
 		expect(openEntities()).toEqual(["a"]);
 		expect(toasts()).toHaveLength(0);
+	});
+
+	it("keeps the dirty tab when a crash is recorded the poll still reads as connected (#3506)", () => {
+		openRequests("a", "clean", "dirty");
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "connected" });
+		useEngineStore
+			.getState()
+			.setEngineCrash({ code: null, signal: "SIGKILL", stderrTail: [], error: null });
+
+		close();
+
+		expect(openEntities()).toEqual(["a", "dirty"]);
 	});
 
 	it("closes the dirty tab too once the engine is connected", () => {

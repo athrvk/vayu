@@ -242,7 +242,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		description:
 			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. " +
 			GUARDED_WRITE_SENTENCE +
-			", and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out.",
+			", and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out. It stops the subtree's running mock servers; a restore does not restart them.",
 		annotations: {
 			title: "Delete collection",
 			readOnlyHint: false,

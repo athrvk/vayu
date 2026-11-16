@@ -142,14 +142,57 @@ to `--foreground`, so this is a known limit rather than an oversight - prefer
 
 Set by the `[data-color-scheme]` attribute; the default is **Ocean**
 (`DEFAULT_COLOR_SCHEME` in `constants/color-schemes.ts` is the source of truth).
-The accent is **split into two tokens** to resolve a contrast bind:
+The accent is **split into two tokens** to resolve a contrast bind, and three
+opaque companions (below) give its hover and its tint a solid colour of their
+own:
 
-- **`--primary`** - the accent used for text, borders, rings, tints, indicators
-  (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
-  the light card, brightened on the near-black dark canvas so it reads in both.
+- **`--primary`** - the accent used for text, borders, rings, indicators
+  (`text-primary`, `border-primary`, `ring-primary/20`). A chip or row ground
+  under text is not an alpha of it but `--primary-tint` (below). Mode-adaptive:
+  deep on the light card, brightened on the near-black dark canvas so it reads
+  in both.
 - **`--primary-fill`** - solid button/badge backgrounds that carry a white
-  label (`bg-primary-fill`). Kept deep in **both** modes so white text clears
-  AA-large (a brightened dark accent would fail white-on-fill).
+  label (`bg-primary-fill`). One value in **both** modes, deep enough that
+  white text clears 4.5:1 (a brightened dark accent would fail white-on-fill).
+
+**The opaque companions (#3515).** A translucent accent alpha puts text on a
+colour that depends on whatever is behind it, so `hover:bg-primary-fill/90`
+measured 4.03-4.09:1 under a white label on six schemes and `bg-primary/15`
+under `text-primary` 4.32-4.42:1 on a white card. Each scheme instead declares
+three solids, plain `H S% L%` triples the contrast guard parses:
+
+- **`--primary-fill-hover`** - the fill's hover (`hover:bg-primary-fill-hover`
+  on `Button`'s default variant, `Badge`'s default variant and the URL bar's
+  Send pair; the border moves with it). A few points darker than the fill, so
+  the white label *gains* contrast on hover instead of losing it. Pinned across
+  themes with the fill.
+- **`--primary-tint`** and **`--primary-tint-hover`** - a solid chip background
+  and its hover (`bg-primary-tint`, `hover:bg-primary-tint-hover`) under
+  `--primary-text`, in place of `bg-primary/15` and `hover:bg-primary/20`
+  wherever the element carries text. A light solid in light, a dark solid in
+  dark, so unlike the fill they differ per theme. `--primary-text`, `--primary`
+  and `--foreground` all clear 4.5:1 on both. Light `ocean`, `coral` and
+  `magenta` are the binding cases: their `--primary` was set by the surfaces
+  and sits barely above 4.5:1 on white, so their tint is the palest.
+
+**The rule: an alpha of the accent (`bg-primary/<n>`, `bg-primary-fill/<n>`,
+`bg-status-<name>-fill/<n>`, and their `hover:` / `disabled:` / `data-[...]:` forms) is allowed only where no
+text sits on it** - a dot, a ring, a selection outline, a chart area, a
+text-selection highlight over transparent text. An element that renders text,
+its own or its children's, uses the opaque tokens: `bg-primary-tint` at rest,
+`hover:bg-primary-tint-hover` when it is already tinted and
+`hover:bg-primary-tint` when it is not. `accent-alpha-under-text.test.ts` scans
+every non-test source file and fails on any other use; a genuinely text-free one
+goes in its allow-list with the reason. The per-scheme values are in the second
+table under [Color Schemes](#color-schemes-accent-themes).
+
+Both halves meet **4.5:1 in every scheme and both themes** (#3499): `--primary`
+as text on `--card`, `--panel`, `--background`, `--muted` and `--accent`, and
+white on `--primary-fill`. The light `--primary` is set by the darkest light
+surface (`--muted`, 93%) and the fill by the white label, so in six schemes
+the light fill sits three to six points lighter than the light text accent; they
+are two jobs, not one colour. `color-scheme-contrast.test.ts` measures every
+cell from the stylesheet.
 
 Rule: white-labelled solid fills use `bg-primary-fill` - a checked checkbox
 under its white check and an on switch under its thumb included (#2305);
@@ -157,17 +200,20 @@ everything else accent uses `--primary`. `--primary-foreground` (white) sits on 
 
 ```css
 /* Sunset (the values below; the default scheme is Ocean) */
---primary:       24 90% 46%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
---primary-fill:  24 90% 46%;   /* both modes - white-safe button fill */
+--primary:       24 90% 36%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
+--primary-fill:  24 90% 39%;   /* both modes - white-safe button fill */
+--primary-fill-hover: 24 90% 34%;   /* both modes - the fill's hover, white-safe */
+--primary-tint:       24 100% 97%;  /* light - solid chip ground */  /* dark: 24 50% 14% */
+--primary-tint-hover: 24 100% 93%;  /* light - its hover */          /* dark: 24 50% 18% */
 --primary-text:  var(--primary);   /* accent as a label - see below */
 --primary-foreground: 0 0% 100%;
 --ring / --variable: track --primary
 ```
 
 **`--primary-text` - the accent when the accent *is* the label.** Used by the
-section tabs for the active trigger (`text-primary-text`), where the accent has
-to separate not from the surface but from the `--muted-foreground` label beside
-it.
+section tabs for the active trigger (`text-primary-text`) and by a resolved
+`{{variable}}` token, where the accent has to separate not from the surface but
+from the `--muted-foreground` label (or empty token) beside it.
 
 It is not sufficient on its own, and the tabs pair it with a 2px underline on
 `--primary`. Colour plus weight leaves the active tab hard to find in graphite,
@@ -178,24 +224,37 @@ label takes `--primary-text` and the indicator takes `--primary`, because one is
 text and the other is an indicator.
 
 That separation is carried almost entirely by **saturation**, not lightness.
-Measured on `--card`, accent text and muted text sit within a **1.01-1.56**
+Measured on `--card`, accent text and muted text sit within a **1.01-1.45**
 contrast ratio of each other in every scheme - effectively the same brightness -
 so what the eye reads is "coloured vs grey". At 55-95% saturation against an
-inactive 4-5% that is plenty, which is why `--primary-text` defaults to
-`--primary` and seven of the eight schemes never override it.
+inactive 4-5% that is usually plenty, which is why `--primary-text` defaults
+to `--primary` and six of the eight schemes never override it.
 
 `graphite` overrides it, because it is the only desaturated scheme (S=12% light,
 15% dark) and so has no hue to spend: `220 12% 26%` light and `220 15% 86%`
-dark, which take its active-vs-inactive separation from 1.14 to 1.86 and 1.23 to
-1.81. Retuning graphite's `--primary` instead is not an option - that also
-paints its buttons, ring and `--chart-1`, and would give it near-black buttons.
+dark, which take its active-vs-inactive separation from 1.02 to 1.86 and 1.23 to
+1.81. Light `sky` overrides it as well, with `192 95% 22%`: a cyan dark enough
+to clear 4.5:1 on `--muted` has given up most of its chroma, and at its `--primary`
+it sits 0.088 OKLab from `--muted-foreground`, where under 0.10 reads as the
+same colour (#3499). Dark `sky` resets the alias to `var(--primary)`, because
+the light block's literal ties `.dark` on specificity and would otherwise reach
+dark too. Retuning graphite's `--primary` instead is not an option - that also
+paints its ring, `--chart-1` and every `text-primary`, near-black in light.
 This is the same bind `--primary-fill` exists to solve, answered the same way.
 
-**Adding a scheme:** override `--primary-text` only if the accent's saturation
-is under about 25%. `color-schemes.test.ts` derives that rule from the
+**Adding a scheme:** declare all three opaque tokens in the scheme's light block
+*and* its dark block (`:root` and `.dark` carry Sunset's), because a token a
+`.dark[data-color-scheme]` block leaves out falls through to the light value of
+its scheme; `color-schemes.test.ts`
+lists them in `REQUIRED` and `color-scheme-contrast.test.ts` measures them.
+Then override `--primary-text` if the accent's saturation is
+under about 25%, or if the accent sits within 0.10 OKLab of
+`--muted-foreground`. `color-schemes.test.ts` derives the first rule from the
 stylesheet rather than naming graphite, so a new desaturated scheme fails until
-it declares one. It is deliberately *not* in that test's `REQUIRED` list -
-inheriting it is correct for a saturated scheme, not a forgotten block.
+it declares one; `color-scheme-contrast.test.ts` measures the second, as the
+resolved-versus-empty pair of the variable states. It is deliberately *not* in
+`color-schemes.test.ts`'s `REQUIRED` list - inheriting it is usually correct,
+not a forgotten block.
 
 Note the ratios above are between two *foreground* colours; neither WCAG nor
 APCA is defined for that, so treat them as a discriminability proxy rather than
@@ -218,6 +277,14 @@ These differ between light and dark mode.
 --info:               199 89% 55%;   /* brighter on a dark plot */
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
+
+There is no `--success-foreground`, `--warning-foreground` or `--info-foreground`:
+a white label on a bare `--warning` measures 2.14:1, and nothing read the other
+two. A solid status control takes the `-fill` token under a white label instead
+(`bg-status-warning-fill text-white`, 4.62:1 - the Restart engine button, the
+client-certificate chip). Its hover is the opaque `--status-warning-fill-hover`
+(`hover:bg-status-warning-fill-hover`, 5.70:1), never `hover:bg-status-warning-fill/90`,
+which composites to 3.87:1 under the same label.
 
 `--info` used to be one value in both modes, like `--warning` still is. It was
 never measured, and at `199 89% 48%` it scored **2.85** on a light card against
@@ -375,6 +442,10 @@ things text contrast never touches: focus rings, control boundaries, and the
 |------|------:|-----:|---------|
 | `--ring` vs every surface | 4.57–5.39 | 5.11–6.75 | passes comfortably |
 | `--border` / `--input` vs card | 1.30 | 1.00 | decorative only - see below |
+| switch **off** track vs card | 1.55 | 1.28 | failed |
+| switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
+| switch **on** track vs card | 5.41 | 3.20 | passes |
+| switch on **thumb** vs its track | 4.93 | 4.93 | passes |
 
 **A divider *inside* a card says `border-rule`, not a border token.** `--border`
 is tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
@@ -498,12 +569,8 @@ the strongest available in both themes (1.356 light / 1.343 dark). The
 *faintest* option there in dark (1.11, per the table above). Decided in issue
 #69; the detected-collections preview list in the same dialog got the same
 treatment.
-| switch **off** track vs card | 1.55 | 1.28 | failed |
-| switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
-| switch **on** track vs card | 5.41 | 3.20 | passes |
-| switch on **thumb** vs its track | 4.93 | 4.93 | passes |
 
-The on rows are the default scheme (Ocean) with the track on `bg-primary-fill`.
+The switch on rows in the first table above are the default scheme (Ocean) with the track on `bg-primary-fill`.
 They used to read `--primary`, which brightens in dark: the track was 5.89
 against the card but only 2.94 under the white thumb. `checked-control-contrast.test.ts`
 holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme,
@@ -511,8 +578,9 @@ and holds the on switch's edge against the card at 3.0 in every dark scheme. The
 track fill alone stays under the bar on `aurora` (2.98), so the checked state
 also paints the reserved 2px border with `--primary` (`data-[state=checked]:border-primary`):
 that edge measures 5.79 on the card at its weakest (`coral`) and 6.47 on `aurora`,
-and it carries the 3:1. In light `--primary` equals `--primary-fill`, so the edge
-is invisible there and the light on-state is unchanged.
+and it carries the 3:1. In light `--primary` equals `--primary-fill` in `ocean`
+and `aurora`, where the edge is invisible; in the other six it is three to six
+points darker than the fill (#3499), a slightly deeper rim of the same hue.
 
 The focus ring needed no work, which is the one that matters most for keyboard
 users - worth knowing so nobody "fixes" it.
@@ -596,6 +664,7 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 --status-redirect: 258 60% 62%;     /* violet  - 3xx, redirect */
 --status-no-response: 240 5% 52%;   /* neutral - status 0, nothing came back */
 --status-warning: 38 92% 36%;       /* amber   - 4xx, client error */
+--status-warning-fill-hover: 38 92% 29%;   /* the warning fill's hover, white-safe */
 ```
 
 **A status colour has three jobs, and three tokens.** The base value above is
@@ -608,11 +677,18 @@ Reuse it as text or as a solid chip and it fails: `status-success` measured
 | Dot, bar, icon, tint, border              | `--status-*`             | `bg-status-success` dot        |
 | The colour **is the text**                | `--status-*-text`        | `text-status-error-text`       |
 | Solid chip under a **white** label        | `--status-*-fill`        | `bg-status-success-fill`       |
+| That chip's **hover**                     | `--status-*-fill-hover`  | `hover:bg-status-warning-fill-hover` |
 
 Only `-text` is mode-adaptive (light needs a darker value, dark a lighter one).
 The base indicators and the `-fill` chips stay mode-consistent, so a green dot
 and a "200 OK" chip read identically on either theme. This is the same split
 `--primary` / `--primary-fill` already uses.
+
+Only `--status-warning-fill-hover` exists so far (`38 92% 29%`, one value in both
+themes, 5.70:1 under white against the fill's 4.62:1), because the Restart engine
+button is the one solid status control with a hover. A `/<n>` alpha of any
+`bg-status-<name>-fill` is refused by `accent-alpha-under-text.test.ts`, as
+`bg-primary/<n>` is (#3499).
 
 **Utility classes** (`text-`, `bg-`, `border-`): `text-status-success-text`,
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
@@ -713,7 +789,9 @@ read as de-emphasised rather than as an outcome of its own.
 
 The history latency tiles are neutral and use `status-stopped` (P95) or
 `status-error` (P99, P999) only when the value exceeds the run's own SLO
-(`LatencyMetric.tsx`, #2245; a run that declared none stays neutral, #2939); the percentile lines in the time-series chart take
+(`LatencyMetric.tsx`, #2245; a run that declared none stays neutral, #2939), and a tile in a
+tier also carries an `AlertTriangle` and a screen-reader "Over SLO: " so the state is not
+colour alone (#3499); the percentile lines in the time-series chart take
 no status role at all, and the HDR distribution's p95 / p99 markers take
 `warning` / `destructive` only past the SLO (`hdrMarkers.ts`, #2263).
 
@@ -858,14 +936,10 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 --method-options: 240  5% 41%;   /* 240  5% 58% - gray   */
 ```
 
-**Utility classes** (defined in `index.css`, available as Tailwind class names):
-- Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
-- Background: `.bg-method-get`, `.bg-method-post`, etc.
-
-These exist but **nothing in `src/` currently uses them** - prefer
-`getMethodColor` below, which is the one path `MethodBadge`, the tab strip and
-the method selector all take. A second way to spell the same colour is a second
-place for it to drift.
+There is no `.method-get` or `.bg-method-get` utility class: the colour is
+read through `getMethodColor` below, the one path `MethodBadge`, the tab strip
+and the method selector all take. A second way to spell the same colour is a
+second place for it to drift.
 
 **`getMethodColor(method)`** in `app/src/lib/method-display.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
@@ -942,7 +1016,8 @@ takes the series' role too (`ChartLegend`), never a token typed beside it.
 ## Color Schemes (Accent Themes)
 
 Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
-`--primary`, `--primary-fill`, `--primary-foreground`, `--ring`, `--variable`,
+`--primary`, `--primary-fill`, `--primary-fill-hover`, `--primary-tint`,
+`--primary-tint-hover`, `--primary-foreground`, `--ring`, `--variable`,
 and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
 accent) live in `app/src/index.css`; the table below is an approximate guide.
 
@@ -958,7 +1033,7 @@ wash (`/10`, `/15`, `/30`) or a solid with no text on it - `Progress`'s bar
 
 Pinning `--primary` to its light value would look like a contrast fix and is in
 fact a regression: accent *text* on the dark card would fall from APCA Lc 44–69
-to Lc 22–37.
+to Lc 22–25.
 
 **Secondary text on the fill is a tint of `--primary-foreground`, never
 `--muted-foreground`.** The muted token is tuned against the canvas, so on the
@@ -967,12 +1042,13 @@ which is not a de-emphasis but a disappearance. A tooltip's second line (a
 shortcut, a URL, the source of a value) therefore uses the `TooltipHint`
 primitive, which holds the one tint; the same argument `surface-sunken` makes
 for its `--rule`, on a filled surface instead of a raised one. The hint cannot
-out-read the label it is secondary to - white on `sunset` is the ceiling at
-3.6:1 - so the bar is 2.5:1 on every scheme, checked in
+out-read the label it is secondary to - white on `coral` is the ceiling at
+4.65:1 - so the bar is 2.5:1 on every scheme, checked in
 `tooltip-hint-contrast.test.ts`. The same file bans an `opacity-N` or a
 hand-written `text-primary-foreground/N` inside a `TooltipContent`: white at
-`opacity-70` on the fill is 2.50:1 on `sunset`, under the bar, and a second
-alpha is a second unmeasured tint.
+`opacity-70` measured 2.50:1 on `sunset` before #3499 deepened the fills, and a
+second alpha is a second unmeasured tint that the next fill retune can put back
+under the bar.
 
 **A shortcut tooltip is `TooltipShortcutLabel`.** The label, then the chord in a
 `TooltipHint`, in one `flex items-center gap-1.5` row - no parentheses, no
@@ -1021,30 +1097,62 @@ move happens to land outside it. `disableHoverableContent` closes on leave
 immediately instead, which is also the macOS system tooltip's own behaviour.
 → `tooltip-delay.test.tsx`
 
-| Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
+| Scheme | Light `--primary` | Dark `--primary` | `--primary-fill` (both themes) |
 |--------|-----------|----------|----------|
-| `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |
-| `sky` | `192 95% 36%` | `188 90% 52%` | `192 95% 36%` |
+| `sunset` | `24 90% 36%` | `24 95% 58%` | `24 90% 39%` |
+| `sky` | `192 95% 28%` | `188 90% 52%` | `192 95% 31%` |
 | `ocean` (default) | `217 80% 48%` | `217 90% 66%` | `217 80% 48%` |
-| `forest` | `142 72% 33%` | `142 65% 52%` | `142 72% 33%` |
+| `forest` | `142 72% 27%` | `142 65% 52%` | `142 72% 30%` |
 | `aurora` | `262 55% 54%` | `258 88% 76%` | `262 55% 54%` |
-| `coral` | `0 68% 54%` | `0 80% 68%` | `0 68% 54%` |
-| `magenta` | `305 72% 45%` | `305 85% 70%` | `305 72% 45%` |
-| `graphite` | `220 12% 46%` | `220 15% 72%` | `220 12% 46%` |
+| `coral` | `0 68% 47%` | `0 80% 68%` | `0 68% 53%` |
+| `magenta` | `305 72% 42%` | `305 85% 70%` | `305 72% 45%` |
+| `graphite` | `220 12% 43%` | `220 15% 72%` | `220 12% 46%` |
+
+The opaque fill hover and tints (#3515) are in their own table, because the one
+above is parsed against the stylesheet column by column. The tint columns are
+light and dark values, since a tint is a solid ground and each theme needs the
+ground that suits it; `--primary-fill-hover` is one value in both themes, like
+the fill.
+
+| Scheme | `--primary-fill-hover` (both themes) | Light `--primary-tint` | Light `--primary-tint-hover` | Dark `--primary-tint` | Dark `--primary-tint-hover` |
+|--------|-----------|----------|----------|----------|----------|
+| `sunset` | `24 90% 34%` | `24 100% 97%` | `24 100% 93%` | `24 50% 14%` | `24 50% 18%` |
+| `sky` | `192 95% 26%` | `192 100% 91%` | `192 100% 87%` | `188 50% 14%` | `188 50% 18%` |
+| `ocean` (default) | `217 80% 43%` | `217 90% 98%` | `217 90% 95%` | `217 50% 14%` | `217 50% 18%` |
+| `forest` | `142 72% 25%` | `142 82% 87%` | `142 82% 83%` | `142 50% 14%` | `142 50% 18%` |
+| `aurora` | `262 55% 49%` | `262 65% 97%` | `262 65% 93%` | `258 50% 14%` | `258 50% 18%` |
+| `coral` | `0 68% 48%` | `0 78% 98%` | `0 78% 95%` | `0 50% 14%` | `0 50% 18%` |
+| `magenta` | `305 72% 40%` | `305 82% 98%` | `305 82% 95%` | `305 50% 14%` | `305 50% 18%` |
+| `graphite` | `220 12% 41%` | `220 14% 97%` | `220 14% 93%` | `220 15% 14%` | `220 15% 18%` |
+
+Light `sky` and `forest` tints are the strongest because their `--primary` is
+the deepest; light `ocean`, `coral` and `magenta` the palest, because theirs is
+the lightest. The ceiling is the text, not taste: `--primary-text` on the hover
+tint is what sets how dark a light tint can go, and the guard holds it.
 
 Every scheme also resolves `--primary-text` (the accent as a label). It tracks
 `--primary` for all of these except `graphite`, which sets `220 12% 26%` light
-and `220 15% 86%` dark - see **Primary (Accent Color)** above for why.
+and `220 15% 86%` dark, and light `sky`, which sets `192 95% 22%` - see
+**Primary (Accent Color)** above for why.
 
 **Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` - nothing
 else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
 missing block fails silently: the picker offers a swatch that inherits `:root`
 and quietly does nothing.
 
-The value has to clear two bars. As a fill it carries a white label, so aim for
-the band the existing schemes occupy - **APCA Lc 68–84** - and keep the fill at
-**3.0+ against `--card`** so the button still reads as a control. The dark
-`--primary` is text, so it wants **Lc 44–69** against the dark card. Check the
+The values have to clear three bars, and `color-scheme-contrast.test.ts`
+measures them in both themes. The fill carries a white label at
+**4.5:1** (the existing fills land at APCA Lc 76–84); keep it at **3.0+ against
+`--card`** too, so the button still reads as a control. `--primary` is text at
+**4.5:1** on the opaque surfaces: `--card`, `--panel`, `--background`,
+`--muted` and `--accent`, so in light the darkest of them, `--muted`, sets it.
+The opaque tokens are measured there too (#3515): white on
+`--primary-fill-hover` at **4.5:1** and darker than the fill, and
+`--primary-text`, `--primary` and `--foreground` each at **4.5:1** on
+`--primary-tint` and `--primary-tint-hover`, with the two tints a visible step
+apart. Pick the tints last, from the accent text: the darkest a light tint can
+be is set by the lightest text on it.
+The dark `--primary` also wants **Lc 44–69** against the dark card. Check the
 new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
 from the semantic status colours, or it will read as a duplicate in the picker.
 `magenta` sits at ΔE 0.153 from `aurora`; `graphite` is distinct by being the
@@ -1075,7 +1183,7 @@ families - the weights bundled, the subsets, and why.
 
 ```css
 body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
-/* mono via font-mono Tailwind class, or .font-code utility */
+/* mono via the font-mono Tailwind class */
 ```
 
 The faces are bundled rather than fetched because a stylesheet in
@@ -1099,6 +1207,15 @@ page zoom factor (Electron `webFrame`, CSS `zoom` fallback in the browser).
 Both live in `appearance-store` (source of truth `constants/appearance.ts`),
 persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
 text stays JetBrains Mono regardless.
+
+**Reflow guarantee** (#3494). The window's minimum is 1024px and the scale
+slider reaches 200%, so the smallest layout the app promises is **512 CSS px
+wide** (a pane beside the context bar is narrower again). At that width nothing
+may overlap, clip a word, or break a label into a column of characters: a
+control that cannot fit **wraps or truncates**, and the thing that gives way is
+the one the user can read least of (a timestamp, a button label, a hint), never
+the one they came for (a run's name, the URL, the status code). The class-level
+rules that hold it are under [Overflowing Text](#overflowing-text) below.
 
 **Interface density** (issue #1670) is a fourth Interface control, next to
 Roundedness: `Default` and `Comfortable`, toggled by a `data-density`
@@ -1213,7 +1330,7 @@ line-height - prefer `text-sm`.
 **The heading register stops at 15px, and a heading never names its own size.**
 `CardTitle` and `DialogTitle` carry `text-md`; a card or dialog heading that
 writes a size is overriding the primitive rather than using it. That is how the
-app got here (#1202): `CardTitle` named no size at all, so all 51 card headings
+app got here (#1202): `CardTitle` named no size at all, so every card heading
 in the app named one, 45 at `text-base` and 6 at `text-lg` - a settings panel
 and a report tab heading at 16-18px against 13px body, which is the register
 Postman and VS Code cap around 14px. `Input` is `text-sm` for the same reason:
@@ -1576,7 +1693,7 @@ stored preference is the right amount of mechanism.
 | `rounded-sm` | `calc(var(--radius) - 4px)` | yes |
 | `rounded-md` | `calc(var(--radius) - 2px)` | yes |
 | `rounded-lg` | `var(--radius)` | yes |
-| `rounded-full` | pill / circle | no - deliberately fixed |
+| `rounded-full` | circle, or a track that is a capsule | no - deliberately fixed, and only for a shape that *is* a circle (see below) |
 | `rounded-none` | `0` | no - deliberately fixed |
 | `rounded` | Tailwind default | **no - never use it** |
 
@@ -1601,7 +1718,8 @@ option regardless of which one is active. The same test enforces this, across
 `appearance-store`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
 live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
 unsuffixed `rounded`** (fixed 4px - it ignores `--radius` and won't follow the
-control). `rounded-full` stays a pill regardless.
+control). `rounded-full` does not follow it either, which is why it is reserved
+for shapes that are circles (below), never for a button or a chip.
 
 The primitives are the reference, not a table of their own: `Badge` and the
 chips that match it are `rounded-md` (`badge-variants.ts`), `Card` is `rounded-lg`
@@ -1625,15 +1743,21 @@ circle or a capsule. It is not for anything rectangular that merely looked
 nicer with round ends: the dashboard header's LIVE / COMPLETED / STOPPED chips
 were `rounded-full` while the `Badge` primitive they otherwise match is
 `rounded-md`, so on Square they were the only round things left on the screen.
-They are `rounded-md` now.
+They are `rounded-md` now, and so are the element list's quick-add buttons and
+the inherited-elements notice's kind chip (a `Badge variant="chip"`, #3501).
 
-No test can tell a chip from a dot, so this one is a judgement call at review
-time. The question to ask: if the user picks Square, should this element go
-square? If yes it is a chip, and `rounded-full` is wrong.
+The radius guard allows the class, because no source scan can tell a chip from a
+dot (`radius-token.test.tsx` is silent on it), so this one is a judgement call at
+review time. The question to ask: if the user picks Square, should this element
+go square? If yes it is a chip, and `rounded-full` is wrong. A track whose shape
+is the capsule (the progress bar, the switch) is the exemption, and says so
+under its own heading.
 
 The same reasoning rules out `rounded-full` on controls - a button or dropdown
 trigger that keeps its pill shape becomes the one thing on screen ignoring the
-Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
+Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`. Render
+the two sites that carried it (`ElementList`'s quick-add buttons,
+`InheritedElementsNotice`'s kind chip) and read `className`, as their tests do.
 
 **A control that renders at more than one box size caps the token by
 proportion instead of using it bare.** `Checkbox` (`ui/checkbox.tsx`) is
@@ -1653,17 +1777,14 @@ for the same `min(token, %)` shape rather than relearning this.
 
 ## Animations
 
-Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animations have Tailwind shorthand aliases (`animate-vayu-spin`, `animate-vayu-pulse`, `animate-vayu-fadepulse`) in addition to the verbose arbitrary form.
+Defined in `index.css`. `tailwind.config.js` carries no keyframes or animation aliases, so a keyframe has
+one definition to keep in step. The live indicator reaches `vayu-pulse` through an arbitrary class
+(`animate-[vayu-pulse_1.6s_ease-in-out_infinite]`).
 
 | Name | Duration | Curve | Tailwind class | Use |
 |------|----------|-------|----------------|-----|
-| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Unused by the app; spinners are `Loader2` with Tailwind's `animate-spin` |
-| `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
-| `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
-| `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `vayu-pulse` | 1.6s | ease-in-out | `animate-[vayu-pulse_1.6s_ease-in-out_infinite]` | Live indicators (100→35% opacity) |
 | `collapsible-down/up` | 0.2s | `--ease-enter` / `--ease-exit` | `animate-collapsible-down/up` | `CollapsibleContent`'s height (from `tw-animate-css`) |
-| `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
-| `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
 | interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 | press feedback | 0.1s | ease-out | *(baseline, `[data-slot="button"]`)* | `scale: 0.98` on `:active` |
 
@@ -1759,7 +1880,7 @@ must carry `.panel-clip`; every focusable descendant then gets
 wrapper and the bordered cards in the load-test and run-collection dialogs;
 `rg panel-clip app/src` is the authoritative list. Put it on the
 element carrying the overflow - not on the rows. For a one-off outside such a
-container, use the `.focus-ring-inset` utility.
+container, use `focus-visible:-outline-offset-2`.
 
 Two limits worth knowing before reaching for it. **`overflow-y-auto` clips
 horizontally too** - it computes `overflow-x` to `auto`, so a box that only
@@ -1775,7 +1896,7 @@ their own ring.
 field inside a dialog needs nothing.
 
 **Which is why a primitive fixes its own clipping, with `ring-inset`.** Neither
-`.panel-clip` nor `.focus-ring-inset` reaches a Tailwind `ring` - both move
+`.panel-clip` nor an `outline-offset` utility reaches a Tailwind `ring` - both move
 `outline-offset`, and a primitive has already turned its outline off. `TabsTrigger`
 is the worked example: a trigger fills its list's height exactly (measured in the
 running app, both boxes were 74->98) and the three scrolling strips - the response
@@ -1811,23 +1932,27 @@ a rounded hover fill, but its label button is 150px with square corners, so an
 outline on the button indicates the wrong shape in the wrong place.
 
 Put `.focus-row` on the element that paints the hover background. It then draws
-the indicator itself - at its own radius, so the roundedness control governs it -
-and adds the same accent fill hover uses, which is how native list selection
-reads. The inner control draws nothing.
+the indicator itself - at its own radius, so the roundedness control governs it.
+The inner control draws nothing.
 
 ```css
 :where(.focus-row):has(:focus-visible:not(.focus-self)) {
-  outline: 2px solid hsl(var(--primary) / 0.3);
+  outline: 2px solid hsl(var(--ring));
   outline-offset: -2px;
 }
 .focus-row :focus-visible:not(.focus-self) { outline: none; }
 ```
 
-The indicator mirrors the disclosure chevron's own ring (`ring-2
-ring-primary/30`) and the selected-row ring (`ring-1 ring-inset
-ring-primary/20`) so focus, selection and hover speak one language. It uses
-`outline` rather than `box-shadow` because Tailwind's ring utilities own
-`box-shadow` - a selected row already sets one, which would override it.
+The indicator is the full `--ring`, the same as the disclosure chevron's own
+ring (`ring-2 ring-ring`). A focus indicator is a UI component boundary and owes
+WCAG 1.4.11's 3:1; `--primary` at 30% composited onto a row measured 1.42-1.61
+in light and 1.56-2.00 in dark across the schemes, so it was a tint, not an
+indicator. `focus-ring-contrast.test.ts` holds the ring at 3:1 on card, panel and
+canvas for every scheme in both themes. The selected-row ring (`ring-1
+ring-inset ring-primary/20`) stays a tint: it marks selection beside a fill and
+is not a focus indicator. The focus indicator uses `outline` rather than
+`box-shadow` because Tailwind's ring utilities own `box-shadow` - a selected row
+already sets one, which would override it.
 
 **Auxiliary controls opt out with `.focus-self`.** A control inside the row that
 is its own target - the chevron toggles expansion rather than opening the
@@ -1864,16 +1989,30 @@ registered, the hint appears on focus and never on a read-only editor) and
 `shortcuts.listed.test.ts` (it reaches the panel).
 
 **Moving focus *between* regions is F6's job, not Tab's** (#1219). The window is
-four bands - the title bar, the drawer, the main pane and the context bar - and
-reaching one from another by Tab alone meant walking every request in an
-expanded collection tree on the way. F6 cycles the bands; Shift+F6 goes back.
+seven bands - the title bar, the activity rail, the drawer, the main pane, the
+context bar, the context rail and the Dock - and reaching one from another by Tab
+alone meant walking every request in an expanded collection tree on the way. F6
+cycles the bands in that order (document order); Shift+F6 goes back. The two
+rails joined with #1615 and #3498 because each stays on screen while the panel it
+opens is closed, and the Dock with #3498 because its save status and per-tab
+view controls were otherwise the last thing Tab reaches. **The tab strip is
+deliberately not a band**: it is the main pane's header, one roving tab stop
+directly above `main`, so Shift+Tab from the pane's first control reaches it and
+its own chords (⇧⌘[ / ⇧⌘], ⌘1-9) switch tabs from anywhere; a stop of its own
+would put a second press between every band and the pane F6 is pressed for
+most.
+F8 is the neighbouring key and is not the app's: Radix's `ToastProvider` binds
+it to the notification stack, which is the only keyboard path to a toast's Undo.
+It is listed in the Keyboard shortcuts panel as a display-only chord
+(`FOCUS_NOTIFICATIONS_CHORD`), and `Toaster.test.tsx` holds it equal to the key
+Radix names in the viewport's accessible name.
 
 Each band carries `data-app-region` rather than being found by landmark tag.
 `header, aside, main` looks like it would do the same job, and it does not: the
 run view renders its own `<header>`, the breadcrumb its own `<nav>`, and the
 inbox its own `<aside>` - content landmarks *inside* `main`, so a tag query
 would cycle around inside one region forever rather than moving between the
-four the window actually has. The attribute says which of the shell's children
+seven the window actually has. The attribute says which of the shell's children
 are stops in the cycle, and a feature adding a landmark of its own cannot join
 it by accident.
 
@@ -1894,19 +2033,35 @@ would move focus with nothing on screen saying where it went, which for a
 keyboard-only feature defeats the point of the key.
 
 **A `{{variable}}` inside an editor is painted from the same tokens as one
-outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
-`text-muted-foreground` / `text-destructive-text` for resolved, empty and
-undefined; Monaco draws its own text, so the same three colours (plus
-`text-muted-foreground` for a run-time token, `text-warning-text` for a
-`data.*` column no contract declares, and `text-muted-foreground` with a dashed
-underline for a name a pre-request script sets, #2741) are declared in
-`index.css` as six global classes its decorations can name -
-`vayu-variable-token-*`, under a `.monaco-editor` prefix so they outrank the
-theme rules Monaco injects at runtime. They are the one place a global class is the right answer rather than
-a utility string, for the same reason the scrollbar block is: no component
-stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
-the seventh, `vayu-time-token`: a dotted underline in `--muted-foreground`
-rather than a colour, so the language's own token colour still reads under it.
+outside it.** `EditableVariable` colours its overlay tokens `text-primary-text`
+/ `text-muted-foreground` / `text-destructive-text` for resolved, empty and
+undefined, and gives undefined a wavy underline as well; Monaco draws its own
+text, so the same three states (plus `text-muted-foreground` for a run-time
+token, `text-warning-text` with a double underline for a `data.*` column no
+contract declares, and `text-muted-foreground` with a dashed underline for a
+name a pre-request script sets, #2741) are declared in `index.css` as six global
+classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than a
+utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is the
+seventh, `vayu-time-token`: a dotted underline in `--muted-foreground` rather
+than a colour, so the language's own token colour still reads under it.
+
+**No variable state rests on a colour difference under 0.10 OKLab** (#3499).
+The accent is one of the colours, so a scheme can land it on a neighbour:
+coral's and sunset's accents sit under 0.10 from `--destructive-text`, light
+sunset's `--primary-text` 0.068 from `--warning-text`, and graphite's and light
+sky's `--primary` that close to `--muted-foreground`. The undefined state
+therefore carries a non-colour cue, a **wavy** underline, and the undeclared
+`data.*` column a **double** one (one style, one meaning: dashed is deferred,
+dotted is a time). The resolved state paints `--primary-text`, which graphite
+and light sky retune away from the grey. `color-scheme-contrast.test.ts`
+measures every pair of the five states in every scheme and theme from the
+Monaco classes, `EditableVariable.test.tsx` holds the field painter equal to
+them, and `variable-token-classes.test.ts` does the same for
+`DATA_TOKEN_TONE_CLASS`, the painter of the warning state in the overlay and the
+script panel's chips.
 → `variable-token-classes.test.ts`
 
 ---
@@ -1922,17 +2077,33 @@ see.
 
 | Rule | Enforced by |
 |------|-------------|
-| An icon-only button carries an `aria-label` | `icon-button-labels.test.tsx` |
+| An icon-only button carries an `aria-label`, no native `title`, and shows its label on focus (`TooltipIconButton`, or a `Tooltip` written by hand and listed in the guard) | `icon-button-labels.test.tsx`, the `*.tooltips.test.tsx` beside each row button |
 | `outline-none` is paired with a replacement indicator | `focus-indicator.test.ts` |
 | A control revealed on hover is revealed on focus too | `row-action-reveal.test.ts` |
 | An editor that takes Tab advertises the way out | `code-editor.chords.test.tsx` |
 | Every chord the app listens for is listed for the user | `shortcuts.listed.test.ts` |
 | A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
-| A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
-| Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
-| Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
+| A `<label>` names a control | `jsx-a11y/label-has-associated-control`; `LabelledField` links a prop-driven label by `useId` (`AuthFields.test.tsx`, `OAuth2Form.names.test.tsx`) |
+| A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
+| A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
+| Every region of the window but the tab strip (the main pane's own header, by design) is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| A tab's main pane has one `h1`, and no heading under it skips a level | `heading-outline.testkit.tsx`'s `expectOneTopHeading`, one case per tab root (`WelcomeScreen.test.tsx`, `RequestBuilderLayout.headings.test.tsx`, `CollectionDetail.breadcrumb.test.tsx`, `dashboard.breadcrumb.test.tsx`, `HistoryDetail.states.test.tsx`, `VariableTableEditor.banner.test.tsx`, `SettingsMain.category-card.test.tsx`, `SettingsMain.panel-heading.test.tsx`, `InboxView.test.tsx`, `MockServerView.test.tsx`); `Shell.heading-outline.test.tsx` |
+| Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
+| A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
+| A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
+| An element that renders text never paints a translucent accent (`bg-primary/<n>`, `bg-status-<name>-fill/<n>`) behind it; the opaque `--primary-tint` family is held to 4.5:1 per scheme instead | `accent-alpha-under-text.test.ts`, `color-scheme-contrast.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**A tree row is named by its name, not by what is inside it.** A `treeitem`
+with no name of its own is named from its content, and Chromium reads every
+descendant into that: the chevron's "Collapse collection", the count, the
+`⋯` menu trigger's label (#3450). The row therefore takes `aria-labelledby`
+naming the name element (`TruncatedText` and `MethodBadge` forward an `id` for
+it), with the method badge first on a request so the row reads "GET Get
+invoices". While the row renames, the name element is the field and has no text
+to point at, so the attribute is omitted. The variables tree builds its ids from
+one `useId` plus the row's id, since its rows are drawn in a loop.
 
 **An operation that takes seconds announces its progress.** A dialog that sits
 on a spinner and a bar reports nothing to a screen reader: the bar's value is
@@ -1947,6 +2118,24 @@ re-announces on every text change, so a figure that moves several times a second
 (`ImportProgressView`'s byte counter) is marked `aria-hidden` inside it and left
 for the eye. A counter that moves once per file is slow enough to keep.
 
+**A run is the one operation announced from an off-screen region.**
+`RunAnnouncer` (`components/layout/`) is an `sr-only` polite region that
+`Shell` mounts once, outside the tab panel, and it is a deliberate exception to
+the visible-line rule above for two reasons. A run is long enough that the user
+is often on another tab when it ends, and only the active tab's surface is
+mounted, so a region on the dashboard or the run view would not be in the DOM
+to hear it; and the visible lines it would sit on (the status pill, the verdict
+banner) are replaced or remount when the run settles, which a live region does
+not survive. It speaks transitions only, never a figure the run moves: a load
+test or collection run starting, then how it ended - "Load test completed.
+Passed. All 3 budgets met", "Load test stopped", "Load test failed. <reason>",
+"Collection run completed. 41 passed, 2 failed" - with the verdict taken from
+`reportOutcome`, the banner's own, so the two cannot disagree. A lost stream and
+the wait for the report are not announced. The run's progress bar is the
+`Progress` primitive ("Run progress"), read on demand; the hero row's fidelity
+gauges (`MiniBar`) are `aria-hidden`, since the percentage above each states
+the same value in words.
+
 **A `role="img"` is a promise that the element has something to say.** A
 decorative glyph given the role and no label announces as an unlabelled image; a
 labelled one beside text that already says the same thing announces twice.
@@ -1955,12 +2144,68 @@ labelled one beside text that already says the same thing announces twice.
 the run row's status glyph is where it landed on `aria-hidden` (see Status
 Badges).
 
+**A chart is an image with a sentence for a name** (#3498). `UPlotChart` draws
+on a canvas, which has no DOM for a screen reader to walk, so its host is
+`role="img"` and `ariaLabel` is a required prop: no mount site can omit it.
+The semantic wrappers build the label with `describeChart(title, data, series)`
+(`charts/uplot/chartLabel.ts`): the title, then per series the latest, lowest
+and highest reading, spelt by the series' own `format` so the sentence reads
+what the hover tooltip reads ("2.27ms", not a second set of digits), with a
+`<0.01` spoken as "less than 0.01". A series the tooltip hides is left out and
+a stacked one reads its own values, not its running total. A chart whose
+"latest" would mislead writes its own sentence (the HDR distribution names its
+percentiles) and one with a better one passes it in (`RunTrend` says how many
+runs and the newest figure). An image's children are hidden from assistive
+technology, so a legend (`ChartLegend`) sits beside the host, never inside it.
+
+**A tab has one top heading, and a heading's level is where it is drawn**
+(#3498). Heading navigation is how a screen-reader user skims a pane, so each
+tab's main pane has exactly one `h1` naming it and nothing below it skips a
+level (axe's `heading-order`). The `h1` is the title the tab already shows:
+the run's name in History, the category in Settings, the collection's name, the
+scope in Variables, the inbox's or mock's address (with a hidden prefix saying
+what it is the address of), and on the request builder and the dashboard, which
+draw no other title, the crumb's current segment (`TabBreadcrumb`'s
+`titlesPane`). The welcome tab's populated Launcher has no title to draw, so
+its `h1` is an `sr-only` "Vayu", the tab's name and the first-run screen's
+visible one.
+
+Below the `h1`, a level is not something a component can know: the run
+report's summary cards sit under the run's title in History and under the
+report's crumb on the dashboard, and an empty state is a whole tab in one place
+and a card's body in another. So the title primitives draw `Heading`
+(`components/ui/heading.tsx`), which takes its element from a context
+(`heading-level.ts`): the Shell opens the outline at 1 around the active tab,
+whatever draws a tab's `h1` wraps the rest in a `HeadingSection`, and
+`CardTitle`, `EmptyState` / `ErrorState`'s pane title and the headings of a
+component more than one surface renders (the response pane's sections, the
+headers viewer) render at that level. A card does not open a section. A dialog
+opens its own at 3 under its `h2` title, because context crosses the portal.
+Outside the outline (the drawer, the context bar) a card title is an `h3` and an
+empty state's title a paragraph; `CardTitle`'s `as` pins the element for the
+one card that is its own page, the crash screen's `h1`. A heading a tab root
+draws for itself is written as the literal element.
+
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
 the row - the button is announced as "button". The Dock's four view switchers
-all had tooltips and all announced as bare buttons. `title` is a name, but the
-weaker one, since it does not surface on keyboard focus: no control here relies
-on it any more, and the guard pins that count at zero.
+all had tooltips and all announced as bare buttons. The converse holds too: a
+native `title` is a tooltip for a pointer only, since it does not surface on
+keyboard focus or touch, so an icon-only button takes `TooltipIconButton`
+(`aria-label` and the app's `Tooltip` from one `label`; `tooltip` when the text
+should be the verb alone while the name carries the row, "Restore Login" named,
+"Restore" shown) and carries no `title` at all. The guard pins icon-only
+buttons with a `title=` at zero, and pins the plain `<Button size="icon">`
+that remain to the files that wrap them in a `Tooltip` by hand (a tree
+header's trigger, a ref-taking child a wrapper cannot forward to), so a new
+bare one fails. A menu trigger is one of those: the row `⋯` menu
+(`RowActionsMenu`) shows "More actions" on focus but not on the focus its
+closing menu hands back, which would otherwise cover the row the user just
+acted on after every Escape. A row's hover-revealed Delete is the same: revealed on focus
+(`row-action-reveal.test.ts`) and labelled on focus (`TooltipIconButton`). A
+text button whose tooltip adds an explanation wraps `Button` in `Tooltip` the same way, and a disabled one gives
+its reason through `DisabledHint`, because `Button` is `pointer-events-none`
+while disabled and neither a `title` nor a bare `Tooltip` can reach it.
 
 **`outline-none` needs its replacement in the same class string.** The base
 `:focus-visible` outline at the top of this page is the whole focus story for
@@ -2005,10 +2250,17 @@ correct one here:
   box opened over a row, or the command palette - moving focus into what the
   user just opened is the WAI-ARIA dialog pattern, not the page-load autofocus
   the rule exists to prevent.
-- `label-has-associated-control` is given `controlComponents: ["Switch",
-  "Input", "SelectTrigger"]`. It recognises a nested control by lower-case tag
-  name, and each of those renders exactly one native labelable element, so the
-  association it asks for is already there.
+- `label-has-associated-control` is given `labelComponents: ["Label"]` and
+  `controlComponents: ["Switch", "Input", "SelectTrigger", "Checkbox"]`. The rule
+  reads a lower-case `<label>` and a lower-case control by default, so without
+  `labelComponents` an unlinked `<Label>` - the primitive every form uses - was
+  never checked (#3498). The control list names what renders exactly one native
+  labelable element, so a `<Label>` wrapping one is already associated. The rule
+  cannot see a label whose text is an expression (`<Label>{label}</Label>`), which
+  is every helper that renders its label from a prop; `LabelledField` is the one
+  such helper, and `AuthFields.test.tsx` / `OAuth2Form.names.test.tsx` are what
+  hold it. A caption over a group of controls (a `ToggleGroup`, a row list) is not
+  a `<label>` at all: it is a `<span>`, and the group names itself.
 - `no-noninteractive-tabindex` also allows `role="separator"`. A focusable
   separator is the ARIA window splitter, which is what both resize handles are,
   arrow/Page/Home/End and all.
@@ -2049,8 +2301,8 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
   its arrow/Page/Home/End handling in the `onKeyDown` beside it.
 - `components/shared/ElementList/ScriptElementForm.tsx` (1) -
-  `jsx-a11y/no-noninteractive-element-interactions`: the `script.pre`/
-  `script.post` editor's height handle, the same window-splitter shape as
+  `jsx-a11y/no-noninteractive-element-interactions`: the script editor's
+  (every `script.*` kind's) height handle, the same window-splitter shape as
   `PanelResizeHandle` above, with its pointer drag and arrow-key handling in
   the `onPointerDown`/`onKeyDown` beside it (issue #1605).
 - `components/shared/VariableInput/index.tsx` (2) -
@@ -2124,6 +2376,18 @@ Reveal them with `opacity-0 group-hover:opacity-100 group-focus-within:opacity-1
 The `focus-within` half is not optional: without it a keyboard user lands on an
 invisible control.
 
+**Where the row's width is scarce, the control also gives its width back until it
+is revealed** (#3495): `opacity-0` keeps the space, and the pin and delete of a
+History row kept 52px of a 260px drawer from the name. `ROW_ACTIONS_REVEAL`
+(`components/shared/row-actions.ts`) takes the control out of the flex flow
+while collapsed (`absolute`, pinned to the row's trailing corner, no gap and no
+scrollable overflow) and returns it on `group-hover`, `group-focus-within`, and
+on a `hover: none` device, which never matches the first. It is `absolute`, never
+`hidden` or `invisible`, because those take the control out of the tab order and
+there would be nothing for focus to reveal. The row is the `group` and must be
+positioned. History rows and Trash rows use it; the `⋯` of a tree row is a
+fixed-size slot and keeps the plain opacity form.
+
 **A state toggle is not a row action, and must not be hover-revealed.** The test
 is whether the control has an *off* state that means something. Delete has none -
 it either fires or it does not - so hiding it costs nothing. The variables
@@ -2135,14 +2399,17 @@ could mask a value was to hover the row. It is now always visible on
 Same rule for anything that reports state - a pin, a mute, an enable. Quiet is
 fine; absent is not.
 
-**A row with no action of its own keeps its controls visible too.** Hover-reveal
+**A row with no action of its own still reveals them** (#3495). Hover-reveal
 exists so the row's own job - open the request, select the run - is not crowded
 by buttons the user did not come for. A Trash row (`modules/trash`) has no such
 job: it opens nothing, and Restore and Delete forever are the entire reason it
-is on screen. Revealed on hover they would hide the surface's whole purpose and
-leave a list of names that reads as inert. The test is the same one the state
-toggle above passes - would the row still say what it is for with the control
-absent - and here the answer is no.
+is on screen, which is why they were always visible. At the 260px drawer that
+cost the name about 105px and wrapped the secondary line to four lines, so they
+are `ROW_ACTIONS_REVEAL` now: out of the flow until the row is hovered or
+focused, in the DOM and the tab order throughout, and shown at all times on a
+device with no hover, where "a list of names that reads as inert" would
+otherwise be the whole touch experience. The secondary line is one truncated
+line with its full sentence as a `title` while it is cut.
 
 **Every row that has actions draws them this way, Services included** (issue
 #1690). The Services drawer's rows were the last holdout - two or three
@@ -2150,8 +2417,8 @@ always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
 URL truncated to make room for controls the user had not come for. They are one
 hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
 URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
-There is no exemption: the rows that keep visible controls are the two the rules
-above name - a state toggle, and a row with no job of its own.
+There is no exemption: the one control that stays visible at rest is a state
+toggle, which keeps its place (a pinned run's pin among the History row's actions).
 
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
@@ -2203,7 +2470,7 @@ control at a different scale.
 
 It carries only the axis-level shape: `w-full`, `justify-start` in place of
 the default's `justify-center`, `text-left`, and `h-auto` overriding the
-default size's fixed `h-9` (in `compoundVariants`, not the variant string
+default size's fixed `h-control` (in `compoundVariants`, not the variant string
 itself - `cva` concatenates `size`'s classes after `variant`'s, so a height
 set beside `w-full`/`justify-start` would lose to the default size once both
 pass through the same `cn()` merge; `button-variants.test.ts` mutation-checks
@@ -2421,8 +2688,95 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
+**A tab's label stops where its close button starts** (#3495). The close button
+is absolute, so a name clamped at the tab width cap ran under it: `truncate`
+inside `ScrollOnOverflow`'s `w-fit` track never engages, and the viewport was
+only as narrow as the row's `px-3`. The label viewport carries a right margin of
+`size-target` less the padding past the button's `right-0.5` offset, in the
+density-scaled units of all three, so it ends exactly where the button begins
+and `tab-fit.ts`'s natural width still fits a name that is not clamped. At rest
+the clipped edge fades (`.scroll-on-overflow`, a `mask-image`, not an ellipsis);
+while the marquee runs the fade is off, so the end of the name is readable at
+the edge. `TabItem.label-strip.test.tsx` derives the margin from the button's and
+the row's own classes.
+
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
 tooltip.
+
+### A row that holds a name, a chip and some controls (#3494, #3495)
+
+The "reflow guarantee" (Interface scale, above) is met with class rules, not a
+media query per surface. jsdom has no layout, so each is held as a class
+guard (`reflow-floors.test.ts` and the component's own test), and none can prove
+a pixel.
+
+- **A chip never shrinks or breaks.** A status chip, a pill or a metric group is
+  `shrink-0 whitespace-nowrap`. A flex item that may shrink breaks "503 Service
+  Unavailable" or "120 ms" into a column of characters *before* its row wraps.
+  `StatusCodeBadge` and `RunStatusPill` carry it themselves; a metric group in
+  `ResponseStatusBar` carries it on its own wrapper.
+- **The row wraps, between groups.** A header or status row is `flex-wrap` with
+  `gap-x-*` and `gap-y-*`, so what does not fit drops to a second line whole.
+  `ResponseStatusBar`, the run header in `HistoryDetail` and `UrlBar` do.
+- **The thing the user came for keeps a floor, and the rest yield first.** The
+  run's name group is `min-w-[12rem]`, the URL field `min-w-[12rem]`: below that
+  the controls wrap under it instead of squeezing it. A floor in `rem`, not a
+  `--spacing` step, so density does not move it.
+- **A table scrolls before it squeezes.** `VariableTableEditor`'s Variable and
+  Value headers carry `min-w-[8rem]` / `min-w-[10rem]`; the fixed-width Type,
+  Secret and action columns would otherwise leave all of the slack to the two
+  inputs. The scroller already computes `overflow-x: auto`.
+
+- **In a two-span row, the descriptor gives way and the name does not**
+  (#3495). A palette row is a title and a subtitle (a collection path, often the
+  longer of the two). The title keeps a floor (`min-w-[12ch]`), the subtitle is
+  `min-w-0 max-w-[50%]` and truncates, and neither carries `shrink-0`: a
+  `shrink-0 truncate` subtitle never truncates (it keeps its intrinsic width, so
+  its ellipsis has nothing to cut) and left the title 0px. Both are
+  `TruncatedText`, so a clipped path still has its full text on hover. A row's
+  *action cluster* (the chip, a button, a chord) is the opposite and stays
+  `shrink-0`.
+- **A flat list of nested things shows the ancestor path in front of the name**
+  (#3495). The Variables drawer lists every collection, roots and sub-folders,
+  in one flat group, so two "v1" folders under different parents read alike. A
+  sub-collection carries its ancestors as a muted `text-xs` prefix
+  ("Payments API /", built with `collectionPath`, as the palette does) and a
+  root carries none. The prefix is `min-w-0 max-w-[50%]` and truncates, the name
+  keeps `min-w-[12ch]`, so the distinguishing part is the last to go. Both are
+  `TruncatedText` with `title` set to the full path, and the row's
+  `aria-labelledby` lists the prefix then the name, so its accessible name is
+  "Payments API / v1" while typeahead (`data-tree-label`) stays the bare name.
+- **A name in a table is one token and never wraps.** `HeadersViewer`'s name
+  cell is `whitespace-nowrap` and its text a `TruncatedText` capped at `40ch`
+  (the longest registered header names are about 35), so "Content-Type" never
+  reads as "Content-" over "Type" and a pathological name cannot take the
+  value's column. The value keeps `break-all`: it is the part that is allowed to
+  wrap. `CompactHeadersViewer`'s name is the same cap on a `shrink-0` label.
+- **A breadcrumb's every crumb can be cut, none to nothing.** `TabBreadcrumb`'s
+  ancestors truncate down to `min-w-[3ch]` (and never past `16ch`), so a chevron
+  cannot land on a label's first letter; the current crumb is `min-w-0` and a
+  `TruncatedText`, so a long name ellipses with its full text on hover instead of
+  running under the nav's clip (it was `shrink-0` with no `title`). The ancestor
+  labels and their chevrons are direct children of one row: a wrapper per pair
+  with `min-w-0` would shrink below the label's floor.
+
+- **A list of rows that must line up is a grid of fixed tracks.** Every row of a
+  list is a grid of its own, so only fixed-size tracks align across rows, and
+  a flexible one is a single `minmax(0,1fr)` lead. `SampledExchange`'s summary
+  row has a `3.5rem` label, a `12rem` status (wide enough for "503 Service
+  Unavailable"), a `4.5rem` latency and an `auto` time, with the cells placed
+  by `@3xl:col-start-*`; below that width the status, latency and time wrap as one
+  group under the name. The thresholds are container variants against the row's
+  own `@container` root (see "A run pane's grids answer to the pane"), and the
+  error's first clause is a `TruncatedText`, not a fixed `max-w-[200px]`.
+
+The title bar is the one surface where these are viewport-sized (see the note
+under "A run pane's grids answer to the pane"). Its side columns are
+`minmax(0,1fr)`, the search bar is `clamp(2.5rem, 100vw - 36rem, 28rem)`, so each
+side keeps 18rem for the environment switcher and Linux's window buttons down to
+the 1024px minimum and the bar alone gives way below it; the switcher is
+`min-w-0` (truncating) and the chord caps hide by CSS (`max-[46rem]:hidden`),
+never by removing the nodes.
 
 **A URL is the exception, and it gives way at the head.** Both treatments above
 keep the beginning of a string, which is right for a name and wrong for a URL:
@@ -2592,10 +2946,16 @@ before it is a drag is dropped, since its release would land where the tree
 never hears it.
 
 **Drop indicators are classes on rows that already exist.** A line between two
-rows is a 2px `bg-primary` span positioned inside the target row and indented to
-that row's own depth - the depth is the only thing separating "after this
-collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: an indicator
+rows is a 2px `bg-primary` span positioned inside a row and indented to the
+depth of the row the drop lands beside - the depth is the only thing separating
+"after this collapsed folder", "into it" and "after its parent". A drop after an
+*open* folder lands after everything in it, so its line is drawn under the last
+visible row of the folder's subtree (a request, a sub-folder's last row, the
+"Empty collection" line or the new-folder form), still at the folder's indent:
+the folder row's own bottom edge is the seam above its first child, a different
+drop (#3447). Dropping *into* a folder reuses the selected-row ring. While the
+drawer auto-scrolls under a held pointer, every scroll frame hit-tests again, so
+the line and the drop follow the row the scroll brings under the pointer. Nothing new gets `role="treeitem"`: an indicator
 node between rows would join the tree's rows and change its shape mid-drag - a
 row with no level, sitting between a folder and its children. The row being
 dragged stays mounted however far the drawer auto-scrolls from it, so the source
@@ -2958,13 +3318,86 @@ Shell                            flex flex-col h-full bg-background
 ├── row (flex-1)
 │   ├── ActivityRail (nav)   w-[var(--rail-width)], bg-panel - the six view
 │   │                        buttons, on the window's left edge (#1615)
-│   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
-│   │                        views, plus its PanelResizeHandle on the right edge
-│   └── content column       TabStrip, then a row of [main + ContextBar]
+│   └── drawer box           relative - what an overlaying Drawer positions from
+│       ├── Drawer (aside)   220–480px, default 260px, bg-panel - one of the six
+│       │                    views, plus its PanelResizeHandle on the right edge
+│       └── content column   TabStrip, then a row of [main + ContextBar]
 │                            beside ContextRail (w-[var(--rail-width)])
 └── Dock                     h-[var(--dock-height)] border-t border-border -
                              ambient status only, along the bottom of the window
 ```
+
+### Push or overlay: the side panels at a narrow window
+
+Each side panel either **pushes** (a flex sibling that takes its width out of
+the content) or **overlays** (`absolute`, `shadow-lg`, `z-10`, over the
+content's edge, taking nothing). Both read one window width, `useWindowWidth()`
+(`app/src/hooks/useWindowWidth.ts`), through `sidePanelMode` and a named
+threshold in `app/src/constants/layout.ts`, push at or above it:
+
+| Panel | Threshold | Overlay edge |
+|-------|-----------|--------------|
+| Drawer | `DRAWER_PUSH_MIN_WIDTH`, 1000px | content's left (`left-0`) |
+| ContextBar | `CONTEXT_BAR_PUSH_MIN_WIDTH`, 1200px | content's right (`right-0`) |
+
+The widths are CSS px, so a 200% scale halves them: a 1024px window at 200% is
+512 and overlays both. The drawer's 1000 is both rails (40 each), the drawer at
+`PANEL_MAX_WIDTH` (480) and one 440px builder pane of content; the maximum
+width rather than the current one, so a drag on the handle never flips the
+mode under the pointer. Each overlay positions from a `relative` box that
+leaves out its rail (the drawer box above leaves out `ActivityRail`, the
+main+ContextBar row leaves out `ContextRail`), so an open panel never covers
+the button that closes it. Both boxes exist in either mode, so crossing a
+threshold changes a class list and never remounts the tab. An overlay keeps its
+width, its `rail-collapse` animation and its F6 stop.
+
+**An overlay dismisses like one** (#3507). The rules live in one hook,
+`useOverlayPanel` (`app/src/components/layout/useOverlayPanel.ts`), called by
+both panels, and none of them applies to a panel that pushes:
+
+- **One overlay at a time.** When both panels are showing as overlays, the one
+  that most recently started showing wins and the other is closed. "Started
+  showing" is an open, or a tab switch that gives the context bar sections;
+  the rule watches the layout and tabs stores (`subscribe`) and not the actions
+  behind them, so the rail buttons, the chords, the palette and
+  `revealDrawerView` are all covered without each knowing it. It is a
+  subscription and not a render effect because `Shell`'s reveal can reopen the
+  drawer in the same flush that closed it, a round trip no render observes.
+  Where nothing opened - the first render with both persisted open, or a resize
+  that turned two pushing panels into overlays - the drawer stays. A pushing
+  panel is never closed by the rule, and neither is a bar that is not on
+  screen (no sections on this tab), so a flag is rewritten only for a panel that
+  was overlaying and lost. **That does write the persisted flag**: ⌘I on a
+  narrow window, or a resize from wide to 512 with both open, leaves the loser's
+  open flag false, and it stays closed when the window widens again.
+  `Shell` hands each panel both modes (`siblingMode`).
+- **The drawer closes on a selection**: a drawer item that opens or switches a
+  tab (a request, a collection, a run, a variables scope, a settings category)
+  calls `onItemOpened` from `useDrawerItemOpened()`
+  (`drawer-item-opened.ts`), and an overlay drawer closes and moves focus to the
+  opened tab. It is an explicit call, not a watch on the active tab, which also
+  changes for a closed tab, Back and every chord. Duplicate and the undo of a
+  delete open a tab too and are not selections; expand, rename, filter and the
+  row menu keep it open. **One rule for creation: any drawer action whose result
+  is a newly opened tab closes the overlay** - the toolbar's New request
+  (`useNewRequest`, which reports the tab it opened), a row menu's Add request,
+  New environment, and the Services rows' Open. Duplicate and undo reopen
+  something that existed, so they stay open. The context bar never closes on
+  selection.
+- **Escape closes it** when focus is inside it and nothing of its own is open
+  above it - no menu, listbox or popover (by role, not closed) and no dialog -
+  and no one has already answered the key (`defaultPrevented`, which Radix sets
+  for the layer it dismisses). A text field keeps its own Escape. Focus returns
+  to the rail button that toggles the panel (`data-rail-side` on `RailButton`),
+  the active tab if the rail is not drawn. A tooltip on the focused control may
+  take the first Escape (Radix cancels it), so a second press closes the panel.
+- **A pointer press outside closes it**, heard on `document` in the capture phase
+  and never cancelled, so the click still reaches what it was aimed at. Presses
+  on the panel, on its own rail's buttons (the click toggles it; closing on the
+  press would reopen it), on a menu or dialog it opened (portalled out of it)
+  and anything while a dialog is up or a menu, listbox or popover is open are
+  not outside: the press that dismisses a modal menu can land on `<html>`, and
+  it is the menu's, not the panel's.
 
 ### The panels that resize, and the one handle that resizes them
 
@@ -3085,7 +3518,13 @@ running, the light's tooltip says why, and a button beside it recovers: Retry
 for a start that cannot succeed (a held port), Restart for an engine that left
 on its own, whose tooltip names the signal, exit code or error and quotes the
 last lines it printed (#3336). Both are the same `EngineRestartButton`, in the
-strip's existing height.
+strip's existing height, and drawn while `selectEngineRestartOffered` holds,
+which is also what the response pane's "Vayu's engine didn't respond" tip reads
+before it points at the status bar's button. A crash the main process reported
+turns the light at once: it reads `selectKnownEngineStatus`, so "Engine
+connected" from a poll older than the crash never stands beside Restart (#3493),
+and the poll's next answer is what turns it back. The running-services button
+reads the same derivation and drops out with it.
 
 The right cluster renders **only while the active tab is a request tab**; every
 other tab keeps the centred strip alone. Its one control is
@@ -3183,9 +3622,14 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320) |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. The context bar's `SectionEmpty` is this component (inline, compact), so every section's empty body is one. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " or "Nothing matches" in `modules/` or `components/`, and on a `SectionEmpty` that stops rendering one, #3501 |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
+
+A pane title (`EmptyState` and `ErrorState` alike) is a heading at the main
+pane's outline level - the tab's `h1` when the state is the whole tab, an `h2`
+under it otherwise - and a paragraph in the drawer and the context bar; see
+Accessibility (#3498). The inline variants are a line, never a heading.
 
 **An empty state that has a create path says so** (issue #1693). Thirty-odd
 call sites had one between them before, so "No environments" and "No mock
@@ -3195,7 +3639,12 @@ to the *same* handler that header button uses - never a second, parallel
 create path, which is what would drift. Where the surface genuinely has no
 create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
-user caused it undoes that ("Clear the filters", "Clear the filter"). The
+user caused it undoes that. The wording is one pattern: "Clear the filter" for
+a single search or filter field, "Clear the filters" where several narrow the
+list (History). A list that is empty because of what was typed says what was
+typed and offers the way out: Settings search's "No settings match", the
+Send-with-row dialog's "No rows match" and the schema explorer's "Nothing
+matches" carry a `variant="link"` "Clear the filter" that empties the field. The
 collections sidebar offers its create path plus Import as a two-`Button`
 `flex gap-2` wrapper ("New request", "Import") rather than a lone link
 (`CollectionTree.tsx`): with no collection to hold it, a new request is what
@@ -3413,10 +3862,12 @@ is a fill and fails AA as a small foreground - see "The bare token is the fill")
 and the pill's tint. It replaced a bare coloured dot, which was five identical
 circles in five colours. **One map feeds the dashboard header's pill, the
 history run tab's pill and the history row's glyph** (`RunStatusGlyph`), and the
-Welcome screen's recent-runs word and the collection context bar's last-run word
-read its label and `-text` token too, so a status cannot be green in one and
-neutral in another; a second status-to-token table in a module is the defect
-it removed (#1932, a failed run drawn as Completed).
+Welcome screen's recent-runs word and the collection context bar's last-run
+word read its label and `-text` token too (through `runStatusDisplay`, with the
+row's verdict), and the command palette's run rows word that verdict in their
+plain-text subtitle, so a status cannot be green in one and neutral in another; a
+second status-to-token table in a module is the defect it removed (#1932, a
+failed run drawn as Completed).
 
 ```tsx
 const RUN_STATUS = {
@@ -3542,12 +3993,14 @@ for, so interrupting what they are reading is the wrong trade.
 
 Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
-sidebar's environments and the element list. The field is an ordinary `Input`
+sidebar's environments and the element list (four call sites). The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
 label's position on both axes: every renaming row puts its label a `gap-2`
 from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
 the floors table), and the field states `size="xs"` and nothing else. The hook
-owns the behaviour:
+takes a required `label` ("Request name") that names the field for a screen
+reader: it replaces a row's name and has no visible label, so it would otherwise
+be a bare "edit text" (#3498). The hook owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
   bare `e.key === "Enter"`. An IME commits its composition buffer with an
@@ -3565,9 +4018,15 @@ owns the behaviour:
   tree is one tab stop and the field replaces the row's only focusable control,
   so an Escape that left focus on `<body>` would drop the user out of the tree.
   After a blur, focus has already gone where the user put it.
+- **The field opens with the whole name selected** (#3450), as Finder, Explorer
+  and VS Code do, so typing replaces the name instead of appending to it. The
+  hook's `onFocus` selects it and the field's `autoFocus` triggers that on
+  mount, which is why the hook sets the draft during the render that opens the
+  rename rather than in an effect: a field that mounts empty would select
+  nothing.
 
-A surface that renames something in place uses the hook rather than a fourth
-copy of those four rules.
+A surface that renames something in place uses the hook rather than a fifth
+copy of those five rules.
 
 ### Copy feedback
 
@@ -3645,9 +4104,9 @@ Three shapes, and each has a component rather than a recipe to copy:
   destructive outline over `ghost` with the label on `text-destructive-text`.
   The bare `text-destructive` is a fill token and is not a foreground (see
   Semantic Status Colors).
-- **A row's delete** is an icon button with `variant="rowActionDestructive"`
-  (`Button` with `size="icon"`, or `TooltipIconButton` where a tooltip names
-  it), revealed per Row Actions above.
+- **A row's delete** is a `TooltipIconButton` with
+  `variant="rowActionDestructive"`, so its label shows on focus as well as on
+  hover (#3498), revealed per Row Actions above.
 
 #### Reversibility
 
@@ -3679,12 +4138,10 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
   Wiring a mutation straight to a button's `onClick` for anything that
   destroys data is the bug this rule exists to catch (#1689's Clear captures
   and Empty trash were both found this way).
-- **One template writes the sentence.** `DeleteConfirmDialog` takes `name` and
-  an optional `scope` (`"default"` or `"cascade"`) and builds "Delete
-  {name}? {name} is removed permanently." itself, with a suffix for a
-  container that takes its contents with it. A call site passes `description`
-  only for prose the template cannot say - a count, a conditional clause -
-  never to restate what `name`/`scope` already produce.
+- **One template writes the sentence.** `DeleteConfirmDialog` takes `name`
+  and builds "Delete {name}? {name} is removed permanently." itself. A call
+  site passes `description` only for prose the template cannot say - a count,
+  a conditional clause - never to restate what `name` already produces.
 - **A refusal goes in the `error` slot.** A delete the engine refused is a
   `<Callout severity="blocking">` passed as `error`, rendered between the
   description and the actions. It is a slot of its own because
@@ -3700,7 +4157,10 @@ surface-card` field, then Send and Load test attached as a pair. Send is the
 solid action on `bg-primary-fill` with a white label, reads "Send" (or
 "Sending…" while in flight) and carries no leading glyph; Load test is the
 outlined action on the same accent and reads "Load test". Both are token-based:
-no hardcoded purple, no bracketed pixel heights.
+no hardcoded purple, no bracketed pixel heights. Each hover is an opaque step of
+its own ground: Send goes `hover:bg-primary-fill-hover` (border with it), Load
+test goes `bg-primary-tint` to `hover:bg-primary-tint-hover`, and a disabled
+Load test pins `disabled:hover:bg-primary-tint` so it does not step at all.
 
 ### Dashboard Header (Compact 52px)
 
@@ -3714,51 +4174,19 @@ The header's elapsed time is the `elapsedDuration` prop, the newest tick's
 `elapsed_seconds` from the engine, so it starts at 0 with each run and holds no
 timer of its own.
 
-### SVG Sparkline
-
-```tsx
-function Sparkline({ data, color }: { data: number[]; color: string }) {
-  if (!data || data.length < 2) return null;
-  const max = Math.max(...data), min = Math.min(...data), rng = max - min || 1;
-  const w = 108, h = 26;
-  const pts = data.map((v, i) =>
-    `${(1 + (i / (data.length - 1)) * w).toFixed(1)},${(1 + h * (1 - (v - min) / rng)).toFixed(1)}`
-  );
-  const area = `M1,${h + 1} L${pts.join(" L")} L${w + 1},${h + 1}Z`;
-  return (
-    <svg width={110} height={28} className="block overflow-visible">
-      <path d={area} fill={color} fillOpacity="0.15" />
-      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
-}
-```
-
-### SVG Area Chart
-
-`viewBox="0 0 600 150"`, padding `PL=42 PR=8 PT=6 PB=20`. Area fill uses `fillOpacity="0.12"` (slightly less than the sparkline's `0.15`). Grid lines use `hsl(var(--border))` with `strokeDasharray="2 2"`. Axis labels use `hsl(var(--muted-foreground))` in JetBrains Mono at `fontSize="9"`. Requires `data.length >= 2` (returns null otherwise).
-
 ### Hero Metric Card
 
 The reference is `app/src/modules/dashboard/components/hero/HeroCardShell.tsx`,
-which every hero card is built on: a `Card pad="md"` with an eyebrow label, a
-`text-hero` mono value with an optional unit beside it, an optional sub-label,
-and an optional `Sparkline` below.
-
-Note: sparkline renders **below** the value row, not beside it.
+which every hero card is built on: a `Card pad="md"` with an eyebrow label and
+its `InfoChip`, then a body. The usual body is `HeroValue`, a `text-hero` mono
+value with an optional unit beside it; two cards add a `MiniBar` fidelity gauge
+below, and a few supply a bespoke body of their own.
 
 ### Secondary Stat Card
 
 The reference is `app/src/modules/dashboard/components/stats/StatCard.tsx`: the
 same anatomy as the hero card at the `Card pad="sm"` (`p-3`) tier, with a
 `text-metric` value.
-
-### Latency Distribution Bar
-
-Gradient track (green→amber→red at 18% opacity), with absolute-positioned needle markers at p50/p95/p99. Each marker consists of:
-- A 1px-wide, 16px-tall vertical pin: `w-px h-4 mx-auto opacity-85`
-- A dot below it: `w-2 h-2 rounded-full mx-auto -mt-1` with `boxShadow: "0 0 0 2px hsl(var(--card))"` (creates the ring effect without Tailwind ring classes)
-- Value label + percentile label below
 
 ### Progress Bar
 
@@ -3796,60 +4224,42 @@ read as a fraction, and there is no fraction to report.
 | Secondary text | `text-muted-foreground` |
 | De-emphasized text | `text-subtle-foreground` |
 | Primary accent | `text-primary`, `bg-primary`, `border-primary` |
+| Solid accent chip and its hover (text on it) | `bg-primary-tint`, `hover:bg-primary-tint-hover`, with `text-primary-text` on it |
 | Default border | `border-border` |
 | Strong border | `border-border-strong` |
 | Hover state | `hover:bg-accent` |
 | Selected state | `bg-accent-active` |
 | Success | `text-success-text`, `bg-success/10` |
 | Warning | `text-warning-text`, `bg-warning/10` |
-| Info | `text-info`, `bg-info/10` |
 | Error | `text-destructive-text`, `bg-destructive/10` |
-| Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
-| Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
-| Code font (utility) | `font-code` |
 | Thin scrollbar | nothing - 6px is the global baseline (see [Scrollbar](#scrollbar)) |
 | Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) - collection detail only; the request and response strips fit-and-overflow |
-| Variable color | `text-variable` or `.variable-highlight` |
+| Variable color | `text-variable` |
 
 ### Never use
 
 - `bg-gray-*`, `bg-zinc-*`, `bg-slate-*` - use `bg-card`, `bg-panel`, `bg-background`
-- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-info/10`, etc.
+- `bg-blue-50`, `bg-red-950`, etc. - use `bg-destructive/10`, `bg-warning/10`, etc.
 - `dark:bg-*` hardcoded overrides - tokens handle both modes automatically
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
-- Hardcoded hex method colors like `text-[#22c55e]` - use `method-get` or `hsl(var(--method-get))`
+- Hardcoded hex method colors like `text-[#22c55e]` - use `getMethodColor` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
-- Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
+- Hardcoded purple for Load test / secondary actions - use `text-primary-text`/`border-primary`/`bg-primary-tint`
+- `bg-primary/10`, `hover:bg-primary/20` and every other alpha of the accent behind text - use `bg-primary-tint` / `hover:bg-primary-tint-hover` (see [Primary](#primary-accent-color))
 
-These rules are enforced for the request/response tree by
-`modules/request-builder/components/ResponseViewer/palette-tokens.test.ts`. They
-were documented long before they were enforced, and the tree had drifted: seven
-usages of `text-green-500` / `text-blue-500` and friends, every one of which
-failed its contrast bar in **light** mode (1.63–3.76 against thresholds of 3.0
-and 4.5) while passing in dark. That asymmetry is inherent to a raw palette
-class rather than bad luck - one value cannot suit a white card and a near-black
-one, so the light failure is unfixable without breaking dark. The per-theme
-`-text` tokens clear both.
+These rules are enforced by `palette-tokens.test.ts` (under
+`modules/request-builder/components/ResponseViewer/`) over every `.tsx` in
+`modules/` and `components/` (#1693). They were documented long before they
+were enforced, and the tree had drifted: seven usages of `text-green-500` /
+`text-blue-500` and friends, every one of which failed its contrast bar in
+**light** mode (1.63–3.76 against thresholds of 3.0 and 4.5) while passing in
+dark. That asymmetry is inherent to a raw palette class rather than bad luck -
+one value cannot suit a white card and a near-black one, so the light failure is
+unfixable without breaking dark. The per-theme `-text` tokens clear both.
 
-The guard is scoped to the trees that were measured. Elsewhere the raw palette
-classes appear as explicit `bg-blue-50 dark:bg-blue-950` pairs, which are
-theme-aware and so are not this defect; converting those needs new tokens
-(there is no purple or info `-text` token today) and is a design decision.
-
----
-
-## Response Body Syntax Highlighting
-
-Planned / pending implementation. Intended colors for the JSON pretty-printer:
-
-| Token | Color |
-|-------|-------|
-| Object keys | `#7dd3fc` (sky-300) |
-| String values | `#86efac` (green-300) |
-| Number values | `#fbbf24` (amber-400) |
-| Boolean values | `#a78bfa` (violet-400) |
-| Null | `#94a3b8` (slate-400) |
+The guard's scope and its two exemptions are described under "Decorative
+categorical palettes", above.
 
 ---
 
@@ -4112,11 +4522,13 @@ Appearance panel says so when `usePrefersReducedMotion()` is true. Without that
 line the only explanation for the app's behaviour lives in another
 application's settings.
 
-**Nothing animates from JavaScript.** No `element.animate()`, no
-requestAnimationFrame loops, and the single `scrollIntoView` passes no
-`behavior`, so it follows the `scroll-behavior` the rules above set. Keep it
-that way: JS-driven motion is invisible to both rules and would need its own
-opt-out.
+**Nothing animates from JavaScript.** No `element.animate()` and no property
+tweened frame by frame: `requestAnimationFrame` is for measuring, resizing and
+stepping a scroll (`lib/resize-gesture.ts`, the tree's drag auto-scroll in
+`useTreeDnd.ts`), and the two `scrollIntoView` calls (`components/ui/command.tsx`,
+`SendWithRowDialog.tsx`) pass `block: "nearest"` and no `behavior`, so they
+follow the `scroll-behavior` the rules above set. Keep it that way: JS-driven
+motion is invisible to both rules and would need its own opt-out.
 
 ### Icon motion
 
@@ -4244,7 +4656,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | File | Purpose |
 |------|---------|
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
-| `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
+| `app/tailwind.config.js` | Color mapping, font families, border radii (no keyframes or animations: those live in `index.css`) |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - the ActivityRail, the drawer row, the content column (TabStrip, main, ContextBar, ContextRail), the Dock, and the window chords |
@@ -4256,13 +4668,14 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/shared/run-status.ts` | `RUN_STATUS`: the one status-to-label/glyph/token map behind the dashboard pill and the history row |
-| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both read from `RUN_STATUS` (refined by a verdict through `runStatusDisplay`) |
+| `app/src/components/shared/RunStatusPill.tsx` | `RunStatusPill` and `RunStatusGlyph`, both drawn through `runStatusDisplay`, the status above refined by a verdict |
 | `app/src/components/shared/RunOutcomeBanner.tsx` | The Passed / Failed / Not judged line a finished load run opens on, over `run-outcome.ts`'s verdict |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
+| `app/src/components/ui/heading.tsx` | `Heading` and `HeadingSection`: a title's element from the main pane's outline (`heading-level.ts`) |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/lib/time-value.ts` | The one place text becomes a time: `parseTimeValue`, `describeInstant`, `formatInstant`, `formatRelative`, `formatDayHeading` |
 | `app/src/components/shared/TimeValue/TimeValue.tsx` | The one renderer of a time: visible text plus the hover card, and `TimeTooltip` for a trigger the surface draws |
 | `app/src/components/shared/TimeValue/TimeMarker.tsx` | The time card's marker beside an editable field that holds a time |
-| `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
+| `app/src/modules/dashboard/components/MetricsView.tsx` | `MetricsView`, the live dashboard's router: derives the run's metrics and composes the rows from `hero/`, `stats/` and `charts/` beside it |

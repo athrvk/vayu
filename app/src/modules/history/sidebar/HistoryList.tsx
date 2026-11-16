@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { formatNumber } from "@/lib/format-number";
 import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -45,6 +46,9 @@ import {
 	SelectValue,
 	DeleteConfirmDialog,
 	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
@@ -107,9 +111,13 @@ export default function HistoryList() {
 
 	// The row-handler props below are stable on purpose: `RunItem` is memoised, and
 	// one fresh function per render would make every row re-render anyway.
+	const onItemOpened = useDrawerItemOpened();
 	const navigateToRunDetail = useCallback(
-		(runId: string) => openTab({ type: "run", entityId: runId }),
-		[openTab]
+		(runId: string) => {
+			openTab({ type: "run", entityId: runId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 	const navigateToHistory = () => activateDrawerView("history");
 
@@ -352,7 +360,7 @@ export default function HistoryList() {
 							type="text"
 							value={searchQuery}
 							onChange={(e) => setSearchQuery(e.target.value)}
-							placeholder="Search runs by API…"
+							placeholder="Search runs"
 							className="pl-10 w-full"
 						/>
 					</div>
@@ -362,7 +370,7 @@ export default function HistoryList() {
 							value={filterType}
 							onValueChange={(v) => setFilterType(v as FilterType)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Run type">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -377,11 +385,11 @@ export default function HistoryList() {
 							value={filterStatus}
 							onValueChange={(v) => setFilterStatus(v as FilterStatus)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Status">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All status</SelectItem>
+								<SelectItem value="all">All statuses</SelectItem>
 								<SelectItem value="pending">Pending</SelectItem>
 								<SelectItem value="running">Running</SelectItem>
 								<SelectItem value="completed">Completed</SelectItem>
@@ -437,20 +445,24 @@ export default function HistoryList() {
 						 * toggle, not a navigation - the variant swap alone says
 						 * nothing to a screen reader.
 						 */}
-						<Button
-							variant={pinnedOnly ? "default" : "ghost"}
-							onClick={() => setPinnedOnly(!pinnedOnly)}
-							size="sm"
-							className="h-control-sm gap-1 ml-auto"
-							aria-pressed={pinnedOnly}
-							title="Show only pinned runs"
-						>
-							<Pin
-								className="size-icon-sm shrink-0"
-								data-icon-motion={ICON_MOTION.tiltPin}
-							/>
-							Pinned
-						</Button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant={pinnedOnly ? "default" : "ghost"}
+									onClick={() => setPinnedOnly(!pinnedOnly)}
+									size="sm"
+									className="h-control-sm gap-1 ml-auto"
+									aria-pressed={pinnedOnly}
+								>
+									<Pin
+										className="size-icon-sm shrink-0"
+										data-icon-motion={ICON_MOTION.tiltPin}
+									/>
+									Pinned
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Show only pinned runs</TooltipContent>
+						</Tooltip>
 					</div>
 				</div>
 

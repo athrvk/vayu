@@ -13,10 +13,10 @@ import { navigateHistory } from "@/lib/navigate-history";
 import { installContextMenuBridge } from "@/lib/context-menu";
 
 /**
- * Bridges native menu items (Preferences… / Settings, View → zoom) to in-app
+ * Bridges native menu items (Settings…, View → zoom) to in-app
  * state. No-op outside Electron.
  *
- * Preferences… points at the `open-settings` command rather than repeating its
+ * Settings… points at the `open-settings` command rather than repeating its
  * two lines, so the menu and the palette cannot drift into opening settings
  * differently - the whole reason `lib/commands` exists.
  *

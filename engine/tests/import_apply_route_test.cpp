@@ -320,6 +320,55 @@ TEST_F (ImportApplyRouteTest, AStatedOrderIsHonouredBesideDefaultedSiblings) {
     EXPECT_EQ (defaulted_row->order, 1);
 }
 
+// A stated `order` goes through the applier `POST /requests` and
+// `POST /collections` use (#3451): one no row can store refuses the whole
+// tree, naming the field and the item. Mutation check: read a request's
+// `order` through `apply_int_field` again and `"3"` imports at 0.
+TEST_F (ImportApplyRouteTest, AnUnstorableStatedOrderRefusesTheTree) {
+    for (const char* text : { "\"3\"", "2.5", "-1", "2147483648" }) {
+        json folder             = collection_item ("c2", "folder");
+        folder["parentTempId"]  = "c1";
+        folder["order"]         = json::parse (text);
+        json request            = request_item ("r1", "c1", "get");
+        request["order"]        = json::parse (text);
+        auto [status, response] = import_apply_response (*db_,
+        json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+        { "requests", json::array ({ request }) } });
+        EXPECT_EQ (status, 400) << text << " -> " << response.dump ();
+        EXPECT_EQ (response["error"]["item"], "r1") << response.dump ();
+        EXPECT_NE (response.dump ().find ("'order'"), std::string::npos)
+        << response.dump ();
+
+        auto [folder_status, refused] = import_apply_response (*db_,
+        json{ { "collections", json::array ({ collection_item ("c1", "root"), folder }) } });
+        EXPECT_EQ (folder_status, 400) << text << " -> " << refused.dump ();
+        EXPECT_EQ (refused["error"]["item"], "c2") << refused.dump ();
+        EXPECT_NE (refused.dump ().find ("'order'"), std::string::npos)
+        << refused.dump ();
+    }
+    EXPECT_EQ (stored_rows (), 0u);
+}
+
+// The batch's consecutive slots stop at the last one rather than wrapping
+// (#3451): after a stored root at INT_MAX - 1 the first imported root takes
+// INT_MAX and the second has none. Mutation check: let `SiblingSlots::take`
+// count past INT_MAX and the second root stores a negative.
+TEST_F (ImportApplyRouteTest, ConsecutiveSlotsStopAtTheHighestOrder) {
+    auto [existing_status, existing] = create_collection_response (
+    *db_, json{ { "name", "nearly last" }, { "order", 2147483646 } });
+    ASSERT_EQ (existing_status, 200) << existing.dump ();
+
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections",
+    json::array ({ collection_item ("c1", "last"), collection_item ("c2", "past it") }) } });
+
+    EXPECT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (response["error"]["item"], "c2") << response.dump ();
+    EXPECT_NE (response.dump ().find ("'order'"), std::string::npos) << response.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), 1u)
+    << "the refused tree was partly written";
+}
+
 TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
     json bad_request = request_item ("r2", "c1", "no method");
     bad_request.erase ("method");
@@ -382,10 +431,10 @@ TEST_F (ImportApplyRouteTest, ABlankNameIsStillImported) {
 }
 
 TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
-    // A non-string `name` makes the shared applier throw a json type_error; the
-    // core must turn that into a per-item 400 rather than letting it escape as a
-    // 500 (the whole payload is one transaction, so an escape is a lost import
-    // with no explanation).
+    // A non-string `name` is the shared applier's own 400 naming the field
+    // (#3482), which the core carries as a per-item 400 rather than a 500 (the
+    // whole payload is one transaction, so an escape is a lost import with no
+    // explanation).
     json collection    = collection_item ("c1", "root");
     collection["name"] = 42;
 
@@ -393,6 +442,10 @@ TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
     *db_, json{ { "collections", json::array ({ collection }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c1");
+    EXPECT_EQ (response.dump ().find ("json.exception"), std::string::npos)
+    << response.dump ();
+    EXPECT_NE (response.dump ().find ("Invalid 'name': must be a string"), std::string::npos)
+    << response.dump ();
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -736,6 +789,17 @@ AnEmptyClientCertificatesSectionRegistersNothingEvenWhenThePreviewHadOne) {
     { "clientCertificates", json::array () } });
     ASSERT_EQ (status, 200) << response.dump ();
 
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
+}
+
+TEST_F (ImportApplyRouteTest, AClientCertificateCandidateWithANonStringHostIsSkippedNotThrown) {
+    // The skip is logged by host after the tree has committed; reading a
+    // non-string host there must not throw the import's answer away (#3482).
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+    { "clientCertificates",
+    json::array ({ json{ { "host", 5 }, { "certPath", "x.pem" } } }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_TRUE (db_->get_client_certificates ().empty ());
 }
 

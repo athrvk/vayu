@@ -103,7 +103,7 @@ export const MONO_FONTS = [
 	},
 	{
 		value: "system",
-		label: "System Mono",
+		label: "System mono",
 		description: "Your OS monospace font",
 		stack: 'ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace',
 	},

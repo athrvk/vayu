@@ -34,6 +34,7 @@
 
 #include "competing_writer.hpp"
 #include "optional_assert.hpp"
+#include "string_field_refusal.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -762,6 +763,21 @@ TEST_F (ClientCertificateDbTest, NeverEchoesThePassphrase) {
     // Stored, though - the wire is what withholds it, not the database, and
     // curl needs it to open the key.
     EXPECT_EQ (db_->get_client_certificates ().front ().passphrase, "hunter2");
+}
+
+// `host` is `apply_required_string_field`, `passphrase` `apply_string_field`
+// (#3482).
+TEST_F (ClientCertificateDbTest, RefusesANonStringStringFieldAndWritesNothing) {
+    for (const char* field : { "host", "passphrase" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            json payload   = body ("api.example.com");
+            payload[field] = value;
+            const auto [status, error] =
+            routes::create_client_certificate_response (*db_, payload);
+            vayu::tests::expect_string_field_refused (status, error, field, value);
+        }
+    }
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
 }
 
 TEST_F (ClientCertificateDbTest, RefusesAnUnusableEntry) {

@@ -18,28 +18,30 @@
 import { DropIndicator } from "@/components/shared";
 import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
+import { useRowDropLine, type RowDropLine } from "./tree-row-dnd";
 
 /**
  * The 2px line between two rows.
  *
- * Indented to the target row's own depth rather than drawn edge to edge,
- * because the depth is the only thing that distinguishes "after this collapsed
- * folder", "into it" and "after its parent" - three drops whose lines would
- * otherwise be pixel-identical.
+ * Indented to the depth of the row the drop lands beside rather than drawn
+ * edge to edge, because the depth is the only thing that distinguishes "after
+ * this collapsed folder", "into it" and "after its parent" - three drops whose
+ * lines would otherwise be pixel-identical. That is not always the depth of the
+ * row drawing it: a line after an open folder sits under its last visible row,
+ * at the folder's indent.
  *
  * A `span` positioned inside the row, not a node between rows: the roving-focus
  * walk reads the row order from the DOM, so an indicator element that sat
  * between treeitems would change the tree's shape mid-drag.
  */
-export function RowDropIndicator({
-	edge,
-	indentPx,
-}: {
-	edge: "before" | "after" | null;
-	indentPx: number;
-}) {
-	if (!edge) return null;
-	return <DropIndicator edge={edge} orientation="horizontal" indentPx={indentPx} />;
+export function RowDropIndicator({ line }: { line: RowDropLine | null }) {
+	if (!line) return null;
+	return <DropIndicator edge={line.edge} orientation="horizontal" indentPx={line.indentPx} />;
+}
+
+/** The same line, for a row with no `useRowDnd` of its own; the host must be `relative`. */
+export function RowDropIndicatorFor({ rowKey }: { rowKey: string }) {
+	return <RowDropIndicator line={useRowDropLine(rowKey)} />;
 }
 
 /**

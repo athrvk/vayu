@@ -343,7 +343,7 @@ export default function GeneralPanel() {
 							className="h-auto p-0 text-xs align-baseline"
 							onClick={() => setSelectedCategory(RETENTION_CATEGORY)}
 						>
-							Engine &gt; Data &amp; retention
+							Settings › Data &amp; retention
 						</Button>
 						.
 					</p>

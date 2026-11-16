@@ -502,6 +502,73 @@ struct ScenarioSummaryInputs {
 const ScenarioSummaryInputs& inputs);
 
 /**
+ * Why a run's setup refused, from the first outcome in @p outcomes, from
+ * position @p first on, that refuses it: an `"error"` or a `"failed"`. The
+ * outcome's message, led by the collection that declared it (#3456), as
+ * `folder '<name>': <message>` or `collection '<name>': <message>` from its
+ * `origin` (the id where it names no name); the message alone for an element
+ * no collection declared (a single-request run's `lifecycleElements`).
+ * `nullopt` when no outcome refuses.
+ */
+[[nodiscard]] std::optional<std::string>
+lifecycle_refusal (const std::vector<ElementOutcome>& outcomes, size_t first = 0);
+
+/**
+ * One list's `run.start` elements (`script.setup`, #1499), their scripts
+ * reading and writing @p scopes, outcomes appended to @p setup_outcomes. A
+ * `pm.sendRequest` there takes @p script_send, the run's own (#2841). The one
+ * dispatch every run shape's setup goes through.
+ */
+void run_setup_elements (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<CompiledElement>& elements,
+std::vector<ElementOutcome>& setup_outcomes);
+
+/**
+ * One list's `run.end` elements (`script.teardown`), as
+ * @ref run_setup_elements, with @p run_summary_info as `pm.info.run`. A throw
+ * is that element's own `"error"` outcome (`ElementPipeline::run`), never the
+ * caller's.
+ */
+void run_teardown_elements (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<CompiledElement>& elements,
+const vayu::runtime::RunSummaryInfo& run_summary_info,
+std::vector<ElementOutcome>& teardown_outcomes);
+
+/**
+ * A collection run's setup (#3456), sequential or load: each collection of
+ * @p lifecycle (`resolve_lifecycle_collections`) in order, root first, its
+ * scripts reading and writing @p scopes bound to that collection, so what a
+ * folder's setup writes is what that folder's steps, and the folders below
+ * it, read. Stops after the first collection whose setup refuses; the ones
+ * after it do not run.
+ *
+ * @return the refusing outcome's message, or `nullopt` on success.
+ */
+[[nodiscard]] std::optional<std::string> run_scenario_setup (
+vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::RunVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<LifecycleCollection>& lifecycle,
+std::vector<ElementOutcome>& setup_outcomes);
+
+/**
+ * A collection run's teardown (#3456): @p lifecycle in reverse, each
+ * collection bound in @p scopes as its setup was, so a write one teardown
+ * makes reaches the teardowns after it as setup's do. A failing teardown is
+ * recorded and the collections above it still tear down.
+ */
+[[nodiscard]] std::vector<ElementOutcome> run_scenario_teardown (
+vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::RunVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<LifecycleCollection>& lifecycle,
+const vayu::runtime::RunSummaryInfo& run_summary_info);
+
+/**
  * @brief The run worker: every step of every iteration, in plan order.
  *
  * Runs on its own thread, spawned by `RunManager::start_scenario_run`. It

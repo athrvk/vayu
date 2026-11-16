@@ -35,6 +35,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <httplib.h>
@@ -130,6 +131,31 @@ class ScriptLevelFold : public ::testing::Test {
             .set_variable       = {},
             .should_stop        = {},
             .record_metric      = {},
+        };
+        std::vector<ElementOutcome> sink;
+        ElementPipeline::run (phase, ctx, compiled, sink);
+        return sink;
+    }
+
+    /// @p elements through `Phase::RunStart` / `Phase::RunEnd`, whose scripts
+    /// `script.setup` / `script.teardown` run through their own two runners.
+    std::vector<ElementOutcome> run_lifecycle (Phase phase, const json& elements) {
+        const auto compiled = vayu::core::compile_elements (elements);
+        const auto answer   = [this] (const std::string& script) {
+            return answers.at (script);
+        };
+        ElementContext ctx{
+            .request             = request,
+            .response            = nullptr,
+            .run_pre_script      = {},
+            .run_post_script     = {},
+            .pre_script_result   = pre,
+            .post_script_result  = post,
+            .set_variable        = {},
+            .should_stop         = {},
+            .record_metric       = {},
+            .run_setup_script    = answer,
+            .run_teardown_script = answer,
         };
         std::vector<ElementOutcome> sink;
         ElementPipeline::run (phase, ctx, compiled, sink);
@@ -426,6 +452,73 @@ TEST_F (ScriptLevelFold, AnOutcomesLongMessageIsCut) {
     ASSERT_EQ (outcomes[0].messages.size (), 1u);
     EXPECT_EQ (outcomes[0].messages[0].text,
     std::string (MAX_BYTES, 'x') + std::string (vayu::utils::kLoggedTextTruncationMarker));
+}
+
+// #3455: `script.setup` / `script.teardown` read a script's result as
+// `script.post` does. A script whose only problem is a failing `pm.test` is
+// `failed` with that test as its message (it was `error` with a blank one), and
+// its tests and console lines are kept on the outcome. Mutation check: restore
+// `result.success ? "ok" : "error"` in `run_lifecycle_script`
+// (script_kinds.cpp) and the status and the message expectations fail; drop the
+// `outcome_messages` assignment from `record_script_outcome` and the lists
+// come back empty.
+TEST_F (ScriptLevelFold, ALifecycleScriptWhoseOnlyProblemIsAFailingTestIsFailed) {
+    using Kind   = vayu::core::ElementMessage::Kind;
+    answers["t"] = asserted ("t", false);
+    for (const auto& [phase, kind] : { std::pair{ Phase::RunStart, "script.setup" },
+         std::pair{ Phase::RunEnd, "script.teardown" } }) {
+        const auto outcomes = run_lifecycle (
+        phase, json::array ({ script_element (kind, "t", "collection") }));
+
+        ASSERT_EQ (outcomes.size (), 1u) << kind;
+        EXPECT_EQ (outcomes[0].status, "failed") << kind;
+        EXPECT_EQ (outcomes[0].message.value_or (""), "Test failed - t: expected 1 to deeply equal 2")
+        << kind;
+        ASSERT_EQ (outcomes[0].messages.size (), 2u) << kind;
+        EXPECT_EQ (outcomes[0].messages[0].kind, Kind::Test);
+        EXPECT_EQ (outcomes[0].messages[0].text, "t: expected 1 to deeply equal 2");
+        EXPECT_EQ (outcomes[0].messages[1].kind, Kind::Console);
+        EXPECT_EQ (outcomes[0].messages[1].text, "ran t");
+    }
+}
+
+// A throw stays `error` with its own message, a clean script is `ok`, and what
+// either logged is kept.
+TEST_F (ScriptLevelFold, ALifecycleScriptThatThrewIsAnErrorAndACleanOneIsOk) {
+    using Kind       = vayu::core::ElementMessage::Kind;
+    answers["boom"]  = threw ("Error: boom");
+    answers["quiet"] = vayu::ScriptResult{};
+    answers["quiet"].console_output.push_back ({ vayu::ConsoleLevel::Warn, "heads up" });
+
+    const auto outcomes = run_lifecycle (Phase::RunEnd,
+    json::array ({ script_element ("script.teardown", "boom", "collection"),
+    script_element ("script.teardown", "quiet", "collection") }));
+
+    ASSERT_EQ (outcomes.size (), 2u);
+    EXPECT_EQ (outcomes[0].status, "error");
+    EXPECT_EQ (outcomes[0].message.value_or (""), "Error: boom");
+    ASSERT_EQ (outcomes[0].messages.size (), 1u);
+    EXPECT_EQ (outcomes[0].messages[0].kind, Kind::Error);
+    EXPECT_EQ (outcomes[1].status, "ok");
+    EXPECT_FALSE (outcomes[1].message.has_value ());
+    ASSERT_EQ (outcomes[1].messages.size (), 1u);
+    EXPECT_EQ (outcomes[1].messages[0].level, vayu::ConsoleLevel::Warn);
+    EXPECT_EQ (outcomes[1].messages[0].text, "heads up");
+}
+
+// A lifecycle script the Stop cut short is skipped and says nothing, as a step
+// script's is (#3371).
+TEST_F (ScriptLevelFold, ACutShortLifecycleScriptIsSkippedWithNoMessages) {
+    vayu::ScriptResult cut_short = asserted ("the fetch answered", false);
+    cut_short.send_cancelled     = true;
+    answers["cut"]               = cut_short;
+
+    const auto outcomes = run_lifecycle (Phase::RunStart,
+    json::array ({ script_element ("script.setup", "cut", "collection") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "skipped");
+    EXPECT_TRUE (outcomes[0].messages.empty ());
 }
 
 // #3371: a script whose `pm.sendRequest` the run's Stop cancelled is no verdict,

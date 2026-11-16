@@ -92,6 +92,7 @@ import {
 } from "./context-menu.js";
 import { showApplicationMenu } from "./app-menu.js";
 import { menuAccelerators } from "./menu-accelerators.js";
+import { menuLabels } from "./menu-labels.js";
 import type { FlushFailurePrompt } from "./save-flush.js";
 import { createQuitFlow, FLUSH_REQUEST_CHANNEL, registerFlushAckIpc } from "./quit-flow.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
@@ -174,8 +175,12 @@ import {
 } from "./constants.js";
 import { isDevelopmentBuild } from "./dev-mode.js";
 import { denyDevicePermissions } from "./permissions.js";
+import { suppressDictionaryDownloads } from "./spellcheck.js";
 
 const isDev = isDevelopmentBuild();
+
+// Before any session exists, so the default session is covered (#1355).
+suppressDictionaryDownloads(app);
 
 // Use an in-memory mock keychain for Chromium's OSCrypt instead of the real
 // macOS Keychain. Without this, Chromium stores its cookie/safeStorage
@@ -621,10 +626,10 @@ function createWindow() {
 				...(legacyStorage.hasPending() ? [LEGACY_STORAGE_ARG] : []),
 			],
 			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
-			// header values, {{tokens}} and JSON keys all draw squiggles - and on
-			// Windows and Linux the checker fetches Hunspell dictionaries from a
-			// Google CDN the first time it runs, which a tool pointed at internal
-			// APIs should not do for a feature it does not want.
+			// header values, {{tokens}} and JSON keys all draw squiggles. This
+			// only silences the checker: the Hunspell download a tool pointed at
+			// internal APIs must not make is stopped by
+			// `suppressDictionaryDownloads` above.
 			spellcheck: false,
 		},
 		title: "Vayu",
@@ -784,6 +789,7 @@ function sendNavigationCommand(direction: NavDirection) {
 function createMenu() {
 	const isMac = process.platform === "darwin";
 	const accelerators = menuAccelerators(process.platform);
+	const labels = menuLabels(process.platform);
 
 	const template: Electron.MenuItemConstructorOptions[] = [
 		// App menu (macOS only)
@@ -795,12 +801,12 @@ function createMenu() {
 							{ role: "about" as const },
 							{ type: "separator" as const },
 							{
-								label: "Check for Updates…",
+								label: labels.checkForUpdates,
 								click: () => void checkForUpdates("menu"),
 							},
 							{ type: "separator" as const },
 							{
-								label: "Preferences…",
+								label: labels.settings,
 								accelerator: accelerators.preferences,
 								click: () => openSettings(),
 							},
@@ -825,7 +831,7 @@ function createMenu() {
 				? [{ role: "close" as const, accelerator: accelerators.closeWindow }]
 				: [
 						{
-							label: "Settings",
+							label: labels.settings,
 							click: () => openSettings(),
 						},
 						{ type: "separator" as const },
@@ -885,12 +891,12 @@ function createMenu() {
 						]
 					: []),
 				{
-					label: "Actual Size",
+					label: labels.actualSize,
 					accelerator: accelerators.actualSize,
 					click: () => sendZoomCommand("reset"),
 				},
 				{
-					label: "Zoom In",
+					label: labels.zoomIn,
 					accelerator: accelerators.zoomIn,
 					click: () => sendZoomCommand("in"),
 				},
@@ -899,13 +905,13 @@ function createMenu() {
 				// rather than dropping it silently; one menu item can hold only
 				// one accelerator.
 				{
-					label: "Zoom In",
+					label: labels.zoomIn,
 					accelerator: accelerators.zoomInPlus,
 					visible: false,
 					click: () => sendZoomCommand("in"),
 				},
 				{
-					label: "Zoom Out",
+					label: labels.zoomOut,
 					accelerator: accelerators.zoomOut,
 					click: () => sendZoomCommand("out"),
 				},
@@ -930,7 +936,7 @@ function createMenu() {
 			],
 		},
 		// Help menu - documentation links on all platforms, plus
-		// "Check for Updates…" on Windows/Linux (macOS keeps that in the app
+		// "Check for updates…" on Windows/Linux (macOS keeps that in the app
 		// menu above).
 		{
 			label: "Help",
@@ -941,11 +947,11 @@ function createMenu() {
 					click: () => shell.openExternal(DOCS_URL),
 				},
 				{
-					label: "Scripting Guide",
+					label: labels.scriptingGuide,
 					click: () => shell.openExternal(SCRIPTING_DOCS_URL),
 				},
 				{
-					label: "Report an Issue",
+					label: labels.reportIssue,
 					click: () => shell.openExternal(ISSUES_URL),
 				},
 				{
@@ -960,7 +966,7 @@ function createMenu() {
 					: [
 							{ type: "separator" as const },
 							{
-								label: "Check for Updates…",
+								label: labels.checkForUpdates,
 								click: () => void checkForUpdates("menu"),
 							},
 							{

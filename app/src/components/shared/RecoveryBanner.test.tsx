@@ -24,7 +24,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { screen, cleanup, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import RecoveryBanner from "./RecoveryBanner";
 import { useEngineStore, useRecoveryNoticeStore } from "@/stores";
 import type { EngineRecovery } from "@/types/domain";
@@ -195,5 +197,17 @@ describe("recovery-notice-store persistence", () => {
 
 		await useRecoveryNoticeStore.persist.rehydrate();
 		expect(useRecoveryNoticeStore.getState().acknowledgedAt).toBe(DELETED.at);
+	});
+});
+
+describe("RecoveryBanner dismiss button", () => {
+	it("says Dismiss on keyboard focus (#3498)", async () => {
+		useEngineStore.setState({ recovery: DELETED });
+		render(<RecoveryBanner />);
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Dismiss data recovery notice" }),
+			"Dismiss"
+		);
 	});
 });

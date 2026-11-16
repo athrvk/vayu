@@ -27,7 +27,10 @@ import {
 	Lightbulb,
 	type LucideIcon,
 } from "lucide-react";
+import { Heading } from "@/components/ui/heading";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
+import { badHostTip } from "./bad-host-tip";
+import { selectEngineRestartOffered, useEngineStore } from "@/stores";
 
 interface ErrorIconDisplayProps {
 	icon: LucideIcon;
@@ -48,6 +51,16 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
 const ENGINE_ANSWERED_ERROR = "Vayu's engine answered with an error";
 const ENGINE_ANSWERED_HINT =
 	"This is Vayu's failure, not the server's. Send again; if it repeats, Vayu's engine log in Settings › General › Logs has the reason.";
+
+/**
+ * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
+ * Without one (the engine is not known to have left, so the Dock offers
+ * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
+ * The button's label is not named: it reads Retry after a start failure and a
+ * disabled Restarting… while a restart runs.
+ */
+const ENGINE_RESTART_IN_DOCK_HINT =
+	"Vayu's engine isn't running or didn't answer. Start it again with the button in the status bar at the bottom of the window.";
 
 /**
  * Error hints for common error codes
@@ -160,13 +173,31 @@ function getErrorIcon(errorCode?: string) {
 	}
 }
 
+function errorHint(
+	errorCode: string | undefined,
+	restartOffered: boolean,
+	requestUrl: string | undefined
+): string | undefined {
+	if (!errorCode) return undefined;
+	if (errorCode === "ENGINE_ERROR" && restartOffered) return ENGINE_RESTART_IN_DOCK_HINT;
+	if (errorCode === "INVALID_URL") return badHostTip(requestUrl) ?? ErrorHints[errorCode];
+	return ErrorHints[errorCode];
+}
+
 export interface ClientErrorViewProps {
 	errorCode?: string;
 	errorMessage?: string;
+	/** The URL as the user wrote it at Send, which a host variable's name is read from. */
+	requestUrl?: string;
 }
 
-export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
-	const hint = errorCode ? ErrorHints[errorCode] : undefined;
+export default function ClientErrorView({
+	errorCode,
+	errorMessage,
+	requestUrl,
+}: ClientErrorViewProps) {
+	const restartOffered = useEngineStore(selectEngineRestartOffered);
+	const hint = errorHint(errorCode, restartOffered, requestUrl);
 	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Couldn't get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 
@@ -178,7 +209,9 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				</div>
 
 				<div className="space-y-2">
-					<h3 className="text-md font-semibold text-foreground">{title}</h3>
+					<Heading outside="h3" className="text-md font-semibold text-foreground">
+						{title}
+					</Heading>
 					<p className="text-sm text-muted-foreground">
 						{errorMessage || "The request never reached the server."}
 					</p>
@@ -202,7 +235,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				)}
 
 				{errorCode && (
-					<p className="text-xs text-muted-foreground/70 font-mono">
+					<p className="text-xs text-muted-foreground font-mono">
 						Error code: {errorCode}
 					</p>
 				)}

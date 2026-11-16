@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ScrollOnOverflow } from "./ScrollOnOverflow";
 
 /**
@@ -72,5 +74,16 @@ describe("ScrollOnOverflow", () => {
 			return s;
 		};
 		expect(durationFor(600)).toBeGreaterThan(durationFor(260));
+	});
+
+	// The track is `w-fit`, so an ellipsis cannot engage; the fade is what says a
+	// resting name is cut. vitest stubs the stylesheet import, so read the file.
+	it("fades the clipped edge at rest, and only at rest", () => {
+		const css = readFileSync(resolve(__dirname, "../../index.css"), "utf8");
+		expect(css.length).toBeGreaterThan(1000);
+		const rule = /\.scroll-on-overflow:not\(:hover\):not\(:focus-within\)\s*\{([^}]*)\}/.exec(
+			css
+		);
+		expect(rule?.[1]).toMatch(/mask-image:\s*linear-gradient\(to right/);
 	});
 });

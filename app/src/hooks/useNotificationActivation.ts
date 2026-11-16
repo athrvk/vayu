@@ -38,7 +38,7 @@ export function useNotificationActivation(): void {
 			}
 			if (target.view === "settings") {
 				// Through the command, not two lines of its own: the palette, the
-				// Preferences… menu item and this must not drift into opening
+				// Settings… menu item and this must not drift into opening
 				// settings differently.
 				commandById("open-settings").perform(baseCommandContext());
 				return;

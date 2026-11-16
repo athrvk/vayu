@@ -78,7 +78,7 @@ describe("the tint", () => {
 		// value in both themes. A tint has to track the accent as it brightens.
 		const { container } = renderCard(2);
 		const card = container.firstElementChild as HTMLElement;
-		expect(card.className).toContain("bg-primary/10");
+		expect(card.className).toContain("bg-primary-tint");
 		expect(card.className).toContain("border-primary/30");
 		expect(card.className).not.toContain("primary-fill");
 	});

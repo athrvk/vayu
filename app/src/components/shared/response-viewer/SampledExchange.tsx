@@ -58,6 +58,7 @@ import { cn } from "@/lib/utils";
 
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import TimingPhaseTiles from "./TimingPhaseTiles";
+import { TruncatedText } from "../TruncatedText";
 import type { ResolvedTimingPhase } from "./timing-phases";
 
 /**
@@ -88,6 +89,17 @@ const STATE_TINT: Record<ExchangeState, string> = {
 	skipped: "text-muted-foreground",
 	stopped: RUN_STATUS.stopped.text,
 };
+
+/**
+ * The summary row's tracks: chevron, state icon, label, the flexible lead (name
+ * and error), then from `@3xl` a status, a latency and a time. The status track
+ * is as wide as "503 Service Unavailable" so a list's status chips share a
+ * column; every row of a list is a grid of its own, so only fixed tracks line
+ * up. `@3xl` is a *container* variant, resolved against the row's own
+ * `@container` root: a viewport variant does not know the context bar is open.
+ */
+const ROW_GRID =
+	"grid grid-cols-[auto_auto_3.5rem_minmax(0,1fr)] @3xl:grid-cols-[auto_auto_3.5rem_minmax(0,1fr)_12rem_4.5rem_auto]";
 
 export interface SampledExchangeProps {
 	/** Printed as `#{label}`. The dashboard prefers the engine's request number. */
@@ -165,8 +177,13 @@ export function SampledExchange({
 	const StatusIcon = STATE_ICON[resolved];
 	const Chevron = isExpanded ? ChevronDown : ChevronRight;
 
+	// The first clause only - the full message is one click away, and a
+	// multi-line curl error would push the row to three lines.
+	const errorPreview = isError && error ? error.split(":")[0] : "";
+	const hasLead = Boolean(title) || errorPreview !== "";
+
 	return (
-		<div className={cn("overflow-hidden", className)}>
+		<div className={cn("@container overflow-hidden", className)}>
 			<Collapsible open={isExpanded} onOpenChange={onToggle}>
 				{/* The summary and its actions share a row without sharing a button.
 			    With no actions this is one full-width button, exactly as before. */}
@@ -176,58 +193,73 @@ export function SampledExchange({
 						variant="listRow"
 						onClick={onToggle}
 						aria-expanded={isExpanded}
-						// The `Button` primitive's own baseline already gives this row its
-						// hover/press transitions (index.css's `:where(button, ...)` rule) -
-						// no hand-rolled `transition-*` needed. `whitespace-normal`
-						// overrides the primitive's default `whitespace-nowrap`: this row
-						// wraps to a second line for a long error (`basis-full` below), and
-						// the base's nowrap is inherited by that text unless undone here.
 						// `rounded-none` overrides the base's `rounded-md`: every caller of
 						// this component renders it as a full-bleed, edge-to-edge row (a
 						// `divide-y` list, or a `border-b` strip), never an inset one, so a
 						// rounded hover fill floats oddly inside the row's own square edges.
-						className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal rounded-none px-4 py-3 hover:bg-muted/50"
+						className={cn(
+							ROW_GRID,
+							"flex-1 min-w-0 items-center gap-x-3 gap-y-1 rounded-none px-4 py-3 hover:bg-muted/50"
+						)}
 					>
 						<Chevron className="size-icon text-muted-foreground shrink-0" />
 
 						<StatusIcon className={cn("size-icon shrink-0", STATE_TINT[resolved])} />
 
-						<span className="text-xs text-muted-foreground font-mono min-w-8">
+						<span className="truncate text-xs text-muted-foreground font-mono">
 							#{label}
 						</span>
 
-						{title}
-
-						{statusCode !== undefined && (
-							<StatusCodeBadge
-								status={statusCode}
-								statusText={statusText}
-								className="shrink-0"
-							/>
-						)}
-
-						{latencyMs !== undefined && (
-							<span
-								className={cn(
-									"text-sm font-mono shrink-0",
-									isSlow && "text-status-stopped-text"
+						{hasLead && (
+							// The step's name and the error's first clause share the one
+							// flexible track. The caller's `title` is a node of its own
+							// shape, so this is the box that is allowed to shrink (`min-w-0`)
+							// around it.
+							<span className="col-start-4 row-start-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 @3xl:flex-nowrap">
+								{title && <span className="min-w-0 max-w-full">{title}</span>}
+								{errorPreview !== "" && (
+									<TruncatedText className="min-w-0 max-w-full basis-full text-xs text-destructive-text @3xl:max-w-[40%] @3xl:basis-auto">
+										{errorPreview}
+									</TruncatedText>
 								)}
-							>
-								{formatLatency(latencyMs)}
 							</span>
 						)}
 
-						<span className="text-xs text-muted-foreground sm:ml-auto">
-							{timestamp}
+						{/* Below @3xl the status, latency and time are one wrapping group
+						    under the name; from @3xl the group dissolves (`contents`) and
+						    each is a cell of the row's own tracks, so the rows of a list
+						    line up. A missing cell leaves its track empty. */}
+						<span
+							className={cn(
+								"flex flex-wrap items-center gap-x-3 gap-y-1 @3xl:contents",
+								hasLead
+									? "col-span-2 col-start-3 row-start-2"
+									: "col-start-4 row-start-1"
+							)}
+						>
+							{statusCode !== undefined && (
+								<StatusCodeBadge
+									status={statusCode}
+									statusText={statusText}
+									className="shrink-0 @3xl:col-start-5 @3xl:max-w-full @3xl:justify-self-start @3xl:overflow-hidden"
+								/>
+							)}
+
+							{latencyMs !== undefined && (
+								<span
+									className={cn(
+										"text-sm font-mono shrink-0 @3xl:col-start-6 @3xl:text-right",
+										isSlow && "text-status-stopped-text"
+									)}
+								>
+									{formatLatency(latencyMs)}
+								</span>
+							)}
+
+							<span className="text-xs text-muted-foreground @3xl:col-start-7 @3xl:text-right">
+								{timestamp}
+							</span>
 						</span>
-
-						{/* First clause only - the full message is one click away, and a
-					    multi-line curl error would push the row to three lines. */}
-						{isError && error && (
-							<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
-								{error.split(":")[0]}
-							</span>
-						)}
 					</Button>
 
 					{actions && <div className="flex shrink-0 items-center pr-3">{actions}</div>}

@@ -103,7 +103,7 @@ export function ProfilePicker({
 							// An odd count leaves the last card alone in a half-empty row.
 							"[&:last-child:nth-child(odd)]:col-span-2",
 							selected
-								? "border-primary bg-primary/10"
+								? "border-primary bg-primary-tint"
 								: "border-border bg-card hover:bg-accent"
 						)}
 					>

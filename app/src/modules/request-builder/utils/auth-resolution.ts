@@ -64,9 +64,9 @@ export function withDraftAuth(
 /**
  * Does the Auth tab's draft say something the stored collection does not?
  *
- * The tab publishes its draft even while clean (equal to the stored value), so
- * "a draft exists" is not "there is something unsaved". Compared the way the
- * tab's own `isDirty` is, by serialised value. What `POST /compose` walks is
+ * A stored draft can briefly equal the stored value (a save landed and the
+ * entry is not yet dropped), so "a draft exists" is not "there is something
+ * unsaved". Compared the way the tab's own `isDirty` is, by serialised value. What `POST /compose` walks is
  * the stored row, so a differing draft is what a context-bar sentence or chain
  * row describes and a request below does not yet send.
  */

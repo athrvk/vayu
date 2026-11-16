@@ -99,7 +99,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "charts show, and the span the engine holds in memory per run so the "
     "dashboard can rebuild those charts when it attaches - or re-attaches - "
     "mid-run. One setting drives both, so they cannot disagree. Its editor is "
-    "Settings > Dashboard > Chart window, which is where the effect is "
+    "Settings › Dashboard › Chart window, which is where the effect is "
     "visible; this list deliberately does not offer a second one. Expressed "
     "as elapsed time "
     "rather than a tick count, so it survives a change to the tick interval. 0 "

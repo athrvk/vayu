@@ -29,6 +29,7 @@ import type { HostSleep } from "@/stores/host-sleep-store";
 import { runAnnotations } from "./annotations";
 import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
 import { UPlotChart, type UPlotSeriesSpec, type Marker, type ScaleKey } from "./UPlotChart";
+import { describeChart } from "./chartLabel";
 import { THROUGHPUT_LEGEND, LATENCY_LEGEND, PERCENTILE_LEGEND } from "./legend";
 import {
 	bucketColumns,
@@ -190,6 +191,7 @@ export function LatencyPercentilesChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Response time percentiles over time", data, series)}
 			data={data}
 			series={series}
 			xTime
@@ -241,6 +243,7 @@ export function LatencyBreakdownChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Latency breakdown over time", data, series)}
 			data={data}
 			series={series}
 			xTime
@@ -355,6 +358,7 @@ export function RequestRateChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Request rate over time", data, series)}
 			data={data}
 			series={series}
 			xTime
@@ -403,6 +407,7 @@ export function ConnectionsChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart(`${concurrencyMeasureLabel(mode)} over time`, data, series)}
 			data={data}
 			series={series}
 			xTime
@@ -440,6 +445,7 @@ export function ErrorRateChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Error rate over time", data, series)}
 			data={data}
 			series={series}
 			xTime
@@ -510,6 +516,7 @@ export function ServerVitalsChart({
 	if (series.length === 0 || data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Server vitals over time", data, series)}
 			data={data}
 			series={series}
 			xTime

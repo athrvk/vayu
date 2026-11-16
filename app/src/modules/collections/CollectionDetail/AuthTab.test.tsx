@@ -24,7 +24,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { resetEntityDraftStoreForTests, useCollectionAuthDraft } from "@/stores/entity-draft-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
+import { render, renderHook, screen, fireEvent, act } from "@testing-library/react";
 import type { Collection } from "@/types";
 import AuthTab from "./AuthTab";
 import { TooltipProvider } from "@/components/ui";
@@ -88,6 +90,8 @@ function wrap(collection: Collection) {
 }
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
+	resetSaveStoreForTests();
 	mutation.mutate.mockReset();
 	mutation.mutateAsync.mockClear();
 	mutation.reset.mockReset();
@@ -103,6 +107,19 @@ beforeEach(() => {
  * the engine has no resolution for digest/aws/ntlm, so offering them would let
  * someone configure something that silently does nothing.
  */
+describe("AuthTab names its controls (#3498)", () => {
+	it("names the type picker", () => {
+		renderTab(makeCollection({ mode: "bearer", token: "t" }));
+		expect(screen.getByRole("combobox", { name: "Authentication type" })).toBeInTheDocument();
+	});
+
+	it("names a credential field by its label, not its placeholder", () => {
+		renderTab(makeCollection({ mode: "basic", username: "acme", password: "" }));
+		expect(screen.getByLabelText("Username")).toHaveValue("acme");
+		expect(screen.getByLabelText("Password")).toBeInTheDocument();
+	});
+});
+
 describe("AuthTab with an auth mode it cannot edit", () => {
 	const uneditable = makeCollection({ mode: "digest" } as Collection["auth"]);
 
@@ -321,5 +338,52 @@ describe("OAuth 2.0 parity with the request builder", () => {
 		for (const name of [/Digest/i, /AWS/i, /NTLM/i]) {
 			expect(screen.queryByRole("option", { name })).not.toBeInTheDocument();
 		}
+	});
+});
+
+describe("AuthTab's unsaved draft outliving the tab (#3459)", () => {
+	const stored = makeCollection({ mode: "basic", username: "acme", password: "" });
+
+	function typePassword() {
+		const view = renderTab(stored);
+		fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "hunt" } });
+		return view;
+	}
+
+	it("is back when the tab mounts again, and Save auth writes it", () => {
+		// Mutation check: keep the draft in component state and the remount
+		// shows the stored, empty password with Save auth disabled.
+		typePassword().unmount();
+
+		renderTab(stored);
+
+		expect(screen.getByPlaceholderText("Password")).toHaveValue("hunt");
+		fireEvent.click(screen.getByRole("button", { name: /save auth/i }));
+		expect(mutation.mutateAsync).toHaveBeenCalledWith({
+			id: "c1",
+			auth: { mode: "basic", username: "acme", password: "hunt" },
+		});
+	});
+
+	it("is still what the context bar describes while the tab is unmounted", () => {
+		// The tab used to clear its published draft on unmount, so the context
+		// bar went back to the stored auth while the tab was still dirty.
+		typePassword().unmount();
+
+		const { result } = renderHook(() => useCollectionAuthDraft("c1"));
+
+		expect(result.current).toEqual({ mode: "basic", username: "acme", password: "hunt" });
+	});
+
+	it("is saved by the quit flush with the tab unmounted", async () => {
+		typePassword().unmount();
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(tally).toEqual({ saved: 1, failed: 0, pending: 0 });
+		expect(mutation.mutateAsync).toHaveBeenCalledWith({
+			id: "c1",
+			auth: { mode: "basic", username: "acme", password: "hunt" },
+		});
 	});
 });

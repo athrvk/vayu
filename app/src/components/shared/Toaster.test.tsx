@@ -28,6 +28,7 @@ import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 import { useToastStore, type ToastVariant } from "@/stores/toast-store";
 import { TIMING } from "@/config/timing";
 import { MAX_TOASTS } from "@/constants/toast";
+import { FOCUS_NOTIFICATIONS_CHORD } from "@/constants/shortcuts";
 import Toaster from "./Toaster";
 
 function show(message: string, variant: ToastVariant = "info") {
@@ -57,6 +58,14 @@ describe("Toaster", () => {
 	afterEach(() => {
 		cleanup();
 		useToastStore.setState({ toasts: [] });
+	});
+
+	it("is focused by the key the shortcuts registry lists", () => {
+		// Radix owns the binding and names it in the viewport's accessible name;
+		// the registry entry is display only, so this is what keeps the two equal.
+		render(<Toaster />);
+		const viewport = screen.getByRole("region", { name: /^Notifications/ });
+		expect(viewport).toHaveAccessibleName(`Notifications (${FOCUS_NOTIFICATIONS_CHORD.key})`);
 	});
 
 	describe("the announcement guarantee", () => {

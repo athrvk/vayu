@@ -61,7 +61,9 @@ function midParts(): Record<"stroke" | "fill" | "band", boolean> {
 }
 
 function renderMid(mid: Partial<UPlotSeriesSpec>) {
-	const { unmount } = render(<UPlotChart data={data} series={stack(mid)} />);
+	const { unmount } = render(
+		<UPlotChart ariaLabel="Test chart" data={data} series={stack(mid)} />
+	);
 	const parts = midParts();
 	unmount();
 	return parts;

@@ -65,14 +65,16 @@ import { effectiveOAuth2Config, resolveAuthForSend } from "./utils/auth-resoluti
 import { useOAuth2DeferredNames } from "./hooks/useOAuth2DeferredNames";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
+import { mergeParamsFromUrl } from "./utils/url";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import type { LeftOutElement } from "@/lib/elements";
 import { toHeaderRows } from "./utils/key-value";
 import {
 	elementsParts,
+	hasInlinePreScript,
 	hasReplayedPostScript,
-	scriptTextFor,
+	hasUnmarkedPreScript,
 	withoutDisabled,
 	withoutInheritedCollectionOnly,
 } from "./utils/elements-parts";
@@ -223,7 +225,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 	return (
 		<ErrorState
 			title="This request no longer exists"
-			detail="It was deleted, or the collection it lived in was. Your edits are still here - copy them out before closing the tab."
+			detail="It was deleted, or the collection it lived in was. Your edits are still here - copy them out before closing the tab. If it is in the Trash, restoring it there brings this tab back."
 			action={
 				<div className="flex gap-2">
 					<Button variant="outline" size="sm" onClick={handleCopyCurl}>
@@ -442,7 +444,15 @@ export default function RequestBuilder() {
 			method: fetchedRequest.method,
 			methodSource: fetchedRequest.methodSource,
 			url: fetchedRequest.url,
-			params: toKeyValueItems(fetchedRequest.params),
+			// A query only in the URL (stored with no `params`) gets its rows here, or
+			// the table opens empty and its first edit rebuilds the URL without that
+			// query (#3491). `baseline` is seeded from this same value, so the rows
+			// do not make the draft unsaved.
+			params: mergeParamsFromUrl(
+				toKeyValueItems(fetchedRequest.params),
+				fetchedRequest.url,
+				fetchedRequest.url
+			),
 			headers: toHeaderItems(fetchedRequest.headers),
 			bodyMode,
 			body: rawBody,
@@ -1001,7 +1011,9 @@ export default function RequestBuilder() {
 	 *
 	 * Deleting a request already closes its tabs (`closeTabsForEntities`), so the
 	 * usual cause of the deleted branch is a delete from another window or a
-	 * database restored underneath the app.
+	 * database restored underneath the app. The delete is soft, so the pane
+	 * points at the Trash (#3449): a restore invalidates `requests.all`, which
+	 * holds this tab's detail query, so the lookup runs again and the tab loads.
 	 */
 	const requestWasDeleted =
 		isRequestNotFound(requestLookupError) || (!isError && !fetchedRequest);
@@ -1023,7 +1035,7 @@ export default function RequestBuilder() {
 		return requestWasDeleted ? (
 			<ErrorState
 				title="This request no longer exists"
-				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered - closing the tab is safe."
+				detail="It was deleted, or the collection it lived in was. It may be in the Trash - restoring it there brings this tab back."
 				action={closeTabAction}
 			/>
 		) : (
@@ -1074,9 +1086,8 @@ export default function RequestBuilder() {
 					onClose={handleCloseLoadTestDialog}
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
-					hasPreRequestScript={
-						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
-					}
+					hasPreRequestScript={hasUnmarkedPreScript(pendingLoadTestRequest?.elements)}
+					hasInlinePreScript={hasInlinePreScript(pendingLoadTestRequest?.elements)}
 					hasPostRequestScript={hasReplayedPostScript(pendingLoadTestParts)}
 					scenarioOnlyElements={pendingScenarioOnlyElements}
 					onRunCollection={requestCollection ? handleRunCollectionInstead : undefined}

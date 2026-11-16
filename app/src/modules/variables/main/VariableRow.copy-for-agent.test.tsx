@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
 import { useToastStore } from "@/stores/toast-store";
@@ -171,6 +171,16 @@ describe("Copy for agent on a variable row", () => {
 		renderEditor({ type: "environment" });
 
 		expect(copyButtons()).toEqual([]);
+	});
+
+	it("names its action in a tooltip that opens on keyboard focus (#3498)", async () => {
+		renderEditor({ type: "environment", environment });
+
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Copy API_URL for agent" }));
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent("Copy for agent");
 	});
 
 	it("is revealed on keyboard focus as well as hover", () => {

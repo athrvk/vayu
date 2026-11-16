@@ -982,6 +982,29 @@ constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 } // namespace inbox
 
 /**
+ * @brief Connection bounds of every on-demand listener (`ManagedListener`)
+ *
+ * Rails, not settings. A listener's connections share the process's file
+ * descriptors with the management API, every libcurl transfer and the
+ * database, and an inbox bound past loopback takes connections from anyone on
+ * its network. cpp-httplib's default queue is unbounded, so idle connections
+ * could hold descriptors until none were left and every transfer failed.
+ * httplib runs a whole connection as one task, so these bound the connections
+ * a listener holds open at once: at most `MAX_THREADS + MAX_QUEUED_CONNECTIONS`.
+ */
+namespace listener {
+/// Worker threads kept for a listener's whole life.
+constexpr size_t BASE_THREADS = 8;
+/// Ceiling on worker threads; the ones above `BASE_THREADS` are started for a
+/// burst and retired when idle. Each is one connection being served, a canned
+/// `delayMs` wait included.
+constexpr size_t MAX_THREADS = 32;
+/// Accepted connections allowed to wait for a worker. A connection past it is
+/// closed at accept, which the client sees as a connection reset.
+constexpr size_t MAX_QUEUED_CONNECTIONS = 64;
+} // namespace listener
+
+/**
  * @brief The workspace change feed, `GET /changes` (issue #3420)
  *
  * Rails, not settings: both bound what the engine holds for clients it cannot
@@ -995,9 +1018,17 @@ namespace change_feed {
 /// which costs it the same refetch the bulk write would have asked for anyway.
 constexpr std::size_t MAX_RETAINED_EVENTS = 1024;
 /// Streams read at once. Each parks a management-API pool thread (at least 8,
-/// growing to 4x), and the route needs no id, so a page's no-cors `fetch`
-/// could otherwise take every thread. One app window holds one stream.
+/// growing to 4x). A stream needs a subscription id only `POST
+/// /changes/subscriptions` hands out, so a page's no-cors `fetch` cannot take
+/// a slot; the cap bounds what a client that can ask for ids holds. One app
+/// window holds one stream.
 constexpr int MAX_READERS = 8;
+/// Entropy of a subscription id, in bytes (256 bits, unguessable).
+constexpr std::size_t SUBSCRIPTION_ID_BYTES = 32;
+/// Subscription ids issued and not yet used. Past it the oldest is dropped, so
+/// a client that asks for ids and never opens a stream cannot grow the engine;
+/// a client that opens straight after asking is never near it.
+constexpr std::size_t MAX_PENDING_SUBSCRIPTIONS = 64;
 } // namespace change_feed
 
 /**

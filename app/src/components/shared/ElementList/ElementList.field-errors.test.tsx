@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { ElementConfigSchema, ElementDef, ElementKindSchema } from "@/types";
 import { elementNeeds, notRunReason } from "@/lib/elements";
 import { ElementList } from "./index";

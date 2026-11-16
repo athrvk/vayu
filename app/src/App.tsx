@@ -100,7 +100,7 @@ function App() {
 	// signature help, which a suggestion list cannot.
 	useScriptTypeDefinitions();
 
-	// Bridge native menu items (Preferences…/Settings) to in-app navigation
+	// Bridge native menu items (Settings…) to in-app navigation
 	useMenuActions();
 
 	// A click on a system notification, which the main process has already

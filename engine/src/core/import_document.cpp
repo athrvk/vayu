@@ -4399,12 +4399,12 @@ json vayu_folder_of (const std::optional<json>& object, ImportTally& tally) {
 
 /// The integer `order` @p object states, if any: a position among a parent's
 /// sub-folders and requests together (#2535), on a draft or on the
-/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote.
+/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote. A
+/// value no row can store (`storable_order`, #3451) states nothing, rather
+/// than wrapping to a negative that sorts first.
 std::optional<int> stated_order (const json& object) {
     const json* order = prop (&object, "order");
-    return order != nullptr && order->is_number_integer () ?
-    std::make_optional (order->get<int> ()) :
-    std::nullopt;
+    return order != nullptr ? vayu::db::storable_order (*order) : std::nullopt;
 }
 
 /// The request's position among its folder's, from `x-vayu-request.order`.
@@ -4923,8 +4923,7 @@ std::optional<InsomniaExport> insomnia_v5_export (const InsomniaType& type) {
  * be their collection.
  */
 std::string insomnia_refusal (const InsomniaType& type) {
-    const std::string lead =
-    "Could not read the document: this is an Insomnia ";
+    const std::string lead = "Couldn't read the document: this is an Insomnia ";
     if (type.kind == "collection" || type.kind == "environment") {
         return lead + type.kind + " export in format " + type.version +
         ", which this version of Vayu does not read. It reads format 5.";
@@ -5263,7 +5262,7 @@ const ImportSource& source) {
     // which is the order `parse-raw.ts` read the same bytes in.
     const DocumentRead read = read_document (text);
     if (!read.ok ()) {
-        parsed.error = "Could not read the document: " + read.error;
+        parsed.error = "Couldn't read the document: " + read.error;
         return parsed;
     }
     const nlohmann::ordered_json& document = read.root;

@@ -26,6 +26,7 @@ import {
 	useCreateRequestMutation,
 } from "@/queries";
 import { useSessionStore, useTabsStore, useToastStore } from "@/stores";
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
@@ -128,6 +129,9 @@ export interface UseNewRequestReturn {
 export function useNewRequest(): UseNewRequestReturn {
 	const openTab = useTabsStore((s) => s.openTab);
 	const openRequestFocusingUrl = useTabsStore((s) => s.openRequestFocusingUrl);
+	// Mounted inside the drawer (the collection tree's own "New request"), the new
+	// tab is a pick from it and an overlay leaves; elsewhere this is a no-op.
+	const onItemOpened = useDrawerItemOpened();
 	const showToast = useToastStore((s) => s.showToast);
 	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
 	const { data: collections = [] } = useCollectionsQuery();
@@ -157,13 +161,14 @@ export function useNewRequest(): UseNewRequestReturn {
 				// A preset request arrives filled in, so its caller keeps focus (#3400).
 				if (preset) openTab({ type: "request", entityId: newRequest.id });
 				else openRequestFocusingUrl(newRequest.id);
+				onItemOpened();
 			} catch (error) {
 				// Without this the click looks dead - the old code only logged.
 				console.error("Failed to create new request:", error);
 				showToast(createFailedMessage(error), "error");
 			}
 		},
-		[createRequestMutation, openTab, openRequestFocusingUrl, showToast]
+		[createRequestMutation, openTab, openRequestFocusingUrl, onItemOpened, showToast]
 	);
 
 	const newRequest = useCallback(

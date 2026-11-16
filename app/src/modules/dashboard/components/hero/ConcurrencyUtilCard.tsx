@@ -65,11 +65,7 @@ export function ConcurrencyUtilCard({
 				% utilisation
 			</p>
 			{util !== undefined && (
-				<MiniBar
-					pct={Math.min(100, util)}
-					color="hsl(var(--muted-foreground))"
-					showTarget
-				/>
+				<MiniBar pct={Math.min(100, util)} color="hsl(var(--muted-foreground))" />
 			)}
 		</HeroCardShell>
 	);

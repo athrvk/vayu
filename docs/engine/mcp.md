@@ -316,7 +316,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` arrives from the engine without its `user:password@` (#3258), which reveal does not change |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; a blank or whitespace-only `name` is an input error, as on `update_collection`, and never reaches the engine (#3253); takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch, with `If-Match` after that read; a `412` re-reads and merges once) | write toggle; a blank or whitespace-only `name` is an input error, never sent to the engine (#3253); `variables` merges like `update_environment`'s (a blank or whitespace-padded name is a `400` naming the key), `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
-| `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
+| `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm; the engine stops every running mock of the subtree as part of the delete, for any client (#3449) |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff` + `GET /requests/:id` (×N, reveal off, one per entry with a `headers`, `url` or `params` change) | - (each bucket - `added`, `declined`, `removed`, `changed` - capped at 50 entries, with `summary` carrying the true totals; `declined` lists operations whose request the user deleted, which `sync_spec` never re-creates; the per-entry `draft` is dropped; the current side of a `headers`, `url` or `params` change that could carry a credential withheld unless revealed) |
 | `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; relays the `basePaths` describe answers to match, so literal-URL requests under a server's base path pair as the bind would (#3030); `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
@@ -331,8 +331,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it; collections, requests, environments, saved examples and client certificates, whose `name` is `host` or `host:port`) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a saved example is refused with the engine's 409 when its request is gone or full, and a client certificate when a live entry holds its host and port |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count, a saved example's name, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a request or saved example is refused with the engine's 409 (naming the item and the Trash entry to restore first) when its owner is in the trash, an example also when its request is gone or full, and a client certificate when a live entry holds its host and port |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - a collection's purge totals, an environment's variable count, a saved request's or example's name and owner, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; `headers` is ordered `{key, value, enabled?}` rows (repeats kept) or a string map; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; `headers` (rows or map) replaces the whole list; the returned row has credential-header values withheld unless revealed |
@@ -813,24 +813,31 @@ Notes:
   it in Settings): its entry is `kind: "clientCertificate"`, named by its
   target, a root with `parentId` null and both counts 0. `list_trash`
   answers a page of `GET /trash` (#2443), each entry unchanged - roots only,
-  with `collections` / `requests` counting what each entry's delete took, an
-  environment entry carrying `variables` and an example entry carrying its
-  request as `parentId`, exactly as the route documents. `restore_trash_entry` is the one write tool here that is **not**
+  with `collections` / `requests` counting what each entry's delete took (what
+  a restore puts back) and `purgeCollections` / `purgeRequests` counting what a
+  purge would destroy under it (#3449), an environment entry carrying
+  `variables`, an example entry carrying its request as `parentId`, and a
+  request or example entry carrying its owner's name as `parentName`, exactly
+  as the route documents. `restore_trash_entry` is the one write tool here that is **not**
   destructive - it puts a row back rather than removing one - so it carries the
   write toggle alone, with no confirmation step; it surfaces the engine's own
   404/409 text verbatim instead of writing a second sentence that could
   disagree with it, and reports `reparentedToRoot` in its result text when a
   restored collection came back at the top level because its parent is gone or
   itself in the trash; a restored environment comes back inactive, and
-  `activate_environment` is what makes it the active one again. A saved
-  example whose request is deleted or gone, or already holds the 100 examples a
-  request may, is refused with the engine's 409 text, and so is a client
+  `activate_environment` is what makes it the active one again. A request
+  or saved example whose owner is in the trash is refused with the engine's 409
+  text, which names the item and the Trash entry to restore first by name and
+  id (#3449); so is an example whose request is gone or already holds the 100
+  examples a request may, and so is a client
   certificate while a live entry holds the same host and port.
   `purge_trash_entry` is the Trash's own hard delete and is gated exactly like
   `delete_collection`: it reads the entry off `GET /trash` first, so the
   confirmation prompt names what a mistyped id would otherwise destroy sight
-  unseen (a collection's sub-collections and requests, an environment's
-  variable count, a saved example's name, a client certificate's registry entry
+  unseen (a collection's sub-collections and requests, counted by the purge
+  totals so an earlier delete's rows under it are included, #3449; an
+  environment's variable count; a saved request's or example's name and the
+  collection or request it came from; a client certificate's registry entry
   and stored passphrase with its files untouched), and an entry the trash does not hold - or one of a kind this
   build does not know - is a refusal before any prompt is shown. Both name the entry with `entryId`, not a bare `id`
   (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the
@@ -1469,12 +1476,18 @@ the stored settings (redirects, protocol, `verifySSL`, cookies), exactly as the
 app's Send does. A field the call states beside the id (`method`, `headers`,
 `body`, `bodyType`, `auth`, `httpVersion`) goes in the compose body's `request`
 overlay and replaces the stored field for that send only. With a `url`,
-`run_request` is ad hoc: `requestId` only links the run in History and is
-never sent to `/compose`, nothing stored is applied, and the result carries a
-caveat saying so, because an agent passing both usually means the saved request
-and would otherwise read a default-auth response as the stored one. A call with
-neither is refused. The by-id branch keeps the ad-hoc gates of the other: the
-`verifySSL: false` refusal and the agent-script refusal run first, and the
+`run_request` is ad hoc: `requestId` links the run in History and is never
+sent to `/compose`, nothing stored is applied but the collection scope its
+scripts read (the linked request's collection wins over `collectionId` at
+`/execute`, issue #3461), and the result carries a caveat saying so, because
+an agent passing both usually means the saved request and would otherwise read
+a default-auth response as the stored one. A call with neither is refused. Ad
+hoc, `collectionId` scopes composition, and the composed answer's
+`collectionId` (passed on unchanged by `asMcpSend`) carries the same scope to
+`/execute`, so a script the call adds reads that chain and the names
+composition deferred past it resolve against it (issue #3461). The by-id
+branch keeps the ad-hoc gates of the other: the `verifySSL: false` refusal and
+the agent-script refusal run first, and the
 allowlist is checked on the composed URL, not the stored one.
 
 A pre-request script can still change where the request goes after that gate
@@ -2764,10 +2777,11 @@ whatever encoding it went out in; an agent reads `<redacted>` there instead:
 
 | What | Masked as | Read by |
 | ---- | --------- | ------- |
-| The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked, and a base64 body (`bodyEncoding: "base64"`, #2458) is searched as the bytes it decodes to, never as its base64 text, where a match is coincidence: each form is matched as UTF-8 bytes and as Latin-1 bytes, the marker replaces the bytes it matched, and the body is re-encoded so it still decodes (`bodySize` / `bodyBytes` keep the engine's count; a body with no match comes back unchanged) | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run` (its `mode` / `duration` echo; the projection carries no other stored text), `export_run_report` (the document text), `get_run_samples`, `list_runs`, `get_inbox_captures`, `get_mock_activity` (each entry's `path`), `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines; every row's `url` is also withheld as a saved request's is, in the table above, so a credential typed literally into it does not pass), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
+| The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode`, query, and a URL's path, fragment and user info as composition writes them), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked, and a base64 body (`bodyEncoding: "base64"`, #2458) is searched as the bytes it decodes to, never as its base64 text, where a match is coincidence: each form is matched as UTF-8 bytes and as Latin-1 bytes, the marker replaces the bytes it matched, and the body is re-encoded so it still decodes (`bodySize` / `bodyBytes` keep the engine's count; a body with no match comes back unchanged) | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run` (its `mode` / `duration` echo; the projection carries no other stored text), `export_run_report` (the document text), `get_run_samples`, `list_runs`, `get_inbox_captures`, `get_mock_activity` (each entry's `path`), `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines; every row's `url` is also withheld as a saved request's is, in the table above, so a credential typed literally into it does not pass), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
 | The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list (a response's `headerLines`, an exchange's `requestHeaderLines`, a trace's `sentHeaderLines` and each redirect hop's `redirects[].headerLines`, #2461, included) and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
 | The value of the query parameter auth wrote into the request at send time, named by the trace's `request.authQueryParam` (an OAuth 2.0 token or an API key placed in the query; the engine's raw, unencoded name), in the sibling `url` and in the request line of the sibling `rawRequest`; and the headers named by `request.authHeaders`, in the sibling `headers`, `sentHeaders` and `rawRequest` header block, beside the names above (#1835). `run_request`'s answer carries both keys at its top level (#1845), where the record has no `url` and `requestHeaders` stands for `headers`. On `run_request`'s answer the same name masks each followed redirect hop's `redirects[].url` (#2949), since the hop sits beside the key; a stored trace keeps the hops under `response` and the key under `request`, so there a hop's `url` is masked by the secret forms and the credential-named rule, and by the engine, which blanks the auth-written parameter in the hop URL it records. The `authNotice` beside them, saying auth sent nothing (a mode Vayu does not execute, #2474, naming the mode; an empty bearer token or API key name, #3203) or that the request's own `Authorization` header was sent in place of an OAuth 2.0 token (#3202), is a plain string, carries no credential and is not masked | `<redacted>` after the name | the same |
 | The value of a credential-named query parameter (`SENSITIVE_PARAM_NAMES`, the saved-request rule above, whole name and case-insensitive) in the `url` of a record (a followed redirect hop's `url` included, #2949) and in the request line of a `rawRequest`, whether it was typed into the saved URL, came from a `Params` row or was written by auth: a credential that is no secret variable and no stored auth credential has no form to match, so the name is what masks it (#1909). `?api_key=LIT&page=2` reads `?api_key=<redacted>&page=2`; `api_key2`, an empty value and a lone `{{variable}}` are shown as written. Only the query between the first `?` and the first `#` is read, so a fragment parameter is not masked here | `<redacted>` after the name | every read of run output above, and `delete_run`'s confirmation prompt, whose subject line names the run by its `url` |
+| The password of a URL's `user:password@host` userinfo, in the `url` of a record (a followed redirect hop's and a monitor's included) and in `metadata.requestUrl` of a run report, the member the engine copies from the run snapshot's `url` and which is read exactly as `url` is, so its credential-named query values are masked by the row above. The password is dropped and the user name kept (`http://u:LIT@h/p` reads `http://u@h/p`), as a saved request's `url` is, so the record keeps its shape; a lone `{{variable}}` password and a URL with no password are shown as written. Only the authority is read, so an `@` in the path, query or fragment is not taken for userinfo | the password dropped | every read of run output above, `get_run_report` and `vayu://run/{runId}/report` included |
 | The planned run's `auth` block, composed with the stored or inherited credential in it | as a stored row's: the member dropped, `<member>Withheld: true` | `start_load_run`'s confirmation preview |
 
 The masking is the engine's own rule for a run's config snapshot (#1803),
@@ -2831,6 +2845,19 @@ failure leads even when the read failed first with a bare `fetch failed`, and a
 lookup failure that is not an outage yields to the read's own failure (a 404
 for an unknown run). A cancelled read says so without a tool call's "may have
 completed" advice, since a read sent nothing.
+
+**An engine refusal's text is masked too.** The engine words its refusals to
+quote no resolved variable value (a header name is quoted as written, with the
+one byte at fault), but that is the engine's rule to keep, so a tool error built
+from an engine refusal body (`Engine error (400): ...`, a `restore_trash_entry`
+404 or 409, the engine's 404 sentence) reads each secret form as `<redacted>`
+under the rule above, in its text and in `structuredContent.error.advice`. The
+mask is applied in `dispatchTool` (`maskEngineText`, `kit.ts`), keyed on the
+failure's `engineText` mark, so an error that holds no engine text (a missing
+argument, a policy refusal) makes no lookup and an outage needs none. It fails
+closed like the reads above: when a lookup fails the answer is the masking error
+and none of the refusal text. With reveal on nothing is masked and no lookup is
+made.
 
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.

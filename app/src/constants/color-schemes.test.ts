@@ -26,10 +26,16 @@ import { COLOR_SCHEMES, DEFAULT_COLOR_SCHEME, isColorScheme } from "./color-sche
 
 // Every token a scheme block is expected to set. `--primary-fill` is the one
 // that carries a white label, so it must be present even though it is the only
-// token that deliberately does *not* change between themes.
+// token that deliberately does *not* change between themes. The fill's hover and
+// the two tints are opaque per-scheme values (#3515), and a dark block that
+// leaves one out inherits the light scheme block's, which reads on the wrong
+// ground.
 const REQUIRED = [
 	"--primary",
 	"--primary-fill",
+	"--primary-fill-hover",
+	"--primary-tint",
+	"--primary-tint-hover",
 	"--primary-foreground",
 	"--ring",
 	"--variable",
@@ -76,27 +82,31 @@ describe("accent colour schemes", () => {
 		for (const token of REQUIRED) expect(b).toContain(`${token}:`);
 	});
 
-	it("keeps --primary-fill pinned across themes, and lets --primary diverge", () => {
+	it("keeps --primary-fill and its hover pinned across themes, and lets --primary diverge", () => {
 		// This split is the whole reason white labels stay legible: the fill is
 		// one value in both themes, while --primary brightens in dark because it
-		// is text, ring and chart-series colour on a near-black card.
+		// is text, ring and chart-series colour on a near-black card. The hover
+		// carries the same white label, so it is pinned with it.
 		for (const { value } of COLOR_SCHEMES) {
 			const light = block(value, false) ?? "";
 			const dark = block(value, true) ?? "";
-			const fill = (b: string) => /--primary-fill:\s*([^;]+);/.exec(b)?.[1].trim();
-			expect(fill(dark), `${value}: --primary-fill must not change between themes`).toBe(
-				fill(light)
-			);
+			for (const token of ["primary-fill", "primary-fill-hover"]) {
+				const read = (b: string) =>
+					new RegExp(`--${token}:\\s*([^;]+);`).exec(b)?.[1].trim();
+				expect(read(dark), `${value}: --${token} must not change between themes`).toBe(
+					read(light)
+				);
+			}
 		}
 	});
 
 	it("makes a desaturated scheme declare its own --primary-text", () => {
 		/*
 		 * `--primary-text` is the accent when the accent *is* the label, and it
-		 * defaults to `--primary` - correct for seven of the eight schemes,
+		 * defaults to `--primary` - right for most schemes,
 		 * because what separates an active tab from an inactive one is almost
 		 * entirely saturation, not lightness. Measured on `--card`, accent text
-		 * and `--muted-foreground` sit within a 1.01-1.56 contrast ratio in every
+		 * and `--muted-foreground` sit within a 1.01-1.45 contrast ratio in every
 		 * scheme; the eye reads "coloured vs grey", and 55-95% saturation against
 		 * an inactive 4-5% carries it.
 		 *
@@ -107,8 +117,9 @@ describe("accent colour schemes", () => {
 		 *
 		 * The rule is derived from the saturation rather than hardcoded to
 		 * "graphite", so the next desaturated scheme cannot ship the same bug.
-		 * `--primary-text` is deliberately NOT in REQUIRED: inheriting it is the
-		 * correct behaviour for a saturated scheme, not a forgotten block.
+		 * `--primary-text` is deliberately NOT in REQUIRED: inheriting it is
+		 * usually correct for a saturated scheme, not a forgotten block (light
+		 * sky's override is measured in `color-scheme-contrast.test.ts`).
 		 */
 		const saturation = (b: string) =>
 			Number(/--primary:\s*[\d.]+\s+([\d.]+)%/.exec(b)?.[1] ?? NaN);

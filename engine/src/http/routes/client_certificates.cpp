@@ -212,7 +212,10 @@ bool is_create) {
     }
     // The one field with a default: a key without a passphrase is the common
     // case, so absent on create means "none" and `null` on update clears it.
-    apply_string_field (json, "passphrase", c.passphrase, "", is_create);
+    if (auto outcome = apply_string_field (json, "passphrase", c.passphrase, "", is_create);
+    !outcome) {
+        return outcome;
+    }
 
     // The merged row's format. Unparseable only when the *stored* value is one
     // no route would have written - a hand-edited row - and that is a 400

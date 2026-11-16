@@ -23,7 +23,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { screen, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { RequestExample } from "@/types";
 import ExamplesPanel from "./ExamplesPanel";
 

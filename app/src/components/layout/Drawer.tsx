@@ -5,12 +5,18 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useCallback } from "react";
+import { flushSync } from "react-dom";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { useLayoutStore } from "@/stores";
+import { cn } from "@/lib/utils";
 import { Collapsible } from "@/components/ui";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { regionProps } from "./region-focus";
-import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
+import { DrawerItemOpenedProvider } from "./drawer-item-opened";
+import { focusActiveTab } from "./tab-focus";
+import { useOverlayPanel } from "./useOverlayPanel";
+import { DEFAULT_DRAWER_WIDTH, type SidePanelMode } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
@@ -23,14 +29,31 @@ import SettingsCategoryTree from "@/modules/settings/sidebar/SettingsCategoryTre
 import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
 
-export function Drawer() {
+interface DrawerProps {
+	mode?: SidePanelMode;
+	/** The context bar's mode, for the one-overlay-at-a-time rule (`useOverlayPanel`). */
+	siblingMode?: SidePanelMode;
+}
+
+export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
 	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
 	const drawerView = useLayoutStore((s) => s.drawerView);
 	const drawerWidth = useLayoutStore((s) => s.drawerWidth);
 	const setDrawerWidth = useLayoutStore((s) => s.setDrawerWidth);
+	const panelRef = useOverlayPanel({ panel: "drawer", mode, siblingMode });
 
-	const width = drawerWidth;
+	// What the views call once they have opened a tab (`drawer-item-opened.ts`).
+	// An overlay has done its job and leaves, with focus on the tab it opened.
+	const onItemOpened = useCallback(() => {
+		if (mode !== "overlay") return;
+		// Commit the tab the caller just opened first. `Shell` reveals the drawer
+		// when the active tab's type changes, from an effect that this flush runs;
+		// closing before it would be undone by it.
+		flushSync(() => {});
+		setDrawerOpen(false);
+		focusActiveTab();
+	}, [mode, setDrawerOpen]);
 
 	return (
 		// See `ContextBar.tsx` for why `Collapsible`/`CollapsibleContent` sit
@@ -42,10 +65,20 @@ export function Drawer() {
 				{/* <aside>, so the sidebar is a landmark a screen reader can jump to
 				   instead of an anonymous div. Labelled by the active view because
 				   the drawer hosts six different panels - "Complementary" alone
-				   would not say which one is showing. */}
+				   would not say which one is showing.
+
+				   Overlay mode is the context bar's, mirrored: the same shadow and
+				   z-index, on the content's left edge where the bar takes its right
+				   one (`Shell` gives the drawer a positioned box of its own). */}
 				<aside
-					className="relative flex shrink-0 bg-panel"
-					style={{ width }}
+					ref={panelRef}
+					className={cn(
+						"flex shrink-0 bg-panel",
+						mode === "overlay"
+							? "absolute left-0 top-0 bottom-0 max-w-full shadow-lg z-10"
+							: "relative"
+					)}
+					style={{ width: drawerWidth }}
 					aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
 					// A stop in the F6 cycle - see `region-focus.ts` for why the bands
 					// are marked rather than found by tag name.
@@ -70,12 +103,14 @@ export function Drawer() {
 						    collections and environments purely to hand them to the
 						    Variables view, which meant the loading state was lost at the
 						    boundary and an in-flight query rendered as an empty tree. */}
-						{drawerView === "collections" && <CollectionTree />}
-						{drawerView === "history" && <HistoryList />}
-						{drawerView === "variables" && <VariablesCategoryTree />}
-						{drawerView === "services" && <ServicesPanel />}
-						{drawerView === "trash" && <TrashList />}
-						{drawerView === "settings" && <SettingsCategoryTree />}
+						<DrawerItemOpenedProvider value={onItemOpened}>
+							{drawerView === "collections" && <CollectionTree />}
+							{drawerView === "history" && <HistoryList />}
+							{drawerView === "variables" && <VariablesCategoryTree />}
+							{drawerView === "services" && <ServicesPanel />}
+							{drawerView === "trash" && <TrashList />}
+							{drawerView === "settings" && <SettingsCategoryTree />}
+						</DrawerItemOpenedProvider>
 					</div>
 
 					<PanelResizeHandle

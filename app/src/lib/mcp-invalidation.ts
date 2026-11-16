@@ -65,6 +65,11 @@ const INVALIDATORS: Record<
 	 * row it purged stays there until the drawer is closed and reopened; clicking
 	 * Restore on that phantom row 404s.
 	 *
+	 * `mockServer.list()` because the engine stops the mocks of a deleted
+	 * collection and its descendants as part of the delete (#3449), so the
+	 * running-mock list the Dock and the Services drawer poll would otherwise
+	 * keep showing a mock that is gone until its next poll.
+	 *
 	 * `compose` at the `all` prefix rather than per request: a collection write
 	 * changes the chain every descendant request inherits its auth, headers and
 	 * scripts from, and which requests those are is the same engine-side
@@ -87,6 +92,7 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 		invalidateAllRequestLists(queryClient);
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.mockServer.list() });
 		invalidateCompositions(queryClient);
 	},
 

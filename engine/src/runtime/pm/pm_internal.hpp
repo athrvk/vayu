@@ -85,10 +85,33 @@ struct RuntimeState {
     /// from a value the script threw: both arrive as a pending exception at the
     /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
     bool interrupted = false;
+    /// Set beside `interrupted` when it was the deadline, and also when the
+    /// async drain stops on it; unlike `interrupted`, nothing clears it until
+    /// the next execution, so the execution can say it timed out.
+    bool deadline_reached = false;
+    /// `ScriptContext::stop` for the execution in progress, or null.
+    const std::atomic<bool>* stop = nullptr;
+    /// Set when `stop` ended the execution, at a poll or in the async drain.
+    bool stopped = false;
     /// The script stack budget this runtime was configured with, which
     /// `load_library` restores after a library's evaluation raised it. 0 is
     /// QuickJS's "no limit".
     std::size_t stack_size = 0;
+    /// The `scriptMemoryLimit` this runtime was configured with: what the
+    /// script heap holds `heap_bytes` to, and what the text of an
+    /// out-of-memory error names. 0 is "no limit".
+    std::size_t memory_limit = 0;
+    /// The bytes the script heap holds for this runtime: every block QuickJS
+    /// asked for, counted as asked rather than as the platform allocator
+    /// rounded it, so a limit refuses at the same point on every platform.
+    std::size_t heap_bytes = 0;
+    /// Set by the script heap when it refuses an allocation (the limit, or the
+    /// host out of memory). QuickJS does not always report that refusal as
+    /// out of memory: with no room for the error it throws a bare `null`, and
+    /// its parser can replace the error with a `SyntaxError` of its own. This
+    /// flag is what `thrown_value_message` reads instead. Cleared before each
+    /// execution, and scoped to a test row's call by `AllocationRefusalWatch`.
+    bool allocation_refused = false;
     /// Promises rejected with no handler attached, in rejection order, each a
     /// reference the rejection tracker took (#2531). Emptied, every reference
     /// freed, before an execution releases its context: a held promise pins
@@ -170,6 +193,11 @@ struct ContextData {
      * warning that says so. Never throws into the script.
      */
     void add_console_entry (ConsoleLevel level, std::string message);
+
+    /// `ScriptConfig::enable_console`. Gates the lines the engine writes on a
+    /// script's behalf (`pm.sendRequest`'s, #3462), so a console-off run
+    /// builds none of them.
+    bool console_enabled = true;
 
     /// Bytes of `console_output` messages kept so far (the limit marker aside).
     std::size_t console_bytes = 0;
@@ -358,6 +386,35 @@ inline bool script_deadline_expired (JSContext* ctx) {
     return state != nullptr && state->enabled && state->interrupted;
 }
 
+// Scopes `RuntimeState::allocation_refused` to one call into the script whose
+// failure the caller reports as a row of its own (a `pm.test` callback, a
+// legacy `tests[name]` getter): the flag reads clear when the call starts, and
+// the reading from before it is put back when the watch ends. Without it, a
+// row that ran out of memory would have every later error of the execution
+// read as out of memory too.
+class AllocationRefusalWatch {
+    public:
+    explicit AllocationRefusalWatch (JSContext* ctx)
+    : state_ (static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)))) {
+        if (state_ != nullptr) {
+            outer_refused_ = std::exchange (state_->allocation_refused, false);
+        }
+    }
+    ~AllocationRefusalWatch () {
+        if (state_ != nullptr) {
+            state_->allocation_refused = outer_refused_;
+        }
+    }
+    AllocationRefusalWatch (const AllocationRefusalWatch&)            = delete;
+    AllocationRefusalWatch& operator= (const AllocationRefusalWatch&) = delete;
+    AllocationRefusalWatch (AllocationRefusalWatch&&)                 = delete;
+    AllocationRefusalWatch& operator= (AllocationRefusalWatch&&)      = delete;
+
+    private:
+    RuntimeState* state_;
+    bool outer_refused_ = false;
+};
+
 // Frees a borrowed JSValue on every exit. QuickJS ships no such helper, and the
 // surfaces that read a handful of properties and refuse on most of them - the
 // pm.request write-back, pm.sendRequest's options object, the Url query
@@ -389,6 +446,12 @@ inline std::string js_to_string (JSContext* ctx, JSValue val) {
     JS_FreeCString (ctx, str);
     return result;
 }
+
+// The text a failed script or `pm.test` row reports for @p thrown (a value a
+// script threw, or the pending exception taken off @p ctx): never empty, and
+// never the bare `null` or `undefined` that `String(value)` gives. Defined in
+// script_engine.cpp, which owns the out-of-memory wording it shares.
+std::string thrown_value_message (JSContext* ctx, JSValueConst thrown);
 
 // Each class's id, process-wide: assigned once, under
 // `class_id_registration_mutex ()`, by the first `ScriptEngine::Impl` to build

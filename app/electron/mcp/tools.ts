@@ -42,6 +42,7 @@ import {
 import {
 	errorResult,
 	isRecord,
+	maskEngineText,
 	maskingIncompleteResult,
 	NOTHING_CHANGED,
 	STARTED_RUNS,
@@ -306,7 +307,9 @@ export async function dispatchTool(
 	const result = tool
 		? await serveCall(tool, args, ctx, signal)
 		: errorResult(`Unknown tool: ${name}`, "input");
-	if (result.isError) return failureAnswer(result, name, ctx, args);
+	if (result.isError) {
+		return failureAnswer(await maskEngineText(result, ctx, signal), name, ctx, args);
+	}
 	// Only a call that succeeded changed anything. A tool that returned an error
 	// result may still have got as far as the engine, but it cannot say so, and
 	// an invalidation storm on every rejected call would be worse than the one

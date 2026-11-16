@@ -26,17 +26,18 @@
  * accent); there is no per-category color.
  */
 
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { useMemo } from "react";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
-import { DrawerPanel, ErrorState } from "@/components/shared";
+import { DrawerPanel, EmptyState, ErrorState } from "@/components/shared";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
 import { Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button, Input, Skeleton, type IconMotion } from "@/components/ui";
+import { Button, Input, Skeleton, TooltipIconButton, type IconMotion } from "@/components/ui";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
@@ -88,6 +89,7 @@ export default function SettingsCategoryTree() {
 	const query = useSettingsStore((s) => s.searchQuery);
 	const setQuery = useSettingsStore((s) => s.setSearchQuery);
 	const openTab = useTabsStore((s) => s.openTab);
+	const onItemOpened = useDrawerItemOpened();
 	const { isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now
@@ -96,6 +98,7 @@ export default function SettingsCategoryTree() {
 	const selectCategory = (category: SettingsCategory, highlightKey?: string) => {
 		setSelectedCategory(category, highlightKey);
 		openTab({ type: "settings", entityId: null });
+		onItemOpened();
 	};
 
 	// The same corpus the palette's settings source searches - see
@@ -134,7 +137,7 @@ export default function SettingsCategoryTree() {
 					// dead CSS that looks wired up.
 					"group w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
 					"data-[active=false]:text-foreground data-[active=false]:hover:bg-accent",
-					"data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
+					"data-[active=true]:bg-primary-tint data-[active=true]:text-primary data-[active=true]:font-medium"
 				)}
 			>
 				<Icon className="size-icon shrink-0" data-icon-motion={motion} />
@@ -158,15 +161,13 @@ export default function SettingsCategoryTree() {
 							className="pl-8 pr-8 text-sm"
 						/>
 						{query !== "" && (
-							<Button
-								variant="ghost"
+							<TooltipIconButton
 								size="sm"
 								onClick={() => setQuery("")}
-								aria-label="Clear search"
+								label="Clear search"
 								className="absolute right-0.5 top-1/2 size-target -translate-y-1/2 p-0"
-							>
-								<X className="size-icon-sm" />
-							</Button>
+								icon={<X className="size-icon-sm" />}
+							/>
 						)}
 					</div>
 				</div>
@@ -181,9 +182,16 @@ export default function SettingsCategoryTree() {
 					<>
 						<SectionHeading>{`${results.length} ${pluralize(results.length, "result")}`}</SectionHeading>
 						{results.length === 0 ? (
-							<p className="px-4 py-2 text-xs text-muted-foreground">
-								No settings match “{trimmedQuery}”.
-							</p>
+							<EmptyState
+								variant="inline"
+								compact
+								title={`No settings match “${trimmedQuery}”.`}
+								action={
+									<Button variant="link" size="sm" onClick={() => setQuery("")}>
+										Clear the filter
+									</Button>
+								}
+							/>
 						) : (
 							<div>
 								{results.map((result) => (

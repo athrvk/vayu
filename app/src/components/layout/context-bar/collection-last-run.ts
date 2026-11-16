@@ -12,23 +12,42 @@
  * makes for the run tab's sections.
  */
 
-import { RUN_STATUS } from "@/components/shared/run-status";
+import { OUTCOME_TITLE, rowOutcome } from "@/components/shared/run-outcome";
+import { RUN_STATUS, runStatusDisplay } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Run } from "@/types";
 
 /** From here `pending` is "Queued" in the running token: both say "no outcome yet". */
-const QUEUED_TONE = { label: "Queued", className: RUN_STATUS.running.text };
+const QUEUED_TONE: RunStatusTone = {
+	label: "Queued",
+	className: RUN_STATUS.running.text,
+	verdict: null,
+};
+
+export interface RunStatusTone {
+	label: string;
+	className: string;
+	/** The verdict's word when the run has one, for the row's accessible name. */
+	verdict: string | null;
+}
 
 /**
- * The status word and the token that colours it, read from `RUN_STATUS` so this
- * section cannot disagree with the other status surfaces. `RUN_STATUS.text` is
- * the `--status-*-text` token, the one meant for the colour *being* the text
- * (see app/CLAUDE.md); `pending` is the only status this section words itself.
+ * The status word and the token that colours it, read through `runStatusDisplay`
+ * so this section cannot disagree with the other status surfaces. The `text` it
+ * answers is the `--status-*-text` token, the one meant for the colour *being*
+ * the text (see app/CLAUDE.md). A completed collection run with a failed or
+ * errored step reads in the error colour, as its History row does (#3496);
+ * `pending` is the only status this section words itself.
  */
-export function runStatusTone(status: Run["status"]): { label: string; className: string } {
-	if (status === "pending") return QUEUED_TONE;
-	const { label, text } = RUN_STATUS[status];
-	return { label, className: text };
+export function runStatusTone(run: Run): RunStatusTone {
+	if (run.status === "pending") return QUEUED_TONE;
+	const judgement = rowOutcome(run);
+	const { label, text } = runStatusDisplay(run.status, judgement?.outcome);
+	return {
+		label,
+		className: text,
+		verdict: judgement ? OUTCOME_TITLE[judgement.outcome].toLowerCase() : null,
+	};
 }
 
 /**

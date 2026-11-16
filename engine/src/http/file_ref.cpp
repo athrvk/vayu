@@ -128,7 +128,7 @@ std::optional<std::string> refuse_shape (const FileRef& file, std::string_view l
 std::string untrusted_message (const FileRef& file, std::string_view label) {
     return std::string (label) + " '" + file.src +
     "' was not picked on this machine and is not under an allowed folder - "
-    "pick it again in the request, or allow its folder in Settings > Files";
+    "pick it again in the request, or allow its folder in Settings › Files";
 }
 
 std::string unreadable_message (const FileRef& file, std::string_view label, std::string_view reason) {

@@ -30,15 +30,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
 import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
+import { formatBytes } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { Callout } from "../Callout";
-import {
-	detectBodyType,
-	getMonacoLanguage,
-	formatBody,
-	formatSize,
-	LARGE_BODY_BYTES,
-} from "./utils";
+import { detectBodyType, getMonacoLanguage, formatBody, LARGE_BODY_BYTES } from "./utils";
 import { LargeBodyNotice } from "./LargeBodyNotice";
 import { buildPreviewDocument } from "./preview-document";
 import type { BodyType, ResponseBodyProps, ViewMode } from "./types";
@@ -338,7 +333,7 @@ function NonTextBody({
 	canDownload: boolean;
 }) {
 	const bytes = useMemo(() => rawBytes?.data ?? new TextEncoder().encode(text), [rawBytes, text]);
-	const size = formatSize(bytes.length);
+	const size = formatBytes(bytes.length);
 	const download = canDownload ? " Download saves it." : "";
 
 	return (

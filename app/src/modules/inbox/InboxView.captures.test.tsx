@@ -40,7 +40,7 @@ import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { mergeCapture, queryKeys } from "@/queries";
-import { useTabsStore } from "@/stores";
+import { useEngineStore, useTabsStore } from "@/stores";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
 
@@ -138,6 +138,8 @@ beforeEach(() => {
 	listInboxCaptures.mockReset().mockResolvedValue(page(0, 0, 0));
 	clearInboxCaptures.mockReset().mockResolvedValue({ inboxId: "inbox_a", cleared: 2 });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
+	// The header reads running only while the engine is up (`useEngineServing`).
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn() } });
 	Element.prototype.scrollIntoView = vi.fn();
 });
@@ -202,6 +204,62 @@ describe("captures past the first page", () => {
 		// reason.
 		await act(async () => {});
 		expect(screen.queryByRole("button", { name: /Load more|Loading/ })).not.toBeInTheDocument();
+	});
+});
+
+describe("a capture row's path (#3492)", () => {
+	// Longer than the row has room for, with the part that tells captures apart
+	// at the end.
+	const LONG_PATH = "/webhooks/stripe/events/evt_1Nk2xYz";
+
+	async function renderLongPathRow() {
+		listInboxCaptures.mockResolvedValueOnce({
+			...page(0, 0, 1),
+			data: [capture(1, { path: LONG_PATH })],
+		});
+		renderTab();
+		const shown = await screen.findByText("…vt_1Nk2xYz");
+		return { shown, row: shown.closest("button")! };
+	}
+
+	it("keeps the tail of a long path, with the CSS clip as the net under it", async () => {
+		const { shown } = await renderLongPathRow();
+
+		// One character for the ellipsis, then the last ten of the path.
+		expect(shown.textContent).toBe("…vt_1Nk2xYz");
+		expect(shown.className).toContain("truncate");
+	});
+
+	it("shows the whole path when the row takes keyboard focus", async () => {
+		const { row } = await renderLongPathRow();
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		fireEvent.focus(row);
+
+		// A native `title` would never open here: this is the focus half of
+		// "full path on hover or focus".
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+		expect(row).not.toHaveAttribute("title");
+	});
+
+	it("shows the whole path on hover", async () => {
+		const { row } = await renderLongPathRow();
+
+		fireEvent.pointerMove(row);
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+	});
+
+	it("leaves a short path whole, with nothing to reveal", async () => {
+		listInboxCaptures.mockResolvedValueOnce(page(1, 1, 1));
+		renderTab();
+
+		const row = (await screen.findByText("/hook/1")).closest("button")!;
+		fireEvent.focus(row);
+		fireEvent.pointerMove(row);
+
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		expect(row).not.toHaveAttribute("title");
 	});
 });
 

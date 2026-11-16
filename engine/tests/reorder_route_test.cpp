@@ -304,6 +304,49 @@ TEST_F (ReorderRouteTest, RejectsANonIntegerOrAbsentOrder) {
     EXPECT_EQ (status, 400) << response.dump ();
 }
 
+// An `order` past `int` is refused, not narrowed (#3451). Parsed from text, as
+// a wire body is: nlohmann reads a non-negative literal as unsigned, and both
+// kinds of row are held to it. Mutation check: restore the `get<int> ()` read
+// in `read_move` and 2^31 stores a negative, 2^32 a 0.
+TEST_F (ReorderRouteTest, RejectsAnOrderPastTheColumnAndWritesNothing) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+    for (const char* text : { "2147483648", "4294967296", "9223372036854775808",
+         "18446744073709551615", "-1" }) {
+        for (const json& move : { json{ { "type", "request" }, { "id", a } },
+             json{ { "type", "collection" }, { "id", col }, { "parentId", nullptr } } }) {
+            json entry     = move;
+            entry["order"] = json::parse (text);
+            auto [status, response] =
+            reorder_response (*db_, json{ { "moves", json::array ({ entry }) } });
+
+            EXPECT_EQ (status, 400) << entry.dump () << " -> " << response.dump ();
+            EXPECT_NE (
+            response["error"]["message"].get<std::string> ().find (
+            "move at index 0: 'order' must be an integer from 0 to 2147483647"),
+            std::string::npos)
+            << response.dump ();
+        }
+    }
+    EXPECT_EQ (request_orders (col), (std::vector<int>{ 0 }));
+    const auto stored = db_->get_collection (col);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->order, 0);
+}
+
+TEST_F (ReorderRouteTest, AcceptsTheHighestOrder) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ json{ { "type", "request" }, { "id", a },
+    { "order", json::parse ("2147483647") } } }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (request_orders (col), (std::vector<int>{ 2147483647 }));
+}
+
 TEST_F (ReorderRouteTest, RejectsAnUnknownTypeAndAMalformedNormalizeScope) {
     const std::string col = make_collection ("Billing");
 
@@ -339,6 +382,58 @@ TEST_F (ReorderRouteTest, RefusesAPerKindNormalizeScopeNamingTheParentShape) {
         EXPECT_NE (message.find (R"({"parentId": )"), std::string::npos) << message;
     }
     EXPECT_EQ (request_orders (col), (std::vector<int>{ 0, 0 }));
+}
+
+// `parentId: ""` is the root, as `null` is, in a move and in a scope (#3451).
+// Mutation check: restore the pre-#3451 string reads in `read_scope` and
+// `read_move` and both answer `Collection '' does not exist`.
+TEST_F (ReorderRouteTest, AnEmptyParentIdIsTheRootInAMoveAndInAScope) {
+    const std::string a     = make_collection ("A");
+    const std::string b     = make_collection ("B");
+    const std::string child = make_collection ("child", a);
+    set_collection_position (a, 0, EARLIER);
+    set_collection_position (b, 0, LATER);
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "normalize", json::array ({ normalize_parent ("") }) },
+    { "moves", json::array ({ move_collection (child, 2, "") }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto child_row = db_->get_collection (child);
+    ASSERT_HAS_VALUE (child_row);
+    EXPECT_FALSE (child_row->parent_id.has_value ())
+    << "stored as null, not as \"\"";
+    EXPECT_EQ (child_row->order, 2);
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_EQ (b_row->order, 1) << "the roots were renumbered";
+}
+
+// A non-string `parentId` is a 400 naming the field, never nlohmann's text,
+// in either list. Mutation check: read the move's `parentId` with a bare
+// `get<std::string> ()` in `read_move` and the move half throws nlohmann's
+// type error.
+TEST_F (ReorderRouteTest, RejectsANonStringParentIdNamingTheField) {
+    const std::string parent = make_collection ("parent");
+    const std::string child  = make_collection ("child", parent);
+    for (const char* text : { "5", "true", "{}", "[]" }) {
+        for (const json& body :
+        { json{ { "moves", json::array ({ move_collection (child, 0, json::parse (text)) }) } },
+        json{ { "normalize", json::array ({ normalize_parent (json::parse (text)) }) } } }) {
+            auto [status, response] = reorder_response (*db_, body);
+
+            EXPECT_EQ (status, 400) << body.dump () << " -> " << response.dump ();
+            const auto message = response["error"]["message"].get<std::string> ();
+            EXPECT_NE (
+            message.find ("'parentId' must be a collection id or null"), std::string::npos)
+            << message;
+            EXPECT_EQ (response.dump ().find ("json.exception"), std::string::npos)
+            << response.dump ();
+        }
+    }
+    const auto child_row = db_->get_collection (child);
+    ASSERT_HAS_VALUE (child_row);
+    EXPECT_EQ (child_row->parent_id, std::optional<std::string> (parent));
 }
 
 // ---------------------------------------------------------------------------

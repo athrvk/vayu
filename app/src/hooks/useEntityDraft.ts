@@ -13,10 +13,16 @@
  * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
  * `ElementsTab` are its button users.
  *
- * `InfoTab` and `ScriptTab` take the draft, the resync and the mutation reset
- * from here and render no Save button at all - they commit when focus leaves
- * the field, like the request builder. `reset` therefore has fewer callers
- * than `draft`; `InfoTab` reaches the discard path through `adopt`.
+ * `InfoTab` takes the draft, the resync and the mutation reset from here and
+ * renders no Save button at all - it commits when focus leaves the field, like
+ * the request builder. `reset` therefore has fewer callers than `draft`;
+ * `InfoTab` reaches the discard path through `adopt`.
+ *
+ * **The draft lives in `entity-draft-store`, not in the component (#3459).**
+ * `Shell.tsx` mounts only the tab on screen, so a draft in component state was
+ * thrown away by a look at a request. The store holds it by `entityKey`, so a
+ * remount, or a switch back to an entity shown earlier, picks up where the
+ * edit was; `useDraftSaveContext` keeps the save reachable meanwhile.
  *
  * **Why auth alone kept the button (#446).** Not because a credential is
  * grander than a script - the request builder autosaves its own auth. Because a
@@ -50,31 +56,27 @@
  *
  * ```ts
  * const { draft, setDraft, isDirty, reset } = useEntityDraft({
- *   entityKey: collection.id,
+ *   entityKey: collectionAuthDraftKey(collection.id),
  *   value: collection.auth,
  *   mutation: updateCollection,
  * });
  * ```
  */
 
-import {
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-	type Dispatch,
-	type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+
+import { useEntityDraftStore, type EntityDraftEntry } from "@/stores/entity-draft-store";
 
 interface EntityDraftOptions<T> {
 	/**
-	 * Identity of the thing being edited. A change here is a *switch* (a
-	 * different collection, a different script kind), not an edit - it clears
-	 * the save mutation's error state as well as reseeding the draft.
+	 * Identity of the thing being edited, and the key its draft is stored under
+	 * (`entityDraftKey`). A change here is a *switch* (a different collection),
+	 * not an edit: the draft shown becomes that entity's own, and the save
+	 * mutation's error state is cleared.
 	 */
 	entityKey: string;
 	/**
-	 * The persisted value: what the draft is seeded from, resynced to, and
+	 * The persisted value: what the draft starts from, falls back to, and is
 	 * compared against. May be a fresh object literal every render - the hook
 	 * tracks it by JSON value, not by identity, so callers do not have to
 	 * memoize it.
@@ -97,8 +99,8 @@ interface EntityDraft<T> {
 	/**
 	 * `setDraft` for taking a persisted value into the draft (`InfoTab`'s per-key
 	 * Take theirs). When that leaves the draft equal to the persisted value, the
-	 * clean edge is a discard, not a save: `consumeDiscard` reports it. Leaves
-	 * `baseline` and `externalValue` alone.
+	 * clean edge is a discard, not a save: `consumeDiscard` reports it. While
+	 * the draft stays dirty, `baseline` and `externalValue` are left alone.
 	 */
 	adopt: Dispatch<SetStateAction<T>>;
 	/**
@@ -107,6 +109,14 @@ interface EntityDraft<T> {
 	 * discard as idle instead of "Saved" (#1931).
 	 */
 	consumeDiscard: () => boolean;
+	/**
+	 * Tell the hook a save of `sent` landed; call it from the editor's own save.
+	 * While the editor shows this entity the persisted value catching up says
+	 * the same thing, so this does nothing. Once it does not (unmounted, or
+	 * switched to another entity while the save was out) this is the only notice
+	 * the stored draft gets, and an entry still equal to `sent` is dropped.
+	 */
+	markSaved: (sent: T) => void;
 	/**
 	 * The persisted value the draft last agreed with the server on. A caller
 	 * that merges by field (`InfoTab`'s `{name, description}`) diffs `draft`
@@ -119,10 +129,26 @@ interface EntityDraft<T> {
 	 * A persisted value that arrived while the draft was dirty, not yet
 	 * adopted - null when nothing is pending. Set instead of silently
 	 * overwriting `draft`, so the caller can show what changed underneath and
-	 * let the user take it.
+	 * let the user take it. A change that lands while the editor is unmounted
+	 * arrives here too, on the remount.
 	 */
 	externalValue: T | null;
 }
+
+/**
+ * The stored entry, unless the persisted value has caught up with its draft:
+ * that is a save that landed - this editor's, or one made while it was
+ * unmounted - and it describes nothing unsaved.
+ */
+function heldEntry<T>(
+	entry: EntityDraftEntry<T> | undefined,
+	serializedValue: string
+): EntityDraftEntry<T> | undefined {
+	return entry && JSON.stringify(entry.draft) !== serializedValue ? entry : undefined;
+}
+
+const resolve = <T>(next: SetStateAction<T>, previous: T): T =>
+	typeof next === "function" ? (next as (prev: T) => T)(previous) : next;
 
 export function useEntityDraft<T>({
 	entityKey,
@@ -130,90 +156,63 @@ export function useEntityDraft<T>({
 	mutation,
 }: EntityDraftOptions<T>): EntityDraft<T> {
 	// The whole hook keys off this rather than off `value`'s identity. Callers
-	// pass anything from a plain string (ScriptTab) to an object built inline
-	// per render (InfoTab's `{ name, description }`); with `value` as an effect
-	// dep the latter would resync on every render forever.
+	// pass anything from a plain array (ElementsTab) to an object built inline
+	// per render (InfoTab's `{ name, description }`).
 	const serializedValue = JSON.stringify(value);
 
-	const [draft, setDraft] = useState<T>(value);
-	const [baseline, setBaseline] = useState<T>(value);
-	const [externalValue, setExternalValue] = useState<T | null>(null);
+	const stored = useEntityDraftStore((s) => s.entries.get(entityKey)) as
+		EntityDraftEntry<T> | undefined;
+	const held = heldEntry(stored, serializedValue);
 
-	// Latest persisted value, reachable from the effects and from `reset`
-	// without being a dependency of either. Synced in its own effect - written
-	// before the resync effect below, which runs after it in declaration order.
+	// Latest persisted value, reachable from the callbacks without being a
+	// dependency of them.
 	const valueRef = useRef(value);
 	useEffect(() => {
 		valueRef.current = value;
 	});
 
-	// Mirrors `draft` the same way `valueRef` mirrors `value`, so the resync
-	// effect can read the draft as it stands without taking a dependency on it
-	// - which would run the effect on every keystroke instead of only when the
-	// entity or the persisted value changes.
-	const draftRef = useRef(draft);
+	// The callbacks read the store, not the render's `held`: two calls in one
+	// batch (InfoTab's two adopts) must each see what the other wrote.
+	const liveEntry = useCallback(
+		() =>
+			heldEntry(
+				useEntityDraftStore.getState().entries.get(entityKey) as
+					EntityDraftEntry<T> | undefined,
+				JSON.stringify(valueRef.current)
+			),
+		[entityKey]
+	);
+
+	const write = useCallback(
+		(next: T) => {
+			const persisted = valueRef.current;
+			const store = useEntityDraftStore.getState();
+			if (JSON.stringify(next) === JSON.stringify(persisted)) {
+				store.drop(entityKey);
+				return;
+			}
+			// The baseline stays what the draft first diverged from, so a value
+			// that changed underneath since is still a conflict (#1437).
+			store.put(entityKey, { draft: next, baseline: liveEntry()?.baseline ?? persisted });
+		},
+		[entityKey, liveEntry]
+	);
+
+	const setDraft = useCallback(
+		(next: SetStateAction<T>) => write(resolve(next, liveEntry()?.draft ?? valueRef.current)),
+		[write, liveEntry]
+	);
+
+	// The "own save landed" case: the persisted value now equals the draft, so
+	// the entry is spent. Dropped only if it is still the entry this render read,
+	// so an edit made since survives.
 	useEffect(() => {
-		draftRef.current = draft;
-	});
+		if (stored && !held) useEntityDraftStore.getState().drop(entityKey, stored);
+	}, [entityKey, stored, held]);
 
-	// `baseline` as of just before this render's resync effect runs - a ref
-	// rather than reading the `baseline` state directly, for the same
-	// "effect never reads the state it writes" reason as `draftRef`.
-	const baselineRef = useRef(value);
-	const prevEntityKeyRef = useRef(entityKey);
-
-	const syncTo = useCallback((next: T) => {
-		baselineRef.current = next;
-		setBaseline(next);
-		setExternalValue(null);
-	}, []);
-
-	// Reseed when the entity switches, or - while the draft is clean - when
-	// the persisted value changes under us (a save lands, a background refetch
-	// arrives). A *dirty* draft is never reseeded out from under an edit
-	// (#1437): the change is held in `externalValue` instead, for the caller
-	// to show and let the user adopt.
-	useEffect(() => {
-		const switched = prevEntityKeyRef.current !== entityKey;
-		prevEntityKeyRef.current = entityKey;
-
-		if (switched) {
-			syncTo(valueRef.current);
-			setDraft(valueRef.current);
-			return;
-		}
-
-		const previousBaseline = JSON.stringify(baselineRef.current);
-		if (serializedValue === previousBaseline) {
-			// Nothing changed since our last sync - including a pending external
-			// change that has since reverted to exactly what we started from.
-			setExternalValue(null);
-			return;
-		}
-
-		const draftSerialized = JSON.stringify(draftRef.current);
-
-		if (draftSerialized === serializedValue) {
-			// The draft already matches the fresh value - our own save landed.
-			syncTo(valueRef.current);
-			return;
-		}
-
-		if (draftSerialized === previousBaseline) {
-			// The draft was clean: adopt the change, as before.
-			syncTo(valueRef.current);
-			setDraft(valueRef.current);
-			return;
-		}
-
-		// Dirty, and the change conflicts with the in-progress edit: keep the
-		// draft, surface the pending value instead of discarding it.
-		setExternalValue(valueRef.current);
-	}, [entityKey, serializedValue, syncTo]);
-
-	// The other half of the switch. These editors are rendered without a `key`,
-	// so a different entity arrives via props on the same component instance -
-	// and a TanStack mutation holds `isError` until the next `mutate`. Without
+	// The other half of the switch. An editor rendered without a `key` gets a
+	// different entity via props on the same component instance - and a
+	// TanStack mutation holds `isError` until the next `mutate`. Without
 	// this, a failed save would keep being reported against an entity the user
 	// never tried to save. `reset` is bound once in the observer, so it is a
 	// stable dep.
@@ -227,31 +226,49 @@ export function useEntityDraft<T>({
 	// would make the next real save read as a discard.
 	const discardedRef = useRef(false);
 	const reset = useCallback(() => {
-		if (JSON.stringify(draftRef.current) !== JSON.stringify(valueRef.current)) {
-			discardedRef.current = true;
-		}
-		setDraft(valueRef.current);
-		syncTo(valueRef.current);
-	}, [syncTo]);
+		if (liveEntry()) discardedRef.current = true;
+		useEntityDraftStore.getState().drop(entityKey);
+	}, [entityKey, liveEntry]);
 
 	// Takes a value from the persisted side into the draft (`InfoTab`'s per-key
 	// Take theirs). Marked a discard only when it lands exactly on the persisted
 	// value from a dirty draft: with another field still dirty no clean edge
 	// follows to consume the mark, and the later real save would read as a
-	// discard. `draftRef` is advanced here as well because its own effect runs
-	// after the render, so two adopts in one batch would otherwise both read the
-	// pre-batch draft. No `syncTo`: `baseline` and `externalValue` still drive
-	// the other fields' conflicts.
-	const adopt = useCallback((next: SetStateAction<T>) => {
-		const previous = draftRef.current;
-		const resolved = typeof next === "function" ? (next as (prev: T) => T)(previous) : next;
-		const persisted = JSON.stringify(valueRef.current);
-		if (JSON.stringify(previous) !== persisted && JSON.stringify(resolved) === persisted) {
-			discardedRef.current = true;
-		}
-		draftRef.current = resolved;
-		setDraft(resolved);
-	}, []);
+	// discard.
+	const adopt = useCallback(
+		(next: SetStateAction<T>) => {
+			const entry = liveEntry();
+			const resolved = resolve(next, entry?.draft ?? valueRef.current);
+			if (entry && JSON.stringify(resolved) === JSON.stringify(valueRef.current)) {
+				discardedRef.current = true;
+			}
+			write(resolved);
+		},
+		[liveEntry, write]
+	);
+
+	// The entity on screen, or null once the editor has unmounted.
+	const shownKeyRef = useRef<string | null>(entityKey);
+	useEffect(() => {
+		shownKeyRef.current = entityKey;
+		return () => {
+			shownKeyRef.current = null;
+		};
+	}, [entityKey]);
+
+	// Dropping the entry while the editor shows it would paint the old value
+	// for a frame: the query cache tells its observers on a later tick than
+	// this store does.
+	const markSaved = useCallback(
+		(sent: T) => {
+			if (shownKeyRef.current === entityKey) return;
+			const entry = useEntityDraftStore.getState().entries.get(entityKey);
+			if (entry && JSON.stringify(entry.draft) === JSON.stringify(sent)) {
+				useEntityDraftStore.getState().drop(entityKey, entry);
+			}
+		},
+		[entityKey]
+	);
 
 	const consumeDiscard = useCallback(() => {
 		const discarded = discardedRef.current;
@@ -260,13 +277,14 @@ export function useEntityDraft<T>({
 	}, []);
 
 	return {
-		draft,
+		draft: held ? held.draft : value,
 		setDraft,
-		isDirty: JSON.stringify(draft) !== serializedValue,
+		isDirty: held !== undefined,
 		reset,
 		adopt,
 		consumeDiscard,
-		baseline,
-		externalValue,
+		markSaved,
+		baseline: held ? held.baseline : value,
+		externalValue: held && JSON.stringify(held.baseline) !== serializedValue ? value : null,
 	};
 }

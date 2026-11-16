@@ -79,6 +79,18 @@ describe("TruncatedText", () => {
 		expect(el).toHaveAttribute("title", name);
 	});
 
+	it("says the given title, not its own text, once it is clipped", () => {
+		const { fireResize, restore } = installControllableResizeObserver();
+		render(<TruncatedText title="Payments API / v1">v1</TruncatedText>);
+		const el = screen.getByText("v1");
+
+		setMeasured(el, 420, 200);
+		fireResize();
+		restore();
+
+		expect(el).toHaveAttribute("title", "Payments API / v1");
+	});
+
 	it("removes the tooltip when the element grows enough to show the text", () => {
 		const { fireResize, restore } = installControllableResizeObserver();
 		const name = "A Very Long Collection Name That Does Not Fit";

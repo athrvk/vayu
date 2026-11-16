@@ -24,7 +24,7 @@ const restoreIntl = vi.hoisted(() => {
 
 afterAll(restoreIntl);
 
-import { capacitySubtitle, resultSubtitle } from "./result-subtitle";
+import { capacitySubtitle, collectionSubtitle, resultSubtitle } from "./result-subtitle";
 
 /**
  * Mutation check (#2820): drop the `assertionsFailed` push in `resultSubtitle`
@@ -55,6 +55,31 @@ describe("resultSubtitle", () => {
 		[{ errorRate: 0, assertionsPassed: 10, assertionsFailed: 0 }, "0.0% errors"],
 	])("%j reads %j", (summary, line) => {
 		expect(resultSubtitle(summary)).toBe(line);
+	});
+});
+
+/**
+ * Mutation check (#3458): drop the failed-or-errored gate in `collectionSubtitle`
+ * and the clean rows redden; drop `errored` from the phrase and the errored rows
+ * redden.
+ */
+describe("collectionSubtitle", () => {
+	it.each([
+		[{ passed: 2, failed: 1, errored: 4 }, "2 passed, 1 failed, 4 errored"],
+		[{ passed: 0, failed: 1, errored: 0 }, "1 failed"],
+		[{ errored: 1200, skipped: 3 }, "1,200 errored, 3 skipped"],
+		[{ passed: 5, failed: 2, stopped: 1 }, "5 passed, 2 failed, 1 stopped"],
+	])("%j reads %s", (summary, line) => {
+		expect(collectionSubtitle(summary)).toBe(line);
+	});
+
+	it.each([
+		["a clean run", { passed: 4 }],
+		["zeroed failure counts", { passed: 4, failed: 0, errored: 0 }],
+		["a run with only skipped and stopped steps", { skipped: 2, stopped: 1 }],
+		["a summary that recorded nothing", {}],
+	])("has no line for %s", (_name, summary) => {
+		expect(collectionSubtitle(summary)).toBeNull();
 	});
 });
 

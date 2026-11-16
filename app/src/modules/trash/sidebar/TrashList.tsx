@@ -17,12 +17,31 @@ import {
 	useConfigQuery,
 } from "@/queries";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
-import { Button, DeleteConfirmDialog, clientCertificatePurgeDescription } from "@/components/ui";
+import {
+	Button,
+	DeleteConfirmDialog,
+	clientCertificatePurgeDescription,
+	collectionPurgeDescription,
+} from "@/components/ui";
 import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import TrashItem from "./TrashItem";
 import { retentionCopy, retentionDaysFrom } from "../retention";
 import { restoreNotice } from "../restore-notice";
 import type { TrashEntry } from "@/types";
+
+/**
+ * What "Delete forever" says beyond the generic sentence: a collection states
+ * the engine's purge totals, a certificate its passphrase. Anything else takes
+ * the dialog's own wording.
+ */
+function purgeDescription(entry: TrashEntry | null): string | undefined {
+	if (entry?.kind === "clientCertificate") return clientCertificatePurgeDescription(entry.name);
+	if (entry?.kind !== "collection") return undefined;
+	return collectionPurgeDescription(entry.name, {
+		collections: entry.purgeCollections,
+		requests: entry.purgeRequests,
+	});
+}
 
 export default function TrashList() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -71,7 +90,7 @@ export default function TrashList() {
 			/*
 			 * The engine's refusals are specific and worth repeating verbatim: a
 			 * request whose collection is itself in the trash is a 409 naming
-			 * that collection ("restore that first"), which tells the user
+			 * the item and the Trash root to restore first, which tells the user
 			 * exactly what to do next. Wording invented here could not.
 			 */
 			showToast(
@@ -251,12 +270,7 @@ export default function TrashList() {
 					onOpenChange={(open) => !open && setPurgeTarget(null)}
 					title={`Delete "${purgeTarget?.name}" forever?`}
 					name={purgeTarget?.name}
-					description={
-						purgeTarget?.kind === "clientCertificate"
-							? clientCertificatePurgeDescription(purgeTarget.name)
-							: undefined
-					}
-					scope={purgeTarget?.kind === "collection" ? "cascade" : "default"}
+					description={purgeDescription(purgeTarget)}
 					confirmLabel="Delete forever"
 					onConfirm={handleConfirmPurge}
 					onCloseAutoFocus={onCloseAutoFocus}

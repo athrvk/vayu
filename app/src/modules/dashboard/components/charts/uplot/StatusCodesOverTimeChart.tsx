@@ -21,6 +21,7 @@ import type uPlot from "uplot";
 import type { LoadTestMetrics } from "@/types";
 import { buildStatusOverTime, stackStatusPoints } from "../../../utils/metricsTransforms";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
+import { describeChart } from "./chartLabel";
 import { axisRate, fmtRate } from "./formatters";
 
 /**
@@ -119,6 +120,7 @@ export function StatusCodesOverTimeChart({
 	if (data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Status codes over time", data, series)}
 			data={data}
 			series={series}
 			xTime

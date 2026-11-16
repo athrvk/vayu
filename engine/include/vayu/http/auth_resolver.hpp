@@ -12,11 +12,14 @@
 #include "vayu/http/target_policy.hpp"
 #include "vayu/types.hpp"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 
@@ -62,6 +65,25 @@ std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth, UnsupportedA
  * expected to be resolved app-side; if it reaches here it is treated as no-op.
  */
 Auth parse_auth (const nlohmann::json& auth);
+
+/**
+ * Every `mode` an `auth` block may name (`AuthMode` in the app's `domain.ts`):
+ * the ones `parse_auth` executes, `none` / `inherit` / `noauth`, and the ones it
+ * stores without executing (`UnsupportedAuth`). Matching is by exact lowercase
+ * string, so a spelling outside this set (`Bearer`, ` inherit`) reaches
+ * `parse_auth` as an unsupported mode and the send carries no credential
+ * (#3464). The write routes and the Vayu-extension reader hold a stored `auth`
+ * to it through `is_known_auth_mode`; `auth_resolver_test.cpp` pins it against
+ * `parse_auth`.
+ */
+inline constexpr auto AUTH_MODES =
+std::to_array<std::string_view> ({ "none", "noauth", "inherit", "bearer", "basic",
+"apikey", "oauth2", "digest", "aws", "ntlm", "hawk", "oauth1", "edgegrid", "jwt" });
+
+/// Whether @p mode is exactly one of `AUTH_MODES`.
+inline bool is_known_auth_mode (std::string_view mode) {
+    return std::ranges::find (AUTH_MODES, mode) != AUTH_MODES.end ();
+}
 
 /**
  * @brief Where a credential ends up once `apply_auth` has written it.

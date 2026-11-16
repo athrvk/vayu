@@ -46,6 +46,7 @@ import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import type { Collection, ElementDef, VariableSupport } from "@/types";
+import { persistedDraft, useStoredCollectionDraft } from "./collection-drafts";
 import { InfoBanner, SaveFailed } from "./shared";
 
 /** How many referenced names get a chip before the rest become a count - the
@@ -100,16 +101,18 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		]
 	);
 
+	const stored = useStoredCollectionDraft(collection.id, "elements");
 	const {
 		draft: elements,
 		setDraft: setElements,
 		isDirty,
 		reset: resetDraft,
 		consumeDiscard,
+		markSaved,
 		externalValue,
 	} = useEntityDraft<ElementDef[]>({
-		entityKey: `${collection.id}:elements`,
-		value: collection.elements,
+		entityKey: stored.key,
+		value: persistedDraft(collection, "elements"),
 		mutation: updateCollection,
 	});
 
@@ -136,7 +139,8 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			refuseElement(error, elements);
 			throw error;
 		}
-	}, [isDirty, updateCollection, collection.id, elements, kinds, refuseElement]);
+		markSaved(elements);
+	}, [isDirty, updateCollection, collection.id, elements, kinds, refuseElement, markSaved]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-elements`,
@@ -145,6 +149,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		isActive: active,
 		save: persist,
 		consumeDiscard,
+		stored,
 	});
 
 	const handleSave = () => void persist().catch(() => {});
@@ -154,7 +159,10 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			<InfoBanner>
 				Elements set here run <strong>before and after every request</strong> in this
 				collection. They compose outer→inner: the parent collection runs first, then nested
-				collections, then the request&apos;s own elements.
+				collections, then the request&apos;s own elements. Setup and teardown scripts run
+				once per run instead: when you run this collection, a collection nested in it, or
+				one it is nested in with nested collections included. Setups run outer→inner and
+				teardowns in reverse.
 			</InfoBanner>
 
 			{externalValue !== null && (

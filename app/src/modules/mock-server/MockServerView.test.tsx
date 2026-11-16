@@ -11,6 +11,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, fireEvent, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import MockServerView from "./index";
 import {
 	useMockActivityQuery,
@@ -18,7 +19,7 @@ import {
 	useMockServersQuery,
 	useStopMockServerMutation,
 } from "@/queries";
-import { useTabsStore } from "@/stores";
+import { useEngineStore, useTabsStore } from "@/stores";
 import type { MockActivityEntry, MockServer, MockServerRoute } from "@/types";
 
 vi.mock("@/queries", async (importOriginal) => ({
@@ -90,6 +91,57 @@ describe("MockServerView", () => {
 		});
 	});
 
+	// One top heading per tab (#3498): the address, prefixed with what it is the
+	// address of, and Routes and Activity one level under it.
+	it("titles the tab with the mock's address as its one h1", () => {
+		const { container } = render(asTab(<MockServerView />));
+		expect(expectOneTopHeading(container)).toBe(`Mock server ${MOCK.url}`);
+		expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual([
+			"Routes (1)",
+			"Activity",
+		]);
+	});
+
+	/*
+	 * #3506. A listed mock is running only while the engine that holds it is, and
+	 * the cached list outlives a crashed one, so the tab reads `useEngineServing`
+	 * like the services drawer does. Mutation-check: drop the gate in `index.tsx`
+	 * and the crashed case keeps its Stop button and loses its Stopped badge.
+	 */
+	describe("while Vayu's engine is down", () => {
+		const CRASH = { code: null, signal: "SIGKILL", stderrTail: [], error: null };
+
+		beforeEach(() => {
+			useEngineStore.setState({
+				engineStatus: "connected",
+				engineCrash: null,
+				engineCrashAheadOfPoll: false,
+			});
+		});
+
+		it("offers Stop, and no Stopped badge, while the engine is up", () => {
+			render(<MockServerView />);
+			expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+			expect(screen.queryByText("Stopped")).not.toBeInTheDocument();
+		});
+
+		it.each([
+			[
+				"the poll reads it unreachable",
+				() => useEngineStore.setState({ engineStatus: "unreachable" }),
+			],
+			[
+				"the sidecar reported a crash the poll has not seen",
+				() => useEngineStore.getState().setEngineCrash(CRASH),
+			],
+		])("reads Stopped, with no Stop action, when %s", (_, goDown) => {
+			goDown();
+			render(<MockServerView />);
+			expect(screen.getByText("Stopped")).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+		});
+	});
+
 	it("shows the addressed mock's route table with its mode and hits", () => {
 		render(<MockServerView />);
 		// Scoped to the Routes section: the same path and example name also
@@ -97,7 +149,7 @@ describe("MockServerView", () => {
 		const routes = within(screen.getByText("Routes (1)").closest("section")!);
 		expect(routes.getByText("/pets")).toBeInTheDocument();
 		expect(routes.getByText("Default")).toBeInTheDocument();
-		expect(routes.getByText("3")).toBeInTheDocument();
+		expect(routes.getByText("3 hits")).toBeInTheDocument();
 	});
 
 	it("marks a shadowed route and names the request that answers instead (#3115)", () => {

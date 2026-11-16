@@ -6,10 +6,10 @@
  */
 
 import { assertionsFailedPhrase } from "@/components/shared/run-assertions";
-import { formatErrorRate } from "@/components/shared/run-outcome";
+import { formatErrorRate, stepCountsPhrase } from "@/components/shared/run-outcome";
 import { STOP_REASONS } from "@/components/shared/capacityStop";
 import { formatLatency, formatNumber, formatRate } from "@/lib/format-number";
-import type { LoadResultCapacity, LoadResultSummary } from "@/types";
+import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } from "@/types";
 
 /**
  * The line a finished load run's history row prints under its identity:
@@ -33,6 +33,16 @@ export function resultSubtitle(summary: LoadResultSummary): string | null {
 	const assertions = assertionsFailedPhrase(assertionsFailed);
 	if (assertions) parts.push(assertions);
 	return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * The line a finished collection run's history row prints when a step did not
+ * pass (#3458): "2 passed, 1 failed, 4 errored", zero counts left out. A clean
+ * run has no line - its row reads as it did before the engine sent counts.
+ */
+export function collectionSubtitle(summary: CollectionResultSummary): string | null {
+	if (!stepCountsPhrase(summary, ["failed", "errored"])) return null;
+	return stepCountsPhrase(summary);
 }
 
 /**

@@ -231,6 +231,26 @@ TEST (DynamicVariables, IsAGeneratorNameAnswersForTheTableAndNothingElse) {
     EXPECT_FALSE (vayu::http::is_generator_variable_name (""));
 }
 
+// The refusal is the union of the addressable-name rule and the brace rule, and
+// each phrase is what an extractor's and a script's message quote (#3461).
+TEST (VariableNameRefusal, NamesTheReasonANameCouldNeverBeReadBack) {
+    const auto reason = [] (std::string_view name) {
+        return vayu::http::variable_name_refusal (name).value_or ("");
+    };
+    EXPECT_NE (reason ("").find ("cannot be empty"), std::string_view::npos);
+    for (const char* padded : { " pad", "pad ", " ", "\t", "a\n" }) {
+        EXPECT_NE (reason (padded).find ("start or end with whitespace"), std::string_view::npos)
+        << padded;
+    }
+    for (const char* braced : { "a}}b", "{", "}", "{{x}}", " {x}" }) {
+        EXPECT_NE (reason (braced).find ("cannot contain '{' or '}'"), std::string_view::npos)
+        << braced;
+    }
+    for (const char* fine : { "token", "my var", "a.b-c_d", "ключ", "$x", "data.id" }) {
+        EXPECT_FALSE (vayu::http::variable_name_refusal (fine).has_value ()) << fine;
+    }
+}
+
 TEST (DynamicVariables, IsoTimestampIsTheShapeTheRendererProduces) {
     // The renderer's `$isoTimestamp` is `new Date().toISOString()`, and the two
     // tables are a contract: this is that shape, spelled out. The engine now
@@ -1749,7 +1769,9 @@ TEST_F (RequestComposerTest, TwoTemplatedHeaderNamesResolvingAlikeAreRefused) {
     // meant - composition names them and repairs neither.
     EXPECT_NE (message.find ("{{a}}"), std::string::npos) << message;
     EXPECT_NE (message.find ("{{b}}"), std::string::npos) << message;
-    EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
+    // Never the name they produced: what a variable made may be a secret.
+    // Mutation check: quote `collision.produced` in the message again.
+    EXPECT_EQ (message.find ("X-Tenant"), std::string::npos) << message;
 }
 
 TEST_F (RequestComposerTest, ATemplatedNameCollidingWithALiteralHeaderIsRefused) {
@@ -2129,6 +2151,26 @@ TEST_F (RequestComposerTest, TheRefusalSaysWhichCharacterIsNotAllowed) {
                "byte 0xC3 cannot appear"),
     std::string::npos)
     << accented.dump ();
+}
+
+// The name a variable produced is never in the refusal - it can be a secret,
+// and the refusal reaches whoever reads the run. The message names the row as
+// written and the one byte at fault. Mutation check: pass `name` instead of
+// `key` as the quoted text in `settle_header_name`.
+TEST_F (RequestComposerTest, TheRefusalOfAResolvedNameQuotesWhatWasWrittenNotWhatItResolvedTo) {
+    seed_environment ("env_1",
+    R"({"token":{"value":"hunter2 secret-value","enabled":true},"tail":{"value":"y","enabled":true}})");
+    for (const std::string written : { "{{token}}", "X-{{token}}", "{{tail}} {{token}}" }) {
+        auto [status, payload] = compose_header_named (*db_, written);
+
+        ASSERT_EQ (status, 400) << written << ": " << payload.dump ();
+        EXPECT_EQ (payload["error"]["code"], "invalid_header_name") << written;
+        const auto message = payload["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("'" + written + "'"), std::string::npos) << message;
+        EXPECT_EQ (message.find ("hunter2"), std::string::npos) << message;
+        EXPECT_EQ (message.find ("secret-value"), std::string::npos) << message;
+        EXPECT_NE (message.find ("' ' cannot appear"), std::string::npos) << message;
+    }
 }
 
 TEST_F (RequestComposerTest, ANameOfOnlySpacesIsTheEmptyNameRefusal) {

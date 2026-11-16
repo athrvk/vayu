@@ -35,6 +35,10 @@ export type { KbdProps } from "./kbd";
 
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 
+export { Heading, HeadingSection } from "./heading";
+export { useHeadingLevel } from "./heading-level";
+export type { HeadingLevel, HeadingTag } from "./heading-level";
+
 export {
 	Dialog,
 	DialogPortal,
@@ -58,10 +62,10 @@ export {
 	deleteConfirmCopy,
 	clientCertificateDeleteDescription,
 	clientCertificatePurgeDescription,
+	collectionPurgeDescription,
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";
-export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,

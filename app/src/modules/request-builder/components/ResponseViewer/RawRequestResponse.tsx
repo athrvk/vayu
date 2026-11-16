@@ -20,7 +20,7 @@
  * toolbar's Raw segment, which means the other thing - the unformatted body -
  * and the collision was weighed rather than missed. The alternatives were worse:
  * "Timeline" implies a sequence of calls over time and would sit beside a tab
- * already called Timing, and "Wire" is taken inside Vayu, where the Timing
+ * already called Timing, and "Wire time" is taken inside Vayu, where the Timing
  * summary uses it for the libcurl transfer phase. Renaming to dodge one
  * collision by creating another is not a trade. The prefixes below also carry
  * most of the weight the name would have: the content is self-evidently an
@@ -72,12 +72,12 @@ import { CodeEditor } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import {
 	buildRawResponse,
-	formatSize,
 	LARGE_BODY_BYTES,
 	LargeBodyNotice,
 } from "@/components/shared/response-viewer";
 import { receivedBody, type ResponseBytes } from "../../utils/response-bytes";
 import type { HeaderLine } from "@/types/domain";
+import { formatBytes } from "@/lib/format-number";
 import { markLines, SENT_MARKER, RECEIVED_MARKER } from "@/lib/http-language";
 
 export interface RawRequestResponseProps {
@@ -195,7 +195,7 @@ function bodyToPrint(response: RawRequestResponseProps["response"]): {
 	const { rawBytes } = response;
 	if (rawBytes && !rawBytes.isText) {
 		return {
-			text: `[${formatSize(rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`,
+			text: `[${formatBytes(rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`,
 			bodyLength: null,
 		};
 	}

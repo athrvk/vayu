@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DesignRunView from "./DesignRunView";
@@ -641,6 +641,16 @@ describe("DesignRunView - pinning a design run (#1509)", () => {
 
 		const button = screen.getByRole("button", { name: "Unpin" });
 		expect(button).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it("says what pinning does on keyboard focus, not only to a pointer (#3498)", async () => {
+		renderView(designRun({ baseline: false }));
+
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Pin" }));
+		});
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(/keep it past retention/);
 	});
 });
 

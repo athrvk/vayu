@@ -13,6 +13,8 @@ import {
 } from "./context/CollectionTreeContext";
 import { Button, DialogCancelButton, Input } from "@/components/ui";
 import { treeGuideStyle } from "./tree-guide-style";
+import { newFolderFormRowKey } from "./tree-rows";
+import { RowDropIndicatorFor } from "./TreeRowDnd";
 import { isCommitEnter } from "@/lib/keyboard";
 import { rowInsetPx } from "@/constants/layout";
 
@@ -40,9 +42,10 @@ export default function NewFolderForm({
 
 	return (
 		<div
-			className="flex gap-2 py-1 pr-2"
+			className="relative flex gap-2 py-1 pr-2"
 			style={{ paddingLeft: rowInsetPx(depth), ...treeGuideStyle(depth, activeGuideLevel) }}
 		>
+			<RowDropIndicatorFor rowKey={newFolderFormRowKey(parentId)} />
 			<Input
 				size="sm"
 				type="text"

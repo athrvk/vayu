@@ -32,6 +32,7 @@ import { LEVEL_TONE } from "@/components/shared/console-level";
 import { LogGutter } from "@/components/shared/LogGutter";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { Heading } from "@/components/ui/heading";
 import type { ParsedLog } from "./parse-logs";
 import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
 import ScopeTag from "../ScopeTag";
@@ -104,14 +105,16 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 				 * short console - two lines, one per script - the row was mostly
 				 * numbers about very little. The slab itself is the count.
 				 */}
-				<h3
+				{/* The level is the host's: the response pane, a run's step in History. */}
+				<Heading
+					outside="h3"
 					className={cn(
 						"text-xs font-medium",
 						tone === "running" ? "text-status-running-text" : "text-status-success-text"
 					)}
 				>
 					{label}
-				</h3>
+				</Heading>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="mt-2">
 				<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-xs">

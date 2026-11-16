@@ -22,6 +22,7 @@ import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import { useDashboardStore, useLayoutStore, type DashboardPhase } from "@/stores";
 import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
@@ -123,5 +124,17 @@ describe("the dashboard's crumb line", () => {
 			expect(useLayoutStore.getState().drawerOpen).toBe(true);
 			unmount();
 		}
+	});
+
+	// One top heading per tab (#3498). The header names no place, so the
+	// crumb's current segment titles the pane: the live view's own crumb, or
+	// the finished report's, with the report's cards one level under it.
+	it.each([
+		["the live view", "running", false, "Live load test"],
+		["the finished report", "completed", true, "Load test run"],
+	] as const)("titles %s with one h1 and no skipped level", (_label, mode, withReport, title) => {
+		seed(mode, withReport);
+		const { container } = render(withQueryClient(asTab(<LoadTestDashboard />)));
+		expect(expectOneTopHeading(container)).toBe(title);
 	});
 });

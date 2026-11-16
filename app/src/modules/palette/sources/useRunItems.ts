@@ -38,6 +38,7 @@ import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
+import { OUTCOME_TITLE, rowOutcome } from "@/components/shared/run-outcome";
 import { RUN_STATUS } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatInstant } from "@/lib/time-value";
@@ -68,6 +69,20 @@ function runTitle(run: Run, collectionsById: Map<string, Collection>): string {
 	}
 	const url = run.summary?.url;
 	return url ?? RUN_TYPE_NAME[run.type];
+}
+
+/**
+ * The status word, then the run's verdict in words when it has one: a subtitle
+ * is plain text, so where the other lists colour "Completed" red the palette
+ * says `verdict failed`, the accessible name's own phrase. Without it a
+ * collection run with failed steps reads as plain "Completed" (#3496).
+ */
+function statusWords(run: Run): string {
+	const status = RUN_STATUS[run.status].label;
+	const judgement = rowOutcome(run);
+	return judgement
+		? `${status} · verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
+		: status;
 }
 
 export function useRunItems(query: string): PaletteItem[] {
@@ -101,7 +116,7 @@ export function useRunItems(query: string): PaletteItem[] {
 			// prints - see `PaletteItem.preMatched`.
 			preMatched: true,
 			title: runTitle(run, collectionsById),
-			subtitle: `${RUN_TYPE_NAME[run.type]} · ${RUN_STATUS[run.status].label} · ${formatInstant(run.startTime, "relative")}`,
+			subtitle: `${RUN_TYPE_NAME[run.type]} · ${statusWords(run)} · ${formatInstant(run.startTime, "relative")}`,
 			// The query itself used to be first in this list, so cmdk's second
 			// filter could not drop a row the engine had matched on snapshot
 			// text no row prints. That is `ranking.ts`'s job now, and carrying

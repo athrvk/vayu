@@ -9,6 +9,7 @@
 
 import { useState, useCallback } from "react";
 import { ApiError, apiService } from "@/services";
+import { approveEndpoint } from "@/lib/graphql/approved-endpoints";
 import type {
 	SanityResult,
 	ExecuteRequestRequest,
@@ -25,7 +26,13 @@ interface UseEngineReturn {
 	 *
 	 * Without `deferredVariables` (#2521): that answer is for display, and these
 	 * callers spread the result into `/execute` and `/runs` bodies. The Code
-	 * section reads it from `apiService.composeRequest` directly.
+	 * section reads it from `apiService.composeRequest` directly. The answer's
+	 * `collectionId` stays (#3461): it is the scope the send's scripts read.
+	 *
+	 * Composing here is composing to send - Send, Load test and a History
+	 * re-run are its only callers - so the answer's origin becomes an endpoint
+	 * the GraphQL body may introspect on its own (`approved-endpoints.ts`).
+	 * Anything that composes to display must use `apiService.composeRequest`.
 	 */
 	composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>;
 	/**
@@ -52,6 +59,7 @@ export function useEngine(): UseEngineReturn {
 		async (params: ComposeRequestRequest): Promise<ComposedRequest> => {
 			const { deferredVariables: _deferredVariables, ...sendable } =
 				await apiService.composeRequest(params);
+			approveEndpoint(sendable.url);
 			return sendable;
 		},
 		[]

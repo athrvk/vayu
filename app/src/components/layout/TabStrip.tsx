@@ -32,9 +32,10 @@
  *   without giving back its space, so all eight paid 22px for something shown
  *   on one. It is absolutely positioned over the trailing padding now.
  * - **Nothing said the text was cut.** `ScrollOnOverflow` clips with
- *   `overflow-hidden` and no ellipsis, so a name ended mid-glyph and eight tabs
- *   all looked like a rendering fault. The ellipsis is back; the hover-scroll
- *   it was hiding behind is untouched and still reads the full name.
+ *   `overflow-hidden`, so a name ended mid-glyph and eight tabs all looked like
+ *   a rendering fault. A clipped name fades at rest now (an ellipsis cannot
+ *   engage inside its `w-fit` track), and stops short of the close button;
+ *   the hover-scroll still reads the full name.
  *
  * Path-shaped labels are cut from the *left*. `/v1/orders` and `/v1/orders/42`
  * differ only in the part a right-hand ellipsis removes first.

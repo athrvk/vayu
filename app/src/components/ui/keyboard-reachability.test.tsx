@@ -27,7 +27,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { VariablePopover } from "./variable-popover";
 import { SecretInput } from "./secret-input";
 import { TooltipProvider } from "./tooltip";

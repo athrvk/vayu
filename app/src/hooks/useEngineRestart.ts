@@ -33,6 +33,10 @@ import { useEngineStore, useSaveStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
+import {
+	recordServicesBeforeOutage,
+	reportServicesStoppedByOutage,
+} from "@/lib/services-stopped-by-restart";
 
 export function useEngineRestart(): { restart: () => Promise<void>; isRestarting: boolean } {
 	const isRestarting = useEngineStore((s) => s.engineRestarting);
@@ -78,6 +82,10 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			// close this one and hand the failures that follow back to the dead-engine
 			// path. Drop it rather than let it speak for the engine replacing it.
 			await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
+			// The engine about to be killed holds every service the drawer lists.
+			// A restart can come and go between two polls, so the health poll's
+			// first failure cannot be left to record them.
+			recordServicesBeforeOutage(queryClient);
 			openEngineStartWindow(Date.now());
 			// The failure being retried would keep the poll reading the coming
 			// silence as unreachable; the main process re-reports it if it holds.
@@ -108,6 +116,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			// gave, since the new one may disagree with all of them.
 			await new Promise((resolve) => setTimeout(resolve, TIMING.ENGINE_RESTART_WAIT_MS));
 			await queryClient.invalidateQueries();
+			void reportServicesStoppedByOutage(queryClient);
 			// Same move `useHealthQuery` makes on an automatic reconnect: a
 			// dirty editor's own retry backs off well past this restart, so a
 			// manual restart should not make the user wait for it either.

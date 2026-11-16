@@ -20,13 +20,19 @@
  * for design runs, so every load test would have nothing to look up.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { RecentRuns } from "./RecentRuns";
 import { useTabsStore } from "@/stores";
-import type { Run } from "@/types";
+import type { Collection, Run } from "@/types";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
+
+let collections: Pick<Collection, "id" | "name">[] = [];
+
+vi.mock("@/queries", () => ({
+	useCollectionsQuery: () => ({ data: collections }),
+}));
 
 function run(over: Partial<Run> = {}): Run {
 	return {
@@ -40,7 +46,18 @@ function run(over: Partial<Run> = {}): Run {
 	} as Run;
 }
 
+/** A collection run's list row: no URL, no method, the collection by id, and the step counts. */
+function collectionRun(over: Partial<Run> = {}): Run {
+	return run({
+		type: "scenario",
+		summary: { scenario: { collectionId: "col_1", stepCount: 33, iterations: 1 } },
+		resultSummary: { passed: 27, failed: 6 },
+		...over,
+	} as Partial<Run>);
+}
+
 beforeEach(() => {
+	collections = [{ id: "col_1", name: "Smoke suite" }];
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
 
@@ -159,6 +176,75 @@ describe("RecentRuns", () => {
 		for (const row of screen.getAllByRole("button", { name: /Open Load test/i })) {
 			expect(row.getAttribute("aria-label")).not.toMatch(/running|pending/i);
 		}
+	});
+
+	describe("a collection run", () => {
+		it("names the collection, with no method badge and no missing-URL line", () => {
+			// A stray `method` on the summary must not draw a badge: the row's
+			// work is a collection, which has no method.
+			render(
+				<RecentRuns
+					runs={[
+						collectionRun({
+							summary: { method: "GET", scenario: { collectionId: "col_1" } },
+						}),
+					]}
+				/>
+			);
+
+			const row = screen.getByRole("button", { name: /Open Collection run/ });
+			expect(row).toHaveTextContent(RUN_TYPE_NAME.scenario);
+			expect(screen.getByText("Smoke suite")).toBeInTheDocument();
+			expect(screen.queryByText(/No URL recorded/i)).not.toBeInTheDocument();
+			expect(screen.queryByText("GET")).not.toBeInTheDocument();
+		});
+
+		it("falls back to the collection id once the collection is gone", () => {
+			collections = [];
+			render(<RecentRuns runs={[collectionRun()]} />);
+			expect(screen.getByText("col_1")).toBeInTheDocument();
+		});
+
+		it.each([
+			["failed", { passed: 27, failed: 6 }],
+			["errored", { passed: 27, errored: 2 }],
+		] as const)(
+			"reads in the error colour when a step %s, and says so in its name",
+			(_, counts) => {
+				render(
+					<RecentRuns runs={[collectionRun({ resultSummary: counts } as Partial<Run>)]} />
+				);
+
+				const word = screen.getByText("Completed");
+				expect([...word.classList]).toContain("text-status-error-text");
+				expect([...word.classList]).not.toContain("text-status-success-text");
+				expect(
+					screen.getByRole("button", {
+						name: "Open Collection run, Smoke suite, completed, verdict failed",
+					})
+				).toBeInTheDocument();
+			}
+		);
+
+		it("stays green and states no verdict when every step passed", () => {
+			render(
+				<RecentRuns
+					runs={[collectionRun({ resultSummary: { passed: 33 } } as Partial<Run>)]}
+				/>
+			);
+
+			expect([...screen.getByText("Completed").classList]).toContain(
+				"text-status-success-text"
+			);
+			expect(
+				screen.getByRole("button", { name: "Open Collection run, Smoke suite, completed" })
+			).toBeInTheDocument();
+		});
+
+		it("keeps a run's own failed status as the plain failure", () => {
+			render(<RecentRuns runs={[collectionRun({ status: "failed" })]} />);
+			expect([...screen.getByText("Failed").classList]).toContain("text-status-error-text");
+		});
 	});
 
 	it("renders nothing when there are no runs", () => {

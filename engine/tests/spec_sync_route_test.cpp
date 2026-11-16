@@ -563,6 +563,36 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
     EXPECT_EQ (db_->get_collections ().size (), 2u);
 }
 
+// A folder's `parentId` of `""` means what `null` does, the synced collection,
+// and a non-string is a 400 naming the field and the item (#3451). Mutation
+// check: restore the pre-#3451 string read in `plan_folder` and `""` is
+// refused as outside the synced collection.
+TEST_F (SpecSyncRouteTest, AnEmptyFolderParentIdIsTheSyncedCollection) {
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "collections",
+    json::array ({ json{ { "tempId", "t" }, { "name", "pets" }, { "parentId", "" } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto folder = db_->get_collection (response["idMap"]["t"].get<std::string> ());
+    ASSERT_HAS_VALUE (folder);
+    EXPECT_EQ (folder->parent_id, std::optional<std::string> (root_));
+}
+
+TEST_F (SpecSyncRouteTest, RefusesANonStringFolderParentIdNamingTheField) {
+    const size_t before = db_->get_collections ().size ();
+    for (const char* text : { "5", "true", "{}", "[]" }) {
+        auto [status, response] = routes::spec_sync_response (*db_,
+        body (json{ { "collections",
+        json::array ({ json{ { "tempId", "t" }, { "name", "pets" },
+        { "parentId", json::parse (text) } } }) } }));
+        ASSERT_EQ (status, 400) << text << " -> " << response.dump ();
+        EXPECT_NE (
+        response["error"]["message"].get<std::string> ().find ("'parentId'"), std::string::npos)
+        << response.dump ();
+        EXPECT_EQ (response["error"]["item"], "t");
+    }
+    EXPECT_EQ (db_->get_collections ().size (), before);
+}
+
 // Issue #3034: a folder bound to a different document is that document's own
 // contract, so the sync's boundary stops at it, taking what is beneath it along.
 // Mutation check: replace `spec_contract_subtree_ids`' body with the unbounded

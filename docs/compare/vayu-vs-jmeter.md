@@ -108,7 +108,10 @@ OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection. JMeter'
 setUp / tearDown thread groups, which run once before or once after the whole
 test, are `script.setup` / `script.teardown` here - elements on the collection
 itself, run once at the run's own start or end in either run mode, rather than
-a thread group of their own.
+a thread group of their own. Folders carry their own too: a run sets up every
+collection above the one it runs, that collection and, with nested
+collections included, every folder beneath it, outermost first, and tears
+them down in reverse.
 
 ## When to choose JMeter
 

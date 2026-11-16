@@ -44,6 +44,7 @@ import {
 } from "@/components/shared/response-viewer/utils";
 import { phaseColor, phasesFromTrace } from "@/components/shared/response-viewer/timing-phases";
 import { Eyebrow, InfoChip } from "@/components/ui";
+import { formatFixed } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RedirectHop } from "@/types/domain";
 import type { ResponseTiming } from "../../types";
@@ -138,7 +139,7 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 							</span>
 						</span>
 						<span className="text-right font-mono tabular-nums text-label text-muted-foreground">
-							{pct(p.value).toFixed(0)}%
+							{formatFixed(pct(p.value), 0)}%
 						</span>
 					</div>
 				))}
@@ -148,7 +149,7 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat
-						label="Wire"
+						label="Wire time"
 						value={timing.wireMs}
 						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
 					/>

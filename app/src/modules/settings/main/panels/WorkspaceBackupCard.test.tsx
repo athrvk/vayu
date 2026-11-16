@@ -132,7 +132,7 @@ describe("WorkspaceBackupCard", () => {
 
 	it("shows a real failure on the card rather than only in a toast", async () => {
 		backupWorkspace.mockRejectedValue(
-			new ApiError(500, "INTERNAL", "Could not write the backup to /nowhere: disk full")
+			new ApiError(500, "INTERNAL", "Couldn't write the backup to /nowhere: disk full")
 		);
 		render(<WorkspaceBackupCard />);
 		backUp();

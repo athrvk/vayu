@@ -338,7 +338,11 @@ TEST (ScenarioDataInvalidHeaderNameTest, ACellThatIsNotATokenRefusesTheRow) {
     const auto result = bind_data_row (request, json::parse (R"({"h":"X Bad"})"), 2);
 
     EXPECT_FALSE (result.ok);
-    EXPECT_NE (result.error.find ("'X Bad'"), std::string::npos) << result.error;
+    // The header as written, and the byte at fault; never the cell's text.
+    EXPECT_NE (result.error.find ("'{{data.h}}'"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("' ' cannot appear"), std::string::npos)
+    << result.error;
+    EXPECT_EQ (result.error.find ("X Bad"), std::string::npos) << result.error;
     EXPECT_NE (result.error.find ("row 2"), std::string::npos) << result.error;
 }
 

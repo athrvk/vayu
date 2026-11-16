@@ -55,6 +55,7 @@ import {
 	ICON_MOTION,
 	Input,
 	Label,
+	TooltipIconButton,
 } from "@/components/ui";
 import { FieldError } from "@/components/shared/FieldError";
 import { errorsWithin } from "@/lib/elements";
@@ -449,17 +450,18 @@ function StringMapField({
 						aria-label={`Value ${index + 1}`}
 						onChange={(e) => editRow(row.id, { value: e.target.value })}
 					/>
-					<Button
-						size="icon"
+					<TooltipIconButton
 						variant="rowActionDestructive"
 						className="shrink-0"
-						aria-label={`Remove entry ${index + 1}`}
+						label={`Remove entry ${index + 1}`}
+						tooltip="Remove entry"
 						onClick={() =>
 							update({ ...draft, rows: draft.rows.filter((r) => r.id !== row.id) })
 						}
-					>
-						<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
-					</Button>
+						icon={
+							<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
+						}
+					/>
 				</div>
 			))}
 			<Button

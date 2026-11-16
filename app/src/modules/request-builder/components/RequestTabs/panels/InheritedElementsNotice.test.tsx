@@ -113,6 +113,25 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		expect(screen.getByText("Pre-request script")).toBeInTheDocument();
 	});
 
+	it("draws the kind as a Badge chip on the radius setting, not a pill (#3501)", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.pre", config: { script: "pm.log('x')" } }),
+			]),
+			collection("leaf", "Refunds", [])
+		);
+
+		renderNotice({ collectionId: "leaf" });
+
+		const chip = screen.getByText("Pre-request script");
+		expect(chip).toHaveAttribute("data-slot", "badge");
+		expect(chip.className).not.toContain("rounded-full");
+		expect(chip.className).toContain("rounded-md");
+		expect(chip.className).toContain("bg-primary-tint");
+		expect(chip.className).not.toMatch(/hover:bg-/);
+	});
+
 	it.each<[string, ElementDef]>([
 		[
 			"a disabled element",
@@ -146,6 +165,68 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
 		expect(screen.getByText("1 element is inherited from a collection.")).toBeInTheDocument();
+	});
+
+	// A collection's setup and teardown run once at the run's boundary, never
+	// before a request (#3457), so "Runs before your own" must neither name them
+	// nor count them. The script.pre beside them proves the list is not simply
+	// empty for a reason of its own.
+	it.each([["script.setup"], ["script.teardown"]])(
+		"does not list or count a collection's %s as running before the request",
+		(kind) => {
+			chain.length = 0;
+			chain.push(
+				collection("root", "Acme", [
+					element({ id: "r1", kind, config: { script: "pm.log('x')" } }),
+					element({ id: "r2", kind: "script.pre", config: { script: "pm.log('y')" } }),
+				])
+			);
+
+			renderNotice({
+				collectionId: "root",
+				kinds: [
+					...KINDS,
+					kindSchema("script.setup", "Setup script"),
+					kindSchema("script.teardown", "Teardown script"),
+				],
+			});
+
+			expect(screen.getByText("Pre-request script")).toBeInTheDocument();
+			expect(screen.queryByText(/^(Setup|Teardown) script$/)).not.toBeInTheDocument();
+			expect(
+				screen.getByText("1 element is inherited from a collection.")
+			).toBeInTheDocument();
+		}
+	);
+
+	it("renders nothing when a collection carries only a setup and a teardown", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.setup", config: { script: "pm.log('x')" } }),
+				element({ id: "r2", kind: "script.teardown", config: { script: "pm.log('y')" } }),
+			])
+		);
+
+		const { container } = renderNotice({ collectionId: "root" });
+
+		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("applies the same exclusion to entries it is handed, such as a stored run's", () => {
+		const entries: ResolvedElement[] = [
+			{
+				id: "s1",
+				kind: "script.setup",
+				enabled: true,
+				config: { script: "pm.log('x')" },
+				origin: { kind: "collection", id: "c1", name: "Stored Run Collection" },
+			},
+		];
+
+		const { container } = renderNotice({ entries });
+
+		expect(container).toBeEmptyDOMElement();
 	});
 
 	it("falls back to the raw kind string when the catalogue has no label for it", () => {

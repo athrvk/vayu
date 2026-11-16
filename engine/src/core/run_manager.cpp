@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -32,6 +33,7 @@
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
@@ -64,13 +66,25 @@ void raise_pacing_thread_priority () {
 }
 
 /// @p config's @p key when it is a non-empty string, the one shape the route
-/// lets an id through as (`requestId`, `environmentId`); nothing otherwise.
+/// lets an id through as (`requestId`, `environmentId`, `collectionId`);
+/// nothing otherwise.
 std::optional<std::string> named_id (const nlohmann::json& config, const char* key) {
     const auto it = config.find (key);
     if (it == config.end () || !it->is_string () || it->get<std::string> ().empty ()) {
         return std::nullopt;
     }
     return it->get<std::string> ();
+}
+
+/** The collection scope a single-request run's scripts read: its
+ *  `lifecycleElements` (issue #1573), its `requestElements`, the deferred
+ *  `tests` replay and the start-of-run pass. `POST /execute`'s rule
+ *  (`scope_collection_id`): the collection of the request the run links, else
+ *  the composed `collectionId` (#3461), else none. */
+std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
+const nlohmann::json& config) {
+    return vayu::http::routes::scope_collection_id (
+    db, named_id (config, "requestId"), named_id (config, "collectionId"));
 }
 
 /**
@@ -104,8 +118,12 @@ struct ScriptReplay {
     /// One entry per `script.post` element, in compile order, each executed
     /// on its own (#3125): joined, two elements that both declare `const json`
     /// are a SyntaxError here while Send and a collection run pass them.
-    const std::vector<std::string>* scripts    = nullptr;
-    const vayu::Request* request               = nullptr;
+    const std::vector<std::string>* scripts = nullptr;
+    /// `pm.request` for every sample, unless @ref request_as_sent is set.
+    const vayu::Request* request = nullptr;
+    /// The request a sample was sent as, re-derived per sample (#3460); unset
+    /// where the replay has no run behind it to re-derive from.
+    std::function<vayu::Request (const ResponseSample&)> request_as_sent;
     const std::vector<ResponseSample>* samples = nullptr;
     /// The run's data rows, so a sampled iteration reads the row it was bound
     /// to as `pm.iterationData`. Null for a run sent without `data`.
@@ -173,14 +191,15 @@ struct ReplayFailures {
  * alongside them, never dropped just because the tests that did run are
  * counted - the same distinction `script_errored` draws in the design path.
  *
- * A script whose `pm.sendRequest` the run's Stop cancelled is not tallied at
- * all: the run ended under it, so it judged nothing (#3371).
+ * A script the run's Stop cut short (its `pm.sendRequest` cancelled, #3371,
+ * or the script itself ended, #3460) is not tallied at all: the run ended
+ * under it, so it judged nothing.
  */
 template <typename RecordFailure>
 void tally_replay_result (const vayu::ScriptResult& result,
 ScriptValidationTotals& totals,
 RecordFailure&& record_failure) {
-    if (result.send_cancelled) {
+    if (result.ended_by_stop ()) {
         return;
     }
     if (!result.tests.empty ()) {
@@ -222,15 +241,16 @@ vayu::Response sample_response (const ResponseSample& sample) {
  * Read-only for the engine (`execute` takes it by `const&` and opens a fresh
  * JavaScript context per call), so one context serves each element in turn;
  * only a scope write carries from one element to the next, through @p scopes.
- * @p response and @p stream_events are bound by address and must outlive
- * every execute that reads the result.
+ * @p request, @p response and @p stream_events are bound by address and must
+ * outlive every execute that reads the result.
  */
 vayu::runtime::ScriptContext replay_context (const ScriptReplay& replay,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ResponseSample& sample,
+const vayu::Request& request,
 const vayu::Response& response,
 nlohmann::json& stream_events) {
-    auto script_ctx = vayu::runtime::ScriptContext::for_test (*replay.request, response);
+    auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
     // All four scopes, through the one function that knows which of them a
     // script may write (issue #728). Binding only `environment` here - and an
     // empty one at that - is what made the same test script pass on Send and
@@ -273,29 +293,75 @@ nlohmann::json& stream_events) {
     return script_ctx;
 }
 
+/// Whether the run's Stop or the engine shutting down has ended a replay
+/// whose scripts take @p send (#3460): both raise the flag those scripts are
+/// stopped by.
+bool replay_stopped (const vayu::runtime::ScriptSendInputs& send) {
+    return send.stop != nullptr && send.stop->load ();
+}
+
+/**
+ * Marks @p result, from a script that timed out, as not replayed against the
+ * @p samples_after samples left (#3460): its deadline is its own, so each of
+ * them could wait it out again, and at the 5 s default a thousand samples is
+ * most of an hour of a run that has finished sending.
+ */
+void note_not_replayed (vayu::ScriptResult& result, size_t samples_after) {
+    if (samples_after == 0) {
+        return;
+    }
+    const std::string note = "timed out, not replayed against the remaining " +
+    std::to_string (samples_after) + (samples_after == 1 ? " sample" : " samples");
+    result.success = false;
+    result.error_message =
+    result.error_message.empty () ? note : result.error_message + " (" + note + ")";
+}
+
 /**
  * @brief Run every script of @p replay against one sample, each on its own.
  *
  * A throw from one element is that element's failure; the elements after it
  * still run, the way a Send's pipeline runs the next level after one throws.
  * Every line a script logged is offered to @p console, whatever its verdict.
+ * A script marked in @p timed_out is skipped, and one that times out here is
+ * marked, with @p samples_after the samples still to come. A Stop ends the
+ * sample between two scripts.
  */
 template <typename RecordFailure>
 void replay_sample (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 const ResponseSample& sample,
+size_t samples_after,
+std::vector<bool>& timed_out,
 ScriptValidationTotals& totals,
 DistinctMessageSample& console,
 RecordFailure& record_failure) {
     const vayu::Response response = sample_response (sample);
+    std::optional<vayu::Request> sent;
+    if (replay.request_as_sent) {
+        sent = replay.request_as_sent (sample);
+    }
+    const vayu::Request& request = sent ? *sent : *replay.request;
     nlohmann::json stream_events;
-    const auto script_ctx = replay_context (replay, scopes, sample, response, stream_events);
-    for (const auto& script : *replay.scripts) {
+    const auto script_ctx =
+    replay_context (replay, scopes, sample, request, response, stream_events);
+    const auto& scripts = *replay.scripts;
+    for (size_t i = 0; i < scripts.size (); ++i) {
+        if (timed_out[i]) {
+            continue;
+        }
+        if (replay_stopped (replay.send)) {
+            return;
+        }
         try {
-            const vayu::ScriptResult result = engine.execute (script, script_ctx);
+            vayu::ScriptResult result = engine.execute (scripts[i], script_ctx);
             for (const auto& line : result.console_output) {
                 console.offer (console_message (line));
+            }
+            if (result.timed_out) {
+                timed_out[i] = true;
+                note_not_replayed (result, samples_after);
             }
             tally_replay_result (result, totals, record_failure);
         } catch (const std::exception& e) {
@@ -308,32 +374,38 @@ RecordFailure& record_failure) {
 /**
  * @brief Replay @p replay's scripts against its samples, tallying the results.
  *
- * @param scopes The run's stored variable scopes, shared by every replay of the
- *        pass and mutated in place by any `set()` a script performs - see
- *        `validate_scripts` for why those writes are never persisted.
+ * @param scopes The pass's copy of the run's scopes as setup left them, shared
+ *        by every replay of the pass and mutated in place by any `set()` a
+ *        script performs - see `validate_scripts` for why those writes are
+ *        never persisted.
  * @param failures Recorded into, and keeps at most MAX_FAILURE_MESSAGES
  *        distinct messages across the whole run - a forty-step plan must not
  *        multiply the cap by forty.
  * @return The tallies, and the console lines of this replay alone: a scenario
- *         step's own, never merged with another step's.
+ *         step's own, never merged with another step's. `sampled` counts the
+ *         samples the replay reached, fewer than it holds when a Stop or the
+ *         engine shutting down ended it (#3460).
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 ReplayFailures& failures) {
     ScriptValidationTotals totals;
-    totals.sampled = replay.samples->size ();
     DistinctMessageSample console;
+    std::vector<bool> timed_out (replay.scripts->size (), false);
 
     auto record_failure = [&failures, &replay] (const std::string& message) {
         failures.record (replay.failure_prefix + message);
     };
 
-    for (const auto& sample : *replay.samples) {
+    const auto& samples = *replay.samples;
+    for (size_t i = 0; i < samples.size () && !replay_stopped (replay.send); ++i) {
+        ++totals.sampled;
         // A sample whose context cannot be built runs none of its scripts and
         // fails once.
         try {
-            replay_sample (engine, scopes, replay, sample, totals, console, record_failure);
+            replay_sample (engine, scopes, replay, samples[i],
+            samples.size () - i - 1, timed_out, totals, console, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
@@ -397,57 +469,49 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.send_rate =
     elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
     inputs.auth = AuthRefreshState::summarize (context.auth_refresh_states);
+    // No teardown runs on a failed run, so setup's rows are the whole node.
+    inputs.lifecycle = vayu::core::build_lifecycle_node (context.setup_outcomes, {});
     return inputs;
 }
 
-/**
- * The run-level request and identity a single-request replay reads.
- *
- * A load run's `tests` script is the same script a Send runs, so it must not
- * read `pm.info.requestId` as undefined here and as a value there. Both fields
- * ride in on the composed payload for a run started from a saved request;
- * resolved once, not per sample. The linked row is read once for the two
- * readers below it: the `pm.info.requestName` fallback, and the collection scope
- * its scripts read (issue #728) - a failure is left to propagate, because empty
- * scopes are the silently wrong verdicts this pass exists to avoid.
- */
-void read_run_script_identity (vayu::db::Database& db,
-const nlohmann::json& config,
-vayu::Request& dummy_request,
-std::optional<std::string>& script_request_id,
-std::optional<std::string>& script_request_name,
-std::optional<vayu::db::Request>& linked_request) {
-    // Build a dummy request for script context (HTTP request fields are at root level)
-    auto request_result = vayu::json::deserialize_request (config);
-    if (request_result.is_ok ()) {
-        dummy_request = request_result.value ();
-    }
+/// The saved request a single-request load run was started from, as `pm.info`
+/// names it to a script.
+struct RunScriptIdentity {
+    std::optional<std::string> request_id;
+    std::optional<std::string> request_name;
+};
 
-    // Identity for `pm.info`. A load run's `tests` script is the same script a
-    // Send runs, so it must not read `pm.info.requestId` as undefined here and
-    // as a value there. Both fields ride in on the composed payload for a run
-    // started from a saved request; resolved once, not per sample.
+/**
+ * The identity a single-request run's scripts read as `pm.info.requestId` and
+ * `pm.info.requestName`, inline or replayed.
+ *
+ * A load run's script is the same script a Send runs, so it must not read the
+ * two as undefined here and as a value there. Both fields ride in on the
+ * composed payload for a run started from a saved request; resolved once, not
+ * per sample. The linked row is read only for the `pm.info.requestName`
+ * fallback - a failure is left to propagate, as the scopes' read does (see
+ * `validate_scripts`).
+ */
+RunScriptIdentity
+read_run_script_identity (vayu::db::Database& db, const nlohmann::json& config) {
+    RunScriptIdentity identity;
     if (auto id = config.find ("requestId");
     id != config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
-        script_request_id = id->get<std::string> ();
+        identity.request_id = id->get<std::string> ();
     }
-    // The linked request row, read once for the two readers below: the
-    // `pm.info.requestName` fallback, and the collection scope its scripts
-    // read (issue #728). The lookup used to be wrapped in a catch, on the
-    // grounds that it cost the script only a name - it now also decides
-    // which collection scope the replay binds, and empty scopes are the
-    // silently wrong verdicts this pass exists to avoid, so a failure is
-    // left to propagate (see the scopes note below).
-    if (script_request_id) {
-        linked_request = db.get_request (*script_request_id);
-    }
-
     if (auto name = config.find ("requestName"); name != config.end () &&
     name->is_string () && !name->get<std::string> ().empty ()) {
-        script_request_name = name->get<std::string> ();
-    } else if (linked_request && !linked_request->name.empty ()) {
-        script_request_name = linked_request->name;
+        identity.request_name = name->get<std::string> ();
+        return identity;
     }
+    if (!identity.request_id) {
+        return identity;
+    }
+    if (auto linked_request = db.get_request (*identity.request_id);
+    linked_request && !linked_request->name.empty ()) {
+        identity.request_name = linked_request->name;
+    }
+    return identity;
 }
 
 /**
@@ -483,15 +547,12 @@ RunContext::ScriptsOverrideMode scripts_mode) {
     return scripts;
 }
 
-/// The collections whose chains a scenario load run's steps read, one per
-/// step (#3248).
-std::vector<std::string> scenario_scope_collection_ids (const ScenarioExecution& execution) {
-    std::vector<std::string> ids;
-    ids.reserve (execution.plan.steps.size ());
-    for (const auto& step : execution.plan.steps) {
-        ids.push_back (load_step_collection_id (step, execution.request.collection_id));
-    }
-    return ids;
+/// The virtual user and iteration a scenario load sample was sent as, which
+/// its executor records on every sample (`submit_one`).
+IterationIdentity scenario_sample_identity (const ResponseSample& sample) {
+    return { vayu::utils::invariant_value (sample.vu, "a scenario load sample records its virtual user"),
+        vayu::utils::invariant_value (
+        sample.iteration, "a scenario load sample records its iteration") };
 }
 
 /**
@@ -500,10 +561,13 @@ std::vector<std::string> scenario_scope_collection_ids (const ScenarioExecution&
  * A step with no script, or one whose script never got a sample to run against,
  * reports nothing rather than a row of zeros - the same distinction the
  * whole-run section has always kept. Returns the steps' counts summed; each
- * step's console lines stay on its own entry of `validation.steps`.
+ * step's console lines stay on its own entry of `validation.steps`. @p state,
+ * null when the run's driver never started, is what each sample's request is
+ * re-derived from.
  */
 ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::RunVariableScopes& scopes,
+const ScenarioLoadState* state,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 const vayu::runtime::ScriptSendInputs& send,
@@ -516,7 +580,7 @@ ReplayFailures& failures) {
     plan.steps.size (), context->metrics_collector->step_sample_step_count ());
     validation.steps.resize (steps);
 
-    for (size_t i = 0; i < steps; ++i) {
+    for (size_t i = 0; i < steps && !replay_stopped (send); ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
         const std::vector<std::string> post_scripts =
@@ -541,8 +605,17 @@ ReplayFailures& failures) {
         "moment are not recorded. See docs/engine/scripting.md.";
         // The step's own request, so `pm.request` describes the step the
         // script is asserting on rather than a run-level request a
-        // scenario payload does not have.
-        replay.request    = &step.request;
+        // scenario payload does not have; as each sample sent it, where the
+        // run's state is there to re-derive it from (#3460).
+        replay.request = &step.request;
+        if (state != nullptr) {
+            replay.request_as_sent = [&execution = *context->scenario,
+                                     &bases      = state->scope_bases,
+                                     i] (const ResponseSample& sample) {
+                return step_request_as_submitted (execution, bases, i,
+                sample.data_row_index, scenario_sample_identity (sample));
+            };
+        }
         replay.samples    = &samples;
         replay.data_rows  = data_rows.empty () ? nullptr : &data_rows;
         replay.request_id = step.request_id.empty () ?
@@ -561,6 +634,10 @@ ReplayFailures& failures) {
         auto& step_scopes = scopes.bind (
         load_step_collection_id (step, context->scenario->request.collection_id));
         auto totals = run_replay (engine, step_scopes, replay, failures);
+        // A Stop before the step's first sample: it judged nothing.
+        if (totals.sampled == 0) {
+            continue;
+        }
         run_totals.sampled += totals.sampled;
         run_totals.passed += totals.passed;
         run_totals.failed += totals.failed;
@@ -612,7 +689,8 @@ size_t failed) {
 }
 
 ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
-vayu::db::Database& db) {
+vayu::db::Database& db,
+const ReplayBase& base) {
     ScriptValidation validation;
 
     // Which shape this run is. A scenario load run's scripts hang off its plan
@@ -664,12 +742,14 @@ vayu::db::Database& db) {
     // scenario takes both off the plan step it is replaying instead, so it does
     // not pay for a payload lookup whose answer it would discard.
     vayu::Request dummy_request;
-    std::optional<std::string> script_request_id;
-    std::optional<std::string> script_request_name;
-    std::optional<vayu::db::Request> linked_request;
+    RunScriptIdentity script_identity;
     if (!per_step) {
-        read_run_script_identity (db, context->config, dummy_request,
-        script_request_id, script_request_name, linked_request);
+        // HTTP request fields are at the root of the run's payload.
+        if (auto request_result = vayu::json::deserialize_request (context->config);
+        request_result.is_ok ()) {
+            dummy_request = request_result.value ();
+        }
+        script_identity = read_run_script_identity (db, context->config);
     }
 
     // The scopes the replayed scripts read (issue #728). A load run's `tests`
@@ -682,9 +762,9 @@ vayu::db::Database& db) {
     // Which collection scope is the run's is the same question the two
     // sequential paths answer: a scenario step's is its own folder's chain, as
     // in the run itself (#3248), a single-request run's is the collection of
-    // the request it links (`load_script_variable_scopes(db, run)`). Read off
-    // the payload, which is what the run row itself was populated from, and
-    // where this function already reads `requestId` from.
+    // the request it links, else the payload's composed `collectionId`
+    // (`single_request_lifecycle_collection_id`, #3461). Read off the payload,
+    // which is what the run row itself was populated from.
     //
     // A database failure here is deliberately not caught: it propagates to
     // `execute_load_test`, which logs it and stores no `testValidation`
@@ -693,20 +773,24 @@ vayu::db::Database& db) {
     // not be reported as "judged and passed".
     const auto environment_id = named_id (context->config, "environmentId");
 
-    // Loaded once and shared by every replay of the pass, so a `set()` is
-    // readable by the samples replayed after it - the same within-a-run
-    // visibility a sequential run gives. Never persisted:
-    // `persist_script_variables` is design-mode only, and a reservoir sample is
-    // not an iteration, so writing back whichever replay ran last would store a
-    // value no ordering justifies.
+    // Copied from what setup left (#3460), so a deferred script reads setup's
+    // writes as an inline one does; a copy, because teardown reads the
+    // original after this pass. Only a context with no worker behind it
+    // (`ReplayBase` empty) loads the stored rows. One set shared by every
+    // replay of the pass, so a `set()` is readable by the samples replayed
+    // after it - the same within-a-run visibility a sequential run gives.
+    // Never persisted: `persist_script_variables` is design-mode only, and a
+    // reservoir sample is not an iteration, so writing back whichever replay
+    // ran last would store a value no ordering justifies.
     ScriptValidationTotals totals;
     ReplayFailures failures;
 
     if (per_step) {
-        vayu::http::routes::RunVariableScopes scopes (
-        db, environment_id, scenario_scope_collection_ids (*context->scenario));
-        totals = replay_scenario_steps (
-        engine, scopes, context, sse_limits, script_send, validation, failures);
+        auto scopes = base.scenario_state != nullptr ?
+        base.scenario_state->lifecycle_scopes :
+        scenario_load_scopes (db, environment_id, *context->scenario);
+        totals = replay_scenario_steps (engine, scopes, base.scenario_state,
+        context, sse_limits, script_send, validation, failures);
         // Every scripted step drew a blank, so the run validated nothing.
         if (totals.sampled == 0) {
             return validation;
@@ -719,6 +803,14 @@ vayu::db::Database& db) {
         ScriptReplay replay;
         replay.scripts = &context->test_scripts;
         replay.request = &dummy_request;
+        if (base.shared_request != nullptr) {
+            replay.request_as_sent = [&run = *context, &shared = *base.shared_request] (
+                                     const ResponseSample& sample) {
+                const ResultAnnotations annotations{ sample.data_row_index,
+                    std::nullopt, sample.iteration, sample.vu };
+                return request_as_submitted (run, shared, annotations);
+            };
+        }
         replay.samples = &samples;
         replay.cookie_read_refusal =
         "pm.cookies.%s is not available here: a single-request load run "
@@ -732,14 +824,20 @@ vayu::db::Database& db) {
         // `pm.iterationData` `undefined` there.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
-        replay.request_id   = script_request_id;
-        replay.request_name = script_request_name;
+        replay.request_id   = script_identity.request_id;
+        replay.request_name = script_identity.request_name;
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
-        auto scopes = vayu::http::routes::load_script_variable_scopes (db, environment_id,
-        linked_request ? linked_request->collection_id : std::string ());
-        totals = run_replay (engine, scopes, replay, failures);
+        auto scopes = base.request_scopes != nullptr ?
+        *base.request_scopes :
+        vayu::http::routes::load_script_variable_scopes (db, environment_id,
+        single_request_lifecycle_collection_id (db, context->config));
+        totals      = run_replay (engine, scopes, replay, failures);
+        // A Stop before the first sample: never judged, not judged and passed.
+        if (totals.sampled == 0) {
+            return validation;
+        }
     }
 
     store_validation_failures (
@@ -1296,7 +1394,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     // of them is waited on, so the grace period is shared rather than serial.
     auto active = get_all_active_runs ();
     for (const auto& context : active) {
-        context->request_stop ();
+        context->request_shutdown ();
     }
 
     if (!active.empty ()) {
@@ -1542,10 +1640,12 @@ int default_max_per_host) {
     context->script_send.default_headers = loop_config.default_headers;
     context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
     context->script_send.request_timeout_ms = timeout_ms;
-    // Stop and shutdown both raise `should_stop` (#3371). Not `aux_cancel`:
-    // the worker raises that at every end before the replay and teardown run,
-    // and their sends must still go out after a natural end.
+    // Stop and shutdown both raise `should_stop` (#3371), which ends the
+    // scripts themselves too (#3460; teardown reads `teardown_stop`). Not
+    // `aux_cancel`: the worker raises that at every end before the replay and
+    // teardown run, and their sends must still go out after a natural end.
     context->script_send.cancel = &context->should_stop;
+    context->script_send.stop   = &context->should_stop;
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
@@ -1566,24 +1666,6 @@ int default_max_per_host) {
     context->publish_event_loop (std::move (event_loop));
 }
 
-/** The collection scope a single-request run's own `lifecycleElements`
- *  scripts read and write (issue #1573) - the same rule the deferred `tests`
- *  replay already follows (`read_run_script_identity`'s collection-scope
- *  reader, above): the collection of the request the run links, or none for
- *  a bare URL run with no collection to inherit from. */
-std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
-const nlohmann::json& config) {
-    auto request_id = config.find ("requestId");
-    if (request_id == config.end () || !request_id->is_string () ||
-    request_id->get<std::string> ().empty ()) {
-        return "";
-    }
-    if (auto linked_request = db.get_request (request_id->get<std::string> ())) {
-        return linked_request->collection_id;
-    }
-    return "";
-}
-
 namespace {
 
 /// The bare column names @p context's rows bind (#1007), or none without rows.
@@ -1593,9 +1675,10 @@ const vayu::http::BoundColumnNames& run_bound_columns (const RunContext& context
 }
 
 /// Whether a single-request run names stored scopes: an `environmentId`, or a
-/// `requestId` whose collection chain they then include.
+/// `requestId` or `collectionId` whose collection chain they then include.
 bool names_stored_scopes (const nlohmann::json& config) {
-    return named_id (config, "environmentId") || named_id (config, "requestId");
+    return named_id (config, "environmentId") ||
+    named_id (config, "requestId") || named_id (config, "collectionId");
 }
 
 /**
@@ -2183,21 +2266,6 @@ const nlohmann::json& config) {
     return script_config;
 }
 
-/** The collection's own `elements` array, compiled once - shared by both
- *  `script.setup`'s and `script.teardown`'s dispatch, never a step's
- *  inherited copy. Empty for an unbound or elements-free collection. */
-std::vector<vayu::core::CompiledElement>
-compile_collection_elements (vayu::db::Database& db, const std::string& collection_id) {
-    std::vector<vayu::core::CompiledElement> elements;
-    if (auto collection_row = db.get_collection (collection_id)) {
-        auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
-        if (!parsed.is_discarded ()) {
-            elements = vayu::core::compile_elements (parsed);
-        }
-    }
-    return elements;
-}
-
 /** A single-request run's own `lifecycleElements` (issue #1573), compiled
  *  once - this run shape's ephemeral, uncollected equivalent of a
  *  collection's `elements` column, validated at the route
@@ -2220,187 +2288,138 @@ const nlohmann::json& config) {
 }
 
 /**
- * `script.setup` (#1499): dispatched by `execute_load_test`, before it
- * captures `test_start`, so a setup script's own time is never folded into
- * the run's duration figures and a throwing setup fails the run before any
- * load is sent. Writes into @p base_scopes, which the caller then hands to
- * `execute_scenario_load` for a scenario run - so a setup write is visible to
- * the run's very first submission, exactly as it is to a sequential run's
- * first step. A single-request load run has no collection to declare one on;
- * it reads its own `lifecycleElements` instead (issue #1573) and the scopes
- * are also copied onto `context->lifecycle_scopes`, since this run shape has
- * no `ScenarioLoadState` for `run_collection_teardown` to read them back from.
- *
- * @return `nullopt` on success; the failed outcome's message otherwise. The
- *         caller's only remaining job on failure is to stop the run - this
- *         does not touch `context->is_running` or the run's status itself,
- *         since only the caller knows the rest of its own shutdown sequence.
+ * A scenario load run's `script.setup` (#1499, #3456): resolves the run's
+ * lifecycle set once onto `context->lifecycle`, loads @p scopes for it and
+ * every step (`scenario_load_scopes`) and runs each collection's setups bound
+ * to that collection, through the same `run_scenario_setup` a sequential run
+ * uses, so what a folder's setup writes reaches the bases of that folder's
+ * steps and the folders below it.
  */
-std::optional<std::string> run_collection_setup (vayu::db::Database& db,
+std::optional<std::string> run_scenario_load_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
-vayu::http::routes::ScriptVariableScopes& base_scopes) {
-    std::vector<vayu::core::CompiledElement> collection_elements;
-    const auto environment_id = named_id (context->config, "environmentId");
-
-    if (context->scenario) {
-        base_scopes = vayu::http::routes::load_script_variable_scopes (
-        db, environment_id, context->scenario->request.collection_id);
-        collection_elements =
-        compile_collection_elements (db, context->scenario->request.collection_id);
-        if (collection_elements.empty ()) {
-            return std::nullopt;
-        }
-    } else {
-        collection_elements = compile_run_lifecycle_elements (context->config);
-        // Issue #1594: a run's own `requestElements` needs the same base
-        // scopes `lifecycleElements` does, even when it declares no
-        // `lifecycleElements` at all - so the early return below only fires
-        // when NEITHER exists to read or write them.
-        const bool needs_scopes = !collection_elements.empty () ||
-        (context->step_elements && !context->step_elements->empty ());
-        if (!needs_scopes) {
-            return std::nullopt;
-        }
-        base_scopes = vayu::http::routes::load_script_variable_scopes (db,
-        environment_id, single_request_lifecycle_collection_id (db, context->config));
-        context->lifecycle_scopes = base_scopes;
-        if (context->step_elements && !context->step_elements->empty ()) {
-            context->step_base_vars =
-            vayu::http::routes::flatten_variable_scopes (base_scopes);
-            context->step_script_config =
-            read_lifecycle_script_config (db, context->config);
-        }
-        if (collection_elements.empty ()) {
-            // Scopes are loaded for `requestElements` alone; nothing to run
-            // at `Phase::RunStart`.
-            return std::nullopt;
-        }
+std::optional<vayu::http::routes::RunVariableScopes>& scopes) {
+    const ScenarioExecution& execution = *context->scenario;
+    context->lifecycle = std::make_shared<const std::vector<LifecycleCollection>> (
+    resolve_lifecycle_collections (
+    db, execution.request.collection_id, execution.request.recursive));
+    auto& run_scopes = scopes.emplace (scenario_load_scopes (db,
+    named_id (context->config, "environmentId"), execution, *context->lifecycle));
+    if (context->lifecycle->empty ()) {
+        return std::nullopt;
     }
-
-    auto setup_config = read_lifecycle_script_config (db, context->config);
-    vayu::runtime::ScriptEngine setup_engine (setup_config);
-
-    vayu::Request lifecycle_request;
-    vayu::ScriptResult unread_pre;
-    vayu::ScriptResult unread_post;
-    vayu::core::ElementContext setup_ctx{
-        .request        = lifecycle_request,
-        .response       = nullptr,
-        .run_pre_script = [] (
-                          const std::string&) { return vayu::ScriptResult{}; },
-        .run_post_script = [] (
-                           const std::string&) { return vayu::ScriptResult{}; },
-        .pre_script_result  = unread_pre,
-        .post_script_result = unread_post,
-        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop   = nullptr,
-        .record_metric = nullptr, // metric.record is step.after only.
-        .run_setup_script =
-        [&] (const std::string& script) {
-            auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
-            vayu::http::routes::bind_variable_scopes (script_ctx, base_scopes);
-            context->script_send.apply (script_ctx);
-            return vayu::http::routes::execute_script (
-            setup_engine, script, script_ctx, "Setup");
-        },
-    };
-    vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
-    collection_elements, context->setup_outcomes);
+    vayu::runtime::ScriptEngine setup_engine (
+    read_lifecycle_script_config (db, context->config));
+    auto refusal = run_scenario_setup (setup_engine, run_scopes,
+    context->script_send, *context->lifecycle, context->setup_outcomes);
     // A virtual user's local scope starts empty each iteration (#2564), and
     // setup is no user's iteration, so its `pm.variables.set` ends with it
-    // rather than reaching every user through the base scopes.
-    base_scopes.local.clear ();
-    // `run_setup_script` above binds `base_scopes` by reference and writes a
-    // `script.setup`'s `pm.environment.set`/`pm.collectionVariables.set` calls
-    // into it in place - so the copies taken before this call
-    // (`context->lifecycle_scopes`, `context->step_base_vars`) are stale the
-    // moment setup writes anything. Refreshed here, after the write, so a
-    // `requestElements` submission's residual pass and the teardown read
-    // what setup actually left rather than what existed before it ran. The
-    // scenario branch does not touch either field - its own caller re-reads
-    // `base_scopes` by reference once this function returns.
-    if (!context->scenario) {
-        context->lifecycle_scopes = base_scopes;
-        if (context->step_elements && !context->step_elements->empty ()) {
-            context->step_base_vars =
-            vayu::http::routes::flatten_variable_scopes (base_scopes);
-        }
-    }
-    for (const auto& outcome : context->setup_outcomes) {
-        if (outcome.status == "error" || outcome.status == "failed") {
-            return outcome.message.value_or ("unknown error");
-        }
-    }
-    return std::nullopt;
+    // rather than reaching every user through the bases.
+    run_scopes.clear_local ();
+    return refusal;
 }
 
 /**
- * `script.teardown` (#1499): the same elements `run_collection_setup` ran,
- * dispatched by `finish_load_test` so `pm.info.run` can carry
- * @p run_summary_info. Never lets a throw reach the caller's `final_status`:
- * `ElementPipeline::run` already turns one into this element's own `"error"`
- * outcome rather than propagating, so a failing teardown is recorded, not
- * fatal. A single-request load run has no `ScenarioLoadState` to hold the
- * scopes setup wrote into - it reads `context->lifecycle_scopes` instead
- * (issue #1573). Empty for a scenario load run whose driver never started
- * (no `scenario_state`), or a run (either shape) that declared no
- * `script.teardown`.
+ * A single-request load run's `script.setup`: it has no collection to declare
+ * one on, so it reads its own `lifecycleElements` instead (issue #1573). The
+ * scopes it leaves are kept on `context->lifecycle_scopes`, since this run
+ * shape has no `ScenarioLoadState` for `run_collection_teardown` to read them
+ * back from, and flattened onto `context->step_base_vars` for a run whose
+ * `requestElements` read them (issue #1594), after setup has written them.
+ */
+std::optional<std::string> run_request_lifecycle_setup (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context) {
+    const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
+    const bool has_step_elements =
+    context->step_elements && !context->step_elements->empty ();
+    if (lifecycle_elements.empty () && !has_step_elements) {
+        return std::nullopt;
+    }
+    auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+    named_id (context->config, "environmentId"),
+    single_request_lifecycle_collection_id (db, context->config));
+    if (!lifecycle_elements.empty ()) {
+        vayu::runtime::ScriptEngine setup_engine (
+        read_lifecycle_script_config (db, context->config));
+        run_setup_elements (setup_engine, scopes, context->script_send,
+        lifecycle_elements, context->setup_outcomes);
+        // Setup is no submission's, so its local scope ends with it, as a
+        // scenario run's does.
+        scopes.local.clear ();
+    }
+    context->lifecycle_scopes = scopes;
+    if (has_step_elements) {
+        context->step_base_vars = vayu::http::routes::flatten_variable_scopes (scopes);
+        context->step_script_config = read_lifecycle_script_config (db, context->config);
+        const auto identity = read_run_script_identity (db, context->config);
+        context->script_request_id   = identity.request_id;
+        context->script_request_name = identity.request_name;
+    }
+    return lifecycle_refusal (context->setup_outcomes);
+}
+
+/**
+ * `script.setup` (#1499): dispatched by `execute_load_test`, before it
+ * captures `test_start`, so a setup script's own time is never folded into
+ * the run's duration figures and a refusing setup fails the run before any
+ * load is sent. A scenario run's @p scenario_scopes are loaded here and then
+ * handed to `execute_scenario_load`, so a setup write is visible to the run's
+ * very first submission, exactly as it is to a sequential run's first step;
+ * a single-request run leaves them empty.
+ *
+ * @return `nullopt` on success; the refusing outcome's message otherwise.
+ *         The caller's only remaining job on failure is to stop the run -
+ *         this does not touch `context->is_running` or the run's status
+ *         itself, since only the caller knows the rest of its own shutdown
+ *         sequence.
+ */
+std::optional<std::string> run_collection_setup (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context,
+std::optional<vayu::http::routes::RunVariableScopes>& scenario_scopes) {
+    if (context->scenario) {
+        return run_scenario_load_setup (db, context, scenario_scopes);
+    }
+    return run_request_lifecycle_setup (db, context);
+}
+
+/**
+ * `script.teardown` (#1499): dispatched by `finish_load_test` so
+ * `pm.info.run` can carry @p run_summary_info. A scenario run tears down the
+ * lifecycle set its setup resolved (`context->lifecycle`, #3456), in
+ * reverse, on a copy of the scopes setup left (`ScenarioLoadState::
+ * lifecycle_scopes`); a single-request run re-reads its own
+ * `lifecycleElements` against `context->lifecycle_scopes` (issue #1573).
+ * Never lets a throw reach the caller's `final_status`: `ElementPipeline::run`
+ * already turns one into this element's own `"error"` outcome. Empty for a
+ * scenario load run whose driver never started (no `scenario_state`), or a
+ * run (either shape) that declared no `script.teardown`.
  */
 std::vector<vayu::core::ElementOutcome> run_collection_teardown (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<ScenarioLoadState>& scenario_state,
 const vayu::runtime::RunSummaryInfo& run_summary_info) {
-    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
-
-    std::vector<vayu::core::CompiledElement> collection_elements;
-    vayu::http::routes::ScriptVariableScopes* scopes = nullptr;
-    // A copy: the run's bases are read-only, and a load run persists nothing.
-    vayu::http::routes::ScriptVariableScopes run_collection_scopes;
+    auto teardown_send = context->script_send;
+    teardown_send.stop = context->teardown_stop ();
     if (context->scenario) {
-        if (!scenario_state) {
-            return teardown_outcomes;
+        if (!scenario_state || !context->lifecycle || context->lifecycle->empty ()) {
+            return {};
         }
-        collection_elements =
-        compile_collection_elements (db, context->scenario->request.collection_id);
-        run_collection_scopes = scenario_state->scope_bases.run_scopes ();
-        scopes                = &run_collection_scopes;
-    } else {
-        collection_elements = compile_run_lifecycle_elements (context->config);
-        scopes              = &context->lifecycle_scopes;
+        vayu::runtime::ScriptEngine teardown_engine (
+        read_lifecycle_script_config (db, context->config));
+        // A copy: the run's scopes are the bases' source and stay as setup
+        // left them, and a load run persists nothing.
+        auto scopes = scenario_state->lifecycle_scopes;
+        return run_scenario_teardown (teardown_engine, scopes, teardown_send,
+        *context->lifecycle, run_summary_info);
     }
-    if (collection_elements.empty ()) {
+    const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
+    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+    if (lifecycle_elements.empty ()) {
         return teardown_outcomes;
     }
-
-    auto teardown_config = read_lifecycle_script_config (db, context->config);
-    vayu::runtime::ScriptEngine teardown_engine (teardown_config);
-
-    vayu::Request lifecycle_request;
-    vayu::ScriptResult unread_pre;
-    vayu::ScriptResult unread_post;
-    vayu::core::ElementContext teardown_ctx{
-        .request        = lifecycle_request,
-        .response       = nullptr,
-        .run_pre_script = [] (
-                          const std::string&) { return vayu::ScriptResult{}; },
-        .run_post_script = [] (
-                           const std::string&) { return vayu::ScriptResult{}; },
-        .pre_script_result  = unread_pre,
-        .post_script_result = unread_post,
-        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop   = nullptr,
-        .record_metric = nullptr, // metric.record is step.after only.
-        .run_teardown_script =
-        [&] (const std::string& script) {
-            auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
-            vayu::http::routes::bind_variable_scopes (script_ctx, *scopes);
-            context->script_send.apply (script_ctx);
-            return vayu::http::routes::execute_script (
-            teardown_engine, script, script_ctx, "Teardown");
-        },
-    };
-    vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd, teardown_ctx,
-    collection_elements, teardown_outcomes);
+    vayu::runtime::ScriptEngine teardown_engine (
+    read_lifecycle_script_config (db, context->config));
+    run_teardown_elements (teardown_engine, context->lifecycle_scopes,
+    teardown_send, lifecycle_elements, run_summary_info, teardown_outcomes);
     return teardown_outcomes;
 }
 
@@ -2431,8 +2450,32 @@ double total_duration_s) {
 }
 
 /**
+ * What this run's worker left its deferred replay to start from, @p request
+ * being the one `build_load_request` built. A single-request run's setup loads
+ * its scopes whenever the run carries `requestElements`
+ * (`run_request_lifecycle_setup`), which is where every replayed script comes
+ * from.
+ */
+ReplayBase replay_base (const RunContext& context,
+const vayu::Request& request,
+const ScenarioLoadState* scenario_state) {
+    ReplayBase base;
+    if (context.scenario) {
+        base.scenario_state = scenario_state;
+        return base;
+    }
+    base.shared_request = &request;
+    if (context.step_elements && !context.step_elements->empty ()) {
+        base.request_scopes = &context.lifecycle_scopes;
+    }
+    return base;
+}
+
+/**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
- * the stored summary and the terminal status.
+ * the stored summary and the terminal status. @p request is the one a
+ * single-request run's submissions copied, which the replay re-derives each
+ * sample's from.
  *
  * Each step is guarded on its own, so one that fails costs only what it was
  * about to write - a run that measured something must still be reported as
@@ -2444,6 +2487,7 @@ double total_duration_s,
 const SendingWindow& sending,
 const RunOverheads& overheads,
 double target_rps,
+const vayu::Request& request,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     size_t completed   = context->total_requests ();
     double avg_latency = context->average_latency_ms ();
@@ -2474,7 +2518,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // go into the summary below, so it has to run before the summary write.
     ScriptValidation validation;
     try {
-        validation = validate_scripts (context, db);
+        validation = validate_scripts (
+        context, db, replay_base (*context, request, scenario_state.get ()));
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "Script validation failed: " + std::string (e.what ()),
@@ -2569,6 +2614,29 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     { "p50", percentiles.p50 }, { "p95", percentiles.p95 }, { "p99", percentiles.p99 } });
 }
 
+namespace {
+
+/**
+ * A failed run's summary, from whatever its collector holds. Without one the
+ * report route takes the legacy path and finds nothing, reporting an empty run.
+ *
+ * Call it after `join_aux_threads` and before the status flips to Failed: the
+ * terminal status is what tells a polling client the report is ready, so one
+ * that fetches on seeing it must not race a summary still being written.
+ */
+void store_failed_run_summary (vayu::db::Database& db, const RunContext& context) {
+    try {
+        db.update_run_summary (context.run_id,
+        build_run_summary_payload (failed_run_summary_inputs (context)).dump ());
+    } catch (const std::exception& ex) {
+        vayu::utils::log_error ("run",
+        "Failed to store run summary for failed run: " + std::string (ex.what ()),
+        { { "runId", context.run_id } });
+    }
+}
+
+} // namespace
+
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 RunManager& manager) {
@@ -2636,20 +2704,21 @@ RunManager& manager) {
             return;
         }
 
-        // `script.setup` (#1499): the collection's own once-per-run elements,
-        // run - and, on failure, refused - before `test_start` below is
-        // captured, so a setup script's own time is never folded into the
-        // run's duration figures and a throwing setup fails the run before any
+        // `script.setup` (#1499): the lifecycle set's once-per-run elements
+        // (#3456), run - and, on failure, refused - before `test_start` below
+        // is captured, so a setup script's own time is never folded into the
+        // run's duration figures and a refusing setup fails the run before any
         // load is sent.
-        vayu::http::routes::ScriptVariableScopes base_scopes;
-        if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
+        std::optional<vayu::http::routes::RunVariableScopes> scenario_scopes;
+        if (auto setup_failure = run_collection_setup (db, context, scenario_scopes)) {
             vayu::utils::log_error ("run", "script.setup failed",
             { { "runId", context->run_id },
             { "scriptError", vayu::utils::bounded_log_text (*setup_failure) } });
-            db.transition_run_status (context->run_id,
-            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
+            store_failed_run_summary (db, *context);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             manager.retain_run (context->run_id);
             return;
         }
@@ -2667,8 +2736,9 @@ RunManager& manager) {
 
         try {
             if (context->scenario) {
-                scenario_state = execute_scenario_load (
-                context, db, *context->scenario, std::move (base_scopes));
+                scenario_state = execute_scenario_load (context, db, *context->scenario,
+                vayu::utils::invariant_value (std::move (scenario_scopes),
+                "a scenario run's setup loads its scopes"));
             } else {
                 auto strategy = LoadStrategy::create (config);
                 strategy->execute (context, db, request);
@@ -2750,7 +2820,7 @@ RunManager& manager) {
         };
 
         finish_load_test (context, db, total_duration_s, sending, overheads,
-        target_rps, scenario_state);
+        target_rps, request, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run
@@ -2761,23 +2831,8 @@ RunManager& manager) {
         vayu::utils::log_error ("run", "Load test error: " + std::string (e.what ()),
         { { "runId", context->run_id } });
 
-        // A crashed run still gets a summary, with whatever the collector holds
-        // and a duration from load start (0 if load never began) - without
-        // one the report route would take the legacy path and find nothing,
-        // reporting an empty run.
-        //
-        // Written *before* the status flips to Failed, matching the success
-        // path: the terminal status is what tells a polling client the report
-        // is ready, so a client that fetches on seeing it must not race a
-        // summary still being written and get the empty-run answer instead.
-        try {
-            db.update_run_summary (context->run_id,
-            build_run_summary_payload (failed_run_summary_inputs (*context)).dump ());
-        } catch (const std::exception& ex) {
-            vayu::utils::log_error ("run",
-            "Failed to store run summary for failed run: " + std::string (ex.what ()),
-            { { "runId", context->run_id } });
-        }
+        // A duration from load start, 0 if load never began.
+        store_failed_run_summary (db, *context);
 
         // From Pending too: the throw may have come from the move to Running.
         try {

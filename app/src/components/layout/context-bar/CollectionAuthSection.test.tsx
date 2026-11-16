@@ -24,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { CollectionAuthSection } from "./CollectionAuthSection";
-import { useCollectionAuthDraftStore } from "@/stores";
+import { collectionAuthDraftKey, useEntityDraftStore } from "@/stores";
 import type { Collection, RequestAuth } from "@/types";
 
 let collections: Collection[] = [];
@@ -69,8 +69,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	useCollectionAuthDraftStore.setState({ drafts: new Map() });
+	useEntityDraftStore.setState({ entries: new Map() });
 });
+
+/** What an Auth tab holding an unsaved pick leaves in the draft store. */
+function draftAuth(collectionId: string, auth: Collection["auth"]) {
+	const stored = collections.find((c) => c.id === collectionId)?.auth ?? auth;
+	useEntityDraftStore
+		.getState()
+		.put(collectionAuthDraftKey(collectionId), { draft: auth, baseline: stored });
+}
 
 describe("CollectionAuthSection", () => {
 	it("names the auth this collection configures", () => {
@@ -138,7 +146,7 @@ describe("CollectionAuthSection", () => {
 		// saved. Without the draft store wired in this would still read "Bearer
 		// Token" and "Requests set to Inherit send this." - the stale-panel bug.
 		collections = [collection("col_leaf", bearer)];
-		useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "noauth" });
+		draftAuth("col_leaf", { mode: "noauth" });
 
 		render(<CollectionAuthSection tab={TAB} />);
 
@@ -178,7 +186,7 @@ describe("CollectionAuthSection", () => {
 
 		it("keeps the (unsaved) mark on both sentences", () => {
 			collections = [collection("col_leaf", bearer)];
-			useCollectionAuthDraftStore.getState().setDraft("col_leaf", digest);
+			draftAuth("col_leaf", digest);
 			const { unmount } = render(<CollectionAuthSection tab={TAB} />);
 			expect(
 				screen.getByText(
@@ -191,7 +199,7 @@ describe("CollectionAuthSection", () => {
 				collection("col_root", digest, undefined, "Billing"),
 				collection("col_leaf", bearer, "col_root"),
 			];
-			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+			draftAuth("col_leaf", { mode: "none" });
 			render(<CollectionAuthSection tab={TAB} />);
 			expect(
 				screen.getByText(
@@ -221,9 +229,7 @@ describe("CollectionAuthSection", () => {
 	describe("marking a draft that is not saved yet", () => {
 		it("says (unsaved) while the draft differs from the stored auth", () => {
 			collections = [collection("col_leaf", bearer)];
-			useCollectionAuthDraftStore
-				.getState()
-				.setDraft("col_leaf", { mode: "bearer", token: "new" });
+			draftAuth("col_leaf", { mode: "bearer", token: "new" });
 
 			render(<CollectionAuthSection tab={TAB} />);
 
@@ -237,7 +243,7 @@ describe("CollectionAuthSection", () => {
 				collection("col_root", bearer, undefined, "Billing"),
 				collection("col_leaf", { mode: "noauth" }, "col_root"),
 			];
-			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+			draftAuth("col_leaf", { mode: "none" });
 
 			render(<CollectionAuthSection tab={TAB} />);
 
@@ -251,7 +257,7 @@ describe("CollectionAuthSection", () => {
 				collection("col_mid", { mode: "noauth" }, undefined, "Sandbox"),
 				collection("col_leaf", bearer, "col_mid"),
 			];
-			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+			draftAuth("col_leaf", { mode: "none" });
 			const { unmount } = render(<CollectionAuthSection tab={TAB} />);
 			expect(
 				screen.getByText(
@@ -267,10 +273,11 @@ describe("CollectionAuthSection", () => {
 			).toBeInTheDocument();
 		});
 
-		it("does not say it when the published draft merely equals the stored auth", () => {
-			// The Auth tab publishes its draft while clean, equal to the stored value.
+		it("does not say it when the stored draft merely equals the stored auth", () => {
+			// A save that landed leaves the entry equal to the stored value until the
+			// Auth tab drops it.
 			collections = [collection("col_leaf", bearer)];
-			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { ...bearer });
+			draftAuth("col_leaf", { ...bearer });
 
 			render(<CollectionAuthSection tab={TAB} />);
 

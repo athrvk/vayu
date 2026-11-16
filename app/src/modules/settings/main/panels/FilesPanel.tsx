@@ -30,7 +30,15 @@
  */
 
 import { FolderLock, FolderOpen, Loader2, Trash2 } from "lucide-react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import {
+	Button,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	TooltipIconButton,
+} from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { useDeleteFileRootMutation, useFileRootsQuery } from "@/queries";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
@@ -115,15 +123,14 @@ export default function FilesPanel() {
 								>
 									{root.path}
 								</span>
-								<Button
-									variant="ghost"
+								<TooltipIconButton
 									size="sm"
 									onClick={() => void remove(root.id, root.path)}
 									disabled={deleteRoot.isPending}
-									aria-label={`Remove ${root.path}`}
-								>
-									<Trash2 className="size-icon" />
-								</Button>
+									label={`Remove ${root.path}`}
+									tooltip="Remove folder"
+									icon={<Trash2 className="size-icon" />}
+								/>
 							</li>
 						))}
 					</ul>

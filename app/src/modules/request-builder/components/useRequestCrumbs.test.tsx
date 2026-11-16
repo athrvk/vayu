@@ -28,10 +28,9 @@
  *      no name must produce no element, not an element with no text - and only
  *      absence, not emptiness, can be asserted for.
  *   2. **Which segment gives way.** The name is the part you are looking for,
- *      so the ancestors truncate and it does not. jsdom has no layout, so the
- *      classes are the assertion: `min-w-0` + `truncate` on the ancestors is
- *      what makes `truncate` engage at all inside a flex row, and `shrink-0` on
- *      the name is what keeps it out of the negotiation.
+ *      so the ancestors truncate down to a floor and the name truncates with
+ *      its full text on hover (#3495). jsdom has no layout, so the classes are
+ *      the assertion; `TabBreadcrumb.test.tsx` holds the rest.
  *
  * The chain is read live from the collections cache rather than captured, so a
  * rename or a drag-move shows up here without a refetch - asserted below by
@@ -134,17 +133,18 @@ describe("the request builder's crumb line", () => {
 		expect(crumb()).toBeNull();
 	});
 
-	it("truncates ancestors and never the name", () => {
+	it("truncates ancestors down to a floor, and the name with a tooltip", () => {
 		ancestors = [collection("col_root", "A collection with a very long name indeed")];
 		renderCrumb({ name: "List settlements" });
 
 		const ancestorLabel = screen.getByText("A collection with a very long name indeed");
 		expect(ancestorLabel.className).toContain("truncate");
-		expect(screen.getByRole("button").className).toContain("min-w-0");
+		expect(screen.getByRole("button").className).toContain("min-w-[3ch]");
 
 		const name = screen.getByText("List settlements");
-		expect(name.className).toContain("shrink-0");
-		expect(name.className).not.toContain("truncate");
+		expect(name.className).toContain("min-w-0");
+		expect(name.className).toContain("truncate");
+		expect(name.className).not.toContain("shrink-0");
 	});
 
 	it("follows a rename in the cache", () => {

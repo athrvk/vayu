@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { mergeCapture } from "@/queries";
 import type { InboxCapture, InboxCapturesResponse } from "@/types";
 import { CaptureDetail } from "./CaptureDetail";

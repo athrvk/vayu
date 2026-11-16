@@ -28,6 +28,7 @@
 
 import { useState } from "react";
 import { formatLatencyParts } from "@/lib/format-number";
+import { spokenSymbols } from "@/lib/spoken-text";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useRequestBuilderContext } from "../context";
 
@@ -35,13 +36,12 @@ const SPOKEN_UNIT = { ms: "millisecond", s: "second" } as const;
 
 /**
  * The header's number, spoken: the digits are the shared ones so the announcer
- * never disagrees with the pane, and the unit is a word. "<0.01" is written out
- * because a screen reader may skip the symbol and speak a bare "0.01".
+ * never disagrees with the pane, and the unit is a word.
  */
 function spokenDuration(ms: number): string {
 	const { value, unit } = formatLatencyParts(ms);
 	const word = pluralize(Number(value), SPOKEN_UNIT[unit], `${SPOKEN_UNIT[unit]}s`);
-	return `${value.replace(/^</, "less than ")} ${word}`;
+	return `${spokenSymbols(value)} ${word}`;
 }
 
 export default function ResponseAnnouncer() {

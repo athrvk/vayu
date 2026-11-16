@@ -25,7 +25,7 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { thresholdReference } from "@/lib/agent-reference";
-import { formatNumber } from "@/lib/format-number";
+import { formatFixed, formatNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { formatDuration, pluralize } from "@/modules/dashboard/utils/format";
 import type { AssertionPopulation, RunReport } from "@/types/domain";
@@ -35,7 +35,7 @@ import { THRESHOLD_METRICS } from "./threshold-metrics";
 
 /** Trailing zeros are noise on a budget the user typed as a whole number. */
 function formatValue(value: number): string {
-	return Number.isInteger(value) ? String(value) : value.toFixed(2);
+	return Number.isInteger(value) ? String(value) : formatFixed(value, 2);
 }
 
 /** Prose-sized: "3s", "1m", never "1m 0s". */

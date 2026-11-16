@@ -16,10 +16,11 @@
  *
  * Mutation-checks: drop the status branch and the "Failed" case reddens; drop
  * `run.summary.scenario` from the size label and the steps case reddens; hand
- * `useLastCollectionRunQuery` the wrong id and the last case reddens.
+ * `useLastCollectionRunQuery` the wrong id and the last case reddens; read
+ * `run.status` alone in `runStatusTone` and the failed-steps cases redden.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { CollectionLastRunSection } from "./CollectionLastRunSection";
@@ -88,6 +89,75 @@ describe("CollectionLastRunSection", () => {
 		const label = screen.getByText("Failed");
 		expect(label).toBeInTheDocument();
 		expect(label.className).toContain("text-status-error-text");
+	});
+
+	describe("a completed run whose steps did not all pass (#3496)", () => {
+		it.each([
+			["failed", { passed: 27, failed: 6 }],
+			["errored", { passed: 27, errored: 2 }],
+		] as const)("reads in the error colour when a step %s", (_, counts) => {
+			response = envelope([run("run_1", { resultSummary: counts } as Partial<Run>)]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			const label = screen.getByText("Completed");
+			expect(label.className).toContain("text-status-error-text");
+			expect(label.className).not.toContain("text-status-success-text");
+		});
+
+		it("says the verdict and the size in the row's accessible name", () => {
+			response = envelope([
+				run("run_1", { resultSummary: { passed: 27, failed: 6 } } as Partial<Run>),
+			]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			expect(screen.getByRole("button").getAttribute("aria-label")).toMatch(
+				/^Open collection run, completed, verdict failed, 3 steps, /
+			);
+		});
+
+		it("stays green, with no verdict in its name, when every step passed", () => {
+			response = envelope([run("run_1", { resultSummary: { passed: 3 } } as Partial<Run>)]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			expect(screen.getByText("Completed").className).toContain("text-status-success-text");
+			expect(screen.getByRole("button").getAttribute("aria-label")).not.toMatch(/verdict/);
+		});
+
+		it("keeps a stopped run's own status rather than judging it", () => {
+			response = envelope([
+				run("run_1", {
+					status: "stopped",
+					resultSummary: { passed: 1, failed: 2 },
+				} as Partial<Run>),
+			]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			expect(screen.getByText("Stopped").className).toContain("text-status-stopped-text");
+		});
+	});
+
+	describe("the size label", () => {
+		const measured = (scrollWidth: number, clientWidth: number) => {
+			vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
+			vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
+		};
+		afterEach(() => vi.restoreAllMocks());
+
+		it("reveals itself in a tooltip while the bar clips it", () => {
+			measured(120, 40);
+			response = envelope([run("run_1", { summary: { scenario: { stepCount: 11 } } })]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			expect(screen.getByText("11 steps").getAttribute("title")).toBe("11 steps");
+		});
+
+		it("adds no tooltip when it fits", () => {
+			measured(40, 120);
+			response = envelope([run("run_1", { summary: { scenario: { stepCount: 11 } } })]);
+			render(<CollectionLastRunSection tab={TAB} />);
+
+			expect(screen.getByText("11 steps").hasAttribute("title")).toBe(false);
+		});
 	});
 
 	it("says a run is still going rather than calling it an outcome", () => {

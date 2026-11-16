@@ -500,7 +500,7 @@ export function availableCommands(ctx: CommandContext): Command[] {
 
 /**
  * Look one up by id, for a surface that offers a single named command (the
- * native menu's Preferences… item) rather than the whole roster.
+ * native menu's Settings… item) rather than the whole roster.
  *
  * Throws on an unknown id: a menu item pointing at a command that no longer
  * exists is a dead menu item, and a silent no-op is exactly how the drift this

@@ -54,6 +54,7 @@ import {
 	SelectValue,
 	ToggleGroup,
 	ToggleGroupItem,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	useCollectionsQuery,
@@ -172,20 +173,21 @@ function ExampleRow({
 						label={`Copy example ${example.name} for agent`}
 					/>
 				)}
-				<Button
-					size="icon"
+				<TooltipIconButton
 					variant="rowActionDestructive"
 					onClick={onDelete}
 					disabled={deleting}
-					aria-label={`Delete example ${example.name}`}
+					label={`Delete example ${example.name}`}
+					tooltip="Delete example"
 					className="shrink-0"
-				>
-					{deleting ? (
-						<Loader2 className="size-icon-sm animate-spin" />
-					) : (
-						<Trash2 className="size-icon-sm" />
-					)}
-				</Button>
+					icon={
+						deleting ? (
+							<Loader2 className="size-icon-sm animate-spin" />
+						) : (
+							<Trash2 className="size-icon-sm" />
+						)
+					}
+				/>
 			</div>
 
 			{open && (

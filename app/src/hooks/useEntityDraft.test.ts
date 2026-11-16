@@ -13,13 +13,18 @@
  * `InfoTab` never cleared its save mutation on a collection switch, so a
  * failure on one collection kept being reported against the next. These tests
  * pin the parts that drifted: what counts as a switch, what a switch does, and
- * that an unsaved draft survives everything except a switch or a change to the
- * persisted value.
+ * that an unsaved draft survives everything except a change to the persisted
+ * value - including the editor unmounting (#3459).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { useEntityDraftStore } from "@/stores/entity-draft-store";
 import { useEntityDraft } from "./useEntityDraft";
+
+beforeEach(() => {
+	useEntityDraftStore.setState({ entries: new Map() });
+});
 
 interface Named {
 	name: string;
@@ -93,7 +98,9 @@ describe("useEntityDraft - the draft itself", () => {
 });
 
 describe("useEntityDraft - switching entity", () => {
-	it("reseeds the draft, discarding an unsaved edit", () => {
+	it("shows the other entity's draft, and the first one's again on the way back", () => {
+		// Mutation check: keep the draft in component state and the way back
+		// shows "Acme API" - the edit is gone.
 		const { result, rerender } = setup({ entityKey: "c1", value: acme });
 
 		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
@@ -101,6 +108,11 @@ describe("useEntityDraft - switching entity", () => {
 
 		expect(result.current.draft.name).toBe("Other API");
 		expect(result.current.isDirty).toBe(false);
+
+		rerender({ entityKey: "c1", value: acme });
+
+		expect(result.current.draft.name).toBe("Renamed");
+		expect(result.current.isDirty).toBe(true);
 	});
 
 	it("clears the save mutation on the switch, and only on a switch", () => {
@@ -183,7 +195,7 @@ describe("useEntityDraft - a dirty draft against a background refetch (#1437)", 
 		});
 	});
 
-	it("a switch clears a pending conflict rather than carrying it to the new entity", () => {
+	it("a switch does not carry a pending conflict to the new entity", () => {
 		const { result, rerender } = setup({ entityKey: "c1", value: acme });
 
 		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
@@ -273,5 +285,109 @@ describe("useEntityDraft - telling a discard from a save", () => {
 
 		expect(result.current.isDirty).toBe(false);
 		expect(result.current.consumeDiscard()).toBe(false);
+	});
+});
+
+describe("useEntityDraft - a draft outliving its editor (#3459)", () => {
+	it("is restored dirty when the editor mounts again", () => {
+		// Mutation check: keep the draft in component state and the remount
+		// shows the stored value, clean.
+		const first = setup({ entityKey: "c1", value: acme });
+		act(() => first.result.current.setDraft({ name: "Renamed", description: "" }));
+		first.unmount();
+
+		const { result } = setup({ entityKey: "c1", value: acme });
+
+		expect(result.current.draft).toEqual({ name: "Renamed", description: "" });
+		expect(result.current.isDirty).toBe(true);
+		expect(result.current.baseline).toEqual(acme);
+		expect(result.current.externalValue).toBeNull();
+	});
+
+	it("surfaces a change made while it was unmounted as a conflict, not as the draft", () => {
+		const first = setup({ entityKey: "c1", value: acme });
+		act(() => first.result.current.setDraft({ name: "Renamed", description: "" }));
+		first.unmount();
+
+		const agent = { ...acme, description: "written by an agent" };
+		const { result } = setup({ entityKey: "c1", value: agent });
+
+		expect(result.current.draft).toEqual({ name: "Renamed", description: "" });
+		expect(result.current.externalValue).toEqual(agent);
+		expect(result.current.baseline).toEqual(acme);
+	});
+
+	it("drops the stored draft once the persisted value has caught up with it", () => {
+		// The save made while the editor was away landed: nothing is unsaved,
+		// and a later change must not read as a conflict with a spent draft.
+		const first = setup({ entityKey: "c1", value: acme });
+		const renamed = { name: "Renamed", description: "" };
+		act(() => first.result.current.setDraft(renamed));
+		first.unmount();
+
+		const { result } = setup({ entityKey: "c1", value: renamed });
+
+		expect(result.current.isDirty).toBe(false);
+		expect(useEntityDraftStore.getState().entries.has("c1")).toBe(false);
+	});
+
+	it("keeps nothing for a draft edited back to the persisted value", () => {
+		const { result } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		expect(useEntityDraftStore.getState().entries.has("c1")).toBe(true);
+		act(() => result.current.setDraft(acme));
+
+		expect(useEntityDraftStore.getState().entries.has("c1")).toBe(false);
+	});
+
+	it("reset drops the stored draft, so a remount starts clean", () => {
+		const first = setup({ entityKey: "c1", value: acme });
+		act(() => first.result.current.setDraft({ name: "Renamed", description: "" }));
+		act(() => first.result.current.reset());
+		first.unmount();
+
+		const { result } = setup({ entityKey: "c1", value: acme });
+
+		expect(result.current.isDirty).toBe(false);
+		expect(result.current.draft).toEqual(acme);
+	});
+});
+
+describe("useEntityDraft - a save that lands after the editor went (markSaved)", () => {
+	const renamed = { name: "Renamed", description: "" };
+
+	it("leaves the entry to the resync while the editor still shows it", () => {
+		// Dropping it here would paint the stored value for a frame before the
+		// query cache catches up. Mutation check: drop the shown-entity guard and
+		// the draft reverts to "Acme API".
+		const { result } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft(renamed));
+
+		act(() => result.current.markSaved(renamed));
+
+		expect(result.current.draft).toEqual(renamed);
+	});
+
+	it("drops the entry once the editor has unmounted", () => {
+		const { result, unmount } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft(renamed));
+		const { markSaved } = result.current;
+		unmount();
+
+		markSaved(renamed);
+
+		expect(useEntityDraftStore.getState().entries.has("c1")).toBe(false);
+	});
+
+	it("keeps an entry edited past what was sent", () => {
+		const { result, unmount } = setup({ entityKey: "c1", value: acme });
+		act(() => result.current.setDraft({ ...renamed, description: "more" }));
+		const { markSaved } = result.current;
+		unmount();
+
+		markSaved(renamed);
+
+		expect(useEntityDraftStore.getState().entries.has("c1")).toBe(true);
 	});
 });

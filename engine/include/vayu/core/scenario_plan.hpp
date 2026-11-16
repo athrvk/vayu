@@ -603,6 +603,34 @@ const ScenarioResolveOptions& options);
  */
 [[nodiscard]] CoverageTally make_coverage_tally (const ScenarioExecution& execution);
 
+/// One collection of a run's lifecycle set: its id, and its own
+/// `script.setup` / `script.teardown` elements (the `run.start` and `run.end`
+/// ones), compiled in stored order and stamped with
+/// `http::collection_element_origin`.
+struct LifecycleCollection {
+    std::string collection_id;
+    std::vector<CompiledElement> elements;
+};
+
+/**
+ * A collection run's lifecycle set (#3456), resolved once at run start: every
+ * live collection whose `run.start` / `run.end` elements apply to a run of
+ * @p run_collection_id, in setup order. That is the ancestor chain root first
+ * (`http::collection_chain`, the run collection its last entry), then, for a
+ * @p recursive run, every live folder beneath it, depth-first in sidebar order
+ * (a parent before its sub-folders, siblings by `Database::get_collections`'
+ * order, which is `sibling_order.hpp`'s among folders). A run that is not
+ * recursive sends only the run collection's own requests, so no folder below
+ * it belongs. Teardown is the same list in reverse. A collection declaring
+ * neither kind is left out; a trashed one, and everything beneath it, is not
+ * reached. The walk keeps a visited set, so a `parent_id` cycle visits each
+ * collection once.
+ */
+[[nodiscard]] std::vector<LifecycleCollection> resolve_lifecycle_collections (
+vayu::db::Database& db,
+const std::string& run_collection_id,
+bool recursive);
+
 /**
  * Bind one iteration's whole per-iteration state into @p step's @p request:
  * @p row where the step has one, then @p identity.

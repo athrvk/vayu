@@ -26,7 +26,7 @@ export function ThroughputCard({
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
 			<HeroValue value={fmtRate(throughput)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
-				mean iter <span className="text-foreground font-semibold">{mean.value}</span>
+				mean iteration <span className="text-foreground font-semibold">{mean.value}</span>
 				{mean.unit}
 			</p>
 		</HeroCardShell>

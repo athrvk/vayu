@@ -25,6 +25,7 @@ import {
 	customMetricSeriesLabel,
 } from "../../../utils/metricsTransforms";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
+import { describeChart } from "./chartLabel";
 import { fmtVitals, axisVitals } from "./formatters";
 
 /**
@@ -69,6 +70,7 @@ export function CustomMetricsChart({
 	if (series.length === 0 || data[0].length < 2) return null;
 	return (
 		<UPlotChart
+			ariaLabel={describeChart("Custom metrics over time", data, series)}
 			data={data}
 			series={series}
 			xTime

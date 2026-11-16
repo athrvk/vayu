@@ -36,6 +36,7 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { variableSupportStub } from "@/test/variable-support";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import KeyValueRow from "./KeyValueRow";
 
 /*
@@ -289,5 +290,16 @@ describe("a value that is a time (#1786)", () => {
 		const container = row();
 		expect(marker(container)).toBeNull();
 		expect(container.querySelector('[aria-label^="Resolved value of"]')).not.toBeNull();
+	});
+});
+
+describe("the remove button", () => {
+	it("says what it does on keyboard focus (#3498)", async () => {
+		row();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove row" }),
+			"Remove row"
+		);
 	});
 });

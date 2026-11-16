@@ -8,14 +8,14 @@
 /**
  * Every region the cycle names is a region something renders (#1219).
  *
- * `AppRegion` is a union of five names and `cycleRegionFocus` walks whatever
+ * `AppRegion` is a union of seven names and `cycleRegionFocus` walks whatever
  * carries the attribute, so the two halves cannot disagree at compile time: a
  * band that lost its marker in a refactor would simply drop out of the cycle,
  * silently, and F6 would move focus somewhere plausible. That is this
  * codebase's most repeated defect wearing a different hat - a value declared in
  * one place and read in none.
  *
- * A scan rather than a render, because the five bands are never on screen
+ * A scan rather than a render, because the bands are never on screen
  * together in a test: the title bar is Electron-only, and the drawer and
  * context bar unmount when closed.
  */
@@ -49,7 +49,7 @@ function layoutSources(): string[] {
  * the DOM inside the helper. `writes the attribute the cycle queries` below is
  * that half, and `region-focus.test.ts` walks the result.
  */
-const MARKER = new RegExp(`\\{\\.\\.\\.${regionProps.name}\\("([a-z]+)"\\)\\}`, "g");
+const MARKER = new RegExp(`\\{\\.\\.\\.${regionProps.name}\\("([a-z-]+)"\\)\\}`, "g");
 
 function markedRegions(): string[] {
 	return layoutSources().flatMap((file) =>
@@ -62,7 +62,15 @@ function markedRegions(): string[] {
  * makes this a compile error if a name is dropped from `AppRegion`, and the
  * cases below catch one being added without a band to mark.
  */
-const EXPECTED = ["banner", "rail", "drawer", "main", "context"] satisfies AppRegion[];
+const EXPECTED = [
+	"banner",
+	"rail",
+	"drawer",
+	"main",
+	"context",
+	"context-rail",
+	"dock",
+] satisfies AppRegion[];
 
 describe("the shell marks every region the cycle knows about", () => {
 	it("scans a non-empty set of layout files", () => {
@@ -77,8 +85,9 @@ describe("the shell marks every region the cycle knows about", () => {
 	it("catches a marker when there is one", () => {
 		// The scan's own mutation check: the pattern has to match the shape it
 		// counts, or agreement above means nothing.
-		const sample = '<main {...regionProps("main")} className="x">';
-		expect(Array.from(sample.matchAll(MARKER), (m) => m[1])).toEqual(["main"]);
+		const sample =
+			'<main {...regionProps("main")} className="x"><nav {...regionProps("context-rail")}>';
+		expect(Array.from(sample.matchAll(MARKER), (m) => m[1])).toEqual(["main", "context-rail"]);
 	});
 
 	it("writes the attribute the cycle queries", () => {

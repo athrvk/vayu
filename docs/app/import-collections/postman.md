@@ -153,9 +153,12 @@ literal; a computed name such as `require(name)` is named) and `pm.require`, a n
 `structuredClone`, `localStorage`, `sessionStorage`; one the script declares itself
 is not named), the `pm.*` members that are undefined at run time (`pm.test.skip`,
 `pm.test.index`, `pm.execution.runRequest`, `pm.execution.location`,
-`pm.response.dataURI`, `pm.response.headers.map`, `pm.request.headers.map`, and the
+`pm.response.dataURI`, `pm.response.jsonp`, `pm.response.headers.map`,
+`pm.request.headers.map`, `pm.request.url.variables`, and the
 flat cookie writers `pm.cookies.set`, `pm.cookies.unset` and `pm.cookies.clear`, each
-its own name; `pm.cookies.jar()` runs and is not named), the console methods
+its own name; `pm.cookies.jar()` runs and is not named), `pm.response.json(reviver)`
+(`json()` runs but ignores a reviver, so only a call that passes an argument is named;
+the empty `pm.response.json()` is not), the console methods
 `console.debug`, `console.table`, `console.dir` and `console.time`, and the one chai
 family `pm.expect` still refuses,
 chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrResponse`

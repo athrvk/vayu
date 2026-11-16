@@ -269,7 +269,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `migrate_before_sync` and refuses to migrate without it. `<db>.bak` is not
   that copy: the same start refreshes it, once it listens, from a file the
   repair has already rewritten, and a clean shutdown refreshes it again
-  (`refresh_recovery_backup_on_shutdown`, #2421).
+  (`refresh_recovery_backup_on_shutdown`, #2421). A pass whose predicate is
+  index-served and idempotent may skip the marker: the probe costs one index
+  lookup per start (`Database::clear_empty_parent_ids`, #3451).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.54), which runs before `init ()` and therefore
@@ -467,22 +469,26 @@ top-level navigation) carries a loopback `Host` and no `Origin`, so the gate
 admits it; what keeps it harmless is that the page cannot read the opaque
 answer and that the route changes nothing. Anything that writes, starts,
 stops, deletes or sends is a `POST`, `PUT` or `DELETE`, which a page can only
-send with an `Origin`. An SSE route's single-reader claim (`/runs/:id/events`,
-`/inbox/:id/live`) lasts as long as the connection reading it and needs an id
-a page cannot know; `/changes` needs none, so its streams are capped instead
-(`change_feed::MAX_READERS`), which bounds the pool threads a page can park.
-The gate is deliberately not widened to `Sec-Fetch-Mode`.
+send with an `Origin`. An SSE route holds a pool thread per stream, so it
+needs an id a page cannot know: the claim of `/runs/:id/events` and
+`/inbox/:id/live` lasts as long as the connection reading it, and `/changes`
+opens only on a single-use id from `POST /changes/subscriptions` (#3420), which
+a page cannot send. Its streams are also capped (`change_feed::MAX_READERS`),
+which bounds what a client that can ask for ids holds. A stream route that
+takes a slot without such an id lets any page fill the slots and lock the app
+out. The gate is deliberately not widened to `Sec-Fetch-Mode`.
 
 Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521) |
+| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521); the answer names the `collectionId` whose chain it read, the scope `/execute` and `/runs` fall back to when no `requestId` row names one (#3461) |
 | POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521) |
 | POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
-| GET | `/changes` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams |
+| POST | `/changes/subscriptions` | A fresh unguessable, single-use id (libsodium random) for one `GET /changes` stream (`ChangeFeed::issue_subscription`; the oldest of `MAX_PENDING_SUBSCRIPTIONS` unspent ids is dropped); a `POST`, so a page cannot send it |
+| GET | `/changes?subscription=<id>` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams; a missing `subscription` is a 400 and an unknown or spent one a 403, neither holding a slot |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
 | GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
@@ -490,7 +496,7 @@ Key endpoints:
 | GET | `/health` | Health check: `status`, `version`, `workers`, `dataDir` (the absolute data directory, `core::absolute_data_dir`, so a client can tell its own engine from another's, #3328) and, after a startup recovery, `recovery` |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
-| GET | `/trash` | What deleting a collection, request, environment, user-saved example or client certificate left recoverable (#988, environments #2970, examples #2971, certificates #2973): roots only, each with what its cascade took (an environment entry alone carries `variables`, its count; an example's `parentId` is its request, and it is a root only while that request is live; a `clientCertificate` is named `host` or `host:port`, and a trashed one is in no transport policy); `POST /trash/:id/restore` puts one back (an environment inactive; an example `409`s under a trashed or missing request or a full one; a certificate `409`s while a live entry holds its target), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
+| GET | `/trash` | What deleting a collection, request, environment, user-saved example or client certificate left recoverable (#988, environments #2970, examples #2971, certificates #2973): roots only, each with what its cascade took (`collections`/`requests`, the cohort a restore puts back) and what a purge would destroy (`purgeCollections`/`purgeRequests`, every stamped row under the root, #3449); an environment entry alone carries `variables`, its count; a request's and an example's carry `parentName`, the live owner's name (#3449); an example's `parentId` is its request, and it is a root only while that request is live; a `clientCertificate` is named `host` or `host:port`, and a trashed one is in no transport policy; `POST /trash/:id/restore` puts one back (an environment inactive; a request or example under a trashed owner `409`s naming the trash root to restore first by name and id, and an example also under a missing request or a full one; a certificate `409`s while a live entry holds its target), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan) into the tree `/import/apply` persists (#877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
@@ -552,7 +558,11 @@ logged as a warning: it means a client skipped composition.
   A collection's or environment's blank `name` is refused by
   `reject_blank_name` (`routes.hpp`, #3253), which the four create/update
   cores call and the appliers do not, because an importer can write a blank
-  name that `POST /import/apply` and `POST /specs/sync` store today.
+  name that `POST /import/apply` and `POST /specs/sync` store today. The same
+  split holds a stored `auth` to a known `mode` (`reject_unknown_auth_mode`,
+  #3464, in the collection and request cores): the closed set is
+  `vayu::http::AUTH_MODES` (`auth_resolver.hpp`), read by the route check and by
+  the Vayu-extension reader, never restated.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`
@@ -654,8 +664,8 @@ logged as a warning: it means a client skipped composition.
   per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its
   own place to declare `script.setup` / `script.teardown` - the run-boundary
   kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
-  (#1573), dispatched by the same `run_collection_setup` /
-  `run_collection_teardown` a collection-backed run uses; a script written
+  (#1573), dispatched through the same `run_setup_elements` /
+  `run_teardown_elements` a collection-backed run uses; a script written
   there resolves into the run's own submissions only on a run whose
   submissions are copied (`submissions_run_the_residual_pass`:
   `requestElements` declared, and a `step.before` kind, data rows, a bind
@@ -840,13 +850,15 @@ logged as a warning: it means a client skipped composition.
     ancestor, which the route resolves (`core::nearest_spec_binding`) and
     passes to `Database::delete_request` / `delete_collection`, so `Database`
     reads no binding. A move out of the contract is the same decision (#3446):
-    `PUT /requests/:id` and `POST /reorder` (a moved folder's whole subtree,
-    judged against the tree the batch writes) compare the nearest binding
-    before and after (`declined_by_move`, `routes.hpp`: the same binding, or
-    the same document with one inside the other's `spec_contract_subtree_ids`,
-    is one contract; a sibling root bound to the same document is not), clear
-    the stamp and pass the record down to `save_request` / `apply_reorder`; a
-    move within one contract keeps it. The diff lists it under `declined`, never `added`;
+    `PUT /requests/:id`, `POST /reorder` and a `parentId` on
+    `PUT /collections/:id` (#3470; a moved folder's whole subtree, judged
+    against the tree the write stores through `SpecTreeMove`, an unbind in the
+    same body included) compare the nearest binding before and after
+    (`declined_by_move`, `routes.hpp`: the same binding, or the same document
+    with one inside the other's `spec_contract_subtree_ids`, is one contract; a
+    sibling root bound to the same document is not), clear the stamp and pass
+    the record down to `save_request` / `apply_reorder` / `rebind_collection`,
+    in the write's one transaction; a move within one contract keeps it. The diff lists it under `declined`, never `added`;
     `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
     it. A restore of a request that still records the operation, a sync that
     creates it, an unbind and a bind to other bytes forget the record; a purge
@@ -1249,7 +1261,10 @@ logged as a warning: it means a client skipped composition.
   `GrantSecret` (`http/grant_secret.hpp`: SHA-256 digests compared with
   `sodium_memcmp`, at least 32 characters). `daemon.cpp` takes it from
   `VAYU_GRANT_SECRET`, which the app's main process sets, and removes the
-  variable before any thread starts; it reaches the routes through `Server`'s
+  variable before any thread starts - on POSIX after overwriting the bytes
+  `getenv` returned, because they are the block `/proc/<pid>/environ` shows
+  and `unsetenv` leaves them (`file_grants_route_test.cpp` re-runs itself as
+  a child to prove it); it reaches the routes through `Server`'s
   constructor and `RouteContext::grant_secret`, so a test hands one in without
   the environment. An engine with no
   secret refuses all four writes. **Trust is derived, never read**: a body's `unresolved` is ignored
@@ -1318,7 +1333,10 @@ invalid_header_name`), and `resolve_header_names` in the residual pass. A blank
 name is the `empty_header_name` rule's, and a `{{token}}` still in a name is
 left to the layer that resolves it while the text around it is judged (each
 token stands in as one token character, a stray `{{` is ordinary text). Refuse
-what trimming cannot settle, never repair it. It also writes a request's
+what trimming cannot settle, never repair it. **A refusal never quotes what a
+variable produced** - it can be a secret and the message reaches whoever reads
+the run: `invalid_header_name_refusal (name, written)` quotes `written` and the
+one offending byte, and the collision message names both names as written. It also writes a request's
 `:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
@@ -1346,7 +1364,14 @@ payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 *composed* URL, then sends the engine the same rule as `targetPolicy`, below)
 and an inline `request` plus `collectionId` scope (the renderer, because Send
 and replay execute editor state that may be unsaved). Inline over stored is
-the overlay MCP's `start_load_run` overrides ride on.
+the overlay MCP's `start_load_run` overrides ride on. The answer carries the
+`collectionId` of the chain it read (the leaf; omitted when it read none, and
+never taken from `request.*`), and `scope_collection_id`
+(`request_exchange.hpp`) is the one rule a send's collection scope comes from:
+a live `requestId` row's collection, else that `collectionId` (#3461).
+`read_run_scope` decides it once per `POST /execute` and `POST /runs`, for the
+scripts and the snapshot's secret masking alike, and a single-request run's
+worker applies the same function to its payload.
 
 **A scripted request composes with its `{{names}}` intact (#2521, Postman's
 order).** Whether a pre-request script runs before the send is read from the

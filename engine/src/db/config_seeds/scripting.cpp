@@ -32,10 +32,11 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
 
     seed (keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
     vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false", "boolean", "Enable script console",
-    "Makes console.log() available inside scripts, with its output shown in "
-    "the "
-    "response viewer. Turn it off during a load test, where the writes cost "
-    "throughput for output nobody reads.",
+    "Records what scripts pass to console.log(), console.info(), "
+    "console.warn() and console.error(), shown in the response viewer. "
+    "Turn it off during a load test, where the writes cost throughput for "
+    "output nobody reads: console stays defined and its calls do nothing, so "
+    "scripts that log keep running.",
     "scripting_sandbox", vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now }));
 

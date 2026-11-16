@@ -200,7 +200,8 @@ class LoadDataTest : public ::testing::Test {
         auto strategy = vayu::core::LoadStrategy::create (payload);
         strategy->execute (context, *db_, built.request);
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
-        context_ = context;
+        context_       = context;
+        built_request_ = std::move (built.request);
     }
 
     /// What the deferred pass recorded as failures, for an assertion that has
@@ -232,6 +233,9 @@ class LoadDataTest : public ::testing::Test {
 
     std::unique_ptr<vayu::db::Database> db_;
     std::shared_ptr<vayu::core::RunContext> context_;
+    /// The request `run` built and every submission copied, as the worker
+    /// hands it to the replay (`ReplayBase::shared_request`).
+    vayu::Request built_request_;
 };
 
 // ============================================================================
@@ -704,6 +708,34 @@ TEST_F (LoadDataTest, TheDeferredScriptReadsTheRowItsSampleBound) {
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 2u)
     << "both samples must replay, each against the row it actually sent";
+}
+
+// The deferred script's `pm.request` is the request its sample sent (#3460),
+// its row and iteration bound into the URL and a header alike, not the request
+// as written. Mutation check: drop the bind from `request_as_submitted`
+// (load_strategy.cpp) and both read `{{data.id}}`.
+TEST_F (LoadDataTest, TheDeferredScriptReadsTheRequestItsSampleSent) {
+    RecordingServer server;
+    json payload =
+    iterations_payload (server.url ("/row/{{data.id}}?i={{$iteration}}"), 2);
+    payload["data"] = json::array ({ json{ { "id", "a" } }, json{ { "id", "b" } } });
+    payload["headers"] = { { "X-Id", "{{data.id}}" } };
+    payload["requestElements"] =
+    json::array ({ json{ { "kind", "script.post" }, { "config", { { "script", R"js(pm.test('as sent', function () {
+  var id = pm.iterationData.get('id');
+  pm.expect(pm.request.url.toString()).to.include('/row/' + id + '?i=' + pm.info.iteration);
+  pm.expect(pm.request.headers.get('X-Id')).to.equal(id);
+});)js" } } } } });
+
+    run (payload);
+    ASSERT_EQ (server.paths ().size (), 2u);
+
+    vayu::core::ReplayBase base;
+    base.shared_request   = &built_request_;
+    const auto validation = vayu::core::validate_scripts (context_, *db_, base);
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
+    EXPECT_EQ (validation.run->passed, 2u);
 }
 
 // A run sent without rows leaves the scope `undefined`, which is the distinction

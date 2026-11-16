@@ -66,7 +66,7 @@ describe("ResponseTimingTab", () => {
 
 	it("shows Wire, Queue and Total in the summary", () => {
 		renderTab({ timing: sample });
-		expect(screen.getByText("Wire")).toBeInTheDocument();
+		expect(screen.getByText("Wire time")).toBeInTheDocument();
 		expect(screen.getByText("Queue")).toBeInTheDocument();
 		expect(screen.getByText("Total")).toBeInTheDocument();
 		// Past a second these read as seconds; the queue wait stays in ms, which
@@ -90,7 +90,7 @@ describe("ResponseTimingTab", () => {
 			downloadMs: 0,
 		};
 		renderTab({ timing: minimal });
-		expect(screen.queryByText("Wire")).not.toBeInTheDocument();
+		expect(screen.queryByText("Wire time")).not.toBeInTheDocument();
 		expect(screen.queryByText("Queue")).not.toBeInTheDocument();
 		expect(screen.getByText("Total")).toBeInTheDocument();
 	});
@@ -98,7 +98,7 @@ describe("ResponseTimingTab", () => {
 	it("shows Vayu's own cost between Queue and Total when the engine reported it (#2132)", () => {
 		renderTab({ timing: { ...sample, engineMs: 0.4 } });
 
-		const labels = ["Wire", "Queue", "Vayu", "Total"].map((l) => screen.getByText(l));
+		const labels = ["Wire time", "Queue", "Vayu", "Total"].map((l) => screen.getByText(l));
 		labels.slice(1).forEach((el, i) => {
 			expect(
 				labels[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING

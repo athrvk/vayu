@@ -42,7 +42,7 @@ import {
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useEngineStore, useTabsStore, useToastStore } from "@/stores";
 import type { Inbox, InboxCapture } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
 
@@ -138,6 +138,8 @@ beforeEach(() => {
 	});
 	stopInbox.mockReset().mockResolvedValue(inbox({ running: false }));
 	clearInboxCaptures.mockReset().mockResolvedValue({ inboxId: "inbox_a", cleared: 1 });
+	// The header reads running only while the engine is up (`useEngineServing`).
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useToastStore.setState({ toasts: [] });
 	writeText.mockReset().mockResolvedValue(undefined);

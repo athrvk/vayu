@@ -4,8 +4,9 @@
  *        validation, the path-template conformance fixture the app shares,
  *        route-table construction over a collection tree, match resolution and
  *        its two near-miss answers, a live listener serving real examples with
- *        latency and error injection, teardown while running, and one load run
- *        pointed at a mock end to end.
+ *        latency and error injection, teardown while running, one load run
+ *        pointed at a mock end to end, and a trashed collection's mock
+ *        stopping.
  *
  * The pure halves (normalize, segment, resolve, the miss body) are driven
  * directly rather than through a socket, matching the suite's other route-core
@@ -19,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <latch>
 #include <memory>
@@ -1638,6 +1640,66 @@ TEST_F (MockServerTest, AnOriginMatchesItsListedEntryWhateverItsSpelling) {
     }
 }
 
+// DNS rebinding makes a hostile page same-origin with a mock, so a mock that
+// names its readers must also name its own host. Mutation check: drop the
+// `names_this_listener` guard in serve_mock_request and the foreign-Host case
+// goes red.
+TEST_F (MockServerTest, AMockWithAnAllowedOriginsListAnswersOnlyItsOwnLoopbackName) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const std::string port = std::to_string (started.info.port);
+    const auto foreign =
+    client.Get ("/pets", httplib::Headers{ { "Host", "evil.example:" + port } });
+    ASSERT_TRUE (foreign);
+    EXPECT_EQ (foreign->status, 403) << foreign->body;
+    EXPECT_FALSE (has_cors_header (*foreign));
+
+    // The refusal is the Host's, not a general breakage: the same listener
+    // answers each of its own spellings.
+    for (const std::string name : { "127.0.0.1", "localhost", "[::1]" }) {
+        const auto own = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
+        ASSERT_TRUE (own) << name;
+        EXPECT_EQ (own->status, 200) << name << ": " << own->body;
+    }
+
+    const auto wrong_port = client.Get ("/pets",
+    httplib::Headers{ { "Host", "127.0.0.1:" + std::to_string (started.info.port + 1) } });
+    ASSERT_TRUE (wrong_port);
+    EXPECT_EQ (wrong_port->status, 403);
+}
+
+TEST_F (MockServerTest, AMockWithNoAllowedOriginsListAnswersAnyHost) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const std::string port = std::to_string (started.info.port);
+    for (const std::string name : { "evil.example", "127.0.0.1", "localhost" }) {
+        const auto answered = client.Get ("/pets",
+        httplib::Headers{ { "Host", std::format ("{}:{}", name, port) } });
+        ASSERT_TRUE (answered) << name;
+        EXPECT_EQ (answered->status, 200) << name << ": " << answered->body;
+    }
+}
+
 TEST_F (MockServerTest, StartAndListEchoTheAllowedOrigins) {
     seed_pet_store ();
     MockServerManager manager;
@@ -2174,5 +2236,123 @@ MockActivityBadLimitTest,
 [] (const ::testing::TestParamInfo<BadLimitCase>& info) {
     return std::string (info.param.name);
 });
+
+// ---------------------------------------------------------------------------
+// DELETE /collections/:id stops the mocks of what it trashed (#3449), over
+// the routes every client calls, so the rule holds for MCP as for the tree.
+// ---------------------------------------------------------------------------
+
+class MockCollectionTrashTest : public MockServerTest {
+    protected:
+    void SetUp () override {
+        MockServerTest::SetUp ();
+        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, sse_manager_, run_summary_cache_ });
+        vayu::http::routes::register_collection_routes (*ctx_);
+        vayu::http::routes::register_mock_server_routes (*ctx_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        ctx_.reset ();
+        MockServerTest::TearDown ();
+    }
+
+    httplib::Client client () const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (5, 0);
+        return client;
+    }
+
+    /// Start a mock of @p collection_id through `POST /mock/start`; empty
+    /// when the start was refused, which fails the calling test.
+    std::string start_mock (const std::string& collection_id) const {
+        const auto started = client ().Post ("/mock/start",
+        json{ { "collectionId", collection_id } }.dump (), "application/json");
+        if (!started || started->status != 200) {
+            ADD_FAILURE () << "POST /mock/start refused " << collection_id;
+            return {};
+        }
+        return json::parse (started->body)["mockId"].get<std::string> ();
+    }
+
+    /// The mock ids `GET /mock` lists.
+    std::set<std::string> listed_mock_ids () const {
+        const auto listed = client ().Get ("/mock");
+        if (!listed || listed->status != 200) {
+            ADD_FAILURE () << "GET /mock did not answer";
+            return {};
+        }
+        const auto body = json::parse (listed->body);
+        std::set<std::string> ids;
+        for (const auto& mock : body.at ("data")) {
+            ids.insert (mock["mockId"].get<std::string> ());
+        }
+        return ids;
+    }
+
+    int delete_collection (const std::string& id) const {
+        const auto deleted = client ().Delete ("/collections/" + id);
+        return deleted ? deleted->status : 0;
+    }
+
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::SseStreamManager sse_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+};
+
+TEST_F (MockCollectionTrashTest, TrashingACollectionStopsItsMock) {
+    seed_pet_store ();
+    const auto mock_id = start_mock ("col_root");
+    ASSERT_FALSE (mock_id.empty ());
+    ASSERT_EQ (listed_mock_ids (), std::set<std::string>{ mock_id });
+
+    ASSERT_EQ (delete_collection ("col_root"), 200);
+
+    // The stop runs before the delete answers, so there is nothing to wait for.
+    EXPECT_TRUE (listed_mock_ids ().empty ());
+    EXPECT_FALSE (mock_server_manager_.get (mock_id).has_value ());
+}
+
+TEST_F (MockCollectionTrashTest, TrashingAnAncestorStopsAChildsMockAndSparesAnUnrelatedOne) {
+    seed_pet_store ();
+    seed_collection ("col_other", std::nullopt, "Other", /*order=*/1);
+    seed_request ("req_other", "col_other", vayu::HttpMethod::GET, "{{baseUrl}}/other");
+    seed_example ("exa_other", "req_other", 200, R"({"other":true})");
+
+    const auto child_mock = start_mock ("col_pets");
+    const auto other_mock = start_mock ("col_other");
+    ASSERT_FALSE (child_mock.empty ());
+    ASSERT_FALSE (other_mock.empty ());
+
+    ASSERT_EQ (delete_collection ("col_root"), 200);
+
+    EXPECT_EQ (listed_mock_ids (), std::set<std::string>{ other_mock });
+    const auto other = mock_server_manager_.get (other_mock);
+    ASSERT_HAS_VALUE (other);
+    httplib::Client other_client ("127.0.0.1", other->port);
+    other_client.set_read_timeout (5, 0);
+    const auto served = other_client.Get ("/other");
+    ASSERT_TRUE (served) << "the unrelated mock stopped answering";
+    EXPECT_EQ (served->status, 200);
+    EXPECT_EQ (served->body, R"({"other":true})");
+}
 
 } // namespace

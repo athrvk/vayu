@@ -2,7 +2,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -160,6 +162,27 @@ describe("ImportModal", () => {
 
 		fireEvent.click(within(box as HTMLElement).getByRole("button", { name: "Dismiss" }));
 		expect(screen.queryByText(/Postman Collection v2.1/i)).toBeNull();
+	});
+
+	it("says what the detected-format band's dismiss button does on keyboard focus (#3498)", async () => {
+		stubParse(() =>
+			result({
+				collections: [collection({ name: "Sample API", requests: [request()] })],
+			})
+		);
+		renderModal();
+		selectTab(/^Paste$/i);
+		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
+		await waitFor(() =>
+			expect(screen.getByText(/Postman Collection v2.1/i)).toBeInTheDocument()
+		);
+
+		const box = screen.getByText(/Postman Collection v2.1/i).closest(".border");
+		await expectTooltipOnFocus(
+			within(box as HTMLElement).getByRole("button", { name: "Dismiss" }),
+			"Dismiss"
+		);
 	});
 
 	/**

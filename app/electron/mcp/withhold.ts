@@ -1011,7 +1011,19 @@ const QUERY_VALUE_ASCII: ReadonlySet<number> = new Set(
 /** A key encodes `=` as well; a value cannot split a pair, because a parser splits on the first `=`. */
 const QUERY_KEY_ASCII: ReadonlySet<number> = new Set([...QUERY_VALUE_ASCII, "=".charCodeAt(0)]);
 
-function percentEncodeQuery(text: string, ascii: ReadonlySet<number>): string {
+const asciiSet = (chars: string): ReadonlySet<number> =>
+	new Set([...chars].map((char) => char.charCodeAt(0)));
+
+/** Postman's `FRAGMENT_ENCODE_SET`: the C0 controls, DEL and above, space `"` `<` `>` and a backtick. */
+const FRAGMENT_ASCII = asciiSet(' "<>`');
+
+/** `PATH_ENCODE_SET`: the fragment set plus `#`, `?`, `{` and `}`. */
+const PATH_ASCII = asciiSet(' "<>`#?{}');
+
+/** `USERINFO_ENCODE_SET`: the path set plus `/ : ; = @ [ \ ] ^ |`. */
+const USERINFO_ASCII = asciiSet(' "<>`#?{}/:;=@[\\]^|');
+
+function percentEncode(text: string, ascii: ReadonlySet<number>): string {
 	let out = "";
 	for (const byte of utf8.encode(text)) {
 		out +=
@@ -1032,7 +1044,7 @@ function tokenEnd(text: string, at: number): number {
 	return -1;
 }
 
-function encodeQueryComponent(text: string, ascii: ReadonlySet<number>): string {
+function encodeOutsideTokens(text: string, ascii: ReadonlySet<number>): string {
 	let out = "";
 	let plain = 0;
 	for (let at = 0; at < text.length;) {
@@ -1041,10 +1053,10 @@ function encodeQueryComponent(text: string, ascii: ReadonlySet<number>): string 
 			at++;
 			continue;
 		}
-		out += percentEncodeQuery(text.slice(plain, at), ascii) + text.slice(at, end);
+		out += percentEncode(text.slice(plain, at), ascii) + text.slice(at, end);
 		plain = at = end;
 	}
-	return out + percentEncodeQuery(text.slice(plain), ascii);
+	return out + percentEncode(text.slice(plain), ascii);
 }
 
 /**
@@ -1056,12 +1068,45 @@ function encodeQueryComponent(text: string, ascii: ReadonlySet<number>): string 
  * `engine/tests/fixtures/query-encoding-conformance.json`.
  */
 export function encodeQueryValue(text: string): string {
-	return encodeQueryComponent(text, QUERY_VALUE_ASCII);
+	return encodeOutsideTokens(text, QUERY_VALUE_ASCII);
 }
 
 /** {@link encodeQueryValue} for `QueryPart::Key`, the form of a name auth appended (#1835). */
 export function encodeQueryKey(text: string): string {
-	return encodeQueryComponent(text, QUERY_KEY_ASCII);
+	return encodeOutsideTokens(text, QUERY_KEY_ASCII);
+}
+
+/** The engine's `encode_path_variable_value`: what a value written into a URL's path is. */
+export function encodePathValue(text: string): string {
+	return encodeOutsideTokens(text, PATH_ASCII);
+}
+
+/** The engine's `encode_outside_tokens (text, in_postman_fragment_encode_set)`. */
+export function encodeFragmentValue(text: string): string {
+	return encodeOutsideTokens(text, FRAGMENT_ASCII);
+}
+
+/** The engine's `encode_outside_tokens (text, in_postman_userinfo_encode_set)`: a password, after the user's own colon. */
+export function encodeUserinfoValue(text: string): string {
+	return encodeOutsideTokens(text, USERINFO_ASCII);
+}
+
+/** Where the first `:` outside a whole `{{...}}` token sits in @p text, or -1: the engine's `Scanner::find`. */
+function colonOutsideTokens(text: string): number {
+	for (let at = 0; at < text.length;) {
+		const end = tokenEnd(text, at);
+		if (end !== -1) at = end;
+		else if (text[at] === ":") return at;
+		else at++;
+	}
+	return -1;
+}
+
+/** The engine's `encode_userinfo_as_postman`: split at the first colon, each side encoded, the colon kept. */
+export function encodeUserinfo(text: string): string {
+	const colon = colonOutsideTokens(text);
+	if (colon === -1) return encodeUserinfoValue(text);
+	return `${encodeUserinfoValue(text.slice(0, colon))}:${encodeUserinfoValue(text.slice(colon + 1))}`;
 }
 
 /**
@@ -1094,7 +1139,9 @@ function escapeXmlContent(text: string, quote: "" | '"' | "'"): string {
 
 /**
  * Each secret value as a run's record can hold it - raw, `url_encode`'d,
- * query-encoded, JSON-escaped, and XML-escaped in character data and in each
+ * query-encoded, written as a URL's path, fragment and user info are (the
+ * sets `encode_url_as_postman` uses, which leave `/ @ & : + '` raw where the
+ * query and strict forms escape them), JSON-escaped, and XML-escaped in character data and in each
  * attribute delimiter - longest first, so a secret that contains another is
  * masked whole rather than around the shorter one. The engine's
  * `masked_secret_forms`, form for form.
@@ -1106,6 +1153,10 @@ export function secretForms(values: readonly string[]): string[] {
 		forms.add(value);
 		forms.add(urlEncode(value));
 		forms.add(encodeQueryValue(value));
+		forms.add(encodePathValue(value));
+		forms.add(encodeFragmentValue(value));
+		forms.add(encodeUserinfo(value));
+		forms.add(encodeUserinfoValue(value));
 		forms.add(escapeJsonStringContent(value));
 		for (const quote of ["", '"', "'"] as const) forms.add(escapeXmlContent(value, quote));
 	}
@@ -1236,6 +1287,27 @@ function maskUrlQuery(url: string, authNames: readonly string[]): string {
 	return `${url.slice(0, queryAt + 1)}${query}${url.slice(end)}`;
 }
 
+/**
+ * The members of a run record that hold a request URL: a trace's and a row's
+ * `url` (a redirect hop's and a monitor's too) and the report metadata's
+ * `requestUrl`, which the engine copies from the snapshot's `url`.
+ */
+const RUN_URL_MEMBERS: ReadonlySet<string> = new Set(["url", "requestUrl"]);
+
+/**
+ * A run record's URL with its userinfo password dropped, as a stored request's
+ * is ({@link withholdRequestUrl}), and its credential query values masked
+ * ({@link maskUrlQuery}).
+ */
+function maskRunUrl(url: string, authNames: readonly string[]): string {
+	const headEnd = url.search(/[?#]/);
+	const unlocked =
+		headEnd === -1
+			? dropUserinfoPassword(url)
+			: dropUserinfoPassword(url.slice(0, headEnd)) + url.slice(headEnd);
+	return maskUrlQuery(unlocked, authNames);
+}
+
 /** The ` HTTP/1.1` a request line ends with, which is not part of its target. */
 const REQUEST_LINE_VERSION = / HTTP\/[\d.]+$/;
 
@@ -1336,7 +1408,7 @@ function withholdRunMember(
 	);
 	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, here.apiKeyHeaders);
 	if (typeof masked !== "string") return masked;
-	if (key === "url") return maskUrlQuery(masked, here.authQueryNames);
+	if (RUN_URL_MEMBERS.has(key)) return maskRunUrl(masked, here.authQueryNames);
 	if (key !== "rawRequest") return masked;
 	return withholdWireHeaders(maskRequestLine(masked, here.authQueryNames), here.apiKeyHeaders);
 }
@@ -1348,7 +1420,9 @@ function withholdRunMember(
  * `authHeaders`) also has that query value masked in its sibling `url` and
  * `rawRequest` request line, and those headers masked in its siblings; a
  * credential-named query value ({@link SENSITIVE_PARAM_NAMES}) is masked in
- * those two places on every record, auth-written or typed.
+ * those two places on every record, auth-written or typed. A URL member
+ * ({@link RUN_URL_MEMBERS}) also has its userinfo password dropped, as a
+ * stored request's is.
  * Keys are left alone, as the engine leaves them: a header or field *name* is
  * not a value. Numbers are never touched, so a size the engine reported still
  * describes what it measured.

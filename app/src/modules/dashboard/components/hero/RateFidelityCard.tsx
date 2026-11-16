@@ -72,7 +72,7 @@ export function RateFidelityCard({
 				</p>
 			)}
 			{achievement !== undefined && targetRps && (
-				<MiniBar pct={Math.min(100, achievement)} color={fillColor} showTarget />
+				<MiniBar pct={Math.min(100, achievement)} color={fillColor} />
 			)}
 		</HeroCardShell>
 	);

@@ -54,6 +54,10 @@ export function Launcher({
 		// `enter-fade`: this replaces `LauncherSkeleton` on mount, the same plain
 		// conditional-swap shape `FirstRunWelcome` fades in for (see its comment).
 		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
+			{/* The tab's `h1`, named as the tab is (#3498). Hidden, because the
+			    populated screen is a launcher with no title of its own to draw;
+			    the first-run screen's visible "Vayu" is the same heading. */}
+			<h1 className="sr-only">Vayu</h1>
 			<section className="flex flex-col gap-2">
 				<Eyebrow>Start</Eyebrow>
 				{/* Six columns since Search joined the row: the tiles are

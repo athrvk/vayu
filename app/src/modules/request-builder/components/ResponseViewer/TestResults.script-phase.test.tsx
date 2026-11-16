@@ -104,12 +104,14 @@ describe("TestResults level labels", () => {
 
 		const card = (name: string) => screen.getByText(name).parentElement as HTMLElement;
 		expect(within(card("from the root")).getByText("Collection")).toBeTruthy();
-		expect(within(card("from a folder")).getByText("Folder")).toBeTruthy();
+		expect(within(card("from a folder")).getByText("Nested collection")).toBeTruthy();
 		expect(
-			within(card("from the request")).queryByText(/^(Collection|Folder|Request)$/)
+			within(card("from the request")).queryByText(/^(Collection|Nested collection|Request)$/)
 		).toBeNull();
 		expect(
-			within(card("stored before the field")).queryByText(/^(Collection|Folder|Request)$/)
+			within(card("stored before the field")).queryByText(
+				/^(Collection|Nested collection|Request)$/
+			)
 		).toBeNull();
 	});
 

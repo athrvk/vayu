@@ -9,7 +9,9 @@
  * there fails whichever side answers it differently. Each case runs three
  * ways here - the encoder itself, an API key placed in the query by
  * `apply_auth`, and a Postman import's `query[]` joined into the stored URL -
- * because each is a separate caller that could keep an older rule.
+ * because each is a separate caller that could keep an older rule. The same
+ * file's `urlComponents` pins the path, fragment and user info spellings the
+ * secret-value mask also recognises (`masked_secret_forms`) to the MCP mirror.
  */
 
 #include <gtest/gtest.h>
@@ -24,7 +26,10 @@
 #include "echo_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_encode_sets.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -103,6 +108,30 @@ TEST (QueryEncodingConformance, EveryComponentEncodesAsAKeyAndAsAValue) {
         << name;
         EXPECT_EQ (encode_query_component (text, QueryPart::Value),
         c.at ("value").get<std::string> ())
+        << name;
+    }
+}
+
+// The secret-value mask's other spellings: `masked_secret_forms` writes each
+// value as a URL's path, fragment, user name and password take it.
+TEST (QueryEncodingConformance, EveryComponentEncodesAsAPathFragmentAndUserInfo) {
+    const json fixture = load_fixture ();
+    const json& rows   = fixture.at ("urlComponents");
+    ASSERT_GT (rows.size (), 8U);
+    for (const json& c : rows) {
+        const std::string name = c.at ("name").get<std::string> ();
+        const std::string text = c.at ("text").get<std::string> ();
+        EXPECT_EQ (vayu::core::encode_path_variable_value (text),
+        c.at ("path").get<std::string> ())
+        << name;
+        EXPECT_EQ (vayu::core::encode_outside_tokens (text, vayu::core::in_postman_fragment_encode_set),
+        c.at ("fragment").get<std::string> ())
+        << name;
+        EXPECT_EQ (vayu::core::encode_userinfo_as_postman (text),
+        c.at ("userinfo").get<std::string> ())
+        << name;
+        EXPECT_EQ (vayu::core::encode_outside_tokens (text, vayu::core::in_postman_userinfo_encode_set),
+        c.at ("password").get<std::string> ())
         << name;
     }
 }

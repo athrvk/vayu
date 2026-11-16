@@ -75,7 +75,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui";
-import { Callout, FieldError } from "@/components/shared";
+import { Callout, EmptyState, FieldError } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { dataCellText, type DataFileRow } from "@/services/data-files";
 import { cn } from "@/lib/utils";
@@ -414,7 +414,7 @@ export default function SendWithRowDialog({
 								// control beside it - with the shared edge transparent so the
 								// two do not draw a 2px line between them.
 								"bg-primary-fill text-white border border-primary-fill border-l-white/25",
-								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
 								lastInGroup ? "rounded-r-md rounded-l-none" : "rounded-none"
 							)}
@@ -532,9 +532,20 @@ export default function SendWithRowDialog({
 								/* An empty box would read as "the file has no rows",
 								   which is a different fact from "nothing matches what
 								   you typed" - and only one of them is fixable here. */
-								<p className="px-3 py-6 text-center text-xs text-muted-foreground">
-									No rows match “{filter}”.
-								</p>
+								<EmptyState
+									variant="inline"
+									compact
+									title={`No rows match “${filter}”.`}
+									action={
+										<Button
+											variant="link"
+											size="sm"
+											onClick={() => setFilter("")}
+										>
+											Clear the filter
+										</Button>
+									}
+								/>
 							) : (
 								/*
 								 * `role="grid"`, so the rows can be `aria-selected` -

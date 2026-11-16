@@ -19,6 +19,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import MockServerView from "./index";
 import {
 	useMockActivityQuery,
@@ -117,6 +118,15 @@ describe("Copy for agent on the mock-server tab", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Copy mock server URL" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(MOCK.url));
+	});
+
+	it("says what the URL button does on keyboard focus (#3498)", async () => {
+		render(<MockServerView />);
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Copy mock server URL" }),
+			"Copy mock server URL"
+		);
 	});
 
 	// An icon button swaps its glyph and raises no toast; the text button beside

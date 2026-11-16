@@ -560,6 +560,15 @@ describe("tool registry", () => {
 		expect(description).toContain("omitted for every other run");
 	});
 
+	// Mutation check (#3458): drop the single-request clause from list_runs in
+	// reads.tools.ts and this fails.
+	test("list_runs says a single-request load row carries assertionsFailed alone", () => {
+		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
+		expect(description).toContain(
+			"a single-request load run carries `assertionsFailed` alone (inline plus sampled-replay failures)"
+		);
+	});
+
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);
@@ -2070,8 +2079,12 @@ describe("trash tools", () => {
 		name: "Retired API",
 		deletedAt: 1_755_000_000_000,
 		parentId: null,
+		// The cohort a restore puts back: a floor. An earlier delete left more
+		// under the collection, which only the purge totals count (#3449).
 		collections: 2,
 		requests: 5,
+		purgeCollections: 3,
+		purgeRequests: 8,
 	};
 	// The engine's environment entry (#2970): a root that takes nothing with it,
 	// and the one kind that carries `variables`.
@@ -2083,6 +2096,8 @@ describe("trash tools", () => {
 		parentId: null,
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 		variables: 6,
 	};
 
@@ -2094,8 +2109,11 @@ describe("trash tools", () => {
 		name: "Happy path",
 		deletedAt: 1_755_000_000_000,
 		parentId: "req_2",
+		parentName: "Create payment",
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 	};
 
 	// A client certificate (#2973): a root named by its target, owning no parent.
@@ -2107,6 +2125,8 @@ describe("trash tools", () => {
 		parentId: null,
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 	};
 
 	test("list_trash answers a client certificate row as the engine wrote it", async () => {
@@ -2260,7 +2280,7 @@ describe("trash tools", () => {
 		// fixture here would have passed against a body the trash routes never
 		// produce, and the agent would have been shown raw JSON.
 		const message =
-			"Request 'req_5' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first";
+			"Request 'Charge' cannot be restored on its own - the collection it belongs to, 'Payments', is in the trash under 'Archive' (col_1), so restore that first";
 		const client = fakeClient({
 			restoreTrashEntry: vi
 				.fn()
@@ -2307,7 +2327,10 @@ describe("trash tools", () => {
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
 	});
 
-	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
+	test("purge_trash_entry previews the entry's name and what a purge destroys, and purges nothing", async () => {
+		// The prompt counts everything the purge destroys (#3449), not the cohort
+		// a restore puts back (2 and 5 in the fixture). Mutation check: read
+		// `collections` / `requests` again in `readTrashEntry` and this fails.
 		const client = fakeClient({
 			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
 		});
@@ -2319,8 +2342,9 @@ describe("trash tools", () => {
 		expect(res.isError).toBeFalsy();
 		expect(firstText(res)).toMatch(/awaiting confirmation/i);
 		expect(firstText(res)).toContain("Retired API");
-		expect(firstText(res)).toContain("2 sub-collection(s)");
-		expect(firstText(res)).toContain("5 saved request(s)");
+		expect(firstText(res)).toContain("3 sub-collection(s)");
+		expect(firstText(res)).toContain("8 saved request(s)");
+		expect(firstText(res)).not.toContain("5 saved request(s)");
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
 	});
 
@@ -2372,10 +2396,42 @@ describe("trash tools", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(firstText(res)).toContain(
-			'This would permanently destroy the saved example "Happy path".'
+			'This would permanently destroy the saved example "Happy path" from the request "Create payment".'
 		);
 		expect(firstText(res)).not.toContain("collection");
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry names the collection a saved request came from, and nothing when the engine named none", async () => {
+		// Mutation check: drop the `parentName` read in `readTrashEntry` and the
+		// owner leaves the prompt.
+		const request = {
+			id: "req_7",
+			kind: "request",
+			name: "Charge",
+			deletedAt: 1_755_000_000_000,
+			parentId: "col_2",
+			parentName: "Payments",
+			collections: 0,
+			requests: 0,
+			purgeCollections: 0,
+			purgeRequests: 0,
+		};
+		const { parentName: _omitted, ...unowned } = request;
+		for (const [item, expected] of [
+			[request, 'the saved request "Charge" from the collection "Payments".'],
+			[unowned, 'the saved request "Charge".'],
+		] as const) {
+			const client = fakeClient({
+				listTrash: vi.fn().mockResolvedValue({ items: [item], total: 1 }),
+			});
+			const res = await dispatchTool(
+				"purge_trash_entry",
+				{ entryId: "req_7" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(firstText(res)).toContain(expected);
+		}
 	});
 
 	test("restore_trash_entry puts a saved example back and answers the engine's entry", async () => {
@@ -8556,8 +8612,9 @@ describe("dispatchTool", () => {
 				.description;
 			for (const text of [descriptionOf(tool), idDescription]) {
 				expect(text).toMatch(/Omit `url` and pass `requestId`|Without `url`/);
-				expect(text).toMatch(/nothing stored is applied/);
-				expect(text).toMatch(/only links the run in History/);
+				expect(text).toMatch(/nothing else stored is applied/);
+				// The linked row's collection is the scope its scripts read (#3461).
+				expect(text).toMatch(/links the run in History and scopes its scripts' collection/);
 			}
 			expect(descriptionOf(tool)).not.toMatch(/use run_collection_smoke/);
 		});
@@ -13552,6 +13609,23 @@ describe("every MCP send carries the session's target policy", () => {
 		expect(sent).not.toHaveProperty("deferredVariables");
 	});
 
+	// The scope an ad-hoc request was composed in is part of its send (#3461):
+	// with no saved row linked, the engine's scripts read their collection from
+	// it. Mutation check: strip `collectionId` in `asMcpSend` and these fail.
+	const adHocCases = cases.filter(
+		([, sender]) =>
+			"url" in sender.args &&
+			(sender.tool === "run_request" || sender.tool === "start_load_run")
+	);
+	test.each(adHocCases)("%s forwards composition's collectionId", async (_, sender) => {
+		const sent = await payloadSent(
+			sender,
+			{ allowlist: ["api.example.com"] },
+			{ collectionId: "col_scope" }
+		);
+		expect(sent.collectionId).toBe("col_scope");
+	});
+
 	test.each(cases)("%s states the session's allowlist", async (_, sender) => {
 		expect(await policySent(sender, { allowlist: ["api.example.com"] })).toStrictEqual({
 			allowAll: false,
@@ -17776,6 +17850,88 @@ describe("secret withholding", () => {
 
 		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
 		expect(revealed.body).toEqual(RUN_REPORT);
+	});
+
+	/*
+	 * An engine refusal reaches the agent in the tool's error text. The engine
+	 * words its refusals to quote no resolved value, and this server does not
+	 * rely on that: the text is masked as a run's output is, or answered whole as
+	 * the masking error. Mutation check: drop `maskEngineText` from
+	 * `dispatchTool`, and the first two cases leak.
+	 */
+	describe("an engine refusal's text", () => {
+		const secretRefusal = (status: number) =>
+			new EngineRequestError(
+				`Engine responded ${status}`,
+				status,
+				engineErrorBody("invalid_header_name", `header 'X ${RUN_SECRET}' is not a name`)
+			);
+		const refusedClient = (overrides: Partial<Record<keyof EngineClient, unknown>> = {}) =>
+			runClient({
+				getRunReport: vi.fn().mockRejectedValue(secretRefusal(400)),
+				restoreTrashEntry: vi.fn().mockRejectedValue(secretRefusal(404)),
+				...overrides,
+			});
+		const calls: Array<[string, Record<string, unknown>, Partial<McpSafetyConfig>]> = [
+			["get_run_report", { runId: "run_1" }, {}],
+			["restore_trash_entry", { entryId: "t1" }, { allowWrites: true }],
+		];
+
+		test.each(calls)(
+			"%s is masked, keeping its class and its status",
+			async (tool, args, safety) => {
+				const res = await dispatchTool(tool, args, ctxWith(refusedClient(), safety));
+
+				expect(res.isError).toBe(true);
+				const text = firstText(res);
+				for (const leak of RUN_SECRET_CORES) expect(text, leak).not.toContain(leak);
+				expect(text).toContain("<redacted>");
+				expect(text).toContain("is not a name");
+				const { error } = res.structuredContent as {
+					error: { class: string; advice: string };
+				};
+				expect(error.advice).toBe(text);
+				expect(error.class).toBe(tool === "get_run_report" ? "input" : "not_found");
+			}
+		);
+
+		test.each(calls)(
+			"%s arrives untouched when the user chose to reveal",
+			async (tool, args, safety) => {
+				const client = refusedClient();
+				const res = await dispatchTool(
+					tool,
+					args,
+					ctxWith(client, { ...safety, revealSecretsToAgents: true })
+				);
+
+				expect(firstText(res)).toContain("p@ss");
+				expect(client.getGlobals).not.toHaveBeenCalled();
+			}
+		);
+
+		test.each(calls)(
+			"%s fails closed when a secret lookup fails",
+			async (tool, args, safety) => {
+				const client = refusedClient({
+					getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+				});
+				const res = await dispatchTool(tool, args, ctxWith(client, safety));
+
+				const text = firstText(res);
+				expect(text).toMatch(/masking .* could not complete, because the globals lookup/);
+				expect(text).not.toContain("is not a name");
+				for (const leak of RUN_SECRET_CORES) expect(text, leak).not.toContain(leak);
+			}
+		);
+
+		test("an error holding no engine text needs no secret lookup", async () => {
+			const client = refusedClient({ getGlobals: vi.fn().mockRejectedValue(new Error("x")) });
+			const res = await dispatchTool("get_run_report", {}, ctxWith(client));
+
+			expect(firstText(res)).toBe('"runId" is required.');
+			expect(client.getGlobals).not.toHaveBeenCalled();
+		});
 	});
 
 	/*

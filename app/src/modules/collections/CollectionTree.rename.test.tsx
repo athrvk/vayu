@@ -60,7 +60,6 @@ vi.mock("@/queries", () => ({
 	useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: [] }),
-	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 function renderTree() {
@@ -113,7 +112,28 @@ const ROW_KINDS = [
 	},
 ];
 
+// The field has no visible label and replaces the row's name (#3498).
+describe.each([
+	{ kind: "collection", selector: '[data-collection-id="c1"]', name: "Collection name" },
+	{ kind: "request", selector: '[data-request-id="r1"]', name: "Request name" },
+])("the rename field of a $kind", ({ selector, name }) => {
+	it("is named after what it renames", () => {
+		renderTree();
+
+		expect(startRename(selector)).toHaveAccessibleName(name);
+	});
+});
+
 describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName, storedName }) => {
+	it("opens with the whole name selected, so typing replaces it", () => {
+		renderTree();
+		const field = startRename(selector);
+
+		expect(field.value).toBe(storedName);
+		expect(field.selectionStart).toBe(0);
+		expect(field.selectionEnd).toBe(storedName.length);
+	});
+
 	it("sends nothing when the name is unchanged", async () => {
 		renderTree();
 		const field = startRename(selector);

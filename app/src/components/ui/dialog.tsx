@@ -10,6 +10,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { HeadingSection } from "./heading";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -120,7 +121,11 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 				)}
 				{...props}
 			>
-				{children}
+				{/* Its own outline under its `h2` title. React context crosses the
+				    portal, so without this a dialog opened from a tab inherits the
+				    tab's level and a card or empty state inside it could be a second
+				    `h1` (#3498). */}
+				<HeadingSection level={3}>{children}</HeadingSection>
 				{showClose && (
 					// `size-target` (issue #1679, 24px): the close button carried no
 					// explicit hit box at all - just the bare 16px icon - which read

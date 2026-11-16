@@ -19,7 +19,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { TooltipProvider } from "@/components/ui";
 import {

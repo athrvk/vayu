@@ -13,7 +13,7 @@
  *
  * The window is frameless, so Windows and Linux draw no menu bar and the
  * application menu had no mouse route at all - Help > Documentation, About Vayu
- * and Check for Updates were reachable only by a shortcut nobody could see
+ * and Check for updates were reachable only by a shortcut nobody could see
  * (#1361). Left click opens that menu on both; on Windows right click keeps the
  * system menu, which is the platform's own convention for this icon and was the
  * only thing the icon did before. macOS renders no button: the menu bar there

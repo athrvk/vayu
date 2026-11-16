@@ -260,7 +260,7 @@ describe("availability", () => {
 });
 
 describe("performing", () => {
-	it("opens the settings tab, the way the menu's Preferences… item does", () => {
+	it("opens the settings tab, the way the menu's Settings… item does", () => {
 		commandById("open-settings").perform(baseCommandContext());
 		expect(useTabsStore.getState().openTabs).toHaveLength(1);
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ type: "settings" });

@@ -80,7 +80,10 @@ export function CommandSearchBar({ className }: { className?: string }) {
 			<span className="flex-1 truncate text-left">Search</span>
 			{/* The hint is the reason the bar earns its width: a user who learns the
 			    chord here never needs the bar again. */}
-			<span className="flex shrink-0 items-center gap-1">
+			{/* Hidden by CSS below 46rem of window, never removed: from there down
+				    the bar is under 10rem wide (see TitleBar) and the caps would be
+				    what overflows it. */}
+			<span className="flex shrink-0 items-center gap-1 max-[46rem]:hidden">
 				{chordKeys(PALETTE_CHORD).map((cap) => (
 					<Kbd key={cap} size="sm">
 						{cap}

@@ -42,6 +42,7 @@ import {
 	DeleteConfirmDialog,
 	DisabledHint,
 	IconSwap,
+	HeadingSection,
 	Label,
 	Select,
 	SelectContent,
@@ -49,7 +50,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Switch,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipValue,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	Callout,
@@ -70,12 +76,14 @@ import {
 	useUpdateInboxResponseMutation,
 } from "@/queries";
 import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useEngineServing } from "@/modules/services/useRunningServices";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { inboxReference } from "@/lib/agent-reference";
 import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
+import { truncateUrl } from "@/lib/truncate-url";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -133,8 +141,16 @@ interface CaptureRowProps {
 	onSelect: () => void;
 }
 
+/**
+ * Characters of a capture's path the row shows: what fits the `w-72` list beside
+ * the method and time at compact density. `truncateUrl` keeps the tail, which
+ * CSS `truncate` (the net under this) would cut and which tells captures apart.
+ */
+const CAPTURE_PATH_CHARS = 11;
+
 function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
-	return (
+	const shownPath = truncateUrl(capture.path, CAPTURE_PATH_CHARS);
+	const row = (
 		<button
 			type="button"
 			onClick={onSelect}
@@ -146,7 +162,7 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 		>
 			<span className="flex w-full items-center gap-2">
 				<MethodBadge method={capture.method} variant="text" size="sm" className="w-[5ch]" />
-				<span className="truncate font-mono text-xs">{capture.path}</span>
+				<span className="truncate font-mono text-xs">{shownPath}</span>
 				<span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
 					<TimeValue value={capture.receivedAt} style="time" />
 				</span>
@@ -160,6 +176,18 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 				{capture.query ? ` · ?${capture.query}` : ""}
 			</span>
 		</button>
+	);
+	if (shownPath === capture.path) return row;
+
+	// The row is the trigger, so focus reveals the path as well as hover: a native
+	// `title` never shows on focus (#3492).
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{row}</TooltipTrigger>
+			<TooltipContent side="right">
+				<TooltipValue className="font-mono">{capture.path}</TooltipValue>
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
@@ -261,7 +289,12 @@ export default function InboxView() {
 	const capturesTotal = capturesQuery.data?.pagination.total ?? 0;
 	const hasMoreCaptures = capturesQuery.data?.pagination.hasMore === true;
 	const loadMore = useLoadMoreInboxCapturesMutation();
-	const live = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
+	// The record outlives the engine process that held its listener, so the
+	// cached flag alone reads Running after a crash (#3506); the same gate the
+	// services drawer puts on its rows.
+	const serving = useEngineServing();
+	const running = inbox?.running === true && serving;
+	const live = useInboxLive(inbox?.inboxId ?? null, running);
 
 	const selectedCaptureId =
 		selection !== null && selection.inboxId === inbox?.inboxId ? selection.captureId : null;
@@ -354,26 +387,31 @@ export default function InboxView() {
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
 				<InboxIcon className="size-icon text-muted-foreground" aria-hidden="true" />
-				<code className="font-mono text-xs">{inbox.url}</code>
-				<Button
-					variant="ghost"
+				{/* The tab's `h1` is the address, the inbox's identity; the hidden
+				    prefix says what it is the address of (#3498). */}
+				<h1>
+					<span className="sr-only">Webhook inbox </span>
+					<code className="font-mono text-xs">{inbox.url}</code>
+				</h1>
+				<TooltipIconButton
 					size="sm"
-					aria-label="Copy inbox URL"
+					label="Copy inbox URL"
 					onClick={() => void copyUrl(inbox.url, "Inbox URL")}
-				>
-					<IconSwap
-						state={urlCopied ? "copied" : "copy"}
-						icons={{
-							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-							copied: (
-								<Check
-									className="size-icon-sm text-status-success-text"
-									aria-hidden="true"
-								/>
-							),
-						}}
-					/>
-				</Button>
+					icon={
+						<IconSwap
+							state={urlCopied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+								copied: (
+									<Check
+										className="size-icon-sm text-status-success-text"
+										aria-hidden="true"
+									/>
+								),
+							}}
+						/>
+					}
+				/>
 				<Button
 					variant="ghost"
 					size="sm"
@@ -386,7 +424,7 @@ export default function InboxView() {
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				<Badge variant="outline">
-					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
+					{running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
 				{/* Always said, the default included: "Any" is the answer to whether
 				    a page in the browser can read this, which an absent line would
@@ -412,7 +450,7 @@ export default function InboxView() {
 						<SelectContent>
 							{ordered.map((option) => (
 								<SelectItem key={option.inboxId} value={option.inboxId}>
-									{`Port ${option.port}${option.running ? "" : " (stopped)"}`}
+									{`Port ${option.port}${option.running && serving ? "" : " (stopped)"}`}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -450,7 +488,7 @@ export default function InboxView() {
 							Clear
 						</Button>
 					</DisabledHint>
-					{inbox.running ? (
+					{running ? (
 						<Button
 							variant="outline"
 							size="sm"
@@ -511,7 +549,7 @@ export default function InboxView() {
 				key={cannedResponseKey(inbox.inboxId, inbox.response)}
 				response={inbox.response}
 				pending={updateResponse.isPending}
-				stopped={!inbox.running}
+				stopped={!running}
 				onApply={applyResponse}
 			/>
 
@@ -594,7 +632,9 @@ export default function InboxView() {
 				</aside>
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-					<CaptureDetail capture={selectedCapture} inboxUrl={inbox.url} />
+					<HeadingSection>
+						<CaptureDetail capture={selectedCapture} inboxUrl={inbox.url} />
+					</HeadingSection>
 				</div>
 			</div>
 		</div>

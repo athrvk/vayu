@@ -190,3 +190,43 @@ describe("AuthFields masks the credential fields", () => {
 		expect(screen.getByPlaceholderText("X-API-Key")).not.toHaveAttribute("type", "password");
 	});
 });
+
+/**
+ * `<Label>` as a bare sibling named nothing: a screen reader announced each
+ * field by its placeholder, or a picker as a bare "combo box" (#3498). Dropping
+ * the `htmlFor`/`id` pair in `LabelledField` fails these.
+ */
+describe("AuthFields links each label to its control", () => {
+	it("bearer", () => {
+		renderFields({ mode: "bearer", token: "t" });
+		expect(screen.getByLabelText("Token")).toBeInTheDocument();
+	});
+
+	it("basic", () => {
+		renderFields({ mode: "basic", username: "u", password: "p" });
+		expect(screen.getByLabelText("Username")).toBeInTheDocument();
+		expect(screen.getByLabelText("Password")).toBeInTheDocument();
+	});
+
+	it("apikey, picker included", () => {
+		renderFields({ mode: "apikey", key: "k", value: "v", in: "header" });
+		expect(screen.getByRole("combobox", { name: "Add to" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Key name")).toBeInTheDocument();
+		expect(screen.getByLabelText("Value")).toBeInTheDocument();
+	});
+
+	it("hands an injected input the id its label points at, and the label's text", () => {
+		const Injected: AuthTextInput = ({ id, label, value }) => (
+			<input id={id} data-label={label} value={value} readOnly />
+		);
+		renderFields({ mode: "bearer", token: "t" }, Injected);
+
+		const field = screen.getByLabelText("Token");
+		expect(field.getAttribute("data-label")).toBe("Token");
+	});
+
+	it("gives two fields two ids", () => {
+		renderFields({ mode: "basic", username: "u", password: "p" });
+		expect(screen.getByLabelText("Username")).not.toBe(screen.getByLabelText("Password"));
+	});
+});

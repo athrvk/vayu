@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -204,6 +205,26 @@ class TrashTest : public ::testing::Test {
     /// A user-saved example - the only origin a delete sends to the trash.
     void make_user_example (const std::string& id, const std::string& request_id) {
         make_example (id, request_id, vayu::core::constants::request_example::ORIGIN_USER);
+    }
+
+    /// Gives a live request a name other than its id, so a message that names
+    /// it shows which of the two it used.
+    void rename_request (const std::string& id, const std::string& name) {
+        auto request = db_->get_request (id);
+        ASSERT_HAS_VALUE (request);
+        request->name = name;
+        db_->save_request (*request);
+    }
+
+    /// `rename_request` for a live example.
+    void rename_example (const std::string& id,
+    const std::string& request_id,
+    const std::string& name) {
+        auto example = db_->get_request_example (id);
+        ASSERT_HAS_VALUE (example);
+        ASSERT_EQ (example->request_id, request_id);
+        example->name = name;
+        db_->save_request_example (*example);
     }
 
     /// What `GET /requests/:id/examples` writes for @p id, or "" when it lists
@@ -494,9 +515,81 @@ TEST_F (TrashTest, TheListRouteCarriesEveryFieldOfAnEntry) {
     EXPECT_EQ (item["kind"], "collection");
     EXPECT_EQ (item["name"], "API");
     EXPECT_TRUE (item["parentId"].is_null ());
+    EXPECT_FALSE (item.contains ("parentName")) << item.dump ();
     EXPECT_EQ (item["collections"], 0);
     EXPECT_EQ (item["requests"], 1);
+    EXPECT_EQ (item.at ("purgeCollections"), 0);
+    EXPECT_EQ (item.at ("purgeRequests"), 1);
     EXPECT_GT (item["deletedAt"].get<int64_t> (), 0);
+}
+
+// #3449: deleting `req_early`, then the folder `col_early` with its request,
+// then their collection leaves one root whose cohort is one request, while a
+// purge destroys all three rows below it. The cohort counts stay what a
+// restore puts back; the purge counts are what the purge takes, in the
+// listing and in the purge's own body. Mutation check: leave
+// `purge_requests` at 0 in `collection_entry` and the listing reads 1, not 3.
+TEST_F (TrashTest, AListedCollectionCountsWhatAPurgeTakesBesideItsCohort) {
+    make_collection ("col_p", "API");
+    make_collection ("col_early", "Old folder", "col_p");
+    make_request ("req_p", "col_p");
+    make_request ("req_early", "col_p");
+    make_request ("req_in_early", "col_early");
+    db_->delete_request ("req_early");
+    db_->delete_collection ("col_early");
+    db_->delete_collection ("col_p");
+
+    const auto body = routes::trash_list_body (*db_);
+    ASSERT_EQ (body["total"], 1) << "the earlier deletes are inside the root";
+    const auto& item = body["items"][0];
+    ASSERT_EQ (item["id"], "col_p");
+    EXPECT_EQ (item["collections"], 0)
+    << "the cohort, which a restore puts back";
+    EXPECT_EQ (item["requests"], 1) << "the cohort, which a restore puts back";
+    EXPECT_EQ (item.at ("purgeCollections"), 1) << item.dump ();
+    EXPECT_EQ (item.at ("purgeRequests"), 3) << item.dump ();
+
+    auto [status, purged] = routes::trash_purge_response (*db_, jar_, "col_p");
+    ASSERT_EQ (status, 200) << purged.dump ();
+    EXPECT_EQ (purged.at ("purgeCollections"), 1);
+    EXPECT_EQ (purged.at ("purgeRequests"), 3);
+    EXPECT_TRUE (db_->get_trash ().empty ());
+}
+
+// #3449: a request's and an example's entries carry their live owner's name,
+// so two same-named examples from different requests read apart, in the
+// listing and in a purge's body. Mutation check: drop the `parent_name`
+// assignment from `listed_example_entries` and both examples lose it.
+TEST_F (TrashTest, ARequestAndAnExampleEntryNameTheirOwner) {
+    make_collection ("col_users", "Users");
+    make_request ("req_get", "col_users");
+    make_request ("req_list", "col_users");
+    make_request ("req_gone", "col_users");
+    rename_request ("req_get", "Get user");
+    rename_request ("req_list", "List users");
+    for (const auto& [example_id, request_id] :
+    { std::pair{ "exa_get", "req_get" }, std::pair{ "exa_list", "req_list" } }) {
+        make_user_example (example_id, request_id);
+        rename_example (example_id, request_id, "200 OK");
+        db_->delete_request_example (example_id);
+    }
+    db_->delete_request ("req_gone");
+
+    const auto body = routes::trash_list_body (*db_);
+    ASSERT_EQ (body["total"], 3) << body.dump ();
+    std::unordered_map<std::string, json> by_id;
+    for (const auto& item : body["items"]) {
+        by_id[item["id"].get<std::string> ()] = item;
+    }
+    EXPECT_EQ (by_id["exa_get"]["name"], "200 OK");
+    EXPECT_EQ (by_id["exa_get"]["parentName"], "Get user");
+    EXPECT_EQ (by_id["exa_list"]["name"], "200 OK");
+    EXPECT_EQ (by_id["exa_list"]["parentName"], "List users");
+    EXPECT_EQ (by_id["req_gone"]["parentName"], "Users");
+
+    auto [status, purged] = routes::trash_purge_response (*db_, jar_, "exa_list");
+    ASSERT_EQ (status, 200) << purged.dump ();
+    EXPECT_EQ (purged["parentName"], "List users");
 }
 
 // -- `q` / `limit` / `offset` (#2443) ----------------------------------------
@@ -725,9 +818,13 @@ TEST_F (TrashTest, ARestoredRequestKeepsItsOrderAndSortsAfterAFolderThatTookItsS
     (std::vector<std::string>{ "col_f", created["id"].get<std::string> (), "req_a" }));
 }
 
+// The refusal names the request and the root to restore by name (#3449);
+// here the root is the request's own collection. Mutation check: build the
+// message from the ids again and the text differs.
 TEST_F (TrashTest, RestoringARequestUnderADeletedCollectionIsRefused) {
     make_collection ("col_1", "API");
     make_request ("req_1", "col_1");
+    rename_request ("req_1", "Get user");
 
     db_->delete_request ("req_1");
     db_->delete_collection ("col_1");
@@ -739,8 +836,56 @@ TEST_F (TrashTest, RestoringARequestUnderADeletedCollectionIsRefused) {
 
     auto [status, body] = routes::trash_restore_response (*db_, "req_1");
     EXPECT_EQ (status, 409);
-    EXPECT_NE (error_field (body, "message").find ("restore that first"), std::string::npos)
-    << "the refusal names the way forward: " << error_field (body, "message");
+    EXPECT_EQ (error_field (body, "message"),
+    "Request 'Get user' cannot be restored on its own - the collection it "
+    "belongs to, 'API' (col_1), is in the trash, so restore that first");
+}
+
+// The root a person can restore is the listed one, which may be an ancestor
+// of the request's own collection: the folder went with its parent's delete,
+// so only the parent is in the list. Mutation check: name the request's own
+// collection as the root and the message names 'Users' (col_folder).
+TEST_F (TrashTest, ARefusedRequestRestoreNamesTheListedRootAboveItsCollection) {
+    make_collection ("col_root", "API");
+    make_collection ("col_folder", "Users", "col_root");
+    make_request ("req_1", "col_folder");
+    rename_request ("req_1", "Get user");
+
+    db_->delete_request ("req_1");
+    db_->delete_collection ("col_root");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "req_1");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Request 'Get user' cannot be restored on its own - the collection it "
+    "belongs to, 'Users', is in the trash under 'API' (col_root), so restore "
+    "that first");
+    EXPECT_TRUE (entry_for ("col_root").has_value ())
+    << "the named root is listed";
+    EXPECT_FALSE (entry_for ("col_folder").has_value ());
+}
+
+// A collection row gone from under a stamped request (seeded past every write
+// path, which purges a collection's requests with it) leaves nothing to
+// restore first.
+TEST_F (TrashTest, ARefusedRequestRestoreUnderAMissingCollectionSaysItIsGone) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    rename_request ("req_1", "Get user");
+    db_->delete_request ("req_1");
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+    const char* remove_collection =
+    "PRAGMA foreign_keys = OFF; DELETE FROM collections WHERE id = 'col_1';";
+    const int removed = sqlite3_exec (handle, remove_collection, nullptr, nullptr, nullptr);
+    sqlite3_close (handle);
+    ASSERT_EQ (removed, SQLITE_OK);
+
+    auto [status, body] = routes::trash_restore_response (*db_, "req_1");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Request 'Get user' cannot be restored on its own - the collection it "
+    "belongs to is gone");
 }
 
 TEST_F (TrashTest, RestoringSomethingTheTrashDoesNotHoldIsA404) {
@@ -1414,7 +1559,9 @@ TEST_F (TrashTest, AnExampleWhoseRequestIsGoneIsUnlistedAndUnrestorable) {
     "Example 'exa_orphan' cannot be restored on its own - the request it "
     "belongs to is gone");
 
-    EXPECT_EQ (routes::trash_purge_response (*db_, jar_, "exa_orphan").first, 200);
+    auto [purge_status, purged] = routes::trash_purge_response (*db_, jar_, "exa_orphan");
+    EXPECT_EQ (purge_status, 200);
+    EXPECT_FALSE (purged.contains ("parentName")) << "no row is left to name";
     EXPECT_EQ (stored_rows ("request_examples", "exa_orphan"), 0);
 }
 
@@ -1482,14 +1629,35 @@ TEST_F (TrashTest, RestoringAnExampleUnderATrashedRequestIsRefused) {
     auto [status, body] = routes::trash_restore_response (*db_, "exa_1");
     EXPECT_EQ (status, 409);
     EXPECT_EQ (error_field (body, "message"),
-    "Example 'exa_1' cannot be restored on its own - the request it belongs to "
-    "is in the trash, so restore that first");
+    "Example 'exa_1' cannot be restored on its own - the request it belongs "
+    "to, 'req_1' (req_1), is in the trash, so restore that first");
 
     EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 1);
     ASSERT_HAS_VALUE (db_->restore_deleted ("req_1"));
     EXPECT_EQ (served_example ("req_1", "exa_1"), "")
     << "the refusal cleared nothing";
     EXPECT_TRUE (entry_for ("exa_1").has_value ());
+}
+
+// Under a request a collection's delete took, the root to restore is that
+// collection, named by name and id, and the example and its request by name
+// (#3449). Mutation check: name the request as the root whatever its
+// collection, and the message names 'Get user' (req_1).
+TEST_F (TrashTest, ARefusedExampleRestoreNamesTheCollectionRootAboveItsRequest) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    rename_request ("req_1", "Get user");
+    make_user_example ("exa_1", "req_1");
+    rename_example ("exa_1", "req_1", "200 OK");
+    db_->delete_request_example ("exa_1");
+    db_->delete_collection ("col_1");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_1");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Example '200 OK' cannot be restored on its own - the request it belongs "
+    "to, 'Get user', is in the trash under 'API' (col_1), so restore that "
+    "first");
 }
 
 // A delete makes room under `MAX_PER_REQUEST` that a later create may take;

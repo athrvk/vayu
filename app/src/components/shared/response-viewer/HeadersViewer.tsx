@@ -46,12 +46,14 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui";
+import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 import { resolveHeaderLines } from "@/lib/header-lines";
 import type { HeaderLine } from "@/types/domain";
 import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
 import { TimeValue } from "../TimeValue";
+import { TruncatedText } from "../TruncatedText";
 import type { HeadersViewerProps } from "./types";
 import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 
@@ -75,6 +77,14 @@ export function HeaderValue({ value }: { value: string }) {
 	parts.push(value.slice(cursor));
 	return <>{parts}</>;
 }
+
+/**
+ * A header name is one token and never wraps: "Content-" over "Type" reads as
+ * two names (#3495). Past this many characters (the longest registered names
+ * are about 35) it ellipses, with the full name on hover, so a pathological
+ * name cannot take the value's column.
+ */
+const HEADER_NAME_MAX = "max-w-[40ch]";
 
 function isWireLines(headers: HeadersViewerProps["headers"]): headers is readonly WireHeaderLine[] {
 	return Array.isArray(headers);
@@ -137,9 +147,9 @@ export default function HeadersViewer({
 						<ChevronRight className="size-icon-sm text-muted-foreground" />
 					)}
 				</div>
-				<h3 className={EYEBROW_CLASS}>
+				<Heading outside="h3" className={EYEBROW_CLASS}>
 					{title || (variant === "response" ? "Response headers" : "Request headers")}
-				</h3>
+				</Heading>
 				<Badge variant="outline" className="ml-auto text-xs">
 					{lines.length}
 				</Badge>
@@ -156,8 +166,10 @@ export default function HeadersViewer({
 						{/* Index-composite: a repeated name is two rows with one name. */}
 						{lines.map(({ name, value }, i) => (
 							<TableRow key={`${i}:${name}`}>
-								<TableCell className="font-mono text-muted-foreground">
-									{name}
+								<TableCell className="font-mono whitespace-nowrap text-muted-foreground">
+									<TruncatedText className={HEADER_NAME_MAX}>
+										{name}
+									</TruncatedText>
 								</TableCell>
 								<TableCell className="font-mono break-all text-foreground">
 									<HeaderValue value={value} />
@@ -193,7 +205,12 @@ export function CompactHeadersViewer({
 
 	return (
 		<div className={className}>
-			{title && <h4 className={cn(EYEBROW_CLASS, "mb-2")}>{title}</h4>}
+			{/* The level is the host's: an inbox capture, a run's step or sample. */}
+			{title && (
+				<Heading outside="h4" className={cn(EYEBROW_CLASS, "mb-2")}>
+					{title}
+				</Heading>
+			)}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
 				{lines.map(({ name, value }, i) => (
 					// Same `border-rule` as the table above, resolving differently
@@ -207,9 +224,14 @@ export function CompactHeadersViewer({
 						key={`${i}:${name}`}
 						className="flex gap-2 py-1 border-b border-rule last:border-0"
 					>
-						<span className="text-xs font-medium text-muted-foreground shrink-0">
-							{name}:
-						</span>
+						<TruncatedText
+							className={cn(
+								"text-xs font-medium text-muted-foreground shrink-0",
+								HEADER_NAME_MAX
+							)}
+						>
+							{`${name}:`}
+						</TruncatedText>
 						<span className="text-xs text-foreground break-all">
 							<HeaderValue value={value} />
 						</span>

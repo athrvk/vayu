@@ -54,21 +54,11 @@ function describeTrend(
 	return `${title} across ${points.length} runs, oldest to newest${latest}`;
 }
 
-function TrendPanel({
-	title,
-	label,
-	children,
-}: {
-	title: string;
-	label: string;
-	children: ReactNode;
-}) {
+function TrendPanel({ title, children }: { title: string; children: ReactNode }) {
 	return (
 		<div className="min-w-0 space-y-1">
 			<p className="text-xs font-medium text-muted-foreground">{title}</p>
-			<div role="img" aria-label={label}>
-				{children}
-			</div>
+			{children}
 		</div>
 	);
 }
@@ -101,30 +91,27 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 
 	const panels = [
 		hasTrend(points, "p95Ms") && (
-			<TrendPanel
-				key="p95"
-				title="p95 latency"
-				label={describeTrend("p95 latency", points, "p95Ms", fmtMs)}
-			>
-				<RunP95TrendChart points={points} />
+			<TrendPanel key="p95" title="p95 latency">
+				<RunP95TrendChart
+					points={points}
+					ariaLabel={describeTrend("p95 latency", points, "p95Ms", fmtMs)}
+				/>
 			</TrendPanel>
 		),
 		hasTrend(points, "rps") && (
-			<TrendPanel
-				key="rps"
-				title="Throughput"
-				label={describeTrend("Throughput", points, "rps", fmtRate)}
-			>
-				<RunThroughputTrendChart points={points} />
+			<TrendPanel key="rps" title="Throughput">
+				<RunThroughputTrendChart
+					points={points}
+					ariaLabel={describeTrend("Throughput", points, "rps", fmtRate)}
+				/>
 			</TrendPanel>
 		),
 		hasTrend(points, "errorRate") && (
-			<TrendPanel
-				key="error"
-				title="Error rate"
-				label={describeTrend("Error rate", points, "errorRate", formatErrorRate)}
-			>
-				<RunErrorRateTrendChart points={points} />
+			<TrendPanel key="error" title="Error rate">
+				<RunErrorRateTrendChart
+					points={points}
+					ariaLabel={describeTrend("Error rate", points, "errorRate", formatErrorRate)}
+				/>
 			</TrendPanel>
 		),
 	].filter(Boolean);

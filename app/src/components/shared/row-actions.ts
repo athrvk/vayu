@@ -99,3 +99,28 @@ export function rowActionRows(actions: RowAction[]): RowActionRow[] {
 export function rowActionItemClass(action: RowAction): string {
 	return cn("group gap-2 text-sm", action.destructive && "text-destructive-text");
 }
+
+/**
+ * A control that costs its row no width until the row is hovered or holds focus.
+ *
+ * `opacity-0` hides a control without giving back its space, so a hover-revealed
+ * pin and delete kept 52px of the 260px history drawer from the name on every
+ * row, and `hidden` would take the control out of the tab order. Collapsed it is
+ * `absolute`: out of the row's flex flow (no width, no gap) yet still focusable,
+ * pinned to the row's trailing corner so it adds no scrollable overflow. A
+ * focused control makes the row `:focus-within`, which returns it to the flow, so
+ * a keyboard user never lands on a control that is not there.
+ *
+ * `static`, not `relative`, on reveal: a flex item takes `z-index` without being
+ * positioned, so a cluster's `z-10` over a stretched activator still holds.
+ * `hover: none` devices never match `group-hover`, so they keep it revealed.
+ *
+ * The row is the `group` and must be positioned. A row whose actions are never
+ * hidden (a state toggle) does not take this.
+ */
+export const ROW_ACTIONS_REVEAL = [
+	"pointer-events-none absolute right-0 top-0 opacity-0 transition-opacity",
+	"group-hover:pointer-events-auto group-hover:static group-hover:opacity-100",
+	"group-focus-within:pointer-events-auto group-focus-within:static group-focus-within:opacity-100",
+	"[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:static [@media(hover:none)]:opacity-100",
+].join(" ");

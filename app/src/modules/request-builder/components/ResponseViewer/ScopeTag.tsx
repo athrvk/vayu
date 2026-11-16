@@ -22,7 +22,7 @@ import type { ElementScope } from "@/types";
 
 const INHERITED_LABEL: Partial<Record<ElementScope, string>> = {
 	collection: "Collection",
-	folder: "Folder",
+	folder: "Nested collection",
 };
 
 export default function ScopeTag({

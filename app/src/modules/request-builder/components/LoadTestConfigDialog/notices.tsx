@@ -37,7 +37,10 @@ function sendsPhrase({ requestCount, countWithheld }: RemoteTarget): string {
 
 /** The validation messages, plus the facts that raise an advisory. */
 export interface NoticeInputs extends DraftErrors {
+	/** A pre-request script not marked inline: skipped unless Scripts is All inline. */
 	hasPreRequestScript: boolean;
+	/** A pre-request script marked inline: skipped only when Scripts is All deferred. */
+	hasInlinePreScript: boolean;
 	/** A post-request script the run would replay on a sample, not inline. */
 	hasPostRequestScript: boolean;
 	scriptsOverride: string;
@@ -72,6 +75,7 @@ export function buildNotices({
 	monitoringError,
 	scenarioOnlyError,
 	hasPreRequestScript,
+	hasInlinePreScript,
 	hasPostRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
@@ -177,9 +181,13 @@ export function buildNotices({
 
 	// Unconditional before issue #1594: the load path ran no element at all,
 	// so a pre-request script never reached the wire regardless of what the
-	// run asked for. Now `elements.scripts: "allInline"` makes it run per
-	// submission, so the warning is only true at the other two settings.
-	if (hasPreRequestScript && scriptsOverride !== "allInline") {
+	// run asked for. Now `elements.scripts: "allInline"` runs every one per
+	// submission and "asMarked" runs the ones marked inline, so the warning is
+	// true only for an unmarked script at the other two settings, and for a
+	// marked one at "allDeferred" (the engine's `script_element_runs_inline`).
+	const preScriptSkipped =
+		hasPreRequestScript || (hasInlinePreScript && scriptsOverride === "allDeferred");
+	if (preScriptSkipped && scriptsOverride !== "allInline") {
 		list.push({
 			key: "pre-script",
 			severity: "warning",

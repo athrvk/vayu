@@ -17,7 +17,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { screen, fireEvent, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingsCategoryTree from "./SettingsCategoryTree";
 import { useTabsStore } from "@/stores";
@@ -252,5 +254,28 @@ describe("settings search", () => {
 
 		fireEvent.click(screen.getByLabelText("Clear search"));
 		expect(screen.getByText("App settings")).toBeInTheDocument();
+	});
+
+	it("offers Clear the filter under the empty line, and it empties the search (#3501)", () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "zzzz" } });
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
+
+		expect(search()).toHaveValue("");
+		expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument();
+		expect(screen.getByText("App settings")).toBeInTheDocument();
+	});
+});
+
+describe("settings search clear button", () => {
+	it("says Clear search on keyboard focus (#3498)", async () => {
+		renderTree();
+		fireEvent.change(search(), { target: { value: "cache" } });
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Clear search" }),
+			"Clear search"
+		);
 	});
 });

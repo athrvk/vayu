@@ -219,7 +219,7 @@ is the settings pane's) and scroll it directly with `scrollWithin`
 - **`--primary` vs `--primary-fill`:** `--primary` is text/ring/chart and
   brightens in dark; `--primary-fill` is the solid button background and is one
   value in both themes. Do not unify them: pinning `--primary` drops accent text
-  from APCA Lc 44-69 to 22-37.
+  from APCA Lc 44-69 to 22-25.
 - **No raw Tailwind palette** (`text-green-500`) anywhere in `modules/` or
   `components/` → `palette-tokens.test.ts` (widened from the request/response
   tree by #1693). The two exemptions are `text-purple-500` marking a load test
@@ -292,8 +292,10 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   `lib/ui-strings.testkit.ts` (logs, comments, tests and `electron/mcp/**` left
   out); a breach an open issue owns goes in its `KNOWN_BREACHES` with that
   number, and the fix deletes the entry. → `voice-casing.test.ts`. The same
-  scan holds the spellings: `Settings ›` not `Settings >`, "cURL" not "curl
-  command", `…` not three full stops after a word.
+  scan holds the spellings: `Settings ›` not `Settings >` (or any names joined
+  with `>`), "cURL" not "curl command", `…` not three full stops after a word,
+  and "collection" or "nested collection" not "folder" (a directory on disk is
+  listed in the test by reason).
   → `user-text-spelling.test.ts`
 
 ## Borders: what a rule sits _on_, never what it is

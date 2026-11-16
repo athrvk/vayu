@@ -16,6 +16,10 @@
  * Mutation-check: put "complete" back in the caption and the first case
  * reddens; put the "stops automatically" sentence back in `TOOLTIPS.progress`
  * and the second does.
+ *
+ * The bar is the `Progress` primitive (#3498), so a screen reader can ask how
+ * far the run is. Mutation check: put the hand-drawn `MiniBar` back and the
+ * progressbar case reddens.
  */
 
 import { describe, it, expect } from "vitest";
@@ -50,6 +54,14 @@ describe("ProgressCard", () => {
 		renderCard(1000, 1000);
 
 		expect(screen.getByText("100.0")).toBeTruthy();
+	});
+
+	it("exposes the bar as a named progressbar with the sent fraction", () => {
+		renderCard(250, 1000);
+
+		const bar = screen.getByRole("progressbar", { name: "Run progress" });
+		expect(bar).toHaveAttribute("aria-valuenow", "25");
+		expect(bar).toHaveAttribute("aria-valuemax", "100");
 	});
 
 	it("explains a bar that fills on sends, and does not promise a stop at 100%", () => {

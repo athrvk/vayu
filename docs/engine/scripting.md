@@ -495,7 +495,9 @@ pm.response.responseTimeQueueWait // Wait before the wire in ms - generator
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
 pm.response.text()            // Body as string
-pm.response.json()            // Parse JSON (throws if invalid)
+pm.response.json()            // Parse JSON (throws if invalid). Takes no
+                              // reviver: an argument is ignored, and a Postman
+                              // import names a call that passes one
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
 pm.response.responseSize      // The body's bytes: size().body
@@ -1459,6 +1461,9 @@ pm.request.url.query             // the query, with the reads below
 pm.request.url.getHost();        // 'api.example.com'
 pm.request.url.getPath();        // '/v2/users'
 pm.request.url.getQueryString(); // 'page=2&sort=name' - no '?'
+pm.request.url.getPathWithQuery(); // '/v2/users?page=2&sort=name'
+pm.request.url.getRemote();      // 'api.example.com:8443' - ':port' only when stated
+pm.request.url.getRaw();         // the whole URL, as toString() gives it
 pm.request.url.toString();       // the whole URL
 ```
 
@@ -1468,9 +1473,17 @@ pm.request.url.query.has('page');     // boolean
 pm.request.url.query.all();           // [{key, value}, ...] in wire order
 pm.request.url.query.toObject();      // {page: '2'} - last wins
 pm.request.url.query.count();         // 3
+
+pm.request.url.query.each((p) => console.log(p.key, p.value)); // (member, index, list), thisArg?
+pm.request.url.query.map((p) => p.key);                        // ['page', 'sort', 'page']
+pm.request.url.query.filter((p) => p.key === 'page');          // every match, duplicates kept
+pm.request.url.query.find((p) => p.key === 'page');            // first match, or undefined
+pm.request.url.query.one('page');     // {key: 'page', value: '2'} - first match, or undefined
+pm.request.url.query.indexOf('page'); // 0 - the position in all(), -1 when absent
+pm.request.url.query.idx(2);          // {key: 'page', value: '3'}, or undefined past the end
 ```
 
-Five rules behind those answers:
+Six rules behind those answers:
 
 - **A `{{variable}}` in the scheme or host is opaque host text**, as in
   Postman. A scripted request's URL reaches its script with its scope names
@@ -1487,12 +1500,27 @@ Five rules behind those answers:
   built from the bytes that were sent. `getQueryString()` is byte-exact against
   the wire.
 - **`all()` keeps wire order and duplicates**, which is the whole reason it
-  exists beside `toObject()`. `get(name)` answers the **first** match (Postman's
-  `PropertyList.one`); `toObject()` is last-wins and says so.
+  exists beside `toObject()`. `get(name)` and `one(name)` answer the **first**
+  match (Postman's `PropertyList.one`); `toObject()` is last-wins and says so.
+- **The walks (`each`, `map`, `filter`, `find`) take a function and run over a
+  list taken once.** The callback gets `(member, index, list)` and the optional
+  second argument as its `this`, as `headers.each` does, so a callback that adds
+  or removes a parameter, or calls `url.update()`, edits the URL without
+  changing the walk in progress. A `false` answer does not stop `each`; `filter`
+  and `find` read the answer as truthy or falsy; a throw out of the callback
+  reaches the script as thrown. Postman also takes an object or a property name
+  as `filter`'s and `find`'s rule and `map`'s iterator - here anything that is
+  not a function is a `TypeError`. `indexOf(item)` takes a name or a
+  `{key, value}`: a member is matched on both, so the second `page` of
+  `page=2&page=3` is `1`, where Postman's identity match cannot hold across
+  two calls that each build their members.
 - **A bare `?flag` reads as `null`, an empty `?flag=` as `''`.** Both are
   `has()`-true.
 - **A URL the parser cannot read has no parts.** `toString()` still answers the
-  whole string, and every part is empty rather than a plausible half. A URL
+  whole string, and every part is empty rather than a plausible half:
+  `getRaw()` is the text, `getPathWithQuery()` and `getRemote()` are `''`,
+  and the query reads find nothing. `getRemote()` takes no `forcePort`
+  argument, since a scheme's default port is never filled in. A URL
   with no scheme and no token before its path (`example.com/users`) is one: no
   scheme is guessed.
 
@@ -1690,11 +1718,31 @@ attached to every request paying for it. See
 [`elements.md`](elements.md#kinds) for the element mechanics (dispatch, phases,
 placement) - this section is what the two scripts see as scripts.
 
+**Whose scripts run** (#3456): every collection above the one being run, the
+collection being run, and, when the run includes nested collections, every
+folder beneath it. Setups run once at the start in that order: the root
+first, down to the collection being run, then the folders beneath it in the
+order the sidebar shows them, a folder before the folders nested in it.
+Teardowns run once at the end in exactly the reverse order. So running a
+sub-folder alone still runs its root collection's setup first, and running
+the root with nested collections included runs each folder's setup and
+teardown too. A run that does not include nested collections sends only the
+collection's own requests, so no folder beneath it takes part. The set is read
+once when the run starts: a folder added, moved or deleted mid-run changes
+neither end. Each row of the report's `lifecycle` names the collection it came
+from in its `origin` (`{kind: "collection", scope: "collection" | "folder",
+id, name}`), so the report says whose setup ran.
+
 Both read and write the same three variable scopes every other script does
 (`pm.environment`, `pm.globals`, `pm.collectionVariables`) - a name
 `script.setup` sets is visible to the very first step or submission of the run,
 because it writes through the same scopes object every other script of that
-run shares, before either run mode's own work begins. `pm.info.eventName` reads
+run shares, before either run mode's own work begins. A load run's deferred
+test replay reads it too: the replay starts from a copy of the scopes setup
+left (#3460), so a replayed write never reaches what teardown reads. A collection's setup
+and teardown read the chain down to that collection and write that
+collection's variables, as a step in it does, so a folder's setup writes a
+value that folder's own steps (and the folders below it) read. `pm.info.eventName` reads
 `'setup'` / `'teardown'`; neither script has a `pm.request` or a `pm.response`
 to read, since neither runs against a particular step. `pm.execution` throws
 the same "not available here" sentence a non-scenario script already gets:
@@ -1718,10 +1766,24 @@ sequential collection run it is the share of steps that errored.
 **A throwing `script.setup` fails the run before anything is sent.** Its
 outcome is checked the same way any element's is (`"error"` fails the check);
 the run reaches `Failed` before either run mode's strategy starts, so nothing
-is sent and no duration is measured. **A throwing `script.teardown` is
+is sent and no duration is measured. The failed run's report still carries
+`lifecycle.setup`, every setup that ran up to and including the refusing one,
+with its outcome, message and `origin`, so it says which collection's script
+failed and why (#3455). Setups are checked a collection at a time: once one
+collection's setup refuses, the collections after it set up nothing, and no
+teardown runs. The engine log's record of the refusal leads with the same
+collection, `folder '<name>': <message>` (or `collection '<name>'` for the
+root, the id where it has no name; a single-request run's
+`lifecycleElements` name none). **A throwing `script.teardown` is
 recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
-`"error"` outcome and the thrown message.
+`"error"` outcome and the thrown message, and the collections above it still
+tear down after it. A script that only fails a `pm.test`
+is `"failed"` rather than `"error"`, with the first failing test as its message,
+and a failing test in `script.setup` fails the run the way a throw does. Either
+script's `console.*` lines and test results are kept on its `lifecycle` row, as
+`console` and `messages` lists (the first ten distinct entries, a repeat counted
+once with a `count`), so they can be read after the run.
 
 **What `script.teardown` writes is saved only by a design run** (#3249). A
 collection run writes its variable scopes back once, after teardown, so a
@@ -1882,7 +1944,7 @@ effect.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused-3461)) |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -1896,6 +1958,21 @@ if (pm.environment.has('auth_token')) {
 
 console.log(pm.environment.toObject());
 ```
+
+#### A name a token cannot read back is refused (#3461)
+
+`{{ name }}` is looked up with the spaces, tabs and line breaks cut from both
+ends, and a reference stops at a brace. A variable stored as `''`, `' pad '`
+or `'a}}b'` could therefore never be referenced, and the next save of that
+scope through the API would answer `400` for the key. So `set` on any scope
+(`pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`, and
+the legacy `postman.setEnvironmentVariable` / `setGlobalVariable`, which
+delegate to them) throws a `TypeError` for such a name, naming the call and the
+reason, and stores nothing. An extractor's `variable` is refused for the same
+names, in the same words (`variable_name_refusal`). Spaces inside a name
+(`my var`), Unicode and dots are fine. `unset` does not check, so a bad name
+that is already stored can still be removed. Postman stores such a name; Vayu
+refuses it because nothing could ever read it.
 
 `unset()` is not the same as `set(name, '')`. An emptied variable is still an
 enabled row, so `{{auth_token}}` resolves to the empty string; an unset one is
@@ -1935,8 +2012,19 @@ request's chain too, sequential or under load, so a step in a sub-folder of the
 collection being run reads and writes that sub-folder, as a Send of it does
 (#3248), and a value one step writes into a folder is what later steps in that
 folder and below it read (under load, that virtual user's later steps). A
-sibling folder does not see it. `script.setup` and `script.teardown` read and
-write the collection being run.
+sibling folder does not see it. A `script.setup` or `script.teardown` reads
+and writes the collection that declares it, which on a sub-folder run can be
+an ancestor of the collection being run, or on a run with nested collections a
+folder beneath it (#3456).
+
+A request sent inline with no saved row linked (MCP's ad-hoc `run_request`
+with a `collectionId`, a direct API caller) reads the chain of the collection
+it was composed in: `POST
+/compose` writes that `collectionId` on its answer and `POST /execute` and
+`POST /runs` read the scope from it, so the script sees the same chain the
+request's `{{names}}` resolve against (issue #3461). A linked saved request's
+own collection comes first; a collection that no longer exists is an empty
+scope.
 
 **Writes stay on the request's own collection.** `set`, `unset` and `clear`
 never reach an ancestor, so `set` on a descendant *shadows* an inherited name
@@ -2188,6 +2276,28 @@ same sentence. Every other local server is reachable as before. See
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.
 It is a subset of `pm.response` and has no `to.*` assertion chain.
 
+**Every request leaves one line in the Console** (#3462), so what a script sent
+is listed even when nothing logs it - a token fetch that failed and a callback
+that returns on `err` would otherwise leave no trace. It is an `info` line,
+written when the transfer ends and before the callback runs, naming the method,
+the URL, the status or the error code, and how long the transfer took:
+
+```text
+pm.sendRequest POST https://auth.example.com/token -> 200 (143 ms)
+pm.sendRequest GET https://auth.example.com/token failed: CONNECTION_FAILED (3 ms)
+```
+
+A 4xx or 5xx answer is a status, not a failure; `failed:` is the `err.code` the
+callback receives. The URL is the one the script gave, after its variables
+resolve, with its credentials blanked the way an export blanks them: the
+password of `user:pass@` and the value of a query parameter named like a
+credential (`token`, `api_key`, `client_secret`, ...) are dropped, the rest of
+the query stays, and a key that `auth` appends is never shown. Only a request
+that was sent has a line: a call refused before it goes out (the cap, a bad
+option, the capability being off) throws and writes none. The line counts
+against the [console caps](#console-output) like any other, and with
+`scriptEnableConsole` off it is not recorded.
+
 **Three bounds, all hard.**
 
 - *The script's deadline.* The wall-clock limit is enforced by a QuickJS
@@ -2232,6 +2342,21 @@ out of the step's result and the run's counts, and a replayed `tests` script
 whose fetch was cancelled is left out of the run's pass and fail counts. On a
 collection run the step itself is then `stopped`, since its own send is
 cancelled too.
+
+**A Stop ends the script itself, too** (#3460). The same Stop or shutdown stops
+a run's script that is still running, fetch or no fetch, at QuickJS's next
+interrupt poll, so a script stuck in a loop never holds a Stop open for its
+`scriptTimeout`. Every script of every run kind honours it: `script.setup`, an
+inline step script under load, the deferred replay (see
+[Load Test Scripts](#load-test-scripts)) and a sequential run's step scripts. A
+script it ended is recorded exactly as a cancelled fetch's is, `skipped` with
+the message `the run was stopped while this script was running`, never an error.
+`script.teardown` is the one exception: teardown runs at the end of every run
+that set up, a stopped one included, so a Stop latched before teardown began
+leaves it to run (its fetches still cancelled at once), and only the engine
+shutting down ends it then; a Stop or shutdown that arrives while it runs ends
+it. A `POST /execute`'s scripts are not ended by a hang-up or a shutdown: its
+post-request script runs after a stream's own Stop.
 
 **It leaves the way its execution leaves.** The fetch takes the transport policy
 its enclosing execution resolved - the proxy mode and URL, the bypass list, the
@@ -2300,7 +2425,8 @@ Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
 names written differently that resolve to one name would send that header twice
 where the script wrote two different ones, so the call throws naming both
-spellings and the name they produced, and nothing goes out. Names are compared
+spellings (never the name they produced, which can be a secret), and nothing
+goes out. Names are compared
 without case. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the
@@ -2895,7 +3021,9 @@ never its path or rows.
 
 ## Console Output
 
-Log messages that appear in test results:
+Log messages that appear in test results. A `script.setup` or `script.teardown`
+has no step to show them under, so a run's report keeps them on that script's
+`lifecycle` row instead (see [Setup and teardown scripts](#setup-and-teardown-scripts)):
 
 ```javascript
 console.log('Response:', pm.response.json());
@@ -2907,6 +3035,17 @@ console.error('Error message');
 Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
 rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
+
+**`scriptEnableConsole` off keeps `console` defined** (#3461). The setting is
+the recommended one for a load test, where recording and storing output nobody
+reads costs throughput. With it off, `console.log`, `console.info`,
+`console.warn` and `console.error` are still bound, to a function that formats
+nothing and records nothing, so a script that logs keeps running and its later
+`pm.test` calls still execute; the result's console output is empty. The two
+settings bind the same four names (`setup_console`), so no script can tell them
+apart by a thrown `ReferenceError`. `console.debug`, `console.table` and the
+rest stay undefined either way, as [pm API
+compatibility](../app/pm-api-compatibility.md) lists.
 
 Four built-in objects have no useful JSON form and print the way Node prints
 them (#3130):
@@ -2947,9 +3086,10 @@ that bounds the script does not bound them. Three caps, the constants
   is dropped, as is every line after it. Exactly one final `warn` entry,
   `[console output limit reached: further output of this script is dropped]`,
   says so; a script that stops at a cap without exceeding it gets none.
-- The warnings the engine writes for a script (`pm.cookies.jar()` refusals,
-  `pm.visualizer`) count against the same caps. Nothing is thrown into the
-  script.
+- The lines the engine writes for a script (`pm.cookies.jar()` refusals,
+  `pm.visualizer`, and the [`info` line each `pm.sendRequest`
+  leaves](#sending-a-request-from-a-script-pmsendrequest)) count against the
+  same caps. Nothing is thrown into the script.
 
 The caps are per execution: each level's script has its own, so a request with
 a collection, a folder and a request script can show up to three times as much,
@@ -3267,6 +3407,15 @@ too; the queue is the engine's to free, so it costs the runtime nothing. State t
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
+One thing is shared on purpose: `Math.random` draws from a generator that lives
+on the thread, seeded once from libsodium, not from one the context owns. QuickJS
+seeds a context's own generator from the microsecond clock, so two workers
+starting a script in the same microsecond would draw the same numbers (#3460);
+with a per-thread generator the contexts of one thread continue a single
+sequence and two threads never share one. It is the same xorshift64* generator
+QuickJS runs, a fast PRNG and not a CSPRNG, so a script that needs unpredictable
+values uses `require('uuid')` rather than `Math.random`.
+
 ### What a script can compute
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
@@ -3412,7 +3561,9 @@ are all there, with npm's signatures (`v3.DNS` / `v3.URL` and `v5.DNS` /
 global** in Vayu: a script reads it with `require` only. Postman's
 `uuid()` and `uuid.v4()` draw from `Math.random`; Vayu's draw from libsodium's
 CSPRNG, so a script that works in Postman works here and the values are
-unpredictable rather than merely unlikely to collide. The bytes reach the
+unpredictable rather than merely unlikely to collide. (`Math.random` stays a PRNG,
+seeded per thread from the same source: see
+[Isolation between scripts](#isolation-between-scripts).) The bytes reach the
 library through a `crypto.getRandomValues` that exists only inside the
 library's own scope, so no script sees a `crypto` global.
 
@@ -4026,12 +4177,16 @@ carries two fields no other entry does:
 
 | Field | Values | What it decides |
 |-------|--------|-----------------|
-| `context` | `pre`, `test`, `both` | Which script kind the template belongs in. A template that reads `pm.response` is `test`, because a pre-request script has no response to read; one that writes `pm.request` is `pre`, because a test script's writes go nowhere. |
+| `context` | `pre`, `test`, `both` | Which script kind the template belongs in. A template that reads `pm.response` is `test`, because a pre-request script has no response to read; one that writes `pm.request` is `pre`, because a test script's writes go nowhere. `both` needs neither, so it is offered under every script editor. |
 | `group` | `Variables`, `Request`, `Response`, `Tests`, `Signing`, `Logging` | The heading it is listed under. |
 
 The app's snippets surface under each script editor is built from those two:
 it shows the templates for the editor it sits under, grouped by heading, and
-inserts one at the cursor with its `${1:placeholders}` intact. Adding a
+inserts one at the cursor with its `${1:placeholders}` intact. A pre-request
+script is offered `pre` and `both`, a post-request script `test` and `both`,
+and a `script.setup` / `script.teardown` script - which run once per run,
+outside any request, with no `pm.request` or `pm.response` to template - only
+`both`. Adding a
 template to the table is therefore all it takes to offer it in the app - see
 [`pm-api-compatibility`](../app/pm-api-compatibility.md#editor-autocomplete)
 for the payload itself.
@@ -4044,9 +4199,14 @@ The **language** is current; what is missing is the **host environment**:
   (`??`) are ES2020 and supported, as are later additions like
   `Array.prototype.at`, `Object.hasOwn`, `String.prototype.replaceAll`, the
   ES2023 copying methods (`toSorted`, `toReversed`, `with`), `findLast`,
-  `Object.groupBy` and `Promise.withResolvers`. The script editor's type
-  declarations use TypeScript's `esnext` library, so none of them is marked as
-  an error. This section used to say the opposite, listing `?.` and `??` as
+  `Object.groupBy` and `Promise.withResolvers`, and the newest library
+  members: `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON` and
+  `JSON.isRawJSON`, and `Uint8Array`'s `fromBase64`, `fromHex`, `toBase64`,
+  `toHex`, `setFromBase64` and `setFromHex`. The script editor's type
+  declarations use TypeScript's `esnext` library, so none of the first group is
+  marked as an error; the engine's own declarations add the newest ones, which
+  TypeScript's bundled lib does not have yet (`LIBRARY_GAPS` in
+  `script_types.cpp`). This section used to say the opposite, listing `?.` and `??` as
   "ES2021+" and unavailable - wrong on both counts, so any workaround written
   around that claim can go. What limits a script is the global list above, not the syntax.
 - **No host globals**: no `fetch`, `URL`, `TextEncoder`,
@@ -4070,9 +4230,17 @@ The **language** is current; what is missing is the **host environment**:
   10 requests per script, bounded by the script's own deadline and by the
   response byte bound its path reads, and refused outright for agent-started
   runs.
-- **Memory limit**: 64MB per script execution. Running out ends the script:
+- **Memory limit**: 64MB per script execution (`scriptMemoryLimit`, 1 MiB to
+  256 MiB). Running out ends the script:
   since quickjs-ng 0.18.0 the out-of-memory error cannot be caught by the
-  script itself, so a `try` cannot swallow it and keep allocating.
+  script itself, so a `try` cannot swallow it and keep allocating. It is
+  reported as `Script ran out of memory at the 64 MiB limit`, naming the limit
+  in force. The engine holds the limit itself, counting each block as QuickJS
+  asked for it rather than as the platform allocator rounded it, and it is the
+  engine's record of the refusal that decides the report, whatever QuickJS
+  raised in its place. At the 1 MiB floor a library as large as lodash cannot
+  load: `require('lodash')` fails with that sentence, so raise the limit rather
+  than load it. See [Error Handling](#error-handling) for the rest.
 - **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
   execution; the rest is dropped behind one warning line
   ([Console Output](#console-output)).
@@ -4174,7 +4342,23 @@ The **language** is current; what is missing is the **host environment**:
   report says which one happened: `sampling.responseSampleBudgetSpent`
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
-  says how many responses the bound thinned away
+  says how many responses the bound thinned away. It counts the samples the
+  replay reached, so it is smaller than the sample when a Stop ended the replay
+  (below)
+- **A Stop or the engine shutting down ends the replay** (#3460). The script
+  running when it lands stops at its next interrupt poll, which is no verdict on
+  it, and no sample after it is replayed; the run settles within the Stop's 5 s
+  grace rather than after every remaining sample's `scriptTimeout`. A Stop that
+  lands before the replay begins (one during the sending) replays nothing, and
+  the report then has no `testValidation` rather than one of zeros. The run
+  keeps the end it would have had: a Stop after the sending ended still leaves
+  it `completed`
+- **A script that times out is not replayed against the rest of the sample**
+  (#3460): its deadline is its own, so each sample after it would wait it out
+  again, and at the 5 s default a thousand samples is most of an hour. Its one
+  failure says so, `Script error: Script execution timed out after 5000ms
+  (timed out, not replayed against the remaining 999 samples)`, and the
+  replay's other scripts still run against every sample
 - Results are aggregated and reported in the final report: `testsPassed` /
   `testsFailed` tally every `pm.test` call across every sampled response, so a
   script whose assertions are a mix of passing and failing reports both counts
@@ -4196,10 +4380,22 @@ The **language** is current; what is missing is the **host environment**:
   is two entries. The number of responses replayed is `testValidation`'s
   `samplesTested`, not a field of the row
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
-  `requestId` / `requestName` are the run's linked request when it has one. It
+  `requestId` / `requestName` are the run's linked request when it has one,
+  in an inline `script.pre` / `script.post` as in the deferred replay (#3460). It
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
+- `pm.request` in the deferred replay is the request each sample was sent as
+  (#3460), re-derived rather than stored: the request the run built, with that
+  submission's row and iteration (a scenario step's virtual user and iteration)
+  bound into it, and every name the bind left resolved against the scopes as
+  `script.setup` left them, as the run's own residual pass resolved it. What no
+  sample records is not reproduced: a `script.pre` or other `step.before`
+  element's edit to the request and its own scope writes (an inline one ran on
+  that submission alone, an un-inlined one never ran), a credential refreshed
+  mid-run (the replay reads the one the run started with), and a scenario
+  user's cookies. A deferred `script.post` beside an inline `script.pre` that
+  rewrites `pm.request` therefore reads the request before that rewrite
 - `pm.response.redirects` is **absent** here, inline or deferred: a load run
   follows redirects without recording the chain, so there is no list to read and
   an empty one would claim there was nothing to find (see
@@ -4246,6 +4442,13 @@ bound an empty environment and no other scope at all, so
 `pm.environment.get('region')` read `undefined` under load and the same test
 gave opposite verdicts on Send and under load.
 
+**The replay starts from the scopes as `script.setup` left them** (#3460), not
+from a fresh read of the stored rows, so a value setup wrote reads the same in a
+deferred script as in an inline one. It works on a copy, so `script.teardown`
+still reads what setup left, whatever the replay wrote. What a virtual user's or
+a submission's own inline scripts wrote during the run is not in it: those writes
+lived in the user's (or the submission's) own overlay, which no sample records.
+
 Writes are the deliberate exception. A `set()`, `unset()` or `clear()` in a
 deferred script is visible to the samples replayed after it - one set of scopes
 serves the whole pass - but **nothing is persisted**: only design mode writes
@@ -4263,8 +4466,8 @@ over a sequence says something failed, not which step - while the aggregate
 still appears as `testValidation`. Three differences from the single-request
 shape:
 
-- `pm.request` is the step's own request, and `pm.info.requestId` /
-  `requestName` are that step's, not a run-level one.
+- `pm.request` is the step's own request as that sample sent it, and
+  `pm.info.requestId` / `requestName` are that step's, not a run-level one.
 - `pm.info.iteration` is the virtual user's own iteration index and
   `pm.info.vu` is that user's number, so a script can tell two users' responses
   apart - beside the `pm.iterationData` a single-request run's rows also
@@ -4362,8 +4565,9 @@ boundary, where `pm.cookies`' per-VU jar is. An inline script's `unset()` or
 `clear()` of a name the run loaded hides that stored value from the same VU
 alone, until a later write sets the name again (#3088). The base a step's
 overlay sits on is its own folder's (#3248): the environment and globals the
-run loaded and `script.setup` left, and the chain from the root down to the
-step's folder, read once before the first submission. The overlay keeps a
+run loaded, and the chain from the root down to the step's folder, each as
+the run's `script.setup` scripts left them (#3456), read once before the
+first submission. The overlay keeps a
 collection write per folder, so it answers that VU's later steps in the same
 folder and in folders below it, and never a step in a sibling folder.
 
@@ -4406,6 +4610,37 @@ try {
 ```
 
 Test failures don't stop script execution - all tests run and results are collected.
+
+The message is never empty and never the bare `null` or `undefined` a value
+stringifies to (#3461). An error with a message reads as it always has
+(`Error: boom`), and one with an empty message reads as its type (`TypeError`).
+What has no text of its own reads as a sentence:
+
+| The script | The message |
+|------------|-------------|
+| Runs out of memory | `Script ran out of memory at the 1 MiB limit` (the configured `scriptMemoryLimit`) |
+| `throw undefined` | `Script threw undefined` |
+| `throw ''` | `Script threw an empty string` |
+| Throws an object whose `toString` gives `''` or throws | `Script threw a value with no text` |
+| `throw null` | `Script threw null` |
+
+Running out of memory is read from the engine's record that the limit refused
+an allocation, never from the thrown value (#3460). QuickJS words a refusal by
+where it lands: its own out-of-memory error, a bare `null` when there was no
+room left to build that, or, inside its parser, a `SyntaxError` such as
+`invalid assignment left-hand side`. A `null` with no refusal behind it is the
+script's own `throw null`. Any other error after a refusal keeps its text
+after the sentence, because a script can catch the `null` and throw something
+else: `Script ran out of memory at the 1 MiB limit (then failed with:
+SyntaxError: invalid assignment left-hand side)`. A `pm.test` row that runs out
+reports it on its row, and the rows after it report their own errors.
+The same text stands in for the reason of an unhandled promise rejection
+(`Unhandled promise rejection: Script threw undefined`).
+
+A failed `pm.test` row (and a legacy `tests[name]` getter that throws) reads the
+same way: `pm.test('x', () => { throw undefined })` gives the row the error
+`Script threw undefined`, `throw new Error('')` gives `Error`, and
+`throw new Error('boom')` still gives `Error: boom`.
 
 In a collection run an uncaught error marks the step `errored`, with the message
 on its row, and the iteration moves on to the next request, as Postman's runner

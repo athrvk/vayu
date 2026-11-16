@@ -85,7 +85,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
-    "integer", "Max stored scenario steps",
+    "integer", "Max stored collection run steps",
     "How many per-step results one collection run keeps, which bounds what a "
     "long run costs the dashboard to load. Steps that failed, errored or were "
     "skipped are kept first and successes fill the rest, so raising this buys "

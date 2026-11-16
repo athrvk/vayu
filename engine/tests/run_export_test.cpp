@@ -96,8 +96,11 @@ json leak_summary () {
         { "failuresTotal", 1 } } },
         { "lifecycle",
         { { "teardown",
-        json::array ({ { { "id", "el_t" }, { "kind", "script.teardown" }, { "origin", json::object () },
-        { "outcome", "error" }, { "message", "LEAKSCRIPT" } } }) } } },
+        json::array ({ { { "id", "el_t" }, { "kind", "script.teardown" },
+        { "origin", json::object () }, { "outcome", "error" }, { "message", "LEAKSCRIPT" },
+        { "messages", json::array ({ { { "kind", "error" }, { "text", "LEAKTHROWN" } } }) },
+        { "console", json::array ({ { { "level", "log" }, { "text", "LEAKCONSOLE" } } }) },
+        { "consoleDropped", 2 } } }) } } },
         { "auth", { { "refreshes", json::array () }, { "refreshFailures", 1 }, { "lastError", "LEAKAUTH" } } },
         { "elements", json::array ({ leak_script_row () }) },
         { "tests", leak_replay_tests ("LEAKREPLAY") },
@@ -280,6 +283,48 @@ TEST_F (RunExportTest, AScriptElementRowIsExportedWithoutItsMessages) {
             EXPECT_FALSE (row->contains (key)) << key << " in " << row->dump ();
         }
     }
+}
+
+// #3455: a lifecycle row's `messages` and `console` lists (and the dropped
+// counts) are script text and stay out of the export, as its `message` does,
+// while the row itself is exported. The report carries them, so the absence is
+// the export's doing. Mutation check: add "console" and "consoleDropped" to
+// LIFECYCLE_OUTCOME_KEYS (run_export.cpp) and `consoleDropped` is exported.
+TEST_F (RunExportTest, ALifecycleRowIsExportedWithoutItsMessagesOrConsole) {
+    seed_leak_run ("run_leak");
+    auto [status, report] = vayu::http::routes::run_report_response (*db_, "run_leak");
+    ASSERT_EQ (status, 200) << report.dump ();
+    ASSERT_TRUE (report.at ("lifecycle").at ("teardown").at (0).contains ("console"))
+    << report.dump ();
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_leak" } });
+    const auto& row = document.at ("report").at ("lifecycle").at ("teardown").at (0);
+    EXPECT_EQ (row.at ("outcome"), "error") << row.dump ();
+    for (const char* key :
+    { "message", "messages", "messagesDropped", "console", "consoleDropped" }) {
+        EXPECT_FALSE (row.contains (key)) << key << " in " << row.dump ();
+    }
+}
+
+// A lifecycle script that only logged still held text the export left behind,
+// so the file says messages were not carried. Mutation check: read only
+// "message" in `held_message_text` (run_export.cpp) and `message_text` is absent.
+TEST_F (RunExportTest, ALifecycleRowThatOnlyLoggedStillReportsMessageTextNotCarried) {
+    json summary = leak_summary ();
+    summary["lifecycle"]["teardown"][0].erase ("message");
+    summary["lifecycle"]["teardown"][0].erase ("messages");
+    summary["schemaValidation"].erase ("failures");
+    seed_run ("run_quiet", vayu::RunType::Load, vayu::RunStatus::Completed,
+    leak_snapshot (), summary);
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_quiet" } });
+
+    std::vector<std::string> codes;
+    for (const json& entry : document["notCarried"]) {
+        codes.push_back (entry["code"]);
+    }
+    EXPECT_NE (std::ranges::find (codes, "message_text"), codes.end ())
+    << document["notCarried"].dump ();
 }
 
 // #3127: the replay's tallies are exported counts-only, the run's

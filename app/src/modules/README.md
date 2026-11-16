@@ -71,7 +71,10 @@ Some modules have components displayed in both the sidebar and main content area
 - **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers, mock
   servers): status, copy-URL, start/stop, and the issuer's start dialog. A mock-servers row opens
   the `mock-server` tab (`modules/mock-server/`) rather than expanding in place, the same shape the
-  inbox row already used.
+  inbox row already used. While Vayu's engine is down (`useEngineServing`, the same gate as the
+  Dock's count) the cached rows read as stopped, since every service lived in its process
+  (issue #3493). The inbox and
+  mock-server tabs read the same gate (issue #3506).
 - **Also exports** `useRunningServices()` and the `useRunningServiceCount()` derived from it, which
   the Dock's ambient indicator reads - one list over all three sources, because they disagree on
   their own terms (a stopped inbox stays listed, a stopped issuer or mock server does not), and
@@ -88,7 +91,11 @@ Some modules have components displayed in both the sidebar and main content area
 - **Components:** `sidebar/TrashList.tsx` - deleted collections, requests, environments, saved examples and client certificates,
   newest first, each with restore and purge-for-good actions; `sidebar/TrashItem.tsx` - one row
 - **Also exports** `retentionCopy()` and `retentionDaysFrom()` (`retention.ts`), which turn the
-  engine's `trashRetentionDays` config entry into the sentence the view puts under its title
+  engine's `trashRetentionDays` config entry into the sentence the view puts under its title; it
+  says the sweep runs at the next start of Vayu, because the engine sweeps once at start (#3449)
+- **A row shows what a purge destroys, not what a restore brings back:** a collection reads the
+  engine's `purgeCollections` / `purgeRequests`, and a request or example names its owner
+  (`parentName`) so same-named entries tell apart
 - **Usage:**
     ```tsx
     import {

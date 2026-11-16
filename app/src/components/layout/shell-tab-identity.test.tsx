@@ -30,7 +30,7 @@ import { useState } from "react";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
-import { useTabsStore, useLayoutStore } from "@/stores";
+import { useTabsStore, useLayoutStore, useDashboardStore } from "@/stores";
 
 vi.mock("./Drawer", () => ({
 	Drawer: () => <div data-testid="drawer" />,
@@ -156,5 +156,27 @@ describe("tab content identity across the drawer", () => {
 		// The panel is inside main, not instead of it: main is a landmark and
 		// carries only role="main".
 		expect(screen.getByRole("main").contains(panel)).toBe(true);
+	});
+
+	/*
+	 * A run usually ends while its own tab is not the one mounted (#3498), and a
+	 * live region announces only a change to a node already in the DOM. So the
+	 * announcer sits outside the tab panel and outlives a tab switch.
+	 */
+	it("keeps the run announcer outside the tab panel, across a tab switch", () => {
+		renderShell();
+		const outsidePanel = () =>
+			screen
+				.getAllByRole("status")
+				.filter((region) => !screen.getByRole("tabpanel").contains(region));
+		const [announcer, ...others] = outsidePanel();
+		expect(announcer).toBeDefined();
+		expect(others).toEqual([]);
+
+		act(() => useTabsStore.getState().openTab({ type: "settings", entityId: null }));
+		act(() => useDashboardStore.getState().startRun("load_1"));
+
+		expect(outsidePanel()).toEqual([announcer]);
+		expect(announcer).toHaveTextContent("Load test started");
 	});
 });

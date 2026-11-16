@@ -16,7 +16,9 @@
 import { describe, it, expect } from "vitest";
 import {
 	elementsParts,
+	hasInlinePreScript,
 	hasReplayedPostScript,
+	hasUnmarkedPreScript,
 	scriptTextFor,
 	sendElementsParts,
 	withoutDisabled,
@@ -290,6 +292,55 @@ describe("hasReplayedPostScript", () => {
 			config: { elementId: "inherited" },
 		});
 		expect(hasReplayedPostScript(elementsParts(chain, "req", [disable]))).toBe(false);
+	});
+});
+
+describe("hasUnmarkedPreScript and hasInlinePreScript", () => {
+	const pre = (overrides: Partial<ElementDef> = {}, config: Record<string, unknown> = {}) =>
+		element({
+			id: "p1",
+			kind: "script.pre",
+			config: { script: "pm.variables.set('a', 1);", ...config },
+			...overrides,
+		});
+
+	it("tells a script left to its default from one marked inline", () => {
+		expect(hasUnmarkedPreScript([pre()])).toBe(true);
+		expect(hasUnmarkedPreScript([pre({}, { inline: false })])).toBe(true);
+		expect(hasInlinePreScript([pre()])).toBe(false);
+		expect(hasInlinePreScript([pre({}, { inline: false })])).toBe(false);
+
+		expect(hasUnmarkedPreScript([pre({}, { inline: true })])).toBe(false);
+		expect(hasInlinePreScript([pre({}, { inline: true })])).toBe(true);
+	});
+
+	it("answers each side independently when the list holds both", () => {
+		const both = [pre({ id: "a" }), pre({ id: "b" }, { inline: true })];
+		expect(hasUnmarkedPreScript(both)).toBe(true);
+		expect(hasInlinePreScript(both)).toBe(true);
+	});
+
+	it("ignores a disabled, blank or absent script and every other kind", () => {
+		const inert = [
+			pre({ enabled: false }),
+			pre({ enabled: false }, { inline: true }),
+			pre({}, { script: "  \n" }),
+			pre({}, { script: "  \n", inline: true }),
+			pre({}, { script: undefined }),
+			element({
+				id: "s",
+				kind: "script.post",
+				config: { script: "pm.test()", inline: true },
+			}),
+			element({ id: "s2", kind: "script.post", config: { script: "pm.test()" } }),
+			element({ id: "a", kind: "assert.status" }),
+		];
+		expect(hasUnmarkedPreScript(inert)).toBe(false);
+		expect(hasInlinePreScript(inert)).toBe(false);
+		expect(hasUnmarkedPreScript([])).toBe(false);
+		expect(hasInlinePreScript([])).toBe(false);
+		expect(hasUnmarkedPreScript(undefined)).toBe(false);
+		expect(hasInlinePreScript(undefined)).toBe(false);
 	});
 });
 

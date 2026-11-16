@@ -60,7 +60,7 @@ import {
 	type ParsedDataFile,
 } from "@/services/data-files";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
-import { formatBytes } from "@/modules/settings/utils/format-size";
+import { formatBytes } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /** A chosen file: its name, for the user, and its rows, for the payload. */

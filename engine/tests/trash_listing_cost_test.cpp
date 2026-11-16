@@ -500,7 +500,8 @@ TEST_F (TrashListingCostTest, ListingTheStampedRequestsSearchesTheDeletedAtIndex
 
 // The listing and a restore count one cohort the same way, from the same
 // definition: a row an earlier delete took inside the subtree is in neither,
-// and neither is a request under a folder an earlier delete took.
+// and neither is a request under a folder an earlier delete took. Both count
+// what a purge takes the same way too (#3449), and that holds all of them.
 TEST_F (TrashListingCostTest, TheListingAndTheRestoreCountTheSameCohort) {
     make_collection ("col_root");
     make_collection ("col_a", "col_root");
@@ -525,12 +526,16 @@ TEST_F (TrashListingCostTest, TheListingAndTheRestoreCountTheSameCohort) {
     ASSERT_HAS_VALUE (listed);
     EXPECT_EQ (listed->collections, 2);
     EXPECT_EQ (listed->requests, 3);
+    EXPECT_EQ (listed->purge_collections, 3);
+    EXPECT_EQ (listed->purge_requests, 5);
 
     const auto [status, restored] =
     vayu::http::routes::trash_restore_response (*db_, "col_root");
     ASSERT_EQ (status, 200) << restored.dump ();
     EXPECT_EQ (restored["collections"], listed->collections);
     EXPECT_EQ (restored["requests"], listed->requests);
+    EXPECT_EQ (restored.at ("purgeCollections"), listed->purge_collections);
+    EXPECT_EQ (restored.at ("purgeRequests"), listed->purge_requests);
 }
 
 } // namespace

@@ -76,8 +76,11 @@ The main process is responsible for:
 
 - **Window Management**: Creates and manages the Electron `BrowserWindow`. Its
   `webPreferences` hold the renderer's security posture - no Node integration,
-  context isolation on, and Chromium's spellchecker off, so no field in the
-  request builder draws underlines and no dictionary is fetched over the network.
+  context isolation on, and Chromium's spellchecker off (`spellcheck: false`),
+  so no field in the request builder draws underlines. No dictionary is fetched
+  over the network either, but that is a session setting, not the window
+  option: `electron/spellcheck.ts` empties every session's spellchecker language
+  list from a `session-created` listener registered before `app.whenReady`.
   Bounds, maximised and full-screen state are remembered across launches in
   `window-state.json` under the user-data directory (`window-state.ts`, issue
   #2100); a maximised or full-screen window keeps its previous normal bounds, and
@@ -210,6 +213,7 @@ The app uses a dual-state management approach:
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
    - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress
+   - `entity-draft-store.ts`: The unsaved drafts of the manual-save collection editors (`useEntityDraft`), by entity key, so a draft outlives the screen that holds it (#3459); dropped with its save, its Reset, its tab or its collection, and never persisted
    - `import-modal-store.ts`: Import dialog visibility and state
    - `env-switcher-store.ts`: Whether the title bar's environment menu is open, so a toast action can open it
    - `import-report-store.ts`: The loss report of each applied import, by root collection id, until dismissed
@@ -272,6 +276,7 @@ sections themselves.
 
 - **`change-feed-service.ts`**: The engine's change feed (`GET /changes`, issue #3420), one stream for the app's life
   - Every committed write of a collection, request, example, environment, the globals or a trash entry, whoever made it, becomes an invalidation of the query keys that read it (`lib/change-feed-invalidation.ts`, through the MCP families of `lib/mcp-invalidation.ts`), coalesced over 200ms and held while a mutation is in flight
+  - Asks `POST /changes/subscriptions` for a single-use id before every connection and opens `GET /changes?subscription=<id>` (a page cannot hold the engine's stream slots, so the app's stream is never the one refused)
   - Reconnects on its own backoff and resumes by `?lastEventId=`, the inbox stream's shape; a `reset` refetches everything the feed covers. Opened by `useChangeFeed` only while the engine is connected. See `state-management.md`
 
 - **`http-client.ts`**: Low-level fetch wrapper
@@ -284,7 +289,7 @@ sections themselves.
 - **`useEngine()`**: Compose (`POST /compose`), execute, and stop
 - **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects for previews (the engine resolves what is sent)
 - **`useSaveManager()`**: Auto-save orchestration with debouncing
-- **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button
+- **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button; the draft is kept in `entity-draft-store` by entity, so it outlives the editor (#3459)
 - **`useChangeFeed()`**: Mounted once in `App.tsx`; holds the change feed open while the engine is connected
 
 ## Data Flow
@@ -363,7 +368,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 
 The preload script (`electron/preload.ts`) exposes a minimal, context-isolated API bridge via `window.electronAPI`:
 
-- **Engine Management**: `restartEngine()` for engine lifecycle control; `getEngineLifecycle()` over `engine:lifecycle` and `onEngineLifecycle(callback)` (returns the unsubscribe), the sidecar's `EngineLifecyclePayload` (`electron/engine-lifecycle.ts`, mirrored in `preload.ts` and `src/types/electron.d.ts`): the `invoke` answers the current state for a window that loaded or reloaded after the last push, and the push carries every change after it. For `crashed` it adds the exit `code`, `signal`, `stderrTail` and `error`; `useEngineLifecycle` (mounted once in `App`) writes that into `engine-store`'s `engineCrash`, which the Dock explains and offers Restart for (#3336) and which only `ready`, `slow`, `stopping` or `stopped` clear, so a restart that fails before it spawns keeps its Restart button; `enginePort`, the port the sidecar settled on (9876 or a fallback), a constant read from the renderer's command line that `config/network.ts` resolves once into `ENGINE_BASE_URL` (issue #2118); `getEngineStartFailure()` over `engine:startFailure`, the main process's own sentence when a start failed in a way the user can fix (every engine port held), or `null`, which the health poll reads on a failed poll. The lifecycle carries facts only, so engine liveness is still *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`) and that poll alone classifies `engineStatus`, so there is one answer rather than two
+- **Engine Management**: `restartEngine()` for engine lifecycle control; `getEngineLifecycle()` over `engine:lifecycle` and `onEngineLifecycle(callback)` (returns the unsubscribe), the sidecar's `EngineLifecyclePayload` (`electron/engine-lifecycle.ts`, mirrored in `preload.ts` and `src/types/electron.d.ts`): the `invoke` answers the current state for a window that loaded or reloaded after the last push, and the push carries every change after it. For `crashed` it adds the exit `code`, `signal`, `stderrTail` and `error`; `useEngineLifecycle` (mounted once in `App`) writes that into `engine-store`'s `engineCrash`, which the Dock explains and offers Restart for (#3336), and invalidates the health query so the poll looks again at once (#3493); only `ready`, `slow`, `stopping` or `stopped` clear the crash, so a restart that fails before it spawns keeps its Restart button; `enginePort`, the port the sidecar settled on (9876 or a fallback), a constant read from the renderer's command line that `config/network.ts` resolves once into `ENGINE_BASE_URL` (issue #2118); `getEngineStartFailure()` over `engine:startFailure`, the main process's own sentence when a start failed in a way the user can fix (every engine port held), or `null`, which the health poll reads on a failed poll. The lifecycle carries facts only, so engine liveness is still *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`) and that poll alone classifies `engineStatus`, so there is one answer rather than two. A recorded crash outranks a stale `connected` only on read (`selectKnownEngineStatus`, which the Dock and `useEngineServing` share), never by writing `engineStatus`
 - **Theme Management**: `getTheme()`, `setTheme()`, `onThemeChanged()` for OS theme synchronization
 - **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
 - **Auto-update**: `useAppUpdate` listens to `onUpdateAvailable()` (strategy, install command) and, for the silent platforms' download, to `onUpdateState()` plus a `getUpdateState()` read on mount (issue #3338); it derives the progress bar, Restart & install, the attestation failure (issue #2372; a `refused` state, which `useAppUpdate` also writes to `update-verification-store` so Settings > Updates can show it) and a failed download (the banner says so and offers Retry, a fresh `checkForUpdates()`) from that one state. A state read on mount never fires the "ready" notification, only a live arrival in `verified` does; after a reload the version comes from the state, since `update:available` is not replayed, and a dismissal is not kept across a reload. The download's progress, its completion and a refused installer have no channels of their own; they are fields of that state. Also `restartToInstallUpdate()`, `openReleasePage()`. On the silent platforms the download is one state in `electron/updater.ts`, `none | downloading | verifying | verified | refused | failed` (issue #3338): `onUpdateState()` receives it on `update:state` at every change, including a download that fails after its announcement, and `getUpdateState()` asks for it over `update:getState`, so a reloaded renderer still sees `verified`. Restart-to-install and the quit-time install (`autoInstallOnAppQuit`) follow that state and act only in `verified`. The five `update:*` invoke channels (restartToInstall, openReleasePage, check, quitForUpdate, getState) are registered in `setupIpcHandlers` ahead of the engine wait and forward into the lazily loaded updater; `getState` alone does not wait for the updater to arm, and answers `none` while it is not loaded

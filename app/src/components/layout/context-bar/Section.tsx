@@ -25,6 +25,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, ICON_MOTION } from "@/components/ui";
 import { EYEBROW_CLASS } from "@/components/ui";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
@@ -105,9 +106,14 @@ export function ContextBarSectionEmptyHeader({ title, note }: { title: string; n
 	);
 }
 
-/** The one-line "nothing here" body, so every section says it the same way. */
+/**
+ * The one-line "nothing here" body, so every section says it the same way: the
+ * app's `EmptyState`, inline and compact for the bar's width (#3501). It is for
+ * an empty body only; a status that is not emptiness (a failed compose) is its
+ * own line.
+ */
 export function SectionEmpty({ children }: { children: ReactNode }) {
-	return <p className="text-xs text-muted-foreground m-0">{children}</p>;
+	return <EmptyState variant="inline" compact title={children} />;
 }
 
 /** The one-line loading body. Same reason. */

@@ -259,15 +259,19 @@ describe("an engine that left on its own", () => {
 		expect((button as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it("does not wait for the poll: the sidecar's word is enough to explain and offer Restart", async () => {
-		// The light is still the poll's last verdict; only the explanation and the
-		// button come from the lifecycle.
-		useEngineStore.setState({ engineStatus: "connected", engineCrash: CRASH });
+	it("does not wait for the poll: the sidecar's word turns the light, explains and offers Restart", async () => {
+		// The poll's last verdict is still `connected` (#3493): "Engine connected"
+		// beside Restart is two answers to one question, so the crash outranks it
+		// until the poll's next verdict. Mutation-check: drop the crash branch of
+		// `selectKnownEngineStatus` and the first assertion fails.
+		useEngineStore.setState({ engineStatus: "connected" });
+		useEngineStore.getState().setEngineCrash(CRASH);
 		renderDock();
 
-		expect(screen.getByText("Engine connected")).toBeTruthy();
+		expect(screen.queryByText("Engine connected")).toBeNull();
 		expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
-		const trigger = screen.getByText("Engine connected").closest("[tabindex='0']");
+		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
+		expect(trigger?.querySelector(".lucide-info")).toBeTruthy();
 		fireEvent.focus(trigger!);
 		await waitFor(() =>
 			expect(screen.getAllByText("Vayu's engine exited with code 1.").length).toBeGreaterThan(

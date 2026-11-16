@@ -59,7 +59,6 @@ vi.mock("@/queries", () => ({
 	useMockServersQuery: () => ({
 		data: [{ mockId: "mock-1", collectionId: "acme", collectionName: "Acme", port: 4123 }],
 	}),
-	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 function renderTree() {

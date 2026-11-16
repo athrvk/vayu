@@ -594,7 +594,7 @@ variable's row and name and writes its value `""`, counted in
 plus `notCarried`, whose one kind is `variable_types`: `json`-typed variables,
 which Postman has no type for, written as `default`, and typed secrets, whose
 type gives way to `secret` (#3252). The renderer's only caller
-is the environment row's **Export as Postman Environment** item, which sends the
+is the environment row's **Export as Postman environment** item, which sends the
 id alone, saves `text` as `fileName` and, once the file is written, puts
 `secretsOmitted` and the `variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).
 
@@ -757,6 +757,17 @@ absent keeps the stored value and `null` resets it, so the builder's
 refuses a number outside the range with a 400 naming `timeout`, so the Settings
 tab clamps what is typed.
 
+**The builder seeds its Params rows from the stored `params` and the URL's
+query together** (issue #3491, `initialRequest` in `modules/request-builder/index.tsx`).
+A request stored with its query only in `url` (an API, MCP or import write that
+left `params` absent or `[]`) opens with those pairs as rows, through
+`mergeParamsFromUrl` - the rule a URL-bar edit already uses, so stored disabled
+rows stay and a stored row keeps its id and description. Without it the table
+opened empty and its first edit rebuilt `url` from the rows alone, deleting the
+query. The seed is not an edit: the draft's saved baseline is seeded from the
+same rows, so the request is not marked unsaved, and nothing is written back
+until the user changes something.
+
 #### Trash
 
 ```typescript
@@ -777,12 +788,17 @@ only shape.
 `listTrash` returns **roots only** - the row a user actually asked to delete,
 never a descendant the same cascade took with it. A deleted collection's whole
 subtree is represented by that one root entry, with `collections` / `requests`
-counting what that delete took along. `kind` is `"collection"`, `"request"`,
+counting what that delete took along (the cohort a restore puts back) and
+`purgeCollections` / `purgeRequests` counting everything a purge would destroy
+under it, an earlier delete's rows included (#3449). The row and the purge
+prompts read the purge totals; the cohort counts are a floor there. `kind` is `"collection"`, `"request"`,
 `"environment"`, `"example"` or `"clientCertificate"`; an environment entry is
 always a root, counts `0` for both, and alone carries `variables`, how many
 variables it holds. An example entry counts `0` for both too; the engine's
-`parentId` on it is the owning request, which `TrashEntry` does not claim
-because no reader needs it. A client-certificate entry is a root with both
+`parentId` on it is the owning request, which `TrashEntry` does not claim:
+it carries the owner's name as `parentName` instead (#3449), sent on request
+and example entries only, which the row shows as "from <name>" so two
+same-named entries tell apart. A client-certificate entry is a root with both
 counts `0` and a `null` `parentId`; its `name` is its target, `host` or
 `host:port`.
 
@@ -793,8 +809,10 @@ the trash, so the engine clears its parent and returns it as a tree root
 instead. It rejects with a `404` for an id the trash does not hold (a live row,
 or one already purged) and a `409` for a request whose collection is itself
 deleted or gone - a request has no root to land on the way a collection does,
-so the engine's message names the collection to restore first - and the same
-`409` for an example whose request is deleted or gone, or already holds the
+so the engine's message names the request, its collection and the Trash root to
+restore first (the collection, or the ancestor whose delete took it), by name
+and id - and the same `409` for an example whose request is in the trash
+(naming the example, the request and the root to restore) or gone, or already holds the
 most examples a request may (100), and for a client certificate while a live
 entry holds the same host and port (the message names that entry); surface
 `ApiError.message` rather than
@@ -1176,13 +1194,15 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer does not read it - no badge or glyph on the row changes - and the MCP
-`list_runs` rows are its consumer. A load run's results are
+renderer reads `failed` and `errored` (a completed run with either gets the
+failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
+the consumer of the rest. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
 `assertionsFailed` (both or neither) on a scenario load run that made an exact
-assertion (#2820). The renderer reads `assertionsFailed` (the row's verdict and
+assertion (#2820), or `assertionsFailed` alone on a single-request run that
+stored `elements` or a test replay (#3458). The renderer reads `assertionsFailed` (the row's verdict and
 its result line); `assertionsPassed` has no renderer reader and is there for the
 MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
@@ -1591,9 +1611,12 @@ export const API_ENDPOINTS = {
 3. **Composition**: `apiService.composeRequest()` → `POST /compose` - the
    engine resolves `{{variables}}` and `inherit` auth against the request's
    `collectionId` chain and the active `environmentId`, and returns the
-   execute-ready payload (issue #226)
+   execute-ready payload (issue #226), naming the `collectionId` whose chain it
+   read (issue #3461)
 4. **API Call**: `apiService.executeRequest()` with the composed payload,
-   unchanged → `POST /execute`, carrying `stream: false` explicitly
+   unchanged → `POST /execute`, carrying `stream: false` explicitly; the
+   composed `collectionId` is how the engine's scripts read the same chain
+   when no saved row is linked
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
 
@@ -1661,9 +1684,15 @@ and always the key, `[]` for a request without any: the engine answers an
 absent `params` from the *stored* rows, which would let a row the editor
 removed fill a segment. Every member of a row is kept (a Postman import's
 `type`, `description`), only the editor `id` is dropped. All four inline sites
-send them: Send, a load test, a History replay and GraphQL introspection. `requestId` is attached to the execute payload afterwards purely to
+send them: Send, a load test, a History replay and GraphQL introspection. `requestId` is attached to the execute payload afterwards to
 link the run to the saved request in History; `environmentId` scopes both
-composition and the engine's script context / variable persistence.
+composition and the engine's script context / variable persistence. The
+collection scope reaches the engine's script context through the composed
+answer's `collectionId`, which every one of these sites passes on by spreading
+the answer (issue #3461). A linked `requestId`'s own collection wins, so it
+changes nothing for a Send of a saved request; an orphaned History replay
+composes with no `collectionId` and the answer carries none.
+`useEngine.composeRequest` strips only `deferredVariables`.
 `useVariableResolver()` still exists but is **preview-only** (tab titles,
 previews, unresolved-token painting) - see
 [variable-resolution](./variable-resolution.md).
@@ -1895,7 +1924,7 @@ request runs every level's scripts and the engine reports all of them. `scope`
 is not the console `level`; it is absent on a trace stored before the field and
 on a send whose elements carry no origin, and absent reads as the request's own.
 The Tests list and the Console label an inherited level ("Collection",
-"Folder") and leave the request's own bare. An inline Send resolves the chain in
+"Nested collection") and leave the request's own bare. An inline Send resolves the chain in
 the renderer (`elements-parts.ts`) and stamps each element's `origin.scope`
 itself - the root as `collection`, every level under it as `folder` - the same
 way the engine stamps a stored request's chain. A script that threw at an

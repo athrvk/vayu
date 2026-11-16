@@ -138,6 +138,7 @@ add_executable(vayu_tests
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
+    run_script_stop_test.cpp
     run_phase_test.cpp
     run_shutdown_test.cpp
     run_retention_release_test.cpp
@@ -187,6 +188,7 @@ add_executable(vayu_tests
     request_composer_test.cpp
     residual_token_test.cpp
     deferred_composition_test.cpp
+    inline_collection_scope_test.cpp
     target_policy_test.cpp
     scenario_data_test.cpp
     scenario_load_test.cpp
@@ -436,6 +438,7 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     DeferredCompositionTest
+    InlineCollectionScopeTest
     TargetPolicyRouteTest
     FileRootsRouteTest
     FileGrantsRouteTest
@@ -465,6 +468,7 @@ set(vayu_scratch_database_suites
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest
+    MockCollectionTrashTest
     MockIssuerTest
     MockServerTest
     MonitorLimitsTest
@@ -492,6 +496,7 @@ set(vayu_scratch_database_suites
     RunExportTest
     RunOriginRouteTest
     RunRetentionReleaseTest
+    RunScriptStopTest
     RunShutdownTest
     RunStatusTransitionTest
     RunStopAccountingTest

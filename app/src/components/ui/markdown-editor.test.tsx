@@ -76,6 +76,11 @@ describe("rendered until you click in", () => {
 		expect(source()).toBeInTheDocument();
 	});
 
+	it("names the read-mode button by its label, not by the whole description (#3498)", async () => {
+		await renderEditor({ "aria-label": "Request description" });
+		expect(screen.getByRole("button", { name: "Request description" })).toBeInTheDocument();
+	});
+
 	it("is reachable from the keyboard, not only by mouse", async () => {
 		const { container } = await renderEditor();
 		const block = container.querySelector('[role="button"]') as HTMLElement;

@@ -86,3 +86,29 @@ export function familiesWithTextPair(css: string = indexCss): string[] {
 		.filter((name) => !name.endsWith("-text") && palette.has(`${name}-text`))
 		.sort();
 }
+
+/** What a global token class paints, as its `@apply` line in `index.css` says. */
+export interface TokenPaint {
+	/** The colour token behind `text-[hsl(var(--x))]`, or `null` when the class sets no colour. */
+	colour: string | null;
+	/** The underline's `text-decoration-style`, or `null` when there is no underline. */
+	underline: string | null;
+}
+
+/**
+ * The paint of one `.monaco-editor .<class>` rule - the editor half of the
+ * `{{variable}}` and time painters, which `EditableVariable` mirrors in
+ * Tailwind. Throws when the stylesheet declares no such rule, so a renamed
+ * class cannot read as "paints nothing".
+ */
+export function monacoTokenPaint(className: string, css: string = indexCss): TokenPaint {
+	const body = new RegExp(`^\\t\\.monaco-editor \\.${className} \\{([^}]*)\\}`, "m").exec(
+		css
+	)?.[1];
+	if (body === undefined) throw new Error(`index.css has no .monaco-editor .${className} rule`);
+	const colour = /\btext-\[hsl\(var\(--([a-z0-9-]+)\)\)\]/.exec(body)?.[1] ?? null;
+	const underline = /(?<![\w-])underline(?![\w-])/.test(body)
+		? (/\bdecoration-(solid|double|dotted|dashed|wavy)\b/.exec(body)?.[1] ?? "solid")
+		: null;
+	return { colour, underline };
+}

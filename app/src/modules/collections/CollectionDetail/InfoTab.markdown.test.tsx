@@ -33,6 +33,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import type { Collection } from "@/types";
 
 const mutation = {
@@ -68,7 +69,8 @@ async function renderTab(overrides: Partial<Collection> = {}) {
 	const utils = render(
 		<TooltipProvider>
 			<InfoTab collection={{ ...collection, ...overrides }} requestCount={3} />
-		</TooltipProvider>
+		</TooltipProvider>,
+		{ wrapper: TestQueryClient }
 	);
 	await act(async () => {});
 	return utils;
@@ -97,7 +99,7 @@ describe("the collection description", () => {
 		const { container } = await renderTab();
 		const block = container.querySelector('[role="button"]') as HTMLElement;
 		fireEvent.click(block);
-		expect(screen.getByLabelText("Collection description")).toBeInTheDocument();
+		expect(screen.getByRole("textbox", { name: "Collection description" })).toBeInTheDocument();
 	});
 
 	it("renders inside a tooltip provider, which the source pin requires", async () => {
@@ -113,7 +115,9 @@ describe("the collection description", () => {
 describe("a failed save keeps the source open", () => {
 	it("renders normally while the save is fine", async () => {
 		await renderTab();
-		expect(screen.queryByLabelText("Collection description")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("textbox", { name: "Collection description" })
+		).not.toBeInTheDocument();
 	});
 
 	it("holds the raw text on screen when the mutation errored", async () => {
@@ -122,6 +126,6 @@ describe("a failed save keeps the source open", () => {
 		// the SaveFailed notice telling you to try again.
 		mutation.isError = true;
 		await renderTab();
-		expect(screen.getByLabelText("Collection description")).toBeInTheDocument();
+		expect(screen.getByRole("textbox", { name: "Collection description" })).toBeInTheDocument();
 	});
 });

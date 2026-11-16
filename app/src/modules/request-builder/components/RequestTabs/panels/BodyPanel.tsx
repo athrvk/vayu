@@ -368,7 +368,7 @@ export default function BodyPanel() {
 			<div className="flex items-center justify-between gap-3">
 				<div className="flex items-center gap-2 min-w-0">
 					<Select value={request.bodyMode} onValueChange={handleModeChange}>
-						<SelectTrigger className="h-control-sm w-auto">
+						<SelectTrigger className="h-control-sm w-auto" aria-label="Body type">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>

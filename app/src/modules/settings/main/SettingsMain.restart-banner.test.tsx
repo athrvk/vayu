@@ -25,7 +25,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingsMain from "./SettingsMain";
 import { useEngineStore } from "@/stores";
@@ -134,6 +135,26 @@ describe("the restart-required banner", () => {
 		await waitFor(() => expect(banner()).toBeNull());
 		expect(useEngineStore.getState().pendingRestart).toBe(false);
 		expect(useEngineStore.getState().restartRequiredKeys).toEqual([]);
+	});
+
+	it("paints Restart engine as the warning fill under a white label, and the detail line at full strength", () => {
+		// The bare `--warning` under `--warning-foreground` measured 2.14:1 (#3499).
+		useEngineStore.getState().addRestartRequiredKey("worker_threads");
+		renderSettings();
+
+		const restart = screen.getByRole("button", { name: /Restart engine/i });
+		expect(restart.className).toContain("bg-status-warning-fill");
+		expect(restart.className).toContain("text-white");
+		expect(restart.className).not.toMatch(/(^|\s)(hover:)?bg-warning/);
+		// The default variant's `hover:bg-primary-fill-hover` survives tailwind-merge
+		// (it files `hover:bg-*` apart from `bg-*`) and would turn the button the
+		// accent colour on hover.
+		expect(restart.className).toContain("hover:bg-status-warning-fill-hover");
+		expect(restart.className).not.toContain("hover:bg-primary");
+
+		const detail = screen.getByText(/will take effect after restarting Vayu's engine/);
+		expect(detail.className).toContain("text-warning-text");
+		expect(detail.className).not.toMatch(/text-warning-text\//);
 	});
 
 	it("does not list the same key twice when it is saved again", () => {

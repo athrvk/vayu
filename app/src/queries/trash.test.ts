@@ -72,8 +72,8 @@ beforeEach(() => {
 		kind: "collection",
 		name: "Billing",
 		deletedAt: 1,
-		collections: 0,
-		requests: 1,
+		purgeCollections: 0,
+		purgeRequests: 1,
 		restored: true,
 		reparentedToRoot: false,
 	});
@@ -82,8 +82,8 @@ beforeEach(() => {
 		kind: "collection",
 		name: "Billing",
 		deletedAt: 1,
-		collections: 0,
-		requests: 1,
+		purgeCollections: 0,
+		purgeRequests: 1,
 		purged: true,
 	});
 	vi.mocked(apiService.listTrash).mockResolvedValue({ items: [], total: 0 });
@@ -157,8 +157,8 @@ describe("useRestoreTrashMutation", () => {
 			kind: "example",
 			name: "Happy path",
 			deletedAt: 1,
-			collections: 0,
-			requests: 0,
+			purgeCollections: 0,
+			purgeRequests: 0,
 			restored: true,
 			reparentedToRoot: false,
 		});

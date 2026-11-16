@@ -987,6 +987,297 @@ TEST_F (ScriptRequestUrlTest, TheJarStillRefusesSomethingThatIsNotAUrl) {
     EXPECT_TRUE (writes.empty ());
 }
 
+// ---------------------------------------------------------------------------
+// #3462: getRaw / getPathWithQuery / getRemote, and the PropertyList reads over
+// the query (each, map, filter, find, one, indexOf, idx).
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptRequestUrlTest, TheWholeUrlAndRemoteReadersAnswerForAFullUrl) {
+    expect_script_passes (R"JS(
+        var url = pm.request.url;
+        pm.expect(url.getRaw()).to.equal(
+          'https://api.example.com:8443/v2/users%20list?page=2&sort=name&page=3#top');
+        pm.expect(url.getRaw()).to.equal(url.toString());
+        pm.expect(url.getPathWithQuery()).to.equal('/v2/users list?page=2&sort=name&page=3');
+        pm.expect(url.getRemote()).to.equal('api.example.com:8443');
+    )JS");
+}
+
+// The `?` and the `:` are joined only to something: a URL that states no query
+// or no port reads as its path or its host alone.
+TEST_F (ScriptRequestUrlTest, NoQueryAndNoPortLeaveNoSeparatorBehind) {
+    request.url = "https://example.com/a/b";
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.url.getPathWithQuery()).to.equal('/a/b');
+        pm.expect(pm.request.url.getRemote()).to.equal('example.com');
+    )JS");
+}
+
+TEST_F (ScriptRequestUrlTest, TheNewUrlReadersAnswerForABaseUrlToken) {
+    request.url       = "{{baseUrl}}/v2/users?page=2&sort=name";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('seen', JSON.stringify([
+            pm.request.url.getRaw(), pm.request.url.getPathWithQuery(),
+            pm.request.url.getRemote()
+        ]));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("seen").value,
+    R"(["{{baseUrl}}/v2/users?page=2&sort=name","/v2/users?page=2&sort=name","{{baseUrl}}"])");
+}
+
+// Whole string, no parts: the raw text survives, the two joined views are empty
+// rather than a plausible half (the rule AnUnparseableUrlKeepsItsString... pins).
+TEST_F (ScriptRequestUrlTest, TheNewUrlReadersAnswerForAnUnparseableUrl) {
+    request.url = "not a url at all";
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.url.getRaw()).to.equal('not a url at all');
+        pm.expect(pm.request.url.getPathWithQuery()).to.equal('');
+        pm.expect(pm.request.url.getRemote()).to.equal('');
+    )JS");
+}
+
+// A read after a write answers for what is being sent, not for what was parsed.
+TEST_F (ScriptRequestUrlTest, TheNewUrlReadersFollowEditsToTheMembers) {
+    request.url = "https://example.com/a?x=1";
+    expect_script_passes (R"JS(
+        var url = pm.request.url;
+        url.path.push('b');
+        url.query.add({ key: 'y', value: '2' });
+        url.port = '8080';
+        pm.expect(url.getPathWithQuery()).to.equal('/a/b?x=1&y=2');
+        pm.expect(url.getRemote()).to.equal('example.com:8080');
+        pm.expect(url.getRaw()).to.equal('https://example.com:8080/a/b?x=1&y=2');
+        url.update('http://other.test/z');
+        pm.expect(url.getRaw()).to.equal('http://other.test/z');
+        pm.expect(url.getPathWithQuery()).to.equal('/z');
+        pm.expect(url.getRemote()).to.equal('other.test');
+    )JS");
+}
+
+// `each` hands the callback (member, index, list) with the second argument as
+// `this`, the shape pm.request.headers.each has.
+TEST_F (ScriptRequestUrlTest, QueryEachWalksEveryParamWithIndexListAndThis) {
+    request.url = "https://example.com/s?page=2&flag&page=3";
+    expect_script_passes (R"JS(
+        var seen = [];
+        var owner = { tag: 'ctx' };
+        var returned = pm.request.url.query.each(function (param, index, list) {
+          seen.push(param.key + '=' + param.value + '@' + index + '/' + list.length + '/' + this.tag);
+        }, owner);
+        pm.expect(returned).to.equal(undefined);
+        pm.expect(seen.join(' ')).to.equal(
+          'page=2@0/3/ctx flag=null@1/3/ctx page=3@2/3/ctx');
+    )JS");
+}
+
+TEST_F (ScriptRequestUrlTest, QueryMapFilterAndFindWalkTheParamsInWireOrder) {
+    expect_script_passes (R"JS(
+        var query = pm.request.url.query;
+        pm.expect(query.map(function (p, i) { return i + p.key; }).join(',')).to.equal(
+          '0page,1sort,2page');
+
+        var pages = query.filter(function (p) { return p.key === 'page'; });
+        pm.expect(pages.length).to.equal(2);
+        pm.expect(pages[1].value).to.equal('3');
+        pm.expect(query.filter(function () { return false; }).length).to.equal(0);
+
+        var found = query.find(function (p) { return p.key === 'page'; });
+        pm.expect(found.value).to.equal('2');
+        pm.expect(query.find(function (p) { return p.key === 'nope'; })).to.equal(undefined);
+        pm.expect(query.find(function (p, i) { return i === 2; }).value).to.equal('3');
+    )JS");
+}
+
+TEST_F (ScriptRequestUrlTest, QueryOneAnswersTheFirstMemberOrUndefined) {
+    request.url = "https://example.com/s?page=2&flag&page=3";
+    expect_script_passes (R"JS(
+        var query = pm.request.url.query;
+        var one = query.one('page');
+        pm.expect(one.key).to.equal('page');
+        pm.expect(one.value).to.equal('2');
+        pm.expect(query.one('flag').value).to.equal(null);
+        pm.expect(query.one('missing')).to.equal(undefined);
+    )JS");
+}
+
+TEST_F (ScriptRequestUrlTest, QueryIndexOfFindsANameOrTellsRepeatedRowsApart) {
+    expect_script_passes (R"JS(
+        var query = pm.request.url.query;
+        pm.expect(query.indexOf('sort')).to.equal(1);
+        // A name is the first row of that name...
+        pm.expect(query.indexOf('page')).to.equal(0);
+        // ...a member from all() is its own row.
+        var all = query.all();
+        pm.expect(query.indexOf(all[0])).to.equal(0);
+        pm.expect(query.indexOf(all[2])).to.equal(2);
+        pm.expect(query.indexOf({ key: 'page', value: '9' })).to.equal(-1);
+        pm.expect(query.indexOf('missing')).to.equal(-1);
+    )JS");
+}
+
+TEST_F (ScriptRequestUrlTest, QueryIdxIsAPositionInAllAndUndefinedOutsideIt) {
+    expect_script_passes (R"JS(
+        var query = pm.request.url.query;
+        pm.expect(query.idx(0).key).to.equal('page');
+        pm.expect(query.idx(2).value).to.equal('3');
+        pm.expect(query.idx(3)).to.equal(undefined);
+        pm.expect(query.idx(-1)).to.equal(undefined);
+        pm.expect(query.idx(1.5)).to.equal(undefined);
+        pm.expect(query.idx(NaN)).to.equal(undefined);
+    )JS");
+}
+
+// An absent query and an unreadable URL are an empty list, not an error.
+TEST_F (ScriptRequestUrlTest, TheQueryReadsAnswerEmptyWhereThereIsNoQuery) {
+    const std::array<const char*, 2> URLS = { "https://example.com/none", "not a url at all" };
+    for (const char* url : URLS) {
+        Request target    = request;
+        target.url        = url;
+        const auto result = engine.execute_prerequest (R"JS(
+            var query = pm.request.url.query;
+            var called = 0;
+            query.each(function () { called++; });
+            pm.environment.set('seen', JSON.stringify([
+              called, query.map(function () { return 1; }).length,
+              query.filter(function () { return true; }).length,
+              query.find(function () { return true; }) === undefined,
+              query.one('a') === undefined, query.indexOf('a'),
+              query.idx(0) === undefined
+            ]));
+        )JS",
+        target, env);
+
+        ASSERT_TRUE (result.success) << url << ": " << result.error_message;
+        EXPECT_EQ (env.at ("seen").value, "[0,0,0,true,true,-1,true]") << url;
+    }
+}
+
+TEST_F (ScriptRequestUrlTest, TheQueryReadsAnswerForABaseUrlToken) {
+    request.url       = "{{baseUrl}}/echo?b=2&a=1";
+    const auto result = engine.execute_prerequest (R"JS(
+        var query = pm.request.url.query;
+        pm.environment.set('seen', JSON.stringify([
+          query.map(function (p) { return p.key; }),
+          query.find(function (p) { return p.key === 'a'; }).value,
+          query.one('b').value, query.indexOf('a'), query.idx(0).key
+        ]));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("seen").value, R"([["b","a"],"1","2",1,"b"])");
+}
+
+// A callback that edits the URL changes what the URL is, not the walk under it:
+// the walk reads the list taken at the start, so it still visits every param
+// once, and the edits are in force after it.
+TEST_F (ScriptRequestUrlTest, ACallbackEditingTheQueryDoesNotChangeTheWalk) {
+    request.url       = "https://example.com/s?a=1&b=2&c=3";
+    const auto result = engine.execute_prerequest (R"JS(
+        var query = pm.request.url.query;
+        var visited = [];
+        query.each(function (p) {
+          visited.push(p.key);
+          query.add({ key: 'added' + visited.length, value: 'x' });
+        });
+        var mapped = query.map(function (p) { query.remove(p.key); return p.key; });
+        pm.environment.set('seen', JSON.stringify([visited, mapped, query.count()]));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    // `each` saw the three it started with; `map` then saw six (the three
+    // `each` added) and removed every one it visited, a name at a time.
+    EXPECT_EQ (env.at ("seen").value,
+    R"([["a","b","c"],["a","b","c","added1","added2","added3"],0])");
+    EXPECT_EQ (request.url, "https://example.com/s");
+}
+
+TEST_F (ScriptRequestUrlTest, ACallbackReplacingTheWholeUrlDoesNotChangeTheWalk) {
+    request.url       = "https://example.com/s?a=1&b=2";
+    const auto result = engine.execute_prerequest (R"JS(
+        var query = pm.request.url.query;
+        var visited = [];
+        query.each(function (p, i, list) {
+          visited.push(p.key + list.length);
+          pm.request.url.update('https://other.test/z?only=1');
+        });
+        pm.environment.set('seen', JSON.stringify([visited, query.count()]));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("seen").value, R"([["a2","b2"],1])");
+    EXPECT_EQ (request.url, "https://other.test/z?only=1");
+}
+
+// The throw is the script's own: it reaches the script's `catch` as thrown, and
+// the walk stops at it.
+TEST_F (ScriptRequestUrlTest, AThrowOutOfACallbackPropagatesAndEndsTheWalk) {
+    const std::array<const char*, 4> WALKS = { "each", "map", "filter", "find" };
+    for (const char* walk : WALKS) {
+        const auto result = engine.execute_prerequest (std::string (R"JS(
+            var calls = 0, caught = null;
+            try {
+              pm.request.url.query.)JS") +
+        walk + R"JS((function () {
+                calls++;
+                throw new Error('boom');
+              });
+            } catch (e) { caught = e.message; }
+            pm.environment.set('seen', calls + ':' + caught);
+        )JS",
+        request, env);
+
+        ASSERT_TRUE (result.success) << walk << ": " << result.error_message;
+        EXPECT_EQ (env.at ("seen").value, "1:boom") << walk;
+    }
+
+    // Uncaught, it fails the script with the script's own message.
+    const auto result = engine.execute_prerequest (
+    "pm.request.url.query.each(function () { throw new Error('boom'); });", request, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("boom"), std::string::npos) << result.error_message;
+}
+
+TEST_F (ScriptRequestUrlTest, TheQueryReadsRefuseTheWrongArgumentByName) {
+    const std::array<std::pair<const char*, const char*>, 8> CASES = { {
+    { "pm.request.url.query.each();", "query.each(fn) needs a function" },
+    { "pm.request.url.query.map('x');", "query.map(fn) needs a function" },
+    { "pm.request.url.query.filter({});", "query.filter(fn) needs a function" },
+    { "pm.request.url.query.find(1);", "query.find(fn) needs a function" },
+    { "pm.request.url.query.one(1);", "query.one needs a name string" },
+    { "pm.request.url.query.indexOf(1);", "query.indexOf needs a name string or a { key, value } member" },
+    { "pm.request.url.query.indexOf();", "query.indexOf needs a name string or a { key, value } member" },
+    { "pm.request.url.query.idx('0');", "query.idx needs an index number" },
+    } };
+
+    for (const auto& [script, message] : CASES) {
+        const auto result = engine.execute_prerequest (script, request, env);
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (result.error_message.find (message), std::string::npos)
+        << script << " -> " << result.error_message;
+    }
+}
+
+// Reads follow writes: the lookups answer for the query as edited, not as parsed.
+TEST_F (ScriptRequestUrlTest, TheQueryReadsFollowEditsToTheUrl) {
+    request.url = "https://example.com/s?a=1";
+    expect_script_passes (R"JS(
+        var query = pm.request.url.query;
+        query.add({ key: 'ts', value: '9' });
+        pm.expect(query.one('ts').value).to.equal('9');
+        pm.expect(query.idx(1).key).to.equal('ts');
+        pm.expect(query.indexOf('ts')).to.equal(1);
+        pm.expect(query.map(function (p) { return p.key; }).join()).to.equal('a,ts');
+        pm.request.url.update('https://example.com/s?z=0');
+        pm.expect(query.find(function () { return true; }).key).to.equal('z');
+    )JS");
+}
+
 #endif // VAYU_HAS_QUICKJS
 
 } // namespace

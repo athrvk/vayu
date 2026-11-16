@@ -415,14 +415,6 @@ nlohmann::json variable_scope_schema () {
         { "description", "Which variable scope to write the result into." } };
 }
 
-/// Whether @p name begins or ends in a character `{{ }}` trims off a name it
-/// reads: the set is `trim` in `http/request_composer.cpp`.
-bool has_edge_whitespace (const std::string& name) {
-    constexpr std::string_view TRIMMED = " \t\r\n";
-    return TRIMMED.find (name.front ()) != std::string_view::npos ||
-    TRIMMED.find (name.back ()) != std::string_view::npos;
-}
-
 /// The refusal for an extractor whose `variable` no `{{name}}` can read back
 /// (#3055): the extractor would run and report `ok`, and the value would be
 /// unreachable. `nullopt` for an absent or non-string value (the schema
@@ -436,15 +428,8 @@ std::optional<std::string> variable_name_problem (const nlohmann::json& config) 
     if (name.empty ()) {
         return std::nullopt;
     }
-    // A token is `{{` then one or more characters but braces, trimmed.
-    if (name.find_first_of ("{}") != std::string::npos) {
-        return "'variable' cannot contain '{' or '}' - a {{name}} reference "
-               "stops at a brace, so nothing could read it back";
-    }
-    if (has_edge_whitespace (name)) {
-        return "'variable' cannot start or end with whitespace - a {{name}} "
-               "reference trims the name it reads, so nothing could read it "
-               "back";
+    if (const auto refusal = vayu::http::variable_name_refusal (name)) {
+        return std::format ("'variable' {}", *refusal);
     }
     if (vayu::http::is_data_variable_name (name)) {
         return "'variable' cannot start with 'data.' - {{data.column}} reads "

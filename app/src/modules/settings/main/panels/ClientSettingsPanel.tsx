@@ -15,6 +15,7 @@
  */
 
 import type { ReactNode } from "react";
+import { HeadingSection } from "@/components/ui";
 import { useRevealedSetting } from "../../useRevealedSetting";
 
 interface ClientSettingsPanelProps {
@@ -55,7 +56,10 @@ export default function ClientSettingsPanel({
 
 			{/* Content */}
 			<div className="flex-1 overflow-auto p-6" data-setting-scroller>
-				<div className="grid gap-6 max-w-3xl mx-auto">{children}</div>
+				<div className="grid gap-6 max-w-3xl mx-auto">
+					{/* A section under the panel's `h1`, so its cards are `h2` (#3498). */}
+					<HeadingSection>{children}</HeadingSection>
+				</div>
 			</div>
 		</div>
 	);

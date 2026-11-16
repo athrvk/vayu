@@ -94,6 +94,23 @@ describe("a status 0 response", () => {
 		expect(screen.getByText("Error code: TIMEOUT")).toBeTruthy();
 	});
 
+	it("names the host variable of a refused URL, read from the URL as sent (#3500)", () => {
+		state.response = failedResponse({
+			errorCode: "INVALID_URL",
+			errorMessage: "URL rejected: Bad hostname",
+			sentRequest: {
+				method: "GET",
+				url: "https://{{apiHost}}/pets",
+				params: [],
+				headers: [],
+				body: { mode: "none" },
+			},
+		});
+		renderViewer();
+
+		expect(screen.getByText(/The host uses \{\{apiHost\}\}/)).toBeTruthy();
+	});
+
 	it("renders the whole tab strip", () => {
 		renderViewer();
 

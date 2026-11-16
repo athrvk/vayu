@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import CollectionTreeRows from "./CollectionTreeRows";
 import { flattenVisibleRows } from "./tree-rows";
 import { withCollectionTreeContext } from "@/test/collection-tree-context";

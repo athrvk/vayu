@@ -165,11 +165,19 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 				{Icon && <Icon className="size-icon-sm shrink-0" />}
 				{/*
 				 * ScrollOnOverflow is kept: it reads the full name on hover, which an
-				 * ellipsis cannot. The ellipsis is what was missing - it clipped
-				 * mid-glyph with no mark at all when nothing was hovering.
+				 * ellipsis cannot. At rest it fades the clipped edge instead of
+				 * ellipsing: `truncate` cannot engage inside its `w-fit` track.
+				 *
+				 * The right margin is the close button's strip. The button is
+				 * absolute, so without the margin a clamped name runs under it.
+				 * The label ends where the button begins - its width plus its
+				 * `right-0.5` offset, less the row's own `px-3` - written in the
+				 * same density-scaled units as those three so it cannot drift from
+				 * them. `tab-fit.ts` budgets this strip into the natural width, so
+				 * a name that fits keeps fitting.
 				 */}
-				<ScrollOnOverflow className="min-w-0 flex-1">
-					<span className={cn("block truncate", descriptor.isPath && "tab-path")}>
+				<ScrollOnOverflow className="mr-[calc(var(--spacing-target)_-_var(--spacing)_*_2.5)] min-w-0 flex-1">
+					<span className={cn("block", descriptor.isPath && "tab-path")}>
 						{descriptor.label}
 					</span>
 				</ScrollOnOverflow>

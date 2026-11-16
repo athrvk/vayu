@@ -39,14 +39,20 @@ namespace {
 /// a request's owning collection and an example's owning *request* - the same
 /// edge under three names in the tables, one name here, since a client
 /// restoring any of them asks the same question of it; an environment's and a
-/// client certificate's are always `null`. `variables` is an environment's
-/// alone: the other kinds omit the key rather than send 0.
+/// client certificate's are always `null`. `parentName` (#3449) is a request's
+/// and an example's alone, its owner's name, and `variables` an environment's
+/// alone: each is omitted where it is not set rather than sent empty.
 nlohmann::json trash_entry_json (const vayu::db::TrashEntry& entry) {
     nlohmann::json item{ { "id", entry.id }, { "kind", entry.kind },
         { "name", entry.name }, { "deletedAt", entry.deleted_at },
-        { "collections", entry.collections }, { "requests", entry.requests } };
+        { "collections", entry.collections }, { "requests", entry.requests },
+        { "purgeCollections", entry.purge_collections },
+        { "purgeRequests", entry.purge_requests } };
     item["parentId"] = entry.parent_id.has_value () ? nlohmann::json (*entry.parent_id) :
                                                       nlohmann::json (nullptr);
+    if (entry.parent_name.has_value ()) {
+        item["parentName"] = *entry.parent_name;
+    }
     if (entry.variables.has_value ()) {
         item["variables"] = *entry.variables;
     }
@@ -102,8 +108,9 @@ trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query) {
  * deleted or gone, which has no root to come back to the way a collection
  * does; an example whose request is already at its example cap (#2971); or a
  * client certificate whose host and port a live entry now claims (#2973). The
- * message names the way forward (restore the owner, delete an example or the
- * live entry) rather than reporting only that this failed.
+ * message names the way forward (the trash root holding the owner, by name and
+ * id, #3449; an example or the live entry to delete) rather than reporting
+ * only that this failed.
  */
 std::pair<int, nlohmann::json>
 trash_restore_response (vayu::db::Database& db, const std::string& id) {
@@ -154,11 +161,15 @@ void register_trash_routes (RouteContext& ctx) {
      * Query params: q, limit, offset (optional) - any of them answers one page
      * of the roots whose name holds `q`, in the `{data, pagination}` envelope
      * (#2443).
-     * Returns: {items: [{id, kind, name, deletedAt, parentId, collections,
-     * requests, variables?}], total}, or that envelope; 400 for a bad `limit`
-     * or `offset`. `kind` is collection, request, environment, example
-     * (whose `parentId` is its request) or clientCertificate (named by its
-     * `host` or `host:port`), and only an environment carries `variables`.
+     * Returns: {items: [{id, kind, name, deletedAt, parentId, parentName?,
+     * collections, requests, purgeCollections, purgeRequests, variables?}],
+     * total}, or that envelope; 400 for a bad `limit` or `offset`. `kind` is
+     * collection, request, environment, example (whose `parentId` is its
+     * request) or clientCertificate (named by its `host` or `host:port`).
+     * `collections` / `requests` are what a restore puts back and
+     * `purgeCollections` / `purgeRequests` what a purge destroys (#3449);
+     * only a request and an example carry `parentName`, their owner's name,
+     * and only an environment carries `variables`.
      */
     ctx.server.Get ("/trash", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
@@ -179,8 +190,9 @@ void register_trash_routes (RouteContext& ctx) {
      * environment comes back inactive. Takes no body.
      * Returns: the restored entry, 404 if the trash does not hold that id, or
      * 409 for a request whose collection (or an example whose request) is
-     * itself deleted or gone, an example whose request is at its cap, or a
-     * client certificate whose target a live entry holds.
+     * itself deleted or gone, naming the trash root to restore first, an
+     * example whose request is at its cap, or a client certificate whose
+     * target a live entry holds.
      */
     ctx.server.Post (R"(/trash/([^/]+)/restore)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

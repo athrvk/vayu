@@ -1444,7 +1444,7 @@ declare const pm: {
 		 */
 		upsertHeader(header: { key: string, value: string | number | boolean } | string, value?: string | number | boolean): void;
 		/**
-		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), getRaw(), getPathWithQuery(), getRemote(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */
@@ -1462,9 +1462,21 @@ declare const pm: {
 			 */
 			getPath(): string;
 			/**
+			 * The decoded path followed by ? and the query as sent ("/v2/users?page=2"), or the path alone when the URL carries no query.
+			 */
+			getPathWithQuery(): string;
+			/**
 			 * The query exactly as it appears on the wire, with no leading ?. Empty when the URL carries none.
 			 */
 			getQueryString(): string;
+			/**
+			 * The whole URL as one string, exactly as toString() gives it - Postman's spelling, for a script lifted from there.
+			 */
+			getRaw(): string;
+			/**
+			 * The host, with :port when the URL states one ("api.example.com:8443"). A scheme's default port is not filled in.
+			 */
+			getRemote(): string;
 			/**
 			 * The fragment with no leading #. Empty when there is none.
 			 */
@@ -1494,7 +1506,7 @@ declare const pm: {
 			 */
 			protocol: string;
 			/**
-			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count() - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
+			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count(), each, map, filter, find, one, indexOf, idx - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
 			 */
 			query: {
 				/**
@@ -1514,6 +1526,18 @@ declare const pm: {
 				 */
 				count(): number;
 				/**
+				 * Call fn for each parameter with { key, value }, in wire order, duplicates kept. fn also gets the index and the list, and the optional second argument is its this. The list is taken once, so editing the query from inside the callback does not change the walk. A parameter with no value has value null.
+				 */
+				each(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => void, thisArg?: any): void;
+				/**
+				 * The parameters fn answers truthy for, as { key, value } in wire order, duplicates kept.
+				 */
+				filter(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): { key: string; value: string | null }[];
+				/**
+				 * The first parameter fn answers truthy for, as { key, value }, or undefined when none does.
+				 */
+				find(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): { key: string; value: string | null } | undefined;
+				/**
 				 * The first value of that parameter, or null when the name is absent or carries no value ("?flag"). First rather than last, matching Postman's PropertyList - all() is the view that keeps duplicates.
 				 */
 				get(name: string): string | null;
@@ -1521,6 +1545,22 @@ declare const pm: {
 				 * Whether the query carries that parameter at all, including a bare "?flag" that has no value.
 				 */
 				has(name: string): boolean;
+				/**
+				 * The parameter at that position of all() as { key, value }, or undefined past either end.
+				 */
+				idx(index: number): { key: string; value: string | null } | undefined;
+				/**
+				 * The position in all() of the first parameter of that name, or of the { key, value } member given - key and value both have to match, which tells the rows of a repeated name apart. -1 when there is none.
+				 */
+				indexOf(item: string | { key: string; value?: string | null }): number;
+				/**
+				 * The answers of fn, one per parameter in wire order, as Array.map gives them: query.map(p => p.key + "=" + p.value).
+				 */
+				map(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): any[];
+				/**
+				 * The first parameter of that name as { key, value } rather than its value, or undefined when the name is absent. get() is the value half of the same lookup.
+				 */
+				one(name: string): { key: string; value: string | null } | undefined;
 				/**
 				 * Remove every parameter of that name, not just the first. A name that is not there is a no-op, the same rule pm.request.headers.remove follows.
 				 */
@@ -2272,6 +2312,8 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
+	 * Every call writes one info line to the Console - method, URL, status or error code, and how long it took - so what the script sent is listed there even when nothing logs it.
+	 * 
 	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a body's text or form fields and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
@@ -2284,7 +2326,7 @@ declare const pm: {
 	 * 
 	 * Example:
 	 * pm.sendRequest('https://auth.example.com/token', function (err, res) {
-	 *   if (err) { return; }
+	 *   if (err) { console.error(err); return; }
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
@@ -2795,6 +2837,28 @@ declare const cheerio: never;
  * Postman's bundled Backbone, which it names no replacement for. Vayu has no Backbone.
  */
 declare const Backbone: never;
+
+// Library members the runtime has and TypeScript's lib does not declare yet.
+interface RegExpConstructor {
+	escape(string: string): string;
+}
+interface Math {
+	sumPrecise(values: Iterable<number>): number;
+}
+interface JSON {
+	rawJSON(text: string): { readonly rawJSON: string };
+	isRawJSON(value: unknown): value is { readonly rawJSON: string };
+}
+interface Uint8ArrayConstructor {
+	fromBase64(string: string, options?: { alphabet?: 'base64' | 'base64url'; lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' }): Uint8Array<ArrayBuffer>;
+	fromHex(string: string): Uint8Array<ArrayBuffer>;
+}
+interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> {
+	toBase64(options?: { alphabet?: 'base64' | 'base64url'; omitPadding?: boolean }): string;
+	toHex(): string;
+	setFromBase64(string: string, options?: { alphabet?: 'base64' | 'base64url'; lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' }): { read: number; written: number };
+	setFromHex(string: string): { read: number; written: number };
+}
 
 declare module 'crypto-js' {
 	export = CryptoJS;

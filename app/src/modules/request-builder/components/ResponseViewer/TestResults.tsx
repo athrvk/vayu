@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ScriptSource, TestResult } from "@/types";
 import { SCRIPT_SECTIONS } from "./console/script-sections";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
+import { Heading } from "@/components/ui/heading";
 import ScopeTag from "./ScopeTag";
 
 export interface TestResultsProps {
@@ -103,7 +104,10 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 			<div className="space-y-3">
 				{groups.map((group) => (
 					<section key={group.source} className="space-y-1.5">
-						<h3 className={EYEBROW_XS_CLASS}>{group.label}</h3>
+						{/* The level is the host's: the response pane, a run's step in History. */}
+						<Heading outside="h3" className={EYEBROW_XS_CLASS}>
+							{group.label}
+						</Heading>
 						{group.tests.map((test, i) => (
 							<div
 								key={i}

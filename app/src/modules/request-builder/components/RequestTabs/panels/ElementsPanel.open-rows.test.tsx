@@ -27,7 +27,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import RequestBuilderProvider from "../../../context/RequestBuilderProvider";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import type { ElementDef, ElementKindSchema } from "@/types";

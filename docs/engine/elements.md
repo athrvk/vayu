@@ -342,9 +342,23 @@ kind) on a request's own `elements`, both at write time and in `GET /elements/ki
 `collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
 answer to "once per run, or once per request that happens to carry it". Their `apply` follows the
 same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
-/ `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
-collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
-`Phase::RunEnd` against it directly, outside the step pipeline entirely. A **single-request** load
+/ `run_teardown_script` pair, dispatched against `Phase::RunStart` / `Phase::RunEnd` directly,
+outside the step pipeline entirely (never a step's inherited copy). Which collections' elements a
+collection run dispatches is its **lifecycle set** (#3456), resolved once at run start by
+`resolve_lifecycle_collections` (`scenario_plan.cpp`): the ancestor chain root first
+(`collection_chain`, ending at the run collection), then, on a `recursive` run, every live folder
+beneath it depth-first in sidebar order (each parent's sub-folders in `get_collections` order,
+`sibling_order.hpp`'s rule among folders), a visited set ending a `parent_id` cycle. A collection
+declaring neither kind is left out, and each kept element is compiled with
+`collection_element_origin`'s stamp, the one `compose_elements` gives a step's inherited elements,
+so a `lifecycle` row's `origin` names its collection. Both run modes dispatch it through the same
+`run_scenario_setup` / `run_scenario_teardown` (`scenario_runner.cpp`): each collection's setups
+run with `RunVariableScopes` bound to that collection, the pass stops after the first collection
+whose setup refuses, and teardown walks the same held list in reverse. A load run resolves the set
+once in `execute_load_test` and holds it on `RunContext::lifecycle` for teardown; its scopes
+(`scenario_load_scopes`, every lifecycle and step collection's chain) are what `LoadScopeBases`
+binds each step's base from after setup, and what `ScenarioLoadState::lifecycle_scopes` keeps for
+teardown. A **single-request** load
 run has no collection row to compile that array from - it compiles `POST /runs`'s own top-level
 `lifecycleElements` array instead (issue #1573), the same two kinds only, checked the same
 `ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright
@@ -355,10 +369,16 @@ load run's live `elapsedSeconds` reads `0` until setup ends (issue #2395) - and
 writes through the same `ScriptVariableScopes` (`scopes` / `scope_bases`) every other script of the
 run shares, so its writes are visible from the very first step or submission (a scenario load
 run's folder bases are built from what it left, #3248). A throwing setup fails
-the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
+the run - `Failed`, nothing sent - before either mode's strategy starts, and the failed run's stored
+summary still carries `lifecycle.setup` (the sequential runner's `catch`, the load path's
+`failed_run_summary_inputs`, #3455); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
 `ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
-propagating one. A design (sequential) run writes its variable scopes back after teardown, so a
+propagating one. Either kind reads its script's result as `script.post` does (`record_script_outcome`):
+a throw is `"error"`, a script that only failed `pm.test`s is `"failed"` with the first failing test as
+its message, and its console lines and tests are kept on the outcome and serialised by
+`build_lifecycle_node` (not by `ElementOutcome::to_json`) as the row's `console` and `messages` lists, the
+shape and cap of an inline element's (#3455). A design (sequential) run writes its variable scopes back after teardown, so a
 teardown's `pm.environment.set` / `pm.globals.set` is saved with the steps' (#3249); a load run
 persists none. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate` - on a load run
 the report's, by the [one error definition](api-reference.md#what-counts-as-an-error) -
@@ -514,9 +534,13 @@ off the kind's registered `hotPath`, never a `kind ==` comparison (the extensibi
 1). A **script** kind (`script.pre`, `script.post`) runs there only when its own
 `config.inline` is `true` or the run's `elements.scripts` override forces it one way or the
 other; otherwise the step keeps its pre-#1495 behaviour, deferred to the post-run `tests`
-replay, which now skips a step whose script already ran inline
+replay (which reads a copy of the scopes every `script.setup` left, #3460, and not a virtual
+user's own writes), which now skips a step whose script already ran inline
 (`RunContext::script_element_runs_inline` is the one place that decision is made, read by
-both sides).
+both sides). The app sets `config.inline` from the **Run inline** switch under a
+`script.pre` / `script.post` editor (the kind's schema declares it `x-vayu-group: "advanced"`,
+so it sits in the card's Advanced disclosure, #3457); `script.setup` / `script.teardown` have
+no such property and their form renders none.
 
 **Per-VU isolation.** A load run's VUs share one event loop, so what an element writes
 (`extract.*`'s target variable, an inline `script.*`'s `pm.environment.set`) cannot land in
@@ -586,8 +610,9 @@ composed from) when it has them, and `required: true` for an extractor whose mis
 replay: the load path's `skip_reason` hook answers it with `ElementSkip::deferred` set, which the
 pipeline copies onto the outcome. `skipped` is every other `skipped` outcome,
 including the two that never run at all: a disabled element and an un-inlined `script.pre`
-(no pre-request replay exists), and an inline `script.*` whose `pm.sendRequest` the run's Stop
-cancelled (#3371), which `run_step_script` keeps out of the step's result. An extractor's miss is a `missing` (or, for an optional
+(no pre-request replay exists), and an inline `script.*` the run's Stop cut short, its
+`pm.sendRequest` cancelled (#3371) or the script itself ended (#3460), which `run_step_script`
+keeps out of the step's result. An extractor's miss is a `missing` (or, for an optional
 `extract.json` that could not read the body, a `skipped`), and is counted again,
 per step, in `scenario.steps[i].extractorMisses` (above).
 
@@ -651,12 +676,14 @@ run-level `elements` override (above) - compiled once at run start into
 `Phase::StepAfter` once the response is in, the same phases a design send
 uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
 `script.post` element runs inline only when its own `config.inline` is
-`true` or the run's `elements.scripts` override forces it -
+`true` (the app's **Run inline** switch on the script's card, #3457) or the run's
+`elements.scripts` override forces it -
 `RunContext::script_element_runs_inline` deciding exactly as it does for a
 scenario step. An unmarked `script.post` defers to this run's own completion
 replay (`RunContext::test_scripts`, one entry per un-inlined element taken at
 compile time so the replay does not need to know `elements` exist, each
-replayed as its own script, #3125); an
+replayed as its own script, #3125, against a copy of the scopes `script.setup`
+left and each sample's request as sent, #3460); an
 unmarked `script.pre` simply never runs, since there is no pre-request replay
 on this path to defer it to.
 

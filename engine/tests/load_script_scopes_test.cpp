@@ -371,6 +371,30 @@ TEST_F (LoadScriptScopesTest, ARunWithNoEnvironmentStillBindsTheOtherScopes) {
     EXPECT_EQ (validation.run->failed, 0u);
 }
 
+// A run of an inline payload links no request, and its replay reads the chain
+// of the `collectionId` composition answered with (#3461), as the Send does.
+// Mutation check: replay against the linked request's collection alone in
+// `validate_scripts` and both collection reads are `undefined`.
+TEST_F (LoadScriptScopesTest, AnInlineRunReplaysWithItsComposedCollection) {
+    auto context = single_request_run (R"(
+        pm.test('leaf', function () {
+            pm.expect(pm.collectionVariables.get('page_size')).to.eql('25');
+        });
+        pm.test('inherited', function () {
+            pm.expect(pm.collectionVariables.get('tenant')).to.eql('acme');
+        });
+    )");
+    context->config.erase ("requestId");
+    context->config["collectionId"] = "col_leaf";
+    context->metrics_collector->record_response_sample (response_with ("{}"));
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->passed, 2u);
+    EXPECT_EQ (validation.run->failed, 0u);
+}
+
 /// The failure text `validate_scripts` stored for @p run_id, or empty if it
 /// stored none - `store_validation_failures`' one JSON row, read back rather
 /// than duplicated as a second copy of what it wrote.

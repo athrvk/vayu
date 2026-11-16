@@ -49,14 +49,20 @@ import {
 	CommandList,
 	EYEBROW_CLASS,
 } from "@/components/ui";
+import { EmptyState } from "./EmptyState";
 import { useScriptCompletionsQuery } from "@/queries";
 import { countSnippets, snippetsForContext } from "@/lib/script-snippets";
 import type { SnippetInsertion, SnippetPlacement } from "@/lib/editor-snippet";
 import { cn } from "@/lib/utils";
+import type { ScriptSnippetContext } from "@/types/domain";
 
 export interface ScriptSnippetsProps {
-	/** Which editor this list sits under. */
-	context: "pre" | "test";
+	/**
+	 * Which editor this list sits under. `"both"` is a script that runs outside
+	 * any request (setup, teardown): only the templates that need neither
+	 * `pm.request` nor `pm.response`.
+	 */
+	context: ScriptSnippetContext;
 	/** Whether the list is folded to its header. */
 	collapsed: boolean;
 	/** Called with the toggled value when the header is clicked. */
@@ -171,6 +177,12 @@ export function ScriptSnippets({
 						</p>
 					) : isPending ? (
 						<p className="px-3 py-2 text-xs text-muted-foreground">Loading snippets…</p>
+					) : total === 0 ? (
+						<EmptyState
+							variant="inline"
+							compact
+							title="No snippets for this kind of script."
+						/>
 					) : (
 						<Command>
 							<CommandInput placeholder="Filter snippets" />

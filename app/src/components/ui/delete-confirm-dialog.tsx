@@ -17,7 +17,7 @@
  * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
  * between the actions the way native confirmation dialogs behave.
  *
- * `name`/`scope` (`deleteConfirmCopy`, in the sibling module) replace the three
+ * `name` (`deleteConfirmCopy`, in the sibling module) replace the three
  * phrasings call sites used to write for themselves: "permanently removed",
  * "removed for good", "will be deleted". This file is the one place any of
  * those three may still appear - as this sentence, naming them - which is what
@@ -36,7 +36,7 @@ import {
 } from "./dialog";
 import { Button } from "./button";
 import { DialogCancelButton } from "./dialog-cancel-button";
-import { deleteConfirmCopy, type DeleteScope } from "./delete-confirm-copy";
+import { deleteConfirmCopy } from "./delete-confirm-copy";
 
 export interface DeleteConfirmDialogProps {
 	open: boolean;
@@ -63,8 +63,6 @@ export interface DeleteConfirmDialogProps {
 	 * is a `<div>`, so nesting one in the other is invalid HTML.
 	 */
 	error?: React.ReactNode;
-	/** See `DeleteScope`. Ignored without `name`. */
-	scope?: DeleteScope;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
 	/**
@@ -110,7 +108,6 @@ export function DeleteConfirmDialog({
 	title,
 	description,
 	name,
-	scope,
 	error,
 	onConfirm,
 	isDeleting = false,
@@ -120,7 +117,7 @@ export function DeleteConfirmDialog({
 	onCloseAutoFocus,
 }: DeleteConfirmDialogProps) {
 	const cancelRef = useRef<HTMLButtonElement>(null);
-	const generated = name !== undefined ? deleteConfirmCopy(name, scope) : undefined;
+	const generated = name !== undefined ? deleteConfirmCopy(name) : undefined;
 	const resolvedTitle = title ?? generated?.title ?? "Delete?";
 	const resolvedDescription = description ?? generated?.description;
 

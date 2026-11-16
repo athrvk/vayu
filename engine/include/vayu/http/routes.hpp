@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -35,6 +36,7 @@
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/entity_tag.hpp"
@@ -450,6 +452,39 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 }
 
 /**
+ * @brief True when @p req names a listener on @p port by one of its loopback
+ *        spellings (`127.0.0.1`, `localhost`, `[::1]`, any case) and nothing
+ *        else, with exactly one `Host` header.
+ *
+ * The rule the management API and a mock server with an `allowedOrigins` list
+ * share. DNS rebinding makes a hostile page same-origin with a listener, so a
+ * request carries no `Origin` and only the name the page dialled - never a
+ * loopback literal - gives it away.
+ */
+inline bool names_this_listener (const httplib::Request& req, int port) {
+    if (req.get_header_value_count ("Host") != 1) {
+        return false;
+    }
+    const std::string host   = req.get_header_value ("Host");
+    const std::string suffix = ":" + std::to_string (port);
+    if (!host.ends_with (suffix)) {
+        return false;
+    }
+    const std::string_view name =
+    std::string_view (host).substr (0, host.size () - suffix.size ());
+    return vayu::utils::ascii_lower_equal (name, "127.0.0.1") ||
+    vayu::utils::ascii_lower_equal (name, "localhost") ||
+    vayu::utils::ascii_lower_equal (name, "[::1]");
+}
+
+/// The 403 body for a request `names_this_listener` refused.
+inline std::string foreign_host_message (int port) {
+    const std::string suffix = ":" + std::to_string (port);
+    return "Refused by the Host check: the engine answers only Host 127.0.0.1" +
+    suffix + ", localhost" + suffix + " or [::1]" + suffix;
+}
+
+/**
  * @brief Which browser origins a mock server or a webhook inbox grants CORS
  *        access to (#2367). Built once when the listener starts and never
  *        written again, so a handler reads it with no lock.
@@ -652,6 +687,18 @@ inline void finalize_cors_expose_headers (httplib::Response& res) {
 }
 
 /**
+ * The 400 for a plain string field handed another JSON type, naming the field
+ * and the type it was given (#3482). `apply_string_field` and
+ * `apply_required_string_field` share it, so nlohmann's `type_error.302` text
+ * never reaches a client.
+ */
+[[nodiscard]] inline RouteResult
+string_field_type_error (const char* key, const nlohmann::json& value) {
+    return route_error (400,
+    std::format ("Invalid '{}': must be a string (got {})", key, value.type_name ()));
+}
+
+/**
  * The one null-vs-absent rule for resource writes (POST create / PUT update).
  *
  * Before issue #95 each resource - and in places each *field* - invented its
@@ -672,16 +719,27 @@ inline void finalize_cors_expose_headers (httplib::Response& res) {
  * The helpers take `is_create` rather than reading it off the request so the
  * cores stay unit-testable without an in-process HTTP server.
  */
-inline void apply_string_field (const nlohmann::json& json,
+[[nodiscard]] inline RouteResult apply_string_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 const std::string& default_value,
 bool is_create) {
-    if (json.contains (key)) {
-        out = json[key].is_null () ? default_value : json[key].get<std::string> ();
-    } else if (is_create) {
-        out = default_value;
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = default_value;
+        }
+        return {};
     }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = default_value;
+        return {};
+    }
+    if (!value.is_string ()) {
+        return string_field_type_error (key, value);
+    }
+    out = value.get_ref<const std::string&> ();
+    return {};
 }
 
 /**
@@ -924,6 +982,58 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
 }
 
 /**
+ * Reads a stated `order` into @p out (#3451): a JSON integer from 0 to
+ * `MAX_SIBLING_ORDER` (`vayu::db::storable_order`), otherwise a 400 naming
+ * the field. `null` is refused like any other non-integer, so a caller that
+ * gives absent or `null` a meaning (append) tests for it first. @p where
+ * names the entry of a batch (`move at index 2`), empty for a whole body.
+ *
+ * Not `apply_int_field`: it ignores a non-integer and narrows without a bound.
+ */
+[[nodiscard]] inline RouteResult
+read_order_field (const nlohmann::json& value, int& out, std::string_view where = {}) {
+    if (const auto order = vayu::db::storable_order (value)) {
+        out = *order;
+        return {};
+    }
+    const std::string got =
+    value.is_number () ? value.dump () : std::string (value.type_name ());
+    const std::string rule = std::format (
+    "must be an integer from 0 to {} (got {})", vayu::db::MAX_SIBLING_ORDER, got);
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'order': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'order' {}", where, rule));
+}
+
+/**
+ * Reads a stated collection `parentId` into @p out (#3451): a collection id,
+ * or `null` for the tree root. `""` is the root as well and is stored as
+ * `null`, so the tree has one spelling of it; `Database::clear_empty_parent_ids`
+ * rewrites the rows written before this. Anything else is a 400 naming the
+ * field, never nlohmann's exception text. @p where is `read_order_field`'s.
+ */
+[[nodiscard]] inline RouteResult read_parent_id_field (const nlohmann::json& value,
+std::optional<std::string>& out,
+std::string_view where = {}) {
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    if (value.is_string ()) {
+        const auto& id = value.get_ref<const std::string&> ();
+        out = id.empty () ? std::nullopt : std::optional<std::string> (id);
+        return {};
+    }
+    const std::string rule =
+    std::format ("must be a collection id or null (got {})", value.type_name ());
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'parentId': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'parentId' {}", where, rule));
+}
+
+/**
  * Same rule for an integer field whose default is "none stated", stored as
  * NULL: absent on create and `null` on either verb leave @p out empty. Unlike
  * `apply_int_field`, a value @p field refuses (not a number, or out of its
@@ -1024,7 +1134,7 @@ bool is_create) {
  * 400s, because there is nothing to fall back to. Succeeds when the value is
  * acceptable, "absent on update" (which keeps the stored value) included.
  */
-inline RouteResult apply_required_string_field (const nlohmann::json& json,
+[[nodiscard]] inline RouteResult apply_required_string_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 bool is_create) {
@@ -1039,7 +1149,10 @@ bool is_create) {
         std::format (
         "Invalid '{}': null is not allowed (this field has no default)", key));
     }
-    out = json[key].get<std::string> ();
+    if (!json[key].is_string ()) {
+        return string_field_type_error (key, json[key]);
+    }
+    out = json[key].get_ref<const std::string&> ();
     return {};
 }
 
@@ -1067,6 +1180,40 @@ inline RouteResult reject_blank_name (const nlohmann::json& json) {
         return {};
     }
     return route_error (400, "Invalid 'name': is empty or whitespace-only");
+}
+
+/**
+ * A stated `auth` object whose `mode` is not a string in `AUTH_MODES` is a 400
+ * naming `auth.mode` (#3464). Modes match by exact lowercase string, so `Bearer`
+ * or ` inherit` would be stored, treated by the composer as a concrete
+ * credential that stops the inherit walk, and sent by `parse_auth` with none.
+ * A missing `mode` is refused too: the credential fields beside it would
+ * silently go nowhere.
+ *
+ * Absent and `null` pass (keep, reset to the default); a non-object `auth` is
+ * `apply_json_field`'s 400. The create and update cores of collections and
+ * requests call it and the appliers do not, because `POST /import/apply` and
+ * `POST /specs/sync` share those and an importer's unrecognised mode must not
+ * fail an atomic import (the `reject_blank_name` split). Whether a collection
+ * may state `inherit` is the collection cores' own rule (#3445).
+ */
+inline RouteResult reject_unknown_auth_mode (const nlohmann::json& json) {
+    const auto auth = json.find ("auth");
+    if (auth == json.end () || !auth->is_object ()) {
+        return {};
+    }
+    const auto mode = auth->find ("mode");
+    if (mode != auth->end () && mode->is_string () &&
+    is_known_auth_mode (mode->get_ref<const std::string&> ())) {
+        return {};
+    }
+    std::string known;
+    for (const std::string_view name : AUTH_MODES) {
+        known += known.empty () ? "" : ", ";
+        known += name;
+    }
+    return route_error (400,
+    std::format ("Invalid 'auth.mode': must be a string, one of: {}", known));
 }
 
 /**
@@ -1147,6 +1294,38 @@ const nlohmann::json& json,
 bool is_create);
 
 /**
+ * The refusal of an append under a parent whose last slot is taken (#3451):
+ * one past `MAX_SIBLING_ORDER` does not fit the column, and wrapping would
+ * put the row first. `POST /reorder` with the parent in `normalize`
+ * renumbers it dense and frees the end again.
+ */
+[[nodiscard]] inline std::unexpected<RouteError> no_sibling_slot_left () {
+    return route_error (400,
+    std::format (
+    "Cannot append: a sibling already holds 'order' {}, the highest "
+    "there is. State an 'order', or renumber the parent with "
+    "POST /reorder's 'normalize'",
+    vayu::db::MAX_SIBLING_ORDER));
+}
+
+/**
+ * The `order` a row appended under @p parent takes
+ * (`Database::next_sibling_order`, leaving @p excluded_id out of the scan)
+ * into @p out, or `no_sibling_slot_left`.
+ */
+[[nodiscard]] inline RouteResult append_sibling_order (vayu::db::Database& db,
+const std::optional<std::string>& parent,
+int& out,
+const std::string& excluded_id = {}) {
+    const std::optional<int> slot = db.next_sibling_order (parent, excluded_id);
+    if (!slot) {
+        return no_sibling_slot_left ();
+    }
+    out = *slot;
+    return {};
+}
+
+/**
  * Consecutive `order`s for the rows a batch writer (`POST /import/apply`,
  * `POST /specs/sync`) creates without stating one. The single-row default,
  * `Database::next_sibling_order`, reads rows that are stored, and none of a
@@ -1156,17 +1335,27 @@ bool is_create);
  */
 class SiblingSlots {
     public:
-    /// The next slot under @p parent (`std::nullopt` for the roots).
-    int take (vayu::db::Database& db, const std::optional<std::string>& parent) {
+    /// The next slot under @p parent (`std::nullopt` for the roots) into
+    /// @p out, or `no_sibling_slot_left` once the parent's slots are spent.
+    [[nodiscard]] RouteResult
+    take (vayu::db::Database& db, const std::optional<std::string>& parent, int& out) {
         auto slot = next_.find (parent);
         if (slot == next_.end ()) {
             slot = next_.emplace (parent, db.next_sibling_order (parent)).first;
         }
-        return slot->second++;
+        std::optional<int>& next = slot->second;
+        if (!next) {
+            return no_sibling_slot_left ();
+        }
+        out = *next;
+        next = out < vayu::db::MAX_SIBLING_ORDER ? std::optional<int> (out + 1) :
+                                                   std::nullopt;
+        return {};
     }
 
     private:
-    std::map<std::optional<std::string>, int> next_;
+    /// Empty once the parent's last slot is taken.
+    std::map<std::optional<std::string>, std::optional<int>> next_;
 };
 
 /**
@@ -1295,6 +1484,37 @@ const std::string& root);
 const std::optional<vayu::core::BoundSpec>& before,
 const std::optional<vayu::core::BoundSpec>& after,
 const std::vector<vayu::db::Collection>& tree);
+
+/**
+ * A write that moves collections, as `declined_by_move` reads it: the binding
+ * before off the tree as stored, the binding after and the contract walk off
+ * the same tree with the write's rows in place. A write can move a folder and
+ * a request under it together, and only the tree it is about to store says
+ * where each request ends up. One read of the collections answers for every
+ * request the write carries along, rather than a query per ancestor per
+ * request. Shared by `POST /reorder` (#3446) and `PUT /collections/:id`
+ * (#3470). Defined in spec_sync.cpp.
+ */
+class SpecTreeMove {
+    public:
+    /**
+     * @param stored every live collection, as `Database::get_collections`
+     *        answers before the write.
+     * @param staged the collection rows the write is about to store, by id.
+     */
+    SpecTreeMove (std::vector<vayu::db::Collection> stored,
+    std::map<std::string, vayu::db::Collection> staged);
+
+    /// `declined_by_move` for @p stored, which sits under its stored
+    /// `collection_id` before the write and under @p destination after it.
+    [[nodiscard]] std::optional<std::string>
+    declined_under (const vayu::db::Request& stored, const std::string& destination) const;
+
+    private:
+    std::unordered_map<std::string, vayu::db::Collection> stored_;
+    std::map<std::string, vayu::db::Collection> staged_;
+    std::vector<vayu::db::Collection> written_tree_;
+};
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.

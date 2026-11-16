@@ -389,7 +389,7 @@ TEST (ImportParse, RefusesBytesThatAreNeitherJsonNorYaml) {
     const ImportParse parsed = parse_import ("{ unclosed: [1, 2", {}, {});
     EXPECT_FALSE (parsed.ok ());
     EXPECT_FALSE (parsed.unrecognised);
-    EXPECT_NE (parsed.error.find ("Could not read the document"), std::string::npos);
+    EXPECT_NE (parsed.error.find ("Couldn't read the document"), std::string::npos);
 }
 
 TEST (ImportParse, NamesTheFieldOfAMalformedInsomniaExport) {
@@ -741,18 +741,18 @@ environments:
 TEST (InsomniaV5Import, RefusesWhatIsNotACollectionByName) {
     const std::vector<std::pair<std::string, std::string>> cases{
         { "spec.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia design document "
+        "Couldn't read the document: this is an Insomnia design document "
         "(spec) "
         "export, which Vayu does not read. Export the collection instead." },
         { "mock.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia mock server export, "
+        "Couldn't read the document: this is an Insomnia mock server export, "
         "which Vayu does not read. Export the collection instead." },
         { "mcpClient.insomnia.rest/5.0",
-        "Could not read the document: this is an Insomnia mcpClient export, "
+        "Couldn't read the document: this is an Insomnia mcpClient export, "
         "which "
         "Vayu does not read. Export the collection instead." },
         { "collection.insomnia.rest/6.0",
-        "Could not read the document: this is an Insomnia collection export in "
+        "Couldn't read the document: this is an Insomnia collection export in "
         "format 6.0, which this version of Vayu does not read. It reads format "
         "5." },
     };
@@ -1949,6 +1949,27 @@ TEST (ImportParse, AnOlderVayuDocumentKeepsItsFoldersFirst) {
     EXPECT_EQ (root_payload_listing (parsed),
     (std::vector<std::string>{ "folder:Pets", "folder:Users",
     "request:{{baseUrl}}/login", "request:{{baseUrl}}/logout" }));
+}
+
+// A stated `order` no row can store counts as unstated (#3451), so `/logout`
+// takes the position an unordered request would rather than wrapping (2^31)
+// or staying negative and sorting first. Mutation check: read `stated_order`
+// with a bare `get<int> ()` again and `/logout` lists first.
+TEST (ImportParse, AVayuDocumentsUnstorableOrderCountsAsUnstated) {
+    for (const std::string order : { "2147483648", "-1" }) {
+        const ImportParse parsed = parse_import (
+        R"json({"openapi":"3.1.0","info":{"title":"T"},
+            "x-vayu-collection":{"folders":[]},
+            "paths":{
+              "/login":{"post":{"responses":{},"x-vayu-request":{"order":0}}},
+              "/logout":{"post":{"responses":{},"x-vayu-request":{"order":)json" +
+        order + "}}}}}",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (root_payload_listing (parsed),
+        (std::vector<std::string>{ "request:{{baseUrl}}/login", "request:{{baseUrl}}/logout" }))
+        << order;
+    }
 }
 
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
@@ -3150,6 +3171,34 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     "const $ = cheerio.load('x');");
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_script_api"));
+}
+
+/// The pm members Vayu lacks or half-runs are named per request (#3462):
+/// `pm.request.url.variables` and `pm.response.jsonp` are undefined at run time,
+/// and `pm.response.json(reviver)` parses without the reviver. "Plain" reads the
+/// body with an empty `json()`, which runs and is not named. Mutation check:
+/// remove one of the three rows in `script_api_scan.cpp` and its request drops
+/// out; dropping the `NoArguments` exemption names "Plain" too.
+TEST (PostmanImport, PmUrlVariablesJsonpAndAJsonReviverAreNamed) {
+    const std::string items = request_with_script ("Path variables",
+                              R"j(["const id = pm.request.url.variables.get('id');"])j") +
+    "," + request_with_script ("Jsonp", R"j(["const b = pm.response.jsonp('cb');"])j") +
+    "," + request_with_script ("Reviver", R"j(["const j = pm.response.json((k, v) => v);"])j") +
+    "," +
+    request_with_script ("Plain",
+    R"j(["const j = pm.response.json();","pm.request.url.query.get('a');"])j") +
+    "," +
+    request_with_script ("All three",
+    R"j(["pm.response.json(r);","pm.response.jsonp(1);","pm.request.url.variables;"])j");
+    const ImportParse parsed = parse_postman_items (items);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([
+        {"request":"Path variables","names":["pm.request.url.variables"]},
+        {"request":"Jsonp","names":["pm.response.jsonp"]},
+        {"request":"Reviver","names":["pm.response.json(reviver)"]},
+        {"request":"All three","names":["pm.response.jsonp","pm.response.json(reviver)","pm.request.url.variables"]}
+    ])j"));
 }
 
 /// A string-valued `event.script` is the script's text (Postman's SDK reads one

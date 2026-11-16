@@ -27,7 +27,7 @@
  * roving model `ActivityRail` uses (`useRovingStop`), so a page with several
  * sections is not several Tab presses to get past.
  *
- * Present in both `ContextBar` layout modes: below 1200px the bar overlays
+ * Present in both `ContextBar` layout modes: below `CONTEXT_BAR_PUSH_MIN_WIDTH` the bar overlays
  * `main` rather than pushing it, but the rail is a normal flex child beside
  * that overlay (`Shell.tsx`), never inside the positioned box the bar
  * overlays from - so it stays reachable exactly where it always is.
@@ -45,6 +45,7 @@ import { contextBarHasContent } from "./context-bar-content";
 import { sectionsForTab } from "./context-bar/registry";
 import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
 import { RailButton } from "./RailButton";
+import { regionProps } from "./region-focus";
 import { useRovingStop } from "./useRovingStop";
 
 /** A section that declares no relevance hook has content by definition - the
@@ -215,6 +216,9 @@ export function ContextRail() {
 			onKeyDown={onKeyDown}
 			className="flex flex-col items-center gap-1 w-[var(--rail-width)] shrink-0 pt-2 border-l border-border bg-panel"
 			aria-label="Context sections"
+			// A stop in the F6 cycle (`region-focus.ts`), as the activity rail is
+			// on the other edge: it is on screen while the bar it opens is closed.
+			{...regionProps("context-rail")}
 		>
 			{/* Relevance probes, not rendered chrome - `onSectionClick` is the only
 			    reader, and it needs nothing while the bar is closed (opening it

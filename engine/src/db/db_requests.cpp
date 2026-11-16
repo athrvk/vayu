@@ -198,7 +198,7 @@ std::vector<Request> Database::get_requests_in_subtree (const std::string& root_
     const std::vector<Collection> collections = get_collections ();
     std::unordered_map<std::string, std::vector<const Collection*>> folders_of;
     for (const auto& collection : collections) {
-        if (collection.parent_id && !collection.parent_id->empty ()) {
+        if (collection.parent_id) {
             folders_of[*collection.parent_id].push_back (&collection);
         }
     }
@@ -419,11 +419,8 @@ const TrashEntry& entry) {
     // The `restore_request_locked` rule one level down: an example has no root
     // to come back to without its request, and the way forward is named.
     if (request_is_absent_locked (request_id)) {
-        const bool gone =
-        impl_->storage.count<Request> (where (c (&Request::id) == request_id)) == 0;
-        return std::unexpected (RestoreFailure{ RestoreRefusal::OwnerGone,
-        "Example '" + entry.id + "' cannot be restored on its own - the request it belongs to is " +
-        (gone ? "gone" : "in the trash, so restore that first") });
+        return std::unexpected (owner_not_live_refusal (
+        "Example", "request", entry, request_trash_root_locked (request_id)));
     }
     // The create route's cap, counted the same way: a delete made room that a
     // later create may have taken.

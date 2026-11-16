@@ -101,12 +101,13 @@ R"(a scope is {"parentId": <collection id, or null for the roots>} and covers )"
 /**
  * Reads one `normalize` entry.
  *
- * A scope must *state* `parentId` (`null` for the roots) rather than omitting
- * it: absent would have to mean either "the roots" or "whatever parent you
- * infer", and a renumber that silently picked the wrong scope is a whole folder
- * reshuffled. A named parent must exist - unlike the single-row `PUT`, which
- * tolerates an unresolvable parent because bulk import writes rows that cannot
- * see each other yet. Nothing here is bulk-created, so a scope that resolves to
+ * A scope must *state* `parentId` (`null` or `""` for the roots, through
+ * `read_parent_id_field`) rather than omitting it: absent would have to mean
+ * either "the roots" or "whatever parent you infer", and a renumber that
+ * silently picked the wrong scope is a whole folder reshuffled. A named
+ * parent must exist - unlike the single-row `PUT`, which tolerates an
+ * unresolvable parent because bulk import writes rows that cannot see each
+ * other yet. Nothing here is bulk-created, so a scope that resolves to
  * no row is a client bug, not an ordering artifact.
  *
  * The per-kind shapes from before #2535 (`type` with `parentId` or
@@ -127,17 +128,10 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
         return std::unexpected (body_error ("Invalid " + at +
         ": 'parentId' must be stated; " + std::string (SCOPE_SHAPE)));
     }
-    const auto& parent = entry["parentId"];
-    if (parent.is_null ()) {
-        out.parent = std::nullopt;
-        return {};
+    if (auto outcome = read_parent_id_field (entry["parentId"], out.parent, at); !outcome) {
+        return outcome;
     }
-    if (!parent.is_string ()) {
-        return std::unexpected (
-        body_error ("Invalid " + at + ": 'parentId' must be a string or null"));
-    }
-    out.parent = parent.get<std::string> ();
-    if (!db.get_collection (*out.parent).has_value ()) {
+    if (out.parent && !db.get_collection (*out.parent).has_value ()) {
         return std::unexpected (
         body_error ("Collection '" + *out.parent + "' does not exist"));
     }
@@ -147,11 +141,12 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
 /**
  * Reads one `moves` entry and checks that the row it names is stored.
  *
- * `order` is required and must be a non-negative integer: this endpoint exists
- * to write dense positions, and a float or a negative would be a silently
- * truncated or unreachable slot. The owner fields follow the merge-patch rule
- * the single-row endpoints use - absent keeps the current owner, present states
- * a move - except that a stated owner must exist, for the reason in `read_scope`.
+ * `order` is required and goes through `read_order_field`: this endpoint
+ * exists to write dense positions, and a float, a negative or a value past
+ * `int` would be a truncated, unreachable or wrapped slot. The owner fields
+ * follow the merge-patch rule the single-row endpoints use - absent keeps the
+ * current owner, present states a move - except that a stated owner must
+ * exist, for the reason in `read_scope`.
  */
 RouteResult
 read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Move& out) {
@@ -166,31 +161,25 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
     }
     out.id = entry["id"].get<std::string> ();
 
-    if (!entry.contains ("order") || !entry["order"].is_number_integer () ||
-    entry["order"].get<int64_t> () < 0) {
-        return std::unexpected (
-        body_error ("Invalid " + at + ": 'order' must be a non-negative integer"));
+    if (auto outcome =
+        read_order_field (entry.value ("order", nlohmann::json ()), out.order, at);
+    !outcome) {
+        return outcome;
     }
-    out.order = entry["order"].get<int> ();
 
     if (out.kind == Kind::Collection) {
         if (!db.get_collection (out.id).has_value ()) {
             return std::unexpected (body_error ("Collection '" + out.id + "' does not exist"));
         }
         if (entry.contains ("parentId")) {
-            out.states_owner   = true;
-            const auto& parent = entry["parentId"];
-            if (parent.is_null ()) {
-                out.parent = std::nullopt;
-            } else if (parent.is_string ()) {
-                out.parent = parent.get<std::string> ();
-                if (!db.get_collection (*out.parent).has_value ()) {
-                    return std::unexpected (
-                    body_error ("Collection '" + *out.parent + "' does not exist"));
-                }
-            } else {
-                return std::unexpected (body_error (
-                "Invalid " + at + ": 'parentId' must be a string or null"));
+            out.states_owner = true;
+            if (auto outcome = read_parent_id_field (entry["parentId"], out.parent, at);
+            !outcome) {
+                return outcome;
+            }
+            if (out.parent && !db.get_collection (*out.parent).has_value ()) {
+                return std::unexpected (
+                body_error ("Collection '" + *out.parent + "' does not exist"));
             }
         }
         return {};
@@ -401,14 +390,9 @@ stamped_requests_moved (vayu::db::Database& db, const std::vector<Move>& moves) 
 /**
  * Stages the requests the batch takes out of the contract that answered for
  * them (#3446), and answers each one's id with the bound collection its
- * operation is declined under (`declined_by_move`).
- *
- * The binding before is read off the stored tree, and the binding after and the
- * contract walk off the staged one, because a batch can move a folder and its
- * requests together and only the tree it is about to write says where each
- * request ends up. Both come from one read of the collections rather than a
- * query per ancestor per request. A departing request is staged with its stamp
- * cleared, so the response shows the row as written.
+ * operation is declined under (`declined_by_move`, read over the staged tree
+ * by `SpecTreeMove`). A departing request is staged with its stamp cleared, so
+ * the response shows the row as written.
  */
 std::unordered_map<std::string, std::string> stage_binding_departures (vayu::db::Database& db,
 const std::vector<Move>& moves,
@@ -420,42 +404,13 @@ WriteSet& writes) {
         return departures;
     }
 
-    std::unordered_map<std::string, vayu::db::Collection> stored_tree;
-    for (auto& collection : db.get_collections ()) {
-        stored_tree.emplace (collection.id, std::move (collection));
-    }
-    const vayu::core::CollectionLookup before =
-    [&stored_tree] (const std::string& id) -> std::optional<vayu::db::Collection> {
-        const auto found = stored_tree.find (id);
-        if (found == stored_tree.end ()) {
-            return std::nullopt;
-        }
-        return found->second;
-    };
-    const vayu::core::CollectionLookup after =
-    [&writes, &before] (const std::string& id) -> std::optional<vayu::db::Collection> {
-        const auto staged = writes.collections.find (id);
-        if (staged != writes.collections.end ()) {
-            return staged->second;
-        }
-        return before (id);
-    };
-    std::vector<vayu::db::Collection> staged_tree;
-    staged_tree.reserve (stored_tree.size ());
-    for (const auto& [id, collection] : stored_tree) {
-        const auto staged = writes.collections.find (id);
-        staged_tree.push_back (
-        staged != writes.collections.end () ? staged->second : collection);
-    }
-
+    const SpecTreeMove tree (db.get_collections (), writes.collections);
     for (const auto& [id, stored] : stamped) {
         const auto staged    = writes.requests.find (id);
         const bool is_staged = staged != writes.requests.end ();
         const std::string destination =
         is_staged ? staged->second.collection_id : stored.collection_id;
-        const auto under = declined_by_move (stored,
-        vayu::core::nearest_spec_binding (before, stored.collection_id),
-        vayu::core::nearest_spec_binding (after, destination), staged_tree);
+        const auto under = tree.declined_under (stored, destination);
         if (!under) {
             continue;
         }

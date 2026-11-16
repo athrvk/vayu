@@ -321,7 +321,7 @@ describe("ScriptReferencesRow", () => {
 			);
 
 			const chip = chipFor(container, "shop_domain");
-			expect(chip.className).not.toContain(DATA_TOKEN_TONE_CLASS.warning);
+			expect(chip.className).not.toContain("text-warning-text");
 			expect(chip.className).toContain("bg-secondary");
 		});
 
@@ -353,9 +353,7 @@ describe("ScriptReferencesRow", () => {
 					}
 				/>
 			);
-			expect(chipFor(container, "shop_domain").className).not.toContain(
-				DATA_TOKEN_TONE_CLASS.warning
-			);
+			expect(chipFor(container, "shop_domain").className).not.toContain("text-warning-text");
 		});
 	});
 

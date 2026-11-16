@@ -485,22 +485,29 @@ read_optional_string_field (const nlohmann::json& json, const char* key) {
 namespace {
 
 /**
- * Stamp the `requestId` and `environmentId` the payload names onto @p run.
- * @return the 400's message when either is not a string, or nothing.
+ * Stamp the `requestId` and `environmentId` the payload names onto @p run, and
+ * answer the collection whose chain its scripts read and whose secrets mask its
+ * snapshot: `scope_collection_id` of that `requestId` and the payload's
+ * `collectionId` (#3461), decided once here so the two readers cannot differ.
+ * @return the 400's message when any of the three is not a string.
  */
-std::optional<std::string>
-read_run_scope_ids (const nlohmann::json& json, vayu::db::Run& run) {
+std::expected<std::string, std::string>
+read_run_scope (vayu::db::Database& db, const nlohmann::json& json, vayu::db::Run& run) {
     auto request_id = read_optional_string_field (json, "requestId");
     if (!request_id) {
-        return request_id.error ();
+        return std::unexpected (request_id.error ());
     }
     auto environment_id = read_optional_string_field (json, "environmentId");
     if (!environment_id) {
-        return environment_id.error ();
+        return std::unexpected (environment_id.error ());
+    }
+    const auto collection_id = read_optional_string_field (json, "collectionId");
+    if (!collection_id) {
+        return std::unexpected (collection_id.error ());
     }
     run.request_id     = std::move (*request_id);
     run.environment_id = std::move (*environment_id);
-    return std::nullopt;
+    return scope_collection_id (db, run.request_id, *collection_id);
 }
 
 /// A top-level data-file key on a collection run, refused by name for the
@@ -854,15 +861,15 @@ const std::vector<std::string>& secret_values) {
  * run's values and is not on the run collection's chain. The union is
  * deduplicated by value; globals and the environment come with every load.
  *
- * Composition resolves an inline payload through a `collectionId` it does not
- * forward, so a run with no `requestId` and no scenario reads no collection
- * scope here.
+ * A single-request run's chain is @p collection_id, `read_run_scope`'s answer.
  */
 std::vector<std::string> run_snapshot_secrets (vayu::db::Database& db,
 const vayu::db::Run& run,
+const std::string& collection_id,
 const vayu::core::ScenarioExecution* scenario) {
     if (scenario == nullptr) {
-        return secret_variable_values (load_script_variable_scopes (db, run));
+        return secret_variable_values (
+        load_script_variable_scopes (db, run.environment_id, collection_id));
     }
     const std::string& run_collection_id = scenario->request.collection_id;
     std::set<std::string> folder_ids{ run_collection_id };
@@ -1583,6 +1590,9 @@ struct ExecutePayload {
  */
 struct DesignSend {
     vayu::db::Run run;
+    /// The collection whose chain the scripts read and whose secrets mask the
+    /// snapshot (`read_run_scope`); empty for none.
+    std::string collection_id;
     /// Absent for a transient execution - no row exists to record against, and
     /// every recording step keys off that.
     std::optional<std::string> run_id;
@@ -1616,6 +1626,11 @@ struct DesignSend {
         return target_policy ? &*target_policy : nullptr;
     }
 };
+
+/// The variable scopes @p send runs under, read from the rows it names.
+ScriptVariableScopes load_send_scopes (vayu::db::Database& db, const DesignSend& send) {
+    return load_script_variable_scopes (db, send.run.environment_id, send.collection_id);
+}
 
 
 /// What a pre-row refusal of `POST /execute` answers with: the message, and the
@@ -1905,8 +1920,8 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
  * The run row this execution carries, and the persisted half of it.
  *
  * Built even for a transient execution, because it is also how the handler
- * carries scope: `load_script_variable_scopes` reads its `request_id` /
- * `environment_id` (and `persist_script_variables` writes back to the rows that
+ * carries scope: `load_send_scopes` reads its `environment_id` beside
+ * `collection_id` (and `persist_script_variables` writes back to the rows that
  * load named), and the cookie scope comes from the same field. Only the
  * *persisted* half - the id, the config snapshot, the create - is conditional,
  * so a transient execution resolves variables and cookies exactly as a
@@ -1932,10 +1947,12 @@ DesignSend& send) {
     send.run.status = vayu::RunStatus::Running;
     seed_run_times (send.run, now_ms ());
 
-    if (auto refusal = read_run_scope_ids (json, send.run)) {
-        vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
-        return refusal;
+    auto collection_id = read_run_scope (ctx.db, json, send.run);
+    if (!collection_id) {
+        vayu::utils::log_warning ("http", "POST /execute - " + collection_id.error ());
+        return collection_id.error ();
     }
+    send.collection_id     = std::move (*collection_id);
     send.run.origin        = payload.origin.kind;
     send.run.origin_client = payload.origin.client;
 
@@ -1960,7 +1977,7 @@ DesignSend& send) {
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         send.run.config_snapshot =
         vayu::json::sanitize_config_snapshot (req.body, max_snapshot_body_bytes,
-        secret_variable_values (load_script_variable_scopes (ctx.db, send.run)));
+        secret_variable_values (load_send_scopes (ctx.db, send)));
         send.run_id = send.run.id;
     }
 
@@ -2172,7 +2189,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // residual-token pass below reads them too (issue #1008): a `{{token}}`
     // that resolves on the buffered path and stays literal here would be one
     // send behaving two ways.
-    scopes = load_script_variable_scopes (ctx.db, send.run);
+    scopes = load_send_scopes (ctx.db, send);
 
     static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
     const std::vector<vayu::core::CompiledElement>& elements =
@@ -2462,7 +2479,7 @@ std::chrono::steady_clock::time_point handler_start) {
 
     // Load variables. Mutated in place by both scripts, then persisted
     // once below.
-    auto scopes = load_script_variable_scopes (ctx.db, send.run);
+    auto scopes = load_send_scopes (ctx.db, send);
 
     // Pre-request script, send, test script - the sequence a scenario step
     // performs too, which is why it lives in request_exchange.cpp rather
@@ -3311,10 +3328,11 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
-    // Ahead of the snapshot, which reads the scopes these two name.
-    if (auto refusal = read_run_scope_ids (json, run)) {
-        vayu::utils::log_warning ("http", "POST /runs - " + *refusal);
-        send_error (res, 400, *refusal);
+    // Ahead of the snapshot, which reads the scopes these name.
+    const auto collection_id = read_run_scope (ctx.db, json, run);
+    if (!collection_id) {
+        vayu::utils::log_warning ("http", "POST /runs - " + collection_id.error ());
+        send_error (res, 400, collection_id.error ());
         return;
     }
     run.origin        = std::move (origin.kind);
@@ -3327,7 +3345,7 @@ httplib::Response& res) {
     ctx.db, compression_scope_of (run.type));
     run.config_snapshot = run_config_snapshot (snapshot_body, is_scenario,
     scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes,
-    run_snapshot_secrets (ctx.db, run, scenario_execution.get ()));
+    run_snapshot_secrets (ctx.db, run, *collection_id, scenario_execution.get ()));
     // The file a single-request run sends, as the plan checked it: name, size
     // and digest for the report (`metadata.bodyFile`), never the bytes.
     run.config_snapshot = with_body_file (std::move (run.config_snapshot), load_body_file);

@@ -110,7 +110,7 @@ describe("DeleteConfirmDialog", () => {
 
 	// Issue #1689: one template produces the sentence, so every call site that
 	// passes `name` instead of writing its own prose reads the same shape.
-	describe("the generated {name, scope} sentence", () => {
+	describe("the generated {name} sentence", () => {
 		it("renders the default-scope shape", () => {
 			open({ title: undefined, description: undefined, name: "Staging" });
 			expect(screen.getByText('Delete "Staging"?')).toBeInTheDocument();
@@ -119,18 +119,8 @@ describe("DeleteConfirmDialog", () => {
 			).toBeInTheDocument();
 		});
 
-		it("adds the cascade suffix without changing the rest of the sentence", () => {
-			open({ title: undefined, description: undefined, name: "Orders", scope: "cascade" });
-			expect(screen.getByText('Delete "Orders"?')).toBeInTheDocument();
-			expect(
-				screen.getByText(
-					`"Orders" and everything inside it is removed permanently. This can't be undone.`
-				)
-			).toBeInTheDocument();
-		});
-
 		it("never reuses the phrasing this replaced", () => {
-			const { description } = deleteConfirmCopy("Anything", "cascade");
+			const { description } = deleteConfirmCopy("Anything");
 			expect(description).not.toMatch(/permanently removed|removed for good|will be deleted/);
 		});
 

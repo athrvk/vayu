@@ -20,7 +20,8 @@
  */
 
 import { Callout } from "../Callout";
-import { formatSize, LARGE_BODY_BYTES } from "./utils";
+import { formatBytes } from "@/lib/format-number";
+import { LARGE_BODY_BYTES } from "./utils";
 
 export interface LargeBodyNoticeProps {
 	/** The full length of the body, in the characters `LARGE_BODY_BYTES` counts. */
@@ -32,12 +33,12 @@ export interface LargeBodyNoticeProps {
 }
 
 export function LargeBodyNotice({ bodyLength, formattingOff, downloadNote }: LargeBodyNoticeProps) {
-	const shown = `the first ${formatSize(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.`;
+	const shown = `the first ${formatBytes(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.`;
 	const lead = formattingOff ? "Formatting is off and only" : "Only";
 	return (
 		<div className="shrink-0 px-4 pt-3">
 			<Callout severity="info" title="Large response">
-				{`This body is ${formatSize(bodyLength)}. ${lead} ${shown}${downloadNote ? ` ${downloadNote}` : ""}`}
+				{`This body is ${formatBytes(bodyLength)}. ${lead} ${shown}${downloadNote ? ` ${downloadNote}` : ""}`}
 			</Callout>
 		</div>
 	);

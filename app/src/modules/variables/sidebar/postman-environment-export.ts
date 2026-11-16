@@ -6,7 +6,7 @@
  */
 
 /**
- * What the environment row's "Export as Postman Environment" tells the user
+ * What the environment row's "Export as Postman environment" tells the user
  * about the engine's answer (#2253): what the saved document left out.
  */
 

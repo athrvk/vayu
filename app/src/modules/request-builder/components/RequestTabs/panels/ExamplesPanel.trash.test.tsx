@@ -29,7 +29,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useToastStore } from "@/stores";
 import { RequestBuilderContext } from "../../../context/RequestBuilderContext";
@@ -120,8 +121,6 @@ beforeEach(() => {
 		kind: "example",
 		name: "Happy path",
 		deletedAt: 1,
-		collections: 0,
-		requests: 0,
 		restored: true,
 		reparentedToRoot: false,
 	});

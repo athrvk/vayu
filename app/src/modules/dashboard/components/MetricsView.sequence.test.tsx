@@ -26,6 +26,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { HeadingSection } from "@/components/ui/heading";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import type { LiveScenarioProgress, LoadTestMetrics } from "@/types";
 import type { DisplayMetrics } from "../types";
 import { LATENCY, PHASES, tick } from "../utils/liveDistributions.testkit";
@@ -135,5 +137,31 @@ describe("MetricsView without a sequence block", () => {
 		expect(screen.queryByText("SEQUENCE")).toBeNull();
 		expect(screen.queryByText(/pooled/i)).toBeNull();
 		expect(screen.queryByText(/all steps/i)).toBeNull();
+	});
+
+	// The live view's panels sit one level under the dashboard's crumb, which
+	// `dashboard.breadcrumb.test.tsx` holds as the tab's h1 (#3498).
+	it("adds no top heading and skips no level under the tab's h1", async () => {
+		const metrics = GATE as DisplayMetrics;
+		const { container } = render(
+			<TooltipProvider>
+				{asTab(
+					<>
+						<h1>Live load test</h1>
+						<HeadingSection>
+							<MetricsView
+								metrics={metrics}
+								historicalMetrics={[GATE]}
+								mode="constant_concurrency"
+								concurrency={10}
+							/>
+						</HeadingSection>
+					</>
+				)}
+			</TooltipProvider>
+		);
+		await screen.findByText("SEQUENCE");
+		expect(expectOneTopHeading(container)).toBe("Live load test");
+		expect(container.querySelectorAll("h2").length).toBeGreaterThan(0);
 	});
 });

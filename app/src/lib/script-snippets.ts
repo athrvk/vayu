@@ -47,9 +47,22 @@ export interface ScriptSnippetGroup {
 	snippets: ScriptCompletion[];
 }
 
-function isSnippetFor(entry: ScriptCompletion, context: Exclude<ScriptSnippetContext, "both">) {
+/**
+ * Where a template with no heading of its own is filed. A `"both"` template is
+ * a variable or logging helper, never a request or a test, so it takes the
+ * heading the engine gives the one it ships today.
+ */
+const FALLBACK_GROUP: Record<ScriptSnippetContext, string> = {
+	pre: "Request",
+	test: "Tests",
+	both: "Variables",
+};
+
+function isSnippetFor(entry: ScriptCompletion, context: ScriptSnippetContext) {
 	if (entry.kind !== SCRIPT_SNIPPET_KIND) return false;
 	if (!entry.insertText) return false;
+	// A `"both"` template is offered everywhere, so asking for `"both"` returns
+	// exactly those and never a pre-request-only or test-only one.
 	return entry.context === context || entry.context === "both";
 }
 
@@ -59,7 +72,8 @@ function groupRank(group: string) {
 }
 
 /**
- * The templates for one script kind, grouped and ordered.
+ * The templates for one script kind, grouped and ordered. `"both"` is the
+ * set for a script that runs outside any request.
  *
  * Entries keep the table's own order inside a group, which is the order
  * `sortText` already gives the completion popup - so a snippet sits in the same
@@ -67,14 +81,14 @@ function groupRank(group: string) {
  */
 export function snippetsForContext(
 	completions: ScriptCompletion[] | undefined,
-	context: Exclude<ScriptSnippetContext, "both">
+	context: ScriptSnippetContext
 ): ScriptSnippetGroup[] {
 	const groups: ScriptSnippetGroup[] = [];
 	for (const entry of completions ?? []) {
 		if (!isSnippetFor(entry, context)) continue;
 		// An entry with no group is still a template someone can insert; file it
 		// under the heading its context makes true rather than refusing it.
-		const group = entry.group || (context === "pre" ? "Request" : "Tests");
+		const group = entry.group || FALLBACK_GROUP[context];
 		const existing = groups.find((candidate) => candidate.group === group);
 		if (existing) {
 			existing.snippets.push(entry);

@@ -55,6 +55,20 @@ describe("the response status band", () => {
 		expect(bar().querySelectorAll(".tabular-nums")).toHaveLength(2);
 	});
 
+	it("wraps whole groups to a second line rather than breaking one per character (#3494)", () => {
+		expect(bar().className).toContain("flex-wrap");
+		// Every metric group holds its width and one line, so wrapping happens
+		// between groups and never inside "120 ms" or "2 KB".
+		const groups = Array.from(bar().querySelectorAll(".tabular-nums")).map(
+			(value) => value.parentElement as HTMLElement
+		);
+		expect(groups).toHaveLength(2);
+		for (const group of groups) {
+			expect(group.className).toContain("shrink-0");
+			expect(group.className).toContain("whitespace-nowrap");
+		}
+	});
+
 	it("still leads with the status chip", () => {
 		// The one thing in the row carrying a fill, and the reason the row exists.
 		expect(bar().firstElementChild?.textContent).toContain("200");

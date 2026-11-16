@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useId, useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
@@ -88,6 +88,7 @@ function CollectionItemRow({
 	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
+	const nameId = useId();
 	const isDeleting = deletingCollectionId === collection.id;
 
 	const entity = useMemo(() => collectionEntity(collection), [collection]);
@@ -116,6 +117,7 @@ function CollectionItemRow({
 	/** The rename contract, including the focus return - see `useInlineRename`. */
 	const rename = useInlineRename({
 		active: isRenaming,
+		label: "Collection name",
 		initialValue: collection.name,
 		onCommit: (name) => onRenameSubmit(collection.id, name),
 		onCancel: onRenameCancel,
@@ -194,6 +196,11 @@ function CollectionItemRow({
 			aria-posinset={posInSet}
 			aria-setsize={setSize}
 			aria-describedby={emptyPlaceholderId ?? undefined}
+			// The row's own name, not the text of everything inside it: left to
+			// content, Chromium reads the chevron's "Collapse collection" and the
+			// menu trigger into it (#3450). Omitted while renaming, where the name
+			// element is the field and has no text to point at.
+			aria-labelledby={isRenaming ? undefined : nameId}
 			onClick={(e) => isRowSurface(e) && handleClick(e)}
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			data-drop-blocked={dnd.isBlocked || undefined}
@@ -213,7 +220,7 @@ function CollectionItemRow({
 				// list (`CollectionTreeRows`), which knows which they are.
 				isDeleting && "opacity-50",
 				isSelected
-					? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
+					? "bg-primary-tint hover:bg-primary-tint-hover ring-1 ring-inset ring-primary/20"
 					: "hover:bg-accent",
 				// Last, so a drop target's ring wins over the selected row's -
 				// same colour, and the drop is the transient one.
@@ -221,7 +228,7 @@ function CollectionItemRow({
 			)}
 			style={{ paddingLeft: indentPx, ...treeGuideStyle(depth, activeGuideLevel) }}
 		>
-			<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
+			<RowDropIndicator line={dnd.dropLine} />
 			<button
 				onClick={handleToggleClick}
 				tabIndex={-1}
@@ -232,7 +239,7 @@ function CollectionItemRow({
 					// up the whole row.
 					// size-target (24px at Default) so the chevron fits the row. Still an
 					// adequate pointer target, and the row itself remains clickable.
-					"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+					"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					isSelected
 						? "text-primary/90 hover:text-primary"
 						: "text-muted-foreground hover:text-foreground"
@@ -289,6 +296,7 @@ function CollectionItemRow({
 						 * sideways instead of ellipsing.
 						 */}
 						<TruncatedText
+							id={nameId}
 							className={cn(
 								"cap-centred text-sm text-foreground cursor-pointer",
 								depth === 0 && "font-medium"

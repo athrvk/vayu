@@ -30,6 +30,7 @@
  */
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatFixed } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { httpStatusClass, STATUS_CLASS_STYLE } from "@/constants/http-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -54,7 +55,7 @@ export interface ContractCoverageProps {
 /** A percentage with no trailing noise on the two values that matter most. */
 function formatPct(value: number): string {
 	if (!Number.isFinite(value)) return "0%";
-	return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
+	return `${Number.isInteger(value) ? value : formatFixed(value, 1)}%`;
 }
 
 /**

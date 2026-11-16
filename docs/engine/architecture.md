@@ -212,6 +212,9 @@ read it and none can read one sent with the user's cookies. With a list, a liste
 echoed with `Access-Control-Allow-Credentials: true` and every other origin gets no CORS header at
 all. The policy decides what a page can *read*, not what it can send: any page can still make a
 mock or an inbox answer a request.
+A mock with a list also answers `403` to a `Host` that is not a loopback spelling of its own port
+(`names_this_listener`, `routes.hpp`, the management API's rule), against DNS rebinding; a mock
+with no list and the inbox, which may bind wide, answer any `Host`.
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
@@ -294,6 +297,15 @@ connections across both accept loops - two inboxes on one port, each capturing a
 webhooks and neither list showing the rest. An ephemeral request needs no check, since the kernel
 does not hand out a port it is already using.
 
+The same helper bounds the connections a listener holds (`constants::listener`): 8 worker threads
+that grow to 32 for a burst, and a queue of 64 accepted connections waiting for one. cpp-httplib's
+default queue is unbounded, and a listener shares the process's file descriptors with the management
+API, every libcurl transfer and the database, so an inbox bound past loopback could otherwise be held
+open by idle connections until a descriptor ran out and every send failed with a misleading "Out of
+memory". httplib runs a whole connection as one task, so a connection past thread plus queue is
+refused at accept and closed. The management API's own server is not on this helper and keeps
+cpp-httplib's defaults.
+
 The management API answers that same `SO_REUSEPORT` problem the other way round, because it is the
 one listener whose port is a *contract* rather than a detail: it clears the option (Windows, which
 has no `SO_REUSEPORT` and lets `SO_REUSEADDR` step over a live listener, gets `SO_EXCLUSIVEADDRUSE`
@@ -331,7 +343,10 @@ Three rules make that the whole story:
 The feed is a bounded ring (`change_feed::MAX_RETAINED_EVENTS`); a reader whose resume point it no
 longer covers is sent a `reset` and refetches everything. It owns no thread: each stream is a
 management-API handler polling the ring on the relay cadence `GET /runs/:id/events` uses, at most
-`change_feed::MAX_READERS` at once, and it ends on `server_stopping` like every other relay. The
+`change_feed::MAX_READERS` at once, and it ends on `server_stopping` like every other relay. A
+stream is admitted only on a single-use subscription id that `POST /changes/subscriptions` issues
+(`ChangeFeed::issue_subscription`, libsodium random, at most `MAX_PENDING_SUBSCRIPTIONS` unspent):
+a page can send no `POST` without an `Origin`, so it cannot hold the slots a plain `GET` would take. The
 feed lives in the `Database`, which outlives `Server::stop()`'s handler join, so nothing has to be
 drained before it. The startup repair passes rewrite rows before the engine listens and publish
 nothing; a client resuming from an earlier process is reset anyway, because ids start from the
@@ -487,15 +502,26 @@ Manages the lifecycle of load test runs:
   step's send, its late OAuth 2.0 token request and its scripts'
   `pm.sendRequest`, so Stop and shutdown end the step in flight at the next
   progress tick instead of after its timeout, and the runner records that
-  step as `stopped`, never `errored`. The auxiliary threads keep `aux_cancel`: a replay or
+  step as `stopped`, never `errored`. A token request whose flag is already
+  set is never sent, so a stopping server does not reach the endpoint. The auxiliary threads keep `aux_cancel`: a replay or
   teardown after a natural end must still send. A call it cancels is the run
   ending, never a failure: a cancelled token request ends the run `Stopped`; a
   lifecycle or inline step script whose send it cancelled is `skipped` (so a
   cut-short setup does not fail the run), and an inline one's tests and throw
   stay out of the step's result, so no tally counts them; the replay leaves
-  such a sample untallied (`ScriptResult::send_cancelled`). A Stop latched
-  before the replay leaves the flag raised, so the replay's and teardown's
-  sends after a Stop are cancelled at once: a Stop abandons them.
+  such a sample untallied (`ScriptResult::send_cancelled`). The same flag ends
+  the script itself (#3460): `ScriptSendInputs::stop` and
+  `ExchangeInputs::stop` carry it to `ScriptContext::stop`, which the QuickJS
+  interrupt handler reads beside the deadline and the async drain before every
+  job, so a looping script ends at its next poll and is
+  `ScriptResult::cancelled`, recorded like a cancelled send. The replay also
+  checks the flag before every sample and script, so a Stop or shutdown during
+  it settles within the Stop's grace and one latched before it replays
+  nothing; a replayed script that timed out is not run against the samples
+  after it. Teardown is the deliberate exception (`RunContext::teardown_stop`):
+  a Stop latched before it began leaves it to run, its sends cancelled at
+  once, and only `RunContext::engine_stopping`, which `RunManager::shutdown`
+  raises through `request_shutdown`, ends it then.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the
@@ -989,7 +1015,13 @@ shares. Script text is **never** interpolated - a `{{...}}` inside a script is
 user JavaScript, not a template. A load run's deferred replay keeps the same
 rule (#3125): each un-inlined `script.post` element (a single-request run's
 `RunContext::test_scripts`, a scenario step's `find_step_post_scripts`) is
-replayed as its own script against every sample, never a joined text - see
+replayed as its own script against every sample, never a joined text. The
+replay starts from a copy of the scopes `script.setup` left (`ReplayBase`,
+#3460: `RunContext::lifecycle_scopes`, or `ScenarioLoadState::lifecycle_scopes`),
+never a fresh read of the stored rows, and teardown reads the original. Each
+sample's `pm.request` is re-derived from the request the run built and the
+row and identity the sample recorded (`request_as_submitted`,
+`step_request_as_submitted`), so nothing is retained per sample - see
 [scripting.md](scripting.md#load-test-scripts).
 
 ### Database (`SQLite`)
@@ -1839,7 +1871,7 @@ Default configuration values (from `constants.hpp`):
 | Poll Timeout | 10ms | Event loop poll interval |
 | DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
 | Max Response Body | 32MB | Per load-test transfer; larger fails the request |
-| Script Memory | 64MB | QuickJS memory limit |
+| Script Memory | 64MB | Per QuickJS runtime, held by the engine's script heap (`scriptMemoryLimit`, 1 MiB to 256 MiB) |
 | Script Timeout | 5s | Script execution timeout (1ms to 60s; there is no "no limit") |
 | Script Stack | 256KB | QuickJS stack size (64KB to 256KB, lowered only) |
 | Stats Interval | 100ms | Metrics collection interval |

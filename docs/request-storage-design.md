@@ -263,14 +263,19 @@ Two rules make a restore mean something precise:
 - **Re-parenting.** A restored collection whose parent is gone or itself deleted
   comes back at the tree root. A request cannot do this - `collection_id` is
   required - so restoring one whose collection is in the trash is refused with a
-  `409` that names the collection to restore first.
+  `409` that names the request and its collection, and the trash root to
+  restore first: the listed entry holding the collection, which may be an
+  ancestor whose delete took it (issue #3449).
 
 A purge is deliberately *not* limited to the cohort: it takes every stamped row
 in the subtree, whichever delete stamped it, because a request left under a
 removed collection would be reachable by no read and restorable by nothing. It
 takes stamped rows *only* (issue #1883): a live collection found under a purged
 one was never listed in the trash, so it is re-parented to the tree root - the
-restore's rule - and the walk stops there, leaving anything below it alone.
+restore's rule - and the walk stops there, leaving anything below it alone. A
+collection's trash entry counts both: the cohort a restore puts back
+(`collections`, `requests`) and what this walk would destroy
+(`purgeCollections`, `purgeRequests`, issue #3449).
 
 The write side keeps that state from arising. `POST /collections` and
 `PUT /collections/:id` refuse a `parentId` naming a collection in the trash with
@@ -321,15 +326,17 @@ records nothing, and a sync's own hard deletes record nothing either: the
 document dropped those operations, nobody declined them.
 
 **Moving the request out of the contract is the same decision** (#3446). A move
-through `POST /reorder` or `PUT /requests/:id` that leaves a stamped request
+through `POST /reorder`, `PUT /requests/:id` or a `parentId` on
+`PUT /collections/:id` (#3470) that leaves a stamped request
 outside the contract it answered to - under a collection whose nearest binding
 names another document, none, or the same document bound by a collection
 outside the source's contract walk (a sibling root) - records the operation
 under the binding it left and clears the request's `spec_operation`, in the
 move's own transaction; a moved collection does it for every stamped request
 beneath it. The route compares the two bindings (`declined_by_move`, over
-`spec_contract_subtree_ids`; for a batch, the binding after and the walk are
-read off the tree the batch writes) and passes the decision down, so `Database`
+`spec_contract_subtree_ids`; for a batch or a moved collection, the binding
+after and the walk are read off the tree the write stores, `SpecTreeMove`) and
+passes the decision down, so `Database`
 still reads no binding. A move within one contract keeps the stamp, a move
 between the root and a sub-folder bound to the same document included. Because the moved request
 no longer records the operation, restoring it from the trash after a later

@@ -31,6 +31,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	TooltipValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
@@ -438,21 +439,19 @@ function KeyValueRow({
 			 * showed a greyed trash can that did nothing.
 			 */}
 			{canRemove ? (
-				<Button
-					size="icon"
+				<TooltipIconButton
 					variant="rowActionDestructive"
 					onClick={() => onRemove(item.id)}
 					disabled={keyReadOnly}
-					aria-label="Remove row"
+					label="Remove row"
 					// `focus-visible:opacity-100` is not decoration. The button was
 					// revealed on hover only, so a keyboard user tabbing through a
 					// headers table landed on a fully transparent control - including
 					// its focus ring - once per row, and Enter there silently deleted
 					// the row they could not see they were on.
 					className="size-target opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-				>
-					<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
-				</Button>
+					icon={<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />}
+				/>
 			) : (
 				<div className="size-target" />
 			)}

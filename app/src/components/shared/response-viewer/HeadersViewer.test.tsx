@@ -164,3 +164,36 @@ describe("HeadersViewer: a list of lines", () => {
 		expect(container).toBeEmptyDOMElement();
 	});
 });
+
+/**
+ * A header name never wraps and a pathological one ellipses (#3495). jsdom has
+ * no layout, so the rule is held as the classes that make it.
+ *
+ * Mutation check: drop `whitespace-nowrap` from the name cell, or the `max-w`
+ * from `HEADER_NAME_MAX`, and the table case fails; drop `shrink-0` or the
+ * `max-w` from the compact name and the compact case fails.
+ */
+describe("HeadersViewer: a long header name", () => {
+	const LONG = `X-${"Very-Long-".repeat(8)}Name`;
+	const classesOf = (el: Element | null) => (el?.getAttribute("class") ?? "").split(/\s+/);
+
+	it("keeps the table's name on one line and caps it, the value still wrapping", () => {
+		render(<HeadersViewer headers={{ [LONG]: "v", "Content-Type": "text/plain" }} />);
+
+		const nameCell = screen.getByText("Content-Type").closest("td");
+		expect(classesOf(nameCell)).toContain("whitespace-nowrap");
+		// The text is the cell's only content, as `TruncatedText` renders it.
+		expect(classesOf(screen.getByText(LONG))).toEqual(
+			expect.arrayContaining(["truncate", "max-w-[40ch]"])
+		);
+		expect(classesOf(valueCell("Content-Type"))).toContain("break-all");
+	});
+
+	it("caps the compact variant's name and lets it go no wider than the cap", () => {
+		render(<CompactHeadersViewer headers={{ [LONG]: "v" }} />);
+
+		expect(classesOf(screen.getByText(`${LONG}:`))).toEqual(
+			expect.arrayContaining(["truncate", "shrink-0", "max-w-[40ch]"])
+		);
+	});
+});

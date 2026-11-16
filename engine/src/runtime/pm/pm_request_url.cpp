@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <expected>
 #include <iterator>
@@ -448,27 +449,64 @@ JSValue js_url_to_string (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
 }
 
-/// `getHost()` / `getPath()` / `getQueryString()`, told apart by their magic -
-/// three readers of the same state that differ only in which part they join.
-enum UrlPartGetter : int { URL_GET_HOST, URL_GET_PATH, URL_GET_QUERY_STRING };
+/// The whole-URL and part readers, told apart by their magic - readers of the
+/// same state that differ only in which part they join.
+enum UrlPartGetter : int {
+    URL_GET_HOST,
+    URL_GET_PATH,
+    URL_GET_QUERY_STRING,
+    URL_GET_RAW,
+    URL_GET_PATH_WITH_QUERY,
+    URL_GET_REMOTE,
+};
+
+/// Indexed by `UrlPartGetter`; also the names the objects are given.
+constexpr std::array<const char*, 6> URL_PART_GETTER_NAMES = { "getHost",
+    "getPath", "getQueryString", "getRaw", "getPathWithQuery", "getRemote" };
+
+/// `getPathWithQuery()` joins the path to its query only when there is one, so a
+/// URL with no query is exactly `getPath()`.
+std::string url_path_with_query (const vayu::http::UrlParts& parts) {
+    std::string out = vayu::http::join_path (parts.path);
+    if (!parts.query.empty ()) {
+        out += '?';
+        out += parts.query;
+    }
+    return out;
+}
+
+/// `getRemote()` is the host and the port the URL states: a scheme's default
+/// port is never filled in, because `parse_url_parts` does not either.
+std::string url_remote (const vayu::http::UrlParts& parts) {
+    std::string out = vayu::http::join_host (parts.host);
+    if (!parts.port.empty ()) {
+        out += ':';
+        out += parts.port;
+    }
+    return out;
+}
+
+std::string url_part_text (const RequestUrlState& state, int magic) {
+    switch (magic) {
+    case URL_GET_HOST: return vayu::http::join_host (state.parts.host);
+    case URL_GET_PATH: return vayu::http::join_path (state.parts.path);
+    case URL_GET_RAW: return state.text;
+    case URL_GET_PATH_WITH_QUERY: return url_path_with_query (state.parts);
+    case URL_GET_REMOTE: return url_remote (state.parts);
+    default: return state.parts.query;
+    }
+}
 
 JSValue
 js_url_part_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)argc;
     (void)argv;
-    const char* member = magic == URL_GET_HOST ? "getHost" :
-    magic == URL_GET_PATH                      ? "getPath" :
-                                                 "getQueryString";
-    auto* state        = url_state_of_this (ctx, this_val, member);
+    auto* state = url_state_of_this (
+    ctx, this_val, URL_PART_GETTER_NAMES.at (static_cast<size_t> (magic)));
     if (!state) {
         return JS_EXCEPTION;
     }
-    std::string out;
-    switch (magic) {
-    case URL_GET_HOST: out = vayu::http::join_host (state->parts.host); break;
-    case URL_GET_PATH: out = vayu::http::join_path (state->parts.path); break;
-    default: out = state->parts.query; break;
-    }
+    const std::string out = url_part_text (*state, magic);
     return JS_NewStringLen (ctx, out.data (), out.size ());
 }
 
@@ -547,15 +585,22 @@ class QueryParamName {
     std::string encoded_;
 };
 
-/// The value of the first param named @p name, or nullptr when there is none.
-const std::optional<std::string>*
-find_query_param (const RequestUrlState& state, const QueryParamName& name) {
+/// The first param named @p name, or nullptr when there is none.
+const vayu::http::UrlQueryParam*
+find_query_row (const RequestUrlState& state, const QueryParamName& name) {
     for (const auto& param : state.parts.query_params) {
         if (name.matches (param.key)) {
-            return &param.value;
+            return &param;
         }
     }
     return nullptr;
+}
+
+/// The value of the first param named @p name, or nullptr when there is none.
+const std::optional<std::string>*
+find_query_param (const RequestUrlState& state, const QueryParamName& name) {
+    const auto* row = find_query_row (state, name);
+    return row != nullptr ? &row->value : nullptr;
 }
 
 /**
@@ -605,6 +650,19 @@ JSValue query_param_entry (JSContext* ctx, const vayu::http::UrlQueryParam& para
     return entry;
 }
 
+/// Every param as the `{ key, value }` array `all()` hands back. The iterating
+/// reads walk this same list, built once up front, so a callback that edits the
+/// URL (`query.add`, `url.update`) changes the state behind it and never the
+/// walk in progress (#3462).
+JSValue query_member_list (JSContext* ctx, const RequestUrlState& state) {
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& param : state.parts.query_params) {
+        JS_SetPropertyUint32 (ctx, list, next++, query_param_entry (ctx, param));
+    }
+    return list;
+}
+
 /**
  * `query.all()` - every param, in wire order, duplicates kept.
  *
@@ -626,12 +684,7 @@ JSValue* func_data) {
     if (!state) {
         return JS_EXCEPTION;
     }
-    JSValue list  = JS_NewArray (ctx);
-    uint32_t next = 0;
-    for (const auto& param : state->parts.query_params) {
-        JS_SetPropertyUint32 (ctx, list, next++, query_param_entry (ctx, param));
-    }
-    return list;
+    return query_member_list (ctx, *state);
 }
 
 /// `query.toObject()` - last wins, because that is what a plain object can say.
@@ -862,6 +915,189 @@ JSValue* func_data) {
 }
 
 // ----------------------------------------------------------------------------
+// The rest of the PropertyList reads: each, map, filter, find, one, indexOf, idx
+// (#3462). All of them answer over the `all()` rows, so a member handed to a
+// callback is the `{ key, value }` a script already knows.
+// ----------------------------------------------------------------------------
+
+/// The four reads that hand every member to a callback.
+enum QueryWalk : int { QUERY_EACH, QUERY_MAP, QUERY_FILTER, QUERY_FIND };
+
+constexpr std::array<const char*, 4> QUERY_WALK_NAMES = { "each", "map", "filter", "find" };
+
+/// What one callback answer adds to the result of the walk it belongs to:
+/// `map` keeps the answer, `filter` keeps the member when the answer is truthy.
+/// `each` and `find` collect nothing here.
+void collect_query_walk_answer (JSContext* ctx,
+int magic,
+JSValueConst item,
+JSValueConst answer,
+JSValueConst collected,
+uint32_t& next) {
+    if (magic == QUERY_MAP) {
+        JS_SetPropertyUint32 (ctx, collected, next++, JS_DupValue (ctx, answer));
+    } else if (magic == QUERY_FILTER && JS_ToBool (ctx, answer) > 0) {
+        JS_SetPropertyUint32 (ctx, collected, next++, JS_DupValue (ctx, item));
+    }
+}
+
+/**
+ * `query.each(fn, thisArg)`, `map`, `filter` and `find` - Postman's walks over
+ * the params, handing the callback `(member, index, list)` with the optional
+ * second argument as its `this`, the arguments the header object's `each`
+ * already gives.
+ *
+ * `each` returns undefined and walks every member (a `false` answer does not
+ * stop it, as on the header object); `map` the answers, `filter` the members
+ * answered truthy, `find` the first such member or `undefined`. The list is
+ * built before the first call, so a callback that edits the URL cannot shorten
+ * or lengthen the walk under it. A throw out of the callback is the script's
+ * own and ends the walk as it was thrown.
+ */
+JSValue js_url_query_walk (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    const char* member = QUERY_WALK_NAMES.at (static_cast<size_t> (magic));
+    auto* state        = url_state_of_query (ctx, func_data, member);
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "pm.request.url.query.%s(fn) needs a function, got %s",
+        member, argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    const ScopedValue list (ctx, query_member_list (ctx, *state));
+    const auto count = static_cast<uint32_t> (state->parts.query_params.size ());
+    const bool keeps = magic == QUERY_MAP || magic == QUERY_FILTER;
+    const ScopedValue collected (ctx, keeps ? JS_NewArray (ctx) : JS_UNDEFINED);
+    const JSValueConst this_arg = argc >= 2 ? argv[1] : JS_UNDEFINED;
+    uint32_t next               = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const ScopedValue item (ctx, JS_GetPropertyUint32 (ctx, list.get (), i));
+        JSValueConst args[3]{ item.get (),
+            JS_NewInt32 (ctx, static_cast<int32_t> (i)), list.get () };
+        const ScopedValue answer (ctx, JS_Call (ctx, argv[0], this_arg, 3, args));
+        if (JS_IsException (answer.get ())) {
+            return JS_EXCEPTION;
+        }
+        if (magic == QUERY_FIND && JS_ToBool (ctx, answer.get ()) > 0) {
+            return JS_DupValue (ctx, item.get ());
+        }
+        collect_query_walk_answer (
+        ctx, magic, item.get (), answer.get (), collected.get (), next);
+    }
+    return JS_DupValue (ctx, collected.get ());
+}
+
+/// `query.one(name)` - the first param's `{ key, value }` rather than its value,
+/// `undefined` when the name is absent. `get` is the value half of the lookup,
+/// and first-match for the same reason.
+JSValue js_url_query_one (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    auto* state = url_state_of_query (ctx, func_data, "one");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "pm.request.url.query.one needs a name string, got %s",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+    const auto* row = find_query_row (*state, name);
+    return row != nullptr ? query_param_entry (ctx, *row) : JS_UNDEFINED;
+}
+
+/// The position of the first param @p wanted names, or -1. With @p value set
+/// the param must also hold that value (`nullopt` being a bare key's).
+int64_t index_of_query_param (const RequestUrlState& state,
+const QueryParamName& wanted,
+bool match_value,
+const std::optional<std::string>& value) {
+    const auto& rows = state.parts.query_params;
+    for (size_t i = 0; i < rows.size (); i++) {
+        if (wanted.matches (rows[i].key) && (!match_value || value == rows[i].value)) {
+            return static_cast<int64_t> (i);
+        }
+    }
+    return -1;
+}
+
+/**
+ * `query.indexOf(item)` - the position in `all()`, `-1` when absent.
+ *
+ * Postman finds a member by identity in its own list. The members handed out
+ * here are built per call, so identity would answer `-1` for a member of this
+ * very list. A `{ key, value }` is matched on both, which is what tells the
+ * rows of a repeated key apart (`page=2&page=3`: the second `page` is 1); a
+ * name is matched on the key alone, as `one` finds it.
+ */
+JSValue js_url_query_index_of (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    constexpr const char* API = "pm.request.url.query.indexOf";
+    auto* state               = url_state_of_query (ctx, func_data, "indexOf");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    if (argc >= 1 && JS_IsString (argv[0])) {
+        const QueryParamName name (ctx, js_to_string (ctx, argv[0]));
+        return JS_NewInt64 (ctx, index_of_query_param (*state, name, false, std::nullopt));
+    }
+    if (argc < 1 || !is_plain_object (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "%s needs a name string or a { key, value } member, got %s",
+        API, argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    vayu::http::UrlQueryParam wanted;
+    if (!read_query_param_arg (ctx, argv[0], API, wanted)) {
+        return JS_EXCEPTION;
+    }
+    const QueryParamName name (ctx, wanted.key);
+    return JS_NewInt64 (ctx, index_of_query_param (*state, name, true, wanted.value));
+}
+
+/// `query.idx(n)` - the n-th `{ key, value }` of `all()`, `undefined` past
+/// either end. Postman's is `members[n]`, so a fraction or a NaN names nothing.
+JSValue js_url_query_idx (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    auto* state = url_state_of_query (ctx, func_data, "idx");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    double wanted = 0;
+    if (argc < 1 || !JS_IsNumber (argv[0]) || JS_ToFloat64 (ctx, &wanted, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "pm.request.url.query.idx needs an index number, got %s",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    const auto& rows = state->parts.query_params;
+    if (!(wanted >= 0) || wanted >= static_cast<double> (rows.size ()) ||
+    wanted != std::floor (wanted)) {
+        return JS_UNDEFINED;
+    }
+    return query_param_entry (ctx, rows[static_cast<size_t> (wanted)]);
+}
+
+// ----------------------------------------------------------------------------
 // url.addQueryParams / url.removeQueryParams - Postman's Url-level spellings of
 // query.add and query.remove, taking several params at once.
 // ----------------------------------------------------------------------------
@@ -1082,7 +1318,7 @@ JSValue build_query_object (JSContext* ctx, JSValue url, const RequestUrlState& 
         int length;
         int magic;
     };
-    static constexpr std::array<QueryMethod, 9> METHODS = {
+    static constexpr std::array<QueryMethod, 16> METHODS = {
         QueryMethod{ "get", js_url_query_get, 1, 0 },
         QueryMethod{ "has", js_url_query_get, 1, 1 },
         QueryMethod{ "all", js_url_query_all, 0, 0 },
@@ -1092,6 +1328,13 @@ JSValue build_query_object (JSContext* ctx, JSValue url, const RequestUrlState& 
         QueryMethod{ "upsert", js_url_query_add, 1, QUERY_UPSERT },
         QueryMethod{ "remove", js_url_query_remove, 1, 0 },
         QueryMethod{ "clear", js_url_query_clear, 0, 0 },
+        QueryMethod{ "each", js_url_query_walk, 1, QUERY_EACH },
+        QueryMethod{ "map", js_url_query_walk, 1, QUERY_MAP },
+        QueryMethod{ "filter", js_url_query_walk, 1, QUERY_FILTER },
+        QueryMethod{ "find", js_url_query_walk, 1, QUERY_FIND },
+        QueryMethod{ "one", js_url_query_one, 1, 0 },
+        QueryMethod{ "indexOf", js_url_query_index_of, 1, 0 },
+        QueryMethod{ "idx", js_url_query_idx, 1, 0 },
     };
     for (const auto& method : METHODS) {
         JS_SetPropertyStr (ctx, query, method.name,
@@ -1099,10 +1342,10 @@ JSValue build_query_object (JSContext* ctx, JSValue url, const RequestUrlState& 
     }
 
     // Deliberately no `members` array beside them. Postman's PropertyList has
-    // one, but a copy of it here would be a second view of the same params
-    // that no doc names and no completion offers - and `all()` is that view,
-    // documented. The real PropertyList is a list of QueryParam objects with
-    // their own methods, which is more than v1 ships either way.
+    // one, but a copy of it here would be a second view of the same params;
+    // `all()` is that view, and every walking read (`each`, `map`, `filter`,
+    // `find`) hands out the same `{ key, value }` rows. They are plain objects,
+    // not Postman's QueryParam objects with methods of their own.
     return query;
 }
 
@@ -1318,11 +1561,11 @@ JSValue new_request_url (JSContext* ctx, std::string text) {
     JS_NewCFunction (ctx, js_url_add_query_params, "addQueryParams", 1));
     define ("removeQueryParams",
     JS_NewCFunction (ctx, js_url_remove_query_params, "removeQueryParams", 1));
-    for (const auto& [name, magic] :
-    std::array<std::pair<const char*, int>, 3>{ { { "getHost", URL_GET_HOST },
-    { "getPath", URL_GET_PATH }, { "getQueryString", URL_GET_QUERY_STRING } } }) {
+    for (size_t magic = 0; magic < URL_PART_GETTER_NAMES.size (); magic++) {
+        const char* name = URL_PART_GETTER_NAMES.at (magic);
         define (name,
-        JS_NewCFunctionMagic (ctx, js_url_part_getter, name, 0, JS_CFUNC_generic_magic, magic));
+        JS_NewCFunctionMagic (ctx, js_url_part_getter, name, 0,
+        JS_CFUNC_generic_magic, static_cast<int> (magic)));
     }
     return url;
 }

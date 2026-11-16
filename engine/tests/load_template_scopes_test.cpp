@@ -277,6 +277,21 @@ TEST_F (LoadTemplateScopesRunTest, ARawRunNamingARequestReadsItsCollection) {
     EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
 }
 
+// The inline half (#3461): a run linking no request reads the chain of the
+// `collectionId` its composition answered with. Mutation check: leave
+// `collectionId` out of `names_stored_scopes` and the run sends `{{base}}/i`.
+TEST_F (LoadTemplateScopesRunTest, ARawRunNamingACollectionReadsItsChain) {
+    save_collection_with_request ({ { "base", variable (echo_.url ()) } });
+    auto config            = payload ("{{base}}/i");
+    config["collectionId"] = "col_1";
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (echo_.path (), "/echo/i");
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
 // A token-free run naming an environment sends what it always sent. What the
 // pass skips for it - the scope read - is not observable on the wire; the
 // run's bytes, its count and its clean report are.

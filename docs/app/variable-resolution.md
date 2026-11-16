@@ -356,12 +356,13 @@ directly the way the tab strip still does (issue #1074); without that the
 editor would rank the scopes while the field one line above ranks the row over
 them, which is the disagreement this paragraph exists to forbid.
 
-A name that **no** scope defines but the row does is the same claim in the
-other direction, and it stops being reported as undefined: the destructive red
-states a token that reaches the server with its braces still on, and this one
-does not. The chip reads `row`, the popover names the column, and a create
-offer - still worth making, since the variable answers every row-less send -
-says what the row already answers rather than implying the token is unanswered.
+A name that **no** scope defines but the row does is the same claim in the other
+direction, and it stops being reported as undefined: the destructive red (with
+its wavy underline) states a token that reaches the server with its braces still
+on, and this one does not. The chip reads `row`, the popover names the column,
+and a create offer - still worth making, since the variable answers every
+row-less send - says what the row already answers rather than implying the token
+is unanswered.
 
 **What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
 title resolves through one list-wide `useVariableResolver()` in
@@ -432,15 +433,16 @@ above it.
 
 This is what makes the token states possible: with a contract in scope,
 `{{data.email}}` is *checkable*. A declared column paints informationally, a
-column no contract in scope declares paints **amber** with the declared list in
-its tooltip, and a chain that declares nothing keeps the neutral token above. It
-is authoring-time advice in every case - the run's file is the authority, and a
-run with a mismatched file is still the user's to start. Declared columns are
-also completed: `{{data.` offers them in the request fields and the body editors,
-and `pm.iterationData.get("` offers them in the script editors (see below). The
-body editors also colour and explain these tokens on hover, the same three
-states as the request fields; the script editors do not, for the same
-interpolation reason as everywhere else in this document (D16).
+column no contract in scope declares paints **amber** (double-underlined, so it
+stays apart from a close accent, #3499) with the declared list in its tooltip,
+and a chain that declares nothing keeps the neutral token above. It is
+authoring-time advice in every case - the run's file is the authority, and a run
+with a mismatched file is still the user's to start. Declared columns are also
+completed: `{{data.` offers them in the request fields and the body editors, and
+`pm.iterationData.get("` offers them in the script editors (see below). The body
+editors also colour and explain these tokens on hover, the same three states as
+the request fields; the script editors do not, for the same interpolation reason
+as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
 (issue #604). They used to paint a name red whenever no scope defined it, which
@@ -721,8 +723,8 @@ second credential beside an `Authorization` typed next to it.
 That is the same quiet wrong request as the one above with the fault reversed -
 there a value forges a header, here a name repeats one the author did not
 repeat - so it gets the same answer: a `400` with code
-`colliding_header_names`, naming both spellings as written and the name they
-produced. Repair is not on offer for the reason it is not offered above: the two
+`colliding_header_names`, naming both spellings as written. It never repeats the
+name they produced, which can be a secret. Repair is not on offer for the reason it is not offered above: the two
 names are equally the author's, so choosing one is inventing an intention.
 
 **Only a collision resolution made is refused.** Two names *written* alike -
@@ -794,7 +796,8 @@ this order. It **trims** the spaces and tabs around it (SP and HTAB, nothing
 else), an obvious paste error with one reading; then it requires what is left to
 be an RFC 9110 token, and **refuses** anything that is not - an interior space,
 a colon, a byte outside ASCII - with a `400` and code `invalid_header_name` whose
-message quotes the name and says which character cannot appear in one. That is
+message quotes the name as written (`{{h}}`, never what the variable held) and
+says which character cannot appear in one. That is
 the line this page draws throughout: repair what has one reading, refuse what
 has none, never guess.
 
@@ -1200,7 +1203,13 @@ priority order, read from the top down. See
 
 The collection scope a script reads is the **whole chain**, the same one
 `{{name}}` merges (issue #234; `load_script_variable_scopes` in
-`engine/src/http/request_exchange.cpp` builds it from `collection_chain`). A
+`engine/src/http/request_exchange.cpp` builds it from `collection_chain`). On a
+Send the chain is that of the linked request's collection, else of the
+`collectionId` `POST /compose` wrote on its answer for an inline request
+(`scope_collection_id`, issue #3461), so a scripted inline send that links no
+saved request (MCP's ad-hoc `run_request` with a `collectionId`) reads, and
+resolves its deferred names against, the collection it was composed in. The
+app's Send links its `requestId`, whose row names the same collection. A
 variable defined on an ancestor collection therefore reads the same in
 `pm.collectionVariables.get`, `pm.variables.get` and
 `pm.variables.replaceIn("{{name}}")` as it substitutes in the URL (and
@@ -1208,7 +1217,9 @@ variable defined on an ancestor collection therefore reads the same in
 collection run reads the chain of its own request's folder, exactly as a Send
 of that request does, even when the run was started on a parent (#3248,
 `RunVariableScopes` for a sequential run, `LoadScopeBases` for a load run);
-the run's `script.setup` and `script.teardown` read the collection being run.
+each `script.setup` and `script.teardown` of the run reads the chain of the
+collection that declares it, which can be an ancestor of the collection being
+run or a folder beneath it (#3456).
 
 **Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
 only ever touch the request's own collection - the one

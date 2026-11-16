@@ -20,12 +20,13 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatFixed } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types/domain";
 
 /** Trailing zeros are noise on a value the script recorded as a whole number. */
 function formatValue(value: number): string {
-	return Number.isInteger(value) ? String(value) : value.toFixed(2);
+	return Number.isInteger(value) ? String(value) : formatFixed(value, 2);
 }
 
 export interface CustomMetricsSummaryProps {

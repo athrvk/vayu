@@ -75,7 +75,6 @@ vi.mock("@/queries", () => ({
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: mockServers }),
-	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 let rerenderTree = () => {};
@@ -228,6 +227,33 @@ describe("the tree's shape as assistive tech sees it", () => {
 		// Empty: nothing announces anything yet, and a region that ships with
 		// filler would speak it on mount.
 		expect(live!.textContent).toBe("");
+	});
+});
+
+describe("a row's accessible name is its own name", () => {
+	// Left to content, Chromium computed "Collapse collection Acme (1) More actions
+	// for Acme" from the chevron's label, the count and the menu trigger (#3450).
+	it("names a collection row by its name alone, not its chevron, count or menu", () => {
+		renderTree();
+
+		expect(screen.getByRole("treeitem", { name: "Acme" })).toBe(collectionRow("acme"));
+		expect(screen.getByRole("treeitem", { name: "Beta" })).toBe(collectionRow("beta"));
+	});
+
+	it("names a request row by its method and name", () => {
+		renderTree();
+
+		expect(screen.getByRole("treeitem", { name: "GET Ping" })).toBe(requestRow("r-ping"));
+	});
+
+	it.each([
+		["collection", () => collectionRow("beta")],
+		["request", () => requestRow("r-ping")],
+	])("leaves a renaming %s row to the field it holds", (_kind, row) => {
+		renderTree();
+		startRename(row());
+
+		expect(row()).not.toHaveAttribute("aria-labelledby");
 	});
 });
 

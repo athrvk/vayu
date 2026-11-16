@@ -372,6 +372,57 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 });
 
 /**
+ * @brief Standard-library members quickjs-ng runs that the TypeScript lib the
+ *        editor loads (`esnext`, SCRIPT_LIB) does not declare yet (#3462; retired by #3485).
+ *
+ * Each row is an interface augmentation: it merges into the lib's own
+ * interface, so `RegExp.escape(...)` stops being a false "Property does not
+ * exist" on a call the engine runs. `head` must repeat the lib's own
+ * declaration of the interface, type parameters and defaults included, or
+ * TypeScript refuses the merge. `members` is the body, one member per line.
+ *
+ * A stopgap with an exit: a row retires when the TypeScript the editor ships
+ * (Monaco's bundled copy) declares its members. Declared by both, a method
+ * would merge into an overload and nothing would complain, so the app's
+ * `script-typedefs.docs-compile.test.ts` compiles the bare lib and fails on
+ * the day it knows one of these - delete the row then.
+ *
+ * `script_types_test.cpp` runs every member here in the real script engine, so
+ * a row cannot declare what the runtime lacks (a declared member the runtime
+ * lacks is offered, then fails when the script runs).
+ */
+struct LibraryGap {
+    const char* head;
+    const char* members;
+};
+constexpr auto LIBRARY_GAPS = std::to_array<LibraryGap> ({
+{ "interface RegExpConstructor", "\tescape(string: string): string;\n" },
+{ "interface Math", "\tsumPrecise(values: Iterable<number>): number;\n" },
+{ "interface JSON",
+"\trawJSON(text: string): { readonly rawJSON: string };\n"
+"\tisRawJSON(value: unknown): value is { readonly rawJSON: string };\n" },
+{ "interface Uint8ArrayConstructor",
+"\tfromBase64(string: string, options?: { alphabet?: 'base64' | 'base64url'; "
+"lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' }): "
+"Uint8Array<ArrayBuffer>;\n"
+"\tfromHex(string: string): Uint8Array<ArrayBuffer>;\n" },
+{ "interface Uint8Array<TArrayBuffer extends ArrayBufferLike = "
+  "ArrayBufferLike>",
+"\ttoBase64(options?: { alphabet?: 'base64' | 'base64url'; omitPadding?: "
+"boolean }): string;\n"
+"\ttoHex(): string;\n"
+"\tsetFromBase64(string: string, options?: { alphabet?: 'base64' | "
+"'base64url'; lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' "
+"}): { read: number; written: number };\n"
+"\tsetFromHex(string: string): { read: number; written: number };\n" },
+});
+
+/// Written into the output above the augmentations; the tests find them by it.
+constexpr std::string_view LIBRARY_GAPS_BANNER =
+"// Library members the runtime has and TypeScript's lib does not declare "
+"yet.\n";
+
+/**
  * @brief Whether a label's first segment opens the assertion chain.
  *
  * A label rooted at `to`, `and` or one of chai's language chains is a chain
@@ -1108,6 +1159,15 @@ std::string render_chain (const TypeNode& chain_root) {
     return out;
 }
 
+/// The LIBRARY_GAPS augmentations, one interface block per row.
+void render_library_gaps (std::string& out) {
+    out += "\n";
+    out += LIBRARY_GAPS_BANNER;
+    for (const auto& gap : LIBRARY_GAPS) {
+        out += std::format ("{} {{\n{}}}\n", gap.head, gap.members);
+    }
+}
+
 /**
  * Every global the sandbox declares, and - after them - the ones it deliberately
  * does not (see ABSENT_GLOBALS). An absent global the table ever starts offering
@@ -1168,6 +1228,7 @@ std::string generate_script_typedefs () {
     "// (GET /scripting/types). Do not edit - add to the table instead.\n\n";
     out += render_chain (chain_root);
     out += render_globals (global_root);
+    render_library_gaps (out);
     for (const auto& shelf_module : SHELF_MODULES) {
         out += std::format ("\ndeclare module '{}' {{\n{}}}\n",
         shelf_module.name, shelf_module.body);

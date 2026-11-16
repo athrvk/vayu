@@ -2029,8 +2029,8 @@ export type Run =
 	// list), not the load-test report: a scenario run's `results[]` are step
 	// executions, so the load report's percentiles would describe a sequence as if
 	// it were one request repeated. The sidebar row is still the non-load shape,
-	// which `RunItem.run-types.test.tsx` pins: the row carries the counts (#2954)
-	// for a reader of the wire, and no badge or glyph reads them.
+	// with no badge of its own; it reads the row's step counts (#2954) for its
+	// glyph and subtitle (`RunItem.run-types.test.tsx`).
 	| (RunFields & { type: "scenario"; resultSummary?: CollectionResultSummary });
 
 /**
@@ -2068,11 +2068,14 @@ export interface LoadResultSummary {
 	errorRate?: number;
 	verdict?: "passed" | "failed";
 	/**
-	 * Exact assertion outcomes of a **scenario load run** that made at least one
-	 * (#2820): `assert.*` outcomes, required `extract.*` misses and inline
-	 * `pm.test` calls. Both keys are present or neither is, and neither is ever
-	 * zeroed: absent for a run that asserted nothing, a collection run, a
-	 * single-request run and a run stored before the field.
+	 * Assertion outcomes of a load run. A **scenario load run** that made at least
+	 * one carries both keys, exact (#2820): `assert.*` outcomes, required
+	 * `extract.*` misses and inline `pm.test` calls; neither is ever zeroed, and
+	 * both are absent for a run that asserted nothing, a collection run and a run
+	 * stored before the field. A **single-request run** carries `assertionsFailed`
+	 * alone (#3458), summed from its inline element tallies and its sampled
+	 * replay, so the row cannot say which population a failure came from; its
+	 * `assertionsPassed` stays absent because the two are not one population.
 	 *
 	 * `assertionsFailed` is what a row's verdict and subtitle read (`rowOutcome`,
 	 * `resultSubtitle`); `errorRate` and `verdict` stay HTTP-and-budget only.
@@ -2105,9 +2108,10 @@ export interface LoadResultSummary {
  * `resultSummary` at all, and `verdict` is present only when the run declared
  * budgets.
  *
- * No renderer reader: the history row's badge and glyph stay gated on a load
- * run, and the MCP `list_runs` row, which passes the summary through, is the
- * consumer.
+ * `failed` and `errored` are what the history row reads (#3458): a completed run
+ * with either reads as failed, and its subtitle prints the counts
+ * (`rowOutcome`, `collectionSubtitle`). `verdict` has no renderer reader; the
+ * MCP `list_runs` row, which passes the summary through, is its consumer.
  */
 export interface CollectionResultSummary {
 	passed?: number;
@@ -2975,6 +2979,21 @@ export interface RunScenarioStepElementTally {
 	consoleDropped?: number;
 }
 
+/**
+ * One `lifecycle.setup[]` / `teardown[]` row (#3455): the outcome of
+ * {@link ElementOutcome} plus the script's own words, bounded and shaped as an
+ * inline element's tally row carries them. `message` is empty or absent for a
+ * row that ran clean; a failed row's carries the reason, including a failing
+ * `pm.test`.
+ */
+export interface LifecycleElementOutcome
+	extends
+		ElementOutcome,
+		Pick<
+			RunScenarioStepElementTally,
+			"messages" | "messagesDropped" | "console" | "consoleDropped"
+		> {}
+
 /** One thing an inline script element reported: the error it threw, or a failing test as `name: message`. */
 export interface ElementTallyMessage {
 	kind: "error" | "test";
@@ -3631,8 +3650,8 @@ export interface RunReport {
 	 * collection to declare them on.
 	 */
 	lifecycle?: {
-		setup?: ElementOutcome[];
-		teardown?: ElementOutcome[];
+		setup?: LifecycleElementOutcome[];
+		teardown?: LifecycleElementOutcome[];
 	};
 	/**
 	 * A single-request run's own step-level element outcomes (issues #1594,

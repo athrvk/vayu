@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import { useImportReportStore, type ImportReport } from "@/stores/import-report-store";
 import type { Collection } from "@/types";
 
@@ -116,6 +117,16 @@ describe("InfoTab - the import notes", () => {
 
 		expect(screen.queryByText("Import notes")).toBeNull();
 		expect(useImportReportStore.getState().reports).toEqual({});
+	});
+
+	it("says what its dismiss button does on keyboard focus (#3498)", async () => {
+		useImportReportStore.getState().record(report);
+		await renderTab();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Dismiss import notes" }),
+			"Dismiss import notes"
+		);
 	});
 
 	it("does not show another root's report", async () => {

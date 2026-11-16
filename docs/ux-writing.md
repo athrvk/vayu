@@ -49,12 +49,11 @@ isn't the same:
 `Please` are banned in UI text. The first two are the passive, formal register
 the voice section rules out; `Please` is the apology's softer cousin and breaks
 the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
-that you would like them to. The app's own text has one breach left, the
-failed engine restart's "Please close the Application and reopen it."
-(`electron/sidecar.ts`, #2292). Beyond it are engine response bodies that the
-app shows after its own "Couldn't ..." prefix (#2295). The first is held by the
-voice and casing scan, the second by the engine test #2295 adds (see
-[Enforcement](#enforcement)). Log strings and code comments are a separate
+that you would like them to. The app's own text has no breach of these left,
+and the voice and casing scan keeps it so (see [Enforcement](#enforcement)).
+The engine's text is held the same way: a message the app shows after its own
+"Couldn't ..." prefix (#2295) opens "Couldn't ..." too, by an engine test
+(#3500). Log strings and code comments are a separate
 surface and keep whatever form reads well there.
 
 ## Terminology glossary
@@ -74,7 +73,7 @@ already consistent in the codebase, plus fixing the one real overload.
 | The free-text line a user writes about a run when starting it | **Comment** | The run header (History, and the live dashboard's) labels it "Comment", and the payload key is `comment`. Never "Note" or "Description". The start dialog's field is the **Run label**, a field name for the act of typing it. |
 | The load-testing feature | **Load test** (noun), **Run** (verb: "Run a load test") | Already consistent as its own noun phrase. |
 | A recorded run, by kind (History, tab titles, Recent runs) | **Send**, **Collection run**, **Load test** | One name per `Run["type"]` (`design`, `scenario`, `load`), defined once as `RUN_TYPE_NAME` in `modules/history/types.ts`, and spelled the same wherever the app says it: the row's visible kind, its accessible name ("Open Load test, completed, ..."), the palette's run subtitle, the History breadcrumb ("Load test run") and the Live crumb ("Live load test"). Never "request run", "collection" or "scenario load run" for these. `modules/history/types.test.ts` fails on a second kind table or an inline kind ternary. The agent reference (`lib/agent-reference.ts`) keeps its own words on purpose: it is pasted into an agent's context, not shown to a user. Never "Design" or "Design mode": `design` is the wire value, not a word the user sees. A run list's empty state says "No runs", never "No test runs" - a send is a run too. |
-| Assertions on a response | **Tests** (tab), **Test validation** (results); **Assertions** (a scenario load run's exact count) and **Sampled replay** (the Test validation card when that Assertions card sits beside it) | Two populations, two names (#2820): **Assertions** is counted on every response, **Sampled replay** only on the responses kept for the post-run replay, and the Overview never shows two cards both called "Test validation". A run's verdict reason says "4,580 assertions failed" (singular "1 assertion failed"), never "failures" or "tests failed". The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
+| Assertions on a response | **Tests** (tab), **Test validation** (results); **Assertions** (a scenario load run's exact count) and **Sampled replay** (the Test validation card when that Assertions card sits beside it) | Two populations, two names (#2820): **Assertions** is counted on every response, **Sampled replay** only on the responses kept for the post-run replay, and the Overview never shows two cards both called "Test validation". A run's verdict reason says "4,580 assertions failed" (singular "1 assertion failed"), never "failures" or "tests failed"; a failure counted only by the sampled replay says so ("4 assertions failed in the sampled replay", #3458). A collection run's History line counts steps the same bare way: "2 passed, 1 failed, 4 errored". The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
 | A pre-request/post-request script | **Script**, living under the **Elements** tab | Keep "Elements" as the tab name (the consolidation from separate Pre-request/Tests tabs was deliberate), but individual script errors/labels keep saying "Pre-request script" / "Post-request script" (sentence case, matching the engine's own labels in `script_kinds.cpp`) - renaming those to "Elements" would lose information the label carries. Discoverability for someone looking for "Pre-request Script" or "Tests" is carried by two lines instead: the empty Elements panel's gloss (with a Post-request script chip), and the response Tests tab's empty state, which points at the Elements tab. An inline empty state is one line (`title` only), so the pointer is folded into it. |
 | A failed request in a load test's numbers | **Error**; the two kinds are **HTTP errors** and **No response** | A request is an error when its response status is outside 2xx/3xx, or it got no response at all (timeout, refused connection, DNS or TLS failure). A 3xx is a success. One definition for every error count and rate (the live card, the report, History, the budget verdict, the Steps table's Errors column), so never "failed" in one place and "error" in another. This reconciles with the first source under "Errors have three sources": a target API's 404 or 500 is still *data* in the Send pane and gets no error chrome there, but in a load test it is counted as an HTTP error because the run's rate is the question being asked. Never "transport error" in user copy. A request a user's **Stop** cancelled before it was answered is none of **error** or **failed**: it got no outcome from the target, so it is counted apart as **cancelled** and is never an error. Say "N requests cancelled by Stop" (a fragment, muted, never destructive); it is in no error count, rate or total. |
 | The number of simulated users in a closed-loop load test | **Virtual users** | Never "VUs", "Connections", "Concurrency" or "concurrent users" in UI copy; prose pluralises it ("1 virtual user", "64 virtual users"). Written once in `constants/load-test-modes.ts` (`CONCURRENCY_LABEL`, `CONCURRENCY_UNIT`, `formatConcurrency`), and the mode is **Constant virtual users**. The open-loop measurement keeps **In-flight requests**: a Constant RPS run's stat, chart title and series say that, every other mode says virtual users (`isClosedLoopMode`, `concurrencyMeasureLabel`). API and MCP field names keep `concurrency`, and genuine TCP/TLS "connection" copy (Settings › Network, the connection-reuse charts) is not this quantity. |
@@ -107,10 +106,11 @@ scattered strings land the same way.
     that is an in-app surface and has no platform convention to follow. One
     destination, one name: the settings item reads "Settings…" everywhere (macOS
     itself now calls it Settings, not Preferences). The macOS Dock menu follows
-    the macOS rule; the Windows Jump List follows sentence case. The code that
-    serves both from one template (`createMenu` in `electron/main.ts`, which
-    needs a per-platform label function) belongs to the sentence-case sweep, not to this
-    page.
+    the macOS rule; the Windows Jump List follows sentence case. `createMenu`
+    in `electron/main.ts` serves both from one template and takes every label
+    that differs from `menuLabels` in `electron/menu-labels.ts`, which holds the
+    Title Case set for `darwin` and the sentence-case set for anything else
+    (`menu-labels.test.ts`).
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis (one
@@ -148,7 +148,13 @@ scattered strings land the same way.
   The response viewer's total and queue wait (`formatDuration`,
   `formatResponseTime`) follow the same rule, so a 2.27 ms send reads `2.27 ms`
   there and as a load p50; only its phase breakdown (`formatPhaseDuration`)
-  keeps a ladder of its own, one decimal in the tens of milliseconds.
+  keeps a ladder of its own, one decimal in the tens of milliseconds. Every
+  digit follows the user's locale, the decimal mark included (a decimal-comma
+  locale reads `2,5ms` and `1,23s`, never one of each): a fixed number of
+  decimals is `formatFixed(value, digits)` and "up to n, trailing zeros drop"
+  is `formatTrimmed(value, digits)`, both in `lib/format-number.ts`, ungrouped as the `toFixed` they replace was, and cached
+  per digit count, so a new surface calls one of them rather than building an
+  `Intl.NumberFormat` or a `toFixed` of its own.
   A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
   (`1.2k`), which take their decimals from the tick spacing so no two
@@ -158,8 +164,16 @@ scattered strings land the same way.
   `formatSeconds` of your own: a source scan fails on it
   (`lib/no-local-format-ms.test.ts`), and a second one
   (`lib/no-hand-built-numbers.test.ts`) fails on any `.toFixed(` outside its
-  short list of axis, byte-size and viewer-phase formatters. The screen-reader announcer takes the
-  same digits and speaks the unit as a word (`2.40 seconds`). Name a latency series for what it
+  short list (the MCP run-compare text and the `Nx baseline` multiplier). A
+  size in bytes is `formatBytes` in the same file, the only byte-size formatter:
+  `512 B`, then `KB`, `MB` and `GB` with one decimal (`2.0 KB`, a 3 GiB body
+  `3.0 GB`), 1024-based under those labels, so an engine limit of 104857600
+  reads `100.0 MB`. A byte *rate* is `formatByteRateParts`, which is decimal
+  (`4.4 KB/s` is 4400 bytes per second); the two answer different questions and
+  do not share a base. The screen-reader announcers take the
+  same digits and speak the unit as a word (`2.40 seconds`), and a figure
+  written `<0.1%` as "less than 0.1%" (`lib/spoken-text.ts`), since a reader
+  may skip the symbol. Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare
   "latency" or "wire".
@@ -184,7 +198,10 @@ scattered strings land the same way.
   exceptions today: all three moved to the Trash and kept their dialog, whose
   body says the Trash can restore it instead of calling the delete final. The
   Trash's own "Delete forever" dialog for a certificate names what is lost (the
-  stored passphrase) and what is not (the files on disk). An imported example's delete keeps a dialog too,
+  stored passphrase) and what is not (the files on disk), and for a collection
+  the sub-collections and requests the purge destroys, an earlier delete's
+  included (#3449). The Trash's retention line says when the sweep runs ("...
+  the next time Vayu starts"), never a clock the engine does not keep. An imported example's delete keeps a dialog too,
   but it is not trashed, so its body says what a sync and a re-import do.
 - **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format: the
   label, then the chord in a `TooltipHint` beside it, no parentheses
@@ -264,15 +281,25 @@ from creeping back in afterward. These hold it:
   `EveryEngineSettingLabelIsSentenceCase` reads the setting labels the Settings
   page renders verbatim (#2293); a later word may start with a capital only when
   it is all capitals or one of OAuth, OpenAPI, Send, Sends,
-  Expect. The other, a scan of
-  `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
-  "Failed to", does not exist yet and is owned by #2295.
+  Expect. The other, `user_error_wording_scan_test.cpp`
+  (#2295, #3500), reads every statement under `engine/src` and fails on a
+  literal opening "Failed to" or "Could not" that can reach a client. A log
+  call and a `throw` are exempt, their wording being the engine's own, and so
+  is each entry of the test's short `kAllowed` list, which names the reason it
+  reaches no screen or must stay as written. An entry whose text is gone fails
+  the test, so the list cannot outlive its cause.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
-  fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
-  "curl request" (write "cURL"), and on three full stops straight after a
-  letter (write `…`). It has no allowlist: a spread, a regex, a `"..."` code
-  sample and a GraphQL `... on` fragment put something other than a letter
-  before the dots.
+  fails on names joined with `>` (`Settings > Files`, `Engine > Data`: write
+  `Settings ›`), on lowercase "curl command" or "curl request" (write "cURL"),
+  on three full stops straight after a letter (write `…`), and on "folder" or
+  "folders" as a word (#3500: a group of requests is a collection or a nested
+  collection). The first three have no allowlist: a spread, a regex, a `"..."`
+  code sample and a GraphQL `... on` fragment put something other than a letter
+  before the dots. The folder rule exempts an identifier (a lower-case token such
+  as `folder` or `new-folder-form`) and `FILESYSTEM_FOLDERS`, the phrases a file
+  uses for a directory on disk (the allowed folders, the folder picker, the logs
+  folder), each with its reason; a phrase no string carries any more fails the
+  test.
 - **Narrow scanners**, one rule each, are filed by their own issues; each adds
   its rule to the scan above when it lands. Landed: hand-built plurals and
   "(s)" (`plural-rule.test.ts`, #2307), which reads "(s)" in the same strings
@@ -284,9 +311,10 @@ from creeping back in afterward. These hold it:
   for a design-mode send.
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
-`file :: literal`, each entry naming the open issue that retires it. The commit
-that fixes a string deletes its entry: a test fails on an entry whose literal
-the sources no longer carry, so a fix cannot land with its entry left behind.
+`file :: literal`, each entry naming the open issue that retires it (it is empty
+now, #3500). The commit that fixes a string deletes its entry: a test fails on
+an entry whose literal the sources no longer carry, so a fix cannot land with
+its entry left behind.
 Text the rules match that is not interface copy (a line of a code sample) is
 listed apart, with its reason instead of an issue.
 

@@ -19,6 +19,12 @@
 /** What a row is, everywhere the tree reads one out of the DOM. */
 export const TREE_ITEM = '[role="treeitem"]';
 
+/**
+ * On an empty folder's "Empty collection" line: the id of the folder it stands
+ * in. The line is not a treeitem, so a drop resolves its folder from this.
+ */
+export const EMPTY_OWNER_ATTR = "data-tree-empty-owner";
+
 /** Every visible row, in the order the tree renders them. */
 export function treeRows(tree: HTMLElement | null | undefined): HTMLElement[] {
 	return Array.from(tree?.querySelectorAll<HTMLElement>(TREE_ITEM) ?? []);

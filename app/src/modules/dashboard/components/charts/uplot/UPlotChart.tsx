@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import { formatFixed } from "@/lib/format-number";
 import { readUplotTheme, currentThemeKey, type ColorRole } from "./uplotTheme";
 import {
 	overlaysPlugin,
@@ -79,6 +80,14 @@ export interface UPlotSeriesSpec {
 }
 
 export interface UPlotChartProps {
+	/**
+	 * The chart's text alternative (#3498): a canvas has nothing else for a screen
+	 * reader. Required so no mount site can omit it; `describeChart` builds one
+	 * from the title and the series. The host is `role="img"`, so a legend or any
+	 * control a chart needs sits beside it, never inside (an image's children are
+	 * hidden from assistive technology).
+	 */
+	ariaLabel: string;
 	/** Aligned data: [xs, series0, series1, …] - every series shares xs. */
 	data: uPlot.AlignedData;
 	series: UPlotSeriesSpec[];
@@ -194,19 +203,20 @@ function visibleSplits(
 }
 
 function defaultY(v: number): string {
-	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
+	return v >= 1000 ? `${formatFixed(v / 1000, 1)}s` : `${Math.round(v)}`;
 }
 
 /** Default 0.5 s tooltip time formatter for elapsed-seconds x axes. */
 function defaultTimeTooltip(v: number): string {
-	return `${v.toFixed(1)}s`;
+	return `${formatFixed(v, 1)}s`;
 }
 
 export function UPlotChart({
+	ariaLabel,
 	data,
 	series,
 	height = 220,
-	xFormat = (v) => `${v.toFixed(0)}s`,
+	xFormat = (v) => `${formatFixed(v, 0)}s`,
 	xSplits,
 	xTooltipFormat,
 	xTime = false,
@@ -557,7 +567,12 @@ export function UPlotChart({
 	}, [isLive, data]);
 
 	return (
-		<div ref={hostRef} style={{ width: "100%", height, position: "relative" }}>
+		<div
+			ref={hostRef}
+			role="img"
+			aria-label={ariaLabel}
+			style={{ width: "100%", height, position: "relative" }}
+		>
 			{liveDot && (
 				<span
 					aria-hidden

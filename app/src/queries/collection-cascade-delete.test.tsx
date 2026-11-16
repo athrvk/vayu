@@ -117,6 +117,23 @@ describe("deleting a collection refetches every request list", () => {
 	});
 });
 
+describe("deleting a collection refetches the running mocks", () => {
+	it("marks the mock list stale, because the engine stopped the subtree's mocks (#3449)", async () => {
+		// Mutation check: drop the `mockServer.list()` invalidation and the tree
+		// keeps offering a mock the engine already stopped until the next poll.
+		deleteCollection.mockResolvedValue(undefined);
+		const client = makeClient();
+		client.setQueryData(queryKeys.mockServer.list(), [{ mockId: "mock_1" }]);
+
+		const { result } = renderHook(() => useDeleteCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync("root");
+
+		expect(client.getQueryState(queryKeys.mockServer.list())?.isInvalidated).toBe(true);
+	});
+});
+
 describe("creating a collection", () => {
 	it("seeds its empty request list and leaves every other list alone", async () => {
 		createCollection.mockResolvedValue(col("new"));

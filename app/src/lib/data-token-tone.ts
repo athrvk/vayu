@@ -28,9 +28,12 @@ import type { DataTokenTone } from "./data-contract";
 /**
  * Foreground per tone. `warning` is amber rather than destructive red on
  * purpose: an undeclared column still binds if the run's file carries it, so
- * the state reads "check this", never "nothing can ever answer this".
+ * the state reads "check this", never "nothing can ever answer this". It is
+ * double-underlined too, so it stays apart from the accent where the two
+ * colours sit close (#3499); the editor's `vayu-variable-token-warning` rule
+ * in `index.css` paints the same.
  */
 export const DATA_TOKEN_TONE_CLASS: Record<DataTokenTone, string> = {
 	muted: "text-muted-foreground",
-	warning: "text-warning-text",
+	warning: "text-warning-text underline decoration-double underline-offset-[3px]",
 };

@@ -480,6 +480,9 @@ enum class Exemption : std::uint8_t {
     /// (`vayu::runtime::CRYPTO_JS_MEMBERS`); anything else under it throws.
     /// Reads through an alias or a destructure are `CryptoJsReads`'s, not the row's.
     CryptoJsMember,
+    /// A call with an empty argument list (`pm.response.json()`); the same
+    /// path called with anything between the parentheses is the row's use.
+    NoArguments,
 };
 
 /**
@@ -534,8 +537,13 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "pm.execution.runRequest", Anchor::Bare, "pm.execution.runRequest", "" },
 { "pm.execution.location", Anchor::Bare, "pm.execution.location", "" },
 { "pm.response.dataURI", Anchor::Bare, "pm.response.dataURI", "" },
+{ "pm.response.jsonp", Anchor::Bare, "pm.response.jsonp", "" },
+// `json()` runs; `json(reviver)` is parsed without the reviver (#3462), so a
+// script relying on one gets different values with no error.
+{ "pm.response.json(reviver)", Anchor::Bare, "pm.response.json", "(", Exemption::NoArguments },
 { "pm.response.headers.map", Anchor::Bare, "pm.response.headers.map", "" },
 { "pm.request.headers.map", Anchor::Bare, "pm.request.headers.map", "" },
+{ "pm.request.url.variables", Anchor::Bare, "pm.request.url.variables", "" },
 { "pm.cookies.set", Anchor::Bare, "pm.cookies.set", "" },
 { "pm.cookies.unset", Anchor::Bare, "pm.cookies.unset", "" },
 { "pm.cookies.clear", Anchor::Bare, "pm.cookies.clear", "" },
@@ -728,6 +736,16 @@ bool crypto_js_use_is_supported (const ScanInput& in, std::size_t root) {
     return follow_members (in, at);
 }
 
+/// Whether the `(` after @p callee_end is closed by the next significant
+/// character, so the call passes nothing. Comments are blanked in @p code.
+bool is_call_without_arguments (std::string_view code, std::size_t callee_end) {
+    const std::size_t open = code.find_first_not_of (WHITESPACE, callee_end);
+    if (open == std::string_view::npos || code[open] != '(') {
+        return false;
+    }
+    return next_significant (code, open + 1) == ')';
+}
+
 /// Whether the use of @p rule whose path ends before token @p end is one Vayu runs.
 bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
     switch (rule.exempt) {
@@ -736,6 +754,8 @@ bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
         return shelf_require (in.script, in.code, in.tokens.at (end - 1).end).has_value ();
     case Exemption::CryptoJsMember:
         return crypto_js_use_is_supported (in, end - 1);
+    case Exemption::NoArguments:
+        return is_call_without_arguments (in.code, in.tokens.at (end - 1).end);
     }
     return false;
 }

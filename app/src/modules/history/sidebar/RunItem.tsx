@@ -10,7 +10,7 @@ import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
-import { Badge, Button, ICON_MOTION } from "@/components/ui";
+import { Badge, ICON_MOTION, TooltipIconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { truncateUrl } from "@/lib/truncate-url";
@@ -24,6 +24,7 @@ import {
 	MethodBadge,
 	OUTCOME_TITLE,
 	RowContextMenu,
+	ROW_ACTIONS_REVEAL,
 	RunStatusGlyph,
 	RUN_STATUS,
 	rowOutcome,
@@ -32,7 +33,7 @@ import {
 import { TimeTooltip } from "@/components/shared/TimeValue";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
-import { resultSubtitle } from "./result-subtitle";
+import { collectionSubtitle, resultSubtitle } from "./result-subtitle";
 import {
 	Activity,
 	Clock,
@@ -94,6 +95,14 @@ interface RunItemProps {
 	collectionName?: string;
 }
 
+/** The line under a row's identity: a load run's headline numbers, or a collection run's step counts. */
+function resultLineOf(run: Run): string | null {
+	if (!run.resultSummary) return null;
+	if (run.type === "load") return resultSubtitle(run.resultSummary);
+	if (run.type === "scenario") return collectionSubtitle(run.resultSummary);
+	return null;
+}
+
 function RunItem({
 	run,
 	onSelect,
@@ -111,7 +120,9 @@ function RunItem({
 	const getRequestInfo = () => {
 		if (!run.summary) return { url: null, method: null };
 		const url = run.summary.url || null;
-		const method = run.summary.method || "GET";
+		// No "GET" default for a collection run: its work has no method, and a
+		// truthy one here would hide the folder glyph the identity line draws.
+		const method = run.summary.scenario ? null : run.summary.method || "GET";
 		const type = run.summary.mode;
 		// Requested protocol only - see design-run-seed.ts's doc comment for the
 		// requested-vs-negotiated distinction. A load run's summary has no single
@@ -286,15 +297,15 @@ function RunItem({
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
 
-	// What a finished load run did (#2130): the verdict `completed` leaves out,
-	// drawn as the glyph's shape and said in words in the activator's name, and
-	// the headline numbers as a line. A row with no `resultSummary` has neither.
+	// What a finished load run did (#2130), or a collection run whose steps did
+	// not all pass (#3458): the verdict `completed` leaves out, drawn as the
+	// glyph's shape and said in words in the activator's name, and the headline
+	// numbers as a line. A row with no `resultSummary` has neither.
 	const judgement = rowOutcome(run);
 	const verdictName = judgement
 		? `, verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
 		: "";
-	const resultLine =
-		run.type === "load" && run.resultSummary ? resultSubtitle(run.resultSummary) : null;
+	const resultLine = resultLineOf(run);
 	// Why the run was run: the one line a user writes about it. A permanent line,
 	// not a hover row - it is what tells two runs of one url apart.
 	const comment = run.summary?.comment;
@@ -304,6 +315,12 @@ function RunItem({
 	const showsRunBounds = loadTestType !== "capacity";
 	const duration = showsRunBounds ? run.summary?.duration : undefined;
 	const concurrency = showsRunBounds ? run.summary?.concurrency : undefined;
+
+	// A pinned run keeps its pin on screen, and a pending delete keeps its spinner:
+	// both are state, not affordance. Whatever is not state still gives its width
+	// back until the row is hovered or focused (`ROW_ACTIONS_REVEAL`).
+	const pinIsState = !!run.baseline || isTogglingBaseline;
+	const actionsAreState = pinIsState || isDeleting;
 
 	const hasMeta =
 		(scenario &&
@@ -329,7 +346,7 @@ function RunItem({
 					// so the selected state would snap rather than fade in.
 					"focus-row group relative flex flex-col gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-[background-color,border-color,box-shadow]",
 					isSelected
-						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+						? "bg-primary-tint ring-1 ring-inset ring-primary/20 hover:bg-primary-tint-hover"
 						: "hover:bg-accent"
 				)}
 			>
@@ -391,7 +408,7 @@ function RunItem({
 					{run.baseline && (
 						<Badge
 							variant="chip"
-							className="min-w-0 max-w-1/2 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
+							className="min-w-0 max-w-1/2 gap-1 bg-primary-tint px-1.5 py-0 text-micro font-semibold text-primary"
 							title={pinChipText}
 						>
 							<Pin className="size-icon-sm shrink-0" />
@@ -432,7 +449,12 @@ function RunItem({
 					)}
 					{/* z-10: sits above the stretched activator below, so these stay
 					    clickable while the rest of the row selects the run. */}
-					<div className="relative z-10 flex shrink-0 items-center gap-1">
+					<div
+						className={cn(
+							"z-10 flex shrink-0 items-center gap-1",
+							!actionsAreState && ROW_ACTIONS_REVEAL
+						)}
+					>
 						{/*
 						 * Pin this run. Every run type gets it: pinning keeps the run
 						 * past retention and finds it again under the Pinned filter.
@@ -445,55 +467,51 @@ function RunItem({
 						 * the pointer would read as unpinned.
 						 */}
 						{onToggleBaseline && (
-							<Button
+							<TooltipIconButton
 								variant="rowAction"
-								size="icon"
 								onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
 								disabled={isTogglingBaseline}
-								aria-label={pinActionLabel}
+								label={pinActionLabel}
+								tooltip={pinTooltip}
 								aria-pressed={!!run.baseline}
-								title={pinTooltip}
 								className={cn(
-									"size-target transition-opacity",
-									run.baseline || isTogglingBaseline
-										? "opacity-100"
-										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+									"size-target",
+									actionsAreState && !pinIsState && ROW_ACTIONS_REVEAL
 								)}
-							>
-								{isTogglingBaseline ? (
-									<Loader2 className="size-icon-sm animate-spin" />
-								) : run.baseline ? (
-									<PinOff
-										className="size-icon-sm"
-										data-icon-motion={ICON_MOTION.tiltPin}
-									/>
-								) : (
-									<Pin
-										className="size-icon-sm"
-										data-icon-motion={ICON_MOTION.tiltPin}
-									/>
-								)}
-							</Button>
+								icon={
+									isTogglingBaseline ? (
+										<Loader2 className="size-icon-sm animate-spin" />
+									) : run.baseline ? (
+										<PinOff
+											className="size-icon-sm"
+											data-icon-motion={ICON_MOTION.tiltPin}
+										/>
+									) : (
+										<Pin
+											className="size-icon-sm"
+											data-icon-motion={ICON_MOTION.tiltPin}
+										/>
+									)
+								}
+							/>
 						)}
-						<Button
+						<TooltipIconButton
 							variant="rowActionDestructive"
-							size="icon"
 							onClick={(e) => onDelete(run.id, e)}
 							disabled={isDeleting}
-							aria-label="Delete run"
+							label="Delete run"
 							className={cn(
-								"size-target transition-opacity",
-								isDeleting
-									? "opacity-100"
-									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+								"size-target",
+								actionsAreState && !isDeleting && ROW_ACTIONS_REVEAL
 							)}
-						>
-							{isDeleting ? (
-								<Loader2 className="size-icon-sm animate-spin" />
-							) : (
-								<Trash2 className="size-icon-sm" />
-							)}
-						</Button>
+							icon={
+								isDeleting ? (
+									<Loader2 className="size-icon-sm animate-spin" />
+								) : (
+									<Trash2 className="size-icon-sm" />
+								)
+							}
+						/>
 					</div>
 				</div>
 
@@ -529,7 +547,7 @@ function RunItem({
 						{scenario?.recursive && (
 							<span className="flex shrink-0 items-center gap-1">
 								<FolderTree className="size-icon-sm" />
-								Sub-folders
+								Nested collections
 							</span>
 						)}
 						{run.type === "load" && duration && (

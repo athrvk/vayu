@@ -550,7 +550,43 @@ TEST (ScriptApiScan, NamesEachPmMemberThatIsUndefinedAtRunTime) {
     { "pm.response.headers.map(h => h.key);", "pm.response.headers.map" },
     { "pm.request.headers.map(h => h.key);", "pm.request.headers.map" },
     { "pm\n  .response\n  .headers\n  ?.map(f);", "pm.response.headers.map" },
+    { "const v = pm.request.url.variables;", "pm.request.url.variables" },
+    { "pm.request.url.variables.get('id');", "pm.request.url.variables" },
+    { "pm.request\n  .url\n  .variables;", "pm.request.url.variables" },
+    { "const p = pm.response.jsonp('cb');", "pm.response.jsonp" },
+    { "pm.response.jsonp();", "pm.response.jsonp" },
     });
+}
+
+// `pm.response.json(reviver)` runs but drops its argument (#3462): a use that
+// passes one is named, and the empty call that reads the body as it is is not.
+TEST (ScriptApiScan, NamesPmResponseJsonOnlyWhenItIsGivenAnArgument) {
+    expect_each_named_alone ({
+    { "pm.response.json(reviver);", "pm.response.json(reviver)" },
+    { "pm.response.json((k, v) => v);", "pm.response.json(reviver)" },
+    { "pm.response.json ( reviver );", "pm.response.json(reviver)" },
+    { "pm\n  .response\n  .json(\n    reviver);", "pm.response.json(reviver)" },
+    { "pm.response.json(...args);", "pm.response.json(reviver)" },
+    { "pm.response.json(null);", "pm.response.json(reviver)" },
+    { "const a = pm.response.json(); const b = pm.response.json(f);", "pm.response.json(reviver)" },
+    });
+    for (const char* script : { "pm.response.json();", "pm.response.json ( ) ;",
+         "pm.response.json(\n);", "pm.response.json(/* none */);",
+         "const x = pm.response.json().data;", "pm.response.json().map(f);", "pm.response.json()[0];",
+         // Not the call, and not a use that passes anything.
+         "const read = pm.response.json;", "pm.response.json;" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+}
+
+// A reviver handed to the parse is not named when it is given to something
+// else: the argument that matters is the one `pm.response.json` receives.
+TEST (ScriptApiScan, AnArgumentToAnotherJsonIsNotNamedAsAReviver) {
+    EXPECT_EQ (
+    names_in ("JSON.parse(pm.response.text(), reviver); "
+              "pm.response.json().items.filter(f); res.json(reviver); "
+              "pm.response.jsonX(r); pm.response.json_(r);"),
+    Names{});
 }
 
 TEST (ScriptApiScan, NamesEachFlatCookieWriterByItsOwnName) {
@@ -637,6 +673,10 @@ TEST (ScriptApiScan, ANearMissOfANewRowIsNotNamed) {
         pm.test('index', f); pm.execution.setNextRequest('x');
         pm.execution.locations; pm.response.dataURIs; pm.response.text();
         pm.request.url.toString(); pm.request.headers.get('a');
+        pm.request.url.query.get('a'); pm.request.url.variable;
+        pm.request.url.variablesX; pm.request.variables; pm.variables.get('a');
+        pm.collectionVariables.variables; const url = {}; url.variables;
+        pm.response.jsonX(); pm.response.jsonpp; pm.request.jsonp(1);
         o.fetch(u); o.URL; this.structuredClone; a?.TextEncoder;
         fetchData(); refetch; myURL; URLs; urlSearchParams; url; textEncoder;
         const s = "fetch URL localStorage"; // new XMLHttpRequest()

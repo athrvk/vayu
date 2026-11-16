@@ -59,6 +59,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			addSteps: vi.fn(),
 			setStreaming: mockScenarioSetStreaming,
 			streamLost: vi.fn(),
+			runEnded: vi.fn(),
 			summary: { counts: { passed: 0, failed: 0, skipped: 0, errored: 0 } },
 		}),
 	},

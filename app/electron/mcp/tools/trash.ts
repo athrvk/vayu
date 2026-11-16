@@ -27,10 +27,15 @@ const TRASH_KINDS = [
 export interface TrashRow {
 	kind: (typeof TRASH_KINDS)[number];
 	name: string;
-	/** Sub-collections this row's delete took with it. Always 0 for every kind but a collection. */
-	collections: number;
-	/** Requests this row's delete took with it. Always 0 for every kind but a collection. */
-	requests: number;
+	/**
+	 * Sub-collections and requests a purge destroys, an earlier delete's rows
+	 * included (#3449). Not the cohort `collections` / `requests` a restore puts
+	 * back, which is a floor here. Always 0 for every kind but a collection.
+	 */
+	purgeCollections: number;
+	purgeRequests: number;
+	/** The live owner's name; the engine sends it on request and example rows only. */
+	parentName?: string;
 	/** The environment's variable count; the engine sends it on environment rows only. */
 	variables: number;
 }
@@ -67,10 +72,23 @@ export async function readTrashEntry(
 	return {
 		kind: row.kind,
 		name: typeof row.name === "string" && row.name !== "" ? row.name : id,
-		collections: typeof row.collections === "number" ? row.collections : 0,
-		requests: typeof row.requests === "number" ? row.requests : 0,
+		purgeCollections: typeof row.purgeCollections === "number" ? row.purgeCollections : 0,
+		purgeRequests: typeof row.purgeRequests === "number" ? row.purgeRequests : 0,
+		parentName:
+			typeof row.parentName === "string" && row.parentName !== ""
+				? row.parentName
+				: undefined,
 		variables: typeof row.variables === "number" ? row.variables : 0,
 	};
+}
+
+/**
+ * ", from the <owner> "<name>"" for a request or example row, so two entries
+ * of one name tell apart in the prompt (#3449). Nothing when the engine named
+ * no owner.
+ */
+function ownedBy(entry: TrashRow, ownerKind: "collection" | "request"): string {
+	return entry.parentName === undefined ? "" : ` from the ${ownerKind} "${entry.parentName}"`;
 }
 
 /** One phrase naming what purging this entry destroys. */
@@ -82,9 +100,9 @@ export function describeTrashEntry(entry: TrashRow): string {
 				`${entry.variables} variable${entry.variables === 1 ? "" : "s"} in it`
 			);
 		case "request":
-			return `the saved request "${entry.name}"`;
+			return `the saved request "${entry.name}"${ownedBy(entry, "collection")}`;
 		case "example":
-			return `the saved example "${entry.name}"`;
+			return `the saved example "${entry.name}"${ownedBy(entry, "request")}`;
 		case "clientCertificate":
 			// `name` is the target (`host` or `host:port`). The row also holds the
 			// plaintext passphrase, which nothing else keeps; the files it only
@@ -95,10 +113,10 @@ export function describeTrashEntry(entry: TrashRow): string {
 			);
 		case "collection": {
 			const subject = `the collection "${entry.name}"`;
-			if (entry.collections === 0 && entry.requests === 0) return subject;
+			if (entry.purgeCollections === 0 && entry.purgeRequests === 0) return subject;
 			return (
-				`${subject}, with ${entry.collections} sub-collection(s) and ` +
-				`${entry.requests} saved request(s) inside it`
+				`${subject}, with ${entry.purgeCollections} sub-collection(s) and ` +
+				`${entry.purgeRequests} saved request(s) inside it`
 			);
 		}
 	}
@@ -107,7 +125,7 @@ export function describeTrashEntry(entry: TrashRow): string {
 /**
  * The engine's own refusal text off a 404/409 `EngineRequestError` from
  * `POST /trash/:id/restore`. Both of restore's failure shapes name the fix (a
- * wrong id, or which collection to restore first, per `trash.cpp`), so this
+ * wrong id, or the item and the Trash root to restore first, per `trash.cpp`), so this
  * surfaces that sentence rather than writing a second one that could disagree
  * with it. Anything but an error body falls back to the body, then the status
  * line - reading a refusal must never throw.
