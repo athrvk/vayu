@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
+import { wireTimings } from "./components/LoadTestConfigDialog/buildLoadTestConfig";
 import RunCollectionDialog from "@/modules/collections/RunCollectionDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
@@ -824,25 +825,19 @@ export default function RequestBuilder() {
 					...(composed as unknown as StartLoadTestRequest),
 					// Load test config
 					mode: config.mode,
-					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
+					...wireTimings(config),
 					targetRps: config.rps,
 					iterations: config.iterations,
 					concurrency: config.concurrency,
-					rampUpDuration: config.ramp_duration_seconds
-						? `${config.ramp_duration_seconds}s`
-						: undefined,
 					// Ramp-Up only. Never sent before: the field was plumbed to the
 					// engine and read back into the dashboard, but nothing set it, so
 					// every ramp started from the engine default of 1.
 					startConcurrency: config.start_concurrency,
 					// Capacity only. `startConcurrency` above is where the search
 					// begins and `concurrency` is its ceiling, so the mode adds
-					// only these two rather than a second spelling of bounds the
-					// ramp already owns.
+					// only `sloMs` and the step duration (in `wireTimings`) rather
+					// than a second spelling of bounds the ramp already owns.
 					sloMs: config.slo_ms,
-					stepDuration: config.step_duration_seconds
-						? `${config.step_duration_seconds}s`
-						: undefined,
 					maxInFlight: config.max_in_flight,
 					// A load run of a streaming request streams (issue #576).
 					// Read off the request rather than the dialog, and sent as
@@ -851,13 +846,10 @@ export default function RequestBuilder() {
 					// composed payload may carry a stale flag, and an omitted
 					// `false` would be read as "unset", not as "no".
 					stream: pendingLoadTestRequest.stream ?? false,
-					// The caps, in the engine's milliseconds. Present only for a
-					// streaming run - the engine rejects a cap without `stream`,
-					// which is what stops an unbounded run from being mistaken
-					// for a capped one.
-					maxStreamDurationMs: config.stream_duration_seconds
-						? config.stream_duration_seconds * 1000
-						: undefined,
+					// The stream caps (the duration one is in `wireTimings`, in the
+					// engine's milliseconds). Present only for a streaming run - the
+					// engine rejects a cap without `stream`, which is what stops an
+					// unbounded run from being mistaken for a capped one.
 					maxStreamEvents: config.stream_max_events,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
