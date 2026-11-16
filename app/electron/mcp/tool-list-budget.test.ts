@@ -205,6 +205,11 @@
  * row, which on top of #3449 and #3458 takes them to 150,690 / 148,094 /
  * 221,845 / 217,578 B; only the third cap moved, to 221,900, because the other
  * three still hold their rows.
+ *
+ * #3550's `headers` rows on `create_request` and `update_request` (the strict
+ * row schema with `valueWithheld` beside the map, paid twice) added 621 B to
+ * the writes-on rows, taking them to 222,466 / 218,199 B; those two caps went
+ * to 222,600 / 218,300 and the writes-off rows are untouched.
  */
 
 import { describe, it, expect } from "vitest";
@@ -226,8 +231,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_900 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 222_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 218_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

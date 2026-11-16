@@ -183,7 +183,9 @@ function revealGateSentence(host: McpHost): string {
 		"because it holds no credential. A credential slot of a saved request's `url`, or a " +
 		"`proxyUrl`, written back as the read showed it keeps its stored value, and the result " +
 		"names each one kept; to delete one, remove the parameter or the userinfo (clear a " +
-		"`proxyUrl` and write it again). " +
+		"`proxyUrl` and write it again). A saved request's header row written back as read, " +
+		"`valueWithheld: true` and no `value`, keeps its stored value; a `headers` map " +
+		"replaces the list, and the result names each unread row it drops. " +
 		"A request that references a secret still sends with it, because the engine resolves " +
 		"it. What a run recorded (run rows, reports, samples, exports, send results, inbox " +
 		"captures, mock activity) reads `<redacted>` in place of every secret variable's " +

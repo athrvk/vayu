@@ -97,6 +97,31 @@ export const requestHeadersInput = z
 	);
 
 /**
+ * A stored header list's `headers` argument, on the tools that write one: the
+ * ordered `{key, value, enabled}` rows the reads return, or the single-valued
+ * map, both read by `readHeaderRows`. A row is strict and declares
+ * `valueWithheld` (#3556), so a row written back as read reaches the handler
+ * whole. @p description is the tool's own, since only a write over a stored
+ * list has a stored value for a withheld row to keep.
+ */
+export function storedHeadersInput(description: string) {
+	return z
+		.union([
+			z.array(
+				z.strictObject({
+					key: z.string(),
+					value: z.string().optional(),
+					enabled: z.boolean().optional(),
+					valueWithheld: z.boolean().optional(),
+				})
+			),
+			z.record(z.string(), z.string()),
+		])
+		.optional()
+		.describe(description);
+}
+
+/**
  * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.
  *
  * One fragment for the two tools that build a request payload: the field means

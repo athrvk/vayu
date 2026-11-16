@@ -65,7 +65,7 @@ import {
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { describeImport, describeImportPreview } from "./tools/spec-bindings.js";
-import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
+import { REDACTED_MARKER, withheldPointer, withholdRowSecrets } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
 /**
@@ -1132,6 +1132,177 @@ describe("data-write tools", () => {
 			expect(client.getRequest).not.toHaveBeenCalled();
 			expect(writtenOf(client)[1]).toEqual({ url: "https://u@h/x?api_key=&page=3" });
 			expect(res.content).toHaveLength(1);
+		});
+	});
+
+	describe("header rows written back while secrets are withheld (#3550)", () => {
+		const storedHeaders = [
+			{ key: "Authorization", value: "Bearer s3cret", enabled: true },
+			{ key: "X-Trace", value: "1", enabled: true },
+			{ key: "X-Off", value: "off", enabled: false },
+			{ key: "Set-Cookie", value: "a=1", enabled: true },
+			{ key: "Set-Cookie", value: "b=2", enabled: true },
+		];
+		const storedRow = { id: "req_1", name: "Get users", headers: storedHeaders, updatedAt: 7 };
+		const storedClient = () =>
+			fakeClient({ getRequest: vi.fn().mockResolvedValue(structuredClone(storedRow)) });
+		/** The rows `get_request` hands an agent while reveal is off. */
+		const readRows = () =>
+			(withholdRowSecrets(structuredClone(storedRow)) as { headers: object[] }).headers;
+		const written = (client: EngineClient) =>
+			(client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		const update = (client: EngineClient, headers: unknown, reveal = false) =>
+			dispatchTool(
+				"update_request",
+				{ requestId: "req_1", headers },
+				ctxWith(client, { allowWrites: true, revealSecretsToAgents: reveal })
+			);
+
+		// Mutation check: return a withheld row as given in
+		// `restoreWithheldHeaderRows` and the PUT loses the Authorization and
+		// Set-Cookie values.
+		test("the rows as read, one value changed, keep every stored value, flag, repeat and the order", async () => {
+			const rows = readRows();
+			expect(rows[0]).toEqual({ key: "Authorization", enabled: true, valueWithheld: true });
+			rows[1] = { ...rows[1], value: "2" };
+			rows.push({ key: "X-New", value: "y" });
+			const client = storedClient();
+			const res = await update(client, rows);
+			expect(res.isError).toBeFalsy();
+			const [, payload, , ifMatch] = written(client);
+			expect(payload).toEqual({
+				headers: [
+					{ key: "Authorization", value: "Bearer s3cret", enabled: true },
+					{ key: "X-Trace", value: "2", enabled: true },
+					{ key: "X-Off", value: "off", enabled: false },
+					{ key: "Set-Cookie", value: "a=1", enabled: true },
+					{ key: "Set-Cookie", value: "b=2", enabled: true },
+					{ key: "X-New", value: "y", enabled: true },
+				],
+			});
+			expect(ifMatch).toBe('W/"7"');
+			expect(res.content).toHaveLength(1);
+		});
+
+		test("a withheld row keeps the stored row of its name and occurrence, whatever the spelling", async () => {
+			const client = storedClient();
+			await update(client, [
+				{ key: "set-cookie", value: "new=1" },
+				{ key: "SET-COOKIE", valueWithheld: true },
+			]);
+			expect(written(client)[1].headers).toEqual([
+				{ key: "set-cookie", value: "new=1", enabled: true },
+				{ key: "SET-COOKIE", value: "b=2", enabled: true },
+			]);
+		});
+
+		// Mutation check: drop the throw for an unmatched withheld row in
+		// `restoreWithheldHeaderRows` and the write goes out.
+		test.each([
+			["a name nothing stores", [{ key: "X-Api-Key", valueWithheld: true }], "X-Api-Key"],
+			[
+				"one occurrence more than is stored",
+				[0, 1, 2].map(() => ({ key: "Set-Cookie", valueWithheld: true })),
+				'only 2 "Set-Cookie" headers are stored',
+			],
+		])(
+			"a withheld row matching %s is refused as input, naming it",
+			async (_label, rows, named) => {
+				const client = storedClient();
+				const res = await update(client, rows);
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+				expect(firstText(res)).toContain(named);
+				expect(client.updateRequest).not.toHaveBeenCalled();
+			}
+		);
+
+		// Mutation check: leave the dropped-header caveat out of
+		// `mergeRequestEdits` and the note is gone.
+		test("a map write still replaces the list, and names the unread rows it dropped", async () => {
+			const client = storedClient();
+			const res = await update(client, { "X-Trace": "2", "Set-Cookie": "c=3" });
+			expect(res.isError).toBeFalsy();
+			expect(written(client)[1]).toEqual({
+				headers: [
+					{ key: "X-Trace", value: "2", enabled: true },
+					{ key: "Set-Cookie", value: "c=3", enabled: true },
+				],
+			});
+			expect(res.content).toHaveLength(2);
+			const caveat = res.content[1].text;
+			expect(caveat).toContain('"Authorization", "Set-Cookie" headers');
+			expect(caveat).toContain("valueWithheld: true");
+		});
+
+		test("rows that keep every unread row carry no caveat", async () => {
+			const client = storedClient();
+			const res = await update(client, readRows());
+			expect(res.isError).toBeFalsy();
+			expect(written(client)[1].headers).toEqual(storedHeaders);
+			expect(res.content).toHaveLength(1);
+		});
+
+		test("with reveal on, a map write reads nothing and notes nothing", async () => {
+			const client = storedClient();
+			const res = await update(client, { "X-Trace": "2" }, true);
+			expect(res.isError).toBeFalsy();
+			expect(client.getRequest).not.toHaveBeenCalled();
+			expect(written(client)[1]).toEqual({
+				headers: [{ key: "X-Trace", value: "2", enabled: true }],
+			});
+			expect(res.content).toHaveLength(1);
+		});
+
+		test("with reveal on, a withheld row written back still keeps its stored value", async () => {
+			const client = storedClient();
+			const res = await update(client, [{ key: "Authorization", valueWithheld: true }], true);
+			expect(res.isError).toBeFalsy();
+			expect(written(client)[1].headers).toEqual([storedHeaders[0]]);
+		});
+
+		// Mutation check: read `create_request`'s headers with `readHeaderRows`
+		// alone and the withheld row is sent with no value.
+		test("create_request refuses a withheld row, since nothing is stored to keep", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "x",
+					url: "https://h",
+					headers: [{ key: "Authorization", valueWithheld: true }],
+				},
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+			expect(firstText(res)).toContain('no "Authorization" header is stored');
+			expect(client.createRequest).not.toHaveBeenCalled();
+		});
+
+		test("create_request stores rows in order, repeats and disabled rows kept", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request",
+				{ collectionId: "col_1", name: "x", url: "https://h", headers: storedHeaders },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload.headers).toEqual(storedHeaders);
+		});
+
+		test("both tools' headers schema takes the rows as read and refuses an undeclared member", () => {
+			for (const name of ["create_request", "update_request"]) {
+				const schema = TOOLS.find((t) => t.name === name)!.inputSchema.headers as z.ZodType;
+				expect(schema.safeParse(readRows()).success, `${name} rows`).toBe(true);
+				expect(schema.safeParse({ "X-A": "1" }).success, `${name} map`).toBe(true);
+				expect(
+					schema.safeParse([{ key: "X-A", value: "1", note: "x" }]).success,
+					`${name} undeclared member`
+				).toBe(false);
+			}
 		});
 	});
 
