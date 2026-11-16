@@ -149,7 +149,7 @@ describe("the restart-required banner", () => {
 		// The default variant's `hover:bg-primary-fill-hover` survives tailwind-merge
 		// (it files `hover:bg-*` apart from `bg-*`) and would turn the button the
 		// accent colour on hover.
-		expect(restart.className).toContain("hover:bg-status-warning-fill/90");
+		expect(restart.className).toContain("hover:bg-status-warning-fill-hover");
 		expect(restart.className).not.toContain("hover:bg-primary");
 
 		const detail = screen.getByText(/will take effect after restarting Vayu's engine/);

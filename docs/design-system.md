@@ -176,7 +176,7 @@ three solids, plain `H S% L%` triples the contrast guard parses:
   and sits barely above 4.5:1 on white, so their tint is the palest.
 
 **The rule: an alpha of the accent (`bg-primary/<n>`, `bg-primary-fill/<n>`,
-and their `hover:` / `disabled:` / `data-[...]:` forms) is allowed only where no
+`bg-status-<name>-fill/<n>`, and their `hover:` / `disabled:` / `data-[...]:` forms) is allowed only where no
 text sits on it** - a dot, a ring, a selection outline, a chart area, a
 text-selection highlight over transparent text. An element that renders text,
 its own or its children's, uses the opaque tokens: `bg-primary-tint` at rest,
@@ -282,7 +282,9 @@ There is no `--success-foreground`, `--warning-foreground` or `--info-foreground
 a white label on a bare `--warning` measures 2.14:1, and nothing read the other
 two. A solid status control takes the `-fill` token under a white label instead
 (`bg-status-warning-fill text-white`, 4.62:1 - the Restart engine button, the
-client-certificate chip).
+client-certificate chip). Its hover is the opaque `--status-warning-fill-hover`
+(`hover:bg-status-warning-fill-hover`, 5.70:1), never `hover:bg-status-warning-fill/90`,
+which composites to 3.87:1 under the same label.
 
 `--info` used to be one value in both modes, like `--warning` still is. It was
 never measured, and at `199 89% 48%` it scored **2.85** on a light card against
@@ -662,6 +664,7 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 --status-redirect: 258 60% 62%;     /* violet  - 3xx, redirect */
 --status-no-response: 240 5% 52%;   /* neutral - status 0, nothing came back */
 --status-warning: 38 92% 36%;       /* amber   - 4xx, client error */
+--status-warning-fill-hover: 38 92% 29%;   /* the warning fill's hover, white-safe */
 ```
 
 **A status colour has three jobs, and three tokens.** The base value above is
@@ -674,11 +677,18 @@ Reuse it as text or as a solid chip and it fails: `status-success` measured
 | Dot, bar, icon, tint, border              | `--status-*`             | `bg-status-success` dot        |
 | The colour **is the text**                | `--status-*-text`        | `text-status-error-text`       |
 | Solid chip under a **white** label        | `--status-*-fill`        | `bg-status-success-fill`       |
+| That chip's **hover**                     | `--status-*-fill-hover`  | `hover:bg-status-warning-fill-hover` |
 
 Only `-text` is mode-adaptive (light needs a darker value, dark a lighter one).
 The base indicators and the `-fill` chips stay mode-consistent, so a green dot
 and a "200 OK" chip read identically on either theme. This is the same split
 `--primary` / `--primary-fill` already uses.
+
+Only `--status-warning-fill-hover` exists so far (`38 92% 29%`, one value in both
+themes, 5.70:1 under white against the fill's 4.62:1), because the Restart engine
+button is the one solid status control with a hover. A `/<n>` alpha of any
+`bg-status-<name>-fill` is refused by `accent-alpha-under-text.test.ts`, as
+`bg-primary/<n>` is (#3499).
 
 **Utility classes** (`text-`, `bg-`, `border-`): `text-status-success-text`,
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
@@ -2082,7 +2092,7 @@ see.
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
-| An element that renders text never paints a translucent accent (`bg-primary/<n>`) behind it; the opaque `--primary-tint` family is held to 4.5:1 per scheme instead | `accent-alpha-under-text.test.ts`, `color-scheme-contrast.test.ts` |
+| An element that renders text never paints a translucent accent (`bg-primary/<n>`, `bg-status-<name>-fill/<n>`) behind it; the opaque `--primary-tint` family is held to 4.5:1 per scheme instead | `accent-alpha-under-text.test.ts`, `color-scheme-contrast.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
 
 **A tree row is named by its name, not by what is inside it.** A `treeitem`

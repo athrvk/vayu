@@ -71,6 +71,7 @@
 	--color-status-success-fill: hsl(var(--status-success-fill));
 	--color-status-error-fill: hsl(var(--status-error-fill));
 	--color-status-warning-fill: hsl(var(--status-warning-fill));
+	--color-status-warning-fill-hover: hsl(var(--status-warning-fill-hover));
 	--color-status-stopped-fill: hsl(var(--status-stopped-fill));
 	--color-status-redirect-fill: hsl(var(--status-redirect-fill));
 	--color-status-no-response-fill: hsl(var(--status-no-response-fill));
@@ -450,6 +451,9 @@
 		--status-success-fill: 142 71% 30%;
 		--status-error-fill: 0 84% 49%;
 		--status-warning-fill: 38 92% 33%;
+		/* The warning fill's hover (`hover:bg-status-warning-fill-hover`): opaque,
+		 * because `/90` of the fill composites to 3.87:1 under white (#3499). */
+		--status-warning-fill-hover: 38 92% 29%;
 		--status-stopped-fill: 25 95% 39%;
 		--status-redirect-fill: 258 60% 46%;
 

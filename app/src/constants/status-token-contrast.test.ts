@@ -14,6 +14,7 @@
  *   indicator  a dot or icon on a card             >= 3.0, in *both* themes
  *   -text      the colour IS the text, on a tint   >= 4.5
  *   -fill      a solid chip under a white label    >= 4.5
+ *   -fill-hover  that chip's hover, opaque           >= 4.5, darker than the fill
  *
  * Values are parsed out of `index.css`, not restated here. A test that
  * hardcodes what it is checking passes when the stylesheet drifts away from it,
@@ -109,6 +110,15 @@ describe("-fill tier carries a white label at 4.5", () => {
 	it.each(["status-redirect", "status-no-response"] as const)("%s", (family) => {
 		const white: Hsl = [0, 0, 100];
 		expect(contrast(white, token(`${family}-fill`, "light"))).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it("status-warning-fill-hover keeps the label at 4.5 and is darker than the fill", () => {
+		// `hover:bg-status-warning-fill/90` composited to 3.87:1 (#3499).
+		const white: Hsl = [0, 0, 100];
+		const fill = token("status-warning-fill", "light");
+		const hover = token("status-warning-fill-hover", "light");
+		expect(contrast(white, hover)).toBeGreaterThanOrEqual(4.5);
+		expect(contrast(white, hover)).toBeGreaterThan(contrast(white, fill));
 	});
 });
 
