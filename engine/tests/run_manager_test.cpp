@@ -2716,6 +2716,100 @@ TEST (FailedRunSummaryInputs, AZeroThresholdKeepsTheSlowSectionOut) {
 }
 
 // ============================================================================
+// The summary's `assertions` block (issue #3537)
+// ============================================================================
+
+/// An element report row with @p error executions that ended in error.
+nlohmann::json element_row_with_errors (const char* kind, size_t error) {
+    return { { "kind", kind }, { "passed", 1 }, { "failed", 0 }, { "missing", 0 },
+        { "error", error }, { "skipped", 0 }, { "deferred", 0 } };
+}
+
+// Both populations as the budget judged them, beside the zeros of a run whose
+// scripts and teardown all ran. Mutation check: drop the `assertions` write in
+// `build_run_summary_payload` and the key is missing.
+TEST (RunSummaryAssertions, StoresBothPopulationsAsTheBudgetJudgedThem) {
+    RunSummaryInputs inputs;
+    inputs.assertions = AssertionPopulations{ .exact = { .passed = 3, .failed = 1 },
+        .sampled = { .passed = 5, .failed = 2 } };
+    const auto summary = build_run_summary_payload (inputs);
+    EXPECT_EQ (summary.value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "exact", { { "passed", 3 }, { "failed", 1 } } },
+    { "sampled", { { "passed", 5 }, { "failed", 2 } } }, { "errored", 0 },
+    { "teardownFailed", 0 } }))
+    << summary.dump ();
+}
+
+// A single-request run's errored element executions are its `elements` rows'
+// `error`, and a run that asserted nothing still stores the block for them.
+// Mutation check: return 0 from `errored_element_runs` and `errored` reads 0
+// and the block is absent.
+TEST (RunSummaryAssertions, CountsASingleRequestRunsErroredElements) {
+    RunSummaryInputs inputs;
+    inputs.elements =
+    nlohmann::json::array ({ element_row_with_errors ("script.post", 3),
+    element_row_with_errors ("extract.json", 4), nlohmann::json ("not a row") });
+    const auto summary = build_run_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("assertions")) << summary.dump ();
+    EXPECT_EQ (summary["assertions"]["errored"], 7);
+    EXPECT_EQ (summary["assertions"]["exact"],
+    (nlohmann::json{ { "passed", 0 }, { "failed", 0 } }));
+}
+
+// A scenario load run's are its steps' element rows, never `scenario.errored`,
+// which also counts a step that got no response. Mutation check: read
+// `scenario.errored` instead and `errored` reads 10.
+TEST (RunSummaryAssertions, CountsAScenarioRunsErroredStepElementsAndNotItsNoResponses) {
+    RunSummaryInputs inputs;
+    inputs.scenario    = nlohmann::json{ { "errored", 10 },
+        { "steps",
+        nlohmann::json::array (
+        { { { "elements", nlohmann::json::array ({ element_row_with_errors ("script.post", 2) }) } },
+        { { "elements",
+        nlohmann::json::array ({ element_row_with_errors ("assert.status", 1),
+        element_row_with_errors ("script.pre", 0) }) } },
+        { { "name", "a step with no elements" } } }) } };
+    const auto summary = build_run_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("assertions")) << summary.dump ();
+    EXPECT_EQ (summary["assertions"]["errored"], 3);
+}
+
+// A teardown script that failed a `pm.test` or threw is counted; setup's rows
+// are not, since a failed setup already fails the run. Mutation check: count
+// only `failed` outcomes in `failed_teardowns` and this reads 1.
+TEST (RunSummaryAssertions, CountsTheTeardownsThatFailedOrErrored) {
+    RunSummaryInputs inputs;
+    inputs.lifecycle =
+    nlohmann::json{ { "setup", nlohmann::json::array ({ { { "outcome", "failed" } } }) },
+        { "teardown",
+        nlohmann::json::array ({ { { "outcome", "failed" } }, { { "outcome", "error" } },
+        { { "outcome", "ok" } }, { { "outcome", 5 } } }) } };
+    const auto summary = build_run_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("assertions")) << summary.dump ();
+    EXPECT_EQ (summary["assertions"]["teardownFailed"], 2);
+    EXPECT_EQ (summary["assertions"]["errored"], 0);
+}
+
+// A run that asserted nothing and errored nowhere stores no block, never one
+// of zeros, and neither does a failed run's summary, which knows neither.
+// Mutation check: drop the early return in `build_run_assertions_payload` and
+// each expectation fails.
+TEST (RunSummaryAssertions, IsAbsentWhenNothingAssertedOrErrored) {
+    EXPECT_FALSE (build_run_summary_payload (RunSummaryInputs{}).contains ("assertions"));
+
+    RunSummaryInputs clean;
+    clean.elements =
+    nlohmann::json::array ({ element_row_with_errors ("timer.think", 0) });
+    clean.lifecycle =
+    nlohmann::json{ { "teardown", nlohmann::json::array ({ { { "outcome", "ok" } } }) } };
+    EXPECT_FALSE (build_run_summary_payload (clean).contains ("assertions"));
+
+    RunContext ctx ("run_failed_unasserted", nlohmann::json::object ());
+    EXPECT_FALSE (
+    build_run_summary_payload (failed_run_summary_inputs (ctx)).contains ("assertions"));
+}
+
+// ============================================================================
 // finish_load_test's terminal-status decision (issue #1497). `finish_load_test`
 // itself is not declared in run_manager.hpp, so this drives it the only way a
 // test can: a real run, end to end through RunManager::start_run exactly as
@@ -2935,6 +3029,59 @@ TEST_F (LoadRunToTerminalTest, AnAssertionThatCannotRunIsInTheExactPopulation) {
     (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }))
     << check.dump ();
     EXPECT_FALSE (check["passed"].get<bool> ());
+}
+
+// #3537 end to end: a required `extract.json` that misses on every completion
+// is a failed assertion in the stored block's exact population, the count the
+// budget's `assertionsExact` reports.
+// Mutation check: pass a default `AssertionPopulations` to the block in
+// `build_run_assertions_payload` and its `exact` reads 0 failed.
+TEST_F (LoadRunToTerminalTest, ARequiredExtractorMissIsTheBlocksAndTheBudgetsExactCount) {
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 4 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
+        { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_tok" }, { "kind", "extract.json" },
+        { "config", { { "path", "$.nope" }, { "variable", "tok" }, { "required", true } } } } }) },
+        { "thresholds", { { "maxAssertionFailureRatePct", 0 } } } };
+
+    const auto row = run_to_terminal_row ("run-required-miss-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    ASSERT_TRUE (summary.contains ("thresholds")) << summary.dump ();
+    const auto& budget_exact =
+    summary["thresholds"]["checks"][0]["assertionsExact"];
+    EXPECT_EQ (budget_exact, (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }))
+    << summary.dump ();
+    ASSERT_TRUE (summary.contains ("assertions")) << summary.dump ();
+    EXPECT_EQ (summary["assertions"]["exact"], budget_exact);
+}
+
+// #3537 end to end: an inline script that throws on every completion is an
+// errored element execution, and a teardown whose `pm.test` fails is a failed
+// teardown, both stored in the block of a run that made no assertion. Mutation
+// check: return 0 from `failed_teardowns` and `teardownFailed` reads 0.
+TEST_F (LoadRunToTerminalTest, AThrownInlineScriptAndAFailedTeardownAreStored) {
+    const nlohmann::json config = {
+        { "mode", "iterations" }, { "iterations", 4 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
+        { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_throw" }, { "kind", "script.post" },
+        { "config", { { "script", "JSON.parse('not json');" }, { "inline", true } } } } }) },
+        { "lifecycleElements",
+        nlohmann::json::array (
+        { { { "id", "el_teardown" }, { "kind", "script.teardown" }, { "enabled", true },
+        { "config", { { "script", "pm.test('error rate ok', function () { pm.expect(1).to.equal(2); });" } } } } }) }
+    };
+
+    const auto row = run_to_terminal_row ("run-errored-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    EXPECT_EQ (summary.value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "exact", { { "passed", 0 }, { "failed", 0 } } },
+    { "sampled", { { "passed", 0 }, { "failed", 0 } } }, { "errored", 4 },
+    { "teardownFailed", 1 } }))
+    << summary.dump ();
 }
 
 // #2399, the completed-run producer end to end: every request to `/slow`

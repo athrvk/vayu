@@ -1738,6 +1738,10 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
   },
   "slow_requests": { "count": 6, "thresholdMs": 25 },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
+  "assertions": {
+    "exact": { "passed": 40, "failed": 0 }, "sampled": { "passed": 9, "failed": 1 },
+    "errored": 0, "teardownFailed": 0
+  },
   "thresholds": {
     "checks": [
       { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true, "evaluated": true }
@@ -1841,8 +1845,24 @@ logged, each cut to 500 bytes, `count` written only on a line logged more than o
 `consoleDropped` (occurrences a full list turned away), each written only when non-empty and
 non-zero (#3127). A scenario load run writes them on each step's own
 `scenario.steps[].tests` (the same object, built by the same `test_totals_payload`) and never on
-the run's `tests`. A summary stored before them has neither. `schemaValidation`
-follows the same rule (issue #682): omitted when the deferred pass over the run's sampled
+the run's `tests`. A summary stored before them has neither.
+
+`assertions` (issue #3537) is every failed check a load run's verdict reads, written by both
+load run kinds in one shape: `exact` and `sampled` (each `{passed, failed}`) are the two
+populations a `maxAssertionFailureRatePct` check judges, `exact` every `assert.*` outcome,
+required `extract.*` miss and inline `pm.test` call counted on each completion and `sampled` the
+deferred replay that `tests` also counts. `errored` is the element executions that ended in
+error (a script that threw, an element that could not run): the summed `error` of a
+single-request run's `elements` rows, or of a scenario load run's `scenario.steps[].elements`
+rows, never `scenario.errored`, which also counts a step that got no response. A deferred
+script's throw is not in it, since the replay counts it in `tests.failed`. `teardownFailed` is
+the `lifecycle.teardown` rows whose `outcome` is `failed` or `error`; a failed setup fails the
+run instead. Absent when the run made no assertion and nothing errored, and every member is
+written once the block is, zeros included. The failed run's summary never writes it. A summary
+stored before the issue has none.
+
+`schemaValidation`
+follows the rule `tests` does (issue #682): omitted when the deferred pass over the run's sampled
 responses walked nothing, so an unbound collection's report carries no block rather than one
 saying its contract held. Written in camelCase because the report passes it through verbatim,
 the `phases` rule. Its `sampled` count is stored rather than derived because it is the
