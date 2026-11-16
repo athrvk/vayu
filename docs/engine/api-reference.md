@@ -9859,9 +9859,11 @@ transfer began *is* timed (see [Latency
 population](#latency-population)), so a run where every request timed out is
 evaluated and its percentiles sit at the timeout. An unevaluated check
 counts toward `failed`: a budget the run could not measure was not met. The
-error rate and the throughput floor have no such gap - `maxErrorRatePct` is
-0/0-safe by request count, and a starved `minThroughputRps` already fails on
-its own - so both are always `evaluated: true`.
+error rate is the same: a run that sent no request has no share to take, so
+`maxErrorRatePct` is `evaluated: false` there (issue #3540) rather than a
+clean 0% that passes any ceiling, including 0. The throughput floor has no
+such gap - a starved `minThroughputRps` already fails on its own - so it is
+always `evaluated: true`.
 
 #### Carried-over budgets (`carriedBudgets`)
 
@@ -12566,7 +12568,7 @@ run stored, never from its result rows, which are many and unbounded:
 | Key | Meaning |
 |-----|---------|
 | `rps` | Achieved requests per second over the run, the report's `summary.avgRps` |
-| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
+| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95`; omitted when the run timed no request (`latency.count` 0), not a stored 0 |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertions` | The run's assertion block (#3537), the report's top-level [`assertions`](#get-runsrunidreport) as it serves it, for both load run kinds: `exact` and `sampled` (each `{passed, failed}`), `errored` and `teardownFailed`. Beside `errorRate`, not folded into it |

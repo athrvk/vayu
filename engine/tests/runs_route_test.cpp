@@ -3424,7 +3424,10 @@ TEST_F (RunsRouteTest, FailedLoadRowCarriesTheVerdictThatFailedIt) {
 
 // Each key is absent when the summary does not record it, never zeroed: a run
 // with no budgets was never judged, a run with no status distribution has no
-// rate, and a run with no summary at all has no `resultSummary`.
+// rate, a run that timed no request has no p95 (#3540), and a run with no
+// summary at all has no `resultSummary`. Mutation check: drop the `count` guard
+// in `read_timed_p95` and `run_untimed` reads `p95Ms: 0`; make it demand a
+// count and `run_pre_count` loses the p95 it stored.
 TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     seed ({ .id = "run_unjudged", .status = vayu::RunStatus::Stopped, .start_time = 1 });
     db_->update_run_summary ("run_unjudged",
@@ -3440,6 +3443,22 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     seed ({ .id = "run_no_checks", .start_time = 3 });
     db_->update_run_summary ("run_no_checks",
     R"({"rps":5,"thresholds":{"checks":[],"passed":0,"failed":0}})");
+
+    // A run that timed nothing stores `latency.count: 0` beside zeroed
+    // percentiles, which are no tail latency; its rps is a recorded rate.
+    auto untimed    = summary_inputs ();
+    untimed.latency = {};
+    seed ({ .id = "run_untimed", .start_time = 7 });
+    db_->update_run_summary (
+    "run_untimed", vayu::core::build_run_summary_payload (untimed).dump ());
+
+    // A summary stored before `latency.count` existed has no marker to read,
+    // so its stored p95 stands.
+    auto pre_count = nlohmann::json::parse (
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+    pre_count["latency"].erase ("count");
+    seed ({ .id = "run_pre_count", .start_time = 8 });
+    db_->update_run_summary ("run_pre_count", pre_count.dump ());
 
     seed ({ .id = "run_no_summary", .start_time = 4 });
     seed ({ .id = "run_bad_summary", .start_time = 5 });
@@ -3462,6 +3481,16 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     EXPECT_FALSE (no_codes_row["resultSummary"].contains ("errorRate"));
     EXPECT_TRUE (no_codes_row["resultSummary"].contains ("rps"));
     EXPECT_TRUE (no_codes_row["resultSummary"].contains ("p95Ms"));
+
+    const auto untimed_row = row_of (body, "run_untimed");
+    ASSERT_TRUE (untimed_row.contains ("resultSummary"));
+    EXPECT_FALSE (untimed_row["resultSummary"].contains ("p95Ms"))
+    << untimed_row["resultSummary"].dump ();
+    EXPECT_TRUE (untimed_row["resultSummary"].contains ("rps"));
+
+    const auto pre_count_row = row_of (body, "run_pre_count");
+    ASSERT_TRUE (pre_count_row.contains ("resultSummary"));
+    EXPECT_DOUBLE_EQ (pre_count_row["resultSummary"].value ("p95Ms", -1.0), 25.0);
 
     const auto no_checks = row_of (body, "run_no_checks");
     ASSERT_TRUE (no_checks.contains ("resultSummary"));
