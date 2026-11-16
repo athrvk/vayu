@@ -907,9 +907,9 @@ class ScenarioLoadDriver {
         if (vu == nullptr) {
             return false;
         }
-        // A claim that lands mid-iteration may walk into the next one, so a
+        // A claim that lands mid-iteration may walk on into the next one, so a
         // trailing skipped step still reaches the first step of the next
-        // iteration; a claim never walks past the end of an iteration it began.
+        // iteration; a claim that begins an iteration walks at most to its end.
         const size_t last_iteration =
         vu->iteration + (vu->steps_this_iteration == 0 ? 0 : 1);
         while (submit_step (vu) == StepSubmission::Skipped && !context_->should_stop &&
