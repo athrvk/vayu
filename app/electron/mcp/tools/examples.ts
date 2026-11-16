@@ -83,21 +83,27 @@ export function boundExampleBodies(value: unknown): BoundedExamples {
  */
 const EXAMPLE_WRITE_KEYS = ["name", "status", "contentType"] as const;
 
-/**
- * The body of an example write - the named fields only, so an update leaves
- * what it did not mention alone (the engine merge-patches on `PUT`).
- *
- * `headers` is the engine's `{key, value, enabled}` rows, replacing the stored
- * list wholesale (see `readHeaderRows` for the two spellings accepted).
- */
-export function exampleWritePayload(args: Record<string, unknown>): Record<string, unknown> {
+/** The scalar fields of an example write - the named ones only, so an update leaves the rest alone. */
+export function exampleFields(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = {};
 	for (const key of EXAMPLE_WRITE_KEYS) {
 		if (args[key] !== undefined) payload[key] = args[key];
 	}
-	if (args.headers !== undefined) payload.headers = newHeaderRows(args.headers);
 	const body = str(args, "body");
 	if (body !== undefined) payload.body = body;
+	return payload;
+}
+
+/**
+ * The body of an example create: {@link exampleFields} and `headers` as the
+ * engine's `{key, value, enabled}` rows (see `readHeaderRows` for the two
+ * spellings accepted). There is nothing stored for a withheld row to keep, so
+ * one is refused by name. An update reads the stored list first
+ * (`update_request_example`), so it builds its own.
+ */
+export function exampleWritePayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload = exampleFields(args);
+	if (args.headers !== undefined) payload.headers = newHeaderRows(args.headers);
 	return payload;
 }
 

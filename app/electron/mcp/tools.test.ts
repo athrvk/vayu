@@ -3303,7 +3303,7 @@ describe("document CRUD parity", () => {
 				await dispatchTool(
 					"update_request_example",
 					{ requestId: "req_1", exampleId: "exa_1", headers: setCookies },
-					ctxWith(client, { allowWrites: true })
+					ctxWith(client, { allowWrites: true, revealSecretsToAgents: true })
 				);
 				const [, , payload] = callArgs(client.updateRequestExample) as [
 					string,
@@ -3318,7 +3318,7 @@ describe("document CRUD parity", () => {
 				await dispatchTool(
 					"update_request_example",
 					{ requestId: "req_1", exampleId: "exa_1", headers: { "X-A": "1", "X-B": "2" } },
-					ctxWith(client, { allowWrites: true })
+					ctxWith(client, { allowWrites: true, revealSecretsToAgents: true })
 				);
 				const [, , payload] = callArgs(client.updateRequestExample) as [
 					string,
@@ -3336,7 +3336,7 @@ describe("document CRUD parity", () => {
 				await dispatchTool(
 					"update_request_example",
 					{ requestId: "req_1", exampleId: "exa_1", headers: [] },
-					ctxWith(client, { allowWrites: true })
+					ctxWith(client, { allowWrites: true, revealSecretsToAgents: true })
 				);
 				expect(callArgs(client.updateRequestExample)[2]).toEqual({ headers: [] });
 			});
@@ -3375,9 +3375,17 @@ describe("document CRUD parity", () => {
 					expect(schema.safeParse(setCookies).success, `${name} rows`).toBe(true);
 					expect(schema.safeParse({ "X-A": "1" }).success, `${name} map`).toBe(true);
 					expect(schema.safeParse(undefined).success, `${name} omitted`).toBe(true);
-					expect(schema.safeParse([{ key: "X-A" }]).success, `${name} no value`).toBe(
-						false
-					);
+					// A row read withheld has no value and is valid; a row with neither a
+					// value nor `valueWithheld` passes the shape and is refused by the
+					// handler (the "a row without a value" case above).
+					expect(
+						schema.safeParse([{ key: "X-A", valueWithheld: true }]).success,
+						`${name} withheld row`
+					).toBe(true);
+					expect(
+						schema.safeParse([{ key: "X-A", value: "1", note: "x" }]).success,
+						`${name} undeclared member`
+					).toBe(false);
 					expect(schema.safeParse(["X-A: 1"]).success, `${name} string row`).toBe(false);
 					expect(
 						schema.safeParse([{ key: "X-A", value: "1", enabled: "yes" }]).success,
@@ -3392,6 +3400,185 @@ describe("document CRUD parity", () => {
 					expect(text, name).toContain("Set-Cookie");
 					expect(text, name).toContain("{key, value, enabled?}");
 				}
+			});
+		});
+
+		describe("header rows written back as list_request_examples returned them (#3550)", () => {
+			const storedHeaders = [
+				{ key: "Set-Cookie", value: "a=1; Path=/", enabled: true },
+				{ key: "X-Trace", value: "1", enabled: true },
+				{ key: "X-Off", value: "off", enabled: false },
+				{ key: "Set-Cookie", value: "b=2; Path=/", enabled: false },
+			];
+			const storedExample = () => ({
+				id: "exa_1",
+				requestId: "req_1",
+				name: "cookies",
+				headers: structuredClone(storedHeaders),
+				updatedAt: 9,
+			});
+			const exampleClient = () =>
+				fakeClient({
+					listRequestExamples: vi
+						.fn()
+						.mockResolvedValue([{ id: "exa_0", headers: [] }, storedExample()]),
+				});
+			/** The rows the real `list_request_examples` hands an agent while reveal is off. */
+			const readRows = async () => {
+				const listed = await dispatchTool(
+					"list_request_examples",
+					{ requestId: "req_1" },
+					ctxWith(exampleClient())
+				);
+				const { examples } = listed.structuredContent as {
+					examples: Array<{ id: string; headers: Array<Record<string, unknown>> }>;
+				};
+				return examples.find((example) => example.id === "exa_1")!.headers;
+			};
+			const written = (client: EngineClient) =>
+				(client.updateRequestExample as ReturnType<typeof vi.fn>).mock.calls[0];
+			const update = (client: EngineClient, headers: unknown, reveal = false) =>
+				dispatchTool(
+					"update_request_example",
+					{ requestId: "req_1", exampleId: "exa_1", headers },
+					ctxWith(client, { allowWrites: true, revealSecretsToAgents: reveal })
+				);
+
+			// Mutation check: return a withheld row as given in
+			// `restoreWithheldHeaderRows` and the PUT loses both Set-Cookie values.
+			test("the rows as listed, one value changed, keep the withheld values, flags, repeats and order", async () => {
+				const rows = await readRows();
+				expect(rows[0]).toEqual({ key: "Set-Cookie", enabled: true, valueWithheld: true });
+				expect(rows[3]).toEqual({ key: "Set-Cookie", enabled: false, valueWithheld: true });
+				rows[1] = { ...rows[1], value: "2" };
+				const client = exampleClient();
+				const res = await update(client, rows);
+				expect(res.isError).toBeFalsy();
+				const [requestId, exampleId, payload, , ifMatch] = written(client);
+				expect([requestId, exampleId]).toEqual(["req_1", "exa_1"]);
+				expect(payload).toEqual({
+					headers: [
+						{ key: "Set-Cookie", value: "a=1; Path=/", enabled: true },
+						{ key: "X-Trace", value: "2", enabled: true },
+						{ key: "X-Off", value: "off", enabled: false },
+						{ key: "Set-Cookie", value: "b=2; Path=/", enabled: false },
+					],
+				});
+				expect(ifMatch).toBe('W/"9"');
+				expect(res.content).toHaveLength(1);
+			});
+
+			// Mutation check: drop the `keepsStoredValue` test from the read
+			// condition in `writeExampleEdits` and a reveal-on write with a
+			// withheld row goes out unmerged.
+			test("with reveal on, a withheld row still keeps its stored value", async () => {
+				const client = exampleClient();
+				const res = await update(
+					client,
+					[{ key: "set-cookie", valueWithheld: true }],
+					true
+				);
+				expect(res.isError).toBeFalsy();
+				expect(written(client)[2]).toEqual({
+					headers: [{ key: "set-cookie", value: "a=1; Path=/", enabled: true }],
+				});
+			});
+
+			// Mutation check: drop the throw for an unmatched withheld row in
+			// `restoreWithheldHeaderRows` and the write goes out.
+			test.each([
+				["a name nothing stores", [{ key: "X-Api-Key", valueWithheld: true }], "X-Api-Key"],
+				[
+					"one occurrence more than is stored",
+					[0, 1, 2].map(() => ({ key: "Set-Cookie", valueWithheld: true })),
+					'only 2 "Set-Cookie" headers are stored',
+				],
+			])(
+				"a withheld row matching %s is refused as input, naming it",
+				async (_label, rows, named) => {
+					const client = exampleClient();
+					const res = await update(client, rows);
+					expect(res.isError).toBe(true);
+					expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+					expect(firstText(res)).toContain(named);
+					expect(client.updateRequestExample).not.toHaveBeenCalled();
+				}
+			);
+
+			// Mutation check: leave the caveat out of `writeExampleEdits`.
+			test("a map write replaces the list and names the unread rows it dropped", async () => {
+				const client = exampleClient();
+				const res = await update(client, { "X-Trace": "2" });
+				expect(res.isError).toBeFalsy();
+				expect(written(client)[2]).toEqual({
+					headers: [{ key: "X-Trace", value: "2", enabled: true }],
+				});
+				expect(res.content).toHaveLength(2);
+				expect(res.content[1].text).toContain('stored "Set-Cookie" header,');
+			});
+
+			test("rows that keep every unread row carry no caveat", async () => {
+				const client = exampleClient();
+				const res = await update(client, await readRows());
+				expect(res.isError).toBeFalsy();
+				expect(written(client)[2].headers).toEqual(storedHeaders);
+				expect(res.content).toHaveLength(1);
+			});
+
+			test("with reveal on, a plain write reads nothing and sends no version", async () => {
+				const client = exampleClient();
+				const res = await update(client, { "X-Trace": "2" }, true);
+				expect(res.isError).toBeFalsy();
+				expect(client.listRequestExamples).not.toHaveBeenCalled();
+				expect(written(client)).toHaveLength(4);
+				expect(res.content).toHaveLength(1);
+			});
+
+			test("a field-only edit reads nothing, whatever the reveal setting", async () => {
+				const client = exampleClient();
+				await dispatchTool(
+					"update_request_example",
+					{ requestId: "req_1", exampleId: "exa_1", status: 500 },
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(client.listRequestExamples).not.toHaveBeenCalled();
+				expect(written(client)[2]).toEqual({ status: 500 });
+			});
+
+			test("a withheld row on an example the list does not hold answers not_found, not a missing header", async () => {
+				const client = exampleClient();
+				const res = await dispatchTool(
+					"update_request_example",
+					{
+						requestId: "req_1",
+						exampleId: "exa_gone",
+						headers: [{ key: "Set-Cookie", valueWithheld: true }],
+					},
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "not_found" } });
+				expect(firstText(res)).toContain('No example with id "exa_gone"');
+				expect(client.updateRequestExample).not.toHaveBeenCalled();
+			});
+
+			// Mutation check: read `create_request_example`'s headers with
+			// `readHeaderRows` alone and the withheld row is sent with no value.
+			test("create_request_example refuses a withheld row, naming it, since nothing is stored to keep", async () => {
+				const client = fakeClient();
+				const res = await dispatchTool(
+					"create_request_example",
+					{
+						requestId: "req_1",
+						name: "x",
+						headers: [{ key: "Set-Cookie", valueWithheld: true }],
+					},
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+				expect(firstText(res)).toContain('no "Set-Cookie" header is stored');
+				expect(client.createRequestExample).not.toHaveBeenCalled();
 			});
 		});
 

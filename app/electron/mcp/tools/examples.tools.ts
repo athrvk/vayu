@@ -11,8 +11,9 @@
  */
 
 import { z } from "zod";
+import { EngineRequestError } from "../engine-client.js";
 import { secretsShape, withholdRowListSecrets, withheldPointer } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import type { McpTool, ToolContext, ToolResult } from "./contract.js";
 import {
 	callEngine,
 	callEngineStructured,
@@ -22,7 +23,9 @@ import {
 	engineErrorResult,
 	errorResult,
 	isRecord,
+	mergeAndWrite,
 	requireStr,
+	withCaveat,
 	writesDisabled,
 } from "./kit.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
@@ -32,31 +35,20 @@ import {
 	boundExampleBodies,
 	describeExample,
 	describeExampleDeleteOutcome,
+	exampleFields,
 	exampleWritePayload,
 	MAX_EXAMPLES_BODY_BYTES,
 } from "./examples.js";
+import {
+	droppedHeadersCaveat,
+	droppedWithheldHeaders,
+	keepsStoredValue,
+	readHeaderRows,
+	restoreWithheldHeaderRows,
+	type HeaderRowArg,
+} from "./header-rows.js";
+import { storedHeadersInput } from "./input-schemas.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
-
-/**
- * `headers` on both write tools: ordered rows, or a string map (#3422). The
- * tools' own descriptions say when to use the rows; this one stays short
- * because the schema is listed once per tool.
- */
-function headersInput(lead: string) {
-	return z
-		.union([
-			z.array(
-				z.object({
-					key: z.string(),
-					value: z.string(),
-					enabled: z.boolean().optional(),
-				})
-			),
-			z.record(z.string(), z.string()),
-		])
-		.optional()
-		.describe(`${lead} Ordered {key, value, enabled?} rows, or a {name: value} map.`);
-}
 
 export const EXAMPLE_TOOLS: McpTool[] = [
 	{
@@ -114,7 +106,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				.max(599)
 				.optional()
 				.describe("Final status, 200-599 (default 200)."),
-			headers: headersInput("Response headers."),
+			headers: storedHeadersInput(
+				"Response headers. Ordered {key, value, enabled?} rows, or a {name: value} map."
+			),
 			body: z.string().optional().describe("Response body, stored verbatim."),
 			contentType: z
 				.string()
@@ -165,7 +159,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			exampleId: z.string().describe("Example ID to update."),
 			name: z.string().optional().describe("New display name."),
 			status: z.number().int().min(200).max(599).optional().describe("New status, 200-599."),
-			headers: headersInput("Replacement response headers (replaces the stored list)."),
+			headers: storedHeadersInput(
+				"Replacement response headers (replaces the stored list). Ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value), or a {name: value} map."
+			),
 			body: z.string().optional().describe("New response body."),
 			contentType: z.string().optional().describe("New content type for `body`."),
 		},
@@ -174,18 +170,15 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			if (refused) return refused;
 			const requestId = requireStr(args, "requestId");
 			const exampleId = requireStr(args, "exampleId");
-			const payload = exampleWritePayload(args);
-			if (Object.keys(payload).length === 0) {
+			const fields = exampleFields(args);
+			const headers = args.headers === undefined ? undefined : readHeaderRows(args.headers);
+			if (Object.keys(fields).length === 0 && headers === undefined) {
 				return errorResult(
 					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").',
 					"input"
 				);
 			}
-			return callEngine(
-				ctx,
-				() => ctx.client.updateRequestExample(requestId, exampleId, payload, signal),
-				echoShape(ctx)
-			);
+			return writeExampleEdits(ctx, { requestId, exampleId, fields, headers }, signal);
 		},
 	},
 	{
@@ -253,3 +246,82 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		},
 	},
 ];
+
+/** The edits one `update_request_example` call makes to one example. */
+interface ExampleEdits {
+	requestId: string;
+	exampleId: string;
+	fields: Record<string, unknown>;
+	headers: HeaderRowArg[] | undefined;
+}
+
+/**
+ * `update_request_example`'s write. `PUT` merge-patches, so stated fields are
+ * sent as they are, with no read. `headers` replaces the stored list, so it
+ * becomes one read-merge-write under the example's version (`mergeAndWrite`)
+ * when a row written back withheld keeps its stored value, and, while secrets
+ * are withheld, whenever it is given, so a stored row the session could not
+ * read is named when the write drops it (#3550).
+ */
+async function writeExampleEdits(
+	ctx: ToolContext,
+	{ requestId, exampleId, fields, headers }: ExampleEdits,
+	signal: AbortSignal | undefined
+): Promise<ToolResult> {
+	const reveal = ctx.config.revealSecretsToAgents;
+	if (headers === undefined || (reveal && !headers.some(keepsStoredValue))) {
+		// No row left here keeps a stored value, so an empty list stands in for it.
+		const body =
+			headers === undefined
+				? fields
+				: { ...fields, headers: restoreWithheldHeaderRows(undefined, headers) };
+		return callEngine(
+			ctx,
+			() => ctx.client.updateRequestExample(requestId, exampleId, body, signal),
+			echoShape(ctx)
+		);
+	}
+	let caveat = "";
+	const result = await mergeAndWrite(ctx, {
+		subject: `example "${exampleId}"`,
+		read: () => readStoredExample(ctx, requestId, exampleId, signal),
+		merge: (stored) => {
+			const rows = restoreWithheldHeaderRows(stored.headers, headers);
+			// An example has no auth block, so no API-key header joins the credential names.
+			if (!reveal) {
+				caveat = droppedHeadersCaveat(
+					droppedWithheldHeaders(stored.headers, undefined, rows)
+				);
+			}
+			return { ...fields, headers: rows };
+		},
+		write: (body, ifMatch) =>
+			ctx.client.updateRequestExample(requestId, exampleId, body, signal, ifMatch),
+		shape: echoShape(ctx),
+	});
+	return result.isError ? result : withCaveat(result, caveat);
+}
+
+/**
+ * The example as stored. There is no by-id read, so it is found in the
+ * request's list. An id the list does not hold fails as the `PUT` would, with
+ * the engine's own 404, so the call answers `not_found` and not a header row
+ * with nothing stored to keep.
+ */
+async function readStoredExample(
+	ctx: ToolContext,
+	requestId: string,
+	exampleId: string,
+	signal: AbortSignal | undefined
+): Promise<unknown> {
+	const rows = await ctx.client.listRequestExamples(requestId, signal);
+	const stored = (Array.isArray(rows) ? rows : []).find(
+		(row) => isRecord(row) && row.id === exampleId
+	);
+	if (stored !== undefined) return stored;
+	throw new EngineRequestError(
+		`Engine responded 404 for PUT /requests/${requestId}/examples/${exampleId}`,
+		404,
+		JSON.stringify({ error: { code: "not_found", message: "Example not found" } })
+	);
+}
