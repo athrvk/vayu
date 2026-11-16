@@ -2785,8 +2785,8 @@ export interface LoadTestMetrics {
 	window_avg_latency_ms?: number | null;
 	window_avg_queue_wait_ms?: number | null;
 	/**
-	 * Mean requests on the wire over the same window (Little's law: the latency
-	 * that completed in it over its span), `0` for a window with no completion.
+	 * Mean requests on the wire over the same window (the time requests spent
+	 * in flight in it over its span, #3567), `0` when nothing was open.
 	 * `current_concurrency` is the instant a virtual user in a timer wait holds
 	 * nothing at, so it reads 0-and-N for users that never stopped (#2821).
 	 * Absent on a tick stored before the window mean existed.

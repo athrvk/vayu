@@ -320,8 +320,8 @@ consumes it.
   the wire, not the instant** (#2821). `current_concurrency` counts the curl
   workers' active transfers at the sample, and a virtual user in a timer wait
   (`timer.think`, `timer.pacing`) holds none, so users that wait in step read 0
-  and N alternately however fast the sample. The engine adds the mean by Little's
-  law: `window_avg_in_flight` on a live frame (`windowAvgInFlight`) and a stored
+  and N alternately however fast the sample. The engine adds the mean time in
+  flight: `window_avg_in_flight` on a live frame (`windowAvgInFlight`) and a stored
   tick over the same trailing window as the means above (`0` for a window with no
   completion), and `summary.avgInFlight` on the report. `MetricsView` and
   `reportToDerived` fill `DashboardDerived.avgInFlight` from them, and
@@ -331,7 +331,7 @@ consumes it.
   to `currentConcurrency` live and `peakConcurrency` once finished, and the chart
   to `current_concurrency` per tick, so such a run reads as it always did. The
   chart keeps the last tick of a bucket like the other windowed series (a mean
-  is not a maximum). `ramp_up` and `constant_rps` stay on the instant in the chart, and `capacity` has no utilisation card (above). The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
+  is not a maximum). `ramp_up` and `constant_rps` stay on the instant in the chart, and `capacity` has no utilisation card (above). The mean is the integral of the open request count over the window, so it never exceeds the user count and the card does not clamp it. The "Peak
   virtual users" stat and `p99AtPeak` stay on the peak.
 - **A finished `ramp_up` run's concurrency card is titled for the peak** (#2870).
   Instantaneous concurrency is 0 once a run ends, so `HeroRow` already hands

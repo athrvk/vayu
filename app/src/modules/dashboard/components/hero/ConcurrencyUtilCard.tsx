@@ -32,12 +32,7 @@ export function ConcurrencyUtilCard({
 	meanInFlight?: number;
 }) {
 	const onTheWire = meanInFlight !== undefined;
-	// The window credits a request to the second it completes in, so a target
-	// slower than the window can read above the user count for one tick; the
-	// count is a hard ceiling on the wire.
-	const shown = onTheWire
-		? Math.min(meanInFlight, configuredConcurrency ?? meanInFlight)
-		: currentConcurrency;
+	const shown = onTheWire ? meanInFlight : currentConcurrency;
 	const util =
 		shown !== undefined && configuredConcurrency && configuredConcurrency > 0
 			? (shown / configuredConcurrency) * 100
