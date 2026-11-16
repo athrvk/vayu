@@ -23,6 +23,14 @@
  * and the no-double-count case reddens. Make `rowOutcome` return `null` for a
  * collection row and the collection cases redden; read only `failed` and the
  * errored-only case reddens.
+ *
+ * The assertion block (#3537): make `reportAssertionsOf` read a scenario
+ * report's `scenario.assertions` before its block (the old `sampled: 0`) and
+ * the sampled-replay scenario case reddens; drop the `elementsErrored` or
+ * `teardownsFailed` phrase from `failedCheckPhrases` and the errored-only or
+ * teardown-only cases redden, on both branches; make `rowOutcome` read the
+ * flat `assertionsFailed` instead of `rowAssertionsOf` and the row block cases
+ * redden.
  */
 
 import { describe, it, expect } from "vitest";
@@ -294,6 +302,64 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ status: "completed", thresholdValidation: TWO_OF_FOUR_MISSED, assertionsFailed: 9 },
 		{ outcome: "failed", reason: "2 of 4 budgets missed: p95, throughput" },
 	],
+	// Element errors and failed teardowns (#3537), after the assertions.
+	[
+		"budgets met at 0% errors but an element errored is not a pass",
+		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0, elementsErrored: 997 },
+		{ outcome: "not-judged", reason: "All 3 budgets met, but 997 elements errored" },
+	],
+	[
+		"budgets met but a teardown failed is not a pass",
+		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0, teardownsFailed: 1 },
+		{ outcome: "not-judged", reason: "All 3 budgets met, but 1 teardown script failed" },
+	],
+	[
+		"no budgets names an errored element",
+		{ status: "completed", errorRate: 0, elementsErrored: 1 },
+		{ outcome: "not-judged", reason: "No budgets set. 0.0% errors, 1 element errored" },
+	],
+	[
+		"no budgets names failed teardowns",
+		{ status: "completed", errorRate: 0, teardownsFailed: 2 },
+		{ outcome: "not-judged", reason: "No budgets set. 0.0% errors, 2 teardown scripts failed" },
+	],
+	[
+		"every failed check is named, errors first, then assertions, elements and teardowns",
+		{
+			status: "completed",
+			thresholdValidation: THREE_MET,
+			errorRate: 0.4,
+			assertionsFailed: 150,
+			sampledAssertionsFailed: 4,
+			elementsErrored: 3,
+			teardownsFailed: 1,
+		},
+		{
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 0.4% errors, 150 assertions failed, 4 more in the sampled replay, 3 elements errored, 1 teardown script failed",
+		},
+	],
+	[
+		"zero errored elements and teardowns change nothing",
+		{
+			status: "completed",
+			thresholdValidation: THREE_MET,
+			errorRate: 0,
+			elementsErrored: 0,
+			teardownsFailed: 0,
+		},
+		{ outcome: "passed", reason: "All 3 budgets met" },
+	],
+	[
+		"a missed budget stays failed over errored elements and teardowns",
+		{
+			status: "completed",
+			thresholdValidation: TWO_OF_FOUR_MISSED,
+			elementsErrored: 3,
+			teardownsFailed: 1,
+		},
+		{ outcome: "failed", reason: "2 of 4 budgets missed: p95, throughput" },
+	],
 	["a pending run has nothing to say", { status: "pending" }, null],
 	["a running run has nothing to say", { status: "running", errorRate: 50 }, null],
 	["a status this build does not know has nothing to say", { status: "queued" }, null],
@@ -415,6 +481,53 @@ describe("reportOutcome", () => {
 		expect(reportOutcome(scenario)?.reason).toBe("All 3 budgets met, but 2 assertions failed");
 	});
 
+	// #3537: the report's top-level block, the same for both run kinds.
+	it("names a scenario run's sampled replay when its exact block is clean", () => {
+		const scenario = report({
+			thresholdValidation: THREE_MET,
+			scenario: { assertions: { passed: 10, failed: 0 } },
+			testValidation: { samplesTested: 23, testsPassed: 0, testsFailed: 23, successRate: 0 },
+			assertions: {
+				exact: { passed: 10, failed: 0 },
+				sampled: { passed: 0, failed: 23 },
+				errored: 0,
+				teardownFailed: 0,
+			},
+		} as Partial<RunReport>);
+		expect(reportOutcome(scenario)).toEqual({
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 23 assertions failed in the sampled replay",
+		});
+	});
+
+	it("reads the block over a single-request report's own fields", () => {
+		const block = report({
+			thresholdValidation: THREE_MET,
+			elements: [{ id: "t", kind: "extract.json", passed: 0, failed: 0, skipped: 0 }],
+			assertions: { exact: { passed: 0, failed: 4227 }, sampled: { passed: 0, failed: 0 } },
+		} as Partial<RunReport>);
+		expect(reportOutcome(block)?.reason).toBe("All 3 budgets met, but 4,227 assertions failed");
+	});
+
+	it.each([
+		["an errored element", { errored: 3 }, "All 3 budgets met, but 3 elements errored"],
+		[
+			"a failed teardown",
+			{ teardownFailed: 1 },
+			"All 3 budgets met, but 1 teardown script failed",
+		],
+	])("is not a pass for %s alone", (_name, assertions, reason) => {
+		const judged = reportOutcome(report({ thresholdValidation: THREE_MET, assertions }));
+		expect(judged).toEqual({ outcome: "not-judged", reason });
+	});
+
+	it("names errored elements and failed teardowns with no budgets", () => {
+		const judged = reportOutcome(report({ assertions: { errored: 2202, teardownFailed: 1 } }));
+		expect(judged?.reason).toBe(
+			"No budgets set. 0.0% errors, 2,202 elements errored, 1 teardown script failed"
+		);
+	});
+
 	it("leaves a scenario report with no assertions block as it was", () => {
 		const without = report({
 			thresholdValidation: THREE_MET,
@@ -487,6 +600,55 @@ describe("rowOutcome", () => {
 		).toEqual({
 			outcome: "not-judged",
 			reason: "All budgets met, but 150 assertions failed",
+		});
+	});
+
+	// #3537: a row's block names which population failed, and what else did.
+	it("names a row's sampled replay from its block, not its summed flat count", () => {
+		expect(
+			rowOutcome(
+				row({
+					resultSummary: {
+						errorRate: 0,
+						verdict: "passed",
+						assertions: {
+							exact: { passed: 4400, failed: 0 },
+							sampled: { passed: 0, failed: 91 },
+							errored: 0,
+							teardownFailed: 0,
+						},
+						assertionsPassed: 4400,
+						assertionsFailed: 91,
+					},
+				})
+			)
+		).toEqual({
+			outcome: "not-judged",
+			reason: "All budgets met, but 91 assertions failed in the sampled replay",
+		});
+	});
+
+	it("is not a pass for a row whose elements errored and whose assertions held", () => {
+		expect(
+			rowOutcome(
+				row({
+					resultSummary: {
+						errorRate: 0,
+						verdict: "passed",
+						assertions: {
+							exact: { passed: 0, failed: 0 },
+							sampled: { passed: 0, failed: 0 },
+							errored: 2202,
+							teardownFailed: 1,
+						},
+						assertionsPassed: 0,
+						assertionsFailed: 0,
+					},
+				})
+			)
+		).toEqual({
+			outcome: "not-judged",
+			reason: "All budgets met, but 2,202 elements errored, 1 teardown script failed",
 		});
 	});
 

@@ -5,7 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { assertionsFailedPhrase } from "@/components/shared/run-assertions";
+import {
+	failedCheckPhrases,
+	failedChecksOf,
+	rowAssertionsOf,
+} from "@/components/shared/run-assertions";
 import { formatErrorRate, stepCountsPhrase } from "@/components/shared/run-outcome";
 import { STOP_REASONS } from "@/components/shared/capacityStop";
 import { formatLatency, formatNumber, formatRate } from "@/lib/format-number";
@@ -15,8 +19,9 @@ import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } f
  * The line a finished load run's history row prints under its identity:
  * "485 req/s · p95 42ms · 0.0% errors". A figure the run did not record is left
  * out rather than zeroed, and a row that recorded none has no line at all. A
- * scenario run with failed assertions (#2820) ends it with "4,580 assertions
- * failed", the one thing its HTTP-only error rate cannot say.
+ * run with a failed check ends it with the words its verdict names them in
+ * (#3537): "4,580 assertions failed", "4 assertions failed in the sampled
+ * replay", "3 elements errored", what its HTTP-only error rate cannot say.
  *
  * A capacity run's row carries the search's levels (#2930) and prints those
  * instead: its run-average rate blends every level the search stepped through
@@ -25,13 +30,12 @@ import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } f
  */
 export function resultSubtitle(summary: LoadResultSummary): string | null {
 	if (summary.capacity) return capacitySubtitle(summary.capacity);
-	const { rps, p95Ms, errorRate, assertionsFailed } = summary;
+	const { rps, p95Ms, errorRate } = summary;
 	const parts: string[] = [];
 	if (rps !== undefined) parts.push(`${formatRate(rps)} req/s`);
 	if (p95Ms !== undefined) parts.push(`p95 ${formatLatency(p95Ms)}`);
 	if (errorRate !== undefined) parts.push(`${formatErrorRate(errorRate)} errors`);
-	const assertions = assertionsFailedPhrase(assertionsFailed);
-	if (assertions) parts.push(assertions);
+	parts.push(...failedCheckPhrases(failedChecksOf(rowAssertionsOf(summary))));
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 
