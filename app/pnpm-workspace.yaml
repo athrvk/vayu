@@ -32,3 +32,10 @@ minimumReleaseAgeExclude:
     - rolldown
     - "@rolldown/binding-*"
     - "@oxc-project/types"
+# monaco-editor pins an exact dompurify (0.56.0 and the newest, 0.57.0, both
+# pin one below 3.4.17), and that copy is bundled into the renderer. The
+# override is scoped to monaco's edge so no other dependent is moved by it.
+# Retire it when a monaco-editor release depends on dompurify >= 3.4.17
+# (#3532).
+overrides:
+    "monaco-editor>dompurify": 3.4.17
