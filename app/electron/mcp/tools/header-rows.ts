@@ -106,7 +106,7 @@ function unmatchedRowText(key: string, index: number, occurrence: number): strin
 	const stored =
 		occurrence === 0
 			? `no "${key}" header is stored`
-			: `only ${occurrence} "${key}" headers are stored`;
+			: `only ${occurrence} "${key}" header${occurrence === 1 ? " is" : "s are"} stored`;
 	return `"headers" row ${index} ("${key}") has "valueWithheld": true and no "value", but ${stored} for it to keep. Give the row a "value", or leave it out.`;
 }
 

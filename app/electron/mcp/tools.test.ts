@@ -1235,6 +1235,21 @@ describe("data-write tools", () => {
 			expect(caveat).toContain("valueWithheld: true");
 		});
 
+		// Mutation check: pass `undefined` for the stored auth in
+		// `mergeRequestEdits` and the API-key header is not named.
+		test("a map write names the header the stored API-key auth names", async () => {
+			const client = fakeClient({
+				getRequest: vi.fn().mockResolvedValue({
+					...structuredClone(storedRow),
+					headers: [{ key: "X-Custom-Key", value: "k1", enabled: true }],
+					auth: { mode: "apikey", key: "X-Custom-Key" },
+				}),
+			});
+			const res = await update(client, { "X-Trace": "2" });
+			expect(res.isError).toBeFalsy();
+			expect(res.content[1].text).toContain('"X-Custom-Key" header');
+		});
+
 		test("rows that keep every unread row carry no caveat", async () => {
 			const client = storedClient();
 			const res = await update(client, readRows());

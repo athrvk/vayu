@@ -912,9 +912,11 @@ Notes:
   `{key, value, enabled?}` rows or a string map** (#3422). An example is a
   stored list and a captured response can repeat a name - several `Set-Cookie`
   lines are several rows - which a map cannot hold, so the rows are forwarded
-  as given, in order, a repeated key kept and `enabled` defaulting to true; the
+  in order, a repeated key kept and `enabled` defaulting to true; the
   map is the short spelling, one value per name. A row that is not an object
-  with string `key` and `value` is refused by its position. Update replaces the
+  with a string `key` and a string `value` is refused by its position, unless
+  it is a row as read with `valueWithheld: true` and no `value`, which keeps
+  the stored value (#3550; see Secret values). Update replaces the
   whole list. The rows are `{key, value}`, unlike `run_request`'s `{name, value}`
   lines, because they are the rows the engine stores and
   `list_request_examples` returns, not a request in flight. Bodies are bounded on the way out for the reason
@@ -1721,8 +1723,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   answers lines either way, and a line that is not an object with a string
   `name` is refused by its position. The same payload that composes is the one
   sent: nothing is folded between the two.
-  The saved-example tools take `{key, value, enabled?}` rows instead, for the
-  reason given under the examples bullet above (#3422).
+  `create_request`, `update_request` and the saved-example tools take
+  `{key, value, enabled?}` rows instead, for the reason given under the
+  examples bullet above (#3422, #3550).
 - **What actually went out** - the engine adds headers an agent never wrote: the
   body-implied `Content-Type` (a `json` body, a `graphql` body on `POST`, or a
   `jsonrpc` body, sends `application/json`; a `graphql` body on `GET` has no
