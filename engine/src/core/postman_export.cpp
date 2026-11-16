@@ -474,27 +474,6 @@ std::pair<json, json> split_params (const json& params) {
     return { std::move (query), std::move (path) };
 }
 
-/// The pairs of @p raw's query as the engine sends them: cut at the first `#`,
-/// then at the first `?`, with a `{{variable}}` holding a separator kept whole.
-std::vector<QueryPair> url_query_pairs (const std::string& raw) {
-    auto [rest, held]               = protect_variables (raw);
-    rest                            = rest.substr (0, rest.find ('#'));
-    const std::size_t question_mark = rest.find ('?');
-    if (question_mark == std::string::npos) {
-        return {};
-    }
-    // Placeholders restore in document order, and the head and path hold the
-    // first ones.
-    auto next = static_cast<std::size_t> (std::count (rest.begin (),
-    rest.begin () + static_cast<std::ptrdiff_t> (question_mark), PLACEHOLDER));
-    std::vector<QueryPair> pairs = split_query_pairs (rest.substr (question_mark + 1));
-    for (QueryPair& pair : pairs) {
-        pair.key   = restore (pair.key, held, next);
-        pair.value = restore (pair.value, held, next);
-    }
-    return pairs;
-}
-
 /// Whether @p row, joined into a URL, writes @p pair. The join depends on where
 /// the request came from (`QueryEncoding`: Postman's rule, `encodeURIComponent`
 /// for an OpenAPI, Insomnia or JMeter import, as typed under
