@@ -100,8 +100,11 @@ export const requestHeadersInput = z
  * A stored header list's `headers` argument, on the tools that write one: the
  * ordered `{key, value, enabled}` rows the reads return, or the single-valued
  * map, both read by `readHeaderRows`. A row is strict and declares
- * `valueWithheld` (#3556), so a row written back as read reaches the handler
- * whole. @p description is the tool's own, since only a write over a stored
+ * `valueWithheld` (#3556) and the members a stored row may carry beside them
+ * (`HEADER_ROW_EXTRA_MEMBERS`), so a row written back as read reaches the
+ * handler whole. `source` is a free string, not an enum: the engine writes only
+ * the three marker values it knows but accepts any, and a refused row as read
+ * is the defect this schema exists to prevent. @p description is the tool's own, since only a write over a stored
  * list has a stored value for a withheld row to keep.
  */
 export function storedHeadersInput(description: string) {
@@ -113,6 +116,9 @@ export function storedHeadersInput(description: string) {
 					value: z.string().optional(),
 					enabled: z.boolean().optional(),
 					valueWithheld: z.boolean().optional(),
+					description: z.string().optional(),
+					source: z.string().optional(),
+					type: z.string().optional(),
 				})
 			),
 			z.record(z.string(), z.string()),

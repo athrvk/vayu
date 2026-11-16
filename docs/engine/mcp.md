@@ -916,7 +916,13 @@ Notes:
   map is the short spelling, one value per name. A row that is not an object
   with a string `key` and a string `value` is refused by its position, unless
   it is a row as read with `valueWithheld: true` and no `value`, which keeps
-  the stored value (#3550; see Secret values). Update replaces the
+  the stored value (#3550; see Secret values). A row may also carry the
+  members a stored row has beside those, each a string: `description`, `type`
+  (a Postman import's) and `source` (`body-mode` on the Content-Type row the
+  app's Body panel or an importer wrote, `legacy-default` on a row the
+  engine's repair pass disabled), forwarded as given, a kept row's included -
+  a row written back without its `source` is no longer the app's own, so rows
+  go back as read. Any other member is refused by name. Update replaces the
   whole list. The rows are `{key, value}`, unlike `run_request`'s `{name, value}`
   lines, because they are the rows the engine stores and
   `list_request_examples` returns, not a request in flight. Bodies are bounded on the way out for the reason

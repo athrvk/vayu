@@ -15,15 +15,27 @@ import { foldHeaderName, withholdsHeaderRow } from "../withhold.js";
 import { isRecord, ToolArgError } from "./kit.js";
 import { toKeyValueEntries } from "./scenario-runs.js";
 
+/**
+ * The members of a stored header row besides `key`, `value` and `enabled`, all
+ * strings: a `description` and a `type` (a Postman import's), and a `source`,
+ * which marks the row an app setting wrote (`body-mode`, `stream`) or the
+ * engine's repair pass disabled (`legacy-default`). The app's Body panel reads
+ * `source` to tell its own Content-Type row from one the user typed, so a row
+ * written back without it changes what the app does with it.
+ */
+export const HEADER_ROW_EXTRA_MEMBERS = ["description", "source", "type"] as const;
+
+type HeaderRowExtras = { [member in (typeof HEADER_ROW_EXTRA_MEMBERS)[number]]?: string };
+
 /** One header row as the engine stores it. */
-export interface HeaderRow {
+export interface HeaderRow extends HeaderRowExtras {
 	key: string;
 	value: string;
 	enabled: boolean;
 }
 
 /** A row written back as the read showed a withheld one: it keeps the stored value (#3550). */
-interface KeptHeaderRow {
+interface KeptHeaderRow extends HeaderRowExtras {
 	key: string;
 	valueWithheld: true;
 	enabled: boolean;
@@ -41,7 +53,8 @@ export function keepsStoredValue(row: HeaderRowArg): row is KeptHeaderRow {
  *
  * The array is taken row for row, in order, a repeated key kept - a response
  * with several `Set-Cookie` lines is several rows, which a map cannot hold.
- * `enabled` defaults to true. A row with `valueWithheld: true` and no `value`
+ * `enabled` defaults to true. The members of {@link HEADER_ROW_EXTRA_MEMBERS}
+ * a row carries are forwarded as given. A row with `valueWithheld: true` and no `value`
  * is the row a read withheld, written back: it stands for the stored value
  * (`restoreWithheldHeaderRows`). The map is the short spelling, one enabled
  * row per name. Rows are `{key, value}` rather than `run_request`'s
@@ -64,21 +77,36 @@ function readHeaderRow(row: unknown, index: number): HeaderRowArg {
 	}
 	const enabled = row.enabled ?? true;
 	if (typeof row.key === "string" && typeof row.value === "string") {
-		return { key: row.key, value: row.value, enabled };
+		return { key: row.key, value: row.value, enabled, ...readRowExtras(row, at) };
 	}
 	if (typeof row.key === "string" && row.value === undefined && row.valueWithheld === true) {
-		return { key: row.key, valueWithheld: true, enabled };
+		return { key: row.key, valueWithheld: true, enabled, ...readRowExtras(row, at) };
 	}
 	throw new ToolArgError(
 		`${at} needs a string "key" and a string "value", or "valueWithheld": true to keep the stored value.`
 	);
 }
 
+/** The extra members @p row carries, each of which must be a string. */
+function readRowExtras(row: Record<string, unknown>, at: string): HeaderRowExtras {
+	const extras: HeaderRowExtras = {};
+	for (const member of HEADER_ROW_EXTRA_MEMBERS) {
+		const value = row[member];
+		if (value === undefined) continue;
+		if (typeof value !== "string") {
+			throw new ToolArgError(`${at} has a "${member}" that is not a string.`);
+		}
+		extras[member] = value;
+	}
+	return extras;
+}
+
 /**
  * @p rows with each withheld row given the stored value it stands for: the
  * row of @p stored with the same name, folded as the credential rules fold
  * it, at the same occurrence counted over every row of that name on each
- * side. Order, `enabled` and repeats are the call's. A withheld row with no
+ * side. Order, `enabled`, repeats and any other member the row carries are
+ * the call's. A withheld row with no
  * such stored row is refused, naming the header, before anything is written;
  * with nothing stored (a create), every withheld row is.
  */
@@ -93,7 +121,8 @@ export function restoreWithheldHeaderRows(stored: unknown, rows: HeaderRowArg[])
 		const value = storedValues.get(name)?.[occurrence];
 		if (value === undefined)
 			throw new ToolArgError(unmatchedRowText(row.key, index, occurrence));
-		return { key: row.key, value, enabled: row.enabled };
+		const { valueWithheld: _kept, ...carried } = row;
+		return { ...carried, value };
 	});
 }
 
@@ -162,5 +191,5 @@ export function droppedWithheldHeaders(
 export function droppedHeadersCaveat(names: string[]): string {
 	if (names.length === 0) return "";
 	const quoted = names.map((name) => `"${name}"`).join(", ");
-	return `This write removed the stored ${quoted} header${names.length > 1 ? "s" : ""}, whose value this session cannot read. To keep such a header, pass \`headers\` as rows and repeat its row as read ({key, valueWithheld: true}).`;
+	return `This write removed the stored ${quoted} header${names.length > 1 ? "s" : ""}, whose value this session cannot read. To keep such a header, pass \`headers\` as rows and repeat its row exactly as read, \`enabled\` and any \`source\` included, with \`valueWithheld: true\` and no \`value\`.`;
 }

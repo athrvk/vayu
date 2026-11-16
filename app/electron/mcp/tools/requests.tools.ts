@@ -176,7 +176,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 			url: z.string().optional().describe("New URL (may contain {{variables}})."),
 			method: z.string().optional().describe("New HTTP method."),
 			headers: storedHeadersInput(
-				"Replaces the stored list: ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value), or a {name: value} map."
+				"Replaces the stored list: ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value; its description, source and type are stored with it, so write them back as read), or a {name: value} map."
 			),
 			body: z.string().optional().describe("New request body content."),
 			file: fileRefInput,

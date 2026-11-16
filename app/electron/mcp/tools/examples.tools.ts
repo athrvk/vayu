@@ -160,7 +160,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			name: z.string().optional().describe("New display name."),
 			status: z.number().int().min(200).max(599).optional().describe("New status, 200-599."),
 			headers: storedHeadersInput(
-				"Replacement response headers (replaces the stored list). Ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value), or a {name: value} map."
+				"Replacement response headers (replaces the stored list). Ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value; its description, source and type are stored with it, so write them back as read), or a {name: value} map."
 			),
 			body: z.string().optional().describe("New response body."),
 			contentType: z.string().optional().describe("New content type for `body`."),

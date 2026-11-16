@@ -212,7 +212,12 @@
  * to 222,600 / 218,300 and the writes-off rows are untouched. The example tools'
  * `headers` moving onto that same schema (#3550: the strict row declaring
  * `valueWithheld`, and a description that says what it keeps) added 177 B more,
- * to 222,643 / 218,376 B; the two caps went to 222,700 / 218,400.
+ * to 222,643 / 218,376 B; the two caps went to 222,700 / 218,400. The row
+ * declaring the members a stored row carries (`description`, `source`, `type`,
+ * so a row written back as read is not refused), once for each of the four
+ * tools that take one, and the sentence saying to write them back as read on
+ * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
+ * went to 223,200 / 218,900.
  */
 
 import { describe, it, expect } from "vitest";
@@ -234,8 +239,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 222_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 218_400 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_200 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 218_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
