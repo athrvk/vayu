@@ -18,10 +18,15 @@
  * an alpha cannot be, so it is only allowed where no text sits on it (a dot, a
  * ring, a text-selection highlight).
  *
- * The scan reads the code with comments blanked and flags a `bg-primary/<n>`
- * or `bg-primary-fill/<n>` under any variant prefix (`hover:`, `disabled:`,
- * `data-[active=true]:`). It cannot see a class that arrives in a variable;
- * that is the limit of every source scan here (`app/CLAUDE.md`).
+ * The status fills are the same case: `hover:bg-status-warning-fill/90` put a
+ * white label on a 3.87:1 ground, and `--status-warning-fill-hover` replaced
+ * it (#3499).
+ *
+ * The scan reads the code with comments blanked and flags a `bg-primary/<n>`,
+ * `bg-primary-fill/<n>` or `bg-status-<name>-fill/<n>` under any variant prefix
+ * (`hover:`, `disabled:`, `data-[active=true]:`). It cannot see a class that
+ * arrives in a variable; that is the limit of every source scan here
+ * (`app/CLAUDE.md`).
  */
 
 import { describe, it, expect } from "vitest";
@@ -32,8 +37,13 @@ import { stripComments } from "@/lib/strip-comments.testkit";
 
 const srcRoot = dirname(fileURLToPath(import.meta.url));
 
-/** `bg-primary` or `bg-primary-fill` with a `/<alpha>`, not preceded by a class-name character. */
-const ACCENT_ALPHA = /(?<![\w-])bg-primary(?:-fill)?\/(?:\d+|\[[^\]\s]+\])/g;
+/**
+ * `bg-primary`, `bg-primary-fill` or `bg-status-<name>-fill` with a `/<alpha>`,
+ * not preceded by a class-name character. The bare `bg-status-<name>` dot
+ * colour is not matched: it never sits under a label.
+ */
+const ACCENT_ALPHA =
+	/(?<![\w-])bg-(?:primary(?:-fill)?|status-[a-z-]+-fill)\/(?:\d+|\[[^\]\s]+\])/g;
 
 /** Every translucent accent background in a source file's code, with its line. */
 function accentAlphas(source: string): { line: number; match: string }[] {
@@ -95,6 +105,8 @@ describe("no translucent accent background under text", () => {
 			'const c = "disabled:hover:bg-primary-fill/10";',
 			'const d = "data-[active=true]:bg-primary/15";',
 			'const e = "selection:bg-primary/[0.3]";',
+			'const f = "hover:bg-status-warning-fill/90";',
+			'const g = "bg-status-no-response-fill/[0.9]";',
 		].join("\n");
 		expect(accentAlphas(planted).map((hit) => hit.match)).toEqual([
 			"bg-primary/10",
@@ -102,14 +114,18 @@ describe("no translucent accent background under text", () => {
 			"bg-primary-fill/10",
 			"bg-primary/15",
 			"bg-primary/[0.3]",
+			"bg-status-warning-fill/90",
+			"bg-status-no-response-fill/[0.9]",
 		]);
-		expect(accentAlphas(planted).map((hit) => hit.line)).toEqual([1, 2, 3, 4, 5]);
+		expect(accentAlphas(planted).map((hit) => hit.line)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 	});
 
 	it("leaves the opaque tokens, borders, rings and comments alone", () => {
 		const clean = [
 			'const a = "bg-primary-tint hover:bg-primary-tint-hover bg-primary-fill hover:bg-primary-fill-hover";',
 			'const b = "border-primary/30 ring-primary/20 text-primary/70";',
+			'const c = "bg-status-warning-fill hover:bg-status-warning-fill-hover bg-status-warning/10 border-status-warning-fill/30";',
+			"// was bg-status-warning-fill/90",
 			"// was bg-primary/10",
 			"/* hover:bg-primary/20 */",
 		].join("\n");
