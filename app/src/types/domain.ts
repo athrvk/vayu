@@ -1854,9 +1854,11 @@ export interface RunResult {
 /**
  * What a collection run's list row says about the sequence that ran, from the
  * snapshot's scenario manifest (`add_scenario`,
- * `engine/src/http/routes/runs.cpp`). Present on `type: "scenario"` rows only -
- * its presence is what tells a row it is a collection run without a second
- * fetch.
+ * `engine/src/http/routes/runs.cpp`). Present on a collection run's row, which
+ * is `type: "scenario"` or a scenario `type: "load"` run - its presence is what
+ * tells a row it is a collection run without a second fetch, and its
+ * `collectionId` is the identity a load run's compare, trend and baseline are
+ * scoped to when it has no `requestId`.
  *
  * `stepCount` and not the manifest's `steps` array: the array carries a name, a
  * method and a URL per step, and shipping it on every list row would undo the

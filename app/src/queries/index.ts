@@ -76,6 +76,7 @@ export {
 	isRunNotFound,
 } from "./runs";
 export { RunNotFoundError } from "./runs";
+export type { RunIdentity, BaselineTarget } from "./runs";
 
 // Environments
 export {
