@@ -41,9 +41,18 @@ import {
 	elementsInput,
 	requestSettingsInput,
 	storedAuthInput,
+	storedHeadersInput,
 	storedScriptInput,
 } from "./input-schemas.js";
-import { toKeyValueEntries } from "./scenario-runs.js";
+import {
+	droppedHeadersCaveat,
+	droppedWithheldHeaders,
+	keepsStoredValue,
+	newHeaderRows,
+	readHeaderRows,
+	restoreWithheldHeaderRows,
+	type HeaderRowArg,
+} from "./header-rows.js";
 import { BINARY_FILE_ACCESS_TOKEN, GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const REQUEST_TOOLS: McpTool[] = [
@@ -68,10 +77,9 @@ export const REQUEST_TOOLS: McpTool[] = [
 			name: z.string().describe("Display name for the saved request."),
 			url: z.string().describe("Request URL (may contain {{variables}})."),
 			method: z.string().optional().describe("HTTP method (default GET)."),
-			headers: z
-				.record(z.string(), z.string())
-				.optional()
-				.describe("Headers as a string map."),
+			headers: storedHeadersInput(
+				"Ordered {key, value, enabled?} rows (repeats and disabled rows kept), or a {name: value} map."
+			),
 			body: z.string().optional().describe("Request body content."),
 			file: fileRefInput,
 			bodyType: z
@@ -104,9 +112,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;
 			applyRequestSettings(args, payload);
-			if (args.headers && typeof args.headers === "object") {
-				payload.headers = toKeyValueEntries(args.headers);
-			}
+			if (args.headers !== undefined) payload.headers = newHeaderRows(args.headers);
 			// The engine stores the body blob verbatim; the canonical shape keys
 			// off `mode` (not `type`), so a `type`-keyed body would not round-trip
 			// in the app. `bodyType` mirrors it into the denormalized column.
@@ -169,10 +175,9 @@ export const REQUEST_TOOLS: McpTool[] = [
 			name: z.string().optional().describe("New display name."),
 			url: z.string().optional().describe("New URL (may contain {{variables}})."),
 			method: z.string().optional().describe("New HTTP method."),
-			headers: z
-				.record(z.string(), z.string())
-				.optional()
-				.describe("Replacement headers as a string map (replaces the stored list)."),
+			headers: storedHeadersInput(
+				"Replaces the stored list: ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value; its description, source and type are stored with it, so write them back as read), or a {name: value} map."
+			),
 			body: z.string().optional().describe("New request body content."),
 			file: fileRefInput,
 			bodyType: z
@@ -222,9 +227,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				if (value !== undefined) payload[field] = value;
 			}
 			const scriptEdits = readScriptEdits(args);
-			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
-				payload.headers = toKeyValueEntries(args.headers);
-			}
+			const headers = args.headers === undefined ? undefined : readHeaderRows(args.headers);
 			// Auth and the six Settings fields ride the same rule as the strings
 			// above: stated is written, absent is left alone. The block replaces
 			// the stored one wholesale because the engine stores it as one JSON
@@ -271,6 +274,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 			if (
 				Object.keys(payload).length === 0 &&
 				scriptEdits.length === 0 &&
+				headers === undefined &&
 				elementsGiven === undefined
 			) {
 				return errorResult(
@@ -281,7 +285,13 @@ export const REQUEST_TOOLS: McpTool[] = [
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			return writeRequestEdits(ctx, requestId, payload, scriptEdits, signal);
+			return writeRequestEdits(
+				ctx,
+				requestId,
+				payload,
+				{ scripts: scriptEdits, headers },
+				signal
+			);
 		},
 	},
 	{
@@ -343,61 +353,99 @@ export const REQUEST_TOOLS: McpTool[] = [
 	},
 ];
 
+/** The `update_request` edits that may need the stored row to be written. */
+interface StoredEdits {
+	scripts: ReturnType<typeof readScriptEdits>;
+	headers: HeaderRowArg[] | undefined;
+}
+
 /**
  * `update_request`'s write. `PUT /requests/:id` merge-patches, so a payload of
- * stated fields is sent as it is, with no read. Two edits need the stored row
- * and become one read-merge-write under its version (`mergeAndWrite`): a
- * script edit, because the engine replaces the `elements` list whole (#1514),
- * and a `url` while secrets are withheld, because the URL the agent read had
- * its credentials emptied and writing it back verbatim would delete them
- * (#3549).
+ * stated fields is sent as it is, with no read. Edits that need the stored row
+ * become one read-merge-write under its version (`mergeAndWrite`); see
+ * `readsStoredRequest` for which.
  */
 async function writeRequestEdits(
 	ctx: ToolContext,
 	requestId: string,
 	payload: Record<string, unknown>,
-	scriptEdits: ScriptEdit[],
+	edits: StoredEdits,
 	signal: AbortSignal | undefined
 ): Promise<ToolResult> {
-	const restoresUrl = typeof payload.url === "string" && !ctx.config.revealSecretsToAgents;
-	if (scriptEdits.length === 0 && !restoresUrl) {
+	const reveal = ctx.config.revealSecretsToAgents;
+	if (!readsStoredRequest(payload, edits, reveal)) {
+		// No edit left on this path consults the stored row, so an empty one stands in.
+		const { body } = mergeRequestEdits({}, payload, edits, reveal);
 		return callEngine(
 			ctx,
-			() => ctx.client.updateRequest(requestId, payload, signal),
+			() => ctx.client.updateRequest(requestId, body, signal),
 			echoShape(ctx)
 		);
 	}
-	let kept: KeptUrlSlot[] = [];
+	let caveat = "";
 	const result = await mergeAndWrite(ctx, {
 		subject: `request "${requestId}"`,
 		read: () => ctx.client.getRequest(requestId, signal),
 		merge: (stored) => {
-			const body: Record<string, unknown> = { ...payload };
-			if (restoresUrl) {
-				const restored = restoreWithheldRequestUrl(
-					stored.url,
-					String(payload.url),
-					stored.auth
-				);
-				body.url = restored.url;
-				kept = restored.kept;
-			}
-			if (scriptEdits.length > 0) {
-				let elements = stored.elements;
-				for (const [which, script] of scriptEdits) {
-					elements = upsertScriptElement(elements, which, script);
-				}
-				body.elements = elements;
-			}
-			return body;
+			const merged = mergeRequestEdits(stored, payload, edits, reveal);
+			caveat = merged.caveat;
+			return merged.body;
 		},
 		write: (body, ifMatch) => ctx.client.updateRequest(requestId, body, signal, ifMatch),
 		shape: echoShape(ctx),
 	});
-	return result.isError ? result : withCaveat(result, keptUrlSlotsCaveat(kept));
+	return result.isError ? result : withCaveat(result, caveat);
 }
 
-type ScriptEdit = ReturnType<typeof readScriptEdits>[number];
+/**
+ * Whether the write needs the stored row: a script edit, because the engine
+ * replaces the `elements` list whole (#1514); a header row written back
+ * withheld, which keeps the stored value (#3550); and, while secrets are
+ * withheld, a `url`, whose credentials the read emptied (#3549), or any
+ * `headers`, so a stored row the session could not read is named when the
+ * write drops it (#3550).
+ */
+function readsStoredRequest(
+	payload: Record<string, unknown>,
+	edits: StoredEdits,
+	reveal: boolean
+): boolean {
+	if (edits.scripts.length > 0 || edits.headers?.some(keepsStoredValue)) return true;
+	return !reveal && (typeof payload.url === "string" || edits.headers !== undefined);
+}
+
+/** The body to write over @p stored, and the caveat lines naming what it kept or dropped unread. */
+function mergeRequestEdits(
+	stored: Record<string, unknown>,
+	payload: Record<string, unknown>,
+	edits: StoredEdits,
+	reveal: boolean
+): { body: Record<string, unknown>; caveat: string } {
+	const body: Record<string, unknown> = { ...payload };
+	const notes: string[] = [];
+	if (typeof payload.url === "string" && !reveal) {
+		const restored = restoreWithheldRequestUrl(stored.url, payload.url, stored.auth);
+		body.url = restored.url;
+		notes.push(keptUrlSlotsCaveat(restored.kept));
+	}
+	if (edits.headers !== undefined) {
+		const headers = restoreWithheldHeaderRows(stored.headers, edits.headers);
+		body.headers = headers;
+		if (!reveal) {
+			notes.push(
+				droppedHeadersCaveat(droppedWithheldHeaders(stored.headers, stored.auth, headers))
+			);
+		}
+	}
+	if (edits.scripts.length > 0) {
+		let elements = stored.elements;
+		for (const [which, script] of edits.scripts) {
+			elements = upsertScriptElement(elements, which, script);
+		}
+		body.elements = elements;
+	}
+	return { body, caveat: notes.filter((note) => note !== "").join("\n") };
+}
 
 /** One line per slot of the written URL that kept its stored credential. */
 function keptUrlSlotsCaveat(kept: KeptUrlSlot[]): string {

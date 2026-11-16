@@ -880,19 +880,23 @@ export class EngineClient {
 	/**
 	 * Update one saved example: `PUT /requests/:id/examples/:exampleId`,
 	 * merge-patch like every other update here - a missing example is a `404`,
-	 * never a silent create.
+	 * never a silent create. @p ifMatch (an {@link entityTagOf} the merge was
+	 * read with) makes it a 412 when the example has moved since.
 	 */
 	updateRequestExample(
 		requestId: string,
 		exampleId: string,
 		payload: unknown,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		ifMatch?: string
 	): Promise<unknown> {
 		return this.request(
 			"PUT",
 			`/requests/${encodeURIComponent(requestId)}/examples/${encodeURIComponent(exampleId)}`,
 			payload,
-			signal
+			signal,
+			this.timeoutMs,
+			ifMatchHeader(ifMatch)
 		);
 	}
 
