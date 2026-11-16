@@ -1050,8 +1050,9 @@ TEST_F (RunsRouteTest, FilterByQSubstringOverSnapshot) {
     EXPECT_EQ (body["data"][0]["id"], "run_orders");
 }
 
-// The scenario snapshot a collection run stores. Only the key the filter reads
-// matters here, so the rest is the smallest thing that still parses as one.
+// The scenario snapshot a collection run, or a load run driven over a
+// collection, stores. Only the key the filter reads matters here, so the rest
+// is the smallest thing that still parses as one.
 std::string scenario_snapshot (const std::string& collection_id) {
     return R"({"scenario":{"collectionId":")" + collection_id + R"(","iterations":1}})";
 }
@@ -4963,6 +4964,43 @@ TEST_F (RunsRouteTest, ListFiltersToBaselinesAndBackAgain) {
     ASSERT_EQ (plain_status, 200);
     ASSERT_EQ (plain_body["data"].size (), 1u);
     EXPECT_EQ (plain_body["data"][0]["id"], "plain");
+}
+
+// A collection's baseline is the newest pinned *load* run over it (#3544): a
+// load run driven over a collection stores `scenario.collectionId` in its
+// snapshot, so the same three filters a request's baseline lookup ANDs also
+// scope to a collection. Each decoy is newer than the answer, so dropping the
+// term that excludes it puts it first: the collection's own sequential run (the
+// type term), another collection's pin (the collection term) and an unpinned
+// load run (the baseline term).
+TEST_F (RunsRouteTest, CollectionBaselineLookupFindsTheNewestPinnedLoadRunOverIt) {
+    seed ({ .id = "load_old", .start_time = 100, .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "load_new", .start_time = 300, .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id      = "sequential_same_collection",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 400,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id      = "load_other_collection",
+    .start_time      = 500,
+    .config_snapshot = scenario_snapshot ("col_B") });
+    seed ({ .id = "load_unpinned", .start_time = 600, .config_snapshot = scenario_snapshot ("col_A") });
+    for (const char* pinned : { "load_old", "load_new",
+         "sequential_same_collection", "load_other_collection" }) {
+        const auto [pin_status, pin_body] =
+        vayu::http::routes::set_run_baseline_response (*db_, pinned, R"({"baseline":true})");
+        ASSERT_EQ (pin_status, 200) << pin_body.dump ();
+    }
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    f.type          = vayu::RunType::Load;
+    f.baseline      = true;
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "load_new");
+    EXPECT_EQ (body["data"][0]["type"], "load");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
 }
 
 // The single-run payload answers it too, so a client that opened a run
