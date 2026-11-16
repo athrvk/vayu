@@ -32,6 +32,7 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include "load_start_stamp.hpp"
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "sqlite_auto_extension.hpp"
@@ -2764,6 +2765,9 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     collector.record_error (vayu::ErrorCode::ConnectionFailed, "refused");
     collector.record_cancelled ();
     collector.record_bytes (100, 400);
+    // Two requests open since a second before the read (#3567).
+    (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
+    (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
     context->peak_in_flight = 3;
     runs.register_run ("run_live", context);
 
@@ -2786,7 +2790,8 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 400u);
     EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 3u);
     EXPECT_GT (summary["avgRps"].get<double> (), 0.0);
-    // The collector's latency sum over the same duration (#2821).
+    // The collector's in-flight integral over the same duration (#2821,
+    // #3567): the two open requests, which nothing has completed.
     ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
     EXPECT_GT (summary["avgInFlight"].get<double> (), 0.0);
     EXPECT_EQ (live["statusCodes"], nlohmann::json::parse ("[[0,1],[200,2],[503,1]]"));

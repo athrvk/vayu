@@ -243,6 +243,46 @@ TEST_F (LoadStrategyTest, ARampAsLongAsTheRunPeaksAtTheConfiguredCount) {
     EXPECT_EQ (context->peak_in_flight.load (), TARGET);
 }
 
+// #3567: a submission is in flight from `open_request` until its completion
+// closes it, and a Stop's cancellation is a completion. `/hang` answers
+// nothing, so while the run holds its users every one is open and the
+// integral grows by the open count per millisecond; once `stop (false)` has
+// cancelled them it stops growing. Mutation check: close only a result that
+// is not an error in `submit_to_loop`'s callback and the integral still grows
+// after the stop.
+TEST_F (LoadStrategyTest, AStopsCancellationClosesEveryOpenRequest) {
+    const size_t USERS    = 4;
+    nlohmann::json config = { { "mode", "constant_concurrency" },
+        { "duration", "300ms" }, { "concurrency", USERS } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-open-cancel", config);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->hang_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+
+    const auto& mc    = *context->metrics_collector;
+    const int64_t now = vayu::tests::steady_now_ms ();
+    const auto open   = static_cast<int64_t> (context->requests_sent.load ());
+    ASSERT_EQ (open, static_cast<int64_t> (USERS))
+    << "the users never all sent";
+    EXPECT_EQ (mc.inflight_integral_ms (now + 1000) - mc.inflight_integral_ms (now),
+    1000 * open);
+
+    context->event_loop->stop (false);
+    const int64_t after = vayu::tests::steady_now_ms ();
+    EXPECT_GT (mc.inflight_integral_ms (after), 0);
+    EXPECT_EQ (mc.inflight_integral_ms (after + 60'000), mc.inflight_integral_ms (after))
+    << "a cancelled request is still open";
+}
+
 namespace {
 
 constexpr size_t FINAL_REFILL_START   = 1;

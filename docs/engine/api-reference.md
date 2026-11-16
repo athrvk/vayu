@@ -11656,8 +11656,7 @@ the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
 the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
 trailing-window means (`windowAvg*Ms` live, `window_avg_*_ms` stored), the
-mean in flight (`windowAvgInFlight`, `window_avg_in_flight` and the report's
-`avgInFlight`, issue #2821), the exports, and the
+exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
 with the percentiles and the max. It is not divided by `totalRequests`.
@@ -11803,13 +11802,23 @@ everything since its first tick. `window_avg_latency_ms` and
 `window_avg_queue_wait_ms` are the mean latency and queue wait of the
 [latency population](#latency-population) that completed in the same window,
 `null` when nothing did. `window_avg_in_flight` is the mean number of
-requests in flight over the same window (issue #2821), by Little's law the
-latency that population carried divided by the window's span: a request is in
-flight from submission to completion, its queue wait inside the generator or
-libcurl included, and a virtual user in a timer wait (`timer.think`,
-`timer.pacing`, `timer.throughput`) has none. A request cancelled or refused
-before the wire adds nothing. With no think time it equals the virtual user
-count. It is a number, `0` for a window that completed nothing, never `null`.
+requests in flight over the same window (issue #2821): the time requests
+spent in flight during the window, divided by its span (issue #3567). A
+request is in flight from its submission to the event loop until it
+completes, its queue wait inside the generator or libcurl included, and it
+counts for every part of the window it was open in, so requests open across
+the whole window with none completing read their count, and a request longer
+than the window never reads above one. A virtual user in a timer wait
+(`timer.think`, `timer.pacing`, `timer.throughput`) has none in flight, and
+neither does a request refused or skipped before it reached the event loop (a
+`maxInFlight` drop, a data-binding failure, a step a controller skipped). A
+request a Stop cancels after submission was in flight until the cancellation.
+With no think time it equals the virtual user count. It is a number, `0` for a
+window with nothing in flight, never `null`. Before issue #3567 the same key
+held the latency the window's completions carried divided by its span, which
+read `0` while a request longer than the window was still open and spiked when
+it completed; rows stored before the change keep that value under the same
+key.
 The live frame of the same tick carries the same five values as `currentRps`,
 `currentSendRate`, `windowAvgInFlight`, `windowAvgLatencyMs` and
 `windowAvgQueueWaitMs`. `current_concurrency` and `backpressure` are
@@ -12200,7 +12209,7 @@ no frame.
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
-| `windowAvgInFlight` | Mean requests in flight over the same trailing window (issue #2821): the latency the window's completions carried divided by its span (Little's law). A request is in flight from submission to completion, queue wait included; a timer wait between requests and a request cancelled or refused before the wire are not. With no think time it equals the virtual user count, and it does not alias the way `activeConnections` does. `0` for a window that completed nothing, never `null`. A gate frame's value is its stored row's `window_avg_in_flight` |
+| `windowAvgInFlight` | Mean requests in flight over the same trailing window (issue #2821): the time requests spent in flight during the window divided by its span (issue #3567), so a request open across the window counts whether or not anything completed. A request is in flight from submission to completion, queue wait included, and a Stop's cancellation ends it; a timer wait between requests and a request refused or skipped before it reached the event loop are not. With no think time it equals the virtual user count, and it does not alias the way `activeConnections` does. `0` for a window with nothing in flight, never `null`. A gate frame's value is its stored row's `window_avg_in_flight` |
 | `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
@@ -13864,13 +13873,19 @@ never written. A partial report of a running load run reads it from the live
 counter.
 
 `summary.avgInFlight` is the mean number of requests in flight over the run
-(issue #2821): the latency sum of the [latency population](#latency-population)
-divided by `testDuration`, by Little's law. A request is in flight from
-submission to completion, its queue wait inside the generator or libcurl
-included; a virtual user in a timer wait between requests has none, and a
-request cancelled or refused before the wire adds nothing. With no think time
-it equals the virtual user count, and over that count it is the run's
-utilisation. `peakConcurrency` beside it is the high-water mark of the
+(issue #2821): the time requests spent in flight, summed over every request,
+divided by `testDuration` (issue #3567). A request is in flight from its
+submission to the event loop until it completes, its queue wait inside the
+generator or libcurl included, and a Stop's cancellation ends it, so a request
+the Stop cancelled counts the time it was open. A virtual user in a timer wait
+between requests has none, and neither does a request refused or skipped
+before it reached the event loop (a `maxInFlight` drop, a data-binding
+failure, a step a controller skipped). A step's script time (`elements.includeScriptTime`)
+is not part of it. With no think time it equals the virtual user count, and
+over that count it is the run's utilisation. A run stored before issue #3567
+keeps the old figure under the same key: the latency sum of the
+[latency population](#latency-population) divided by `testDuration`, which
+left out cancelled requests and folded in included script time. `peakConcurrency` beside it is the high-water mark of the
 instantaneous in-flight gauge (the live stream's `backpressure`), which the load
 generator reads after each batch of submissions in every mode: the closed-loop
 controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`

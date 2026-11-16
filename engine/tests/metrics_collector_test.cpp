@@ -7,9 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -100,10 +103,81 @@ TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
     EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0); // 800 / 8 samples
     EXPECT_DOUBLE_EQ (collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (),
     20.0); // 2/10 * 100
-    // #2821: 800 ms on the wire over 0.4 s is two in flight on average; the
-    // timeouts with no transfer add nothing, and no duration reads 0.
-    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.4), 2.0);
-    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.0), 0.0);
+}
+
+// #2821, #3567: the mean in flight is the time requests were open over the
+// duration. Eight open for 100 ms of a 0.4 s run is two on average; a failure
+// with no submission behind it (a bind failure) adds nothing, and no duration
+// reads 0.
+TEST_F (MetricsCollectorTest, AverageInFlightIsTimeOpenOverTheDuration) {
+    constexpr int64_t T0 = 50'000;
+    std::array<int64_t, 8> stamps{};
+    for (int64_t& stamp : stamps) {
+        stamp = collector->open_request (T0);
+    }
+    for (const int64_t stamp : stamps) {
+        collector->close_open (stamp, T0 + 100);
+        collector->record_success (200, 100.0, 0.0);
+    }
+    collector->record_error (vayu::ErrorCode::DataBindingFailed, "never submitted");
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 400), 800);
+    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.4, T0 + 400), 2.0);
+    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.0, T0 + 400), 0.0);
+}
+
+// #3567: a request still open counts its time so far, so a reading taken
+// before anything completes is not 0, and the integral never goes back.
+TEST_F (MetricsCollectorTest, AnOpenRequestCountsItsTimeSoFar) {
+    constexpr int64_t T0 = 50'000;
+    const int64_t first  = collector->open_request (T0);
+    (void)collector->open_request (T0 + 200);
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 200), 200);
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 500), 500 + 300);
+    collector->close_open (first, T0 + 600);
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 600), 600 + 400);
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 700), 600 + 500);
+}
+
+// #3567: a Stop cancels what is in flight, and those requests were on the wire
+// until it did: four held 500 ms of a 1 s run read two, not the 0 a
+// completed-latency mean reads for a run whose requests carried no latency.
+// Mutation check: return from `close_open` without crediting `closed_ms` and
+// this reads 0.
+TEST_F (MetricsCollectorTest, CancelledRequestsReadTheirOpenTimeOverTheDuration) {
+    constexpr int64_t T0 = 50'000;
+    std::array<int64_t, 4> stamps{};
+    for (int64_t& stamp : stamps) {
+        stamp = collector->open_request (T0);
+    }
+    for (const int64_t stamp : stamps) {
+        collector->close_open (stamp, T0 + 500);
+        collector->record_cancelled ();
+    }
+    ASSERT_EQ (collector->latency_samples (), 0u);
+    EXPECT_DOUBLE_EQ (collector->average_in_flight (1.0, T0 + 1000), 2.0);
+}
+
+// The integral's three parts are read under one lock, so a reader racing
+// opens and closes never pairs a count with the stamps of another moment:
+// with every request opened and closed at one instant, any torn read is a
+// non-zero value. Run under TSan this is also the data-race check.
+TEST_F (MetricsCollectorTest, TheInFlightIntegralIsNeverReadTorn) {
+    constexpr int64_t T0 = 1'000'000'000;
+    constexpr int ROUNDS = 20'000;
+    std::atomic<bool> done{ false };
+    std::thread writer ([&] () {
+        for (int i = 0; i < ROUNDS; ++i) {
+            collector->close_open (collector->open_request (T0), T0);
+        }
+        done = true;
+    });
+    int64_t worst = 0;
+    while (!done) {
+        worst = std::max (worst, std::abs (collector->inflight_integral_ms (T0)));
+    }
+    writer.join ();
+    EXPECT_EQ (worst, 0);
+    EXPECT_EQ (collector->inflight_integral_ms (T0 + 10'000), 0);
 }
 
 // #2384: a failure whose transfer ran is in the latency population at its own

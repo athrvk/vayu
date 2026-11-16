@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
+#include "load_start_stamp.hpp"
 #include "log_capture.hpp"
 #include "mock_server.hpp"
 #include "task_queue.hpp"
@@ -4261,13 +4263,54 @@ TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
     EXPECT_EQ (context->peak_in_flight.load (), VUS);
 }
 
+// #3567: a step is in flight from `open_request` until its completion closes
+// it, and a Stop's cancellation is a completion. `/hang` answers nothing, so
+// every virtual user holds one open step until `stop (false)` cancels it, and
+// the integral then stops growing. Mutation check: close only a result that is
+// not an error in `submit_one`'s callback and the integral still grows after
+// the stop.
+TEST_F (ScenarioLoadTest, AStopsCancellationClosesEveryOpenStep) {
+    vayu::tests::SlowMockServer upstream;
+    const auto execution = plan_over ({ upstream.hang_url () });
+
+    const size_t VUS  = 4;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "300ms" }, { "concurrency", VUS } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-open-cancel", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    auto base_scopes =
+    vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
+    (void)vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+
+    const auto& mc    = *context->metrics_collector;
+    const int64_t now = vayu::tests::steady_now_ms ();
+    const auto open   = static_cast<int64_t> (context->requests_sent.load ());
+    ASSERT_EQ (open, static_cast<int64_t> (VUS)) << "the users never all sent";
+    EXPECT_EQ (mc.inflight_integral_ms (now + 1000) - mc.inflight_integral_ms (now),
+    1000 * open);
+
+    context->event_loop->stop (false);
+    const int64_t after = vayu::tests::steady_now_ms ();
+    EXPECT_GT (mc.inflight_integral_ms (after), 0);
+    EXPECT_EQ (mc.inflight_integral_ms (after + 60'000), mc.inflight_integral_ms (after))
+    << "a cancelled step is still open";
+}
+
 // #2821: a virtual user in a think wait has nothing on the wire, so the run's
 // mean in flight is its share of time spent sending: two 20 ms steps around a
 // 200 ms think is about 0.17 of each user, under 2 of 10 here, and 10 if the
-// think wait were counted. Mutation check: divide the latency sum by the
+// think wait were counted. Since #3567 the mean is the time each step was open
+// over the run, not the latency its completions carried, so a step's script
+// time is no longer folded in. Mutation check: divide the integral by the
 // completion count in `MetricsCollector::average_in_flight` and this reads the
-// mean latency, about 20. The 1 Hz peak sample is the instantaneous gauge this
-// mean replaces, so it is only bounded here, not pinned (#2397 item 3).
+// mean time a step was open, about 20. The 1 Hz peak sample is the
+// instantaneous gauge this mean replaces, so it is only bounded here, not
+// pinned (#2397 item 3).
 TEST_F (ScenarioLoadTest, AThinkTimeRunsMeanInFlightIsItsShareOfTimeOnTheWire) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/slow"), server.url ("/slow") });

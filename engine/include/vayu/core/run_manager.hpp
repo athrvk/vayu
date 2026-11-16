@@ -1311,9 +1311,10 @@ struct MetricTickSample {
     size_t cancelled   = 0;     // By a Stop; in none of the above (#2136)
     // The trailing window of the live frame of the same tick (TrailingWindow,
     // #2393): completions and dispatches per second over at least the last
-    // second, the window's mean requests in flight (0 when it completed
-    // nothing, #2821), and its mean latency and queue wait, absent (stored as
-    // null) when it completed nothing.
+    // second, the window's mean requests in flight (#2821; its time in flight
+    // over its span since #3567, so a request open across the window counts
+    // whether or not anything completed), and its mean latency and queue
+    // wait, absent (stored as null) when it completed nothing.
     double current_rps          = 0.0;
     double current_send_rate    = 0.0;
     double window_avg_in_flight = 0.0;
@@ -1569,7 +1570,7 @@ struct RunSummaryInputs {
     // Load end to the auxiliary threads joined.
     double cleanup_overhead_s = 0.0;
     size_t peak_concurrency   = 0;
-    // MetricsCollector::average_in_flight over `test_duration_s` (#2821).
+    // MetricsCollector::average_in_flight over `test_duration_s` (#2821, #3567).
     double avg_in_flight    = 0.0;
     size_t dropped_requests = 0;
     // The pacer's deliberate skips and the schedule time they cover (#2911).
