@@ -64,7 +64,7 @@ describe("in flight on the live closed-loop rows", () => {
 	it("constant_rps keeps its backpressure sub-line, in its own words", () => {
 		const row = renderRow({ mode: "constant_rps", backpressure: 7, peakConcurrency: 9 });
 		expect(row.textContent).toContain("backpressure 7");
-		expect(row.textContent).not.toContain("in flight 7");
+		expect(row.textContent).not.toContain("7 in flight");
 	});
 });
 

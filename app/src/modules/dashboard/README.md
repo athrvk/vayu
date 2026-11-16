@@ -34,11 +34,11 @@ ways; until then the live view stays, with the report fetch's Retry.
   run streams they leave its stream alone, Reconnect opening that run with a toast instead.
   **A run draining its in-flight requests is the engine's word, never the app's** (#3568): every live
   frame carries `phase`, and `index.tsx` hands the header `draining = live && phase === "draining"`,
-  `waitingOn` (the frame's `backpressure`) and `plannedSeconds` (the configured duration), all
-  primitives, the first two set only while draining so the memo'd header re-renders per tick for the
-  drain alone. The pill then reads **Finishing** (a `label` override on `RunStatusPill`: the status
+  `waitingOn` (the frame's `backpressure`) and `plannedSeconds` (the configured duration, handed
+  over only while the run is live), all primitives, `draining` and `waitingOn` set only while
+  draining so the memo'd header re-renders per tick for the drain alone. The pill then reads **Finishing** (a `label` override on `RunStatusPill`: the status
   stays `running`), the config line says "waiting on N requests", and Stop reads **Stop waiting**.
-  The clock reads `00:18 / 00:15` (elapsed over plan) whenever the run has a duration. A phase the
+  The clock reads `00:18 / 00:15` (elapsed over plan) while a run with a duration is live, and `00:15 elapsed` once it is not. A phase the
   client does not know, or none (an older engine), draws the run exactly as before: nothing here
   compares elapsed with the duration, because a run that is merely slow runs past its plan too.
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)

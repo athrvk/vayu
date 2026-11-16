@@ -375,7 +375,7 @@ export default function LoadTestDashboard() {
 				stepCount={stepCount}
 				comment={loadTestConfig?.comment}
 				elapsedDuration={elapsedDuration}
-				plannedSeconds={plannedSeconds}
+				plannedSeconds={live ? plannedSeconds : undefined}
 				draining={draining}
 				waitingOn={waitingOn}
 				configuration={loadTestConfig ?? undefined}

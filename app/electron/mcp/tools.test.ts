@@ -563,6 +563,16 @@ describe("tool registry", () => {
 		expect(description).toContain("omitted for every other run");
 	});
 
+	// Mutation check (#3568): drop the "Every tick carries phase: ..." sentence
+	// from get_live_metrics in runs.tools.ts and this fails.
+	test("get_live_metrics names the phase every tick carries and its five values", () => {
+		const description = descriptionOf(TOOLS.find((t) => t.name === "get_live_metrics"));
+		expect(description).toContain("Every tick carries phase");
+		for (const phase of ["setup", "sending", "draining", "summarising", "settled"]) {
+			expect(description, phase).toContain(phase);
+		}
+	});
+
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);
