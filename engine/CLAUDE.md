@@ -546,7 +546,13 @@ logged as a warning: it means a client skipped composition.
   engine-side, the `idMap` back, the whole tree in one transaction. The same
   per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
-  field added there reaches bulk import too. A `variables` blob goes through
+  field added there reaches bulk import too. **A write that states a request's
+  `url` and no `params` reconciles the stored query rows with the URL**
+  (#3551, `core::reconcile_query_rows`, `query_encoding.hpp`, called from
+  `apply_request_params_field`): enabled rows follow the URL's pairs, disabled
+  and path rows stay, rows that already agree are left byte for byte; a body
+  stating `params` stores them as sent. A reader of the rows can rely on them
+  agreeing with `url`. A `variables` blob goes through
   `apply_variables_field` (`routes.hpp`, #3251), which also refuses a key that is
   blank or differs from `trim_variable_name`, the trim `{{ name }}` is looked up
   by, since such a key could never be referenced; the importers trim names

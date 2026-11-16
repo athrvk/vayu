@@ -526,8 +526,9 @@ json postman_url_only_row (const QueryPair& pair) {
 /// The url object with its query, and the path rows as `url.variable[]` -
 /// after everything else, where Postman writes it.
 ///
-/// `url` is what the engine sends and Params rows are display state (they
-/// also hold the turned-off rows), and Postman reads `query[]` over `raw` when
+/// `url` is what the engine sends and Params rows mirror it (a URL-only write
+/// derives them, and they also hold the turned-off rows), and Postman reads
+/// `query[]` over `raw` when
 /// both exist. So `query[]` is every stored row in stored order, then the
 /// pairs of `raw`'s query that no enabled row states, in URL order: a request
 /// whose rows do not state its URL (stored before a URL-only write derived
