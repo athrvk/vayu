@@ -508,6 +508,15 @@ ReportText no_budgets_text (const ordered& document) {
     return out;
 }
 
+/// `15 requests were still unanswered when the drain was stopped` (#3538).
+ReportText drain_stopped_text (const ordered& document) {
+    const double cancelled =
+    number_at (document, { "report", "summary", "drainCut", "cancelled" }).value_or (0);
+    return words (format_run_count (cancelled) +
+    (cancelled == 1 ? " request was" : " requests were") +
+    " still unanswered when the drain was stopped");
+}
+
 /// A met-budget reason that the failed checks undercut (#2820, #3537).
 bool is_failed_check_reason (std::string_view reason) {
     return reason == "budgets_met_with_assertion_failures" ||
@@ -530,6 +539,9 @@ ReportText verdict_detail (const ordered& document, std::string_view reason) {
     }
     if (reason == "no_budgets") {
         return no_budgets_text (document);
+    }
+    if (reason == "drain_stopped") {
+        return drain_stopped_text (document);
     }
     if (reason == "run_failed") {
         return "the run failed before it finished";

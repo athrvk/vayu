@@ -170,6 +170,8 @@ constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 "bytesSent", "bytesReceived", "httpVersionDowngraded", "throughputBytesPerSec",
 "sendingDurationSeconds", "connectionReplays", "avgInFlight", "completedWhileSending",
 "partial", "summaryMissing", "skippedRequests", "stalledMs" });
+constexpr auto DRAIN_CUT_KEYS =
+std::to_array<std::string_view> ({ "cancelled" });
 constexpr auto LATENCY_KEYS = std::to_array<std::string_view> (
 { "min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999" });
 constexpr auto RATE_CONTROL_KEYS = std::to_array<std::string_view> (
@@ -428,6 +430,15 @@ ordered assertions_section (const json& assertions) {
     return out;
 }
 
+/// The report's `summary`, its one nested member (`drainCut`, #3538) named.
+ordered summary_section (const json& summary) {
+    ordered out = pick (summary, SUMMARY_KEYS);
+    if (const json& drain_cut = member (summary, "drainCut"); drain_cut.is_object ()) {
+        out["drainCut"] = pick (drain_cut, DRAIN_CUT_KEYS);
+    }
+    return out;
+}
+
 using SectionBuilder = ordered (*) (const json&);
 
 struct ReportSection {
@@ -438,7 +449,7 @@ struct ReportSection {
 /// Every report section the document carries, in the order it writes them.
 /// A section the report does not hold stays absent, as the report has it.
 constexpr auto REPORT_SECTIONS = std::to_array<ReportSection> ({
-{ "summary", [] (const json& s) { return pick (s, SUMMARY_KEYS); } },
+{ "summary", summary_section },
 { "latency", [] (const json& s) { return pick (s, LATENCY_KEYS); } },
 { "statusCodes", code_counts },
 { "rateControl", [] (const json& s) { return pick (s, RATE_CONTROL_KEYS); } },
@@ -679,7 +690,8 @@ std::string_view failed_check_reason (const json& report) {
 
 /**
  * `{state, stoppedEarly, reason}`: a stopped run is not judged; a failed run,
- * or a missed budget, fails; met budgets pass only when no request errored and
+ * or a missed budget, fails; a run whose drain a Stop cut (`summary.drainCut`,
+ * #3538) is not judged; met budgets pass only when no request errored and
  * the `assertions` block counts no failed check; no budgets is not judged. The
  * app's `judgeRun` (`run-outcome.ts`) reads the same report fields, and
  * `tests/fixtures/run-verdict-conformance.json` holds the two to one answer.
@@ -701,10 +713,13 @@ ordered verdict_section (const json& report, std::string_view status) {
     if (status == "failed" || missed) {
         return verdict ("failed", missed ? "budgets_missed" : "run_failed");
     }
+    const json& summary = member (report, "summary");
+    if (has_number_above_zero (member (member (summary, "drainCut"), "cancelled"))) {
+        return verdict ("not_judged", "drain_stopped");
+    }
     if (!budgets) {
         return verdict ("not_judged", "no_budgets");
     }
-    const json& summary   = member (report, "summary");
     const json& total     = member (summary, "totalRequests");
     const json& rate      = member (summary, "errorRate");
     const bool any_errors = total.is_number () && total.get<double> () > 0 &&

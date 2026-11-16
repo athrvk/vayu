@@ -444,7 +444,10 @@ Manages the lifecycle of load test runs:
   backlog is thrown away and in-flight transfers are cancelled, so a stop is not paced by the
   upstream. A Stop after the strategy returned on its own (`draining`) decides nothing: it
   cancels the natural-end drain at once, the in-flight transfers are counted as cancelled, and
-  the run keeps its own end - `completed`, or `failed` by its `failRun` thresholds. A run that
+  the run keeps its own end - `completed`, or `failed` by its `failRun` thresholds. What it
+  cancelled is stored as the summary's `drainCut` (`RunContext::drain_cut`, issue #3538): those
+  are the run's slowest requests and in none of its figures, so every verdict reader takes such a
+  run as not judged unless a budget already failed it, while its status stays its own end. A run that
   reaches the end of its duration with no Stop waits for genuine in-flight requests, but no
   longer than `timeout` + 2s. A sequential collection run has no drain. The phase and the latch
   are one atomic byte (`RunPhaseLatch`) that only compare-exchange loops write, so the worker's

@@ -2332,6 +2332,40 @@ TEST_F (RunsRouteTest, ReportReadsZeroCancelledFromAnOlderSummary) {
     EXPECT_EQ (body["summary"]["cancelledRequests"].get<size_t> (), 0u);
 }
 
+// #3538: a run whose drain a Stop cut reports the cut beside its cancelled
+// count, which the cut leaves where it was; a run cancelled by any other Stop
+// carries no key. Mutation check: drop the `drainCut` write in
+// `build_report_body` and the first expectation fails.
+TEST_F (RunsRouteTest, ReportCarriesTheDrainCutOnlyWhenStored) {
+    auto cut      = summary_inputs ();
+    cut.cancelled = 15;
+    cut.drain_cut = 15;
+    seed ({ .id = "run_cut", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_cut", vayu::core::build_run_summary_payload (cut).dump ());
+
+    auto uncut      = summary_inputs ();
+    uncut.cancelled = 15;
+    seed ({ .id = "run_uncut", .status = vayu::RunStatus::Stopped, .start_time = 1001 });
+    db_->update_run_summary (
+    "run_uncut", vayu::core::build_run_summary_payload (uncut).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_cut");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary.value ("drainCut", nlohmann::json ()),
+    (nlohmann::json{ { "cancelled", 15 } }))
+    << summary.dump ();
+    EXPECT_EQ (summary["cancelledRequests"].get<size_t> (), 15u);
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), cut.total_requests);
+
+    auto [uncut_status, uncut_body] =
+    vayu::http::routes::run_report_response (*db_, "run_uncut");
+    ASSERT_EQ (uncut_status, 200);
+    EXPECT_FALSE (uncut_body["summary"].contains ("drainCut"))
+    << uncut_body["summary"].dump ();
+}
+
 // A 50 RPS run that sent all 100 of its requests in 2 s, then drained for half
 // a second: completed over wall time is 40/s, the pacer's own count is 100%,
 // and the 25 sent in the last half second answered after sending ended.
@@ -3512,6 +3546,39 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
         EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
         EXPECT_FALSE (outcome.contains ("assertionsFailed")) << id;
         EXPECT_FALSE (outcome.contains ("assertionsPassed")) << id;
+    }
+}
+
+// #3538: a load row carries the drain a Stop cut beside its budget verdict,
+// which stays as stored; a summary with no cut, or a malformed one, carries no
+// key. Mutation check: drop the `record_drain_cut` call in
+// `build_load_result_summary` and the first expectation fails.
+TEST_F (RunsRouteTest, LoadRowCarriesTheDrainCutOnlyWhenStored) {
+    auto cut         = nlohmann::json::parse (judged_summary (true));
+    cut["cancelled"] = 15;
+    cut["drainCut"]  = { { "cancelled", 15 } };
+    seed ({ .id = "run_cut", .start_time = 1 });
+    db_->update_run_summary ("run_cut", cut.dump ());
+
+    auto malformed        = nlohmann::json::parse (judged_summary (true));
+    malformed["drainCut"] = { { "cancelled", "15" } };
+    seed ({ .id = "run_malformed_cut", .start_time = 2 });
+    db_->update_run_summary ("run_malformed_cut", malformed.dump ());
+
+    seed ({ .id = "run_uncut", .start_time = 3 });
+    db_->update_run_summary ("run_uncut", judged_summary (true));
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto outcome = row_of (body, "run_cut")["resultSummary"];
+    EXPECT_EQ (outcome.value ("drainCut", nlohmann::json ()),
+    (nlohmann::json{ { "cancelled", 15 } }))
+    << outcome.dump ();
+    EXPECT_EQ (outcome.value ("verdict", ""), "passed") << outcome.dump ();
+    for (const char* id : { "run_malformed_cut", "run_uncut" }) {
+        EXPECT_FALSE (row_of (body, id)["resultSummary"].contains ("drainCut")) << id;
     }
 }
 

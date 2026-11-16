@@ -312,6 +312,27 @@ TEST (RunExportMarkdownTest, TheVerdictNamesEveryFailedCheck) {
     std::string::npos);
 }
 
+// #3538: a run whose drain a Stop cut says how many requests were left
+// unanswered, singular for one. Mutation check: drop the `drain_stopped` branch
+// of `verdict_detail` (run_export_view.cpp) and the reason is spelled out
+// instead.
+TEST (RunExportMarkdownTest, TheVerdictCountsWhatAStopCutFromTheDrain) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "drain_stopped";
+    document["report"]["summary"]["drainCut"] = { { "cancelled", 15 } };
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "**Not judged** - 15 requests were still unanswered when the "
+               "drain was stopped\n"),
+    std::string::npos);
+
+    document["report"]["summary"]["drainCut"]["cancelled"] = 1;
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "**Not judged** - 1 request was still unanswered when the drain "
+               "was stopped\n"),
+    std::string::npos);
+}
+
 TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {
     const std::string text =
     render_run_export_markdown (read_document ("errors-and-budget-failed"));

@@ -319,6 +319,19 @@ TEST (RunExportHtmlTest, TheVerdictNamesFailedAssertions) {
     std::string::npos);
 }
 
+// #3538. Mutation check: drop the `drain_stopped` branch of `verdict_detail`
+// (run_export_view.cpp) and this fails.
+TEST (RunExportHtmlTest, TheVerdictCountsWhatAStopCutFromTheDrain) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "drain_stopped";
+    document["report"]["summary"]["drainCut"] = { { "cancelled", 15 } };
+    EXPECT_NE (render_run_export_html (document).find (
+               "<strong>Not judged</strong> - 15 requests were still "
+               "unanswered when the drain was stopped</p>"),
+    std::string::npos);
+}
+
 TEST (RunExportHtmlTest, TheTargetUrlIsTextNeverALink) {
     const std::string html =
     render_run_export_html (read_document ("healthy-passed"));
