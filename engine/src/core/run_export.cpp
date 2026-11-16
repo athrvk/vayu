@@ -681,7 +681,8 @@ std::string_view failed_check_reason (const json& report) {
  * `{state, stoppedEarly, reason}`: a stopped run is not judged; a failed run,
  * or a missed budget, fails; met budgets pass only when no request errored and
  * the `assertions` block counts no failed check; no budgets is not judged. The
- * app's `judgeRun` (`run-outcome.ts`) reads the same report fields.
+ * app's `judgeRun` (`run-outcome.ts`) reads the same report fields, and
+ * `tests/fixtures/run-verdict-conformance.json` holds the two to one answer.
  */
 ordered verdict_section (const json& report, std::string_view status) {
     const bool stopped = status == "stopped";

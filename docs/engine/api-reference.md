@@ -5362,7 +5362,9 @@ declared no budget for it. The first matching row wins:
 `reason` names the first failed check; the Markdown and HTML line names every
 one (below). A report with no `assertions` block (a run that asserted nothing
 and errored nowhere, or one stored before the block whose old fields derive
-none) has no failed check.
+none) has no failed check. `engine/tests/fixtures/run-verdict-conformance.json`
+pins this table to the app's: the engine's suite replays it through the export
+and the app's through `reportOutcome`.
 
 `stoppedEarly` is `status == "stopped"`.
 

@@ -1,0 +1,483 @@
+{
+  "description": "Cross-language conformance fixture for a load run's verdict (issue #3537). Read by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through the run-report export's `verdict` and the Markdown/HTML verdict line) and by the app's vitest suite (app/src/components/shared/run-outcome.test.ts, through `reportOutcome`). Each case's `report` is a GET /runs/:runId/report answer cut to what a verdict reads - `metadata.status`, `summary.totalRequests` and `summary.errorRate`, `thresholdValidation` and the top-level `assertions` block - plus the sections that block summarises (`scenario`, `testValidation`, `elements`, `lifecycle`), kept consistent with it so a reader that re-derives a failed check from them instead of reading the block answers differently on some case. `expected.state` is the export's `verdict.state` (`not_judged` is the app's `not-judged`); `expected.reason` is the export's `verdict.reason`; `expected.names` are the phrases the verdict's words must contain, in this order, on every surface: the export's Markdown and HTML line and the app's not-judged reason. The error-rate phrase is each surface's own and is never listed. A case with no `names` must name no failed check. A report stored before the block carries one derived from what it stored (GET /runs/:runId/report, `assertions`); the `old run` cases are those reports.",
+  "cases": [
+    {
+      "name": "collection load run, every deferred pm.test fails: the sampled replay alone",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4400, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "errorRate", "limit": 5, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 5000, "actual": 12.4, "passed": true, "evaluated": true}
+          ],
+          "passed": 2, "failed": 0, "verdict": "passed"
+        },
+        "scenario": {"iterations": 4400, "stepsExecuted": 4400, "passed": 4400, "failed": 0, "skipped": 0, "errored": 0},
+        "testValidation": {"samplesTested": 91, "testsPassed": 0, "testsFailed": 91, "successRate": 0},
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 91},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["91 assertions failed in the sampled replay"]
+      }
+    },
+    {
+      "name": "single-request run, an inline pm.test fails on every response",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 150, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 0, "failed": 150, "missing": 0, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 0, "failed": 150}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["150 assertions failed"]
+      }
+    },
+    {
+      "name": "single-request run, a deferred pm.test fails on the sampled replay",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4000, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 4000}
+        ],
+        "testValidation": {"samplesTested": 94, "testsPassed": 0, "testsFailed": 94, "successRate": 0},
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 94},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["94 assertions failed in the sampled replay"]
+      }
+    },
+    {
+      "name": "single-request run, inline failures and a sampled replay that failed too",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 158, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_inline", "kind": "script.post", "passed": 8, "failed": 150, "missing": 0, "error": 0, "skipped": 0, "deferred": 0},
+          {"id": "el_deferred", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 158}
+        ],
+        "testValidation": {"samplesTested": 100, "testsPassed": 96, "testsFailed": 4, "successRate": 96},
+        "assertions": {
+          "exact": {"passed": 8, "failed": 150}, "sampled": {"passed": 96, "failed": 4},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["150 assertions failed, 4 more in the sampled replay"]
+      }
+    },
+    {
+      "name": "single-request run, a required extract.json misses every response, no assertion budget",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4227, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_tok", "kind": "extract.json", "required": true, "passed": 0, "failed": 0, "missing": 4227, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 0, "failed": 4227}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["4,227 assertions failed"]
+      }
+    },
+    {
+      "name": "single-request run, a required extract.json misses every response against maxAssertionFailureRatePct 0",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4227, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [
+            {
+              "metric": "maxAssertionFailureRatePct", "limit": 0, "actual": 100, "passed": false, "evaluated": true,
+              "assertionsExact": {"passed": 0, "failed": 4227}, "assertionsSampled": {"passed": 0, "failed": 0}
+            }
+          ],
+          "passed": 0, "failed": 1, "verdict": "failed"
+        },
+        "elements": [
+          {"id": "el_tok", "kind": "extract.json", "required": true, "passed": 0, "failed": 0, "missing": 4227, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 0, "failed": 4227}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "failed", "reason": "budgets_missed"}
+    },
+    {
+      "name": "single-request run, an inline script throws on every response",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 997, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 997, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 997, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_element_errors",
+        "names": ["997 elements errored"]
+      }
+    },
+    {
+      "name": "collection load run, an inline script throws on every step",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 2202, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "scenario": {
+          "iterations": 2202, "stepsExecuted": 2202, "passed": 0, "failed": 0, "skipped": 0, "errored": 2202,
+          "steps": [
+            {
+              "index": 0, "name": "Get order", "executed": 2202, "errors": 0,
+              "elements": [
+                {"id": "el_post", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 2202, "skipped": 0, "deferred": 0}
+              ]
+            }
+          ]
+        },
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 2202, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_element_errors",
+        "names": ["2,202 elements errored"]
+      }
+    },
+    {
+      "name": "a script.teardown whose pm.test fails",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 3100, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "name": "error rate ok", "outcome": "failed", "waitedMs": 0}]
+        },
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 1
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_teardown_failures",
+        "names": ["1 teardown script failed"]
+      }
+    },
+    {
+      "name": "errored elements and failed teardowns: the errors name the reason, both are named",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 3100, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 3097, "failed": 0, "missing": 0, "error": 3, "skipped": 0, "deferred": 0}
+        ],
+        "lifecycle": {
+          "teardown": [
+            {"id": "el_down_1", "kind": "script.teardown", "outcome": "failed", "waitedMs": 0},
+            {"id": "el_down_2", "kind": "script.teardown", "outcome": "error", "waitedMs": 0}
+          ]
+        },
+        "assertions": {
+          "exact": {"passed": 3097, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 3, "teardownFailed": 2
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_element_errors",
+        "names": ["3 elements errored", "2 teardown scripts failed"]
+      }
+    },
+    {
+      "name": "every failed check at once, one of each",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 10, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_inline", "kind": "script.post", "passed": 8, "failed": 1, "missing": 0, "error": 1, "skipped": 0, "deferred": 0},
+          {"id": "el_deferred", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 10}
+        ],
+        "testValidation": {"samplesTested": 10, "testsPassed": 9, "testsFailed": 1, "successRate": 90},
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "outcome": "failed", "waitedMs": 0}]
+        },
+        "assertions": {
+          "exact": {"passed": 8, "failed": 1}, "sampled": {"passed": 9, "failed": 1},
+          "errored": 1, "teardownFailed": 1
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["1 assertion failed, 1 more in the sampled replay", "1 element errored", "1 teardown script failed"]
+      }
+    },
+    {
+      "name": "requests errored too: the error rate names the reason, the failed checks follow it",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 8420, "errorRate": 0.4},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP95Ms", "limit": 800, "actual": 512, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "scenario": {
+          "iterations": 2105, "stepsExecuted": 8420, "passed": 8386, "failed": 34, "skipped": 0, "errored": 0,
+          "assertions": {"passed": 8352, "failed": 68}
+        },
+        "assertions": {
+          "exact": {"passed": 8352, "failed": 68}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 1
+        },
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "outcome": "failed", "waitedMs": 0}]
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_errors",
+        "names": ["68 assertions failed", "1 teardown script failed"]
+      }
+    },
+    {
+      "name": "no budgets, the sampled replay failed",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4400, "errorRate": 0},
+        "scenario": {"iterations": 4400, "stepsExecuted": 4400, "passed": 4400, "failed": 0, "skipped": 0, "errored": 0},
+        "testValidation": {"samplesTested": 91, "testsPassed": 0, "testsFailed": 91, "successRate": 0},
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 91},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "no_budgets",
+        "names": ["91 assertions failed in the sampled replay"]
+      }
+    },
+    {
+      "name": "no budgets, errored elements and a failed teardown",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 2202, "errorRate": 0},
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0, "error": 2202, "skipped": 0, "deferred": 0}
+        ],
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "outcome": "failed", "waitedMs": 0}]
+        },
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 2202, "teardownFailed": 1
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "no_budgets",
+        "names": ["2,202 elements errored", "1 teardown script failed"]
+      }
+    },
+    {
+      "name": "no budgets, nothing failed",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 150, "errorRate": 0},
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 150, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 150, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "not_judged", "reason": "no_budgets"}
+    },
+    {
+      "name": "budgets met and every check held",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 150, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 150, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "outcome": "ok", "waitedMs": 0}]
+        },
+        "assertions": {
+          "exact": {"passed": 150, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "passed", "reason": "budgets_met"}
+    },
+    {
+      "name": "a missed budget stays failed whatever else failed",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 158, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5, "actual": 9.1, "passed": false, "evaluated": true}],
+          "passed": 0, "failed": 1, "verdict": "failed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 8, "failed": 150, "missing": 0, "error": 3, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 8, "failed": 150}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 3, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "failed", "reason": "budgets_missed"}
+    },
+    {
+      "name": "a failed run is failed whatever else failed",
+      "report": {
+        "metadata": {"status": "failed"},
+        "summary": {"totalRequests": 158, "errorRate": 0},
+        "assertions": {
+          "exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 1
+        },
+        "lifecycle": {
+          "teardown": [{"id": "el_down", "kind": "script.teardown", "outcome": "failed", "waitedMs": 0}]
+        }
+      },
+      "expected": {"state": "failed", "reason": "run_failed"}
+    },
+    {
+      "name": "a stopped run is not judged whatever else failed",
+      "report": {
+        "metadata": {"status": "stopped"},
+        "summary": {"totalRequests": 158, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_post", "kind": "script.post", "passed": 8, "failed": 150, "missing": 0, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "assertions": {
+          "exact": {"passed": 8, "failed": 150}, "sampled": {"passed": 0, "failed": 0},
+          "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "not_judged", "reason": "stopped"}
+    },
+    {
+      "name": "old run: a scenario load run stored before #2820 derives no block, and its failed replay is not read",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 4400, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 12.4, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "scenario": {"iterations": 4400, "stepsExecuted": 4400, "passed": 4400, "failed": 0, "skipped": 0, "errored": 0},
+        "testValidation": {"samplesTested": 91, "testsPassed": 0, "testsFailed": 91, "successRate": 0}
+      },
+      "expected": {"state": "passed", "reason": "budgets_met"}
+    },
+    {
+      "name": "old run: a scenario load run stored before the block derives its exact assertions alone",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 8420, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP95Ms", "limit": 800, "actual": 512, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "scenario": {
+          "iterations": 2105, "stepsExecuted": 8420, "passed": 8386, "failed": 34, "skipped": 0, "errored": 0,
+          "assertions": {"passed": 8352, "failed": 68}
+        },
+        "testValidation": {"samplesTested": 50, "testsPassed": 40, "testsFailed": 10, "successRate": 80},
+        "assertions": {"exact": {"passed": 8352, "failed": 68}}
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["68 assertions failed"]
+      }
+    },
+    {
+      "name": "old run: a single-request run stored before the block derives its element rows and its replay",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 200, "errorRate": 0},
+        "thresholdValidation": {
+          "checks": [{"metric": "latencyP99Ms", "limit": 5000, "actual": 9.1, "passed": true, "evaluated": true}],
+          "passed": 1, "failed": 0, "verdict": "passed"
+        },
+        "elements": [
+          {"id": "el_inline", "kind": "script.post", "passed": 0, "failed": 12, "missing": 0, "error": 5, "skipped": 0, "deferred": 0},
+          {"id": "el_tok", "kind": "extract.json", "required": true, "passed": 0, "failed": 0, "missing": 200, "error": 0, "skipped": 0, "deferred": 0}
+        ],
+        "testValidation": {"samplesTested": 10, "testsPassed": 6, "testsFailed": 4, "successRate": 60},
+        "assertions": {"exact": {"passed": 0, "failed": 12}, "sampled": {"passed": 6, "failed": 4}}
+      },
+      "expected": {
+        "state": "not_judged", "reason": "budgets_met_with_assertion_failures",
+        "names": ["12 assertions failed, 4 more in the sampled replay"]
+      }
+    }
+  ]
+}
