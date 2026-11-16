@@ -530,9 +530,9 @@ json postman_url_only_row (const QueryPair& pair) {
 /// also hold the turned-off rows), and Postman reads `query[]` over `raw` when
 /// both exist. So `query[]` is every stored row in stored order, then the
 /// pairs of `raw`'s query that no enabled row states, in URL order: a request
-/// built from the URL alone (`POST /requests` with no `params`, every MCP
-/// request) keeps its query, and one the app built, whose rows already state
-/// every pair, gains nothing.
+/// whose rows do not state its URL (stored before a URL-only write derived
+/// them, issue #3551, or written with `params: []`) keeps its query, and one
+/// whose rows already state every pair gains nothing.
 json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
     auto [query_rows, path_rows] = split_params (params);
     const std::string raw = blank_url_credentials (raw_url, query_rows, walk);

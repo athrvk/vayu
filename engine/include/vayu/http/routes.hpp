@@ -842,6 +842,10 @@ apply_variables_field (const nlohmann::json& json, std::string& out, bool is_cre
  * Here rather than in requests.cpp because saved examples store the same shape
  * and must validate it the same way - a second copy would drift the moment the
  * entry shape gains a field.
+ *
+ * This stores what the body states and nothing else. A request's `params` is
+ * also written by its `url`: `apply_request_fields` reconciles the query rows
+ * when a body states `url` and no `params` (issue #3551).
  */
 [[nodiscard]] inline RouteResult
 apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {

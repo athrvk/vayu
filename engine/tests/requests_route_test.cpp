@@ -32,6 +32,7 @@
 #include "optional_assert.hpp"
 #include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/list_page.hpp"
@@ -786,6 +787,127 @@ TEST_F (RequestsRouteTest, EveryKnownAuthModeIsStoredOnBothVerbsAndNullResetsToI
     *db_, id, json{ { "auth", nullptr } });
     ASSERT_EQ (reset_status, 200) << reset.dump ();
     EXPECT_EQ (reset["auth"]["mode"], "inherit");
+}
+
+// -- `params` follows a URL-only write (#3551) ------------------------------
+//
+// Mutation check for the first two: drop the `reconcile_params_with_url` call
+// from `apply_request_params_field`; the create stores `[]` and the update
+// keeps the stale `old` row.
+
+json param_row (const std::string& key, const std::string& value, bool enabled = true) {
+    return json{ { "key", key }, { "value", value }, { "enabled", enabled } };
+}
+
+TEST_F (RequestsRouteTest, ACreateWithAQueryURLAndNoParamsStoresOneRowPerPair) {
+    seed_collection_at ("col_p", "", 0);
+    json write   = new_request ("col_p");
+    write["url"] = "https://example.test/search?q=shoes&tag=a&tag=b";
+
+    auto [status, body] = vayu::http::routes::create_request_response (*db_, write);
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto stored = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->params),
+    json::array (
+    { param_row ("q", "shoes"), param_row ("tag", "a"), param_row ("tag", "b") }));
+    EXPECT_EQ (body["params"], json::parse (stored->params));
+}
+
+TEST_F (RequestsRouteTest, AURLOnlyUpdateRederivesEnabledRowsAndKeepsDisabledAndPathRows) {
+    const std::string id = seed_request ();
+    json path            = param_row ("id", "7");
+    path["in"]           = "path";
+    const json rows      = json::array ({ param_row ("old", "1"),
+    param_row ("off", "x", false), param_row ("keep", "a"), path });
+    auto [seeded, seed_body] = vayu::http::routes::update_request_response (*db_, id,
+    json{ { "url", "https://example.test/user/:id?old=1&keep=a" }, { "params", rows } });
+    ASSERT_EQ (seeded, 200) << seed_body.dump ();
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "url", "https://example.test/user/:id?keep=b&new=2" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->params),
+    json::array ({ param_row ("off", "x", false), param_row ("keep", "b"),
+    param_row ("new", "2"), path }));
+}
+
+// The renderer sends `url` alone for a host or path edit, so rows that already
+// state the query (in any member order, with members of their own) must keep
+// the stored text byte for byte. Mutation check: rewrite `r.params` in
+// `reconcile_params_with_url` even when nothing changed.
+TEST_F (RequestsRouteTest, AURLOnlyUpdateLeavesAgreeingParamsByteForByte) {
+    const std::string id = seed_request ();
+    auto existing        = db_->get_request (id);
+    ASSERT_HAS_VALUE (existing);
+    existing->url = "https://example.test/user?a=1&flag";
+    existing->params =
+    R"([ {"value":"1","key":"a","enabled":true,"description":"kept"}, )"
+    R"({"key":"off","value":"","enabled":false}, {"key":"flag","value":"","enabled":true,"valueless":true} ])";
+    db_->save_request (*existing);
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "url", "https://other.test/v2/user?a=1&flag" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->url, "https://other.test/v2/user?a=1&flag");
+    EXPECT_EQ (stored->params, existing->params);
+}
+
+// Rows read from a URL are held to the cap a stated `params` is, since `url`
+// has none of its own: refused with the 413 a stated field gets, naming
+// `params`, and nothing is written. A few long values reach the cap in a
+// handful of allocations, where short pairs would take a hundred thousand
+// rows. Mutation check: drop the size check in `reconcile_params_with_url`
+// and the update stores the rows.
+TEST_F (RequestsRouteTest, RowsReadFromAURLOverTheFieldCapAreRefusedWith413) {
+    const std::string id = seed_request ();
+    const auto before    = db_->get_request (id);
+    ASSERT_HAS_VALUE (before);
+    constexpr std::size_t VALUES = 4;
+    const std::string value (vayu::core::constants::json::MAX_FIELD_SIZE / VALUES, 'v');
+    std::string url = "https://example.test/user?";
+    for (std::size_t at = 0; at < VALUES + 1; ++at) {
+        url += "k=" + value + "&";
+    }
+
+    auto [status, body] =
+    vayu::http::routes::update_request_response (*db_, id, json{ { "url", url } });
+
+    EXPECT_EQ (status, 413);
+    EXPECT_NE (body.dump ().find ("'params'"), std::string::npos)
+    << body.dump ().substr (0, 200);
+    const auto after = db_->get_request (id);
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->url, before->url);
+    EXPECT_EQ (after->params, before->params);
+}
+
+// A body that states `params` is stored as sent, whatever its URL says, and
+// one that states neither `url` nor `params` leaves stale rows alone.
+TEST_F (RequestsRouteTest, ParamsAreStoredAsSentWhenTheBodyStatesThem) {
+    const std::string id = seed_request ();
+    const json rows      = json::array ({ param_row ("not_in_url", "1") });
+
+    auto [both, both_body] = vayu::http::routes::update_request_response (*db_,
+    id, json{ { "url", "https://example.test/user?a=1" }, { "params", rows } });
+    ASSERT_EQ (both, 200) << both_body.dump ();
+    auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->params), rows);
+
+    auto [renamed, renamed_body] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (renamed, 200) << renamed_body.dump ();
+    stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->params), rows);
 }
 
 // -- Leaving a spec binding (#3446) -----------------------------------------

@@ -759,8 +759,9 @@ tab clamps what is typed.
 
 **The builder seeds its Params rows from the stored `params` and the URL's
 query together** (issue #3491, `initialRequest` in `modules/request-builder/index.tsx`).
-A request stored with its query only in `url` (an API, MCP or import write that
-left `params` absent or `[]`) opens with those pairs as rows, through
+A request stored with its query only in `url` (written before the engine
+derived the rows from a URL-only write, issue #3551, or by a write that stated
+`params: []`) opens with those pairs as rows, through
 `mergeParamsFromUrl` - the rule a URL-bar edit already uses, so stored disabled
 rows stay and a stored row keeps its id and description. Without it the table
 opened empty and its first edit rebuilt `url` from the rows alone, deleting the
