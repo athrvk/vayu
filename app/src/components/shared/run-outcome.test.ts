@@ -46,6 +46,7 @@ import type { Run, RunReport } from "@/types";
 import {
 	formatErrorRate,
 	judgeRun,
+	missedBudgetsReason,
 	reportOutcome,
 	rowOutcome,
 	type RunJudgement,
@@ -390,6 +391,33 @@ describe("judgeRun", () => {
 			verdict: "passed",
 		});
 		expect(judged?.outcome).toBe("failed");
+	});
+});
+
+/*
+ * A collection run's notification and spoken ending (#3539). Mutation check:
+ * answer the failed reason for met budgets too and the null cases redden;
+ * word it apart from `judgeRun` and the agreement case does.
+ */
+describe("missedBudgetsReason", () => {
+	it("names what a budget block missed", () => {
+		expect(missedBudgetsReason(TWO_OF_FOUR_MISSED)).toBe(
+			"2 of 4 budgets missed: p95, throughput"
+		);
+	});
+
+	it("says it in the failed verdict's words", () => {
+		const judged = judgeRun({ status: "completed", thresholdValidation: TWO_OF_FOUR_MISSED });
+		expect(missedBudgetsReason(TWO_OF_FOUR_MISSED)).toBe(judged?.reason);
+	});
+
+	it.each([
+		["every budget met", THREE_MET],
+		["no budget declared", { checks: [], passed: 0, failed: 0, verdict: "passed" } as Budgets],
+		["no block", null],
+		["an absent block", undefined],
+	])("is null for %s", (_name, block) => {
+		expect(missedBudgetsReason(block)).toBeNull();
 	});
 });
 

@@ -2130,8 +2130,12 @@ not survive. It speaks transitions only, never a figure the run moves: a load
 test or collection run starting, then how it ended - "Load test completed.
 Passed. All 3 budgets met", "Load test stopped", "Load test failed. <reason>",
 "Collection run completed. 41 passed, 2 failed" - with the verdict taken from
-`reportOutcome`, the banner's own, so the two cannot disagree. A lost stream and
-the wait for the report are not announced. The run's progress bar is the
+`reportOutcome`, the banner's own, so the two cannot disagree. A collection run
+that missed a budget says so after its counts ("Collection run failed. 12
+passed, 0 failed. 1 of 2 budgets missed: p99", #3539), so its ending waits for
+the stored report, the only place the budgets are; one that cannot be read is
+still announced, with the counts alone. A lost stream and the wait for the
+report are not announced. The run's progress bar is the
 `Progress` primitive ("Run progress"), read on demand; the hero row's fidelity
 gauges (`MiniBar`) are `aria-hidden`, since the percentage above each states
 the same value in words.

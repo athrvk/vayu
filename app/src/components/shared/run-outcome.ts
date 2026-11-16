@@ -108,7 +108,10 @@ type Budgets =
 	| { state: "met"; total?: number }
 	| { state: "missed"; total?: number; missed?: number; names: string[] };
 
-function readBudgets({ thresholdValidation, verdict }: RunOutcomeInput): Budgets {
+function readBudgets({
+	thresholdValidation,
+	verdict,
+}: Pick<RunOutcomeInput, "thresholdValidation" | "verdict">): Budgets {
 	if (thresholdValidation && thresholdValidation.checks.length > 0) {
 		const { checks, passed, failed } = thresholdValidation;
 		const total = passed + failed;
@@ -128,6 +131,19 @@ function failedReason(budgets: Budgets): string {
 	if (budgets.total === undefined || budgets.missed === undefined) return "Budgets missed";
 	const noun = pluralize(budgets.total, "budget");
 	return `${budgets.missed} of ${budgets.total} ${noun} missed: ${budgets.names.join(", ")}`;
+}
+
+/**
+ * "1 of 3 budgets missed: p99" for a budget block that missed one, in the
+ * failed verdict's words, or `null` when every budget was met or none was
+ * declared. A collection run's terminal notification and its spoken ending say
+ * it after the step counts (#3539).
+ */
+export function missedBudgetsReason(
+	thresholdValidation: RunReport["thresholdValidation"] | null | undefined
+): string | null {
+	const budgets = readBudgets({ thresholdValidation: thresholdValidation ?? undefined });
+	return budgets.state === "missed" ? failedReason(budgets) : null;
 }
 
 function metReason(budgets: Extract<Budgets, { state: "met" }>): string {
