@@ -998,7 +998,8 @@ Notes:
   saying nothing was written, and repeating the call merges into the latest
   version. `update_collection` does the same whenever it reads (a variables or
   script edit); a call naming only stated fields reads nothing and sends no
-  `If-Match`. Overwriting an
+  `If-Match`. `update_request` does the same whenever it reads (a script edit,
+  or a `url` while secrets are withheld, #3549). Overwriting an
   existing variable changes its value only - its `secret`, `type`, `createdAt`
   and enabled/disabled state are preserved, so a rotated secret stays masked and
   a disabled variable stays disabled. The answer is the stored row, withheld as
