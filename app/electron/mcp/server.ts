@@ -180,7 +180,10 @@ function revealGateSentence(host: McpHost): string {
 		"`user:password@` or a url cut short before its host ends, a credential-named query " +
 		"or params value) reads `currentWithheld: true` in place of `current`. An auth block " +
 		"carrying a Withheld marker is refused as `auth` by every tool that takes one, " +
-		"because it holds no credential. " +
+		"because it holds no credential. A credential slot of a saved request's `url`, or a " +
+		"`proxyUrl`, written back as the read showed it keeps its stored value, and the result " +
+		"names each one kept; to delete one, remove the parameter or the userinfo (clear a " +
+		"`proxyUrl` and write it again). " +
 		"A request that references a secret still sends with it, because the engine resolves " +
 		"it. What a run recorded (run rows, reports, samples, exports, send results, inbox " +
 		"captures, mock activity) reads `<redacted>` in place of every secret variable's " +

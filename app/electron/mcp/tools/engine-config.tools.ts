@@ -12,8 +12,13 @@
  */
 
 import { z } from "zod";
-import { secretsShape, withholdConfigCredentials } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import {
+	isUrlConfigKey,
+	restoreConfigCredentials,
+	secretsShape,
+	withholdConfigCredentials,
+} from "../withhold.js";
+import type { McpTool, ToolContext } from "./contract.js";
 import {
 	GUARDED_WRITE_SENTENCE,
 	NETWORK_SETTINGS_TOKEN,
@@ -21,7 +26,7 @@ import {
 	engineRestartRemedy,
 	settingRemedy,
 } from "../remedy.js";
-import { engineErrorResult, errorResult } from "./kit.js";
+import { engineErrorResult, errorResult, withCaveat } from "./kit.js";
 import { configUpdateSchema, isNetworkConfigKey, restartRequiredAmong } from "./output-schemas.js";
 
 export const ENGINE_CONFIG_TOOLS: McpTool[] = [
@@ -72,7 +77,12 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 				);
 			}
 			try {
-				const updated = await ctx.client.updateConfig({ entries }, signal);
+				const { entries: written, kept } = await restoreWithheldProxyCredentials(
+					ctx,
+					entries as Record<string, string>,
+					signal
+				);
+				const updated = await ctx.client.updateConfig({ entries: written }, signal);
 				const changedKeys = Object.keys(entries as Record<string, unknown>);
 				// Best-effort: read back to flag restart-required keys. Failure here
 				// must not fail the (already-applied) update.
@@ -90,25 +100,47 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 					restartRequired,
 					updated: secretsShape(ctx, withholdConfigCredentials)(updated),
 				};
-				if (restartRequired.length > 0) {
-					const note =
-						`Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
-						`${restartRequired.join(", ")}. These are saved, but the running engine keeps ` +
-						`the old values until it is restarted (${engineRestartRemedy(ctx.host)}).`;
-					return {
-						content: [
-							{ type: "text", text: `${note}\n\n${JSON.stringify(result, null, 2)}` },
-						],
+				const json = JSON.stringify(result, null, 2);
+				const note =
+					restartRequired.length > 0
+						? `Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
+							`${restartRequired.join(", ")}. These are saved, but the running engine keeps ` +
+							`the old values until it is restarted (${engineRestartRemedy(ctx.host)}).\n\n`
+						: "";
+				return withCaveat(
+					{
+						content: [{ type: "text", text: `${note}${json}` }],
 						structuredContent: result,
-					};
-				}
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					structuredContent: result,
-				};
+					},
+					kept.map(keptCredentialsLine).join("\n")
+				);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}
 		},
 	},
 ];
+
+/**
+ * @p entries with each URL entry written back exactly as the read showed it
+ * given its stored credentials again (`restoreConfigCredentials`, #3549), so a
+ * batch that repeats the read-back `proxyUrl` does not strip them. Read only
+ * while secrets are withheld and the batch names such an entry. `/config`
+ * carries no version, so this read and the write are not one conditioned step:
+ * a proxy edit the user saves between them is overwritten, as any concurrent
+ * `POST /config` already is.
+ */
+async function restoreWithheldProxyCredentials(
+	ctx: ToolContext,
+	entries: Record<string, string>,
+	signal: AbortSignal | undefined
+): Promise<{ entries: Record<string, string>; kept: string[] }> {
+	if (ctx.config.revealSecretsToAgents || !Object.keys(entries).some(isUrlConfigKey)) {
+		return { entries, kept: [] };
+	}
+	return restoreConfigCredentials(entries, await ctx.client.getConfig(signal));
+}
+
+function keptCredentialsLine(key: string): string {
+	return `${key} kept the user:password of its stored value, because the address written is the one the read showed without them. To drop them, clear ${key} and write the address again.`;
+}

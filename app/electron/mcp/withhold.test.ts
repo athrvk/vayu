@@ -21,8 +21,11 @@ import { resolveSafetyConfig } from "./config.js";
 import {
 	MaskingIncompleteError,
 	REDACTED_MARKER,
+	restoreConfigCredentials,
+	restoreWithheldRequestUrl,
 	runOutputShape,
 	secretForms,
+	withholdConfigCredentials,
 	withholdDiagnoseCredentials,
 	withholdReorderRows,
 	withholdRequestUrl,
@@ -328,40 +331,45 @@ describe("withholdRowSecrets OAuth 2.0 config parameter rows (#2536)", () => {
 	});
 });
 
+/** `[case, stored url, what the read shows]`, the cases the read and its inverse are both held to. */
+const WITHHELD_URL_CASES: [string, string, string][] = [
+	["a password", "https://u:p@h/x", "https://u@h/x"],
+	["no scheme", "u:p@h:80/x", "u@h:80/x"],
+	["an at sign inside the password", "http://u:p@ss@h/x", "http://u@h/x"],
+	["a colon inside the password", "http://u:p:q@h", "http://u@h"],
+	["a user with no password", "https://u@h/x", "https://u@h/x"],
+	["an empty password", "https://u:@h/x", "https://u:@h/x"],
+	["a {{variable}} password", "https://u:{{pw}}@h/x", "https://u:{{pw}}@h/x"],
+	["a template host", "{{baseUrl}}/x?a=1", "{{baseUrl}}/x?a=1"],
+	["a template user", "https://{{user}}:p@h/x", "https://{{user}}@h/x"],
+	["an at sign past the authority", "https://h/p:q@r", "https://h/p:q@r"],
+	["whitespace in a scheme-less authority", "a b:c@d", "a b:c@d"],
+	["a slash before the ://", "/p/x://u:p@h", "/p/x://u:p@h"],
+	["an at sign only in the query", "https://h/p?e=a@b.c", "https://h/p?e=a@b.c"],
+	["a query credential", "https://h/p?api_key=S&page=2", "https://h/p?api_key=&page=2"],
+	["a query credential name in any case", "/p?Access_Token=S", "/p?Access_Token="],
+	["a bare name and an empty value", "/p?token&api_key=&x", "/p?token&api_key=&x"],
+	["a {{variable}} value", "/p?api_key={{k}}&token=S", "/p?api_key={{k}}&token="],
+	[
+		"a fragment credential",
+		"https://h/cb#access_token=S&state=1",
+		"https://h/cb#access_token=&state=1",
+	],
+	[
+		"a query and a fragment",
+		"https://h/cb?a=1&sig=S#id_token=T",
+		"https://h/cb?a=1&sig=#id_token=",
+	],
+	["a ? inside the fragment", "https://h/cb#a?token=S", "https://h/cb#a?token=S"],
+	["a value holding =", "/p?token=a=b", "/p?token="],
+	["nothing to hide", "https://h/p?page=2&code=US", "https://h/p?page=2&code=US"],
+	["an empty string", "", ""],
+	["a repeated credential name", "/p?api_key=A&page=2&api_key=B", "/p?api_key=&page=2&api_key="],
+	["an empty user", "https://:p@h/x", "https://@h/x"],
+];
+
 describe("withholdRequestUrl", () => {
-	test.each([
-		["a password", "https://u:p@h/x", "https://u@h/x"],
-		["no scheme", "u:p@h:80/x", "u@h:80/x"],
-		["an at sign inside the password", "http://u:p@ss@h/x", "http://u@h/x"],
-		["a colon inside the password", "http://u:p:q@h", "http://u@h"],
-		["a user with no password", "https://u@h/x", "https://u@h/x"],
-		["an empty password", "https://u:@h/x", "https://u:@h/x"],
-		["a {{variable}} password", "https://u:{{pw}}@h/x", "https://u:{{pw}}@h/x"],
-		["a template host", "{{baseUrl}}/x?a=1", "{{baseUrl}}/x?a=1"],
-		["a template user", "https://{{user}}:p@h/x", "https://{{user}}@h/x"],
-		["an at sign past the authority", "https://h/p:q@r", "https://h/p:q@r"],
-		["whitespace in a scheme-less authority", "a b:c@d", "a b:c@d"],
-		["a slash before the ://", "/p/x://u:p@h", "/p/x://u:p@h"],
-		["an at sign only in the query", "https://h/p?e=a@b.c", "https://h/p?e=a@b.c"],
-		["a query credential", "https://h/p?api_key=S&page=2", "https://h/p?api_key=&page=2"],
-		["a query credential name in any case", "/p?Access_Token=S", "/p?Access_Token="],
-		["a bare name and an empty value", "/p?token&api_key=&x", "/p?token&api_key=&x"],
-		["a {{variable}} value", "/p?api_key={{k}}&token=S", "/p?api_key={{k}}&token="],
-		[
-			"a fragment credential",
-			"https://h/cb#access_token=S&state=1",
-			"https://h/cb#access_token=&state=1",
-		],
-		[
-			"a query and a fragment",
-			"https://h/cb?a=1&sig=S#id_token=T",
-			"https://h/cb?a=1&sig=#id_token=",
-		],
-		["a ? inside the fragment", "https://h/cb#a?token=S", "https://h/cb#a?token=S"],
-		["a value holding =", "/p?token=a=b", "/p?token="],
-		["nothing to hide", "https://h/p?page=2&code=US", "https://h/p?page=2&code=US"],
-		["an empty string", "", ""],
-	])("%s", (_name, input, expected) => {
+	test.each(WITHHELD_URL_CASES)("%s", (_name, input, expected) => {
 		expect(withholdRequestUrl(input, undefined)).toBe(expected);
 	});
 
@@ -379,6 +387,132 @@ describe("withholdRequestUrl", () => {
 			expect(withholdRequestUrl(url, undefined)).toBe(url);
 		}
 	);
+});
+
+describe("restoreWithheldRequestUrl (#3549)", () => {
+	// Mutation check: return `incoming` unchanged and every case with a slot
+	// to carry fails.
+	test.each(WITHHELD_URL_CASES)("%s round-trips through the read", (_name, stored) => {
+		const read = String(withholdRequestUrl(stored, undefined));
+		expect(restoreWithheldRequestUrl(stored, read, undefined).url).toBe(stored);
+	});
+
+	test("names each slot it carried, by part and name", () => {
+		const stored = "https://u:PW@h/x?api_key=S&page=2&api_key=T#access_token=F";
+		const read = String(withholdRequestUrl(stored, undefined));
+		expect(restoreWithheldRequestUrl(stored, read, undefined).kept).toEqual([
+			{ part: "userinfo" },
+			{ part: "query", name: "api_key" },
+			{ part: "query", name: "api_key" },
+			{ part: "fragment", name: "access_token" },
+		]);
+	});
+
+	test("carries the slots into an edited URL and leaves the edit as written", () => {
+		const stored = "https://u:PW@h/x?api_key=S&page=2";
+		expect(
+			restoreWithheldRequestUrl(stored, "https://u@h/y?api_key=&page=3", undefined)
+		).toEqual({
+			url: "https://u:PW@h/y?api_key=S&page=3",
+			kept: [{ part: "userinfo" }, { part: "query", name: "api_key" }],
+		});
+	});
+
+	test.each([
+		["a removed parameter", "https://u@h/x?page=2", "https://u:PW@h/x?page=2"],
+		["a removed query", "https://u@h/x", "https://u:PW@h/x"],
+		[
+			"a filled parameter",
+			"https://u@h/x?api_key=NEW&page=2",
+			"https://u:PW@h/x?api_key=NEW&page=2",
+		],
+		["a removed userinfo", "https://h/x?api_key=&page=2", "https://h/x?api_key=S&page=2"],
+		["another user", "https://v@h/x?api_key=&page=2", "https://v@h/x?api_key=S&page=2"],
+		["an explicit empty password", "https://u:@h/x?page=2", "https://u:@h/x?page=2"],
+		["a filled password", "https://u:NEW@h/x?page=2", "https://u:NEW@h/x?page=2"],
+	])("%s stays as written", (_name, incoming, expected) => {
+		const stored = "https://u:PW@h/x?api_key=S&page=2";
+		expect(restoreWithheldRequestUrl(stored, incoming, undefined).url).toBe(expected);
+	});
+
+	test("matches a repeated name by occurrence", () => {
+		const stored = "/p?api_key=A&api_key=B";
+		expect(restoreWithheldRequestUrl(stored, "/p?api_key=X&api_key=", undefined).url).toBe(
+			"/p?api_key=X&api_key=B"
+		);
+		expect(restoreWithheldRequestUrl(stored, "/p?api_key=", undefined).url).toBe(
+			"/p?api_key=A"
+		);
+	});
+
+	test("carries a value the stored API-key auth withheld, and only that one", () => {
+		const auth = { mode: "apikey", key: "tenant", in: "query" };
+		expect(restoreWithheldRequestUrl("/p?tenant=S", "/p?tenant=", auth).url).toBe(
+			"/p?tenant=S"
+		);
+		// Not withheld by the read, so `tenant=` is the caller's own edit.
+		expect(restoreWithheldRequestUrl("/p?tenant=S", "/p?tenant=", undefined).url).toBe(
+			"/p?tenant="
+		);
+	});
+
+	test("a query slot is not carried into the fragment", () => {
+		expect(restoreWithheldRequestUrl("/p?token=S", "/p#token=", undefined).url).toBe(
+			"/p#token="
+		);
+	});
+
+	test.each([[null], [undefined], [7]])("a stored %j carries nothing", (stored) => {
+		expect(restoreWithheldRequestUrl(stored, "/p?token=", undefined)).toEqual({
+			url: "/p?token=",
+			kept: [],
+		});
+	});
+});
+
+describe("restoreConfigCredentials (#3549)", () => {
+	const current = {
+		entries: [
+			{ key: "proxyUrl", value: "http://alice:pw@proxy.corp:8080" },
+			{ key: "workers", value: "8" },
+		],
+	};
+
+	// Mutation check: return `entries` unchanged and the first case fails.
+	test("writes the stored value for the address the read showed", () => {
+		const read = withholdConfigCredentials(current) as { entries: { value: string }[] };
+		expect(
+			restoreConfigCredentials({ proxyUrl: read.entries[0].value, workers: "4" }, current)
+		).toEqual({
+			entries: { proxyUrl: "http://alice:pw@proxy.corp:8080", workers: "4" },
+			kept: ["proxyUrl"],
+		});
+	});
+
+	test.each([
+		["another address", "http://other.corp:8080"],
+		["new credentials", "http://bob:new@proxy.corp:8080"],
+		["a cleared value", ""],
+	])("%s is written as given", (_name, value) => {
+		expect(restoreConfigCredentials({ proxyUrl: value }, current)).toEqual({
+			entries: { proxyUrl: value },
+			kept: [],
+		});
+	});
+
+	test("a stored URL with no credentials carries nothing", () => {
+		const bare = { entries: [{ key: "proxyUrl", value: "http://proxy.corp:8080" }] };
+		expect(restoreConfigCredentials({ proxyUrl: "http://proxy.corp:8080" }, bare).kept).toEqual(
+			[]
+		);
+	});
+
+	test("an unreadable config carries nothing", () => {
+		expect(restoreConfigCredentials({ proxyUrl: "http://proxy.corp:8080" }, null)).toEqual({
+			entries: { proxyUrl: "http://proxy.corp:8080" },
+			kept: [],
+		});
+	});
 });
 
 describe("withholdSpecDiffChanges", () => {

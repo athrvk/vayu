@@ -6,11 +6,11 @@
  */
 
 /**
- * `update_environment`, `update_collection` (#2433) and `update_globals`
- * (#2988) merge into a row another client can write between their read and
- * their write. Driven through the real `EngineClient` against a fake engine
- * that holds one row and judges `If-Match` the way the engine does, so the
- * header is what is under test.
+ * `update_environment`, `update_collection` (#2433), `update_globals`
+ * (#2988) and `update_request` (#3549) merge into a row another client can
+ * write between their read and their write. Driven through the real
+ * `EngineClient` against a fake engine that holds one row and judges
+ * `If-Match` the way the engine does, so the header is what is under test.
  */
 
 import { describe, expect, test } from "vitest";
@@ -353,5 +353,86 @@ describe("update_globals under a concurrent edit", () => {
 		expect(res.isError).toBe(true);
 		expect(res.content[0].text).toMatch(/^Nothing was written: the set of globals was changed/);
 		expect(engine.stored().variables).not.toHaveProperty("apiKey");
+	});
+});
+
+describe("update_request under a concurrent edit (#3549)", () => {
+	type RequestRow = Record<string, unknown> & { id: string; updatedAt: number };
+
+	/**
+	 * One saved request at `/requests/req_1`: `GET` answers it, a `PUT` first
+	 * applies the next queued edit, judges `If-Match` as above, then
+	 * merge-patches and moves the version on.
+	 */
+	function fakeRequestEngine(initial: RequestRow, edits: ((row: RequestRow) => RequestRow)[]) {
+		let row = initial;
+		const engine = engineWith((method, path, init) => {
+			if (path !== `/requests/${row.id}`) return answer(404, NOT_FOUND);
+			if (method === "GET") return answer(200, row);
+			const edit = edits.shift();
+			if (edit) row = edit(row);
+			const refused = refusal(row as Row, init);
+			if (refused) return refused;
+			const patch = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			row = { ...row, ...patch, updatedAt: row.updatedAt + 1 };
+			return answer(200, row);
+		});
+		return { ...engine, stored: () => row };
+	}
+
+	const assertion = { id: "el_x", kind: "assert.status", enabled: true, config: { equals: 200 } };
+	const savedRequest = (): RequestRow => ({
+		id: "req_1",
+		name: "Echo",
+		method: "GET",
+		url: "{{baseUrl}}/echo?api_key=LITERALKEY99&page=2",
+		elements: [],
+		updatedAt: 1_792_359_304_896,
+	});
+
+	// Mutation check: send no `If-Match` from `updateRequest` and the first
+	// PUT lands the elements merged before the app's edit, so the assertion
+	// the app added is gone.
+	test("a script edit re-reads once on a 412 and keeps the element added in between", async () => {
+		const engine = fakeRequestEngine(savedRequest(), [
+			(row) => ({ ...row, elements: [assertion], updatedAt: row.updatedAt + 1 }),
+		]);
+
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", preRequestScript: "pm.variables.set('a', 1);" },
+			engine.ctx
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(engine.stored().elements).toEqual([
+			assertion,
+			expect.objectContaining({ kind: "script.pre" }),
+		]);
+		expect(engine.calls.map(({ method, status }) => `${method} ${status}`)).toEqual([
+			"GET 200",
+			"PUT 412",
+			"GET 200",
+			"PUT 200",
+		]);
+	});
+
+	test("a URL read with its key withheld and written back keeps the stored key", async () => {
+		const engine = fakeRequestEngine(savedRequest(), []);
+
+		const read = await dispatchTool("get_request", { requestId: "req_1" }, engine.ctx);
+		const shown = (JSON.parse(read.content[0].text) as { url: string }).url;
+		expect(shown).toBe("{{baseUrl}}/echo?api_key=&page=2");
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", url: shown.replace("page=2", "page=3") },
+			engine.ctx
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(engine.stored().url).toBe("{{baseUrl}}/echo?api_key=LITERALKEY99&page=3");
+		expect(res.content.map((c) => c.text)).toContain(
+			"api_key kept its stored value; remove the parameter to drop it."
+		);
 	});
 });
