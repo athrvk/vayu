@@ -35,6 +35,7 @@ import type {
 import type { RunResultSample } from "@/modules/request-builder/utils/restore-response";
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { missedBudgetsReason } from "@/components/shared/run-outcome";
 
 /** How many step executions ended in each outcome. */
 export type OutcomeCounts = Record<StepOutcome, number>;
@@ -47,13 +48,23 @@ export type OutcomeCounts = Record<StepOutcome, number>;
  * clean run's line stays two numbers long, and a run that errored never reads
  * as a pass. A step a Stop cut short (#3397) is named as stopped and is in no
  * failure count, so a stopped run does not read as one that failed.
+ *
+ * Given the stored report's budget block, a run that missed a budget says so
+ * after the counts ("12 passed, 0 failed. 1 of 2 budgets missed: p99", #3539):
+ * a missed budget fails the run while every step passed, and the counts alone
+ * would read as a clean run.
  */
-export function stepOutcomeLine(counts: OutcomeCounts): string {
+export function stepOutcomeLine(
+	counts: OutcomeCounts,
+	thresholdValidation?: RunReport["thresholdValidation"] | null
+): string {
 	const parts = [`${counts.passed} passed`, `${counts.failed} failed`];
 	if (counts.errored > 0) parts.push(`${counts.errored} errored`);
 	if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
 	if (counts.stopped > 0) parts.push(`${counts.stopped} stopped`);
-	return parts.join(", ");
+	const line = parts.join(", ");
+	const missed = missedBudgetsReason(thresholdValidation);
+	return missed ? `${line}. ${missed}` : line;
 }
 
 /**
