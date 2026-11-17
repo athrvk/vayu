@@ -31,7 +31,7 @@ import { capacitySubtitle, collectionSubtitle, resultSubtitle } from "./result-s
  * the assertion rows redden. The block (#3537): read the flat
  * `assertionsFailed` instead of `rowAssertionsOf` and the block rows redden.
  *
- * A drain cut (#3538): drop the `drainCutCancelled` push and the cut rows redden.
+ * A drain cut (#3538): drop the `drainCutCancelledOf` push and the cut rows redden.
  *
  * Capacity (#2930): drop the `summary.capacity` guard in `resultSubtitle` and
  * the average-rate case reddens; make `capacitySubtitle` ignore `finding` and
