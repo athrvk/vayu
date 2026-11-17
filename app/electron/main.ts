@@ -480,9 +480,10 @@ const rendererRecovery = createRendererRecovery({
 	onRecovered: () => quitFlow.reset(),
 });
 
-// What a close is about to stop, said before it stops it (#1363). The renderer
-// publishes what the engine is holding for it; the wording, the platform rule
-// and the button order are this side's. See service-stop-guard.ts.
+// What a close is about to stop, said before it stops it (#1363, #3604). The
+// renderer publishes what the engine is holding for it and the run it shows
+// live; the wording, the platform rule and the button order are this side's.
+// See service-stop-guard.ts.
 const serviceStopGuard = createServiceStopGuard({
 	ask: async (prompt) => {
 		const choice = await askOnWindow({
@@ -1264,9 +1265,10 @@ function setupIpcHandlers() {
 	// about the window's focus, which only this side can answer.
 	registerOsIconIpc(ipcMain, osIcon, (msg, fields) => appLogger().warn("ipc", msg, fields));
 
-	// What the Services drawer has listening, kept current for the close that
-	// would stop it (#1363). One snapshot per change, not a question asked while
-	// the user waits on the close - see service-stop-guard.ts.
+	// What the Services drawer has listening and the run the window shows live,
+	// kept current for the close that would stop them (#1363, #3604). One
+	// publication per change on each channel, not a question asked while the
+	// user waits on the close - see service-stop-guard.ts.
 	registerRunningServicesIpc(ipcMain, serviceStopGuard, (msg, fields) =>
 		appLogger().warn("ipc", msg, fields)
 	);

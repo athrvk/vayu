@@ -654,6 +654,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		}>
 	): void => ipcRenderer.send("services:running", services),
 
+	// The run this window shows live, or null once none is, so the same close
+	// can name it first (#3604). Mirrors `LiveRun` in
+	// `electron/service-stop-guard.ts`, inlined for the same reason.
+	setLiveRun: (run: { kind: "load" | "collection"; label: string | null } | null): void =>
+		ipcRenderer.send("runs:live", run),
+
 	// System notifications for what finishes while the user is elsewhere
 	// (#1358). The renderer sends what happened; main decides whether to post
 	// it - the window's focus and the platform's support are its to answer -

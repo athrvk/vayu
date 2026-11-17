@@ -81,6 +81,16 @@ export interface RunningServiceSummary {
 }
 
 /**
+ * The run this window shows live, which the same close would stop (#3604).
+ * Mirrors `LiveRun` in `electron/service-stop-guard.ts`. `label` is what the
+ * run is aimed at ("GET https://..."), where the renderer knows it.
+ */
+export interface LiveRunSummary {
+	kind: "load" | "collection";
+	label: string | null;
+}
+
+/**
  * A collection as the OS icon's menu needs it. Mirrors `OsIconCollection` in
  * `electron/os-icon.ts`.
  */
@@ -623,6 +633,12 @@ interface ElectronAPI {
 	 * has no way to read the queries this side derives the list from.
 	 */
 	setRunningServices: (services: RunningServiceSummary[]) => void;
+
+	/**
+	 * The run this window shows live, or `null` once none is, so the same close
+	 * names it first (#3604). One-way and published on change, as above.
+	 */
+	setLiveRun: (run: LiveRunSummary | null) => void;
 
 	/**
 	 * System notifications for the events that finish while the user is in

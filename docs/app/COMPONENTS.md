@@ -1135,7 +1135,10 @@ both reveal it.
 live in the engine and the engine goes down with the app, so a close - the X on Windows and Linux,
 Quit anywhere - that would stop one asks first, naming each: the inbox by its port, the mock server
 by the collection it serves. Cancel leaves them running. Closing the window on macOS asks nothing
-because it stops nothing: the app keeps serving with no window until Quit.
+because it stops nothing: the app keeps serving with no window until Quit. The same dialog names
+the run the app shows live first, a load test by its method and URL (issue #3604):
+`useLiveRunPublisher()`, mounted beside the services publisher, pushes it under the same
+`useEngineServing()` gate.
 - `failure-modes.ts` - the four `failureMode` labels, the engine's bounds, and the row's
   one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
   differently.
