@@ -2924,7 +2924,8 @@ value of a credential-named header (a row of `create_request`, `update_request`,
 of `run_request`, `start_load_run` and `get_graphql_schema`; a row written back
 as `valueWithheld: true` has no value to judge), the value of a credential-named
 query or fragment parameter or the userinfo password of a request's `url`
-(`create_request`, `update_request`), and the value of a variable that is, or is
+(`create_request`, `update_request`, or the `url` override of `run_request` and
+`start_load_run`), and the value of a variable that is, or is
 being written as, `secret: true` (every tool that writes a variable blob). The
 call is refused before anything is written or sent, and the error says to pass
 the real value or a `{{variable}}` reference. A request body, a description, a
