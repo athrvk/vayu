@@ -31,14 +31,14 @@ import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import {
-	EngineSidecar,
-	EngineNotReadyError,
-	EnginePortInUseError,
-	defaultSidecarSystem,
-} from "./sidecar.js";
+import { EngineSidecar, defaultSidecarSystem } from "./sidecar.js";
 import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
 import { bridgeEngineLifecycle, registerEngineLifecycleIpc } from "./engine-lifecycle.js";
+import {
+	classifyEngineStartFailure,
+	engineStartFailureReason,
+	logEngineStartFailure,
+} from "./engine-start-failure.js";
 import { appLinkUrl } from "./app-links.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { openThirdPartyNotices, openThirdPartyNoticesFromMenu } from "./third-party-notices.js";
@@ -233,10 +233,10 @@ let engineSidecar: EngineSidecar | null = null;
  */
 let engineStartup: Promise<void> | null = null;
 /**
- * Why the engine is down when a start failed in a way that leaves the window up
- * for the user to fix: today only `EnginePortInUseError`. Read by the
- * renderer's disconnected state over `engine:startFailure`; null once a start
- * or restart succeeds.
+ * Why the engine is down when a start or restart failed with no crashed child
+ * to explain it: a held port, or a failure before the spawn such as a missing
+ * binary (`engineStartFailureReason`). Read by the renderer's disconnected
+ * state over `engine:startFailure`; null once a start or restart succeeds.
  */
 let engineStartFailure: string | null = null;
 /**
@@ -1028,53 +1028,14 @@ async function startEngine() {
 		// before this resolves, and every one after.
 		void applyFloorFromEngine(appLogger(), engineSidecar.getApiUrl());
 	} catch (error) {
-		// A slow engine is not a failed one, and it is not ours to kill. The
-		// process is alive and still working through its startup housekeeping; the
-		// window is up, the renderer is showing the disconnected state, and its
-		// health poll adopts the engine the moment it answers. Quitting here ended
-		// launches that were about to succeed.
-		if (error instanceof EngineNotReadyError) {
-			appLogger().warn("main", `${error.message}; leaving it to the renderer's health poll.`);
-			appLogger().applyFloor("debug");
-			return;
-		}
-
-		// Another program, or a Vayu engine serving another data directory,
-		// holds every port the engine may use. That is the user's to fix, not
-		// a reason to leave: the window stays on the disconnected state with
-		// this sentence, and Retry (`engine:restart`) tries again.
-		if (error instanceof EnginePortInUseError) {
-			appLogger().warn("main", "No engine port is free; waiting for the user to retry", {
-				error: error.message,
-			});
-			appLogger().applyFloor("debug");
-			engineStartFailure = error.message;
-			return;
-		}
-
-		// Overtaken, not failed: the app is quitting, or a restart asked for during
-		// the start is queued behind it and answers `engine:restart` itself. An
-		// error box and a quit here would greet the one and cancel the other.
-		if (engineSidecar?.isShuttingDown() || engineSidecar?.hasRestartPending()) {
-			appLogger().info("main", "Engine start overtaken by a quit or a restart", {
-				error: String(error),
-			});
-			appLogger().applyFloor("debug");
-			return;
-		}
-
-		appLogger().error("main", "Failed to start engine", { error: String(error) });
-		appLogger().applyFloor("debug");
-		// The start is begun before `app.whenReady` (see `engineStartup`), and
-		// a dialog needs a ready app.
-		await app.whenReady();
-		// Show error dialog to user
-		const { dialog } = await import("electron");
-		await dialog.showErrorBox(
-			"Couldn't start Vayu's engine",
-			`${error instanceof Error ? error.message : String(error)}\n\nCheck the logs for details.`
+		// Whatever went wrong, the window stays: the Dock names the reason and
+		// offers Restart or Retry (#3610). See engine-start-failure.ts.
+		const outcome = classifyEngineStartFailure(error, engineSidecar);
+		logEngineStartFailure(outcome, error, (level, msg, fields) =>
+			appLogger()[level]("main", msg, fields)
 		);
-		app.quit();
+		appLogger().applyFloor("debug");
+		engineStartFailure = engineStartFailureReason(outcome);
 	}
 }
 
@@ -1238,7 +1199,9 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		// failed as `cause`, which the string form drops. The renderer still
 		// gets the message.
 		appLogger().error("main", "Failed to restart engine", { error: String(error) });
-		engineStartFailure = error instanceof EnginePortInUseError ? error.message : null;
+		engineStartFailure = engineStartFailureReason(
+			classifyEngineStartFailure(error, engineSidecar)
+		);
 		return { success: false, error: errorMessage };
 	}
 }

@@ -60,9 +60,10 @@ interface EngineState {
 	engineError: string | null;
 
 	/**
-	 * Why the main process has no engine to start, when that is something the
-	 * user can fix - another program holding every port the engine may use
-	 * (#2118). `null` otherwise.
+	 * Why the main process has no engine to start, when no crashed child
+	 * explains it - another program holding every port the engine may use
+	 * (#2118), or a start that failed before it had a child (#3610). `null`
+	 * otherwise.
 	 *
 	 * Apart from `engineError` because it is not the transport's report but the
 	 * main process's own, it does not wait out the startup budget (the engine is

@@ -692,8 +692,9 @@ written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 backup or deleted it as unrecoverable.
 
 `engineStartFailure` is the main process's own account of why no engine is
-coming, when the user can fix it: another program holding every port the engine
-may use (issue #2118). `useHealthQuery` asks for it (`getEngineStartFailure`) on
+coming, when no crashed child explains it: another program holding every port
+the engine may use (issue #2118), or a start or Retry that failed before it had
+a child, such as a missing binary, in one sentence (issue #3610). `useHealthQuery` asks for it (`getEngineStartFailure`) on
 a failed poll and writes it here; the poll an engine answers clears it, and so
 does `useEngineRestart` when Retry is pressed. A reply that lands after a
 restart opened its start window is dropped, because it describes the start

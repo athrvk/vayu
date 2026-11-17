@@ -77,18 +77,6 @@ describe("startup ordering", () => {
 		expect(main.match(/suppressDictionaryDownloads\(app\)/g)).toHaveLength(1);
 	});
 
-	it("waits for a ready app before it reports a failed start", () => {
-		// A start begun before `whenReady` can fail before it; a dialog cannot
-		// be shown until then.
-		const start = main.indexOf("async function startEngine()");
-		const readyAt = main.indexOf("await app.whenReady();", start);
-		const dialogAt = main.indexOf("showErrorBox", start);
-
-		expect(start).toBeGreaterThan(-1);
-		expect(readyAt).toBeGreaterThan(start);
-		expect(readyAt).toBeLessThan(dialogAt);
-	});
-
 	it("still starts MCP after the window, which is why the ordering rule existed", () => {
 		// MCP reads a config file, and a corrupt one once left the app with a
 		// headless engine and no window at all. Overlapping the engine with the
@@ -181,59 +169,6 @@ describe("startup ordering", () => {
 		expect(activateAt).toBeGreaterThan(-1);
 		expect(engineAt).toBeGreaterThan(-1);
 		expect(activateAt).toBeLessThan(engineAt);
-	});
-
-	it("does not quit the app for an engine that is merely slow", () => {
-		// The whole point of the split: `EngineNotReadyError` returns, everything
-		// else still reaches the dialog and the quit below it.
-		const notReadyAt = main.indexOf("error instanceof EngineNotReadyError");
-		const quitAt = main.indexOf("app.quit();", notReadyAt);
-
-		expect(notReadyAt).toBeGreaterThan(-1);
-		expect(quitAt).toBeGreaterThan(notReadyAt);
-		// The early return sits between the two, so a slow engine never reaches
-		// the quit. Revert it and this window contains no `return`.
-		expect(main.slice(notReadyAt, quitAt)).toContain("return;");
-	});
-
-	/*
-	 * #2118. Mutation check: drop the early return from the
-	 * `EnginePortInUseError` branch and this reddens - the launch ends on a
-	 * dialog the user can do nothing about, which is what the issue was.
-	 */
-	it("does not quit the app when another program holds every engine port", () => {
-		const start = main.indexOf("async function startEngine()");
-		const portInUseAt = main.indexOf("error instanceof EnginePortInUseError", start);
-		const quitAt = main.indexOf("app.quit();", portInUseAt);
-
-		expect(start).toBeGreaterThan(-1);
-		expect(portInUseAt).toBeGreaterThan(start);
-		expect(quitAt).toBeGreaterThan(portInUseAt);
-		expect(main.slice(portInUseAt, quitAt)).toContain("return;");
-		// And the reason is kept for the renderer, not only logged.
-		expect(main.slice(portInUseAt, quitAt)).toContain("engineStartFailure = error.message;");
-	});
-
-	/*
-	 * #3336. Mutation check: drop the overtaken branch, or either half of its
-	 * condition, and this reddens. A quit landing mid-start used to raise
-	 * "Couldn't start Vayu's engine" on the way out, and a start that failed
-	 * with a restart queued behind it quit the app under that restart. That
-	 * the sidecar still reports both facts when the start's rejection arrives
-	 * is driven in `sidecar.test.ts`.
-	 */
-	it("does not end the app for a start a quit or a restart overtook", () => {
-		const start = main.indexOf("async function startEngine()");
-		const overtakenAt = main.indexOf(
-			"if (engineSidecar?.isShuttingDown() || engineSidecar?.hasRestartPending()) {",
-			start
-		);
-		const dialogAt = main.indexOf("showErrorBox", start);
-
-		expect(start).toBeGreaterThan(-1);
-		expect(overtakenAt).toBeGreaterThan(start);
-		expect(overtakenAt).toBeLessThan(dialogAt);
-		expect(main.slice(overtakenAt, dialogAt)).toContain("return;");
 	});
 
 	/*
