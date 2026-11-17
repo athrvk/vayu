@@ -330,14 +330,17 @@ export class EngineClient {
 		);
 	}
 
-	/** One page of {@link listRequests} (whole rows), in the `{data, pagination}` envelope. */
+	/**
+	 * One page of {@link listRequests}, in the `{data, pagination}` envelope. With
+	 * no `collectionId` the page spans every live collection.
+	 */
 	listRequestsPage(
-		collectionId: string,
+		collectionId: string | undefined,
 		query: ListPageQuery,
 		signal?: AbortSignal
 	): Promise<unknown> {
 		const params = listPageParams(query);
-		params.set("collectionId", collectionId);
+		if (collectionId !== undefined) params.set("collectionId", collectionId);
 		return this.request("GET", `/requests?${params.toString()}`, undefined, signal);
 	}
 

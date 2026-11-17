@@ -241,6 +241,11 @@
  * around it, to 151,243 / 148,647 / 223,750 / 219,483 B; the four caps went to
  * 151,300 / 148,700 / 223,800 / 219,500 (one measurement plus a few hundred
  * bytes).
+ *
+ * #3562's optional `collectionId` on `list_requests` (the scope, and the
+ * sentence that a workspace-wide `full` read costs the whole workspace) is paid
+ * once per row, 89 B, taking the rows to 151,332 / 148,736 / 223,839 / 219,572
+ * B; the four caps went to 151,400 / 148,800 / 223,900 / 219,600.
  */
 
 import { describe, it, expect } from "vitest";
@@ -260,10 +265,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_300 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_700 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_500 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_800 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_900 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
