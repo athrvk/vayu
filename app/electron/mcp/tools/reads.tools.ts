@@ -460,7 +460,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. A load run keeps 1 in 100 responses, up to 1000 per run, unless `start_load_run` set `responseSamplePeriod` (1 keeps every response) or `maxResponseSamples` (0 keeps none); a run that captured nothing returns an empty page, not an error. " +
+			"Get the exchanges a load run captured - the actual headers and bodies, which the report's aggregates do not carry. It captures every error, every completion at or above `slowRequestThresholdMs` (the `start_load_run` argument that widens this) and the first three of each status code, so a healthy 300-request run returns about three per status code, whatever the response sampling period; a run that captured nothing returns an empty page, not an error. " +
 			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. A response with \`bodyEncoding: "base64"\` holds its non-text body as base64 in \`body\`: decode it. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. ` +
 			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config, "recorded"),

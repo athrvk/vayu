@@ -14906,7 +14906,7 @@ describe("start_load_run recording knobs", () => {
 	});
 
 	/**
-	 * The two keys behind `get_run_samples` (#2447). They are the engine's own
+	 * The two response-sample keys (#2447). They are the engine's own
 	 * snake_case spellings and a camelCase one would reach it as an unread key,
 	 * so the assertion is on the payload, for both load paths.
 	 */
@@ -15044,12 +15044,18 @@ describe("start_load_run recording knobs", () => {
 	});
 
 	/**
-	 * The "written but never read" guard for descriptions: a switch the sample
-	 * reader says `start_load_run` sets has to be an argument an agent can pass.
+	 * The "written but never read" guard for descriptions, in both directions
+	 * (#3555). A switch the sample reader says `start_load_run` sets has to be an
+	 * argument an agent can pass, and it has to be one that changes what the
+	 * reader returns: `get_run_samples` reads the engine's error, slow-outlier and
+	 * first-per-status captures, which only `slowRequestThresholdMs` widens. The
+	 * two response-sample arguments size the script and schema replay's
+	 * population, so neither tool may attribute the other's reader to them.
 	 * Scoped to the sentence naming `start_load_run`, because the same description
 	 * also names the *output* fields (`resultId`, `bodyTruncated`) of a sample.
 	 */
-	test("every argument get_run_samples attributes to start_load_run exists there", () => {
+	test("get_run_samples names only the start_load_run arguments that change its capture", () => {
+		const CHANGES_CAPTURE = ["slowRequestThresholdMs"];
 		const samples = TOOLS.find((t) => t.name === "get_run_samples")!;
 		const load = TOOLS.find((t) => t.name === "start_load_run")!;
 		const description = resolveDescription(samples, resolveSafetyConfig());
@@ -15059,11 +15065,21 @@ describe("start_load_run recording knobs", () => {
 		];
 
 		// A scan that found nothing would pass forever.
-		expect(named).toEqual(["responseSamplePeriod", "maxResponseSamples"]);
+		expect(named).toEqual(CHANGES_CAPTURE);
 		for (const name of named) {
 			expect(Object.keys(load.inputSchema), `${name} is named by get_run_samples`).toContain(
 				name
 			);
+		}
+	});
+
+	test("responseSamplePeriod and maxResponseSamples describe the replay, not get_run_samples", () => {
+		const load = TOOLS.find((t) => t.name === "start_load_run")!;
+		for (const name of ["responseSamplePeriod", "maxResponseSamples"]) {
+			const description = (load.inputSchema[name] as z.ZodType).description ?? "";
+			expect(description, name).not.toBe("");
+			expect(description, name).not.toContain("get_run_samples");
+			expect(description, name).toMatch(/replay/);
 		}
 	});
 

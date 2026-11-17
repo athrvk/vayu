@@ -918,7 +918,8 @@ export const MAX_IN_FLIGHT_BOUND = 1_000_000;
  * (`validate_run_config`, `engine/src/http/routes/execution.cpp`), mirrored for
  * the reason {@link MAX_IN_FLIGHT_BOUND} is: the schema refuses an
  * out-of-range value by name instead of surfacing a `400`. The two response
- * sample bounds are `response_sample_rate` (a period, so 1 and up) and
+ * sample bounds, which size the sampled replay's population and not
+ * `get_run_samples`, are `response_sample_rate` (a period, so 1 and up) and
  * `max_response_samples` (`run_config::MAX_RESPONSE_SAMPLES`; 0 keeps none).
  *
  * Deliberately *not* the load dialog's own ceilings - `LOAD_TEST_LIMITS`
@@ -958,7 +959,9 @@ export const MAX_REDIRECTS_BOUND = 100;
  * stays the engine's, so `get_run_report`'s echo of the config snapshot matches
  * what a run was started with. The load dialog sends the first three of these
  * and neither response-sample key (#2447), so only an agent ever changes the
- * samples `get_run_samples` reads.
+ * responses the sampled script and schema replay runs over. Those two keys do
+ * not feed `get_run_samples` (#3555): it reads the exchanges the engine kept
+ * for errors, slow outliers and the first three per status code.
  */
 const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]> = [
 	["successSamplePeriod", "success_sample_rate"],
