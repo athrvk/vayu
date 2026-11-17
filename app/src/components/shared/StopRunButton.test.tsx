@@ -50,4 +50,31 @@ describe("StopRunButton", () => {
 		expect(className).toContain("text-destructive-text");
 		expect(className).not.toMatch(/(^|\s)text-destructive(\s|$)/);
 	});
+
+	// Mutation check: ignore `label` (a literal "Stop") and the first case reddens;
+	// leave `states` as ["Stop", "Stopping…"] and the reserve case does.
+	it("says the label it is given, and still says Stopping… while a stop is in flight", () => {
+		const view = render(<StopRunButton onStop={() => {}} label="Stop waiting" />);
+		expect(screen.getByRole("button", { name: /^stop waiting$/i })).toBeInTheDocument();
+		view.unmount();
+
+		render(<StopRunButton onStop={() => {}} label="Stop waiting" isStopping />);
+		expect(screen.getByRole("button", { name: /stopping/i })).toBeDisabled();
+		expect(screen.queryByRole("button", { name: /stop waiting/i })).toBeNull();
+	});
+
+	it("reads Stop with no label", () => {
+		render(<StopRunButton onStop={() => {}} />);
+		expect(screen.getByRole("button", { name: /^stop$/i })).toBeInTheDocument();
+	});
+
+	it("reserves the width of the label it is given, so the swap never resizes the button", () => {
+		const { container } = render(<StopRunButton onStop={() => {}} label="Stop waiting" />);
+		const reserved = Array.from(
+			container.querySelectorAll('[data-slot="label-swap-reserve"]'),
+			(el) => el.textContent
+		);
+		expect(reserved).toContain("Stop waiting");
+		expect(reserved).toContain("Stopping…");
+	});
 });

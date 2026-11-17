@@ -577,7 +577,7 @@ after the frame left the run's retained ring.
 
 | Component | Role |
 |---|---|
-| `DashboardHeader.tsx` | Run status, method and URL, stop button, and the config summary line (virtual users, mode, a data-driven run's row count and the file it came from, elapsed). A collection load run has no URL, so the collection's name and its step count ("Checkout · 12 steps") take that place (#2270); they arrive as the primitive props `collectionName` / `stepCount` from `hooks/useCollectionRunTarget.ts`, which reads the run's row (its snapshot's scenario manifest) and resolves the name through `useCollectionName`, falling back to the id once the collection is deleted. The run's comment is the `comment` prop, drawn under that line by the shared `RunComment` ("Comment" label, one truncated line with the full text in its `title`): from the launch config while live, from the report's `configuration` once the run has finished - the report body no longer draws it, so this header is where a finished dashboard run shows it. Once that report is on screen the dashboard also hands the header `exportRunId`, with the report's `requestUrl` / `requestMethod` as `exportRequestUrl` / `exportRequestMethod` (primitives, for the memo), and the header draws the run's **Export** menu ([`RunExportMenu`](#history-moduleshistory), #2139) where the live header has Stop; a streaming run never mounts it |
+| `DashboardHeader.tsx` | Run status, method and URL, stop button, and the config summary line (virtual users, mode, a data-driven run's row count and the file it came from, elapsed over the configured duration as `00:18 / 00:15` while the run is live, or elapsed alone for a run with none or one that is no longer live). While the engine reports the run `draining` (#3568: the primitives `draining` and `waitingOn`, set only then) the pill reads **Finishing**, the line adds "waiting on N requests" and Stop reads **Stop waiting**. A collection load run has no URL, so the collection's name and its step count ("Checkout · 12 steps") take that place (#2270); they arrive as the primitive props `collectionName` / `stepCount` from `hooks/useCollectionRunTarget.ts`, which reads the run's row (its snapshot's scenario manifest) and resolves the name through `useCollectionName`, falling back to the id once the collection is deleted. The run's comment is the `comment` prop, drawn under that line by the shared `RunComment` ("Comment" label, one truncated line with the full text in its `title`): from the launch config while live, from the report's `configuration` once the run has finished - the report body no longer draws it, so this header is where a finished dashboard run shows it. Once that report is on screen the dashboard also hands the header `exportRunId`, with the report's `requestUrl` / `requestMethod` as `exportRequestUrl` / `exportRequestMethod` (primitives, for the memo), and the header draws the run's **Export** menu ([`RunExportMenu`](#history-moduleshistory), #2139) where the live header has Stop; a streaming run never mounts it |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode; hands `LiveStreamPanel` the newest frame, the history buffer and the latest first-event block when the frame carries `stream_events` |
 | `LiveDistributionRow.tsx` | Row 3 of the live view: the latency distribution (HDR plot, its min / mean / p50 / p95 / p99 / max footer and an "N completions so far" caption) and the request timing card (the average waterfall with History's per-phase percentile table under it), from the latest gate frame; a scenario load run's distribution card is titled "Latency distribution (all steps)" (#2823) |
 | `LiveSequencePanel.tsx` | Row 1.5 of the live view, between the hero row and the charts, for a **scenario load run** only (#2823): the shared `SequenceBadge`, "N steps per iteration", the iterations started / completed / abandoned (`ScenarioFacts`; abandoned only while non-zero) and a Step / Executed / Errors table drawn from the same cells as History's Steps tab (`StepLabelCell`, `ExecutedCell`, `ErrorsCell`). Its data is the gate frame's `scenario` block (`LoadTestMetrics.scenario`, no latency), read from the latest frame that carries it (`utils/liveScenario.ts`) and passed down as the block itself so this memo'd panel re-renders when a gate lands and not at the tick rate; a run whose frames carry none draws nothing, and the hero latency card, the Response-time percentile card and the distribution card read "pooled" / "(all steps)" for the same run. A live row has no "(n short)" marker (a step in flight is always behind the one before it) and no method badge (a frame names the step, not its request) |
@@ -1632,7 +1632,10 @@ text, so they say the verdict in words instead (below). All read `RUN_STATUS` in
 once per status. The dashboard header's ending includes `failed` (#1932), set
 when the engine reports the run failed, so a failed run no longer reads as
 Completed; it says Running for as long as the run is live, a lost stream
-included (#3351).
+included (#3351). An optional `label` replaces the word and keeps the status's
+glyph and family: the dashboard passes **Finishing** for a run draining its
+in-flight requests (#3568), which is a running run, not a status of its own, so
+`RUN_STATUS` has no such key.
 
 **`completed` is not a verdict** (#2130). A run that missed a budget, or whose
 responses mostly errored, still ends `completed`, and the tick said it went well.
@@ -1717,7 +1720,11 @@ places a run can be cancelled: the load dashboard header, the collection-run
 tab and the in-progress pane of a load run's History tab. A primitive rather than markup each view repeats, because the treatment is
 not a `Button` variant - a destructive *outline* over `ghost`, which no variant
 paints, plus the in-flight swap to a spinner and "Stopping…". The label is
-`destructive-text`, never the bare `destructive` fill.
+`destructive-text`, never the bare `destructive` fill. The idle word is `Stop`,
+or the `label` the caller passes: **Stop waiting** while a load run only drains
+its in-flight requests (#3568), from the dashboard header and from the History
+tab's in-progress pane, which reads the phase off the run's own query rather than
+polling for it. The swap reserves the width of that label as well as "Stopping…".
 
 The caller owns the request and the failure path: every call site calls
 `apiService.stopRun(runId)` and, on failure, raises an **error toast with a Try

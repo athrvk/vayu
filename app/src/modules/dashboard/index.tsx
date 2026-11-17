@@ -247,6 +247,11 @@ export default function LoadTestDashboard() {
 		historicalMetrics.length > 0 ? historicalMetrics[historicalMetrics.length - 1] : null;
 	const displayMetrics: DisplayMetrics | null = currentMetrics || lastTick;
 	const elapsedDuration = lastTick ? lastTick.elapsed_seconds * 1000 : 0;
+	const plannedSeconds = durationSeconds(loadTestConfig?.duration) ?? undefined;
+	// The engine's phase, never inferred from elapsed against the plan (#3568).
+	const draining = live && displayMetrics?.phase === "draining";
+	// Only while draining, so the memo'd header stays still on every other tick.
+	const waitingOn = draining ? displayMetrics?.backpressure : undefined;
 
 	// Memoised: MetricsView is memo'd, and a fresh object per tick would defeat it.
 	const rampConfig = useMemo(
@@ -370,6 +375,9 @@ export default function LoadTestDashboard() {
 				stepCount={stepCount}
 				comment={loadTestConfig?.comment}
 				elapsedDuration={elapsedDuration}
+				plannedSeconds={live ? plannedSeconds : undefined}
+				draining={draining}
+				waitingOn={waitingOn}
 				configuration={loadTestConfig ?? undefined}
 			/>
 
@@ -397,7 +405,7 @@ export default function LoadTestDashboard() {
 						targetRps={loadTestConfig?.targetRps}
 						concurrency={loadTestConfig?.concurrency}
 						mode={loadTestConfig?.mode}
-						runDurationSeconds={durationSeconds(loadTestConfig?.duration) ?? undefined}
+						runDurationSeconds={plannedSeconds}
 						rampConfig={rampConfig}
 					/>
 				</div>

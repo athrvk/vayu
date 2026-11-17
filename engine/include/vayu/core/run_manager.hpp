@@ -475,8 +475,9 @@ struct RunContext {
         phase_latch_.advance (next);
     }
 
-    /// Where the worker is now. No production code branches on it; tests wait
-    /// on it to know a run reached its drain.
+    /// Where the worker is now, as the live frame and `GET /runs/:id` publish
+    /// it (`phase`, #3568). Nothing decides on this reading; a Stop's meaning
+    /// comes from the latch (`stop_decides_outcome`).
     [[nodiscard]] RunPhase phase () const noexcept {
         return phase_latch_.phase ();
     }

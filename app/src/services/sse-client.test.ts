@@ -30,6 +30,20 @@ describe("mapSseMetrics", () => {
 		expect(m.status_codes).toEqual({ "200": 1, "404": 1 });
 	});
 
+	// Mutation check: `phase: m.phase` (unvalidated) reddens the unknown case;
+	// dropping the key reddens the draining case; `phase: m.phase ?? "sending"`
+	// reddens the absent case.
+	it("carries the engine's phase through as sent, and none when it sent none (issue #3568)", () => {
+		expect(mapSseMetrics({ timestamp: 1, phase: "draining" }).phase).toBe("draining");
+		expect(mapSseMetrics({ timestamp: 1, phase: "sending" }).phase).toBe("sending");
+		expect(mapSseMetrics({ timestamp: 1 }).phase).toBeUndefined();
+	});
+
+	it("reads a phase this client does not know as absent, never as a state", () => {
+		expect(mapSseMetrics({ timestamp: 1, phase: "pausing" }).phase).toBeUndefined();
+		expect(mapSseMetrics({ timestamp: 1, phase: "" }).phase).toBeUndefined();
+	});
+
 	it("defaults bytes to 0 and leaves status_codes undefined when absent", () => {
 		const m = mapSseMetrics({ timestamp: 1, totalRequests: 0 });
 		expect(m.bytes_sent).toBe(0);

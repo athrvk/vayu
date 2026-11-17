@@ -21,6 +21,16 @@ interface RunStatusProps {
 	className?: string;
 }
 
+interface RunStatusPillProps extends RunStatusProps {
+	/**
+	 * Replaces the status's word, keeping its glyph and family. For a state that
+	 * is a refinement of a status and not a status of its own: a running run
+	 * draining its in-flight requests reads "Finishing" (#3568), and `Run["status"]`
+	 * has no such value for the engine to store.
+	 */
+	label?: string;
+}
+
 /**
  * The status glyph on its own, for a row too dense for a word. Decorative:
  * whatever hosts it states the status in words (the row's accessible name).
@@ -34,7 +44,12 @@ export function RunStatusGlyph({ status, outcome, className }: RunStatusProps) {
  * A run's status as a word and a glyph, tinted by the status family. `chip`
  * because the pill paints its own background (see `badge-variants.ts`).
  */
-export function RunStatusPill({ status, outcome, className }: RunStatusProps) {
+export function RunStatusPill({
+	status,
+	outcome,
+	label: labelOverride,
+	className,
+}: RunStatusPillProps) {
 	const { label, text, tint } = runStatusDisplay(status, outcome);
 	return (
 		<Badge
@@ -48,7 +63,7 @@ export function RunStatusPill({ status, outcome, className }: RunStatusProps) {
 			)}
 		>
 			<RunStatusGlyph status={status} outcome={outcome} className="size-icon-sm shrink-0" />
-			{label}
+			{labelOverride ?? label}
 		</Badge>
 	);
 }

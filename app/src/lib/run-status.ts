@@ -5,6 +5,17 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { RUN_PHASES, type RunPhase } from "@/types";
+
+/**
+ * The phase the engine reported, or `undefined` for a missing one or one this
+ * client does not know (an engine newer than it): absent renders as the app did
+ * before the phase existed, never as a guessed state (#3568).
+ */
+export function runPhaseOf(value: unknown): RunPhase | undefined {
+	return RUN_PHASES.find((phase) => phase === value);
+}
+
 /**
  * Whether a stored run status says the engine is still executing the run.
  *

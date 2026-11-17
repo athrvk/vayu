@@ -14,7 +14,7 @@
 import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { FinishedKind } from "@/stores/dashboard-store";
-import type { LiveCapacityState, LoadTestMetrics } from "@/types";
+import type { LiveCapacityState, LoadTestMetrics, RunPhase } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
 import type { PooledLatency } from "./utils/pooledLatency";
@@ -55,6 +55,20 @@ export interface DashboardHeaderProps {
 	exportRequestUrl?: string;
 	exportRequestMethod?: string;
 	elapsedDuration?: number;
+	/**
+	 * The engine's own word that a live run's end has come and it is waiting out
+	 * its in-flight requests (`phase === "draining"`, #3568), and how many it
+	 * waits on. The pill then reads Finishing and Stop reads Stop waiting.
+	 * Primitives, set only while draining, so the memo'd header re-renders per
+	 * tick for the drain alone (the in-flight count moves each tick there).
+	 */
+	draining?: boolean;
+	waitingOn?: number;
+	/**
+	 * The configured duration, seconds: the run's clock reads elapsed over it.
+	 * Absent for an open-ended run, which prints elapsed alone.
+	 */
+	plannedSeconds?: number;
 	/**
 	 * The finished run's verdict (`run-outcome.ts`), so a `completed` pill does not
 	 * wear the success tick for a run that missed a budget or was never judged.
@@ -189,6 +203,8 @@ export interface DashboardDerived {
 	pooledLatency?: PooledLatency;
 	// Timing
 	testDuration?: number;
+	/** The configured duration, seconds; live only, so the Duration card has something to say before the run ends. */
+	plannedDurationSeconds?: number;
 	elapsedSeconds: number;
 	/** Run entry to load start, setup script included; absent for a run stored before it was measured. */
 	setupOverhead?: number;
@@ -239,6 +255,8 @@ export interface DashboardDerived {
 // ============================================================================
 
 export interface DisplayMetrics {
+	/** The engine's phase on a live frame (#3568); never inferred, absent on a stored tick. */
+	phase?: RunPhase;
 	requests_completed: number;
 	requests_failed: number;
 	// The split of `requests_failed`; absent on a tick stored by an older engine.

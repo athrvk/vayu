@@ -24,9 +24,20 @@ import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
 import { sloLineName } from "../../utils/computeBreakpoint";
 import { computeEta } from "../../utils/computeEta";
-import { StatCard } from "./StatCard";
+import { StatCard, SubCount } from "./StatCard";
 
 // ---- constant_concurrency ----
+
+/**
+ * What a live closed-loop run has on the wire. A finished bundle has no frame's
+ * backpressure to say (`reportToDerived` sets 0), so it gets no sub-line; a
+ * draining run's count is the requests it still waits on (#3568).
+ */
+function liveInFlightSub(d: DashboardDerived) {
+	return d.isCompleted ? undefined : (
+		<SubCount label="in flight" count={d.backpressure} countFirst />
+	);
+}
 
 /** Throughput per virtual user - achieved throughput divided by configured concurrency. */
 export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
@@ -39,6 +50,7 @@ export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 			label="Throughput per virtual user"
 			value={fmtRate(perVu)}
 			unit="req/s"
+			sub={liveInFlightSub(d)}
 			infoTip={TOOLTIPS.throughputPerVu}
 		/>
 	);
@@ -68,6 +80,7 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 		<StatCard
 			label="Remaining (ETA)"
 			value={eta !== null ? formatSeconds(eta) : "-"}
+			sub={liveInFlightSub(d)}
 			infoTip={TOOLTIPS.remainingEta}
 		/>
 	);

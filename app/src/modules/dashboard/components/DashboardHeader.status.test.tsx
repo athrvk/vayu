@@ -16,10 +16,17 @@
  * a live run says Running (#3351), and a run that is neither live nor ended
  * draws nothing.
  *
+ * The engine's phase (#3568): a live run draining its in-flight requests reads
+ * Finishing, names what it waits on and offers Stop waiting; the clock reads
+ * elapsed over the plan when the run has one.
+ *
  * Mutation check: give `failed` the `bg-muted` tint in `RUN_STATUS` and the
  * family assertion reddens; draw `endedAs` alone in `DashboardHeader` and the
  * Running case reddens; gate Stop on `endedAs === null` instead of `live` and
- * the neither-live-nor-ended case reddens.
+ * the neither-live-nor-ended case reddens. Drop the `label` override on the pill
+ * (or on Stop) and the draining cases redden; ignore `draining` and gate on
+ * `waitingOn` alone and the "no phase" case reddens; print elapsed alone and the
+ * planned-duration case reddens.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -37,7 +44,8 @@ vi.mock("@/stores", () => ({
 function mount(
 	endedAs: FinishedKind | null,
 	live = false,
-	outcome?: DashboardHeaderProps["outcome"]
+	outcome?: DashboardHeaderProps["outcome"],
+	extra: Partial<DashboardHeaderProps> = {}
 ) {
 	const props: DashboardHeaderProps = {
 		live,
@@ -45,6 +53,7 @@ function mount(
 		isStopping: false,
 		onStop: async () => {},
 		outcome,
+		...extra,
 	};
 	return render(<DashboardHeader {...props} />);
 }
@@ -131,6 +140,65 @@ describe("DashboardHeader status pill", () => {
 
 			const el = screen.getByText("Failed").closest("[data-status]")!;
 			expect(el.className).toContain("text-status-error-text");
+		});
+	});
+
+	describe("the engine's phase (#3568)", () => {
+		it("draws a draining run as Finishing, waiting on its in-flight requests, with Stop waiting", () => {
+			mount(null, true, undefined, { draining: true, waitingOn: 10 });
+
+			const el = screen.getByText("Finishing").closest("[data-status]")!;
+			// Still a running run: the status family and the spinner stay.
+			expect(el.getAttribute("data-status")).toBe("running");
+			expect(el.className).toContain("text-status-running-text");
+			expect(screen.queryByText("Running")).toBeNull();
+			expect(screen.getByText(/waiting on 10 requests/)).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /^stop waiting$/i })).toBeInTheDocument();
+		});
+
+		it("says request, not requests, for one", () => {
+			mount(null, true, undefined, { draining: true, waitingOn: 1 });
+			expect(screen.getByText(/waiting on 1 request$/)).toBeInTheDocument();
+		});
+
+		it("names nothing to wait on when no request is left", () => {
+			mount(null, true, undefined, { draining: true, waitingOn: 0 });
+			expect(screen.getByText("Finishing")).toBeInTheDocument();
+			expect(screen.queryByText(/waiting on/)).toBeNull();
+		});
+
+		it("draws a run with no phase as Running, with Stop and no waiting line", () => {
+			mount(null, true, undefined, { elapsedDuration: 18_000 });
+
+			expect(screen.getByText("Running")).toBeInTheDocument();
+			expect(screen.queryByText("Finishing")).toBeNull();
+			expect(screen.queryByText(/waiting on/)).toBeNull();
+			expect(screen.getByRole("button", { name: /^stop$/i })).toBeInTheDocument();
+		});
+
+		it("draws Running when only the count is present, because the phase says draining", () => {
+			mount(null, true, undefined, { draining: false, waitingOn: 5 });
+
+			expect(screen.getByText("Running")).toBeInTheDocument();
+			expect(screen.queryByText(/waiting on/)).toBeNull();
+			expect(screen.getByRole("button", { name: /^stop$/i })).toBeInTheDocument();
+		});
+
+		it("is Stopping… while the stop is in flight, drain or not", () => {
+			mount(null, true, undefined, { draining: true, waitingOn: 3, isStopping: true });
+			expect(screen.getByRole("button", { name: /stopping/i })).toBeDisabled();
+		});
+
+		it("reads elapsed over the planned duration when the run has one", () => {
+			mount(null, true, undefined, { elapsedDuration: 18_000, plannedSeconds: 15 });
+			expect(screen.getByText(/00:18 \/ 00:15/)).toBeInTheDocument();
+			expect(screen.queryByText(/elapsed/)).toBeNull();
+		});
+
+		it("reads elapsed alone for a run with no planned duration", () => {
+			mount(null, true, undefined, { elapsedDuration: 18_000 });
+			expect(screen.getByText(/00:18 elapsed/)).toBeInTheDocument();
+			expect(screen.queryByText(/\//)).toBeNull();
 		});
 	});
 });

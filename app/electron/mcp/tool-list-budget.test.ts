@@ -230,6 +230,11 @@
  * 37 B more to the writes-on rows. With #3552's clause above, the merged rows
  * measure 150,796 / 148,200 / 223,303 / 219,036 B; the four caps went to
  * 150,900 / 148,300 / 223,400 / 219,100.
+ *
+ * #3568's `phase` clause in `get_live_metrics` (the five phases and what
+ * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
+ * merged rows to 150,934 / 148,338 / 223,441 / 219,174 B; the four caps went to
+ * 151,000 / 148,400 / 223,500 / 219,200.
  */
 
 import { describe, it, expect } from "vitest";
@@ -249,10 +254,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_300 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_400 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_100 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_000 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_400 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_500 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_200 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -18,6 +18,8 @@
  *      (#3341).
  *   7. A Stop that lands after the run's strategy returned on its own cuts
  *      the natural-end drain short and leaves the run Completed (#3341).
+ *   8. A live frame published in that drain says so, beside the in-flight
+ *      count it waits out (#3568).
  *
  * Every timing assertion is an upper bound measured against an upstream that
  * holds the connection open for 30s, so the margins are wide: a regression here
@@ -26,11 +28,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -592,6 +596,26 @@ class StopAfterNaturalEndTest : public RunStopAccountingTest {
         context.active_transfer_count () == in_flight;
     }
 
+    /// True once a live `metrics` frame says the run is draining with
+    /// @p in_flight transfers held: what a client reads to tell a drain from
+    /// a run still sending.
+    static bool published_draining_with (const vayu::core::RunContext& context,
+    size_t in_flight) {
+        constexpr std::string_view METRICS_EVENT = "event: metrics\n";
+        constexpr std::string_view DATA_LINE     = "\ndata: ";
+        const auto batch                         = context.ticks_since (0);
+        return std::ranges::any_of (batch.payloads, [&] (const std::string& frame) {
+            const auto data_at = frame.find (DATA_LINE);
+            if (!frame.starts_with (METRICS_EVENT) || data_at == std::string::npos) {
+                return false;
+            }
+            const auto live = nlohmann::json::parse (
+            frame.substr (data_at + DATA_LINE.size ()), nullptr, false);
+            return live.is_object () && live.value ("phase", "") == "draining" &&
+            live.value ("backpressure", size_t{ 0 }) == in_flight;
+        });
+    }
+
     nlohmann::json parsed_summary (const std::string& run_id) {
         const auto stored = db->get_run (run_id);
         if (!stored) {
@@ -711,6 +735,34 @@ TEST_F (StopAfterNaturalEndTest, ACollectionRunStoppedInItsDrainAnswersItsOwnEnd
     const auto summary = parsed_summary (run_id);
     ASSERT_TRUE (summary.is_object ()) << stored->summary;
     EXPECT_EQ (summary.value ("cancelled", size_t{ 0 }), IN_FLIGHT) << stored->summary;
+}
+
+// #3568: the drain is visible on the wire. Once the strategy has returned with
+// its four requests held by the upstream, a live frame names the phase beside
+// the in-flight count it is waiting out. Mutation check: drop the `phase`
+// write from `emit_live_tick` and no frame ever matches.
+TEST_F (StopAfterNaturalEndTest, ALiveFrameInTheDrainNamesThePhaseBesideItsBackpressure) {
+    constexpr size_t IN_FLIGHT = 4;
+    const std::string run_id   = "run-drain-phase-frame";
+    create_pending_run (run_id);
+    const nlohmann::json config = { { "mode", "iterations" }, { "iterations", IN_FLIGHT },
+        { "concurrency", IN_FLIGHT }, { "url", server->hang_url () },
+        { "method", "GET" }, { "timeout", DRAIN_TIMEOUT_MS }, { "workers", 1 } };
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    // EXPECT, not ASSERT: the worker holds `db` and `manager`, so the Stop and
+    // the settle below must run whatever this reads.
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&] { return published_draining_with (*context, IN_FLIGHT); }))
+    << "no live frame said the run was draining with its requests in flight";
+
+    context->request_stop ();
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
+    << "the run never settled after the Stop";
 }
 
 // ---------------------------------------------------------------------------

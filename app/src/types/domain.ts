@@ -1977,10 +1977,31 @@ export interface RunOrigin {
 	client?: string | null;
 }
 
+/**
+ * Where an active run's worker is, as the engine publishes it (issue #3568):
+ * on every live metrics frame and on `GET /runs/:id` for a run it holds active.
+ * `draining` is the run's own end having come, with `backpressure` the requests
+ * it still waits out. Live only: a stored or retained run has none. The engine
+ * owns it and the app never infers it (from elapsed against duration, say);
+ * `runPhaseOf` (`lib/run-status.ts`) reads an unrecognised value as absent.
+ */
+export type RunPhase = "setup" | "sending" | "draining" | "summarising" | "settled";
+
+/** The phases as a value, for narrowing what the wire sent. */
+export const RUN_PHASES: readonly RunPhase[] = [
+	"setup",
+	"sending",
+	"draining",
+	"summarising",
+	"settled",
+];
+
 /** What every run shares; {@link Run} adds the `type` and the `resultSummary` that goes with it. */
 interface RunFields {
 	id: string;
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
+	/** `GET /runs/:id` of a run the engine holds active only; read it through `runPhaseOf`. */
+	phase?: RunPhase;
 	startTime: number; // Unix timestamp in ms
 	/** Unix ms once the run is terminal; `null` while it is pending or running. */
 	endTime: number | null;
@@ -2816,6 +2837,11 @@ export interface LoadTestMetrics {
 	 * `latency_p*_ms` are already per second.
 	 */
 	live?: true;
+	/**
+	 * Where the run's worker is (issue #3568): every live frame, absent from a
+	 * stored tick and from an engine that predates it. Never inferred.
+	 */
+	phase?: RunPhase;
 	/**
 	 * Completions behind the `second_p*_ms` figures. Present only on a gate frame
 	 * (about one live frame a second, plus the final frame); 0 for an idle second.
