@@ -18,7 +18,7 @@ import type { ToolContext } from "./tools.js";
 import { resolveBaseline, runTypeRefusal } from "./tools.js";
 import { compareReports } from "./compare.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
-import { withheldRunOutput } from "./resources.js";
+import { readRunReportForAgent } from "./resources.js";
 
 export interface PromptMessage {
 	role: "user" | "assistant";
@@ -46,6 +46,16 @@ function userText(text: string): PromptMessage {
 	return { role: "user", content: { type: "text", text } };
 }
 
+/**
+ * A report read while its run is going is marked `partial: true` (#3557); the
+ * prompts say so, because a model reading zeros as results calls a run that has
+ * barely started healthy or broken.
+ */
+const PARTIAL_REPORT_SENTENCE =
+	"Read `partial` first: when it is true the run has not finished, so the report holds " +
+	"what has accumulated so far and its zeros are not results. Say that the run is " +
+	"unfinished, and do not call it healthy or concerning on this report. ";
+
 function arg(args: Record<string, unknown>, key: string): string {
 	const v = args[key];
 	return typeof v === "string" ? v : "";
@@ -59,17 +69,13 @@ export const PROMPTS: McpPromptDef[] = [
 		argsSchema: { runId: z.string().describe("Run ID to summarize.") },
 		build: async (args, ctx, signal) => {
 			const runId = arg(args, "runId");
-			const report = await withheldRunOutput(
-				ctx,
-				ctx.client.getRunReport(runId, signal),
-				signal
-			);
+			const report = await readRunReportForAgent(ctx, runId, signal);
 			return {
 				messages: [
 					userText(
 						"Summarize this Vayu run for an engineer in a few sentences. Call out throughput " +
 							"(RPS), latency p50/p95/p99, error rate, and the status-code mix, and say whether " +
-							`it looks healthy or concerning. ${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`it looks healthy or concerning. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
 					),
 				],
 			};
@@ -143,17 +149,13 @@ export const PROMPTS: McpPromptDef[] = [
 		argsSchema: { runId: z.string().describe("Run ID to diagnose.") },
 		build: async (args, ctx, signal) => {
 			const runId = arg(args, "runId");
-			const report = await withheldRunOutput(
-				ctx,
-				ctx.client.getRunReport(runId, signal),
-				signal
-			);
+			const report = await readRunReportForAgent(ctx, runId, signal);
 			return {
 				messages: [
 					userText(
 						"Diagnose the errors in this Vayu run. Identify which status codes / error types " +
 							"dominate, whether failures correlate with load (latency climbing toward saturation), " +
-							`and suggest likely causes and the next checks to run. ${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`and suggest likely causes and the next checks to run. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
 					),
 				],
 			};

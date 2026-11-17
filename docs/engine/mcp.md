@@ -2401,7 +2401,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
 | `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
-| `vayu://run/{runId}/report` | A run's full report (templated), masked as `get_run_report` is. |
+| `vayu://run/{runId}/report` | A run's full report (templated), masked, bounded (the 32 KB body cap and the trace budget) and marked `partial` while the run is unfinished, all as `get_run_report` is (`readRunReportForAgent`, #3557). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
@@ -2518,9 +2518,9 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
-| `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
+| `summarize_run`        | `runId`                  | The run report (masked, bounded and marked `partial` as `get_run_report` is) + a "summarize p50/p95/p99, errors, health"; tells the model to read `partial` first and not to call an unfinished run healthy or concerning (#3557). |
 | `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". Two runs of different types get the tool's refusal instead, with no delta embedded. An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
-| `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
+| `diagnose_errors`      | `runId`                  | The report (masked, bounded and marked `partial` as `get_run_report` is) + an error-focused diagnosis prompt, with the same read-`partial`-first instruction (#3557). |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data); tells the model to read `get_safety_config` first, so a profile is sized to the session's caps and allowlist (#2444). |
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one

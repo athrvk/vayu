@@ -15,6 +15,7 @@
 import { parseDurationSeconds } from "../safety.js";
 import type { LoadShape } from "./compose.js";
 import type { ToolResult } from "./contract.js";
+import { boundRunReport } from "./inline-body-bounds.js";
 import { isRecord, jsonResult, structuredResult } from "./kit.js";
 import { RUN_STATUSES } from "./run-housekeeping.js";
 
@@ -219,6 +220,19 @@ export function markPartialReport(report: unknown): unknown {
 				note: unrecognisedStatusNote(status),
 			};
 	}
+}
+
+/**
+ * What an agent reads of a run's report once it is masked: the stored traces
+ * bounded, then the run marked partial while it is unfinished. The one
+ * composition behind `get_run_report`, the `vayu://run/{runId}/report`
+ * resource and the run-report prompts (#3557), so the three cannot disagree on
+ * how many bytes a run hands over or on whether it is done. Bound after the
+ * mask, never before: a cut through an unmasked secret leaves a prefix no form
+ * matches (#1809).
+ */
+export function boundAndMarkRunReport(maskedReport: unknown): unknown {
+	return markPartialReport(boundRunReport(maskedReport));
 }
 
 /**
