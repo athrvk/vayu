@@ -184,7 +184,11 @@ const StepDataTemplate& bind_template);
  *                     `target_fn (run_end_ms - 1)`: the target is otherwise
  *                     read only when the loop wakes, and a run can end with no
  *                     wake in its last tick, short of a ramp's target (#2913).
- *                     `nullopt` for a run ended by anything but the clock.
+ *                     That refill sends at most what the last target refilled
+ *                     toward was below the end target, so a run already at
+ *                     its end target does not replace what completed after
+ *                     its time was up (#3545). `nullopt` for a run ended by
+ *                     anything but the clock.
  */
 void maintain_concurrency (std::shared_ptr<RunContext> context,
 const std::function<bool ()>& submit_one,

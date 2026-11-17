@@ -290,15 +290,18 @@ constexpr size_t FINAL_REFILL_TARGET  = 50;
 constexpr int64_t FINAL_REFILL_RUN_MS = 200;
 
 /// A `submit_one` that sends nothing: it counts, and bumps `requests_sent` the
-/// way a real submission does. Nothing it submits ever completes, so
-/// `in_flight ()` is exactly what the controller has submitted. The first call
-/// (the seed's) sleeps out the whole run and then runs @p after_seed, so the
-/// controller's first wake already reads the run as over: no wake lands in the
-/// ramp at all. A sleep only bounds elapsed time from below, so a slower
-/// runner reaches the same state.
+/// way a real submission does. Unless @p settles, nothing it submits ever
+/// completes, so `in_flight ()` is exactly what the controller has submitted;
+/// with it, each submission settles as it is made (as a cancellation, the
+/// cheapest settle `in_flight ()` reads), so every wake finds the whole target
+/// completed. The first call (the seed's) sleeps out the whole run and then
+/// runs @p after_seed, so the controller's first wake already reads the run as
+/// over: no wake lands in the ramp at all. A sleep only bounds elapsed time
+/// from below, so a slower runner reaches the same state.
 struct CountingSubmitter {
     std::shared_ptr<vayu::core::RunContext> context;
     std::function<void ()> after_seed;
+    bool settles     = false;
     size_t submitted = 0;
 
     bool operator() () {
@@ -310,6 +313,9 @@ struct CountingSubmitter {
         }
         ++submitted;
         ++context->requests_sent;
+        if (settles) {
+            context->metrics_collector->record_cancelled ();
+        }
         return true;
     }
 };
@@ -317,6 +323,10 @@ struct CountingSubmitter {
 size_t final_refill_ramp (int64_t elapsed_ms) {
     return vayu::core::ramp_target_concurrency (
     FINAL_REFILL_START, FINAL_REFILL_TARGET, FINAL_REFILL_RUN_MS, elapsed_ms);
+}
+
+size_t final_refill_flat (int64_t) {
+    return FINAL_REFILL_TARGET;
 }
 
 size_t unbounded_budget () {
@@ -341,6 +351,41 @@ TEST (MaintainConcurrency, ARunTheClockEndsIsRefilledToTheTargetAtItsLastInstant
 
     EXPECT_EQ (submitter.submitted, FINAL_REFILL_TARGET);
     EXPECT_EQ (context->peak_in_flight.load (), FINAL_REFILL_TARGET);
+}
+
+// #3545: the final refill tops a ramp up to its end target; it does not
+// replace what completed during the wake that found the run over. A flat ramp
+// is at its end target from the seed on, so with the whole seed completed by
+// that wake it still sends nothing after the run's time is up. Mutation check:
+// pass the final `refill_toward` a `SIZE_MAX` cap (the in-flight deficit, as
+// before) and the seed is sent a second time.
+TEST (MaintainConcurrency, AFlatRampSendsNothingAfterTheClockEndsIt) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-flat-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
+    CountingSubmitter submitter{ context, {}, true };
+
+    vayu::core::maintain_concurrency (
+    context, std::ref (submitter), final_refill_flat, unbounded_budget,
+    [] (int64_t el) { return el < FINAL_REFILL_RUN_MS; }, {}, FINAL_REFILL_RUN_MS);
+
+    EXPECT_EQ (submitter.submitted, FINAL_REFILL_TARGET)
+    << "requests were sent after the run's duration ended";
+}
+
+// The other side of #3545: a ramp whose last refill fell short of its end
+// target is topped up by that shortfall, not by its in-flight deficit, even
+// when everything it sent has completed. The same mutation as above sends one
+// request more.
+TEST (MaintainConcurrency, AShortRampIsToppedUpByItsShortfallNotItsDeficit) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-short-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
+    CountingSubmitter submitter{ context, {}, true };
+
+    vayu::core::maintain_concurrency (
+    context, std::ref (submitter), final_refill_ramp, unbounded_budget,
+    [] (int64_t el) { return el < FINAL_REFILL_RUN_MS; }, {}, FINAL_REFILL_RUN_MS);
+
+    EXPECT_EQ (submitter.submitted, FINAL_REFILL_TARGET);
 }
 
 // The final refill is owed only to a run the clock ended. A loop that leaves
