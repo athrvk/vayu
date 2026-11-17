@@ -159,8 +159,6 @@ export function isDashboardRunLive(phase: DashboardPhase): boolean {
 			return true;
 		case "awaitingReport":
 			return !phase.stopped;
-		case "engineStopped":
-			return false;
 		default:
 			return false;
 	}
