@@ -50,5 +50,6 @@ export function describeCrashEndedRuns(ended: readonly CrashEndedRun[]): string 
 		.filter((name) => name !== null)
 		.map((name) => name.toLowerCase());
 	if (names.length === 0) return null;
-	return `The ${names.join(" and the ")} that ${names.length === 1 ? "was" : "were"} running stopped with it.`;
+	if (names.length === 1) return `The ${names[0]} that was running stopped with it.`;
+	return `The ${names.join(" and the ")} that were running stopped with it.`;
 }
