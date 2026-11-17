@@ -42,7 +42,9 @@ import {
 	optionalOffset,
 	optionalPageLimit,
 	requireStr,
+	str,
 	structuredResult,
+	ToolArgError,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
 import {
@@ -119,6 +121,22 @@ async function presentCollectionPage(page: unknown, ctx: ToolContext): Promise<u
 	if (!isRecord(page) || !Array.isArray(page.data)) return page;
 	const data = await withCurrentDataFileHashes(presentCollections(page.data, ctx), ctx);
 	return { ...page, data };
+}
+
+/**
+ * `list_requests`' optional scope. A blank id is refused rather than read as
+ * absent: a client whose id variable came up empty would otherwise silently
+ * get the whole workspace, and the engine reads `?collectionId=` as a
+ * collection named "", which lists nothing.
+ */
+function optionalCollectionId(args: Record<string, unknown>): string | undefined {
+	const collectionId = str(args, "collectionId");
+	if (collectionId === "") {
+		throw new ToolArgError(
+			'"collectionId" must not be empty; omit it to list every collection.'
+		);
+	}
+	return collectionId;
 }
 
 export const READ_TOOLS: McpTool[] = [
@@ -231,7 +249,7 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			`List the saved requests directly inside one collection. ${listPageSentence("requests", "name")} Each row is a summary (${REQUEST_SUMMARY_KEYS.join(", ")}); \`fields: "full"\` returns each whole stored request (headers, params, body, auth, elements...); get_request reads one. In a full row a stored column the engine cannot hand back - one that will not parse, or one past its 10 MB field cap - comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted and not counted, so a short list is not proof the collection is small. ` +
+			`List saved requests directly inside one collection, or every live collection's without collectionId. ${listPageSentence("requests", "name")} Each row is a summary (${REQUEST_SUMMARY_KEYS.join(", ")}); \`fields: "full"\` returns each whole stored request (headers, params, body, auth, elements...); get_request reads one. In a full row a stored column the engine cannot hand back - one that will not parse, or one past its 10 MB field cap - comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted and not counted, so a short list is not proof the collection is small. Without collectionId, \`full\` reads the whole workspace. ` +
 			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config),
 		annotations: {
@@ -241,13 +259,13 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			collectionId: z.string().describe("Collection ID to list."),
+			collectionId: z.string().optional().describe("Collection ID; omit for all."),
 			...listPageInputs("requests"),
 			fields: fieldsInput,
 		},
 		outputSchema: requestPageSchema,
 		handler: (args, ctx, signal) => {
-			const collectionId = requireStr(args, "collectionId");
+			const collectionId = optionalCollectionId(args);
 			const query = listPageQuery(args);
 			const full = wantsFullRows(args);
 			return pagedRead(

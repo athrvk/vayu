@@ -7943,10 +7943,12 @@ describe("dispatchTool", () => {
 		expect(firstText(res)).toMatch(/unknown tool/i);
 	});
 
-	test("list_requests without collectionId is a readable arg error", async () => {
-		const res = await dispatchTool("list_requests", {}, ctxWith(fakeClient()));
+	test("list_requests with an empty collectionId is a readable arg error, not a workspace read", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("list_requests", { collectionId: "" }, ctxWith(client));
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/collectionId.*required/i);
+		expect(firstText(res)).toMatch(/collectionId.*must not be empty/i);
+		expect(client.listRequestsPage).not.toHaveBeenCalled();
 	});
 
 	test("run_request is blocked by the empty default allowlist", async () => {
@@ -13146,6 +13148,12 @@ describe("run housekeeping tools", () => {
 				row: { id: "req_1", name: "Get", method: "GET", url: "https://a.test" },
 			},
 			{
+				tool: "list_requests",
+				args: {},
+				method: "listRequestsPage",
+				row: { id: "req_1", name: "Get", method: "GET", url: "https://a.test" },
+			},
+			{
 				tool: "get_cookies",
 				args: {},
 				method: "getCookiesPage",
@@ -16883,7 +16891,7 @@ describe("the paged whole-list reads", () => {
 
 	/** The engine's paging over @p rows: the slice the query names, with the total behind it. */
 	const pagingEngine = (rows: unknown[]) =>
-		vi.fn(async (_collectionId: string, query: { limit: number; offset: number }) =>
+		vi.fn(async (_collectionId: string | undefined, query: { limit: number; offset: number }) =>
 			page(rows.slice(query.offset, query.offset + query.limit), rows.length, query.offset)
 		);
 
@@ -16939,6 +16947,26 @@ describe("the paged whole-list reads", () => {
 			{ limit: DEFAULT_LIST_PAGE_LIMIT, offset: 0 },
 			undefined
 		);
+	});
+
+	test("without a collectionId the page spans collections and none is sent to the engine", async () => {
+		const rows = [
+			{ ...REQUEST_ROWS[0], id: "req_a", collectionId: "col_1", name: "login" },
+			{ ...REQUEST_ROWS[1], id: "req_b", collectionId: "col_2", name: "login again" },
+		];
+		const client = fakeClient({ listRequestsPage: pagingEngine(rows) });
+		const res = await dispatchTool("list_requests", { q: "login" }, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(client.listRequestsPage).toHaveBeenCalledWith(
+			undefined,
+			{ q: "login", limit: DEFAULT_LIST_PAGE_LIMIT, offset: 0 },
+			undefined
+		);
+		const body = JSON.parse(firstText(res));
+		expect(body.data.map((row: { collectionId: string }) => row.collectionId)).toEqual([
+			"col_1",
+			"col_2",
+		]);
 	});
 
 	test("limit: 2 answers two rows and says where the next page starts", async () => {
@@ -17156,6 +17184,37 @@ describe("secret withholding", () => {
 			valueWithheld: true,
 			in: "header",
 		});
+	});
+
+	test("a workspace-wide list_requests withholds credentials in every collection's rows", async () => {
+		const rows = [
+			{ ...REQUESTS[3], collectionId: "c1" },
+			{
+				id: "req_5",
+				collectionId: "c2",
+				name: "Typed header",
+				auth: { mode: "none" },
+				headers: [
+					{ key: "Authorization", value: "Bearer typed-live-token", enabled: true },
+				],
+			},
+		];
+		const listRequestsPage = vi.fn().mockResolvedValue(page(rows));
+		const { text, body } = await readFull("list_requests", fakeClient({ listRequestsPage }));
+		expect(listRequestsPage.mock.calls[0][0]).toBeUndefined();
+		for (const secret of ["k-456", "typed-live-token"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body.map((row: { collectionId: string }) => row.collectionId)).toEqual(["c1", "c2"]);
+		expect(body[0].auth).toEqual({
+			mode: "apikey",
+			key: "X-Api-Key",
+			valueWithheld: true,
+			in: "header",
+		});
+		expect(body[1].headers).toEqual([
+			{ key: "Authorization", enabled: true, valueWithheld: true },
+		]);
 	});
 
 	test("list_requests returns auth whole with reveal on", async () => {

@@ -672,4 +672,17 @@ describe("EngineClient whole-list reads", () => {
 			["/trash", { limit: "50", offset: "50" }],
 		]);
 	});
+
+	it("sends no collectionId when a requests page names none", async () => {
+		const { fetchImpl, urls } = recordingFetch();
+		const engine = new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+		await engine.listRequestsPage(undefined, { q: "login" });
+		const parsed = new URL(urls[0]);
+		expect(parsed.pathname).toBe("/requests");
+		expect(Object.fromEntries(parsed.searchParams)).toEqual({
+			limit: "50",
+			offset: "0",
+			q: "login",
+		});
+	});
 });
