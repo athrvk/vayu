@@ -313,3 +313,49 @@ describe("run output in prompts", () => {
 		for (const leak of LEAKS) expect(text, leak).not.toContain(leak);
 	});
 });
+
+/*
+ * The run-report prompts embed the report as get_run_report hands it over
+ * (#3557): bodies capped, and a run still going marked `partial` with the
+ * prompt telling the model to read that first.
+ */
+describe.each(["summarize_run", "diagnose_errors"])("%s bounds the report it embeds", (name) => {
+	const BIG_BODY = "x".repeat(100 * 1024);
+
+	const buildFor = (report: unknown) =>
+		prompt(name)
+			.build(
+				{ runId: "run_1" },
+				ctxWith(
+					fakeClient({
+						getRunReport: vi.fn().mockResolvedValue(report),
+						getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
+						listEnvironments: vi.fn().mockResolvedValue([]),
+						listCollections: vi.fn().mockResolvedValue([]),
+						listAllRequests: vi.fn().mockResolvedValue([]),
+					})
+				)
+			)
+			.then(textOf);
+
+	const reportOf = (status: string) => ({
+		...REPORT,
+		metadata: { status },
+		results: [{ id: 1, status: 200, trace: { response: { body: BIG_BODY } } }],
+	});
+
+	test("a 100 KB stored body is cut and says so", async () => {
+		const text = await buildFor(reportOf("completed"));
+		expect(text).toContain('"bodyTruncated": true');
+		expect(text).not.toContain(BIG_BODY);
+	});
+
+	test("a run still going is marked partial, and the prompt says to read that first", async () => {
+		const running = await buildFor(reportOf("running"));
+		expect(running).toContain('"partial": true');
+		expect(running).toMatch(/Read `partial` first/);
+		expect(running).toMatch(/do not call it healthy or concerning/);
+
+		expect(await buildFor(reportOf("completed"))).not.toContain('"partial": true');
+	});
+});

@@ -42,6 +42,7 @@ import {
 } from "./withhold.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
 import { maskingOutageMessage } from "./tools/kit.js";
+import { boundAndMarkRunReport } from "./tools/run-status.js";
 import type { ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -354,6 +355,21 @@ export async function withheldRunOutput(
 	return shape.value(read.value);
 }
 
+/**
+ * A run's report as `get_run_report` hands it over: masked, then bounded and
+ * marked `partial` while the run is unfinished (#3557). The resource and the
+ * run-report prompts read through this, so none of them embeds a trace the
+ * tool would have cut or presents a running run's zeros as results.
+ */
+export async function readRunReportForAgent(
+	ctx: ToolContext,
+	runId: string,
+	signal?: AbortSignal
+): Promise<unknown> {
+	const masked = await withheldRunOutput(ctx, ctx.client.getRunReport(runId, signal), signal);
+	return boundAndMarkRunReport(masked);
+}
+
 /** Templated per-run report resource. */
 export const RUN_REPORT_RESOURCE = {
 	name: "run-report",
@@ -361,10 +377,11 @@ export const RUN_REPORT_RESOURCE = {
 	title: "Run report",
 	description:
 		"Full report for a run: latency percentiles, throughput, error rate, and status-code mix. Attach as context for analysis. " +
+		"A run still in progress carries `partial: true`, and its zeros are not results. " +
+		"Stored trace bodies are capped as in the get_run_report tool. " +
 		`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 		WITHHELD_RUN_OUTPUT_SENTENCE,
-	read: (ctx: ToolContext, runId: string, signal?: AbortSignal) =>
-		withheldRunOutput(ctx, ctx.client.getRunReport(runId, signal), signal),
+	read: readRunReportForAgent,
 	listRuns: (ctx: ToolContext, signal?: AbortSignal) => ctx.client.listRuns({}, signal),
 };
 

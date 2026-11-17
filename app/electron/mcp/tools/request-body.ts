@@ -45,11 +45,14 @@ export function bodyPayload(bodyType: string, content: string): Record<string, u
 
 /**
  * The `file` argument of a `binary` body, as the two write tools declare it.
- * No trust member: the engine decides from its allowed folders and the files
- * the user picked, which this server can neither read nor add to (#2356).
+ * No trust member is written: the engine decides from its allowed folders and
+ * the files the user picked, which this server can neither read nor add to
+ * (#2356). `unresolved` is declared because a read derives it onto every file
+ * reference (`derive_file_trust`), so a reference written back as read is not
+ * refused (#3556); `shapeBody` never forwards it.
  */
 export const fileRefInput = z
-	.object({
+	.strictObject({
 		src: z
 			.string()
 			.describe(
@@ -62,6 +65,7 @@ export const fileRefInput = z
 				"Content-Type to send it under, when no Content-Type header is set. Omitted, the engine derives one from the file extension, else application/octet-stream."
 			),
 		fileName: z.string().optional().describe("Display name of the file."),
+		unresolved: z.boolean().optional().describe("As a read returns it; ignored."),
 	})
 	.optional()
 	.describe(
@@ -70,8 +74,8 @@ export const fileRefInput = z
 
 /**
  * `file` on the tools that send an ad-hoc request. Declared only so that it
- * reaches the handler and is refused there: the SDK strips an undeclared key,
- * and a stripped `file` would send the request with no body at all.
+ * reaches the handler and is refused there with {@link INLINE_FILE_REFUSAL},
+ * which names the route that does send a file.
  */
 export const inlineFileInput = z
 	.unknown()

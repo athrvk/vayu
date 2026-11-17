@@ -447,7 +447,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			// exactly as the load path does - see `elementsTimersInput`'s doc
 			// comment), so silencing them here is real, not a no-op control.
 			elements: z
-				.object({ timers: elementsTimersInput() })
+				.strictObject({ timers: elementsTimersInput() })
 				.optional()
 				.describe(
 					"Silence this run's timer.pacing/timer.think waits without editing the collection (`timers: \"off\"`); \"asConfigured\" (default) leaves each element's own configuration in effect. Only `timers` applies to a design-mode run - `scripts`'s inline-vs-deferred distinction is a load-run concept only, so it belongs on start_load_run's `scenario` branch instead."

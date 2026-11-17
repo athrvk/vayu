@@ -293,10 +293,11 @@ How the name reaches the tool differs by era and transport:
 
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 **annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
-`openWorldHint` + a display title), and a **Zod** input schema (arguments are
-validated by the SDK). Every **read** tool declares an `outputSchema` and
-returns validated `structuredContent` alongside the text rendering, except the
-three whose answer is not an object: `list_environments` and
+`openWorldHint` + a display title), and a strict **Zod** input schema
+(arguments are validated by the SDK, and an undeclared one is refused; see
+[Error results](#error-results)). Every **read** tool declares an
+`outputSchema` and returns validated `structuredContent` alongside the text
+rendering, except the three whose answer is not an object: `list_environments` and
 `list_client_certificates` answer a bare JSON array, and
 `export_run_report` answers the document's own text. An
 `outputSchema` is object-rooted, and reshaping those answers would break every
@@ -374,7 +375,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence); a soft delete for a saved (`user`) example - it goes to the Trash; an imported example becomes a spec-sync tombstone, not a Trash entry |
 | `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId`; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; a stamped request moved out of its spec contract comes back unstamped, its operation declined at the source (#3446); the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); a blank or whitespace-only `name` is an input error, as on `update_environment`, and never reaches the engine (#3253); the returned row has secret values withheld unless revealed |
-| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; a blank or whitespace-only `name` is an input error, never sent to the engine (#3253); `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; a blank or whitespace-padded name is a `400` naming the key (#3251); `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
+| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; a blank or whitespace-only `name` is an input error, never sent to the engine (#3253); `variables` takes a string or `{value, secret, type, enabled, description}`, `removeVariables` deletes names; a blank or whitespace-padded name is a `400` naming the key (#3251); `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count); a soft delete - the environment goes to the Trash, inactive |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
@@ -1072,9 +1073,11 @@ Notes:
 - **The variables an agent writes are the flags it did not state** (issue #758).
   `update_environment` and `update_globals` take each variable either as a
   string - set the value, keep every flag - or as an object
-  `{value, secret, type, enabled}` whose *omitted* fields keep their stored
-  setting, which is what makes `secret` and `enabled` reachable at all without
-  a read-modify-write dance on the agent's side. Two rules make that safe rather
+  `{value, secret, type, enabled, description}` whose *omitted* fields keep
+  their stored setting (an entry as read also carries `valueWithheld` and
+  `createdAt`, accepted and kept as stored, #3556), which is what makes
+  `secret` and `enabled` reachable at all without a read-modify-write dance on
+  the agent's side. Two rules make that safe rather
   than merely convenient: a variable the blob does not already hold (or holds
   malformed) must carry a `value`, so `{secret: true}` against a mistyped name
   is an error instead of a new empty secret variable; and a name in both
@@ -1682,10 +1685,10 @@ composed chain's own `script.post` elements are filtered out first
 (`tools/compose.ts::composeLoadRunRequest`), because with no way to know which
 assertions the agent meant, running both would add ones they never asked for.
 `tests` stays accepted on both as the engine's own spelling for the run
-tool - a Zod object strips keys it does not declare, so removing it would turn
-a script the agent believes is running into silence. Passing both names is
-rejected with a `ToolArgError` rather than resolved by precedence: they are
-one slot, and dropping either would report a run as validated by assertions
+tool - a tool's schema refuses a key it does not declare, so removing it would
+refuse a script written in that spelling. Passing both names is rejected with
+a `ToolArgError` rather than resolved by precedence: they are one slot, and
+dropping either would report a run as validated by assertions
 that never ran. Under load the script runs against *sampled* responses
 (`max_response_samples` / `response_sample_rate`), not every one.
 
@@ -1777,9 +1780,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   argument) before composing anything, and say to run the saved request by id
   instead - `run_request` with `requestId` and no `url`, `start_load_run` with
   `requestId`, or `run_collection` / `run_collection_smoke` over its
-  collection. Both declare `file` only so the
-  refusal is reachable: an undeclared key is stripped by the SDK, and the
-  request would go out with no body at all.
+  collection. Both declare `file` only so this refusal, which names that
+  route, is the answer rather than the schema's bare `Unrecognized key`.
 - **Headers as lines** (issue #2466) - `headers` on `run_request`,
   `start_load_run` and `get_graphql_schema` is an array of `{name, value}`
   lines or a string map. Each line is sent as its own header line, in the order
@@ -2040,8 +2042,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     the executor: a load run validates sampled responses once the run has
     drained and never demotes a step, so the gate would decide nothing. It is
     declared on that tool for the refusal's sake - an argument the tool's schema
-    does not name is stripped before the handler sees it, which would drop the
-    flag in silence.
+    does not name is refused as an unrecognized key, which says nothing of the
+    surface that honours it.
   - **`stopOnError` ends an iteration at every errored step** (issue #2526), on
     `run_collection` only, matching the Run Collection dialog's switch. Top-level
     beside `scenario` and **sent only when true**, like `failOnSchemaError`.
@@ -2052,8 +2054,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `scenario.stepsNotRun` in `get_run_report`, and `stepsNotRun` on the step row
     that ended it, in its `trace` - the tool's description and the `nextStep` it
     returns both say so. `start_load_run` **refuses** it on either path for the
-    reason it refuses `failOnSchemaError` (declared so the refusal can reach an
-    agent, since the SDK strips an undeclared key): no load path reads it.
+    reason it refuses `failOnSchemaError` (declared so the refusal that names
+    `run_collection` is what an agent reads): no load path reads it.
   - **`elements: {timers, scripts}` overrides a run's stored timer/script
     behaviour without editing the collection** (issue #1559, exposing the
     block issue #1495 defines on `POST /runs`, `validate_elements_run_override`).
@@ -2323,6 +2325,32 @@ its schema check refuses (`Input validation error: ...`) is classed `input`,
 and anything else it catches (an answer its output check refuses) `transient`,
 by the wrapper `server.ts` puts in front of its `tools/call` handler.
 
+**An argument a tool does not declare is refused, never dropped** (#3556).
+Every tool's arguments object is strict (`argumentsSchema` in
+`app/electron/mcp/tools/kit.ts`, which `server.ts` registers each tool and
+prompt through), and so is every nested input object: a request's header line,
+a stored header row, an element, a binary body's `file`, a variable entry,
+`start_load_run`'s `scenario`, `monitor` and `elements`, `run_collection`'s
+`elements`, a mock issuer's `clients` and an inbox's `response`. The answer
+names the key, with its path when it is nested:
+
+```text
+Input validation error: Invalid arguments for tool start_load_run: scenario: Unrecognized key: "iterations"
+```
+
+So a misspelt `collection_id` on `list_runs` is an error rather than a list of
+every run, and nothing reaches the engine. A prompt refuses an undeclared
+argument the same way, as a protocol error. `tools/list` advertises it as
+`additionalProperties: false` on each of those objects. Four shapes stay open
+on purpose: an `auth` block (each mode's members are the engine's), an OAuth
+2.0 `config`, `thresholds` (a `custom.<name>.<stat>` budget is a key no schema
+can name) and every name-keyed map (`headers` as a map, `variables`, `data`
+rows, an element's `config`). A row a read returns can be written back as
+read: a stored header row declares `valueWithheld`, `description`, `source`
+and `type`; a variable entry declares `valueWithheld` and `createdAt` (kept as
+stored) and `description` (written); a `file` declares `unresolved`, which is
+ignored.
+
 `class` is one of five, set where the error is built (`errorResult` in
 `app/electron/mcp/tools/kit.ts`, which requires one) and mapped in
 `app/electron/mcp/tools/failure.ts`:
@@ -2407,7 +2435,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
 | `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
-| `vayu://run/{runId}/report` | A run's full report (templated), masked as `get_run_report` is. |
+| `vayu://run/{runId}/report` | A run's full report (templated), masked, bounded (the 32 KB body cap and the trace budget) and marked `partial` while the run is unfinished, all as `get_run_report` is (`readRunReportForAgent`, #3557). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
@@ -2493,8 +2521,8 @@ Three ways to close that were available, and this is which one and why:
 Denying by **default** is the load-bearing half: a new tool here, or any future
 engine client, gets a script that cannot send rather than unchecked egress.
 An agent cannot set the field either - every tool builds its request from named
-arguments, so an `allowScriptRequests` in the arguments is dropped before
-composition, and Zod strips what a tool does not declare.
+arguments, and no tool declares `allowScriptRequests`, so a call naming it is
+refused as an unrecognized key before any handler runs.
 
 A script that calls `pm.sendRequest` under MCP throws a message saying why, so
 an agent is told rather than left with a silently missing global. The
@@ -2524,9 +2552,9 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
-| `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
+| `summarize_run`        | `runId`                  | The run report (masked, bounded and marked `partial` as `get_run_report` is) + a "summarize p50/p95/p99, errors, health"; tells the model to read `partial` first and not to call an unfinished run healthy or concerning (#3557). |
 | `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". Two runs of different types get the tool's refusal instead, with no delta embedded. An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
-| `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
+| `diagnose_errors`      | `runId`                  | The report (masked, bounded and marked `partial` as `get_run_report` is) + an error-focused diagnosis prompt, with the same read-`partial`-first instruction (#3557). |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data); tells the model to read `get_safety_config` first, so a profile is sized to the session's caps and allowlist (#2444). |
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
@@ -3094,7 +3122,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
-| `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
+| `tools/kit.ts`     | Helpers every tool shares: the strict arguments object (`argumentsSchema`), result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `redacted-input.ts` (the refusal of a credential slot written as `<redacted>`), `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |

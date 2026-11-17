@@ -272,7 +272,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// it - and `validate_run_config` already answers each one by field
 			// name. This layer types the shape; the engine owns the ranges.
 			monitor: z
-				.object({
+				.strictObject({
 					url: z
 						.string()
 						.describe(
@@ -407,7 +407,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// design runner's per-run pass count, which this executor never looks
 			// at. Offering it here would be an argument written and never read.
 			scenario: z
-				.object({
+				.strictObject({
 					collectionId: z
 						.string()
 						.describe("Collection whose saved requests are the sequence."),
@@ -429,7 +429,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// sends either today, so they stay off this schema until something
 			// actually needs them.
 			elements: z
-				.object({
+				.strictObject({
 					timers: elementsTimersInput(),
 					scripts: z
 						.enum(["asMarked", "allInline", "allDeferred"])
@@ -442,9 +442,8 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Override how this run's stored timer.*/script.* elements execute, without editing the collection - the same block RunCollectionDialog's load-test section sends. Works on a scenario (\"scenario\") and on a single target alike."
 				),
-			// Declared only so it can be refused by name - see
-			// LOAD_RUN_SCHEMA_GATE_REFUSAL for why an undeclared key would be
-			// dropped in silence instead.
+			// Declared only so it can be refused with the reason - see
+			// LOAD_RUN_SCHEMA_GATE_REFUSAL.
 			failOnSchemaError: z
 				.boolean()
 				.optional()

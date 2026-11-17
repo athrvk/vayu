@@ -34,7 +34,7 @@ import { McpListener } from "./listener.js";
 import { createMcpLifecycle, type McpLifecycle } from "./lifecycle.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
+import { TOOLS, isListed, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
 import { EngineRequestError, type EngineClient } from "./engine-client.js";
@@ -612,6 +612,219 @@ describe("MCP protocol handshake (in-memory)", () => {
 });
 
 /**
+ * An argument a tool does not declare is refused by name, never dropped
+ * (#3556). Dropped, a misspelt `collection_id` read every run in the workspace
+ * and a nested `scenario.iterations` started a run of another length, each with
+ * nothing said to the agent. The SDK answers before any handler runs, so the
+ * engine client here records every call and must record none.
+ */
+describe("undeclared arguments", () => {
+	const UNKNOWN = "notAnArgument";
+	/** Every tool listed: write tools are withheld otherwise, and would answer the write gate instead. */
+	const EVERY_TOOL: Partial<McpSafetyConfig> = { allowWrites: true };
+
+	interface CallAnswer {
+		isError?: boolean;
+		content: Array<{ text: string }>;
+		structuredContent?: { error?: { class?: string } };
+	}
+
+	/** An engine client that records each method called on it, answering every one with `{}`. */
+	function recordingClient() {
+		const called: string[] = [];
+		const client = new Proxy(
+			{},
+			{
+				get: (_target, method) =>
+					// Not a thenable, so nothing that awaits the client hangs on it.
+					typeof method !== "string" || method === "then"
+						? undefined
+						: () => {
+								called.push(method);
+								return Promise.resolve({});
+							},
+			}
+		) as EngineClient;
+		return { client, called };
+	}
+
+	async function call(name: string, args: Record<string, unknown>) {
+		const engine = recordingClient();
+		const { client, server } = await connectClient({
+			safety: EVERY_TOOL,
+			client: engine.client,
+		});
+		const answer = (await client.callTool({ name, arguments: args })) as CallAnswer;
+		await server.close();
+		return { answer, called: engine.called };
+	}
+
+	function expectRefusedNaming(
+		{ answer, called }: Awaited<ReturnType<typeof call>>,
+		refusal: string
+	) {
+		expect(answer.isError).toBe(true);
+		expect(answer.structuredContent?.error?.class).toBe("input");
+		expect(answer.content[0].text).toContain(refusal);
+		expect(called).toEqual([]);
+	}
+
+	const listed = TOOLS.filter((tool) => isListed(tool, resolveSafetyConfig(EVERY_TOOL)));
+
+	it("covers every tool in the registry", () => {
+		expect(listed.length).toBe(TOOLS.length);
+	});
+
+	// Mutation check: `z.object` for `argumentsSchema` in server.ts fails every
+	// row - a tool with a required argument answers without naming the key, and
+	// one without runs its handler and reaches the engine.
+	it.each(listed.map((tool) => tool.name))(
+		"%s refuses an undeclared argument by name and reaches no engine",
+		async (name) => {
+			expectRefusedNaming(
+				await call(name, { [UNKNOWN]: true }),
+				`Unrecognized key: "${UNKNOWN}"`
+			);
+		}
+	);
+
+	it("list_runs refuses a snake_case collection_id rather than listing every run", async () => {
+		expectRefusedNaming(
+			await call("list_runs", { collection_id: "x" }),
+			'Unrecognized key: "collection_id"'
+		);
+	});
+
+	/*
+	 * One row per nested input object, each otherwise valid so the unknown key
+	 * is the only issue the schema finds. The open shapes (`auth`,
+	 * `thresholds`, an OAuth 2.0 `config`, every map) are not here: the walk
+	 * below holds them to a named list.
+	 */
+	const URL = "https://api.example.com/x";
+	const SAVED = { collectionId: "c1", name: "r", url: URL };
+	it.each([
+		[
+			"start_load_run",
+			"scenario",
+			{ scenario: { collectionId: "c1", iterations: 5 } },
+			'scenario: Unrecognized key: "iterations"',
+		],
+		[
+			"start_load_run",
+			"monitor",
+			{
+				url: URL,
+				monitor: { url: "http://127.0.0.1:9100/metrics", series: ["up"], [UNKNOWN]: 1 },
+			},
+			`monitor: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"start_load_run",
+			"elements",
+			{ url: URL, elements: { timers: "off", [UNKNOWN]: 1 } },
+			`elements: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"run_collection",
+			"elements",
+			{ collectionId: "c1", elements: { timers: "off", [UNKNOWN]: 1 } },
+			`elements: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"run_request",
+			"a header line",
+			{ url: URL, headers: [{ name: "X-A", value: "1", [UNKNOWN]: 1 }] },
+			`headers.0: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"create_request",
+			"a stored header row",
+			{ ...SAVED, headers: [{ key: "X-A", value: "1", [UNKNOWN]: 1 }] },
+			`headers.0: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"create_request",
+			"an element",
+			{ ...SAVED, elements: [{ kind: "assert.status", config: {}, [UNKNOWN]: 1 }] },
+			`elements.0: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"create_request",
+			"a binary body's file",
+			{ ...SAVED, bodyType: "binary", file: { src: "/data/a.bin", [UNKNOWN]: 1 } },
+			`file: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"update_environment",
+			"a variable entry",
+			{ environmentId: "e1", variables: { token: { value: "v", [UNKNOWN]: 1 } } },
+			`variables.token: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"start_mock_issuer",
+			"a client",
+			{ clients: [{ clientId: "cid", [UNKNOWN]: 1 }] },
+			`clients.0: Unrecognized key: "${UNKNOWN}"`,
+		],
+		[
+			"start_webhook_inbox",
+			"the canned response",
+			{ response: { status: 200, [UNKNOWN]: 1 } },
+			`response: Unrecognized key: "${UNKNOWN}"`,
+		],
+	])("%s refuses an undeclared key in %s", async (name, _where, args, refusal) => {
+		expectRefusedNaming(await call(name, args), refusal);
+	});
+
+	/**
+	 * The top-level arguments whose object is open on purpose, by name and why.
+	 * Each is listed only while some tool still carries it open, so an entry
+	 * outlives no reason.
+	 */
+	const OPEN_ARGUMENTS: Record<string, string> = {
+		auth: "each mode's members are the engine's to know (`authBlock`'s passthrough)",
+		thresholds: "a `custom.<name>.<stat>` budget is a key no schema can name (catchall)",
+		config: "fetch_oauth2_token's OAuth 2.0 config, read by the engine (passthrough)",
+	};
+
+	/** Each object node under @p schema that declares properties and leaves others open. */
+	function openObjects(schema: unknown, path: string[], out: string[][]): string[][] {
+		if (!schema || typeof schema !== "object") return out;
+		const node = schema as Record<string, unknown>;
+		if (node.properties && node.additionalProperties !== false) out.push(path);
+		for (const [key, child] of Object.entries(node.properties ?? {})) {
+			openObjects(child, [...path, key], out);
+		}
+		for (const key of ["items", "additionalProperties"]) openObjects(node[key], path, out);
+		for (const key of ["anyOf", "oneOf", "allOf"]) {
+			for (const member of (node[key] as unknown[] | undefined) ?? []) {
+				openObjects(member, path, out);
+			}
+		}
+		return out;
+	}
+
+	it("lists every input schema closed, apart from the declared open arguments", async () => {
+		const { client, server } = await connectClient({ safety: EVERY_TOOL });
+		const { tools } = await client.listTools();
+		await server.close();
+		expect(tools.length).toBe(listed.length);
+
+		const open = tools.flatMap((tool) =>
+			openObjects(tool.inputSchema, [], []).map((path) => ({ tool: tool.name, path }))
+		);
+		const undeclared = open.filter(
+			({ path }) => path.length !== 1 || !(path[0] in OPEN_ARGUMENTS)
+		);
+		expect(undeclared).toEqual([]);
+		expect([...new Set(open.map(({ path }) => path[0]))].sort()).toEqual(
+			Object.keys(OPEN_ARGUMENTS).sort()
+		);
+	});
+});
+
+/**
  * `run_collection_smoke` reports a tick per row to a client that asked for
  * progress (#2451). The ask is the request's `progressToken`, which the SDK
  * client adds when `callTool` is given `onprogress`; a call without it must
@@ -1109,6 +1322,19 @@ describe("prompts", () => {
 		expect(text).toContain("statusCodes");
 		await server.close();
 	});
+
+	// Mutation check: `z.object` for `argumentsSchema` in `registerPrompts`
+	// leaves the key out of the answer (or builds the prompt) on every row.
+	it.each(PROMPTS.map((prompt) => prompt.name))(
+		"%s refuses an argument it does not declare, by name",
+		async (name) => {
+			const { client, server } = await connectClient();
+			await expect(
+				client.getPrompt({ name, arguments: { notAnArgument: "x" } })
+			).rejects.toThrow('Unrecognized key: "notAnArgument"');
+			await server.close();
+		}
+	);
 
 	it("builds suggest_load_profile without needing engine data", async () => {
 		const { client, server } = await connectClient();
