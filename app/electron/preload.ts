@@ -167,6 +167,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	enginePort: enginePortFromArgv(process.argv),
 	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
+	// Whether Restart may go on: asks first when a run is live (#3604).
+	confirmEngineRestart: (): Promise<boolean> => ipcRenderer.invoke("engine:confirm-restart"),
 	getEngineStartFailure: (): Promise<string | null> => ipcRenderer.invoke("engine:startFailure"),
 	getEngineLifecycle: (): Promise<EngineLifecyclePayload> =>
 		ipcRenderer.invoke("engine:lifecycle"),

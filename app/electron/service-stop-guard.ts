@@ -15,7 +15,8 @@
  * default rather than a decision anyone made for Vayu, and the resolution
  * (#1363, option A) keeps it: services are window-scoped, and the close says so
  * when there is something to say. A live run dies the same way, so the same
- * question names it, first (#3604).
+ * question names it, first (#3604). Restarting the engine stops it too, so
+ * Restart asks the same question when a run is live (#3604).
  *
  * **The renderer says what is running; this side says what that costs.** Only
  * the renderer holds the three lists and the one rule that makes them
@@ -41,6 +42,8 @@ import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
 export const RUNNING_SERVICES_CHANNEL = "services:running";
 /** Carries the run the renderer shows live, or `null` once none is. */
 export const LIVE_RUN_CHANNEL = "runs:live";
+/** Asked by Restart engine before it does anything; answers whether to go on. */
+export const CONFIRM_RESTART_CHANNEL = "engine:confirm-restart";
 
 /** The three things the Services drawer starts, as the dialog speaks of them. */
 export type RunningServiceKind = "inbox" | "mock-server" | "issuer";
@@ -74,13 +77,21 @@ export interface StopTargets {
 	services: RunningService[];
 }
 
-/** The gesture asking, which changes both the wording and the platform rule. */
+/** A gesture that ends the app, which `quit-flow.ts` puts through its flush. */
 export type StopGesture = "window-close" | "quit";
 
+/**
+ * Every gesture the guard asks for, which changes both the wording and the
+ * rule. Restart ends the engine but not the app, so it never reaches the quit
+ * flow and its save flush.
+ */
+export type AskingGesture = StopGesture | "restart";
+
 /** How each gesture is spoken of: the message's opening and the confirm button. */
-const GESTURE_WORDS: Record<StopGesture, { lead: string; confirm: string }> = {
+const GESTURE_WORDS: Record<AskingGesture, { lead: string; confirm: string }> = {
 	"window-close": { lead: "Close Vayu", confirm: "Close anyway" },
 	quit: { lead: "Quit Vayu", confirm: "Quit anyway" },
+	restart: { lead: "Restart Vayu's engine", confirm: "Restart anyway" },
 };
 
 const RUN_NOUN: Record<LiveRun["kind"], string> = {
@@ -182,7 +193,7 @@ function stopConsequence({ run, services }: StopTargets): string {
  * every platform shows at full size. The run is listed first because it is the
  * one thing here that cannot be started again where it left off.
  */
-export function buildStopPrompt(gesture: StopGesture, targets: StopTargets): ServiceStopPrompt {
+export function buildStopPrompt(gesture: AskingGesture, targets: StopTargets): ServiceStopPrompt {
 	const { lead, confirm } = GESTURE_WORDS[gesture];
 	const listed = [
 		...(targets.run ? [describeLiveRun(targets.run)] : []),
@@ -225,13 +236,13 @@ export interface ServiceStopGuard {
 	/** The last run published, as the prompt would name it. */
 	liveRun: () => LiveRun | null;
 	/** Whether `gesture` would stop something running right now, on this platform. */
-	wouldStop: (gesture: StopGesture) => boolean;
+	wouldStop: (gesture: AskingGesture) => boolean;
 	/**
 	 * Ask, and answer whether the gesture may proceed. A no, or a dialog that
 	 * could not be shown, is `false`; the promise never rejects. Whether an
 	 * answer still counts for the next gesture is `quit-flow.ts`'s to decide.
 	 */
-	confirm: (gesture: StopGesture) => Promise<boolean>;
+	confirm: (gesture: AskingGesture) => Promise<boolean>;
 }
 
 export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopGuard {
@@ -252,9 +263,13 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 	const liveRun = (): LiveRun | null => (rendererGone() ? null : run);
 	const targets = (): StopTargets => ({ run: liveRun(), services: running() });
 
-	const wouldStop = (gesture: StopGesture): boolean => {
+	const wouldStop = (gesture: AskingGesture): boolean => {
 		if (gesture === "window-close" && !closeQuits) return false;
 		const now = targets();
+		// A restart that stops only services does not ask: a toast names what
+		// stopped afterwards (#3493). It stops a run on every platform, so the
+		// macOS close rule does not apply either.
+		if (gesture === "restart") return now.run !== null;
 		return now.run !== null || now.services.length > 0;
 	};
 

@@ -625,8 +625,12 @@ which case the app picks a fallback (below).
   its edits would stall on it until `install.sh` killed the app and orphaned
   the engine (issue #1908).
   An engine restart stops them too, whether a crash ended the old engine or
-  the user pressed Restart, and neither asks first. What it does instead is
-  say so afterwards: the renderer keeps what the cached Services lists said
+  the user pressed Restart, and neither asks first about services. A Restart
+  pressed with a run live is the exception: it asks before it does anything,
+  in the same dialog ("Restart Vayu's engine and stop the load test it is
+  running?", the services beside the run), and Cancel leaves the run, the
+  services and the engine as they were (issue #3604). For services, what a
+  restart does instead is say so afterwards: the renderer keeps what the cached Services lists said
   was running when the outage began, and once the health poll or the Restart
   sees the engine back it compares that by id with the engine's fresh lists
   and raises one toast naming what is no longer running (three by name, then a

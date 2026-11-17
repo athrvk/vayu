@@ -69,7 +69,11 @@ import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
 import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
 import { startsMainFramePage } from "./main-frame-page.js";
-import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
+import {
+	CONFIRM_RESTART_CHANNEL,
+	createServiceStopGuard,
+	registerRunningServicesIpc,
+} from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
 import {
@@ -1281,6 +1285,11 @@ function setupIpcHandlers() {
 	ipcMain.handle("shell:openAppLink", async (_e, key: string) => {
 		await shell.openExternal(appLinkUrl(key));
 	});
+
+	// Asked by the renderer before it prepares a restart, not inside
+	// `engine:restart`: a dialog there would sit over a start window the healthy
+	// engine's next poll closes (#3604). Answers yes at once with no run live.
+	ipcMain.handle(CONFIRM_RESTART_CHANNEL, () => serviceStopGuard.confirm("restart"));
 
 	// Handle engine restart request from renderer
 	ipcMain.handle("engine:restart", async () => {

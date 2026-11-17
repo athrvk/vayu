@@ -301,6 +301,12 @@ interface ElectronAPI {
 	enginePort: number | null;
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
 	/**
+	 * Whether Restart engine may go on. Asks first when the run the window
+	 * shows live would stop with it, and answers true at once when none is
+	 * (issue #3604). Never rejects: a question that could not be asked is false.
+	 */
+	confirmEngineRestart: () => Promise<boolean>;
+	/**
 	 * Why the launch (or the last restart) left the app without an engine, when
 	 * that is a reason the user can act on - another program holding the port.
 	 * Null otherwise.

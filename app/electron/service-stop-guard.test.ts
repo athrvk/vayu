@@ -21,7 +21,11 @@
  * Mutation checks: make `closeQuits` true on every platform and the macOS
  * cases redden; return the snapshot without the `rendererGone` gate and the
  * crashed-renderer case reddens; drop the run from `wouldStop` and "asks
- * about a quit with only a load test live" reddens. Whether an answer carries
+ * about a quit with only a load test live" reddens; drop the restart line from
+ * `wouldStop` and the services-alone restart case reddens; answer `false` there
+ * and the three restart cases that ask redden; give restart the macOS close
+ * rule and its macOS case reddens.
+ * Whether an answer carries
  * over to the next gesture is `quit-flow.ts`'s, and is tested there.
  */
 
@@ -31,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
 	buildStopPrompt,
+	CONFIRM_RESTART_CHANNEL,
 	createServiceStopGuard,
 	describeLiveRun,
 	describeRunningService,
@@ -466,6 +471,60 @@ describe("a live run (#3604)", () => {
 	});
 });
 
+describe("Restart engine with a run live (#3604)", () => {
+	it("asks before a restart only when a run is live", async () => {
+		const { guard, ask, prompts, answerDialog } = fakeGuard();
+
+		await expect(guard.confirm("restart")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+
+		guard.publishRun(loadRun);
+		expect(guard.wouldStop("restart")).toBe(true);
+		const proceed = guard.confirm("restart");
+		answerDialog(false);
+
+		await expect(proceed).resolves.toBe(false);
+		expect(prompts[0].message).toBe(
+			"Restart Vayu's engine and stop the load test it is running?"
+		);
+		expect(prompts[0].buttons).toEqual(["Restart anyway", "Cancel"]);
+	});
+
+	it("does not ask for services alone, which a toast names afterwards", async () => {
+		const { guard, ask } = fakeGuard();
+		guard.publish([inbox, mock]);
+
+		expect(guard.wouldStop("restart")).toBe(false);
+		await expect(guard.confirm("restart")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+	});
+
+	it("asks on macOS too, where a restart stops the run all the same", () => {
+		const { guard, ask } = fakeGuard({ platform: "darwin" });
+		guard.publishRun(loadRun);
+
+		expect(guard.wouldStop("restart")).toBe(true);
+		void guard.confirm("restart");
+		expect(ask).toHaveBeenCalledTimes(1);
+	});
+
+	it("names the services beside the run when it asks", async () => {
+		const { guard, prompts, answerDialog } = fakeGuard();
+		guard.publish([mock]);
+		guard.publishRun(loadRun);
+
+		const proceed = guard.confirm("restart");
+		answerDialog(true);
+		await proceed;
+
+		expect(prompts[0].message).toBe(
+			"Restart Vayu's engine and stop the load test and the service it is running?"
+		);
+		expect(prompts[0].detail).toContain("the load test of GET https://api.example.com/orders");
+		expect(prompts[0].detail).toContain("Orders API");
+	});
+});
+
 describe("registerRunningServicesIpc", () => {
 	/** The slice of `ipcMain` the channel uses, plus the renderer that sent it. */
 	function fakeIpc() {
@@ -637,6 +696,7 @@ describe("the preload's half of the channels", () => {
 		expect(preload.length).toBeGreaterThan(10_000);
 		expect(preload).toContain(`ipcRenderer.send("${RUNNING_SERVICES_CHANNEL}", services)`);
 		expect(preload).toContain(`ipcRenderer.send("${LIVE_RUN_CHANNEL}", run)`);
+		expect(preload).toContain(`ipcRenderer.invoke("${CONFIRM_RESTART_CHANNEL}")`);
 	});
 });
 
@@ -654,6 +714,12 @@ describe("main.ts wiring", () => {
 	it("asks through the quit flow, which both gestures drive", () => {
 		const flowWiring = main.slice(main.indexOf("createQuitFlow("));
 		expect(flowWiring).toContain("services: serviceStopGuard,");
+	});
+
+	it("answers Restart engine's question from the guard, as the restart gesture", () => {
+		expect(main).toContain(
+			'ipcMain.handle(CONFIRM_RESTART_CHANNEL, () => serviceStopGuard.confirm("restart"))'
+		);
 	});
 
 	it("reads the running list through the renderer's own liveness", () => {

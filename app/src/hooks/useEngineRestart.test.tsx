@@ -16,6 +16,9 @@
  * `ENGINE_RESTART_WAIT_MS` and then invalidates the world, which this file
  * would have to drive with fake timers to say anything about - and what it
  * would say is covered where the window it opens is read (`health.test.ts`).
+ *
+ * Mutation check for the restart question (#3604): skip `confirmRestart` and
+ * "changes nothing when the user cancels the restart question" reddens.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -175,6 +178,88 @@ describe("useEngineRestart", () => {
 		});
 		expect(dock.result.current.isRestarting).toBe(false);
 		expect(banner.result.current.isRestarting).toBe(false);
+	});
+
+	describe("with a run live (#3604)", () => {
+		/** The bridge, with the restart question held until the case answers it. */
+		function stubAsking() {
+			let answer: (proceed: boolean) => void = () => undefined;
+			const confirmEngineRestart = vi.fn(
+				() => new Promise<boolean>((resolve) => (answer = resolve))
+			);
+			const restartEngine = vi.fn(
+				() => new Promise<{ success: boolean; error?: string }>(() => undefined)
+			);
+			(window as unknown as { electronAPI?: unknown }).electronAPI = {
+				confirmEngineRestart,
+				restartEngine,
+			};
+			return {
+				confirmEngineRestart,
+				restartEngine,
+				answer: (proceed: boolean) => answer(proceed),
+			};
+		}
+
+		it("changes nothing when the user cancels the restart question", async () => {
+			const bridge = stubAsking();
+			const { result } = renderHook(() => useEngineRestart(), { wrapper });
+
+			let restart: Promise<void> = Promise.resolve();
+			act(() => {
+				restart = result.current.restart();
+			});
+			await waitFor(() => expect(bridge.confirmEngineRestart).toHaveBeenCalledTimes(1));
+			// Nothing is prepared while the question is on screen.
+			expect(useEngineStore.getState().engineStartWindow).toBeNull();
+			expect(result.current.isRestarting).toBe(false);
+
+			await act(async () => {
+				bridge.answer(false);
+				await restart;
+			});
+
+			expect(bridge.restartEngine).not.toHaveBeenCalled();
+			expect(useEngineStore.getState().engineStartWindow).toBeNull();
+			expect(result.current.isRestarting).toBe(false);
+			expect(showToast).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		it("restarts as before once the user confirms", async () => {
+			const bridge = stubAsking();
+			const { result } = renderHook(() => useEngineRestart(), { wrapper });
+
+			act(() => {
+				void result.current.restart();
+			});
+			await waitFor(() => expect(bridge.confirmEngineRestart).toHaveBeenCalledTimes(1));
+			await act(async () => {
+				bridge.answer(true);
+			});
+
+			await waitFor(() => expect(bridge.restartEngine).toHaveBeenCalledTimes(1));
+			expect(useEngineStore.getState().engineStartWindow).not.toBeNull();
+			expect(result.current.isRestarting).toBe(true);
+		});
+
+		it("asks once for two clicks that land while the question is up", async () => {
+			const bridge = stubAsking();
+			const dock = renderHook(() => useEngineRestart(), { wrapper });
+			const banner = renderHook(() => useEngineRestart(), { wrapper });
+
+			act(() => {
+				void dock.result.current.restart();
+				void banner.result.current.restart();
+			});
+			await waitFor(() => expect(bridge.confirmEngineRestart).toHaveBeenCalledTimes(1));
+			await act(async () => {
+				bridge.answer(true);
+			});
+
+			await waitFor(() => expect(bridge.restartEngine).toHaveBeenCalledTimes(1));
+			expect(bridge.confirmEngineRestart).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	it("lets the next restart run once the last one has ended", async () => {
