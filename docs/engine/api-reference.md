@@ -12482,22 +12482,24 @@ seconds.
 - `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
 - `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
 - `requestId` - exact match on the run's linked request.
-- `collectionId` - exact match on a **collection run's** stored
-  `scenario.collectionId`, read out of the snapshot as JSON. This is the
-  deliberate opposite of `q` below: it matches the field, never the text around
-  it, so a design run whose URL happens to contain the id does not come back.
-  Only a collection run records the path, so `type: "design"` and `type: "load"`
-  runs can never match; an id nothing has run is an empty page, not an error. A
-  collection's most recent run is `?collectionId=<id>&limit=1`, since the list
-  is already `start_time DESC`.
+- `collectionId` - exact match on a run's stored `scenario.collectionId`, read
+  out of the snapshot as JSON. This is the deliberate opposite of `q` below: it
+  matches the field, never the text around it, so a design run whose URL
+  happens to contain the id does not come back. A collection run records the
+  path, and so does a load run driven over a collection (#3544); a
+  single-request design or load run never does, so it can never match. Add
+  `type=load` to leave the collection's sequential runs out. An id nothing has
+  run is an empty page, not an error. A collection's most recent run is
+  `?collectionId=<id>&limit=1`, since the list is already `start_time DESC`.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
 - `baseline` - `true` lists only runs pinned as baselines, `false` only unpinned
   ones (any other value is ignored, like an unrecognised `type`). Leaving it out
   lists both, so omit it rather than passing `false` to mean "either". A
-  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, since
-  the list is already `start_time DESC` - the lookup both the history view's
+  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, and a
+  collection's `?baseline=true&type=load&collectionId=<id>&limit=1`, since the
+  list is already `start_time DESC` - the lookups both the history view's
   vs-baseline strip and the MCP `compare_runs` tool make.
 - `origin` - `app` | `mcp` | `other`, exact match on the run's stored
   `origin.kind` (#1817; see [POST /execute](#post-execute)). Like an
@@ -14227,7 +14229,8 @@ Two things follow from a pin, and both are the point of it:
   `maxRunsRetained` or `maxDesignRunsRetained` either - a pin a cap could
   expire is not a pin, and pins crowding a cap would evict the recent history
   the cap exists to keep.
-- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
+- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`,
+  or `...&collectionId=<id>&...` for a load run over a collection.
 
 The engine's own meaning of the flag stops there - it holds no opinion about
 *why* a run is kept. A client's vs-baseline comparison is a narrower, load-only
@@ -14237,7 +14240,7 @@ diff needs, so a comparison lists `type=load` alongside `baseline=true`
 treating any pinned row as its baseline - otherwise a more-recently-pinned
 design or scenario run of the same request would shadow it.
 
-Several runs may be pinned at once (one per request is the expected use). The
+Several runs may be pinned at once (one per request or collection is the expected use). The
 engine records the pin and holds no opinion about which baseline applies to
 which run - that selection is the client's, so a pin never unpins anything else.
 

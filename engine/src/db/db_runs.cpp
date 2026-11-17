@@ -176,8 +176,10 @@ template <class Test> auto unless_unset (bool unset, Test test) {
 // would rely on the planner's evaluation order for the same protection.
 //
 // A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
-// id, so design and load runs (and a scenario run stored before the snapshot
-// carried the key) fall out of the result rather than erroring.
+// id, so single-request design and load runs (and a scenario run stored before
+// the snapshot carried the key) fall out of the result rather than erroring. A
+// load run over a collection carries the key, so it matches; a caller that wants
+// only those adds the `type` term (#3544).
 auto run_filter_condition (const RunFilter& filter) {
     const bool no_type       = !filter.type.has_value ();
     const bool no_status     = !filter.status.has_value ();

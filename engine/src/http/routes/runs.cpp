@@ -2993,9 +2993,10 @@ void register_run_routes (RouteContext& ctx) {
      * - type: "design" | "load" (invalid -> ignored)
      * - status: RunStatus string (invalid -> ignored)
      * - requestId: exact match
-     * - collectionId: exact match against a scenario run's stored
-     *   `scenario.collectionId`. Only a collection run records one, so a design
-     *   or load run never matches; an id nothing ran is an empty page, not an
+     * - collectionId: exact match against a run's stored
+     *   `scenario.collectionId`. A collection run records one, and so does a
+     *   load run driven over a collection (#3544); a single-request design or
+     *   load run never matches. An id nothing ran is an empty page, not an
      *   error.
      * - q: case-insensitive substring over the stored config_snapshot text
      * - baseline: "true" lists only pinned baselines, "false" only unpinned

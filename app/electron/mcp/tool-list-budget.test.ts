@@ -223,6 +223,13 @@
  * row) added 67 B to every row, taking them to 150,757 / 148,161 / 221,912 /
  * 217,645 B; the four caps went to 150,800 / 148,200 / 223,300 / 219,000 (the writes-on
  * rows had also moved under #3550, so they are re-measured after the merge).
+ *
+ * #3544's "or collection" on the baseline wording (`set_run_baseline`,
+ * `compare_runs` and its prompt's argument, `export_run_report`'s `baseline`,
+ * and `list_runs`' `collectionId`) added 43 B to every row, and `set_run_baseline`
+ * 37 B more to the writes-on rows. With #3552's clause above, the merged rows
+ * measure 150,796 / 148,200 / 223,303 / 219,036 B; the four caps went to
+ * 150,900 / 148,300 / 223,400 / 219,100.
  */
 
 import { describe, it, expect } from "vitest";
@@ -242,10 +249,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_800 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_300 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_000 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_300 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_400 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_100 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

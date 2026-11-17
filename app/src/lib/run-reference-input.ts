@@ -17,6 +17,7 @@
  */
 
 import { runReference, type RunReferenceInput } from "@/lib/agent-reference";
+import type { RunIdentity } from "@/queries";
 import type { Collection, Run, RunConfigSnapshot, RunScenarioSummary } from "@/types";
 
 function stringField(snapshot: RunConfigSnapshot | undefined, key: string): string | undefined {
@@ -47,6 +48,25 @@ export function runReferenceInput(run: Run): RunReferenceInput {
 			scenario: snapshotScenario(snapshot) ?? summary?.scenario,
 		},
 	};
+}
+
+/**
+ * What the run is a run *of*, for the lookups that scope to it (compare, trend,
+ * baseline): its saved request, else the collection a scenario load run drove,
+ * else `null` for a run with neither (an unsaved request's). Read through
+ * `runReferenceInput` so a list row (summary only) and a loaded run (snapshot
+ * only) answer alike. `collectionId` is what is checked, not `scenario`, which
+ * can be present and empty.
+ */
+export function runIdentity(run: Run): RunIdentity | null {
+	if (run.requestId) return { requestId: run.requestId };
+	const collectionId = runReferenceInput(run).summary?.scenario?.collectionId;
+	return collectionId ? { collectionId } : null;
+}
+
+/** What a surface calls the thing an identity names, for its own copy. */
+export function runIdentityNoun(identity: RunIdentity): "request" | "collection" {
+	return "collectionId" in identity ? "collection" : "request";
 }
 
 /** The run's line, a collection run named by its collection from the loaded tree. */

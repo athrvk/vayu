@@ -2720,10 +2720,12 @@ runs: {
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],
   lastCollectionRuns: () => ["runs", "lastCollectionRun"], // prefix: invalidate every collection's row
   lastCollectionRun: (collectionId) => ["runs", "lastCollectionRun", collectionId],
-  baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's pin
+  baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's and collection's pin
   baseline: (requestId) => ["runs", "baseline", requestId],
-  requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's compare picker
+  collectionBaseline: (collectionId) => ["runs", "baseline", "collection", collectionId],
+  requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's and collection's compare picker
   requestRun: (requestId) => ["runs", "requestRun", requestId],
+  collectionRun: (collectionId) => ["runs", "requestRun", "collection", collectionId],
   count: () => ["runs", "count"],                         // Settings' stored-run count, a bare number
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -2744,12 +2746,19 @@ request: invalidating one request's subtree drops its examples with it, which is
 what a request delete needs, and what a restored example needs, since
 `requests.all` reaches it by prefix (#2971). `runs.lastDesign`,
 `runs.recentDesign`, `runs.lastCollectionRun`, `runs.baseline` and
-`runs.requestRun` sit under
-`runs.all` but deliberately **not** under `runs.lists()` - see below.
+`runs.requestRun` (and the `collectionBaseline` / `collectionRun` keys beside
+them) sit under `runs.all` but deliberately **not** under `runs.lists()` - see below.
 
-`runs.baseline(requestId)` caches the run pinned as that request's baseline
+`runs.baseline(requestId)` caches the run pinned as that request's (or collection's) baseline
 (`GET /runs?baseline=true&requestId=&limit=1`), which the history report's
-vs-baseline strip reads. Pinning, unpinning and deleting a run all **invalidate
+vs-baseline strip reads. A collection load run has no `requestId`, so its pin is
+cached under `runs.collectionBaseline(collectionId)`
+(`GET /runs?baseline=true&type=load&collectionId=&limit=1`), a segment of its own
+inside the same `baselines()` prefix, so no id can read as the other kind and
+every invalidation below reaches both. Which key a run uses is
+`runIdentity(run)` (`lib/run-reference-input.ts`: `requestId`, else the scenario
+`collectionId`), and `usePinnedBaseline` and `RunComparisonView` look the pin up
+by the same identity. Pinning, unpinning and deleting a run all **invalidate
 the `baselines()` prefix** rather than patching it: the pin moves, and a run id
 gives no way back to the request whose baseline it was - a run of an unsaved
 request has no `requestId` at all. The pin *flag* on the loaded list rows is
@@ -2759,7 +2768,10 @@ pin invisible on any page the user had scrolled to.
 
 `runs.requestRun(requestId)` caches the load runs of one request
 (`useRequestRunsQuery`: `GET /runs?requestId=&type=load&limit=50`, newest first),
-which the History compare view's run picker reads. A plain `RunListResponse`, so
+which the History compare view's run picker and the run trend read. A collection
+load run's list is `runs.collectionRun(collectionId)`
+(`GET /runs?collectionId=&type=load&limit=50`), under the same `requestRuns()`
+prefix. A plain `RunListResponse`, so
 its own family for the sixth time and the same shape reason as the five above it,
 and under the `requestRuns()` prefix that a delete, a pin, a cleared history
 (`useInvalidateRuns`) and an MCP `run` event all invalidate. The query returns

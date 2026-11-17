@@ -178,6 +178,34 @@ describe("useBaselineRunQuery", () => {
 		});
 	});
 
+	it("scopes a collection's lookup to its pinned load run, under a key of its own", async () => {
+		listRuns.mockResolvedValue(page([runRow("run_col")]));
+		const client = makeClient();
+
+		const { result } = renderHook(() => useBaselineRunQuery({ collectionId: "col_1" }), {
+			wrapper: wrapper(client),
+		});
+
+		await waitFor(() => expect(result.current.data?.id).toBe("run_col"));
+		expect(listRuns).toHaveBeenCalledWith({
+			baseline: true,
+			type: "load",
+			collectionId: "col_1",
+			limit: 1,
+		});
+		expect(client.getQueryData(queryKeys.runs.collectionBaseline("col_1"))).toBeDefined();
+		// The same id as a request's is another run set, so another cache entry.
+		expect(client.getQueryData(queryKeys.runs.baseline("col_1"))).toBeUndefined();
+		const key = queryKeys.runs.collectionBaseline("col_1") as readonly unknown[];
+		const family = queryKeys.runs.baselines() as readonly unknown[];
+		expect(key.slice(0, family.length)).toEqual([...family]);
+	});
+
+	it("does not fetch for no target", () => {
+		renderHook(() => useBaselineRunQuery(null), { wrapper: wrapper(makeClient()) });
+		expect(listRuns).not.toHaveBeenCalled();
+	});
+
 	it("scopes the unsaved-request url/method fallback to load runs", async () => {
 		listRuns.mockResolvedValue(page([]));
 
@@ -197,7 +225,7 @@ describe("useRequestRunsQuery", () => {
 	it("asks for one page of this request's load runs, with no status filter", async () => {
 		listRuns.mockResolvedValue(page([runRow("run_7")]));
 
-		const { result } = renderHook(() => useRequestRunsQuery("req_1"), {
+		const { result } = renderHook(() => useRequestRunsQuery({ requestId: "req_1" }), {
 			wrapper: wrapper(makeClient()),
 		});
 
@@ -207,6 +235,49 @@ describe("useRequestRunsQuery", () => {
 			requestId: "req_1",
 			type: "load",
 			limit: RUNS_PAGE_LIMIT,
+		});
+	});
+
+	it("asks for one page of a collection's load runs, under a key of its own", async () => {
+		listRuns.mockResolvedValue(page([runRow("run_7")]));
+		const client = makeClient();
+
+		const { result } = renderHook(() => useRequestRunsQuery({ collectionId: "col_1" }), {
+			wrapper: wrapper(client),
+		});
+
+		await waitFor(() => expect(result.current.data?.data[0].id).toBe("run_7"));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		expect(listRuns).toHaveBeenCalledWith({
+			collectionId: "col_1",
+			type: "load",
+			limit: RUNS_PAGE_LIMIT,
+		});
+		expect(client.getQueryData(queryKeys.runs.collectionRun("col_1"))).toBeDefined();
+		expect(client.getQueryData(queryKeys.runs.requestRun("col_1"))).toBeUndefined();
+		// Under the family every run-set change invalidates, so a delete or a pin
+		// reaches it.
+		const key = queryKeys.runs.collectionRun("col_1") as readonly unknown[];
+		const family = queryKeys.runs.requestRuns() as readonly unknown[];
+		expect(key.slice(0, family.length)).toEqual([...family]);
+	});
+
+	it("is invalidated by a delete when it lists a collection's runs", async () => {
+		const client = makeClient();
+		client.setQueryData(queryKeys.runs.collectionRun("col_1"), page([runRow("r1")]));
+		client.setQueryData(queryKeys.runs.collectionBaseline("col_1"), runRow("r1"));
+		deleteRun.mockResolvedValue(undefined);
+
+		const { result } = renderHook(() => useDeleteRunMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync("r1");
+
+		await waitFor(() => {
+			expect(client.getQueryState(queryKeys.runs.collectionRun("col_1"))?.isInvalidated).toBe(
+				true
+			);
+			expect(
+				client.getQueryState(queryKeys.runs.collectionBaseline("col_1"))?.isInvalidated
+			).toBe(true);
 		});
 	});
 

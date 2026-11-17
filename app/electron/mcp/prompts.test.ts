@@ -108,8 +108,24 @@ describe("compare_runs", () => {
 			await prompt("compare_runs").build({ targetRunId: "run_target" }, ctxWith(client))
 		);
 
-		expect(client.listBaselineRuns).toHaveBeenCalledWith("req_1", undefined);
+		expect(client.listBaselineRuns).toHaveBeenCalledWith({ requestId: "req_1" }, undefined);
 		expect(client.getRunReport).toHaveBeenCalledWith("run_pinned", undefined);
+		expect(text).toContain("run_pinned -> run_target");
+	});
+
+	test("resolves a collection load run's pin through its collection (#3544)", async () => {
+		const client = fakeClient({
+			getRun: vi.fn().mockResolvedValue({
+				id: "run_target",
+				requestId: null,
+				configSnapshot: { scenario: { collectionId: "col_1" } },
+			}),
+		});
+		const text = textOf(
+			await prompt("compare_runs").build({ targetRunId: "run_target" }, ctxWith(client))
+		);
+
+		expect(client.listBaselineRuns).toHaveBeenCalledWith({ collectionId: "col_1" }, undefined);
 		expect(text).toContain("run_pinned -> run_target");
 	});
 

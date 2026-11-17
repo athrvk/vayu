@@ -142,9 +142,10 @@ std::optional<StorageError> classify_storage_error (const std::exception& error)
  *
  * `collection_id` is the exact opposite of `q` and deliberately so: it reads
  * `scenario.collectionId` out of the snapshot as JSON, so it matches the field
- * and never the text around it. Only a scenario run's snapshot carries that
- * path, which is what makes design and load runs unmatchable rather than merely
- * unlikely to match.
+ * and never the text around it. Only a snapshot with a `scenario` manifest
+ * carries that path: a collection run's, and a load run driven over a
+ * collection (#3544). That is what makes a single-request design or load run
+ * unmatchable rather than merely unlikely to match.
  */
 struct RunFilter {
     std::optional<RunType> type;

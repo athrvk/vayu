@@ -88,7 +88,7 @@ export const PROMPTS: McpPromptDef[] = [
 				.string()
 				.optional()
 				.describe(
-					"Baseline run ID (e.g. main). Leave it out to compare against the run pinned as baseline for whatever saved request the target ran."
+					"Baseline run ID (e.g. main). Leave it out to compare against the run pinned as baseline for whatever saved request or collection the target ran."
 				),
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},

@@ -10531,7 +10531,7 @@ describe("dispatchTool", () => {
 
 		expect(res.isError).toBeFalsy();
 		expect(client.getRun).toHaveBeenCalledWith("run_b", undefined);
-		expect(client.listBaselineRuns).toHaveBeenCalledWith("req_1", undefined);
+		expect(client.listBaselineRuns).toHaveBeenCalledWith({ requestId: "req_1" }, undefined);
 		expect(client.getRunReport).toHaveBeenCalledWith("run_pinned", undefined);
 		expect(firstText(res)).toContain("run_pinned");
 	});
@@ -10546,16 +10546,86 @@ describe("dispatchTool", () => {
 		expect(client.getRunReport).not.toHaveBeenCalled();
 	});
 
-	test("compare_runs says so when the target ran no saved request", async () => {
+	// A load run over a collection stores no requestId; its snapshot names the
+	// collection it drove (#3544).
+	const collectionRun = (collectionId = "col_1") =>
+		vi.fn().mockResolvedValue({
+			id: "run_b",
+			requestId: null,
+			configSnapshot: { scenario: { collectionId } },
+		});
+
+	test("compare_runs resolves a collection load run's baseline through the collection", async () => {
+		const client = fakeClient({ getRun: collectionRun() });
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBeFalsy();
+		expect(client.listBaselineRuns).toHaveBeenCalledWith({ collectionId: "col_1" }, undefined);
+		expect(client.getRunReport).toHaveBeenCalledWith("run_pinned", undefined);
+	});
+
+	test("compare_runs prefers the saved request when a run names both", async () => {
 		const client = fakeClient({
-			getRun: vi.fn().mockResolvedValue({ id: "run_b", requestId: null }),
+			getRun: vi.fn().mockResolvedValue({
+				id: "run_b",
+				requestId: "req_9",
+				configSnapshot: { scenario: { collectionId: "col_1" } },
+			}),
+		});
+		await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(client.listBaselineRuns).toHaveBeenCalledWith({ requestId: "req_9" }, undefined);
+	});
+
+	test("compare_runs names the collection when it has no baseline pinned", async () => {
+		const client = fakeClient({
+			getRun: collectionRun(),
+			listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }),
 		});
 		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
 
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/did not run a saved request/i);
-		expect(client.listBaselineRuns).not.toHaveBeenCalled();
+		expect(firstText(res)).toMatch(/No run is pinned as the baseline for collection col_1/);
+		expect(client.getRunReport).not.toHaveBeenCalled();
 	});
+
+	test("compare_runs names the collection when the target is its own baseline", async () => {
+		const client = fakeClient({
+			getRun: collectionRun(),
+			listBaselineRuns: vi.fn().mockResolvedValue({ data: [{ id: "run_b" }] }),
+		});
+		const res = await dispatchTool("compare_runs", { targetRunId: "run_b" }, ctxWith(client));
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/is itself the baseline for collection col_1/);
+	});
+
+	test.each([
+		["no requestId and no snapshot scenario", { id: "run_b", requestId: null }],
+		[
+			"a scenario that names no collection",
+			{ id: "run_b", requestId: null, configSnapshot: { scenario: {} } },
+		],
+		[
+			"a blank collection id",
+			{ id: "run_b", requestId: null, configSnapshot: { scenario: { collectionId: "" } } },
+		],
+	])(
+		"compare_runs says so when the target ran neither a request nor a collection: %s",
+		async (_name, run) => {
+			const client = fakeClient({ getRun: vi.fn().mockResolvedValue(run) });
+			const res = await dispatchTool(
+				"compare_runs",
+				{ targetRunId: "run_b" },
+				ctxWith(client)
+			);
+
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/did not run a saved request or a collection/i);
+			expect(firstText(res)).toContain('"baseRunId"');
+			expect(client.listBaselineRuns).not.toHaveBeenCalled();
+		}
+	);
 
 	test("compare_runs refuses to compare the baseline with itself", async () => {
 		const client = fakeClient({
@@ -10647,6 +10717,23 @@ describe("dispatchTool", () => {
 			const client = fakeClient();
 			const res = await exportWith(client, { baseline: true });
 			expect(res.isError).toBeFalsy();
+			expect(lastOptions(client)).toMatchObject({ baseRunId: "run_pinned" });
+		});
+
+		test("baseline: true compares a collection load run against the collection's pin", async () => {
+			const client = fakeClient({
+				getRun: vi.fn().mockResolvedValue({
+					id: "run_b",
+					requestId: null,
+					configSnapshot: { scenario: { collectionId: "col_1" } },
+				}),
+			});
+			const res = await exportWith(client, { baseline: true });
+			expect(res.isError).toBeFalsy();
+			expect(client.listBaselineRuns).toHaveBeenCalledWith(
+				{ collectionId: "col_1" },
+				undefined
+			);
 			expect(lastOptions(client)).toMatchObject({ baseRunId: "run_pinned" });
 		});
 
@@ -13169,6 +13256,13 @@ describe("run housekeeping tools", () => {
 				baseRunId: "run_a",
 				targetRunId: "run_b",
 			});
+		});
+
+		test("says a collection load run is pinned for its collection", () => {
+			const description = descriptionOf(TOOLS.find((t) => t.name === "set_run_baseline"));
+			expect(description).toMatch(/saved request or collection/);
+			// The "reads nothing" claim holds only for a run with neither.
+			expect(description).toMatch(/A run of neither[^.]*changes what nothing reads/);
 		});
 
 		test("is not hinted destructive - it is undone by calling it again", () => {

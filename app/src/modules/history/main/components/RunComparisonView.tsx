@@ -8,7 +8,8 @@
 /**
  * RunComparisonView
  *
- * The open load run against any other finished load run of the same request:
+ * The open load run against any other finished load run of the same request or
+ * collection:
  * every latency percentile, both throughput measures, the reliability rows and
  * the status-code merge, under the comparability warnings. It is the full diff
  * behind the report's vs-baseline strip, and it replaces the report's
@@ -43,6 +44,7 @@ import { STATUS_CLASS_STYLE, httpStatusClass, statusCodeLabel } from "@/constant
 import { formatNumber } from "@/lib/format-number";
 import { formatInstant } from "@/lib/time-value";
 import { compareReports, type MetricDelta } from "@/lib/run-compare";
+import { runIdentityNoun } from "@/lib/run-reference-input";
 import { cn } from "@/lib/utils";
 import {
 	isRunNotFound,
@@ -50,6 +52,7 @@ import {
 	useRequestRunsQuery,
 	useRunQuery,
 	useRunReportQuery,
+	type RunIdentity,
 } from "@/queries";
 import type { Run, RunReport } from "@/types";
 import { comparableRuns } from "./comparable-runs";
@@ -61,8 +64,11 @@ interface RunComparisonViewProps {
 	/** The open run's report - the "target" of the comparison. */
 	report: RunReport;
 	runId: string;
-	/** The request whose runs are offered; a comparison across requests is not one. */
-	requestId: string;
+	/**
+	 * The request or collection whose runs are offered; a comparison across
+	 * them is not one. It is the identity `usePinnedBaseline` looks the pin up by.
+	 */
+	identity: RunIdentity;
 	/** Back to the report's tabs. */
 	onClose: () => void;
 	/**
@@ -240,7 +246,7 @@ function ComparisonPanel({
 export default function RunComparisonView({
 	report,
 	runId,
-	requestId,
+	identity,
 	onClose,
 	runContext,
 }: RunComparisonViewProps) {
@@ -249,8 +255,9 @@ export default function RunComparisonView({
 		isLoading: loadingRuns,
 		error: runsError,
 		refetch: refetchRuns,
-	} = useRequestRunsQuery(requestId);
-	const { data: baselineRun } = useBaselineRunQuery({ requestId });
+	} = useRequestRunsQuery(identity);
+	const { data: baselineRun } = useBaselineRunQuery(identity);
+	const noun = runIdentityNoun(identity);
 
 	const candidates = useMemo(
 		() => comparableRuns(runsPage?.data ?? [], baselineRun, runId),
@@ -300,7 +307,7 @@ export default function RunComparisonView({
 					{loadingRuns && <DetailSkeleton label="Loading runs" rows={3} />}
 					{runsError && (
 						<ErrorState
-							title="Couldn't load the runs of this request"
+							title={`Couldn't load the runs of this ${noun}`}
 							detail={runsError instanceof Error ? runsError.message : undefined}
 							onRetry={() => void refetchRuns()}
 						/>
@@ -309,7 +316,7 @@ export default function RunComparisonView({
 						<EmptyState
 							icon={GitCompareArrows}
 							title="No other runs to compare"
-							description="Run this request again, or wait for a running load test to finish."
+							description={`Run this ${noun} again, or wait for a running load test to finish.`}
 						/>
 					)}
 					{comparedId && (

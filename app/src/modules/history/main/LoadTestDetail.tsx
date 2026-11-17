@@ -33,6 +33,7 @@ import {
 	useHeadingLevel,
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
+import { runIdentity } from "@/lib/run-reference-input";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import {
 	MethodBadge,
@@ -245,10 +246,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// say how the run ended, which draws nothing.
 	const judgement = useMemo(() => reportOutcome(report), [report]);
 
-	// Only a run of a saved request has "the same request" to compare against.
-	// The run row is the cache the pane above already filled.
+	// Only a run of a saved request or a collection has "the same one" to compare
+	// against. The run row is the cache the pane above already filled.
 	const { data: run } = useRunQuery(runId || null);
-	const compareRequestId = run?.requestId ?? null;
+	const identity = run ? runIdentity(run) : null;
 
 	/*
 	 * A "Compare with…" chosen on this run's History row (#2164) lands here as
@@ -365,7 +366,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						titlesPane={titlesPane}
 						className="min-w-0 flex-1 bg-transparent px-0 pt-0"
 					/>
-					{compareRequestId && (
+					{identity && (
 						<Button
 							variant="ghost"
 							size="sm"
@@ -382,11 +383,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			{/* Level 2 in both hosts: under this crumb on the dashboard, under the
 			    run's header in History. */}
 			<HeadingSection level={2}>
-				{comparing && compareRequestId ? (
+				{comparing && identity ? (
 					<RunComparisonView
 						report={report}
 						runId={runId}
-						requestId={compareRequestId}
+						identity={identity}
 						onClose={() => setComparing(false)}
 						runContext={runContext}
 					/>
@@ -452,7 +453,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									/>
 									{/* Not part of PerformanceTab: that is a view of this run's report
 								    and renders without a QueryClient in tests; this reads the request's other runs. */}
-									<RunTrend requestId={compareRequestId} openRunId={runId} />
+									<RunTrend identity={identity} openRunId={runId} />
 								</TabsContent>
 
 								{hasStepBreakdown && (
