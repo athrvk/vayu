@@ -9,14 +9,14 @@
  * @file server.ts
  * @brief Builds a configured MCP server (official SDK high-level `McpServer`)
  *        with the Vayu tool registry. Each enabled tool is registered with its
- *        Zod input schema (validated automatically), annotations, and optional
- *        output schema. A per-instance context (engine client + current safety
- *        config) is closed over each tool, and each call adds what only it
- *        knows (`callContext`). Transport-agnostic: built per request by the
- *        Streamable HTTP host (Electron) and per connection by the stdio CLI.
+ *        strict Zod input schema (validated automatically), annotations, and
+ *        optional output schema. A per-instance context (engine client +
+ *        current safety config) is closed over each tool, and each call adds
+ *        what only it knows (`callContext`). Transport-agnostic: built per
+ *        request by the Streamable HTTP host (Electron) and per connection by
+ *        the stdio CLI.
  */
 
-import { z } from "zod";
 import {
 	CLIENT_CAPABILITIES_META_KEY,
 	CLIENT_INFO_META_KEY,
@@ -36,7 +36,7 @@ import {
 	withheldWriteRefusal,
 	type ToolContext,
 } from "./tools.js";
-import { INPUT_REQUIRED } from "./tools/kit.js";
+import { argumentsSchema, INPUT_REQUIRED } from "./tools/kit.js";
 import type { McpHost } from "./tools/contract.js";
 import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
 import { SERVER_ICONS } from "./server-icon.js";
@@ -284,7 +284,7 @@ export function createMcpServer(
 			{
 				title: tool.annotations.title,
 				description: resolveDescription(tool, baseCtx.config),
-				inputSchema: z.object(tool.inputSchema),
+				inputSchema: argumentsSchema(tool.inputSchema),
 				...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 				annotations: tool.annotations,
 			},
@@ -574,7 +574,11 @@ function registerPrompts(mcp: McpServer, ctx: ToolContext): void {
 	for (const p of PROMPTS) {
 		mcp.registerPrompt(
 			p.name,
-			{ title: p.title, description: p.description, argsSchema: z.object(p.argsSchema) },
+			{
+				title: p.title,
+				description: p.description,
+				argsSchema: argumentsSchema(p.argsSchema),
+			},
 			async (args, sdkCtx) => {
 				const result = await p.build(args, ctx, sdkCtx.mcpReq.signal);
 				return result as typeof result & Record<string, unknown>;

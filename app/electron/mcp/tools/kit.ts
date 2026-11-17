@@ -48,6 +48,20 @@ import {
 	type FailureClass,
 } from "./failure.js";
 
+// --- Argument schema ---------------------------------------------------------
+
+/**
+ * The arguments object a tool's `inputSchema` or a prompt's `argsSchema`
+ * describes, as the SDK validates a call against it. Strict (#3556): a key the
+ * shape does not declare is refused by name (`Unrecognized key: "<name>"`),
+ * never dropped, so a misspelt or misplaced argument cannot change what a call
+ * does without the agent hearing of it. A test that parses through a tool's
+ * schema builds it here too, so it reads a call the way production does.
+ */
+export function argumentsSchema<Shape extends Record<string, z.ZodType>>(shape: Shape) {
+	return z.strictObject(shape);
+}
+
 // --- Result helpers ----------------------------------------------------------
 
 export function jsonResult(value: unknown): ToolResult {

@@ -79,9 +79,8 @@ export function boundExampleBodies(value: unknown): BoundedExamples {
  * without touching the second (#588, #722). An agent that could claim `import`
  * could hand its own example to the next sync to overwrite; one that could claim
  * `user` could pin a stale imported row against the document it came from.
- * Neither is the agent's call, so the field is refused by omission: the SDK
- * strips what the schema does not declare, and the payload builder copies only
- * the keys below.
+ * Neither is the agent's call, so the schema does not declare it and refuses it
+ * as an unrecognized key, and the payload builder copies only the keys below.
  */
 const EXAMPLE_WRITE_KEYS = ["name", "status", "contentType"] as const;
 

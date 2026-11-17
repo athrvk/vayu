@@ -65,7 +65,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				),
 			clients: z
 				.array(
-					z.object({
+					z.strictObject({
 						clientId: z.string().min(1).describe("Client id this issuer accepts."),
 						clientSecret: z
 							.string()

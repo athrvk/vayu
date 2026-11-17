@@ -88,7 +88,7 @@ export const ENGINE_DEFAULT_HEADERS_POINTER =
  */
 export const requestHeadersInput = z
 	.union([
-		z.array(z.object({ name: z.string(), value: z.string() })),
+		z.array(z.strictObject({ name: z.string(), value: z.string() })),
 		z.record(z.string(), z.string()),
 	])
 	.optional()
@@ -149,8 +149,8 @@ export const INSECURE_TLS_REFUSAL = `verifySSL: false is not accepted on a one-o
 
 /**
  * `run_request`'s TLS argument: declared so that asking for the downgrade gets
- * {@link INSECURE_TLS_REFUSAL} - naming the two supported routes - rather than a
- * stripped unknown key and a handshake failure the agent has to guess at.
+ * {@link INSECURE_TLS_REFUSAL}, naming the two supported routes, rather than the
+ * schema's bare unknown-key refusal.
  */
 export const verifySSLSendInput = z
 	.boolean()
@@ -242,12 +242,9 @@ export function failOnSchemaErrorInput(surface: {
  * Why a schema gate cannot ride a load run, in the executor's own terms rather
  * than a bare "unsupported" (issue #766).
  *
- * `failOnSchemaError` is *declared* on `start_load_run` so this refusal can
- * reach an agent at all: the MCP SDK validates a call against the tool's schema
- * and **strips** what the schema does not declare, so an undeclared key would
- * be dropped before the handler ran and the run would start with the agent
- * believing a gate applied. Declared and refused, the answer names the flag and
- * the surface that honours it. It is refused on both of this tool's paths - a
+ * `failOnSchemaError` is *declared* on `start_load_run` so the refusal names the
+ * flag and the surface that honours it, where an undeclared key gets only the
+ * schema's `Unrecognized key`. It is refused on both of this tool's paths - a
  * scenario is not the reason, the executor is: `read_fail_on_schema_error` is
  * the scenario *runner*'s, and no load path reads it.
  */
@@ -260,11 +257,10 @@ export const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`run_collection, which is where the gate takes effect.`;
 
 /**
- * Why `stopOnError` cannot ride a load run (issue #2526), refused for the reason
- * `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the SDK strips an undeclared key before the
- * handler runs, so `start_load_run` declares it to be able to say no. The flag
- * is the design-mode runner's - a virtual user's walk has its own rule for a step
- * with no response and never reads it.
+ * Why `stopOnError` cannot ride a load run (issue #2526), declared to be refused
+ * for the reason `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the answer names the runner
+ * that reads it. The flag is the design-mode runner's - a virtual user's walk
+ * has its own rule for a step with no response and never reads it.
  */
 export const LOAD_RUN_STOP_ON_ERROR_REFUSAL =
 	`"stopOnError" does not apply to a load run: only the design-mode runner reads it, and a ` +
@@ -401,11 +397,11 @@ export const thresholdsInput = z
 				"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
 			),
 	})
-	// Zod's object() strips any key it doesn't name, which would
-	// silently drop a `custom.<name>.<stat>` budget (issue #1500)
-	// before it ever reached `POST /runs`. `catchall` accepts it
-	// instead and forwards it as-is; the engine's own
-	// `validate_thresholds` is the real gate on its shape.
+	// Open, unlike the other input objects (#3556): a
+	// `custom.<name>.<stat>` budget (issue #1500) is a key this schema
+	// cannot name. `catchall` accepts a number under any key and forwards
+	// it as-is; the engine's own `validate_thresholds` is the real gate on
+	// its shape.
 	.catchall(z.number())
 	.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
 		// `error`, not zod 3's `message`: v4 still reads the old key as a
@@ -472,9 +468,11 @@ export const streamBudgetMsInput = z
  * /elements/kinds`, served here as the `vayu://elements/kinds` resource), and
  * enumerating them here would need a tool change every time the engine adds
  * one. `element-kinds.conformance.test.ts` is what keeps this schema and the
- * resource from silently drifting apart.
+ * resource from silently drifting apart. Strict at this level, the members a
+ * stored element carries (`ElementDef`); `config` stays an open record, judged
+ * engine-side against the kind's own schema.
  */
-export const elementSchema = z.object({
+export const elementSchema = z.strictObject({
 	id: z.string().optional().describe("Element id; omit to let the engine assign one."),
 	kind: z
 		.string()

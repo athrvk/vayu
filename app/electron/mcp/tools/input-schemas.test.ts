@@ -18,6 +18,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { TOOLS } from "../tools.js";
+import { argumentsSchema } from "./kit.js";
 import { authInput, storedAuthInput, storedCollectionAuthInput } from "./input-schemas.js";
 
 const MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"];
@@ -109,9 +110,14 @@ describe("the stored-auth description keeps the same schema", () => {
 	});
 });
 
+/** @p args without the keys @p shape does not declare, which the strict schema would refuse first. */
+function declaredBy(shape: Record<string, unknown>, args: Record<string, unknown>) {
+	return Object.fromEntries(Object.entries(args).filter(([key]) => key in shape));
+}
+
 describe("a tool call is refused by the registered schema", () => {
 	// `dispatchTool` runs the handler directly; the SDK validates the arguments
-	// against `z.object(tool.inputSchema)` before dispatch (server.ts).
+	// against `argumentsSchema(tool.inputSchema)` before dispatch (server.ts).
 	const tools = TOOLS.filter((t) => "auth" in t.inputSchema);
 
 	it("finds the tools that take an auth block", () => {
@@ -131,18 +137,20 @@ describe("a tool call is refused by the registered schema", () => {
 		(name) => {
 			const tool = TOOLS.find((t) => t.name === name);
 			expect(tool).toBeDefined();
-			const schema = z.object(tool?.inputSchema ?? {});
-			const parsed = schema.safeParse({
-				url: "https://api.example.com",
-				requestId: "req_1",
-				collectionId: "col_1",
-				name: "r",
-				auth: { mode: "Bearer", token: "t" },
-			});
-			expect(parsed.success).toBe(false);
-			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toContain(
-				"auth"
+			const schema = argumentsSchema(tool?.inputSchema ?? {});
+			const parsed = schema.safeParse(
+				declaredBy(tool?.inputSchema ?? {}, {
+					url: "https://api.example.com",
+					requestId: "req_1",
+					collectionId: "col_1",
+					name: "r",
+					auth: { mode: "Bearer", token: "t" },
+				})
 			);
+			expect(parsed.success).toBe(false);
+			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toEqual([
+				"auth",
+			]);
 		}
 	);
 });
@@ -178,16 +186,69 @@ describe("a collection's stored auth never inherits (#3445)", () => {
 		(name) => {
 			const tool = TOOLS.find((t) => t.name === name);
 			expect(tool).toBeDefined();
-			const schema = z.object(tool?.inputSchema ?? {});
-			const parsed = schema.safeParse({
-				collectionId: "col_1",
-				name: "c",
-				auth: { mode: "inherit" },
-			});
-			expect(parsed.success).toBe(false);
-			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toContain(
-				"auth"
+			const schema = argumentsSchema(tool?.inputSchema ?? {});
+			const parsed = schema.safeParse(
+				declaredBy(tool?.inputSchema ?? {}, {
+					collectionId: "col_1",
+					name: "c",
+					auth: { mode: "inherit" },
+				})
 			);
+			expect(parsed.success).toBe(false);
+			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toEqual([
+				"auth",
+			]);
 		}
 	);
+});
+
+/*
+ * A strict schema refuses what it does not declare, so every member a read
+ * hands back on an object an agent may write back is declared (#3556): a read
+ * row refused on the way back in would be the defect stripping was, inverted.
+ */
+describe("an object written back as read is accepted", () => {
+	const parse = (name: string, args: Record<string, unknown>) =>
+		argumentsSchema(TOOLS.find((t) => t.name === name)?.inputSchema ?? {}).safeParse(args);
+	const SAVED = { collectionId: "col_1", name: "r", url: "https://api.example.com" };
+
+	it("a withheld variable entry, with its stamp and description", () => {
+		const entry = {
+			valueWithheld: true,
+			enabled: true,
+			secret: true,
+			type: "string",
+			createdAt: 1,
+			description: "d",
+		};
+		for (const name of ["update_environment", "update_globals", "update_collection"]) {
+			const id = name === "update_environment" ? { environmentId: "e1" } : {};
+			const scope = name === "update_collection" ? { collectionId: "c1" } : {};
+			expect(
+				parse(name, { ...id, ...scope, variables: { token: entry } }).success,
+				name
+			).toBe(true);
+		}
+	});
+
+	it("a binary body's file, with the trust the read derived onto it", () => {
+		const file = {
+			src: "/data/a.bin",
+			fileName: "a.bin",
+			contentType: "x/y",
+			unresolved: true,
+		};
+		expect(parse("create_request", { ...SAVED, bodyType: "binary", file }).success).toBe(true);
+	});
+
+	it("an element as stored", () => {
+		const element = {
+			id: "el_1",
+			kind: "assert.status",
+			enabled: true,
+			name: "ok",
+			config: { equals: 200 },
+		};
+		expect(parse("create_request", { ...SAVED, elements: [element] }).success).toBe(true);
+	});
 });
