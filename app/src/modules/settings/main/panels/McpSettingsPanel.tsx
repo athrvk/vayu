@@ -143,7 +143,7 @@ function connectSnippets(url: string): ConnectSnippet[] {
 	return [
 		{
 			label: "Claude Code",
-			code: `claude mcp add --transport http vayu ${url}`,
+			code: `claude mcp add --transport http --scope user vayu ${url}`,
 			client: "claude",
 		},
 		{

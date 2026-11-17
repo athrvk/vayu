@@ -319,7 +319,7 @@ second process to manage, and nothing leaves the machine.
 === "Claude Code"
 
     ```bash
-    claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
+    claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp
     ```
 
     Or click **Connect** in **Settings → MCP**, which shells out to the CLI for

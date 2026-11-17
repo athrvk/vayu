@@ -56,7 +56,7 @@ snippet below it is the manual path.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
-claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
+claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp
 ```
 
 ```json
