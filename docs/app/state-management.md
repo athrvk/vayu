@@ -2214,6 +2214,8 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 - **`useCollectionsQuery()`** - Fetch all collections (there is no
   single-collection query: a collection is read out of this list)
+- **`useCollectionName(collectionId)`** - A run's collection by name, read out of
+  that list; the id stands in once the collection is deleted, never a blank
 - **`useRequestsQuery(collectionId)`** - Fetch requests in a collection, as
   `RequestSummary` rows (`types/domain.ts`, #2546): `id`, `collectionId`,
   `name`, `method`, `url`, `order`, `createdAt` and `specOperation`, from
