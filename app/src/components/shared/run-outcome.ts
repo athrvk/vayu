@@ -36,10 +36,11 @@
  * words and order of the run-report export's verdict line
  * (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
- * A collection run's list row is judged by `collectionRowOutcome`, not by the
- * rules above: it is **failed** when a step failed or errored or its budgets
- * were missed (#3539), and otherwise says nothing (`null`), met budgets
- * included.
+ * A collection run is judged by `judgeCollection`, not by the rules above, from
+ * its list row (`rowOutcome`) or from its opened report
+ * (`collectionReportOutcome`, #3543), with the same answer either way: it is
+ * **failed** when a step failed or errored or its budgets were missed (#3539),
+ * and otherwise says nothing (`null`), met budgets included.
  *
  * A Stop that cuts the end-of-run drain with requests still outstanding leaves
  * the run `completed` with the budgets its answered requests met, but those
@@ -271,25 +272,44 @@ export function stepCountsPhrase(
 /**
  * A completed collection run is not clean when a step failed or errored
  * (#3458) or when it missed a budget (#3539): `completed` says the sequence ran
- * to its end, not that its steps or its budgets held. Either one makes the row
+ * to its end, not that its steps or its budgets held. Either one makes the run
  * `failed`, and the reason names both when both apply ("Budgets missed, 1
  * failed"). A clean run answers `null` and keeps the status glyph, whether its
- * budgets were met (`verdict: "passed"`) or it declared none: a collection run
- * is never judged `passed` from a row, since the row holds no error rate or
- * check count that could undercut a met budget, and {@link judgeRun} is the
- * load run's judge, not this one's.
+ * budgets were met or it declared none: a collection run is never judged
+ * `passed`, since neither a row nor a report holds an error rate or check count
+ * that could undercut a met budget, and {@link judgeRun} is the load run's
+ * judge, not this one's.
+ *
+ * The one core behind {@link rowOutcome} and {@link collectionReportOutcome}:
+ * they differ only in where the counts and the budgets come from, so the list
+ * row and the opened run's pill (#3543) cannot reach different verdicts.
  */
-function collectionRowOutcome(
-	status: string,
-	summary: CollectionResultSummary
+function judgeCollection(
+	status: string | undefined,
+	counts: CollectionResultSummary,
+	budgets: Budgets
 ): RunJudgement | null {
 	if (status !== "completed") return null;
 	const reasons = [
-		// The row names no budget, so the reason is the unnamed form.
-		summary.verdict === "failed" ? failedReason({ state: "missed", names: [] }) : null,
-		stepCountsPhrase(summary, UNCLEAN_STEP_COUNTS),
+		budgets.state === "missed" ? failedReason(budgets) : null,
+		stepCountsPhrase(counts, UNCLEAN_STEP_COUNTS),
 	].filter(Boolean);
 	return reasons.length > 0 ? { outcome: "failed", reason: reasons.join(", ") } : null;
+}
+
+/**
+ * The verdict for a loaded collection run's report, in the row's terms: the
+ * same steps and the same budget miss turn it `failed` (#3543). `null` for a
+ * clean run, a run that did not complete, and a report with no step counts.
+ * The reason names the missed budgets, which the row cannot.
+ */
+export function collectionReportOutcome(report: RunReport | null | undefined): RunJudgement | null {
+	if (!report?.scenario) return null;
+	return judgeCollection(
+		report.metadata?.status,
+		report.scenario,
+		readBudgets({ thresholdValidation: report.thresholdValidation })
+	);
 }
 
 /**
@@ -300,7 +320,13 @@ function collectionRowOutcome(
  */
 export function rowOutcome(run: Run): RunJudgement | null {
 	if (!run.resultSummary) return null;
-	if (run.type === "scenario") return collectionRowOutcome(run.status, run.resultSummary);
+	if (run.type === "scenario") {
+		const { verdict } = run.resultSummary;
+		// The row names no budget, so a miss reads in the unnamed form.
+		const budgets: Budgets =
+			verdict === "failed" ? { state: "missed", names: [] } : { state: "none" };
+		return judgeCollection(run.status, run.resultSummary, budgets);
+	}
 	if (run.type !== "load") return null;
 	const { verdict, errorRate } = run.resultSummary;
 	return judgeRun({

@@ -43,7 +43,11 @@ import {
 	RunComment,
 	RunStatusPill,
 } from "@/components/shared";
-import { reportOutcome, rowOutcome } from "@/components/shared/run-outcome";
+import {
+	collectionReportOutcome,
+	reportOutcome,
+	rowOutcome,
+} from "@/components/shared/run-outcome";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { runComment, runTitle } from "./run-heading";
@@ -109,16 +113,18 @@ export default function HistoryDetail() {
 	const isScenarioRun = run?.type === "scenario";
 
 	/*
-	 * Only a **load** run's report is fetched here, and gated on below.
+	 * A **load** run's report is what this pane shows, so it is waited on below.
 	 *
 	 * A scenario run has a report too, but this pane must not wait for it: while
 	 * the sequence is still executing, the live `step` stream is the content, and
 	 * blocking on a report that does not describe a finished run yet would leave
 	 * the tab on a skeleton for the length of the run. `ScenarioRunView` asks for
 	 * the report itself, through the same query key, and renders around whatever
-	 * has arrived.
+	 * has arrived. This pane reads a finished scenario run's report only to judge
+	 * the pill (#3543), and neither the skeleton nor the error state waits on it.
 	 */
 	const isLoadRun = !!run && !isDesignRun && !isScenarioRun;
+	const isRunLive = useRunLiveness(selectedRunId, run?.status);
 	/*
 	 * A load run the engine is still executing has a report, but not a result:
 	 * the numbers are the requests so far, and caching them is what froze this
@@ -126,17 +132,22 @@ export default function HistoryDetail() {
 	 * ends; `runDetailOptions` polls the run's status, so this flips to the
 	 * report without the tab being closed.
 	 */
-	const isLoadRunInProgress = useRunLiveness(selectedRunId, run?.status) && isLoadRun;
+	const isLoadRunInProgress = isRunLive && isLoadRun;
 	const showsReport = isLoadRun && !isLoadRunInProgress;
+	const judgesFromReport = showsReport || (isScenarioRun && !isRunLive);
 	const {
 		data: report,
 		isLoading: loadingReport,
 		error: reportError,
 		refetch: refetchReport,
-	} = useRunReportQuery(showsReport ? selectedRunId : null, run?.status);
-	// The verdict refines a load run's pill, as it does on the dashboard header
-	// and the sidebar row (#2130); every other run type keeps the plain glyph.
-	const judgement = isLoadRun ? (reportOutcome(report) ?? rowOutcome(run)) : null;
+	} = useRunReportQuery(judgesFromReport ? selectedRunId : null, run?.status);
+	// The verdict refines the pill of a load run, as it does on the dashboard
+	// header and the sidebar row (#2130), and of a collection run, which History
+	// marks failed for a failed or errored step or a missed budget (#3539, #3543).
+	// A report that has not arrived, or that cannot say, leaves the row's answer.
+	// A design run keeps the plain glyph.
+	const fromReport = isScenarioRun ? collectionReportOutcome(report) : reportOutcome(report);
+	const judgement = !run || isDesignRun ? null : (fromReport ?? rowOutcome(run));
 
 	// No run selected
 	if (!selectedRunId) {

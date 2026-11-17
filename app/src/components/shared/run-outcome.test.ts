@@ -33,10 +33,16 @@
  * redden. The conformance replay below reddens on any reason worded apart from
  * the engine's.
  *
- * A collection row's budgets (#3539): make `collectionRowOutcome` ignore
- * `verdict` and the missed-budget cases redden; make it read `"passed"` as a
- * verdict worth an outcome and the met-budgets glyph case reddens; drop its
- * `completed` gate and the non-completed case reddens.
+ * A collection run's budgets (#3539): make `judgeCollection` ignore a missed
+ * budget and the missed-budget cases redden, on the row and the report alike;
+ * make it read a met budget as worth an outcome and the met-budgets glyph case
+ * reddens; drop its `completed` gate and the non-completed case reddens.
+ *
+ * An opened collection run's pill (#3543): make `collectionReportOutcome`
+ * return `null` and its failed, errored and missed-budget cases and the parity
+ * table redden; read `report.thresholdValidation` as met always and the
+ * missed-budget cases redden; stop reading `report.metadata.status` and the
+ * non-completed case reddens.
  *
  * A drain cut (#3538): drop `drainCutCancelled` from `judgeRun` and the drain
  * rows and the fixture's drain_stopped cases redden; move its branch above the
@@ -49,6 +55,7 @@ import { describe, it, expect } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { Run, RunReport } from "@/types";
 import {
+	collectionReportOutcome,
 	formatErrorRate,
 	judgeRun,
 	missedBudgetsReason,
@@ -885,6 +892,111 @@ describe("rowOutcome", () => {
 			expect(rowOutcome(collection({ passed: 3, verdict: "failed" }, "failed"))).toBeNull();
 		});
 	});
+});
+
+/**
+ * An opened collection run's pill (#3543) and its list row are the same run
+ * read from two payloads, so they answer from one core: the same verdict for the
+ * same steps and the same budget miss. The report names the missed budgets,
+ * which the row cannot, so a miss reads differently in its reason only.
+ */
+describe("collectionReportOutcome", () => {
+	type Counts = { passed: number; failed: number; skipped: number; errored: number };
+	const CLEAN: Counts = { passed: 3, failed: 0, skipped: 0, errored: 0 };
+
+	function collectionReport(
+		counts: Partial<Counts> | undefined,
+		over: { status?: string; thresholdValidation?: Budgets } = {}
+	): RunReport {
+		const { status = "completed", thresholdValidation } = over;
+		return {
+			metadata: { runId: "run_1", runType: "scenario", status, startTime: 0, endTime: 1 },
+			summary: { totalRequests: 4, successfulRequests: 4, failedRequests: 0, errorRate: 0 },
+			...(counts ? { scenario: { ...CLEAN, ...counts } } : {}),
+			...(thresholdValidation ? { thresholdValidation } : {}),
+		} as unknown as RunReport;
+	}
+
+	it.each([
+		["a failed step", { failed: 1 }, "1 failed"],
+		["an errored step", { errored: 2 }, "2 errored"],
+		["failed and errored steps", { failed: 1, errored: 4, skipped: 5 }, "1 failed, 4 errored"],
+	])("is failed for %s", (_name, counts, reason) => {
+		expect(collectionReportOutcome(collectionReport(counts))).toEqual({
+			outcome: "failed",
+			reason,
+		});
+	});
+
+	it("is failed for a missed budget over clean steps, naming it", () => {
+		const missed = budgets(["latencyP99Ms", false], ["latencyP95Ms", true]);
+		expect(
+			collectionReportOutcome(collectionReport({}, { thresholdValidation: missed }))
+		).toEqual({ outcome: "failed", reason: "1 of 2 budgets missed: p99" });
+	});
+
+	it("names a missed budget before the failed steps, as the row does", () => {
+		const missed = budgets(["latencyP99Ms", false]);
+		expect(
+			collectionReportOutcome(
+				collectionReport({ failed: 1 }, { thresholdValidation: missed })
+			)
+		).toEqual({ outcome: "failed", reason: "1 of 1 budget missed: p99, 1 failed" });
+	});
+
+	it.each([
+		["clean steps and no budgets", collectionReport({})],
+		["clean steps and met budgets", collectionReport({}, { thresholdValidation: THREE_MET })],
+		["a step the user stopped", collectionReport({ stopped: 2 } as Partial<Counts>)],
+		["a run that did not complete", collectionReport({ failed: 2 }, { status: "stopped" })],
+		[
+			"a run that failed before it finished",
+			collectionReport({ failed: 2 }, { status: "failed" }),
+		],
+		["a report with no step counts", collectionReport(undefined)],
+		["a report with no status", collectionReport({ failed: 1 }, { status: "" })],
+	])("keeps the status glyph for %s", (_name, report) => {
+		expect(collectionReportOutcome(report)).toBeNull();
+	});
+
+	it("says nothing for a missing report", () => {
+		expect(collectionReportOutcome(undefined)).toBeNull();
+		expect(collectionReportOutcome(null)).toBeNull();
+	});
+
+	// The same run through both payloads: the verdict agrees, and the reason does
+	// too wherever the row has the words to say it (it has no budget names).
+	it.each([
+		["clean", {}, undefined],
+		["a failed step", { failed: 1 }, undefined],
+		["an errored step", { errored: 2 }, undefined],
+		["a missed budget", {}, budgets(["latencyP99Ms", false])],
+		["a missed budget and a failed step", { failed: 1 }, budgets(["latencyP99Ms", false])],
+		["met budgets and an errored step", { errored: 1 }, THREE_MET],
+		["met budgets over clean steps", {}, THREE_MET],
+	] as Array<[string, Partial<Counts>, Budgets | undefined]>)(
+		"agrees with the list row for %s",
+		(_name, counts, thresholdValidation) => {
+			const failedBudget = thresholdValidation?.failed ? 1 : 0;
+			const verdict = thresholdValidation
+				? failedBudget > 0
+					? "failed"
+					: "passed"
+				: undefined;
+			const fromRow = rowOutcome(
+				row({
+					type: "scenario",
+					status: "completed",
+					resultSummary: { ...CLEAN, ...counts, ...(verdict ? { verdict } : {}) },
+				})
+			);
+			const fromReport = collectionReportOutcome(
+				collectionReport(counts, { thresholdValidation })
+			);
+			expect(fromReport?.outcome).toBe(fromRow?.outcome);
+			if (failedBudget === 0) expect(fromReport).toEqual(fromRow);
+		}
+	);
 });
 
 /**
