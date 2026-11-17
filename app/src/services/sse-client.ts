@@ -39,7 +39,7 @@ interface RawSseMetrics {
 	currentSendRate?: number;
 	windowAvgLatencyMs?: number | null;
 	windowAvgQueueWaitMs?: number | null;
-	/** Mean requests on the wire over the window; `0` for one with no completion (issue #2821). */
+	/** Mean requests on the wire over the window: the time they spent in flight over its span, `0` when nothing was open (issues #2821, #3567). */
 	windowAvgInFlight?: number | null;
 	activeConnections?: number;
 	/** The tick's window; `null` for a window with no completion (issue #2386). */

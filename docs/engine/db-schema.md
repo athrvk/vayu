@@ -1789,9 +1789,12 @@ A summary stored before the issue has no key, and the report then leaves
 `summary.connectionReplays` out rather than reading it as `0`.
 
 `avg_in_flight` (issue #2821) is the mean number of requests in flight over the run: the
-collector's latency sum over `test_duration` (`MetricsCollector::average_in_flight`), by Little's
-law, so timer waits between requests count for nothing. Written by the completed and the failed
-run alike, `0` included; the report's `summary.avgInFlight` reads it. A summary stored before the
+collector's in-flight integral over `test_duration` (`MetricsCollector::average_in_flight`, issue
+#3567), the time every request spent between its submission to the event loop and its completion,
+a Stop's cancellation included, so timer waits between requests and requests refused before the
+event loop count for nothing. A summary stored before issue #3567 holds the old figure under the
+same key, the latency sum over `test_duration`, which left cancelled requests out; no schema
+version marks the change. Written by the completed and the failed run alike, `0` included; the report's `summary.avgInFlight` reads it. A summary stored before the
 issue has no key, and the report leaves `avgInFlight` out rather than reading it as `0`. A
 collection (design-mode) run's summary does not carry it.
 
@@ -2235,8 +2238,12 @@ completed. The three keys besides `current_rps` are absent from a tick stored be
 whose `current_rps` was the completions since the previous row over the time since it. No schema
 version marks the change: they are keys inside `payload`, which `sync_schema()` never reads.
 
-`window_avg_in_flight` (issue #2821) is the same window's mean requests in flight: the latency its
-completions carried over its span. Always a number, `0` for a window that completed nothing.
+`window_avg_in_flight` (issue #2821) is the same window's mean requests in flight: the time
+requests spent in flight during the window over its span (issue #3567), so a request open across
+the window counts whether or not anything completed. Always a number, `0` for a window with
+nothing in flight. A tick stored before issue #3567 holds the latency its window's completions
+carried over its span under the same key, which read `0` while a request longer than the window
+was open.
 `current_concurrency` and `backpressure` beside it are instantaneous gauges (curl transfers
 active at the tick, and `RunContext::in_flight`), which a virtual user in a timer wait does not
 hold, so a run whose users wait in step aliases them between 0 and the user count. Absent from a

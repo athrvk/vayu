@@ -1059,11 +1059,16 @@ class ScenarioLoadDriver {
         std::optional<std::string> next_target_before = before_result.next_target;
         const bool assertion_failed_before = before_result.assertion_failed;
         const bool script_threw_before     = before_result.script_threw;
+        // Opened before the submit, because the completion can run on a
+        // worker before it returns, and closed first, before `step.after`
+        // runs, whatever the outcome (#3567).
+        const int64_t opened_ms = context_->metrics_collector->open_request ();
         context_->event_loop->submit (request,
         [context = context_, &db = db_, state = state_, &plan = execution_.plan,
-        step_ptr, vu, step_index, iteration, vu_index, row, data_row,
-        pipeline_before_ms, sent_request, next_target_before, assertion_failed_before,
-        script_threw_before] (size_t, const vayu::Result<vayu::Response>& result) {
+        step_ptr, vu, step_index, iteration, vu_index, row, data_row, pipeline_before_ms,
+        sent_request, next_target_before, assertion_failed_before, script_threw_before,
+        opened_ms] (size_t, const vayu::Result<vayu::Response>& result) {
+            context->metrics_collector->close_open (opened_ms);
             if (result.is_error ()) {
                 finish_without_response (context, db, state, plan, vu, step_index,
                 result, ResultAnnotations{ row, step_index, iteration, vu_index });

@@ -1006,9 +1006,13 @@ const vayu::Request& request,
 const ResultAnnotations& annotations,
 std::shared_ptr<vayu::Request> sent_request,
 std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
+    // Opened before the submit, because the completion can run on a worker
+    // before it returns, and closed first, whatever the outcome (#3567).
+    const int64_t opened_ms = context->metrics_collector->open_request ();
     context->event_loop->submit (request,
-    [context, &db, annotations, sent_request = std::move (sent_request),
+    [context, &db, annotations, opened_ms, sent_request = std::move (sent_request),
     overlay = std::move (overlay)] (size_t, const vayu::Result<vayu::Response>& result) {
+        context->metrics_collector->close_open (opened_ms);
         if (sent_request && overlay && result.is_ok ()) {
             run_request_elements_after_submission (
             context, *sent_request, result.value (), *overlay, annotations);
