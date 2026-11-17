@@ -1473,8 +1473,9 @@ streams stops sending anything at all once *N* reaches the target. So a
 streaming request carries `Request::stream_bounds`, and both caps are always
 set - the payload's, or the `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
 settings - with no zero-means-unbounded spelling for either. A collection run's
-plan gives the bounds to each streaming step, reading the stored row because
-composition drops the flag, so both executors receive the step already bounded:
+plan gives the bounds to each streaming step, reading the flag off the stored
+row (`vayu::Request` has no mirror of it), so both executors receive the step
+already bounded:
 the event loop under load, and the single-request `Client` for a sequential run,
 which ends the stream by the same two caps.
 

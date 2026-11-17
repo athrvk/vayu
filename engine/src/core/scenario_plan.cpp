@@ -519,7 +519,6 @@ nlohmann::json& raw_elements_out) {
     step.request    = std::move (built.request);
     // A stored stream runs as one under either executor (#3235), ended by a
     // cap or by the server's close rather than by the step's timeout.
-    // Composition does not carry the flag, so it is read off the row.
     if (row.stream) {
         step.request.stream_bounds = options.stream_bounds;
     }

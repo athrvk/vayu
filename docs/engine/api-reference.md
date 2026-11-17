@@ -7672,7 +7672,10 @@ never re-resolved - see [POST /execute](#post-execute) and
   the stored execution options (`followRedirects` /
   `maxRedirects` / `httpVersion` / `verifySSL`, always emitted; the request's own
   `timeout`, emitted only when it states one, so a request that states none
-  sends with the `defaultTimeout` setting in force at the send, issue #2937) and
+  sends with the `defaultTimeout` setting in force at the send, issue #2937),
+  its Event stream setting as `stream`, always emitted (issue #3561: a caller
+  that hands the payload to `POST /execute` gets `202 {runId, eventsUrl}` for a
+  streaming request unless it states `stream` itself) and
   its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is

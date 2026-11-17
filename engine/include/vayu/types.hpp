@@ -1893,8 +1893,8 @@ struct Request {
     // this endpoint - the execution model, not one run's options - and a toggle
     // that reset on every tab switch would have to be re-found every time. The
     // executable `vayu::Request` has no mirror of it: `POST /execute` reads the
-    // flag off the payload (`read_stream_flag`), and the by-id compose path
-    // deliberately does not send it - see `payload_from_stored`.
+    // flag off the payload (`read_stream_flag`), which the by-id compose path
+    // always carries (`payload_from_stored`, issue #3561).
     bool stream = false; // INTEGER NOT NULL DEFAULT 0
     // Postman's per-request protocol settings (issue #1765), stored beside
     // the redirect policy for the same reason it is: each is a property of

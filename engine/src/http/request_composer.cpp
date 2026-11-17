@@ -1220,6 +1220,10 @@ const std::vector<vayu::db::Collection>& chain) {
     // engine-side, so an omitted `false` would verify the certificate the user
     // explicitly asked the engine not to check (issue #706).
     payload["verifySSL"] = request.verify_ssl;
+    // Same rule (issue #3561): a by-id send follows the saved request's Event
+    // stream setting, so an omitted `true` would buffer a stream that never
+    // ends. Inline composition carries no such key; its client states its own.
+    payload["stream"] = request.stream;
     // Postman's per-request protocol settings (issue #1765), always emitted
     // for the same reason: each defaults to off engine-side, so an omitted
     // `true` would send the jar, the header or the encoding the user turned
