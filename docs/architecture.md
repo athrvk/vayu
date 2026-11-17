@@ -630,9 +630,9 @@ which case the app picks a fallback (below).
   in the same dialog ("Restart Vayu's engine and stop the load test it is
   running?", the services beside the run), and Cancel leaves the run, the
   services and the engine as they were (issue #3604). For services, what a
-  restart does instead is say so afterwards: the renderer keeps what the cached Services lists said
-  was running when the outage began, and once the health poll or the Restart
-  sees the engine back it compares that by id with the engine's fresh lists
+  restart does instead is say so afterwards: the renderer keeps what the
+  cached Services lists said was running when the outage began, and once the
+  health poll or the Restart sees the engine back it compares that by id with the engine's fresh lists
   and raises one toast naming what is no longer running (three by name, then a
   count), with a View services action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
   reconnect paths report, and one snapshot is pending per outage, so the user
