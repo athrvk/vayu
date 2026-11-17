@@ -63,8 +63,8 @@ export interface QuitFlowDeps {
 	services: ServicesQuestion;
 	/**
 	 * Ask the renderer to flush, tagged with `flushId`. Returns `false` when there
-	 * is no live renderer to ask, in which case nothing it held can be saved and
-	 * there is nothing to wait for.
+	 * is no loaded page in a live renderer to ask (`createFlushRequest`), in which
+	 * case nothing it held can be saved and there is nothing to wait for.
 	 */
 	requestFlush: (flushId: number) => boolean;
 	/** Arm the flush's ceiling. Never cancelled: a stale one is dropped by ticket. */
@@ -238,6 +238,36 @@ export function createQuitFlow(deps: QuitFlowDeps): QuitFlow {
 		},
 
 		phase: () => phase,
+	};
+}
+
+/** What a flush request needs to know about the window it would go to. */
+export interface FlushAudience {
+	/** The window's contents, or null when there is no live window to ask. */
+	contents: () => { send: (channel: string, flushId: number) => void } | null;
+	/**
+	 * The renderer process is gone. A dead renderer's WebContents outlives the
+	 * process it drove, so `contents` still answers. See renderer-recovery.ts.
+	 */
+	rendererGone: () => boolean;
+	/**
+	 * The page has loaded, so it can hear main: `openIntents.isReady()`, the
+	 * same account open intents wait on (#3339).
+	 */
+	pageLoaded: () => boolean;
+}
+
+/**
+ * `requestFlush` for main: send only to a page that can answer. Anything else
+ * would wait out the 2s ceiling and then ask about "some edits" that a page
+ * with no renderer, or one still loading, never held (#3610).
+ */
+export function createFlushRequest(audience: FlushAudience): QuitFlowDeps["requestFlush"] {
+	return (flushId) => {
+		const contents = audience.contents();
+		if (!contents || audience.rendererGone() || !audience.pageLoaded()) return false;
+		contents.send(FLUSH_REQUEST_CHANNEL, flushId);
+		return true;
 	};
 }
 

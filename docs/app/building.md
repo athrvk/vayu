@@ -567,7 +567,9 @@ Bundled by Vite, so `devDependencies`:
 
 ### Engine Not Found
 
-**Error**: `Engine binary not found at: ...`
+**Symptom**: the window opens on "Engine disconnected", and its tooltip reads
+`Couldn't start Vayu's engine: Engine binary not found at: ...` beside Retry.
+The main log has the full message, with the build or reinstall step.
 
 **Solution**: Build the engine first, or ensure binary is in correct location:
 - Development: `engine/build/vayu-engine` (or `Debug/vayu-engine.exe` on Windows)

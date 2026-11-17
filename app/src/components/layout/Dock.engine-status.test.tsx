@@ -280,6 +280,38 @@ describe("an engine that left on its own", () => {
 		);
 	});
 
+	it("reads Disconnected, not Starting, for an engine that exited at spawn (#3610)", async () => {
+		// A failed poll inside the startup grace is `starting`, and the crash was
+		// pushed before it, so `engineCrashAheadOfPoll` is already clear. Nothing
+		// is coming, so the light says so beside the Restart the crash offers.
+		// Mutation-check: let `starting` pass through `selectKnownEngineStatus`
+		// whatever the crash says and this reddens.
+		useEngineStore.getState().setEngineCrash(CRASH);
+		useEngineStore.getState().setEngineStatus("starting");
+		renderDock();
+
+		expect(screen.queryByText("Starting…")).toBeNull();
+		expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
+		fireEvent.focus(trigger!);
+		await waitFor(() =>
+			expect(screen.getAllByText("Vayu's engine exited with code 1.").length).toBeGreaterThan(
+				0
+			)
+		);
+	});
+
+	it("stays Starting while a restart is in flight after the crash", () => {
+		// The restart is the crash's successor: its own start window is what the
+		// `starting` describes.
+		useEngineStore.getState().setEngineCrash(CRASH);
+		useEngineStore.setState({ engineStatus: "starting", engineRestarting: true });
+		renderDock();
+
+		expect(screen.getByText("Starting…")).toBeTruthy();
+		expect(screen.queryByText("Engine disconnected")).toBeNull();
+	});
+
 	it("offers the held-port Retry, not Restart, when both are on record", () => {
 		useEngineStore.setState({
 			engineStatus: "unreachable",

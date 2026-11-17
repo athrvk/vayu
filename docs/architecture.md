@@ -416,6 +416,14 @@ A child leaving while the state is `replacing` or `stopping` left because it
 was asked to, and a previous child's late exit during a restart is not the
 current child's: neither is `crashed`.
 
+A start or restart that throws is read once, by `classifyEngineStartFailure`
+(`electron/engine-start-failure.ts`), for both callers: slow (the budget is
+spent, the child lives on), port in use, overtaken (by a quit or a queued
+restart), or failed. None of them closes the window or quits (issue #3610).
+A failed start whose child exited is explained by the lifecycle's `crashed`
+facts; one that failed before it had a child, which leaves the lifecycle
+`idle`, records one sentence for `engine:startFailure` instead.
+
 `start`, `stop`, `restart` and `shutdown` run through one queue, so no two of
 them drive the child at once. A restart requested while one is queued or
 running joins it and gets the same result, so two clicks never spawn two
@@ -508,13 +516,21 @@ which case the app picks a fallback (below).
   rather than raced - otherwise a freshly spawned engine outlives the process
   that was supposed to kill it. A first start that fails because of the quit,
   or with a restart queued behind it, is overtaken rather than failed: the
-  launch path logs it and neither shows the "Couldn't start Vayu's engine"
-  box nor quits, since the quit is already happening and the restart answers
-  `engine:restart` itself.
-- **An engine that dies after startup is shown, with a way back** (issue
-  #3336). The main process pushes every lifecycle change to the window on
-  `engine:lifecycle` (and answers an invoke on the same channel with the current
-  state, for a window that loaded or reloaded after the last push). The renderer
+  launch path logs it and records no start failure, since the quit is already
+  happening and the restart answers `engine:restart` itself.
+- **An engine that dies, at startup or after it, is shown, with a way back**
+  (issues #3336, #3610). A first start that fails keeps the window: there is
+  no native error box and no quit. A child that exited before it was ready
+  (a locked or damaged data directory, a missing library) is the same `crashed`
+  state a later crash is, so the Dock reads "Engine disconnected" with the exit
+  code and the last output, beside Restart. A start that failed before it had a
+  child (the binary is missing) gives the Dock one sentence over
+  `engine:startFailure`, "Couldn't start Vayu's engine: " and the first line of
+  the innermost error, beside Retry; a Retry that fails the same way keeps it,
+  because `restartEngine` classifies through the same function. The full error
+  is in the main log either way. The main process pushes every lifecycle
+  change to the window on `engine:lifecycle` (and answers an invoke on the same channel with the
+  current state, for a window that loaded or reloaded after the last push). The renderer
   keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
   how the engine left (signal, exit code or error, with the last lines it
   printed) and offers **Restart**, which a crash never did. The lifecycle is
@@ -530,13 +546,17 @@ which case the app picks a fallback (below).
   next verdict ends the override, whatever it says: the crash itself stays
   recorded until `ready`, which can trail the poll that sees a restarted engine
   answer, and that engine is connected. A crash pushed inside a
-  restart's start window refetches like any poll there and reads "Starting…".
+  restart's start window refetches like any poll there and reads "Starting…"
+  while that restart is in flight. With no restart in flight a recorded crash
+  reads "Engine disconnected" even inside the startup grace, where a failed
+  poll is otherwise "Starting…": an engine that exited at spawn is not coming.
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
   fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
-  held port with Retry), which takes precedence over a crash. One restart runs
+  held port or a failure before the spawn, with Retry), which takes precedence
+  over a crash. One restart runs
   at a time across the Dock button and the Settings banner. The engine that
   comes back is running none of the services the old one held, so the
   reconnect names them (local services, below).
@@ -553,8 +573,13 @@ which case the app picks a fallback (below).
   process, `quit-flow.ts`: `idle`, then the running-services question below,
   then the flush, then the loss question, then `proceeding`, after which a quit
   hands over to `quit-shutdown.ts` to stop the engine and the MCP server. The
-  flush waits out its round trip unconditionally (the renderer's ACK, or a 2 s
-  ceiling if it never comes); what matters is what happens once it settles. The renderer's `flushAll`
+  flush waits out its round trip (the renderer's ACK, or a 2 s ceiling if it
+  never comes) whenever there is a page to ask. With no window, a renderer
+  that is gone, or a page that has not finished loading, nothing is sent and
+  the flush settles at once with nothing to save (`createFlushRequest`, issue
+  #3610): "has loaded" is the same `did-finish-load` signal the open intents
+  wait on, so the app keeps one account of whether the page can hear main.
+  What matters is what happens once it settles. The renderer's `flushAll`
   resolves to how many contexts saved, failed or stayed pending (a save the
   editor declined to send); a ceiling with no ACK at all is read the same as
   a failure, since nothing is known to have landed. Either case holds the

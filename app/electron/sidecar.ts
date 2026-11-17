@@ -517,7 +517,7 @@ interface PortChoice {
  */
 type EngineIdentity = "ours" | "foreign" | "none";
 
-/** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
+/** The user-facing half of a `SpawnFailure`; a failed Restart's toast carries it. */
 function describeSpawnFailure(failure: SpawnFailure): string {
 	if (failure.kind === "error") {
 		return `Couldn't start Vayu's engine: ${failure.message}`;
