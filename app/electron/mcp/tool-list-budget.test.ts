@@ -246,6 +246,11 @@
  * sentence that a workspace-wide `full` read costs the whole workspace) is paid
  * once per row, 89 B, taking the rows to 151,332 / 148,736 / 223,839 / 219,572
  * B; the four caps went to 151,400 / 148,800 / 223,900 / 219,600.
+ *
+ * #3561's default clause on the `stream` argument of `run_request` and
+ * `start_load_run` (a send by `requestId` follows the saved request's setting)
+ * is paid once per row, 120 B, taking the rows to 151,452 / 148,856 / 223,959 /
+ * 219,692 B; the four caps went to 151,500 / 148,900 / 224,000 / 219,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -265,10 +270,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_800 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_900 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_500 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_900 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 224_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_700 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

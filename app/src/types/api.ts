@@ -678,6 +678,10 @@ export interface ComposeRequestRequest {
  * it read none. Unlike `deferredVariables` it is part of the send: `/execute`
  * and `/runs` read the scripts' collection scope from it when no `requestId`
  * row names one, so a spread of the answer carries it.
+ *
+ * `stream` is present on a by-id compose only, as the saved row's Event stream
+ * setting (#3561); a caller that spreads that answer into `/execute` states
+ * its own, or a streaming row answers `202 {runId, eventsUrl}`.
  */
 export type ComposedRequest = ExecuteRequestRequest &
 	Record<string, unknown> & {

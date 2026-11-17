@@ -422,7 +422,7 @@ export const streamInput = z
 	.boolean()
 	.optional()
 	.describe(
-		`Consume the response as a text/event-stream instead of buffering it (default false). BOUNDED, ALWAYS: this tool does not stream to you - it reads the run's events for at most \`streamBudgetMs\` milliseconds (default ${DEFAULT_STREAM_BUDGET_MS}) and returns at most \`maxStreamEvents\` of them (default ${DEFAULT_STREAM_MAX_EVENTS}). The result says which bound it stopped at (\`completed\`, \`capReached\`, \`budgetExhausted\`) and carries \`totalEvents\` where the engine knows it, so a partial read is never mistaken for the whole stream. The run keeps going engine-side after this returns; read it later with get_run_report, or end it with stop_run.`
+		`Consume the response as a text/event-stream instead of buffering it (default false; by \`requestId\` with no \`url\`, the saved request's setting). BOUNDED, ALWAYS: this tool does not stream to you - it reads the run's events for at most \`streamBudgetMs\` milliseconds (default ${DEFAULT_STREAM_BUDGET_MS}) and returns at most \`maxStreamEvents\` of them (default ${DEFAULT_STREAM_MAX_EVENTS}). The result says which bound it stopped at (\`completed\`, \`capReached\`, \`budgetExhausted\`) and carries \`totalEvents\` where the engine knows it, so a partial read is never mistaken for the whole stream. The run keeps going engine-side after this returns; read it later with get_run_report, or end it with stop_run.`
 	);
 
 /**

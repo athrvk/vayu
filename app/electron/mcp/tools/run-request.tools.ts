@@ -154,6 +154,20 @@ async function composeWithAdHocElements(
 	);
 }
 
+/**
+ * Whether this send streams. A `stream` argument wins either way; without one,
+ * a send by `requestId` follows the saved request's Event stream setting, which
+ * a by-id compose always carries (#3561), and an ad-hoc send buffers.
+ */
+function streamsThisSend(
+	args: Record<string, unknown>,
+	composed: Record<string, unknown>,
+	sendsSaved: boolean
+): boolean {
+	if (typeof args.stream === "boolean") return args.stream;
+	return sendsSaved && composed.stream === true;
+}
+
 export const RUN_REQUEST_TOOLS: McpTool[] = [
 	{
 		name: "run_request",
@@ -297,11 +311,11 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			applyDefaultHeaderOptOuts(args, payload);
 
 			// Stated on every call, never elided: the two answers have different
-			// *shapes* - `202 {runId, eventsUrl}` against the exchange - so a
-			// caller that let composition or an engine default decide would not
-			// know which one it was about to parse. The same rule both app
-			// clients follow for `followRedirects`.
-			const streaming = args.stream === true;
+			// *shapes* - `202 {runId, eventsUrl}` against the exchange - so the
+			// handler decides which one it is about to parse rather than an
+			// engine default. The same rule both app clients follow for
+			// `followRedirects`.
+			const streaming = streamsThisSend(args, payload, sendsSaved);
 			payload.stream = streaming;
 			// Beside `stream` so both transports carry it: with write access off,
 			// what a script or extractor sets stays within this send (#1904).

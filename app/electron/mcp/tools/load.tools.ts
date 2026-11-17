@@ -238,7 +238,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.boolean()
 				.optional()
 				.describe(
-					"Consume each response as a text/event-stream. Under load a stream is bounded by construction: reaching a cap below completes it successfully rather than failing it. Not for a `scenario`, whose steps stream per their saved request's Event stream setting."
+					"Consume each response as a text/event-stream (default false; by `requestId`, the saved request's setting). Under load a stream is bounded by construction: reaching a cap below completes it successfully rather than failing it. Not for a `scenario`, whose steps stream per their saved request's Event stream setting."
 				),
 			maxStreamDurationMs: streamDurationMsSchema
 				.optional()
@@ -533,10 +533,11 @@ export const LOAD_TOOLS: McpTool[] = [
 			for (const key of ["maxInFlight", "sloMs", "maxStreamDurationMs", "maxStreamEvents"]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
-			// Forwarded only when present: the engine refuses a cap on a
-			// non-streaming run, and refuses `stream` beside `transient`, so a
-			// defaulted `false` here would turn "the caller said nothing" into
-			// a claim the engine then has to judge (issue #576).
+			// Laid over the composed payload only when present: a by-id compose
+			// carries the saved request's Event stream setting (#3561), which is
+			// what "the caller said nothing" means here, as in the app's load
+			// run; an ad-hoc compose carries none, and the engine reads absent
+			// as false (issue #576).
 			if (typeof args.stream === "boolean") payload.stream = args.stream;
 			// Forwarded verbatim, rows and all: the engine validates the set
 			// before the run row exists and its refusal names the field, so a

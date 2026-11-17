@@ -4724,14 +4724,36 @@ describe("run_collection_smoke", () => {
 			undefined
 		);
 		// Executed exactly as composed - resolved once, never re-resolved - with
-		// only the run's origin and the session's target policy added beside it.
+		// only the run's origin, the session's target policy and the buffered
+		// answer it judges added beside it.
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(outgoing).toEqual({
 			...composed,
+			stream: false,
 			origin: { kind: "mcp" },
 			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
 		});
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
+	});
+
+	test("buffers a request stored with stream: true, since a row is judged by its exchange (#3561)", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "events" }]),
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://api.example.com/events",
+				stream: true,
+			}),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
+		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(outgoing).toMatchObject({ stream: false });
 	});
 
 	test("a request that fails to compose is reported failed, not dropped", async () => {
@@ -9488,6 +9510,68 @@ describe("dispatchTool", () => {
 			}
 			expect(descriptionOf(tool)).not.toMatch(/use run_collection_smoke/);
 		});
+
+		/*
+		 * #3561: a by-id send follows the saved request's Event stream setting,
+		 * which the by-id compose carries; an explicit `stream` still wins.
+		 */
+		describe("the stored Event stream setting", () => {
+			const started = { runId: "run_s", eventsUrl: "/runs/run_s/events" };
+			const streamingSavedClient = () => {
+				const client = savedRequestClient({ stream: true });
+				(client.executeRequest as ReturnType<typeof vi.fn>).mockResolvedValue(started);
+				return client;
+			};
+
+			test("streams a request stored with stream: true when the call names none", async () => {
+				const client = streamingSavedClient();
+				const res = await dispatchTool(
+					"run_request",
+					{ requestId: "req_1" },
+					ctxWith(client, OFF)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(executed(client)).toMatchObject({ stream: true });
+				// Parsed as the 202 it asked for, then read from the relay.
+				expect(client.consumeStreamEvents).toHaveBeenCalledWith(
+					"run_s",
+					50,
+					5_000,
+					undefined
+				);
+				expect(res.structuredContent).toMatchObject({ runId: "run_s", completed: true });
+			});
+
+			test("an explicit stream: false buffers the same request", async () => {
+				const client = savedRequestClient({ stream: true });
+				const res = await dispatchTool(
+					"run_request",
+					{ requestId: "req_1", stream: false },
+					ctxWith(client, OFF)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(executed(client)).toMatchObject({ stream: false });
+				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+			});
+
+			test("an ad-hoc send streams only when asked, whatever composition answers", async () => {
+				const client = fakeClient({
+					composeRequest: vi.fn().mockResolvedValue({
+						method: "GET",
+						url: "https://api.example.com/events",
+						stream: true,
+					}),
+				});
+				const res = await dispatchTool(
+					"run_request",
+					{ requestId: "req_1", url: "https://api.example.com/events" },
+					ctxWith(client, OFF)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(executed(client)).toMatchObject({ stream: false });
+				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+			});
+		});
 	});
 
 	/*
@@ -10003,6 +10087,21 @@ describe("dispatchTool", () => {
 								)
 				),
 		});
+
+	test("start_load_run by id keeps the saved request's stream flag unless the call states one (#3561)", async () => {
+		const sent = async (extra: Record<string, unknown>) => {
+			const client = savedRequestClient({ stream: true });
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true, ...extra },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+		expect(await sent({})).toMatchObject({ stream: true });
+		expect(await sent({ stream: false })).toMatchObject({ stream: false });
+	});
 
 	test("start_load_run composes a saved request; the chain's assertions fold into `requestElements`", async () => {
 		const client = savedRequestClient();
