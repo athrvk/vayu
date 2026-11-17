@@ -29,6 +29,7 @@ import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { formatInstant } from "@/lib/time-value";
+import type { RunIdentity } from "@/queries";
 import type { Run, RunReport } from "@/types";
 
 vi.mock("@/services/api", () => ({
@@ -183,6 +184,8 @@ function serve(pool: Run[]) {
 		const rows = pool.filter(
 			(r) =>
 				(params.requestId === undefined || r.requestId === params.requestId) &&
+				(params.collectionId === undefined ||
+					r.summary?.scenario?.collectionId === params.collectionId) &&
 				(params.type === undefined || r.type === params.type) &&
 				(!params.baseline || r.baseline === true)
 		);
@@ -192,10 +195,15 @@ function serve(pool: Run[]) {
 	mocked.getRunReport.mockImplementation(async (id: string) => reports[id]);
 }
 
-function renderView(onClose = vi.fn()) {
+function renderView(onClose = vi.fn(), identity: RunIdentity = { requestId: "req_1" }) {
 	render(
 		withQueryClient(
-			<RunComparisonView report={OPEN} runId="run_open" requestId="req_1" onClose={onClose} />
+			<RunComparisonView
+				report={OPEN}
+				runId="run_open"
+				identity={identity}
+				onClose={onClose}
+			/>
 		)
 	);
 	return onClose;
@@ -295,6 +303,40 @@ describe("RunComparisonView", () => {
 		]);
 	});
 
+	it("offers a collection's load runs and defaults to that collection's pin", async () => {
+		const inCollection = (id: string, over: Partial<Run> = {}) =>
+			run(id, {
+				requestId: null,
+				summary: { scenario: { collectionId: "col_1" } },
+				...over,
+			});
+		serve([
+			inCollection("run_open", { startTime: T }),
+			inCollection("run_pinned", { startTime: T - DAY, baseline: true }),
+			inCollection("run_old", { startTime: T - 2 * DAY }),
+			// Another collection's pin and a request's run are neither offered nor chosen.
+			run("run_other", {
+				requestId: null,
+				summary: { scenario: { collectionId: "col_2" } },
+				startTime: T - 3 * DAY,
+				baseline: true,
+			}),
+			run("run_request", { startTime: T - 4 * DAY }),
+		]);
+		renderView(vi.fn(), { collectionId: "col_1" });
+		await screen.findByRole("row", { name: /P50 latency/ });
+
+		expect(mocked.listRuns).toHaveBeenCalledWith(
+			expect.objectContaining({ collectionId: "col_1", type: "load" })
+		);
+		expect(mocked.getRunReport).toHaveBeenCalledWith("run_pinned");
+		fireEvent.click(picker());
+		expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+			`${formatInstant(T - DAY)} - Completed - Baseline`,
+			`${formatInstant(T - 2 * DAY)} - Completed`,
+		]);
+	});
+
 	it("defaults to the pinned baseline when one exists", async () => {
 		renderView();
 		await screen.findByRole("row", { name: /P50 latency/ });
@@ -377,7 +419,7 @@ describe("RunComparisonView", () => {
 				<RunComparisonView
 					report={OPEN}
 					runId="run_open"
-					requestId="req_1"
+					identity={{ requestId: "req_1" }}
 					onClose={vi.fn()}
 				/>
 			</QueryClientProvider>

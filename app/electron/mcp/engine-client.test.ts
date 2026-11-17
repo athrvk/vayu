@@ -546,13 +546,27 @@ describe("EngineClient run housekeeping", () => {
 		// has the percentiles a baseline comparison diffs - an unscoped lookup
 		// would let a more-recently-pinned non-load run shadow the load baseline.
 		const { fetchImpl, calls } = recordingFetch();
-		await client(fetchImpl).listBaselineRuns("req_1");
+		await client(fetchImpl).listBaselineRuns({ requestId: "req_1" });
 		const url = new URL(calls[0].url);
 		expect(url.pathname).toBe("/runs");
 		expect(Object.fromEntries(url.searchParams)).toEqual({
 			limit: "1",
 			offset: "0",
 			requestId: "req_1",
+			type: "load",
+			baseline: "true",
+		});
+	});
+
+	it("resolves a collection baseline by collectionId, never requestId (#3544)", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).listBaselineRuns({ collectionId: "col_1" });
+		const url = new URL(calls[0].url);
+		expect(url.pathname).toBe("/runs");
+		expect(Object.fromEntries(url.searchParams)).toEqual({
+			limit: "1",
+			offset: "0",
+			collectionId: "col_1",
 			type: "load",
 			baseline: "true",
 		});

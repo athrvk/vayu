@@ -17,6 +17,7 @@ import { truncateUrl } from "@/lib/truncate-url";
 import { dataFileDisplayName, dataFileFromSummary } from "@/lib/run-data-file";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import { runReference } from "@/lib/agent-reference";
+import { runIdentity } from "@/lib/run-reference-input";
 import { isRunInProgress } from "@/lib/run-status";
 import { useCopy } from "@/hooks/useCopy";
 import type { TimeRow } from "@/lib/time-value";
@@ -53,7 +54,7 @@ import {
 } from "lucide-react";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
-// What a pinned load run's chip says: the pin is its request's comparison
+// What a pinned load run's chip says: the pin is its request's or collection's comparison
 // baseline and also keeps it past retention (#2163).
 const LOAD_PIN_STATE = "Baseline - kept past retention";
 
@@ -195,8 +196,8 @@ function RunItem({
 	const mcpClientLabel =
 		run.origin?.kind === "mcp" ? mcpClientDisplayName(run.origin.client) : null;
 
-	// A load run's pin is two promises at once - its request's comparison
-	// baseline, and exempt from retention - and nothing but a tooltip said the
+	// A load run's pin is two promises at once - its request's (or collection's)
+	// comparison baseline, and exempt from retention - and nothing but a tooltip said the
 	// second (#2163), so the visible chip and the action's name carry both. Every
 	// other type's pin makes only the retention promise and keeps "Pin"/"Unpin".
 	const isLoadRun = run.type === "load";
@@ -234,7 +235,7 @@ function RunItem({
 					},
 				]
 			: []),
-		...(onCompare && isLoadRun && run.requestId && !isRunInProgress(run.status)
+		...(onCompare && isLoadRun && runIdentity(run) !== null && !isRunInProgress(run.status)
 			? [
 					{
 						label: "Compare with…",

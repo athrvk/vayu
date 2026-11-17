@@ -141,10 +141,13 @@ starts and stops (#3337): a stop that lands while the port is still binding
 waits for the bind and closes it, a re-enable binds only once the previous
 close has finished, and a service whose lazy load outlives its listener is
 never built. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
-take effect on the next request with no extra bookkeeping. The one thing carried
-from one request to the next is a 2025-era client's name from its handshake,
-under an `Mcp-Session-Id` the host issues - see
-[How History names the client](#how-history-names-the-client).
+take effect on the next request with no extra bookkeeping. Two things are
+carried from one request to the next, both for a 2025-era client and both
+under an `Mcp-Session-Id` the host issues: the client's name from its handshake
+(see [How History names the client](#how-history-names-the-client)), and an
+abort handle for each of its requests still in flight, so a cancel it sends
+reaches the call it names (see
+[What is live on each transport](#what-is-live-on-each-transport)).
 
 ### stdio CLI (Zed / headless / CI)
 
@@ -198,12 +201,12 @@ to what the list answers, not only to which tools it names: the Reveal secrets
 toggle lists the same tools and rewrites their descriptions (a tool's
 withholding pointer is dropped with it, #2441), so it fires the notice too.
 
-| Client | Confirmation question | `tools/list` changed |
-| ------ | --------------------- | -------------------- |
-| 2026-07-28, HTTP | ✅ asked in-band, the call retried with the answer | ✅ on a `subscriptions/listen` stream |
-| 2026-07-28, stdio | ✅ asked in-band | - (the CLI's config cannot change) |
-| 2025-era, stdio | ✅ the SDK puts the question to the client | - (as above) |
-| 2025-era, HTTP | `confirmed: true` flag | on the client's next `tools/list` |
+| Client | Confirmation question | `tools/list` changed | Cancellation |
+| ------ | --------------------- | -------------------- | ------------ |
+| 2026-07-28, HTTP | ✅ asked in-band, the call retried with the answer | ✅ on a `subscriptions/listen` stream | ✅ the SDK aborts the call when the client cancels |
+| 2026-07-28, stdio | ✅ asked in-band | - (the CLI's config cannot change) | ✅ `notifications/cancelled`, read by the SDK |
+| 2025-era, stdio | ✅ the SDK puts the question to the client | - (as above) | ✅ `notifications/cancelled`, read by the SDK |
+| 2025-era, HTTP | `confirmed: true` flag | on the client's next `tools/list` | ✅ `notifications/cancelled`, matched by the host |
 
 Only a client that declared elicitation is asked; any other client gets the
 `confirmed: true` flag instead, because asking one that cannot answer is a
@@ -211,8 +214,25 @@ protocol error the tool cannot recover from. A 2025-era client over HTTP gets
 the flag even when it declared elicitation: the server that would ask is gone
 when its request ends, so there is no one to carry the answer back to. Neither
 fallback is unsafe, only less direct. `tools.listChanged` is advertised only to
-the clients in the ✅ row, so no client waits for a notice that never comes. See
+the clients with a ✅ under `tools/list` changed, so no client waits for a
+notice that never comes. See
 [Design notes](#design-notes).
+
+A cancel ends the call on every leg, with the same effect: the call's
+`AbortSignal` fires and the engine request behind it is aborted (the
+Cancellation bullet under [Tools](#tools)). On 2025-era HTTP the cancel is its
+own `POST`, and the fresh server it reaches never saw the call, so the SDK
+alone would answer `202` and drop it. The host keeps an abort handle for
+each 2025-era request it is serving instead (`in-flight-calls.ts`, #3574), under the `Mcp-Session-Id` it
+issued and the JSON-RPC request id, and a `notifications/cancelled` naming both
+ends that request's exchange, which aborts the signal; the cancel still gets its
+`202`. A cancel with no session id, or another session's, reaches nothing: every
+client counts its request ids from 0, so the id alone names no one call. The
+handle is dropped when the exchange ends however it ends - an answer, a cancel,
+the client disconnecting - and at most 256 are held, the oldest dropped first
+(its call keeps running, no longer cancellable). The issued session id is the
+whole binding: a loopback caller that presents it and a request id can abort
+that call.
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
@@ -308,8 +328,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format, `hasPassphrase`, and `usable` with a `problem` when the engine would not present the entry; the engine never answers a passphrase; an entry the user removed is in the Trash and not listed until restored, #2973) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number from 1 to 3000 (refused above, not clamped: 3000 is the stock live buffer, `liveReplayWindowMs` 300,000 ms at the 100 ms tick cadence), and there is no `offset` - it answers the tail of the buffer, so a page position has nothing to count from; the answer is `{ticks, completed}` (#2955): `completed` is the stream's own `complete` event, `true` once the run ended and `false` when the time budget ended the read with the run still going, and only when `true` a `note` says the final tick's latency window may be empty (its percentiles can read 0) and the run's percentiles come from `get_run_report`; a tick that closes a second carries `statusSeconds` (#2866, as the engine sends it: the responses that completed in each second it closed, `[]` for none), the others do not; a capacity run's ticks carry `capacity` (#2928, as the engine sends it: `{level, levelElapsedMs, levelsJudged, stopReason?}`, `stopReason` once the search has ended), other runs' do not; a streaming run's ticks carry `streamEvents` (so far), `streamsOpen` and `eventsPerSecond`, and the `statusSeconds` ones also `streamTimeToFirstEvent` (#3236, as the engine sends them: absent when not measured, never `0`). The ticks that carry `statusSeconds` also carry `cumulativeLatency` / `cumulativePhases` (the run-so-far distributions) and, for a scenario load run, `scenario` (#2823: `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, no latency; the final tick included). The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
-| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
-| `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, a streaming run's events, a capacity search's result, the contract's coverage and schema checks, a scenario's sequence and transactions, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline, through its saved request or, for a load run over a collection, its collection. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
+| `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both; `baseline` resolves the pin as `compare_runs` does), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, a streaming run's events, a capacity search's result, the contract's coverage and schema checks, a scenario's sequence and transactions, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | runs one page of the list, `limit` (default 25, max 100, a larger value refused) from `offset`, and the result's `requestTotal`, `hasMore`, `next.offset` and `note` say what is left; allowlist per host, and again by the engine on each sent URL (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed; sends a progress notification per row when the client sent a `progressToken` (index and status word only, never a name or URL) |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run - and held by the engine to each step's sent URL and OAuth 2.0 token endpoint (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; optional `maxStreamDurationMs` / `maxStreamEvents` forwarded top-level to bound the steps whose saved request streams (#3235); the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
@@ -347,7 +367,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; a blank or whitespace-padded name is a `400` naming the key; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `get_cookies`          | read     | `GET /cookies?q=&limit=&offset=`             | - (paged as `list_collections`, one cookie a row with its jar's `environmentId`, `q` matching the name or domain; a summary row is `environmentId`, `name`, `domain`, `path`, `expires` and never the value; `fields: "full"` adds the flags and the value, withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
-| `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
+| `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; one pin per saved request or collection (a load run over a collection pins for the collection), and a run of neither pins as a flag nothing reads; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `GET /config` (reveal off, a batch naming a key ending in `url`) + `POST /config` | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole; with reveal off a `proxyUrl` (or `proxySystemUrl`) equal to the read's credential-stripped value is written as the stored value, with a caveat line, so its `user:password` stays (#3549); any other value is written as given. `/config` has no `If-Match`, so that read and the write are not one conditioned step |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist (also held by the engine, `targetPolicy`) + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target; their column names, the union across every row, go to `POST /compose` as `dataColumns`, so a bare `{{email}}` is bound from the row rather than answered by a same-named environment variable, #2956) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets (the `maxAssertionFailureRatePct` check judges the worse of the exact inline and the sampled `pm.test` populations and names both, #2892; `streamTimeToFirstEventP95Ms` and `streamEventsPerSecondMin` judge a streaming run's `stream` section and are not evaluated, so failed, on any other run, #3234) and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
@@ -685,12 +705,18 @@ Notes:
 - **`compare_runs`** takes `baseRunId` optionally. Omitted, it resolves the run
   pinned as the **baseline** for whatever saved request the target ran -
   `GET /runs/:id` for the `requestId`, then
-  `GET /runs?baseline=true&requestId=<id>&limit=1` - which is the same lookup
-  the app's history view makes, so an agent and the UI never compare a run
-  against different references. Nothing to resolve through (an ad-hoc run with
-  no saved request), no pin for that request, or a target that *is* the pin:
-  each is a refusal naming the fix, never a silent comparison against some
-  other run. **Two runs of different types are refused too** (#2438): a
+  `GET /runs?baseline=true&type=load&requestId=<id>&limit=1` - which is the
+  same lookup the app's history view makes, so an agent and the UI never
+  compare a run against different references. A load run over a collection has
+  no `requestId`, so it resolves through the `configSnapshot.scenario.collectionId`
+  the same `GET /runs/:id` carries instead (`collectionId=<id>` in place of
+  `requestId=<id>`, #3544); a run naming both resolves through its request. The
+  newest pinned load run wins, so a pinned sequential run of the same collection
+  never shadows it. Nothing to resolve through (an ad-hoc run with neither a
+  saved request nor a collection), no pin for that request or collection, or a
+  target that *is* the pin: each is a refusal naming the fix, never a silent
+  comparison against some other run. `export_run_report`'s `baseline: true`
+  resolves the same way. **Two runs of different types are refused too** (#2438): a
   `run_type` entry in `comparability` makes the tool an error naming both
   runs, their types and `list_runs`' `type` filter, with no deltas, because a
   load test's throughput against a collection run's is not a regression either
@@ -735,7 +761,8 @@ Notes:
   `baseline`) plus `limit`/`offset`, so finding one run is a query rather than a
   scan of 100-row blobs. Order is fixed newest-first - `GET /runs` takes no sort
   parameter, and the app's oldest-first view sorts client-side. `collectionId`
-  matches a **collection run** only, since a design or load run stores none. The
+  matches a **collection run** and a **load run over a collection** (both store
+  `scenario.collectionId`), never a single-request design or load run. The
   filters are Zod enums rather than passthrough strings because the engine
   *ignores* a `type` or `status` it cannot parse: forwarded raw, a typo would
   answer the unfiltered page and read as "nothing matched anywhere".
@@ -1161,7 +1188,10 @@ Notes:
   for it, or the connection closing), so the partial result is what a caller
   that reads the handler's return value gets - the tests, `dispatchTool` - and
   what the cancelled loop no longer does is walk the remaining rows, each a
-  failed fetch the instant after the abort.
+  failed fetch the instant after the abort. That holds on every transport: on
+  2025-era HTTP the host matches the client's cancel to the call and ends its
+  exchange, so no request goes out after the cancel there either (see
+  [What is live on each transport](#what-is-live-on-each-transport)).
   When the client sent a `progressToken` (#2451) the call reports
   `notifications/progress` - `0/total` before the first request, then one per
   row on every path (sent, skipped off the allowlist or failed to compose), with
@@ -1309,10 +1339,15 @@ Notes:
   start result and `list_webhook_inboxes`. It is CORS policy, which browser pages
   may read the canned answer, and does not touch who can connect, so it sits
   beside the loopback guarantee rather than loosening it.
-- **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
-  is threaded into the engine `fetch` for every tool call, resource read,
-  template list and prompt, so a client cancelling an in-flight call actually
-  aborts it rather than leaving the engine request running detached. The one
+- **Cancellation:** the `AbortSignal` the SDK hands each call fires when the
+  client cancels it, and it is threaded into the engine `fetch` for every tool
+  call, resource read, template list and prompt, so a client cancelling an
+  in-flight call actually aborts it rather than leaving the engine request
+  running detached. How the cancel reaches the signal differs by leg: over
+  stdio the SDK reads the `notifications/cancelled` itself, a 2026-07-28 HTTP
+  client's cancel is handled by the SDK itself, and on 2025-era HTTP the host matches the
+  cancel to the call by `Mcp-Session-Id` and request id (see
+  [What is live on each transport](#what-is-live-on-each-transport)). The one
   exception is the run-ID **completion** callback, which the SDK invokes as
   `(value, context?)` with no request context to carry a signal.
 - **Timeouts:** engine-local calls are bounded at 35s, but `POST /execute` waits
@@ -2915,7 +2950,29 @@ any `...Withheld` marker on or in place of a `config` extra parameter row or
 list)
 is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
-authenticate with nothing. The server instructions state the withholding rules
+authenticate with nothing.
+
+The other marker, `<redacted>`, is what a run's record shows in place of a
+credential (above), and a request copied out of one carries it back. It is
+refused as `input` in the credential slots a read withholds, exactly as the
+`...Withheld` markers are, and only as the *whole* value
+(`isRedactionMarker` in `withhold.ts`; `tools/redacted-input.ts` holds the
+refusals): an auth member (`readAuthArg`, so every tool that takes `auth`), the
+value of a credential-named header (a row of `create_request`, `update_request`,
+`create_request_example` and `update_request_example`, or a `headers` override
+of `run_request`, `start_load_run` and `get_graphql_schema`; a row written back
+as `valueWithheld: true` has no value to judge), the value of a credential-named
+query or fragment parameter or the userinfo password of a request's `url`
+(`create_request`, `update_request`, or the `url` override of `run_request` and
+`start_load_run`), and the value of a variable that is, or is
+being written as, `secret: true` (every tool that writes a variable blob). The
+call is refused before anything is written or sent, and the error says to pass
+the real value or a `{{variable}}` reference. A request body, a description, a
+header or parameter no read withholds, and a value that only contains the text
+are stored as written, and with reveal on nothing is refused: the marker then
+stands for nothing.
+
+The server instructions state the withholding rules
 once, in full, in every session where reveal is off, beside the write gate's
 sentence and for the same reason, and the run and config resources repeat the
 rule for their own output. Each tool that carries one of the rows above gets
@@ -3012,13 +3069,14 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
-| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
+| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `redacted-input.ts` (the refusal of a credential slot written as `<redacted>`), `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`, including `progress` when the call carries a `progressToken`). |
 | `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
+| `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
@@ -3295,7 +3353,9 @@ serves both eras from one factory, so a 2025-era client keeps what it had and a
 2026-07-28 client gets both (see
 [What is live on each transport](#what-is-live-on-each-transport)). A stateful
 2025-era server - real sessions, a GET stream each, servers mutated on toggle -
-is not built: it would grow the mechanism the spec retired.
+is not built: it would grow the mechanism the spec retired. What the host does
+keep for that leg is an abort handle per request in flight, so a cancel reaches
+a call whose server it cannot reach, and nothing else.
 
 ### The size of `tools/list` is budgeted
 

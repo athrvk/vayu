@@ -12,9 +12,10 @@
 /**
  * "Compare with…" on a history row (#2164).
  *
- * A comparison needs a final load report and a saved request to find the other
- * runs by, so the entry is offered for exactly that and for nothing else: a
- * menu item that opened an empty compare view would be worse than no item.
+ * A comparison needs a final load report and a saved request or a collection to
+ * find the other runs by, so the entry is offered for exactly that and for
+ * nothing else: a menu item that opened an empty compare view would be worse
+ * than no item.
  */
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
@@ -77,6 +78,18 @@ describe("a history row's Compare with… entry", () => {
 
 	it("is absent for a collection run", async () => {
 		await openMenu(run({ type: "scenario", requestId: null }));
+
+		expect(compareItem()).toBeNull();
+	});
+
+	it("is offered for a finished collection load run, which has no request id", async () => {
+		await openMenu(run({ requestId: null, summary: { scenario: { collectionId: "col_1" } } }));
+
+		expect(compareItem()).toBeInTheDocument();
+	});
+
+	it("is absent for a collection load run whose manifest names no collection", async () => {
+		await openMenu(run({ requestId: null, summary: { scenario: {} } }));
 
 		expect(compareItem()).toBeNull();
 	});

@@ -8,15 +8,16 @@
 /**
  * RunTrend
  *
- * p95 latency, throughput and error rate across the runs of one request (#2165),
- * under the open run's own Performance charts: a run's report answers "how did
- * this one go", this answers "is the request getting better or worse".
+ * p95 latency, throughput and error rate across the runs of one request or one
+ * collection (#2165), under the open run's own Performance charts: a run's
+ * report answers "how did this one go", this answers "is it getting better or
+ * worse".
  *
  * Built from the runs list's `resultSummary` (`useRequestRunsQuery`, the query
  * the compare picker already holds), so it costs no report fetch per run. It
- * draws nothing for a run with no `requestId` and nothing until two runs have a
- * summary: one point is not a trend, and an empty frame would read as a
- * failure to load.
+ * draws nothing for a run with no identity (an unsaved request's) and nothing
+ * until two runs have a summary: one point is not a trend, and an empty frame
+ * would read as a failure to load.
  */
 
 import type { ReactNode } from "react";
@@ -31,12 +32,13 @@ import {
 	fmtRate,
 	type RunTrendPoint,
 } from "@/modules/dashboard/components/charts/uplot";
-import { useRequestRunsQuery } from "@/queries";
+import { useRequestRunsQuery, type RunIdentity } from "@/queries";
+import { runIdentityNoun } from "@/lib/run-reference-input";
 import { buildRunTrend } from "./run-trend";
 
 interface RunTrendProps {
-	/** The open run's request; null for a run of an unsaved request, which has no siblings. */
-	requestId: string | null;
+	/** The open run's request or collection; null for a run of an unsaved request, which has no siblings. */
+	identity: RunIdentity | null;
 	openRunId: string;
 }
 
@@ -68,8 +70,9 @@ function hasTrend(points: RunTrendPoint[], metric: Metric): boolean {
 	return points.filter((p) => p[metric] !== null).length >= 2;
 }
 
-export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
-	const { data, isError, error, refetch } = useRequestRunsQuery(requestId);
+export default function RunTrend({ identity, openRunId }: RunTrendProps) {
+	const { data, isError, error, refetch } = useRequestRunsQuery(identity);
+	const noun = identity ? runIdentityNoun(identity) : "request";
 
 	if (isError) {
 		return (
@@ -77,7 +80,7 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 				<CardContent className="pt-4">
 					<ErrorState
 						variant="inline"
-						title="Couldn't load this request's runs"
+						title={`Couldn't load this ${noun}'s runs`}
 						detail={error instanceof Error ? error.message : undefined}
 						onRetry={() => void refetch()}
 					/>
@@ -121,7 +124,7 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 	return (
 		<Card className="enter-fade">
 			<CardHeader className="pb-2">
-				<CardTitle>This request across runs</CardTitle>
+				<CardTitle>This {noun} across runs</CardTitle>
 				<CardDescription>
 					The last {points.length} runs, oldest first.
 					{!points.some((p) => p.isOpen) && " This run is not among them."}

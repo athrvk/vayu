@@ -19,13 +19,20 @@
  * wrong is a pane that renders confidently and says nothing true.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import type { ReactElement } from "react";
 import LoadTestDetail from "./LoadTestDetail";
 import type { RunReport, RunScenarioStepStat } from "@/types";
+
+const listCollections = vi.hoisted(() => vi.fn());
+vi.mock("@/services/api", () => ({ apiService: { listCollections } }));
+
+beforeEach(() => {
+	listCollections.mockReset().mockResolvedValue([{ id: "col_1", name: "Checkout" }]);
+});
 
 vi.mock("@/queries/runs", () => ({
 	useRunTimeSeriesQuery: () => ({ data: undefined, isLoading: false }),
@@ -71,7 +78,15 @@ const STEPS: RunScenarioStepStat[] = [
 	},
 ];
 
-function report(scenario?: RunReport["scenario"]): RunReport {
+/**
+ * `identity` is the report's `metadata.scenario`, which every collection run
+ * carries; `scenario` is the top-level breakdown, which only a run the engine
+ * finished has. A report with neither is a single-request run.
+ */
+function report(
+	scenario?: RunReport["scenario"],
+	identity?: NonNullable<RunReport["metadata"]>["scenario"]
+): RunReport {
 	return {
 		metadata: {
 			runId: "run_1",
@@ -79,7 +94,10 @@ function report(scenario?: RunReport["scenario"]): RunReport {
 			status: "completed",
 			startTime: 0,
 			endTime: 1000,
-			...(scenario ? {} : { requestUrl: "https://api.test/ping", requestMethod: "GET" }),
+			...(scenario || identity
+				? {}
+				: { requestUrl: "https://api.test/ping", requestMethod: "GET" }),
+			...(identity ? { scenario: identity } : {}),
 		},
 		summary: {
 			totalRequests: 74,
@@ -184,14 +202,65 @@ describe("a single-request load run", () => {
 		expect(screen.queryByRole("tab", { name: /steps/i })).toBeNull();
 	});
 
-	it("grows no Steps tab for a report whose scenario section carries no steps", () => {
-		// A design-mode collection run's report has a `scenario` object with no
-		// breakdown - it reports its steps as `results[]` rows instead - and this
-		// pane must not claim it has one.
+	it("grows no Steps tab and no sequence bar for a scenario section with no steps and no identity", () => {
+		// Neither the breakdown nor `metadata.scenario` says this is a collection
+		// run, so the pane has nothing to call it by but the single-request bar.
 		const designMode = { ...SCENARIO, virtualUsers: undefined, steps: undefined };
 		renderReport(<LoadTestDetail report={report(designMode)} runId="run_1" />);
 
 		expect(screen.queryByRole("tab", { name: /steps/i })).toBeNull();
 		expect(screen.queryByText("SEQUENCE")).toBeNull();
+	});
+});
+
+/*
+ * What names a collection run is its snapshot identity in `metadata.scenario`,
+ * which every such report carries; the `scenario` breakdown is built from the
+ * stored summary and is absent for a run the engine did not finish (#3569).
+ *
+ * Mutation check: read the bar's predicate from `report.scenario.steps` again
+ * and the unfinished-run case reddens with "Unknown URL"; drop the id fallback
+ * in `useCollectionName` and the deleted-collection case reddens.
+ */
+describe("a collection run named by its report's scenario identity", () => {
+	const IDENTITY = { collectionId: "col_1", iterations: 40, recursive: false, stepCount: 3 };
+
+	it("names an unfinished run - no breakdown - by its collection and step count", async () => {
+		renderReport(<LoadTestDetail report={report(undefined, IDENTITY)} runId="run_1" />);
+
+		expect(screen.getByText("SEQUENCE")).toBeTruthy();
+		expect(await screen.findByText(/Checkout - 3 steps per iteration/)).toBeTruthy();
+		expect(screen.queryByText(/unknown url/i)).toBeNull();
+		// The breakdown is what the Steps tab renders; this report has none.
+		expect(screen.queryByRole("tab", { name: /steps/i })).toBeNull();
+	});
+
+	it("names a finished run's collection beside the breakdown's own step count", async () => {
+		renderReport(<LoadTestDetail report={report(SCENARIO, IDENTITY)} runId="run_1" />);
+
+		expect(
+			await screen.findByText("Checkout - 2 steps per iteration - 8 virtual users")
+		).toBeTruthy();
+		expect(screen.getByRole("tab", { name: /steps/i })).toBeTruthy();
+	});
+
+	it("shows the collection's id once it is deleted, never a blank", async () => {
+		listCollections.mockResolvedValue([]);
+		renderReport(
+			<LoadTestDetail
+				report={report(undefined, { ...IDENTITY, collectionId: "col_gone" })}
+				runId="run_1"
+			/>
+		);
+
+		expect(await screen.findByText(/col_gone - 3 steps per iteration/)).toBeTruthy();
+	});
+
+	it("leaves the step phrase out when the identity carries no count", async () => {
+		const { collectionId } = IDENTITY;
+		renderReport(<LoadTestDetail report={report(undefined, { collectionId })} runId="run_1" />);
+
+		expect(await screen.findByText("Checkout")).toBeTruthy();
+		expect(screen.queryByText(/per iteration/)).toBeNull();
 	});
 });

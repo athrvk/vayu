@@ -100,20 +100,29 @@ export const queryKeys = {
 		lastCollectionRuns: () => [...queryKeys.runs.all, "lastCollectionRun"] as const,
 		lastCollectionRun: (collectionId: string) =>
 			[...queryKeys.runs.lastCollectionRuns(), collectionId] as const,
-		// The run pinned as baseline for one request, for the history view's
-		// vs-baseline strip. Its own family for the fourth time and the same
-		// reason as the three above: it caches a plain `RunListResponse`, and
-		// the delete-run patch walks everything under `lists()` as
-		// `InfiniteData`. `baselines()` is the prefix to invalidate when a pin
-		// moves, or when the run set changes without a known request.
+		// The run pinned as baseline for one request or one collection, for the
+		// history view's vs-baseline strip. Its own family for the fourth time
+		// and the same reason as the three above: it caches a plain
+		// `RunListResponse`, and the delete-run patch walks everything under
+		// `lists()` as `InfiniteData`. `baselines()` is the prefix to invalidate
+		// when a pin moves, or when the run set changes without a known
+		// request. `baseline` takes a request id or the free-form "METHOD url"
+		// of an unsaved request; a collection's key has a segment of its own, so
+		// no id can read as one.
 		baselines: () => [...queryKeys.runs.all, "baseline"] as const,
 		baseline: (requestId: string) => [...queryKeys.runs.baselines(), requestId] as const,
-		// The load runs of one request, for the compare picker. Its own family:
-		// it caches a plain `RunListResponse`, and the delete-run patch walks
-		// everything under `lists()` as `InfiniteData`. `requestRuns()` is the
-		// prefix to invalidate when a run ends, is deleted or is pinned.
+		collectionBaseline: (collectionId: string) =>
+			[...queryKeys.runs.baselines(), "collection", collectionId] as const,
+		// The load runs of one request or one collection, for the compare picker
+		// and the trend. Its own family: it caches a plain `RunListResponse`,
+		// and the delete-run patch walks everything under `lists()` as
+		// `InfiniteData`. `requestRuns()` is the prefix to invalidate when a run
+		// ends, is deleted or is pinned; a collection's list sits under it with
+		// a segment of its own, so every such invalidation reaches it too.
 		requestRuns: () => [...queryKeys.runs.all, "requestRun"] as const,
 		requestRun: (requestId: string) => [...queryKeys.runs.requestRuns(), requestId] as const,
+		collectionRun: (collectionId: string) =>
+			[...queryKeys.runs.requestRuns(), "collection", collectionId] as const,
 		// One small page of runs matching a palette query. Its own family for the
 		// fifth time and the same reason as the four above: it caches a plain
 		// `RunListResponse`, and the delete-run patch walks everything under

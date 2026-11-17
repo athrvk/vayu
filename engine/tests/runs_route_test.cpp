@@ -32,6 +32,7 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include "load_start_stamp.hpp"
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "sqlite_auto_extension.hpp"
@@ -1050,8 +1051,9 @@ TEST_F (RunsRouteTest, FilterByQSubstringOverSnapshot) {
     EXPECT_EQ (body["data"][0]["id"], "run_orders");
 }
 
-// The scenario snapshot a collection run stores. Only the key the filter reads
-// matters here, so the rest is the smallest thing that still parses as one.
+// The scenario snapshot a collection run, or a load run driven over a
+// collection, stores. Only the key the filter reads matters here, so the rest
+// is the smallest thing that still parses as one.
 std::string scenario_snapshot (const std::string& collection_id) {
     return R"({"scenario":{"collectionId":")" + collection_id + R"(","iterations":1}})";
 }
@@ -1847,6 +1849,37 @@ TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileName"));
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileHash"));
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileCastNumbers"));
+}
+
+// A collection run the engine did not finish has no stored summary, so the
+// report's top-level `scenario` breakdown is absent; the snapshot's identity
+// (which collection, how many steps) must still reach `metadata.scenario`
+// (issue #3569), without the manifest's per-step array. A single-request run
+// has no manifest and so no `scenario`. Mutation check: drop the
+// `add_scenario` call in `build_report_metadata` and this reds.
+TEST (RunReportMetadataTest, NamesTheCollectionARunWithoutASummaryRan) {
+    vayu::db::Run run;
+    run.type            = vayu::RunType::Scenario;
+    run.status          = vayu::RunStatus::Failed;
+    run.config_snapshot = R"({"mode":"scenario","iterations":3,"scenario":{
+    "source":"collection","collectionId":"col_1","iterations":3,"recursive":true,
+    "steps":[{"name":"a","method":"GET","url":"https://x.test/a"},
+    {"name":"b","method":"POST","url":"https://x.test/b"}]}})";
+
+    const auto metadata = vayu::http::routes::build_report_metadata ("run_1", run);
+    ASSERT_TRUE (metadata.contains ("scenario")) << metadata.dump ();
+    const auto& scenario = metadata["scenario"];
+    EXPECT_EQ (scenario.value ("collectionId", ""), "col_1");
+    EXPECT_EQ (scenario.value ("iterations", 0), 3);
+    EXPECT_EQ (scenario.value ("recursive", false), true);
+    EXPECT_EQ (scenario.value ("stepCount", 0), 2);
+    EXPECT_FALSE (scenario.contains ("steps")) << scenario.dump ();
+
+    run.type            = vayu::RunType::Load;
+    run.config_snapshot = R"({"mode":"constant_rps","url":"https://x.test/a",
+    "method":"GET","rps":10})";
+    const auto single = vayu::http::routes::build_report_metadata ("run_2", run);
+    EXPECT_FALSE (single.contains ("scenario")) << single.dump ();
 }
 
 // ============================================================================
@@ -2798,6 +2831,9 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     collector.record_error (vayu::ErrorCode::ConnectionFailed, "refused");
     collector.record_cancelled ();
     collector.record_bytes (100, 400);
+    // Two requests open since a second before the read (#3567).
+    (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
+    (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
     context->peak_in_flight = 3;
     runs.register_run ("run_live", context);
 
@@ -2820,7 +2856,8 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 400u);
     EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 3u);
     EXPECT_GT (summary["avgRps"].get<double> (), 0.0);
-    // The collector's latency sum over the same duration (#2821).
+    // The collector's in-flight integral over the same duration (#2821,
+    // #3567): the two open requests, which nothing has completed.
     ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
     EXPECT_GT (summary["avgInFlight"].get<double> (), 0.0);
     EXPECT_EQ (live["statusCodes"], nlohmann::json::parse ("[[0,1],[200,2],[503,1]]"));
@@ -5059,6 +5096,43 @@ TEST_F (RunsRouteTest, ListFiltersToBaselinesAndBackAgain) {
     ASSERT_EQ (plain_status, 200);
     ASSERT_EQ (plain_body["data"].size (), 1u);
     EXPECT_EQ (plain_body["data"][0]["id"], "plain");
+}
+
+// A collection's baseline is the newest pinned *load* run over it (#3544): a
+// load run driven over a collection stores `scenario.collectionId` in its
+// snapshot, so the same three filters a request's baseline lookup ANDs also
+// scope to a collection. Each decoy is newer than the answer, so dropping the
+// term that excludes it puts it first: the collection's own sequential run (the
+// type term), another collection's pin (the collection term) and an unpinned
+// load run (the baseline term).
+TEST_F (RunsRouteTest, CollectionBaselineLookupFindsTheNewestPinnedLoadRunOverIt) {
+    seed ({ .id = "load_old", .start_time = 100, .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id = "load_new", .start_time = 300, .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id      = "sequential_same_collection",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 400,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id      = "load_other_collection",
+    .start_time      = 500,
+    .config_snapshot = scenario_snapshot ("col_B") });
+    seed ({ .id = "load_unpinned", .start_time = 600, .config_snapshot = scenario_snapshot ("col_A") });
+    for (const char* pinned : { "load_old", "load_new",
+         "sequential_same_collection", "load_other_collection" }) {
+        const auto [pin_status, pin_body] =
+        vayu::http::routes::set_run_baseline_response (*db_, pinned, R"({"baseline":true})");
+        ASSERT_EQ (pin_status, 200) << pin_body.dump ();
+    }
+
+    vayu::db::RunFilter f;
+    f.collection_id = "col_A";
+    f.type          = vayu::RunType::Load;
+    f.baseline      = true;
+    auto [status, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "load_new");
+    EXPECT_EQ (body["data"][0]["type"], "load");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
 }
 
 // The single-run payload answers it too, so a client that opened a run

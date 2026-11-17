@@ -432,17 +432,18 @@ SamplingRetention read_retention (const MetricsCollector& mc) {
 }
 
 RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
+    const int64_t now = steady_now_ms ();
     RunSummaryInputs inputs;
-    auto& mc              = *context.metrics_collector;
-    inputs.total_requests = mc.total_requests ();
-    inputs.cancelled      = mc.cancelled ();
-    const double elapsed_s = context.seconds_since_load_start (steady_now_ms ());
+    auto& mc               = *context.metrics_collector;
+    inputs.total_requests  = mc.total_requests ();
+    inputs.cancelled       = mc.cancelled ();
+    const double elapsed_s = context.seconds_since_load_start (now);
     inputs.rps =
     elapsed_s > 0 ? static_cast<double> (inputs.total_requests) / elapsed_s : 0.0;
     inputs.throughput              = inputs.rps;
     inputs.test_duration_s         = elapsed_s;
     inputs.peak_concurrency        = context.peak_in_flight.load ();
-    inputs.avg_in_flight           = mc.average_in_flight (elapsed_s);
+    inputs.avg_in_flight           = mc.average_in_flight (elapsed_s, now);
     inputs.dropped_requests        = mc.dropped_requests ();
     inputs.skipped_requests        = mc.skipped_requests ();
     inputs.stalled_ms              = mc.stalled_ms ();
@@ -3244,12 +3245,13 @@ void put_window_reading (nlohmann::json& stats, const WindowReading& window) {
 CumulativeCounters
 cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t completed, size_t sent) {
     CumulativeCounters counters;
-    counters.steady_ms         = steady_ms;
-    counters.completed         = completed;
-    counters.sent              = sent;
-    counters.latency_samples   = mc.latency_samples ();
-    counters.latency_sum_ms    = mc.total_latency_sum ();
-    counters.queue_wait_sum_ms = mc.total_queue_wait_sum ();
+    counters.steady_ms            = steady_ms;
+    counters.completed            = completed;
+    counters.sent                 = sent;
+    counters.latency_samples      = mc.latency_samples ();
+    counters.latency_sum_ms       = mc.total_latency_sum ();
+    counters.queue_wait_sum_ms    = mc.total_queue_wait_sum ();
+    counters.inflight_integral_ms = mc.inflight_integral_ms (steady_ms);
     return counters;
 }
 

@@ -41,6 +41,12 @@ import { ID_KINDS, unknownIdText } from "./failure.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
 import { selectEnvironment } from "./variable-blobs.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
+import {
+	READ_WITHHELD_REASON,
+	refuseRedactedAuth,
+	refuseRedactedHeaders,
+	refuseRedactedUrl,
+} from "./redacted-input.js";
 
 /**
  * The `headers` an agent passed: the ordered `[{ name, value }]` lines, a
@@ -70,6 +76,16 @@ function readHeaderOverrides(
 	);
 }
 
+/** The override lines as the `{key, value}` rows the credential rules judge. */
+function overrideRows(
+	headers: NonNullable<ReturnType<typeof readHeaderOverrides>>
+): { key: string; value: string }[] {
+	const lines = Array.isArray(headers)
+		? headers
+		: Object.entries(headers).map(([name, value]) => ({ name, value }));
+	return lines.map((line) => ({ key: line.name, value: line.value }));
+}
+
 /**
  * The request fields an agent stated directly, raw - and *only* the ones it
  * actually supplied, so this can be laid over a saved request by `POST
@@ -81,16 +97,25 @@ function readHeaderOverrides(
  * `deserialize_request` reads - keyed off `mode`, not `type`, and carrying
  * `fields` rather than `content` for the two form modes (see `bodyPayload`).
  */
-export function readRequestOverrides(args: Record<string, unknown>): Record<string, unknown> {
+export function readRequestOverrides(
+	args: Record<string, unknown>,
+	ctx: ToolContext
+): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	// Upper-cased because the engine's `parse_method` matches the verb exactly
 	// (compose normalises this too; being explicit keeps previews readable).
 	const method = str(args, "method");
 	if (method !== undefined) out.method = method.toUpperCase();
 	const url = str(args, "url");
-	if (url !== undefined) out.url = url;
+	if (url !== undefined) {
+		refuseRedactedUrl(ctx, url, args.auth);
+		out.url = url;
+	}
 	const headers = readHeaderOverrides(args.headers);
-	if (headers !== undefined) out.headers = headers;
+	if (headers !== undefined) {
+		refuseRedactedHeaders(ctx, overrideRows(headers), args.auth);
+		out.headers = headers;
+	}
 	// Before anything is composed: an inline body is never a file, because
 	// nothing here can stand for the person who has to choose it.
 	if (str(args, "bodyType") === "binary" || args.file !== undefined) {
@@ -573,17 +598,22 @@ type AuthRecord = Record<string, unknown> & { mode?: string };
  *
  * A block copied from a read that withheld its credentials is refused: stored,
  * it would replace the user's credential with nothing, and sent, it would
- * authenticate with nothing.
+ * authenticate with nothing. So is one carrying the `<redacted>` marker of a
+ * run's record as a credential, unless the session reveals secrets (#3553).
  */
-export function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
+export function readAuthArg(
+	args: Record<string, unknown>,
+	ctx: ToolContext
+): AuthRecord | undefined {
 	const a = args.auth;
 	if (!isRecord(a)) return undefined;
 	const withheld = withheldAuthMembers(a);
 	if (withheld.length > 0) {
 		throw new ToolArgError(
-			`"auth" carries ${withheld.join(", ")}: it was read with its credentials withheld, so it holds no credential to store or send. Leave "auth" out to keep what is stored, or pass the block with real values or {{variable}} references.`
+			`"auth" carries ${withheld.join(", ")}: ${READ_WITHHELD_REASON}. Leave "auth" out to keep what is stored, or pass the block with real values or {{variable}} references.`
 		);
 	}
+	refuseRedactedAuth(ctx, a);
 	return a as AuthRecord;
 }
 
@@ -653,8 +683,8 @@ export async function composeLoadRunRequest(
 ): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
 	refuseAgentScripts(args, ctx);
 	const savedId = str(args, "requestId");
-	const overrides = readRequestOverrides(args);
-	const authArg = readAuthArg(args);
+	const overrides = readRequestOverrides(args, ctx);
+	const authArg = readAuthArg(args, ctx);
 	if (authArg) overrides.auth = authArg;
 
 	const composeBody: Record<string, unknown> = {

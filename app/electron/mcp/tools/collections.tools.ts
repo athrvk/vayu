@@ -92,7 +92,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			if (parentId !== undefined) payload.parentId = parentId;
 			const description = str(args, "description");
 			if (description !== undefined) payload.description = description;
-			const auth = readAuthArg(args);
+			const auth = readAuthArg(args, ctx);
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
 			// Merged against nothing, the way create_environment does it: on a
@@ -172,7 +172,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			const description = str(args, "description");
 			if (description !== undefined) payload.description = description;
 			const scriptEdits = readScriptEdits(args);
-			const auth = readAuthArg(args);
+			const auth = readAuthArg(args, ctx);
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
 			const removals = removalNames(args);

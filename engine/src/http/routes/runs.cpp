@@ -2055,6 +2055,13 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["configuration"] = config_obj;
         }
 
+        // Which collection ran, the snapshot's own identity (#3569): the
+        // top-level `scenario` breakdown exists only once a summary was
+        // stored, which a run the engine did not finish never gets. The same
+        // object the list row carries, so the two cannot name a run
+        // differently.
+        add_scenario (metadata, config);
+
         // The spec this run was planned against (issue #637), echoed from the
         // snapshot the scenario manifest stamped it into. Echoed rather than
         // re-read from the collection: the binding is free to have moved since,
@@ -3020,9 +3027,10 @@ void register_run_routes (RouteContext& ctx) {
      * - type: "design" | "load" (invalid -> ignored)
      * - status: RunStatus string (invalid -> ignored)
      * - requestId: exact match
-     * - collectionId: exact match against a scenario run's stored
-     *   `scenario.collectionId`. Only a collection run records one, so a design
-     *   or load run never matches; an id nothing ran is an empty page, not an
+     * - collectionId: exact match against a run's stored
+     *   `scenario.collectionId`. A collection run records one, and so does a
+     *   load run driven over a collection (#3544); a single-request design or
+     *   load run never matches. An id nothing ran is an empty page, not an
      *   error.
      * - q: case-insensitive substring over the stored config_snapshot text
      * - baseline: "true" lists only pinned baselines, "false" only unpinned

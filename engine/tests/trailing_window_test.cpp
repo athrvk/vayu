@@ -5,6 +5,7 @@
 
 #include "vayu/core/trailing_window.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -163,28 +164,24 @@ TEST (TrailingWindow, TheMeansCoverOnlyTheSamplesTheWindowGained) {
     EXPECT_DOUBLE_EQ (*reading.avg_queue_wait_ms, 2.0);
 }
 
-// Little's law (#2821): 2,000 ms of latency completed over a 1,000 ms window is
-// two requests in flight on average. Mutation check: divide by the window's
+// #2821, #3567: 2,000 request-ms in flight over a 1,000 ms window is two
+// requests in flight on average. Mutation check: divide by the window's
 // completion count instead of its span and this reads 200.
-TEST (TrailingWindow, MeanInFlightIsTheWindowsLatencyOverItsSpan) {
+TEST (TrailingWindow, MeanInFlightIsTheWindowsTimeInFlightOverItsSpan) {
     TrailingWindow window (WINDOW_MS);
     (void)window.push (counters_at (0, 0));
-    CumulativeCounters later = counters_at (WINDOW_MS, 10);
-    later.latency_samples    = 10;
-    later.latency_sum_ms     = 2000.0;
+    CumulativeCounters later   = counters_at (WINDOW_MS, 10);
+    later.inflight_integral_ms = 2000;
     EXPECT_DOUBLE_EQ (window.push (later).avg_in_flight, 2.0);
 }
 
-// The run's latency so far must not leak into a window that completed nothing.
-TEST (TrailingWindow, AWindowWithNoCompletionReadsZeroInFlight) {
+// The run's time in flight so far must not leak into a window with nothing
+// open: once the integral stops growing, a window later reads zero.
+TEST (TrailingWindow, AWindowWithNothingOpenReadsZeroInFlight) {
     TrailingWindow window (WINDOW_MS);
-    auto busy            = counters_at (0, 100);
-    busy.latency_samples = 100;
-    busy.latency_sum_ms  = 5000.0;
-    (void)window.push (busy);
-    auto busier            = counters_at (WINDOW_MS, 200);
-    busier.latency_samples = 200;
-    busier.latency_sum_ms  = 10000.0;
+    (void)window.push (counters_at (0, 100));
+    auto busier                 = counters_at (WINDOW_MS, 200);
+    busier.inflight_integral_ms = 5000;
     ASSERT_DOUBLE_EQ (window.push (busier).avg_in_flight, 5.0);
 
     WindowReading reading;
@@ -196,9 +193,48 @@ TEST (TrailingWindow, AWindowWithNoCompletionReadsZeroInFlight) {
     EXPECT_DOUBLE_EQ (reading.avg_in_flight, 0.0);
 }
 
-// Ten users with no think time each hold one request at every instant: every
-// 21 ms batch completes ten requests of 21 ms. The window reads 10 within the
-// batch quantisation (a window holds 47 or 48 batches of a 47.6 average).
+// #3567: eight requests open for three whole windows and none completing are
+// eight in flight in every one of them. Mutation check: read the window's
+// completed latency over its span (`latency_ms / span_ms`) and all three read
+// 0, the blind spot this replaced.
+TEST (TrailingWindow, RequestsOpenAcrossWindowsWithNoCompletionReadTheirCount) {
+    constexpr int64_t OPEN = 8;
+    TrailingWindow window (WINDOW_MS);
+    for (int64_t ms = 0; ms <= 3 * WINDOW_MS; ms += TICK_MS) {
+        auto open                 = counters_at (ms, 0);
+        open.inflight_integral_ms = OPEN * ms;
+        const auto reading        = window.push (open);
+        if (ms > 0 && ms % WINDOW_MS == 0) {
+            EXPECT_DOUBLE_EQ (reading.avg_in_flight, static_cast<double> (OPEN))
+            << "at " << ms << " ms";
+        }
+    }
+}
+
+// #3567: one request open from 0 to 2,500 ms is at most one in flight in any
+// window. Mutation check: read the window's completed latency over its span
+// and the window the completion lands in reads 2.5, and every window before it
+// reads 0.
+TEST (TrailingWindow, ARequestLongerThanTheWindowNeverReadsAboveTheOpenCount) {
+    constexpr int64_t LATENCY_MS = 2500;
+    TrailingWindow window (WINDOW_MS);
+    for (int64_t ms = 0; ms <= 4 * WINDOW_MS; ms += TICK_MS) {
+        const bool done         = ms >= LATENCY_MS;
+        auto at                 = counters_at (ms, done ? 1 : 0);
+        at.latency_samples      = done ? 1 : 0;
+        at.latency_sum_ms       = done ? static_cast<double> (LATENCY_MS) : 0.0;
+        at.inflight_integral_ms = std::min (ms, LATENCY_MS);
+        const auto reading      = window.push (at);
+        EXPECT_LE (reading.avg_in_flight, 1.0) << "at " << ms << " ms";
+        if (ms >= TICK_MS && ms <= LATENCY_MS) {
+            EXPECT_DOUBLE_EQ (reading.avg_in_flight, 1.0) << "at " << ms << " ms";
+        }
+    }
+}
+
+// Ten users with no think time each hold one request at every instant, so
+// the integral grows ten request-ms per ms and every window reads 10 exactly,
+// with none of the batch quantisation the completions themselves carry.
 TEST (TrailingWindow, AClosedLoopWithNoThinkTimeReadsItsUserCount) {
     constexpr size_t USERS     = 10;
     constexpr int64_t BATCH_MS = 21;
@@ -208,9 +244,10 @@ TEST (TrailingWindow, AClosedLoopWithNoThinkTimeReadsItsUserCount) {
         CumulativeCounters at = counters_at (ms, batches * USERS);
         at.latency_samples    = batches * USERS;
         at.latency_sum_ms = static_cast<double> (at.latency_samples * BATCH_MS);
-        const auto reading = window.push (at);
+        at.inflight_integral_ms = static_cast<int64_t> (USERS) * ms;
+        const auto reading      = window.push (at);
         if (ms >= WINDOW_MS) {
-            EXPECT_NEAR (reading.avg_in_flight, static_cast<double> (USERS), 0.25)
+            EXPECT_DOUBLE_EQ (reading.avg_in_flight, static_cast<double> (USERS))
             << "at " << ms << " ms";
         }
     }

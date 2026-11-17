@@ -14,17 +14,24 @@
  */
 
 #include <chrono>
+#include <cstdint>
 
 #include "vayu/core/run_manager.hpp"
 
 namespace vayu::tests {
 
+/// The steady clock in the milliseconds the engine stamps load start and
+/// open requests with (`MetricsCollector::open_request`).
+inline int64_t steady_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 /// No metric tick is stored before load start, so a test that drives
 /// `collect_metrics` on a context no worker stamped must stamp it first.
 inline void stamp_load_start (vayu::core::RunContext& context) {
-    context.load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now ().time_since_epoch ())
-                                   .count ();
+    context.load_start_steady_ms = steady_now_ms ();
 }
 
 } // namespace vayu::tests

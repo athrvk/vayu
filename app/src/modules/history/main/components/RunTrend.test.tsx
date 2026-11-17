@@ -25,6 +25,7 @@ import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
 import { apiService } from "@/services/api";
 import type { Run } from "@/types";
+import type { RunIdentity } from "@/queries";
 
 interface ChartProps {
 	ariaLabel: string;
@@ -86,8 +87,8 @@ function answerWith(list: Run[]) {
 	});
 }
 
-function renderTrend(requestId: string | null = "req-1", openRunId = "run-2") {
-	return render(withQueryClient(<RunTrend requestId={requestId} openRunId={openRunId} />));
+function renderTrend(identity: RunIdentity | null = { requestId: "req-1" }, openRunId = "run-2") {
+	return render(withQueryClient(<RunTrend identity={identity} openRunId={openRunId} />));
 }
 
 beforeEach(() => {
@@ -128,6 +129,18 @@ describe("RunTrend", () => {
 		);
 	});
 
+	it("trends a collection's runs, named as a collection's", async () => {
+		answerWith(runs(3));
+		renderTrend({ collectionId: "col-1" });
+
+		await waitFor(() => expect(charts).toHaveLength(3));
+		expect(mocked.listRuns).toHaveBeenCalledWith(
+			expect.objectContaining({ collectionId: "col-1", type: "load" })
+		);
+		expect(mocked.listRuns.mock.calls[0][0]).not.toHaveProperty("requestId");
+		expect(screen.getByText("This collection across runs")).toBeInTheDocument();
+	});
+
 	it("draws nothing for a request with a single run", async () => {
 		answerWith(runs(1));
 		const { container } = renderTrend();
@@ -140,7 +153,7 @@ describe("RunTrend", () => {
 		expect(screen.queryByText("This request across runs")).toBeNull();
 	});
 
-	it("draws nothing, and asks nothing, for a run with no requestId", () => {
+	it("draws nothing, and asks nothing, for a run with no identity", () => {
 		const { container } = renderTrend(null);
 
 		expect(container.innerHTML).toBe("");
@@ -176,7 +189,7 @@ describe("RunTrend", () => {
 
 	it("marks the open run on its own position", async () => {
 		answerWith(runs(4));
-		renderTrend("req-1", "run-3");
+		renderTrend({ requestId: "req-1" }, "run-3");
 
 		await waitFor(() => expect(charts).toHaveLength(3));
 		for (const chart of charts) {
@@ -215,7 +228,7 @@ describe("RunTrend", () => {
 
 	it("says so when the open run is older than the plotted window", async () => {
 		answerWith(runs(25));
-		renderTrend("req-1", "run-1");
+		renderTrend({ requestId: "req-1" }, "run-1");
 
 		await screen.findByText(/This run is not among them/);
 	});
