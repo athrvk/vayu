@@ -190,7 +190,7 @@ export class McpHttpServer {
 			);
 			return;
 		}
-		// An adapter per request, so that a stop can drop this one's connection.
+		// An adapter per request: `serve` needs this exchange's response, which a stop destroys.
 		const serveMcp = toNodeHandler({
 			fetch: (request, options) => this.serve(request, options, res),
 		});
