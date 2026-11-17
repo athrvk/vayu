@@ -12013,7 +12013,8 @@ samples.
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
 in-memory tick topic. The engine produces one wire-ready `metrics` tick per
 `liveTickIntervalMs` (default 100ms) into a per-run buffer; this endpoint
-replays that buffer **from offset 0** and then tails new ticks until the run
+replays that buffer **from offset 0** (or, for a reconnecting client that names
+a resume point, from the frame after it) and then tails new ticks until the run
 finishes, ending with a `complete` event. Because the topic is retained for
 `liveRetentionMs` (default 60000ms) after completion, a client that connects
 late - even after a sub-second run has already finished - still receives the
@@ -12235,6 +12236,17 @@ browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
 needed), and the stream resumes from `Last-Event-ID + 1`.
 
+**`?lastEventId=<id>` is the same resume point as a query parameter**, for a
+client that reconnects by hand: `EventSource` sets `Last-Event-ID` only on its
+*own* retry and exposes no way to set a header on a fresh connection. The
+header wins when both are given. Frame ids start at **0**, so `lastEventId=0`
+means "I saw frame 0" rather than "from the start"; absence is what means the
+start. A value that is not a non-negative frame id is refused with `400` and
+code `invalid_last_event_id` rather than resumed from the start, which would
+replay every retained tick to a client that already holds them - the
+[change feed](#get-changes) and [inbox](#get-inboxinboxidlive) streams'
+rule.
+
 **Replay window.** The in-memory tick topic is a bounded ring, so a long run's
 memory does not grow with its duration. Its span is `liveReplayWindowMs`
 (default 300000, i.e. 5 minutes) and the tick count is derived from that window
@@ -12267,13 +12279,14 @@ requests are cancelled and counted as `cancelled`, so the last live numbers
 agree with the stored report rather than freezing at the moment of the stop
 request.
 
-**Application-level reconnect**: clients that close the EventSource themselves
-(e.g. after observing `readyState === CLOSED`) should NOT open a new connection
-and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
-API, so a fresh connect would request `from=0` and replay the entire retained
-topic, duplicating ticks already shown. The canonical recovery is to converge
-on the stored report via `GET /runs/:runId/report` (the same path used at normal
-run end). This is the pattern the bundled app uses.
+**Application-level reconnect**: a client that closes the EventSource itself
+(e.g. after observing `readyState === CLOSED`) and opens a new connection
+resumes with `?lastEventId=<id of the last frame it held>`, because a fresh
+`EventSource` sends no `Last-Event-ID` and would otherwise start at offset 0
+and replay the entire retained topic, duplicating ticks already shown. A
+connection that names no resume point is the first attach and does start at 0.
+The other recovery is to converge on the stored report via
+`GET /runs/:runId/report` (the same path used at normal run end).
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).

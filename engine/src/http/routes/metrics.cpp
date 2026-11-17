@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "vayu/core/status_seconds.hpp"
+#include "vayu/http/inbox.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
@@ -591,16 +592,20 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
         return;
     }
 
-    // Honor Last-Event-ID for reconnect resume (offset = last seen + 1).
-    size_t start_offset = 0;
-    if (req.has_header ("Last-Event-ID")) {
-        try {
-            start_offset =
-            std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
-        } catch (...) {
-            start_offset = 0;
-        }
+    const auto resume_point = parse_live_resume_point (
+    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"), "frame");
+    if (!resume_point) {
+        const auto& refusal = resume_point.error ();
+        send_error (res, refusal.http_status, refusal.message, refusal.code);
+        return;
     }
+    // Frame ids start at 0, so "0" is a real resume point and cannot double as
+    // "absent". Presence decides, and a resume starts at the frame *after* the
+    // last one seen.
+    const bool resuming = !req.get_header_value ("Last-Event-ID").empty () ||
+    !req.get_param_value ("lastEventId").empty ();
+    const auto start_offset =
+    resuming ? static_cast<size_t> (*resume_point) + 1 : static_cast<size_t> (0);
 
     res.set_content_provider ("text/event-stream",
     [&ctx, run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
@@ -651,6 +656,9 @@ void register_metrics_routes (RouteContext& ctx) {
     /**
      * GET /runs/:runId/live
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
+     * `id:` is the frame's absolute offset, so `?lastEventId=` / `Last-Event-ID`
+     * resumes at the frame after the last one seen; an unreadable value is a
+     * 400, never a replay from the start.
      */
     ctx.server.Get (R"(/runs/([^/]+)/live)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

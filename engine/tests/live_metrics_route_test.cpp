@@ -14,15 +14,19 @@
  * run's terminal status, so a stream that ended on `closed` sent `complete`
  * with no status and the app reported a lost stream. These drive the extracted
  * poll (`live_metrics_step`) with an injected clock: no DataSink, no threads.
- * The same file holds the 404 body (`live_metrics_unavailable_response`, #2775).
+ * The same file holds the 404 body (`live_metrics_unavailable_response`, #2775)
+ * and, over a real server, where a resumed stream starts (#3571).
  */
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 
+#include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
@@ -31,6 +35,8 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/http/sse_stream.hpp"
 
 namespace {
 
@@ -174,6 +180,143 @@ TEST_F (LiveMetricsRouteTest, AnUnknownRunIsRunNotFoundWithTheErrorTextUnchanged
     EXPECT_EQ (body.value ("error", ""), "Run not found or expired");
     EXPECT_EQ (body.value ("hint", ""),
     "Use /runs/run_never_existed/report for the stored report");
+}
+
+// ---------------------------------------------------------------------------
+// Resuming a stream (#3571)
+// ---------------------------------------------------------------------------
+
+/// `GET /runs/:id/live` registered on a real server with the whole RouteContext
+/// its handler reads through, over a run whose four frames (ids 0-3) are
+/// already published and which has finished and is retained.
+class LiveMetricsResumeTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_live_metrics_resume.db";
+    static constexpr const char* RUN_ID  = "run_resume";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+
+        context_ = std::make_shared<vayu::core::RunContext> (RUN_ID, nlohmann::json{});
+        for (int i = 0; i < 4; ++i) {
+            context_->append_event ("metrics", "{}");
+        }
+        context_->closed.store (true, std::memory_order_release);
+        // Retained, as the worker leaves it: settled, so every stream ends on
+        // its own, and no longer active, so the manager's destructor does not
+        // wait five seconds for a run that will never finish.
+        run_manager_.register_run (RUN_ID, context_);
+        run_manager_.retain_run (RUN_ID);
+
+        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr, authorize_manager_,
+        cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_, sse_manager_,
+        run_summary_cache_, vayu::http::no_grant_secret (), server_stopping_ });
+        vayu::http::routes::register_metrics_routes (*ctx_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        ctx_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    httplib::Result get_live (const std::string& query = "",
+    const httplib::Headers& headers                    = {}) const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        return client.Get ("/runs/" + std::string (RUN_ID) + "/live" + query, headers);
+    }
+
+    static bool has_frame (const httplib::Result& response, int id) {
+        return response->body.find ("id: " + std::to_string (id) + "\n") != std::string::npos;
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    std::shared_ptr<vayu::core::RunContext> context_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::SseStreamManager sse_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
+    /// What `Server::stop()` sets (#2683); this fixture has no `Server`.
+    std::atomic<bool> server_stopping_{ false };
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+};
+
+TEST_F (LiveMetricsResumeTest, WithoutAResumePointTheStreamReplaysEveryRetainedFrame) {
+    const auto response = get_live ();
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 200);
+    for (int id = 0; id < 4; ++id) {
+        EXPECT_TRUE (has_frame (response, id)) << "frame " << id << " was not replayed";
+    }
+}
+
+TEST_F (LiveMetricsResumeTest, TheQueryParameterResumesAtTheFrameAfterTheLastSeen) {
+    const auto response = get_live ("?lastEventId=1");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 200);
+    EXPECT_FALSE (has_frame (response, 0));
+    EXPECT_FALSE (has_frame (response, 1))
+    << "re-sent a frame the client already holds";
+    EXPECT_TRUE (has_frame (response, 2));
+    EXPECT_TRUE (has_frame (response, 3));
+}
+
+// Frame ids start at 0, so "0" is a real resume point rather than a stand-in
+// for absent: resuming from it skips exactly the first frame.
+TEST_F (LiveMetricsResumeTest, ZeroIsARealResumePoint) {
+    const auto from_param  = get_live ("?lastEventId=0");
+    const auto from_header = get_live ("", { { "Last-Event-ID", "0" } });
+    for (const auto* response : { &from_param, &from_header }) {
+        ASSERT_TRUE (*response);
+        EXPECT_EQ ((*response)->status, 200);
+        EXPECT_FALSE (has_frame (*response, 0))
+        << "replayed the frame the client held";
+        EXPECT_TRUE (has_frame (*response, 1));
+    }
+}
+
+TEST_F (LiveMetricsResumeTest, TheHeaderWinsOverTheQueryParameter) {
+    const auto response = get_live ("?lastEventId=0", { { "Last-Event-ID", "2" } });
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 200);
+    EXPECT_FALSE (has_frame (response, 2))
+    << "the parameter was read instead of the header";
+    EXPECT_TRUE (has_frame (response, 3));
+}
+
+TEST_F (LiveMetricsResumeTest, AnUnreadableResumePointIs400RatherThanAReplay) {
+    for (const char* bad : { "abc", "-1", "1.5", "99999999999999999999" }) {
+        const auto from_param = get_live (std::string ("?lastEventId=") + bad);
+        ASSERT_TRUE (from_param) << bad;
+        EXPECT_EQ (from_param->status, 400) << bad;
+        EXPECT_NE (from_param->body.find ("invalid_last_event_id"), std::string::npos) << bad;
+
+        const auto from_header = get_live ("", { { "Last-Event-ID", bad } });
+        ASSERT_TRUE (from_header) << bad;
+        EXPECT_EQ (from_header->status, 400) << bad;
+    }
+    const auto response = get_live ("?lastEventId=abc");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (nlohmann::json::parse (response->body).at ("error").at ("message"),
+    "lastEventId must be a non-negative frame id");
 }
 
 } // namespace
