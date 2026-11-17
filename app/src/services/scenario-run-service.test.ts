@@ -437,7 +437,9 @@ describe("ScenarioRunService", () => {
 			deliverStep(1);
 			mockWakeLockRelease.mockClear();
 
-			scenarioRunService.handleEngineStopped();
+			// The answer `useEngineLifecycle` records beside the crash, for the
+			// engine-lost notification's sentence.
+			expect(scenarioRunService.handleEngineStopped()).toBe(true);
 
 			expect(sseClient.disconnect).toHaveBeenCalledTimes(1);
 			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
@@ -459,7 +461,7 @@ describe("ScenarioRunService", () => {
 		});
 
 		it("does nothing without a run", () => {
-			scenarioRunService.handleEngineStopped();
+			expect(scenarioRunService.handleEngineStopped()).toBe(false);
 
 			expect(sseClient.disconnect).not.toHaveBeenCalled();
 			expect(mockEngineStopped).not.toHaveBeenCalled();

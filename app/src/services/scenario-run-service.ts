@@ -282,11 +282,12 @@ class ScenarioRunService {
 	 * notification is the one the user gets, and the latch keeps it the only
 	 * one. The stream is closed, because the `EventSource` would otherwise retry
 	 * the dead port every few seconds for the rest of the session, and no
-	 * stored record is fetched: there is no engine to answer.
+	 * stored record is fetched: there is no engine to answer. Returns whether
+	 * there was a run to end.
 	 */
-	handleEngineStopped(): void {
+	handleEngineStopped(): boolean {
 		const runId = this.activeRunId;
-		if (!runId) return;
+		if (!runId) return false;
 		this.notifiedRunId = runId;
 		this.failProgress(runId);
 		// The steps that did arrive go on screen under the notice, as on a stream error.
@@ -294,6 +295,7 @@ class ScenarioRunService {
 		this.releaseRun(runId);
 		sseClient.disconnect();
 		useScenarioRunStore.getState().engineStopped(runId, ENGINE_STOPPED_MESSAGE);
+		return true;
 	}
 
 	/*

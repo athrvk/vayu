@@ -18,7 +18,12 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";
 import { queryKeys } from "@/queries/keys";
-import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
+import {
+	useDashboardStore,
+	useClientSettingsStore,
+	deriveRunProgress,
+	isDashboardRunLive,
+} from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
@@ -307,8 +312,11 @@ class LoadTestService {
 	 * superseded stream left it live with nothing here attached, and its
 	 * engine is gone all the same. Its stored report, once an engine is back,
 	 * is what says how it ended (`setFinalReport`).
+	 *
+	 * Returns whether the dashboard's run was live, so the engine-lost
+	 * notification can say a run ended with the engine.
 	 */
-	handleEngineStopped(): void {
+	handleEngineStopped(): boolean {
 		const runId = this.activeRunId;
 		if (runId) {
 			this.notifiedRunId = runId;
@@ -316,8 +324,11 @@ class LoadTestService {
 			this.releaseRun(runId);
 			sseClient.disconnect();
 		}
-		const { currentRunId, engineStopped } = useDashboardStore.getState();
-		if (currentRunId) engineStopped(currentRunId);
+		const { currentRunId, phase, engineStopped } = useDashboardStore.getState();
+		if (!currentRunId) return false;
+		const wasLive = isDashboardRunLive(phase);
+		engineStopped(currentRunId);
+		return wasLive;
 	}
 
 	/**

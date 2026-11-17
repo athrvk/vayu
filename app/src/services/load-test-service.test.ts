@@ -16,14 +16,22 @@ const mockEngineStopped = vi.fn();
 // Which run the dashboard is showing *right now*. Every writer names its run
 // and the real store drops one for a run it is not holding
 // (`dashboard-store.test.ts`), so what this suite pins is the run named.
-const dashboard = { currentRunId: null as string | null };
+const dashboard = {
+	currentRunId: null as string | null,
+	phase: { phase: "streaming" } as { phase: string },
+};
 // The user's standing answer to "keep this machine awake" (#1357), which the
 // service reads at start. Off is the shipped default, so it is the default here.
 const settings = { keepAwakeDuringRuns: false };
-vi.mock("@/stores", () => ({
+vi.mock("@/stores", async () => ({
+	// The real predicate: what counts as a live run is not this suite's to restate.
+	isDashboardRunLive: (
+		await vi.importActual<typeof import("@/stores/dashboard-store")>("@/stores/dashboard-store")
+	).isDashboardRunLive,
 	useDashboardStore: {
 		getState: () => ({
 			currentRunId: dashboard.currentRunId,
+			phase: dashboard.phase,
 			loadTestConfig: null,
 			streamOpened: mockStreamOpened,
 			streamLost: mockStreamLost,
@@ -109,6 +117,7 @@ describe("LoadTestService", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		dashboard.currentRunId = null;
+		dashboard.phase = { phase: "streaming" };
 	});
 	afterEach(() => loadTestService.stopMonitoring());
 
@@ -647,8 +656,26 @@ describe("LoadTestService", () => {
 			expect(mockWakeLockRelease).not.toHaveBeenCalled();
 		});
 
+		// The answer `useEngineLifecycle` records beside the crash, for the
+		// engine-lost notification's sentence. Mutation check: return `true`
+		// unconditionally and the settled-run case reddens; return `false` and
+		// the live cases do.
+		it.each([
+			[{ phase: "streaming" }, true],
+			[{ phase: "streamLost" }, true],
+			[{ phase: "awaitingReport", stopped: false }, true],
+			[{ phase: "awaitingReport", stopped: true }, false],
+			[{ phase: "reportError" }, false],
+			[{ phase: "finished" }, false],
+		])("answers whether the run was live: %j is %s", (phase, live) => {
+			dashboard.currentRunId = "run_crash_5";
+			dashboard.phase = phase;
+
+			expect(loadTestService.handleEngineStopped()).toBe(live);
+		});
+
 		it("does nothing without a run", () => {
-			loadTestService.handleEngineStopped();
+			expect(loadTestService.handleEngineStopped()).toBe(false);
 
 			expect(mockEngineStopped).not.toHaveBeenCalled();
 			expect(sseClient.disconnect).not.toHaveBeenCalled();

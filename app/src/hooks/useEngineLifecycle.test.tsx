@@ -101,9 +101,9 @@ function mountLifecycle(client = new QueryClient()) {
 }
 
 beforeEach(() => {
-	useEngineStore.setState({ engineCrash: null, engineStartWindow: 1000 });
-	mockLoadEngineStopped.mockClear();
-	mockScenarioEngineStopped.mockClear();
+	useEngineStore.setState({ engineCrash: null, crashEndedRuns: [], engineStartWindow: 1000 });
+	mockLoadEngineStopped.mockReset();
+	mockScenarioEngineStopped.mockReset();
 });
 
 afterEach(() => {
@@ -173,6 +173,62 @@ describe("useEngineLifecycle", () => {
 
 		expect(mockLoadEngineStopped).toHaveBeenCalledTimes(1);
 		expect(mockScenarioEngineStopped).toHaveBeenCalledTimes(1);
+	});
+
+	/*
+	 * Which runs the crash ended is recorded with the crash, for the engine-lost
+	 * notification's sentence. Mutation check: write the list without the
+	 * services' answers (always `[]`, or always both) and the first two cases
+	 * redden; leave the list in place for `ready` and the last one does.
+	 */
+	it.each([
+		[true, false, ["load"]],
+		[false, true, ["collection"]],
+		[true, true, ["load", "collection"]],
+		[false, false, []],
+	] as const)(
+		"records the runs the crash ended (load %s, collection %s)",
+		async (load, collection, ended) => {
+			mockLoadEngineStopped.mockReturnValue(load);
+			mockScenarioEngineStopped.mockReturnValue(collection);
+			const bridge = stubBridge();
+			mountLifecycle();
+			await bridge.answerSnapshot({ kind: "ready" });
+
+			bridge.push(CRASHED);
+
+			expect(useEngineStore.getState().crashEndedRuns).toEqual(ended);
+		}
+	);
+
+	it("forgets the ended runs when the engine is up again, and on a later crash that ended none", async () => {
+		mockLoadEngineStopped.mockReturnValueOnce(true);
+		const bridge = stubBridge();
+		mountLifecycle();
+		await bridge.answerSnapshot({ kind: "ready" });
+		bridge.push(CRASHED);
+		expect(useEngineStore.getState().crashEndedRuns).toEqual(["load"]);
+
+		bridge.push({ kind: "ready" });
+		expect(useEngineStore.getState().crashEndedRuns).toEqual([]);
+
+		mockLoadEngineStopped.mockReturnValueOnce(true);
+		bridge.push(CRASHED);
+		mockLoadEngineStopped.mockReturnValueOnce(false);
+		bridge.push(CRASHED);
+		expect(useEngineStore.getState().crashEndedRuns).toEqual([]);
+	});
+
+	it("keeps the ended runs through a restart's transient states", async () => {
+		mockLoadEngineStopped.mockReturnValue(true);
+		const bridge = stubBridge();
+		mountLifecycle();
+		await bridge.answerSnapshot({ kind: "ready" });
+		bridge.push(CRASHED);
+
+		bridge.push({ kind: "spawning" });
+
+		expect(useEngineStore.getState().crashEndedRuns).toEqual(["load"]);
 	});
 
 	it.each(["ready", "spawning", "stopped", "stopping", "slow", "idle"] as const)(

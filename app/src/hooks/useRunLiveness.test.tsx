@@ -12,7 +12,11 @@
  * Each source `useRunLiveness` joins, alone, and that it follows the stores
  * (#3351). How the stored status and the streams combine is `isRunLive`'s
  * table in `lib/run-status.test.ts`; this pins which store state counts as
- * "a stream says this run is live".
+ * "a stream says this run is live", and that a run the engine's process ended
+ * under (#3605) is never live, whatever status the cache last read.
+ *
+ * Mutation check: drop either engine-stopped read in the hook and its row of
+ * the "whatever the cached status says" case reddens.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,10 +34,28 @@ function liveness(status?: string, runId: string | null = RUN): boolean {
 
 afterEach(() => {
 	useDashboardStore.setState({ currentRunId: null, phase: { phase: "idle" } });
-	useScenarioRunStore.setState({ runId: null, isStreaming: false });
+	useScenarioRunStore.setState({ runId: null, isStreaming: false, endedByEngineStop: false });
 });
 
 describe("useRunLiveness", () => {
+	// Stored `running` from an engine that no longer exists: the cache's last word.
+	const STOPPED_WITH_ENGINE: ReadonlyArray<{ name: string; arrange: () => void }> = [
+		{
+			name: "the dashboard's run was ended by the engine stopping",
+			arrange: () => {
+				useDashboardStore.getState().startRun(RUN);
+				useDashboardStore.getState().engineStopped(RUN);
+			},
+		},
+		{
+			name: "a collection run was ended by the engine stopping",
+			arrange: () => {
+				useScenarioRunStore.getState().startRun(RUN);
+				useScenarioRunStore.getState().engineStopped(RUN, "engine gone");
+			},
+		},
+	];
+
 	const SOURCES: ReadonlyArray<{ name: string; arrange: () => void; live: boolean }> = [
 		{ name: "nothing holds the run", arrange: () => {}, live: false },
 		{
@@ -94,6 +116,21 @@ describe("useRunLiveness", () => {
 	it("is live from a stored in-progress status with no stream at all", () => {
 		expect(liveness("running")).toBe(true);
 		expect(liveness("pending")).toBe(true);
+	});
+
+	it.each(STOPPED_WITH_ENGINE)(
+		"is not live, whatever the cached status says, when $name",
+		({ arrange }) => {
+			arrange();
+			expect(liveness("running")).toBe(false);
+			expect(liveness("pending")).toBe(false);
+			expect(liveness(undefined)).toBe(false);
+		}
+	);
+
+	it.each(STOPPED_WITH_ENGINE)("leaves another run alone when $name", ({ arrange }) => {
+		arrange();
+		expect(liveness("running", "run_other")).toBe(true);
 	});
 
 	it("is not live once the stored status is terminal, whatever a stream still says", () => {
