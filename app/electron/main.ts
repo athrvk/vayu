@@ -1300,8 +1300,8 @@ function setupIpcHandlers() {
 	});
 
 	// One-click connect: register the Vayu endpoint with a client via its own CLI
-	// (`claude mcp add`, `code --add-mcp`). Returns cli-not-found so the renderer
-	// can fall back to the copy snippet.
+	// (`claude mcp get`/`remove`/`add`, `code --add-mcp`). Returns cli-not-found
+	// so the renderer can fall back to the copy snippet.
 	ipcMain.handle("mcp:connectClient", async (_event, client: unknown) => {
 		if (client !== "claude" && client !== "vscode") {
 			return { ok: false, reason: "unsupported", message: "Unsupported client" };

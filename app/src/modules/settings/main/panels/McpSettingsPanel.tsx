@@ -504,7 +504,9 @@ export default function McpSettingsPanel() {
 			setConnecting(client);
 			try {
 				const res = await window.electronAPI.connectMcpClient(client);
-				if (res.ok) {
+				if (res.ok && res.alreadyConnected) {
+					showToast(`Vayu is already connected to ${CLIENT_LABEL[client]}.`, "info");
+				} else if (res.ok) {
 					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
 				} else if (res.reason === "cli-not-found") {
 					showToast(

@@ -54,6 +54,14 @@ shim is run through `cmd.exe`, which Node has required since 20.12. If the CLI
 is not installed, or the run fails for any reason, Connect says so and the
 snippet below it is the manual path.
 
+Connect is safe to click again. For Claude Code it first runs `claude mcp get
+vayu` and reads only whether the exact endpoint URL appears in the output: if it
+does, nothing is run and the panel says Vayu is already connected. If `vayu` is
+registered with a different URL (the engine moved ports), the old entry is
+removed at user scope and the new one added; should that add fail, the error
+says the earlier registration was removed. If `get` fails, Connect adds as
+usual. VS Code has no lookup command, so its Connect always runs `--add-mcp`.
+
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
 claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp
@@ -3166,7 +3174,7 @@ The IPC surface:
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 

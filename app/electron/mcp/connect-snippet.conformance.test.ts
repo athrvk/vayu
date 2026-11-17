@@ -37,7 +37,7 @@ function snippetArgs(source: string): string[] {
 
 /** The argv `connectClient` hands the claude CLI, with the `url` variable as a placeholder. */
 function connectArgs(source: string): string[] {
-	const match = /\[\s*("mcp",[^\]]*)\]/.exec(source);
+	const match = /\[\s*("mcp",\s*"add",[^\]]*)\]/.exec(source);
 	if (!match) return [];
 	return match[1].split(",").map((token) => {
 		const trimmed = token.trim();
