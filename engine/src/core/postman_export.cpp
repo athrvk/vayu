@@ -474,27 +474,6 @@ std::pair<json, json> split_params (const json& params) {
     return { std::move (query), std::move (path) };
 }
 
-/// The pairs of @p raw's query as the engine sends them: cut at the first `#`,
-/// then at the first `?`, with a `{{variable}}` holding a separator kept whole.
-std::vector<QueryPair> url_query_pairs (const std::string& raw) {
-    auto [rest, held]               = protect_variables (raw);
-    rest                            = rest.substr (0, rest.find ('#'));
-    const std::size_t question_mark = rest.find ('?');
-    if (question_mark == std::string::npos) {
-        return {};
-    }
-    // Placeholders restore in document order, and the head and path hold the
-    // first ones.
-    auto next = static_cast<std::size_t> (std::count (rest.begin (),
-    rest.begin () + static_cast<std::ptrdiff_t> (question_mark), PLACEHOLDER));
-    std::vector<QueryPair> pairs = split_query_pairs (rest.substr (question_mark + 1));
-    for (QueryPair& pair : pairs) {
-        pair.key   = restore (pair.key, held, next);
-        pair.value = restore (pair.value, held, next);
-    }
-    return pairs;
-}
-
 /// Whether @p row, joined into a URL, writes @p pair. The join depends on where
 /// the request came from (`QueryEncoding`: Postman's rule, `encodeURIComponent`
 /// for an OpenAPI, Insomnia or JMeter import, as typed under
@@ -547,13 +526,13 @@ json postman_url_only_row (const QueryPair& pair) {
 /// The url object with its query, and the path rows as `url.variable[]` -
 /// after everything else, where Postman writes it.
 ///
-/// `url` is what the engine sends and Params rows are display state (they
-/// also hold the turned-off rows), and Postman reads `query[]` over `raw` when
-/// both exist. So `query[]` is every stored row in stored order, then the
+/// `url` is what the engine sends and Params rows mirror it (a URL-only write
+/// derives them, and they also hold the turned-off rows), and Postman reads
+/// `query[]` over `raw` when both exist. So `query[]` is every stored row in stored order, then the
 /// pairs of `raw`'s query that no enabled row states, in URL order: a request
-/// built from the URL alone (`POST /requests` with no `params`, every MCP
-/// request) keeps its query, and one the app built, whose rows already state
-/// every pair, gains nothing.
+/// whose rows do not state its URL (stored before a URL-only write derived
+/// them, issue #3551, or written with `params: []`) keeps its query, and one
+/// whose rows already state every pair gains nothing.
 json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
     auto [query_rows, path_rows] = split_params (params);
     const std::string raw = blank_url_credentials (raw_url, query_rows, walk);

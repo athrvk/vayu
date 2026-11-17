@@ -2119,7 +2119,8 @@ the null-vs-absent rule.
   "name": "Get Users",               // Required, no default (null is a 400)
   "method": "GET",                   // Required: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
   "url": "{{baseUrl}}/users",        // Required, no default (null is a 400)
-  "params": [],                      // Optional, array of {key, value, enabled, in?} - see below
+  "params": [],                      // Optional, array of {key, value, enabled, in?, valueless?};
+                                      // derived from `url`'s query when absent - see below
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
@@ -2151,19 +2152,41 @@ the null-vs-absent rule.
 }
 ```
 
-**A query row in `params` is builder display state, not the query the engine
-sends.** The engine stores it and hands it back verbatim; nothing in the
-request-composition path reads a query row. `url` is the wire truth, so a query
-parameter that must reach the wire belongs **in `url`** - the app's Params table
-keeps the two in step by rewriting `url` on every edit, and stores disabled rows
-in `params` only. A raw API, MCP or import caller that puts the query only in
-`params` stores a request that sends none of it (issue #590). The
-[Postman export](#post-exportpostman) writes the query the URL states as
-`url.query[]` even when `params` holds no row for it (issue #3242); a pair in
-`params` only is written there too, but it is still not sent. The other
-direction is the app's to bridge: a request stored with its query only in `url`
-(`params` absent or `[]`) opens in the Params table with those pairs as rows,
-merged with any stored rows, and is not marked unsaved by it (issue #3491).
+**A query row in `params` describes the query in `url`; `url` is the wire
+truth.** Nothing in the request-composition path reads a query row, so a query
+parameter that must reach the wire belongs **in `url`**: a caller that puts the
+query only in `params` stores a request that sends none of it (issue #590).
+The write keeps the rows in step with the URL (issue #3551). A `POST` or `PUT`
+that states `url` and **no** `params` has its query rows reconciled with the
+URL's query, the rule the app's Params table follows on every URL keystroke
+(`mergeParamsFromUrl`):
+
+- each enabled row claims the first unclaimed pair whose key its own key
+  writes (under any of the query joins, so an OpenAPI import's `a b` claims
+  `a%20b`), rows in stored order, and the merged rows follow the URL's pair
+  order;
+- a claimed row keeps every other member (`description`, `source`, ...); one
+  that no longer writes its pair takes the pair's key and value, and
+  `valueless` follows the pair (`true` for a bare `key` with no `=`);
+- a pair no row claims becomes a fresh `{key, value, enabled: true}` row
+  (plus `valueless: true` for a bare `key`), and an enabled row the URL no
+  longer carries is dropped;
+- a disabled row is kept, after the nearest enabled row before it that the URL
+  still carries, or first when there is none; path rows are left untouched.
+
+Rows that already state the URL's query are left byte for byte, so a host or
+path edit sent as `url` alone rewrites nothing. A body that states `params`
+stores them as sent, whatever `url` says, and a body that states neither keeps
+the stored rows. `POST /import/apply` and `POST /specs/sync` reach the same
+applier: a sync update that applies a request's `url` without its `params`
+reconciles the kept rows with the new URL's query. So a request created from a URL alone (every MCP request)
+reads back with one row per query pair, and the
+[OpenAPI export](#post-specsexport), the [spec diff](#post-specsdiff) and the
+[Postman export](#post-exportpostman) see its query. Rows stored before the
+rule are not rewritten until their next URL-only write, so the Postman export
+still writes a URL pair no enabled row states into `url.query[]` (issue
+#3242), and the app still merges a URL-only query into the Params table when
+it opens one, without marking the tab unsaved (issue #3491).
 
 **A path row is the one row composition reads** (issue #1764). A row carrying
 `"in": "path"` is a Postman-style path variable: `key` is the name without its
@@ -3561,7 +3584,10 @@ is neither what the new document produces nor what the **bound** one did - the
 only evidence that a person put it there, and the flag an apply may not overwrite
 silently. `previousUnknown` says the bound document does not declare this
 operation, so no such claim can be made about it at all, and every `userTouched`
-on that request is `false`.
+on that request is `false`. A query typed into the URL is a Params change too:
+the write that stored the URL derived the query rows from it (see
+[`POST /requests`](#post-requests), issue #3551), so `params` is flagged beside
+`url`.
 
 **Response examples are deliberately not compared.** The rule that governs them
 (`origin="import"` is replaced, `origin="user"` survives) only means anything at
@@ -3734,7 +3760,8 @@ paragraphs describe. `full` writes everything the collection holds, into the
 document's own dialect (Swagger 2.0 included): each request's name (as
 `summary`, only where it differs from the name an import would read) and
 description, a parameter for every Params or Headers row the operation does not
-declare (2.0's `type` and `x-example` in a 2.0 document), the body as the media
+declare (a query stated only in the URL included, since the write derives its
+rows, issue #3551; 2.0's `type` and `x-example` in a 2.0 document), the body as the media
 type's `example` (2.0: an `in: body` or `formData` parameter, added only where
 the operation declares none), the auth wherever the operation does not already
 state it (a scheme the document declares with the same credential is reused,
@@ -3813,7 +3840,7 @@ collection's own `baseUrl` variable has a value - written as the single-brace
 `default` - and the bare double-brace token otherwise, since an undeclared
 single-brace variable is invalid OpenAPI. A path segment that is exactly one
 token becomes the OpenAPI `{petId}` it came from, every Params and Headers row
-is declared without a `required` it was never given but carries its toggle
+(a query written only in the URL has its rows, issue #3551) is declared without a `required` it was never given but carries its toggle
 explicitly as `x-vayu-enabled` (neither a value nor its absence says whether a
 row is on), and a body or response is described only where there is a stored
 example to read a shape off - carrying a `description` that says the shape is
@@ -5102,7 +5129,8 @@ variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `file.src` (`file: {}` when no file is chosen); `url.query[]` is every stored
 query row in stored order (a turned-off one `disabled: true`), then the pairs
 of the URL's own query that no enabled row states, in URL order, so a request
-created with its query only in `url` (every MCP request) keeps it - Postman and
+stored with its query only in `url` before the write kept the rows in step (see
+[`POST /requests`](#post-requests), issue #3551) keeps it - Postman and
 Newman read `query[]` over `raw`, and a row matches a pair by key and value (as
 the row is written into the URL), each row accounting for one pair so a repeated
 key is not doubled; `script.pre` /
@@ -9869,9 +9897,11 @@ transfer began *is* timed (see [Latency
 population](#latency-population)), so a run where every request timed out is
 evaluated and its percentiles sit at the timeout. An unevaluated check
 counts toward `failed`: a budget the run could not measure was not met. The
-error rate and the throughput floor have no such gap - `maxErrorRatePct` is
-0/0-safe by request count, and a starved `minThroughputRps` already fails on
-its own - so both are always `evaluated: true`.
+error rate is the same: a run that sent no request has no share to take, so
+`maxErrorRatePct` is `evaluated: false` there (issue #3540) rather than a
+clean 0% that passes any ceiling, including 0. The throughput floor has no
+such gap - a starved `minThroughputRps` already fails on its own - so it is
+always `evaluated: true`.
 
 #### Carried-over budgets (`carriedBudgets`)
 
@@ -10058,7 +10088,16 @@ is made, shared with the scenario load path's own step dispatch.
 `timer.think`'s wait is folded into `maintain_concurrency`'s own
 backpressure (`RunContext::reserve_think_wait`) rather than a blocking sleep
 on a worker thread, so a request-level timer costs no new thread the way the
-scenario load path's per-VU wait does.
+scenario load path's per-VU wait does. That is the closed loop only: every
+mode but `constant_rps`. **A `constant_rps` run skips `timer.think`**
+([#3541](https://github.com/athrvk/vayu/issues/3541)): its pacer sends on a
+schedule, so there is no next request for a wait to hold back, and a
+reservation would only fill `maxInFlight` with slots no request holds,
+dropping arrivals and inflating `peakConcurrency`. The element is tallied
+`skipped` in `summary["elements"]`, nothing is reserved, and the report
+carries one `think_timer_skipped_open_loop` warning. The element is not
+refused, because an inherited timer would then block load-testing every
+request under its collection in the default mode.
 
 **A `script.pre` element's edits reach the wire, and its scope's writes reach
 later `{{tokens}}` in the same submission.** When a run's submissions are
@@ -12032,7 +12071,8 @@ samples.
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
 in-memory tick topic. The engine produces one wire-ready `metrics` tick per
 `liveTickIntervalMs` (default 100ms) into a per-run buffer; this endpoint
-replays that buffer **from offset 0** and then tails new ticks until the run
+replays that buffer **from offset 0** (or, for a reconnecting client that names
+a resume point, from the frame after it) and then tails new ticks until the run
 finishes, ending with a `complete` event. Because the topic is retained for
 `liveRetentionMs` (default 60000ms) after completion, a client that connects
 late - even after a sub-second run has already finished - still receives the
@@ -12213,7 +12253,7 @@ no frame.
 | `sendRate` | Requests dispatched per second, **cumulative**: `requestsSent` over the time since load start |
 | `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
 | `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
-| `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight. The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
+| `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **closed-loop single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight, and a `constant_rps` run reserves none, because it skips the timer ([#3541](#the-requestelements-array-a-single-request-runs-own-step-level-elements)). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `skippedRequests` / `stalledMs` | `constant_rps` only (#2911): requests a stalled pacer owed beyond its 100 ms catch-up window and skipped (never sent, not in `droppedRequests`), and the schedule time they cover in ms, `skippedRequests ÷ targetRps`. `0` on every other mode |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
@@ -12254,6 +12294,17 @@ browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
 needed), and the stream resumes from `Last-Event-ID + 1`.
 
+**`?lastEventId=<id>` is the same resume point as a query parameter**, for a
+client that reconnects by hand: `EventSource` sets `Last-Event-ID` only on its
+*own* retry and exposes no way to set a header on a fresh connection. The
+header wins when both are given. Frame ids start at **0**, so `lastEventId=0`
+means "I saw frame 0" rather than "from the start"; absence is what means the
+start. A value that is not a non-negative frame id is refused with `400` and
+code `invalid_last_event_id` rather than resumed from the start, which would
+replay every retained tick to a client that already holds them - the
+[change feed](#get-changes) and [inbox](#get-inboxinboxidlive) streams'
+rule.
+
 **Replay window.** The in-memory tick topic is a bounded ring, so a long run's
 memory does not grow with its duration. Its span is `liveReplayWindowMs`
 (default 300000, i.e. 5 minutes) and the tick count is derived from that window
@@ -12271,9 +12322,10 @@ older than the retained window resumes from the oldest retained tick rather than
 replaying from 0, which means a client that was disconnected for longer than the
 window sees a gap, not a duplicate flood.
 
-The window also bounds the **replay-from-0** path below, which is the one the
-bundled app actually exercises: a dashboard attaching (or re-attaching) mid-run
-rebuilds its chart from the retained ring. That is why `liveReplayWindowMs` is
+The window also bounds the **replay-from-0** path, which the bundled app takes
+on a first attach: a dashboard attaching mid-run rebuilds its chart from the
+retained ring. Its Reconnect resumes with `?lastEventId=` instead and is sent
+only the frames after the last one it holds. That is why `liveReplayWindowMs` is
 the *same* setting as the app's live-chart window rather than a second one to
 keep aligned - the app's **Settings → Live Dashboard → Chart window** picker
 reads and writes this entry (`GET`/`POST /config`), so the span the engine
@@ -12286,13 +12338,14 @@ requests are cancelled and counted as `cancelled`, so the last live numbers
 agree with the stored report rather than freezing at the moment of the stop
 request.
 
-**Application-level reconnect**: clients that close the EventSource themselves
-(e.g. after observing `readyState === CLOSED`) should NOT open a new connection
-and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
-API, so a fresh connect would request `from=0` and replay the entire retained
-topic, duplicating ticks already shown. The canonical recovery is to converge
-on the stored report via `GET /runs/:runId/report` (the same path used at normal
-run end). This is the pattern the bundled app uses.
+**Application-level reconnect**: a client that closes the EventSource itself
+(e.g. after observing `readyState === CLOSED`) and opens a new connection
+resumes with `?lastEventId=<id of the last frame it held>`, because a fresh
+`EventSource` sends no `Last-Event-ID` and would otherwise start at offset 0
+and replay the entire retained topic, duplicating ticks already shown. A
+connection that names no resume point is the first attach and does start at 0.
+The other recovery is to converge on the stored report via
+`GET /runs/:runId/report` (the same path used at normal run end).
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).
@@ -12585,7 +12638,7 @@ run stored, never from its result rows, which are many and unbounded:
 | Key | Meaning |
 |-----|---------|
 | `rps` | Achieved requests per second over the run, the report's `summary.avgRps` |
-| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
+| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95`; omitted when the run timed no request (`latency.count` 0), not a stored 0 |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertions` | The run's assertion block (#3537), the report's top-level [`assertions`](#get-runsrunidreport) as it serves it, for both load run kinds: `exact` and `sampled` (each `{passed, failed}`), `errored` and `teardownFailed`. Beside `errorRate`, not folded into it |
@@ -13586,6 +13639,14 @@ run's steps carry cookies, so only it can raise this; a step with
 `disableCookies` drops nothing. The outgoing caps (a `Cookie` line over 8190
 bytes, more than 150 jar cookies) are not detected under load: reading libcurl's
 notice needs `CURLOPT_VERBOSE` on every transfer.
+`think_timer_skipped_open_loop` ([#3541](https://github.com/athrvk/vayu/issues/3541))
+is raised once by a `constant_rps` single-request run that sent anything and
+whose `requestElements` hold an enabled `timer.think`: the pacer sends on a
+schedule, so the timer was skipped on every submission (each tallied `skipped`
+under `summary.elements`) and held no slot. Its `message` is "A think timer
+does not apply to a constant-rate run: requests are sent on a schedule, not
+one after another", and it carries `timers` (how many enabled timers were
+skipped). A closed-loop mode runs the timer and raises nothing.
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
@@ -13906,7 +13967,10 @@ instantaneous in-flight gauge (the live stream's `backpressure`), which the load
 generator reads after each batch of submissions in every mode: the closed-loop
 controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`
 and every scenario run, and the open-loop pacer behind `constant_rps` (issue
-#2912). The once-a-second metrics sample is a backstop writer. The peak is the
+#2912). The once-a-second metrics sample is a backstop writer. A
+closed-loop single-request run's gauge counts the slots a `timer.think` wait
+holds too; a `constant_rps` run's counts requests alone, because it skips the
+timer (#3541). The peak is the
 most requests ever in flight at once, so on a run whose users wait in step it
 can read the full user count though most of the run had far fewer in flight;
 `avgInFlight` is the figure that measures utilisation. `avgInFlight` is present

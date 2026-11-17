@@ -49,11 +49,11 @@ struct ThresholdMetric {
     const char* why;   // appended to a rejection, explains the bound
     double (*measured) (const RunSummaryInputs&);
     /// Whether this run's numbers mean anything for this metric. `nullptr`
-    /// means always yes: the error rate and throughput are 0/0-safe already
-    /// (see `measured_error_rate`, and a starved throughput floor already
-    /// fails on its own). A latency percentile needs a real completion to
-    /// mean anything, so it is not evaluated when the run recorded none; a
-    /// stream budget likewise needs the run to have streamed.
+    /// means always yes: only throughput, whose starved floor already fails on
+    /// its own. A latency percentile needs a real completion to mean anything,
+    /// so it is not evaluated when the run recorded none; the error rate needs a
+    /// request to take a share of (0/0 is no rate, not a clean 0%); a stream
+    /// budget likewise needs the run to have streamed.
     bool (*has_data) (const RunSummaryInputs&);
     /// The populations an evaluated check carries onto the report, for a
     /// metric judged from more than one; `nullptr` for every other metric.
@@ -62,13 +62,17 @@ struct ThresholdMetric {
 
 /// Share of this run's requests that were errors, as a percentage - the same
 /// figure `GET /runs/:id/report` prints, by the one definition
-/// (`vayu::count_status_failures`).
+/// (`vayu::count_status_failures`). Read only when `error_rate_data_present`
+/// holds, so the denominator is never zero.
 double measured_error_rate (const RunSummaryInputs& inputs) {
-    if (inputs.total_requests == 0) {
-        return 0.0;
-    }
     const size_t failed = vayu::count_status_failures (inputs.status_codes).failed;
     return static_cast<double> (failed) * 100.0 / static_cast<double> (inputs.total_requests);
+}
+
+/// A run that sent no request has no error rate to judge: the same 0/0 the run
+/// summary leaves `errorRate` out for (`build_load_result_summary`).
+bool error_rate_data_present (const RunSummaryInputs& inputs) {
+    return inputs.total_requests > 0;
 }
 
 constexpr double MAX_LATENCY_BUDGET_MS = 86400000.0; // a day; past it nothing completes
@@ -144,8 +148,9 @@ const std::array<ThresholdMetric, 8>& metrics () {
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p99; },
     [] (const RunSummaryInputs& in) { return in.latency.count > 0; }, nullptr },
-    { "maxErrorRatePct", "Error rate", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
-    "It is a percentage of the run's requests.", measured_error_rate, nullptr, nullptr },
+    { "maxErrorRatePct", "Error rate", Direction::AtMost, 0.0, true, 100.0,
+    "between 0 and 100", "It is a percentage of the run's requests.",
+    measured_error_rate, error_rate_data_present, nullptr },
     { "minThroughputRps", "Throughput", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
     "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
     [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr, nullptr },

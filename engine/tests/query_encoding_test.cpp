@@ -46,7 +46,9 @@ using vayu::core::encode_query_component;
 using vayu::core::ImportParse;
 using vayu::core::parse_import;
 using vayu::core::QueryPart;
+using vayu::core::reconcile_query_rows;
 using vayu::core::split_query_pairs;
+using vayu::core::url_query_pairs;
 
 constexpr const char* POSTMAN_SCHEMA =
 "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
@@ -207,6 +209,117 @@ TEST (SplitQueryPairs, SplitsOnAmpersandThenTheFirstEqualsWithoutDecoding) {
     EXPECT_EQ (pairs[5].value, "v");
     EXPECT_TRUE (split_query_pairs ("").empty ());
     EXPECT_TRUE (split_query_pairs ("&&").empty ());
+}
+
+// A URL's query is what lies between the first `?` and the first `#`, with
+// every `{{...}}` token opaque: `{{a#b}}` opens no fragment and `{{p&q}}`
+// splits no pair, while a `?` in the fragment is never the query.
+// Mutation check: cut `url_query_pairs`' URL without `mask_template_tokens`,
+// or at the last `#`.
+TEST (UrlQueryPairs, ReadsTheQueryBeforeTheFragmentWithTokensKeptWhole) {
+    const auto pairs =
+    url_query_pairs ("{{base.url}}/{{a#b}}?a={{p&q}}&{{k=v}}=1&b#f?z=1");
+    ASSERT_EQ (pairs.size (), 3U);
+    EXPECT_EQ (pairs[0].key, "a");
+    EXPECT_EQ (pairs[0].value, "{{p&q}}");
+    EXPECT_EQ (pairs[1].key, "{{k=v}}");
+    EXPECT_EQ (pairs[1].value, "1");
+    EXPECT_EQ (pairs[2].key, "b");
+    EXPECT_TRUE (pairs[2].valueless);
+    EXPECT_TRUE (url_query_pairs ("https://h/x#f?z=1").empty ());
+    EXPECT_TRUE (url_query_pairs ("https://h/{{a?b}}").empty ());
+    EXPECT_TRUE (url_query_pairs ("https://h/x?").empty ());
+}
+
+json row_of (const std::string& key, const std::string& value, bool enabled = true) {
+    return json{ { "key", key }, { "value", value }, { "enabled", enabled } };
+}
+
+// A URL with no rows (`POST /requests` with no `params`) states one row per
+// pair, in URL order: a repeated key twice, an empty value as `""`, a bare
+// key `valueless`, a variable as written, and nothing from the fragment.
+// Mutation check: drop the `valueless` member from `fresh_row`, or read the
+// pairs with `split_query_pairs` on everything after the `?`.
+TEST (ReconcileQueryRows, AURLAloneStatesOneRowPerPair) {
+    const json rows = reconcile_query_rows (
+    json::array (), "https://h/x?tag=a&tag=b&empty=&flag&v={{token}}#frag?z=1");
+    json flag         = row_of ("flag", "");
+    flag["valueless"] = true;
+    EXPECT_EQ (rows,
+    json::array ({ row_of ("tag", "a"), row_of ("tag", "b"),
+    row_of ("empty", ""), flag, row_of ("v", "{{token}}") }));
+    EXPECT_EQ (reconcile_query_rows (json ("not rows"), "https://h/x?a=1"),
+    json::array ({ row_of ("a", "1") }))
+    << "a stored value that is not an array holds no rows";
+}
+
+// Enabled rows follow the URL: each takes the first unclaimed pair with its
+// key (so a repeated key pairs off in order) and keeps its other members; a
+// key the URL dropped goes and a new one is a fresh row where it stands.
+// Mutation check: claim the *last* matching pair in `claim_pairs`, or rebuild
+// a claimed row from the pair alone in `row_for_pair`.
+TEST (ReconcileQueryRows, EnabledRowsFollowTheURLAndKeepTheirOtherMembers) {
+    json first           = row_of ("tag", "a");
+    first["description"] = "the first tag";
+    json second          = row_of ("tag", "b");
+    second["source"]     = "import";
+    const json stored = json::array ({ row_of ("gone", "1"), first, second });
+
+    json first_now      = first;
+    first_now["value"]  = "b";
+    json second_now     = second;
+    second_now["value"] = "c";
+    EXPECT_EQ (reconcile_query_rows (stored, "https://h/x?new=0&tag=b&tag=c"),
+    json::array ({ row_of ("new", "0"), first_now, second_now }));
+}
+
+// A disabled row is invisible in the URL, so it is kept, after the nearest
+// enabled row before it that the URL still carries, or leading when there is
+// none; a path row is left alone and follows the query rows.
+// Mutation check: anchor a disabled row to a dropped enabled row in
+// `disabled_rows_by_anchor`, or drop the disabled rows.
+TEST (ReconcileQueryRows, DisabledAndPathRowsAreKept) {
+    json path  = row_of ("id", "7");
+    path["in"] = "path";
+    const json stored = json::array ({ row_of ("d0", "x", false), path, row_of ("a", "1"),
+    row_of ("d1", "x", false), row_of ("b", "2"), row_of ("d2", "x", false) });
+    EXPECT_EQ (reconcile_query_rows (stored, "https://h/:id?b=3&c=4"),
+    json::array ({ row_of ("d0", "x", false), row_of ("d1", "x", false),
+    row_of ("b", "3"), row_of ("d2", "x", false), row_of ("c", "4"), path }));
+}
+
+// Rows that already state the URL's query come back as they were, in place
+// and with every member: a URL-only write that leaves the query alone (the
+// app sends `url` alone for a host or path edit) must not rewrite them. A row
+// agrees under whichever join wrote its URL - an OpenAPI import's
+// `encodeURIComponent` (`a b` is `a%20b`, `a+b` is `a%2Bb`, an empty value a
+// bare key) or Postman's rule.
+// Mutation check: compare only the row's own text in `writes_pair`, or append
+// the path rows after the query rows unconditionally.
+TEST (ReconcileQueryRows, RowsThatAgreeWithTheURLComeBackUnchanged) {
+    json path           = row_of ("id", "7");
+    path["in"]          = "path";
+    json described      = row_of ("a b", "x y");
+    described["source"] = "openapi";
+    const json stored   = json::array ({ path, described,
+    row_of ("off", "", false), row_of ("q", "a+b"), row_of ("flag", "") });
+    const json reconciled =
+    reconcile_query_rows (stored, "{{baseUrl}}/users/:id?a%20b=x%20y&q=a%2Bb&flag");
+    EXPECT_EQ (reconciled, stored);
+    EXPECT_EQ (reconciled.dump (), stored.dump ());
+}
+
+// A claimed row whose value or bare-ness the URL changed takes the pair's
+// text: `valueless` is set for a bare `key` and cleared for `key=`.
+// Mutation check: leave `valueless` as the row had it in `row_for_pair`.
+TEST (ReconcileQueryRows, AChangedPairRewritesTheRowsValueAndBareness) {
+    json bare             = row_of ("flag", "");
+    bare["valueless"]     = true;
+    json now_bare         = row_of ("other", "");
+    now_bare["valueless"] = true;
+    EXPECT_EQ (reconcile_query_rows (json::array ({ bare, row_of ("other", "x") }),
+               "https://h/x?flag=&other"),
+    json::array ({ row_of ("flag", ""), now_bare }));
 }
 
 // Issue #1772's acceptance: `{flag, ""}` stores `flag=`, and a null value a

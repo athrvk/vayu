@@ -21,6 +21,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -965,6 +966,11 @@ struct RunContext {
      * does, through the same `maintain_concurrency` poll loop, with no new
      * thread and no per-strategy change.
      *
+     * Closed loop only (#3541): an open-loop run skips the timer instead
+     * (`open_loop_timer_skip_reason`), because its pacer's `maxInFlight`
+     * headroom reads the same `in_flight()` and would drop arrivals for slots
+     * no request holds.
+     *
      * The atomic count is the fast path every run without a single
      * `timer.think` element pays for: `in_flight()` is on the hot
      * completion-and-refill path, and a run with no such element must not
@@ -1009,6 +1015,32 @@ struct RunContext {
         think_reservation_count.store (
         think_reservation_deadlines.size (), std::memory_order_relaxed);
         return think_reservation_deadlines.size ();
+    }
+
+    /// The skip reason @ref open_loop_timer_skip_reason reports, and the
+    /// sentence of the run's `think_timer_skipped_open_loop` warning.
+    static constexpr std::string_view OPEN_LOOP_TIMER_SKIP_REASON =
+    "A think timer does not apply to a constant-rate run: requests are sent "
+    "on a schedule, not one after another";
+
+    /**
+     * Skip a `timer.*` element of a single-request run's `step.between`
+     * dispatch when the run is open-loop (#3541). Read through the registry's
+     * `category`, never a `kind ==` comparison; `timer.think` is the only
+     * timer `requestElements` admits. `maintain_concurrency` sets
+     * `closed_loop` before its first submission, so every completion of a
+     * closed-loop run reads it true and keeps its reservation.
+     */
+    [[nodiscard]] std::optional<vayu::core::ElementSkip>
+    open_loop_timer_skip_reason (const vayu::core::CompiledElement& element) const {
+        if (closed_loop.load (std::memory_order_relaxed)) {
+            return std::nullopt;
+        }
+        const auto* kind = vayu::core::Registry::instance ().find (element.kind);
+        if (kind == nullptr || kind->category != "timer") {
+            return std::nullopt;
+        }
+        return vayu::core::ElementSkip{ std::string (OPEN_LOOP_TIMER_SKIP_REASON), false };
     }
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
@@ -1251,9 +1283,10 @@ struct RunContext {
         // A run with no `timer.think` element (the overwhelming common case)
         // never reserves one, so this is one relaxed load and nothing else -
         // see `reserve_think_wait`'s doc comment. Only the single-request path
-        // reserves: a scenario virtual user's timer wait must stay out, because
-        // the scenario dispatcher refills while this is under its target and
-        // counts a deferred user as not in flight (#2821).
+        // reserves, and only on a closed loop (#3541): a scenario virtual
+        // user's timer wait must stay out, because the scenario dispatcher
+        // refills while this is under its target and counts a deferred user as
+        // not in flight (#2821).
         if (think_reservation_count.load (std::memory_order_relaxed) == 0) {
             return base;
         }
@@ -1337,7 +1370,7 @@ struct MetricTickSample {
     double send_rate  = 0.0;
     double throughput = 0.0;
     // RunContext::in_flight: sent and not yet settled, plus the slots a
-    // `timer.think` wait holds on a single-request run only.
+    // `timer.think` wait holds on a closed-loop single-request run only.
     size_t backpressure     = 0;
     double error_rate       = 0.0; // Percent
     size_t dropped_requests = 0;

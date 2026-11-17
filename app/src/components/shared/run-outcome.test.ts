@@ -33,6 +33,11 @@
  * redden. The conformance replay below reddens on any reason worded apart from
  * the engine's.
  *
+ * A collection row's budgets (#3539): make `collectionRowOutcome` ignore
+ * `verdict` and the missed-budget cases redden; make it read `"passed"` as a
+ * verdict worth an outcome and the met-budgets glyph case reddens; drop its
+ * `completed` gate and the non-completed case reddens.
+ *
  * A drain cut (#3538): drop `drainCutCancelled` from `judgeRun` and the drain
  * rows and the fixture's drain_stopped cases redden; move its branch above the
  * failed/missed-budget one and the ordering rows redden; make `reportOutcome` or
@@ -46,6 +51,7 @@ import type { Run, RunReport } from "@/types";
 import {
 	formatErrorRate,
 	judgeRun,
+	missedBudgetsReason,
 	reportOutcome,
 	rowOutcome,
 	type RunJudgement,
@@ -390,6 +396,33 @@ describe("judgeRun", () => {
 			verdict: "passed",
 		});
 		expect(judged?.outcome).toBe("failed");
+	});
+});
+
+/*
+ * A collection run's notification and spoken ending (#3539). Mutation check:
+ * answer the failed reason for met budgets too and the null cases redden;
+ * word it apart from `judgeRun` and the agreement case does.
+ */
+describe("missedBudgetsReason", () => {
+	it("names what a budget block missed", () => {
+		expect(missedBudgetsReason(TWO_OF_FOUR_MISSED)).toBe(
+			"2 of 4 budgets missed: p95, throughput"
+		);
+	});
+
+	it("says it in the failed verdict's words", () => {
+		const judged = judgeRun({ status: "completed", thresholdValidation: TWO_OF_FOUR_MISSED });
+		expect(missedBudgetsReason(TWO_OF_FOUR_MISSED)).toBe(judged?.reason);
+	});
+
+	it.each([
+		["every budget met", THREE_MET],
+		["no budget declared", { checks: [], passed: 0, failed: 0, verdict: "passed" } as Budgets],
+		["no block", null],
+		["an absent block", undefined],
+	])("is null for %s", (_name, block) => {
+		expect(missedBudgetsReason(block)).toBeNull();
 	});
 });
 
@@ -789,7 +822,8 @@ describe("rowOutcome", () => {
 		).toBeNull();
 	});
 
-	// #3458: a collection row is failed when a step failed or errored.
+	// #3458: a collection row is failed when a step failed or errored; #3539: or
+	// when it missed a budget.
 	describe("a collection row", () => {
 		function collection(
 			resultSummary: Extract<Run, { type: "scenario" }>["resultSummary"],
@@ -807,16 +841,48 @@ describe("rowOutcome", () => {
 		});
 
 		it.each([
+			[
+				"a missed budget over clean steps",
+				{ passed: 3, verdict: "failed" },
+				"Budgets missed",
+			],
+			[
+				"a missed budget beside a failed step",
+				{ passed: 3, failed: 1, verdict: "failed" },
+				"Budgets missed, 1 failed",
+			],
+			[
+				"a missed budget beside failed and errored steps",
+				{ passed: 2, failed: 1, errored: 4, verdict: "failed" },
+				"Budgets missed, 1 failed, 4 errored",
+			],
+			["a missed budget and nothing else recorded", { verdict: "failed" }, "Budgets missed"],
+		] as const)("is failed for %s", (_name, resultSummary, reason) => {
+			expect(rowOutcome(collection(resultSummary))).toEqual({ outcome: "failed", reason });
+		});
+
+		it("keeps a failed step's reason when the budgets were met", () => {
+			expect(rowOutcome(collection({ passed: 3, failed: 1, verdict: "passed" }))).toEqual({
+				outcome: "failed",
+				reason: "1 failed",
+			});
+		});
+
+		it.each([
 			["only passed and skipped steps", { passed: 3, skipped: 1 }],
 			["zeroed failure counts", { passed: 3, failed: 0, errored: 0 }],
 			["a step stopped by the user", { passed: 1, stopped: 2 }],
-		])("keeps its status glyph for %s", (_name, resultSummary) => {
+			// The success tick of a met-budget clean run stays: `null` keeps the status glyph.
+			["met budgets over clean steps", { passed: 3, verdict: "passed" }],
+		] as const)("keeps its status glyph for %s", (_name, resultSummary) => {
 			expect(rowOutcome(collection(resultSummary))).toBeNull();
 		});
 
 		it("says nothing for a row with no summary or a run that did not complete", () => {
 			expect(rowOutcome(row({ type: "scenario" }))).toBeNull();
 			expect(rowOutcome(collection({ failed: 2 }, "stopped"))).toBeNull();
+			expect(rowOutcome(collection({ passed: 3, verdict: "failed" }, "stopped"))).toBeNull();
+			expect(rowOutcome(collection({ passed: 3, verdict: "failed" }, "failed"))).toBeNull();
 		});
 	});
 });

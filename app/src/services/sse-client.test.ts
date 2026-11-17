@@ -595,6 +595,10 @@ class MockEventSource {
 	close(): void {
 		this.readyState = MockEventSource.CLOSED;
 	}
+	/** Deliver one frame with the id the engine stamped on it, as the browser would. */
+	emit(type: string, payload: object, lastEventId: string): void {
+		this.listeners.get(type)?.({ data: JSON.stringify(payload), lastEventId } as MessageEvent);
+	}
 	/** Deliver the engine's terminal frame, the way a finished run does. */
 	complete(status: string): void {
 		this.listeners.get("complete")?.({ data: JSON.stringify({ status }) } as MessageEvent);
@@ -788,5 +792,187 @@ describe("SSEClient - what the close handler is told (#2140)", () => {
 		MockEventSource.instances[0]?.listeners.get("error")?.({} as MessageEvent);
 
 		expect(h.onClose).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * Resuming a run's stream from the last frame held (#3571).
+ *
+ * A fresh `EventSource` cannot send `Last-Event-ID`, so without the query
+ * parameter every Reconnect replayed the retained ring and the dashboard drew
+ * each tick twice. Each case reads the URL the client opened, the one thing a
+ * service test that mocks the client cannot see.
+ */
+describe("SSEClient - resuming a run's stream (#3571)", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	/** Every handler a run can use, so each kind of frame has a listener. */
+	function attachAll(client: SSEClient, runId: string, onMessage = vi.fn()): void {
+		client.connect(runId, onMessage, vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn());
+	}
+	const urls = () => MockEventSource.instances.map((source) => source.url);
+	const socket = (index: number) => {
+		const source = MockEventSource.instances[index];
+		if (!source) throw new Error(`no socket ${index}`);
+		return source;
+	};
+	const tick = (elapsedSeconds: number) => ({
+		timestamp: 1_700_000_000_000 + elapsedSeconds * 1000,
+		elapsedSeconds,
+		totalRequests: elapsedSeconds * 100,
+		currentRps: 100,
+	});
+	const FRAMES: Record<string, object> = {
+		metrics: tick(1),
+		step: { iteration: 0, stepIndex: 0, outcome: "passed" },
+		plan: { stepsPerIteration: 1, iterations: 1, stepsExpected: 1 },
+		monitor: { timestamp: 1_700_000_000_500, series: { cpu: 0.5 } },
+	};
+
+	it("opens a first attach from offset 0, with no parameter", () => {
+		attachAll(new SSEClient(), "run_1");
+
+		expect(urls()).toEqual([expect.stringMatching(/\/runs\/run_1\/live$/)]);
+	});
+
+	it("resumes after the last frame when the same run is attached again", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).emit("metrics", tick(1), "0");
+		socket(0).emit("metrics", tick(2), "1");
+		socket(0).drop();
+
+		attachAll(client, "run_1");
+
+		expect(socket(1).url).toMatch(/\/runs\/run_1\/live\?lastEventId=1$/);
+	});
+
+	/*
+	 * Ticks, steps, plans and scrapes share one id sequence. Resuming from the
+	 * ticks alone would re-deliver a scrape that arrived after the last tick, so
+	 * each kind, arriving last, has to be the resume point. Mutation check: stop
+	 * recording the id in any one listener and its row reddens.
+	 */
+	it.each(["metrics", "step", "plan", "monitor"])(
+		"takes the resume point from a %s frame that arrives after the last tick",
+		(kind) => {
+			const client = new SSEClient();
+			attachAll(client, "run_1");
+			socket(0).emit("metrics", tick(1), "7");
+			socket(0).emit(kind, FRAMES[kind] ?? {}, "8");
+			socket(0).drop();
+
+			attachAll(client, "run_1");
+
+			expect(socket(1).url).toMatch(/\?lastEventId=8$/);
+		}
+	);
+
+	it("treats id 0 as a resume point, not as nothing held", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).emit("monitor", FRAMES.monitor, "0");
+		socket(0).drop();
+
+		attachAll(client, "run_1");
+
+		expect(socket(1).url).toMatch(/\?lastEventId=0$/);
+	});
+
+	it("resumes again from the later frame after a second drop", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).emit("metrics", tick(1), "3");
+		socket(0).drop();
+		attachAll(client, "run_1");
+		socket(1).emit("metrics", tick(2), "4");
+		socket(1).drop();
+
+		attachAll(client, "run_1");
+
+		expect(socket(2).url).toMatch(/\?lastEventId=4$/);
+	});
+
+	it("starts from offset 0 when the same run dropped before any frame arrived", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).drop();
+
+		attachAll(client, "run_1");
+
+		expect(socket(1).url).not.toContain("lastEventId");
+	});
+
+	/*
+	 * The id belongs to the run it came from. Mutation check: stop comparing the
+	 * run ids and the second case sends run_1's id to run_2.
+	 */
+	it("starts another run from offset 0, and does not hand it the first run's id", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).emit("metrics", tick(1), "5");
+
+		attachAll(client, "run_2");
+
+		expect(socket(1).url).toMatch(/\/runs\/run_2\/live$/);
+	});
+
+	it("does not resume a run another run displaced in between", () => {
+		const client = new SSEClient();
+		attachAll(client, "run_1");
+		socket(0).emit("metrics", tick(1), "5");
+		attachAll(client, "run_2");
+		socket(1).emit("metrics", tick(1), "2");
+
+		attachAll(client, "run_1");
+
+		expect(socket(2).url).toMatch(/\/runs\/run_1\/live$/);
+	});
+
+	/*
+	 * The final `complete` re-delivers `currentMetrics`, and the header reads the
+	 * last tick: a resume that reset them would flash a zero throughput until the
+	 * next frame, or for good when the run ends before another tick.
+	 */
+	it("keeps the held tick through a resume, so the closing frame still reports it", () => {
+		const client = new SSEClient();
+		const onMessage = vi.fn();
+		attachAll(client, "run_1", onMessage);
+		socket(0).emit("metrics", tick(4), "3");
+		socket(0).drop();
+		onMessage.mockClear();
+
+		attachAll(client, "run_1", onMessage);
+		socket(1).complete("completed");
+
+		expect(onMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				elapsed_seconds: 4,
+				requests_completed: 400,
+				current_rps: 100,
+			})
+		);
+	});
+
+	it("starts a new run from an empty tick, not the last run's", () => {
+		const client = new SSEClient();
+		const onMessage = vi.fn();
+		attachAll(client, "run_1");
+		socket(0).emit("metrics", tick(4), "3");
+
+		attachAll(client, "run_2", onMessage);
+		socket(1).complete("completed");
+
+		expect(onMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ elapsed_seconds: 0, requests_completed: 0 })
+		);
 	});
 });

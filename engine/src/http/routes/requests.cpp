@@ -13,6 +13,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
@@ -574,12 +575,57 @@ apply_request_order_field (const nlohmann::json& json, int& out, bool is_create)
 }
 
 /**
+ * A write that states `url` and not `params` brings the stored query rows into
+ * line with the URL (issue #3551, `reconcile_query_rows`), on create and update
+ * alike, so every reader of `params` sees the query the engine sends. A write
+ * that states `params` is stored as sent, and one that states neither leaves
+ * the rows alone. A reconcile that changes nothing writes nothing, so the
+ * stored text stays byte for byte.
+ */
+static RouteResult
+reconcile_params_with_url (const nlohmann::json& json, vayu::db::Request& r) {
+    if (!json.contains ("url") || json.contains ("params")) {
+        return {};
+    }
+    const auto stored =
+    nlohmann::json::parse (r.params, nullptr, /*allow_exceptions=*/false);
+    const nlohmann::json reconciled =
+    vayu::core::reconcile_query_rows (stored, r.url);
+    if (reconciled == stored) {
+        return {};
+    }
+    std::string dumped = reconciled.dump ();
+    if (dumped.size () > vayu::core::constants::json::MAX_FIELD_SIZE) {
+        return route_error (413,
+        std::format (
+        "'params' read from 'url' is {} bytes, over the limit of {}",
+        dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
+    }
+    r.params = std::move (dumped);
+    return {};
+}
+
+/// A request's `params`: the rows a body states, through the shared validation,
+/// then `reconcile_params_with_url`. `url` is applied first.
+static RouteResult
+apply_request_params_field (const nlohmann::json& json, vayu::db::Request& r, bool is_create) {
+    if (auto outcome = apply_key_value_field (json, "params", r.params, is_create); !outcome) {
+        return outcome;
+    }
+    return reconcile_params_with_url (json, r);
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
  *
  * `collectionId`, `name`, `method` and `url` have no default, so each is
  * required on create and rejects an explicit null on either verb.
+ *
+ * `params` is the one field another field writes: a body that states `url`
+ * and no `params` reconciles the query rows with it
+ * (`reconcile_params_with_url`).
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every request in a bulk payload (issue #96).
@@ -624,7 +670,7 @@ bool is_create) {
         return outcome;
     }
 
-    if (auto outcome = apply_key_value_field (json, "params", r.params, is_create); !outcome) {
+    if (auto outcome = apply_request_params_field (json, r, is_create); !outcome) {
         return outcome;
     }
     if (auto outcome = apply_key_value_field (json, "headers", r.headers, is_create); !outcome) {

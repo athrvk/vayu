@@ -2031,6 +2031,24 @@ bool declares_concurrency (const nlohmann::json& config) {
     const auto concurrency = config.find ("concurrency");
     return concurrency != config.end () && !concurrency->is_null ();
 }
+
+/**
+ * How many of a single-request run's enabled `requestElements` its open-loop
+ * pacer skipped (`RunContext::open_loop_timer_skip_reason`, #3541). A run that
+ * sent nothing never reached its strategy, and `closed_loop` reads false there
+ * whatever the mode, so it counts none.
+ */
+size_t open_loop_skipped_timers (const RunContext& context) {
+    if (!context.step_elements || context.requests_sent.load () == 0) {
+        return 0;
+    }
+    const auto& elements = *context.step_elements;
+    return static_cast<size_t> (std::count_if (elements.begin (),
+    elements.end (), [&context] (const vayu::core::CompiledElement& element) {
+        return element.enabled &&
+        context.open_loop_timer_skip_reason (element).has_value ();
+    }));
+}
 } // namespace
 
 /**
@@ -2046,8 +2064,9 @@ bool declares_concurrency (const nlohmann::json& config) {
  * connection limit the run raised above `eventLoopMaxPerHost` (#2394) to cover
  * the virtual users it asked for (#2801), so a run that opened more
  * connections than the setting says is not silent about it. And requests
- * libcurl re-sent on a new connection (#2799), and `Set-Cookie` headers its
- * cookie engine discarded from a virtual user's responses (#3307). Empty for a
+ * libcurl re-sent on a new connection (#2799), `Set-Cookie` headers its
+ * cookie engine discarded from a virtual user's responses (#3307), and the
+ * think timers a constant-rate run skipped (#3541). Empty for a
  * run with nothing to say, which is what lets the caller omit the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
@@ -2107,6 +2126,11 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
             "load") },
             { "steps", skipped } });
         }
+    }
+
+    if (const size_t timers = open_loop_skipped_timers (*context); timers > 0) {
+        warnings.push_back ({ { "code", "think_timer_skipped_open_loop" },
+        { "message", RunContext::OPEN_LOOP_TIMER_SKIP_REASON }, { "timers", timers } });
     }
 
     return warnings;
@@ -3055,11 +3079,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // "looked, and every request got the protocol it asked for".
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
     summary["status_codes"]            = codes;
-    summary["latency"]                 = { { "min", inputs.latency.min },
-        { "max", inputs.latency.max }, { "avg", inputs.latency_avg_ms },
-        { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
-        { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
-        { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+    // `count` is what a reader checks before trusting a percentile: a run that
+    // timed no request still stores zeros here, which are not measurements.
+    summary["latency"] = { { "count", inputs.latency.count },
+        { "min", inputs.latency.min }, { "max", inputs.latency.max },
+        { "avg", inputs.latency_avg_ms }, { "p50", inputs.latency.p50 },
+        { "p75", inputs.latency.p75 }, { "p90", inputs.latency.p90 },
+        { "p95", inputs.latency.p95 }, { "p99", inputs.latency.p99 },
+        { "p999", inputs.latency.p999 } };
     // Always written, the downgrade's rule: absent is a run stored before
     // #2799, whose report then omits `connectionReplays`.
     summary["connection_replays"] = inputs.connection_replays;

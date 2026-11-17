@@ -353,13 +353,10 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * The stream ended. The run has reached a terminal status, so its stored
+	 * The stream ended. `status` is what the engine's completion frame said, or
+	 * null for a stream that ended without one (issue #1415). The run's stored
 	 * step rows are now the complete record - invalidating the report and the
 	 * run itself is what flips the view from the live list to that record.
-	 */
-	/**
-	 * The stream ended. `status` is what the engine's completion frame said, or
-	 * null for a stream that ended without one (issue #1415).
 	 */
 	private async handleClose(status: SSETerminalStatus = null): Promise<void> {
 		const runId = this.activeRunId;
@@ -381,24 +378,10 @@ class ScenarioRunService {
 		if (status === "failed") this.failProgress(runId);
 		this.releaseRun(runId);
 		if (!runId) return;
-		if (status) useScenarioRunStore.getState().runEnded(runId, status);
-
-		// From the store's own fold rather than the report fetched below: the
-		// counts are complete the moment the last step arrived, and the user
-		// should not wait on a round trip to be told their run is over.
-		//
-		// Which is also why the frame's status is the only source here, where
-		// the load service can fall back to the stored row: that fetch happens
-		// after this line, and waiting for it to name a failure would trade the
-		// promptness this comment is about for a verdict the frame already
-		// carries (#1415).
-		this.notifyTerminal(
-			runId,
-			status === "failed"
-				? NOTIFY_KINDS.collectionRunFailed
-				: NOTIFY_KINDS.collectionRunFinished,
-			stepOutcomeLine(useScenarioRunStore.getState().summary.counts)
-		);
+		// The counts from the store's own fold, complete the moment the last
+		// step arrived. Read before the await: the store holds one run, and a
+		// run started during the round trip empties it.
+		const counts = useScenarioRunStore.getState().summary.counts;
 
 		// Through the cache, not a bare fetch: the run tab reads these exact
 		// keys, so a fetch that bypassed them would leave the pane on the stale
@@ -433,9 +416,21 @@ class ScenarioRunService {
 		// A stream that closed without the frame (#1415) leaves the stored record
 		// to say how the run ended; one it still calls running only lost its stream.
 		const storedStatus = report?.metadata?.status;
-		if (status === null && isRunTerminal(storedStatus)) {
-			useScenarioRunStore.getState().runEnded(runId, storedStatus);
-		}
+		const endedAs = status ?? (isRunTerminal(storedStatus) ? storedStatus : null);
+		// The budget verdict is only in the stored report - the frame carries a
+		// status alone - so the ending is recorded and said after the fetch, a
+		// localhost round trip, and names a missed budget (#3539). A fetch that
+		// failed leaves no block, and the counts alone are still said: the run
+		// ending is never lost to the report.
+		const thresholdValidation = report?.thresholdValidation ?? null;
+		if (endedAs) useScenarioRunStore.getState().runEnded(runId, endedAs, thresholdValidation);
+		this.notifyTerminal(
+			runId,
+			endedAs === "failed"
+				? NOTIFY_KINDS.collectionRunFailed
+				: NOTIFY_KINDS.collectionRunFinished,
+			stepOutcomeLine(counts, thresholdValidation)
+		);
 
 		// The run's row in History still says "running" until the next 5s poll,
 		// and once the user has paged the list that poll is off.

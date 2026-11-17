@@ -759,8 +759,9 @@ tab clamps what is typed.
 
 **The builder seeds its Params rows from the stored `params` and the URL's
 query together** (issue #3491, `initialRequest` in `modules/request-builder/index.tsx`).
-A request stored with its query only in `url` (an API, MCP or import write that
-left `params` absent or `[]`) opens with those pairs as rows, through
+A request stored with its query only in `url` (written before the engine
+derived the rows from a URL-only write, issue #3551, or by a write that stated
+`params: []`) opens with those pairs as rows, through
 `mergeParamsFromUrl` - the rule a URL-bar edit already uses, so stored disabled
 rows stay and a stored row keeps its id and description. Without it the table
 opened empty and its first edit rebuilt `url` from the rows alone, deleting the
@@ -1196,9 +1197,10 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer reads `failed` and `errored` (a completed run with either gets the
-failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
-the consumer of the rest. A load run's results are
+renderer reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
+run with any of them gets the failed glyph and a line naming the missed budgets
+and the step counts, #3458, #3539) and the MCP `list_runs` rows read the whole
+summary. A `"passed"` verdict changes nothing on the row. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus, on a run that asserted
@@ -1408,7 +1410,12 @@ collection run's per-step progress.
 
 - **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
   topic, so the client connects immediately after `POST /runs` with no attach race - it replays
-  from offset 0 and tails to the `complete` event (even for sub-second runs).
+  from offset 0 and tails to the `complete` event (even for sub-second runs). The client records
+  the `lastEventId` of every `metrics`, `step`, `plan` and `monitor` frame (one id sequence; the
+  `complete` frame carries none), and a `connect` to the run it already holds frames for opens
+  `?lastEventId=<last id>` so the engine resumes after it (issue #3571). A first attach, or an
+  attach to another run, sends no parameter. A resume keeps the held metrics and start time; a
+  start resets them.
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   carrying the run's terminal `status` (issue #2140). Transient `CONNECTING` errors are left to
   the browser's built-in `EventSource` retry. `onClose` is called as `onClose(status, { frame })`
@@ -1420,8 +1427,8 @@ collection run's per-step progress.
   every 500 ms for up to 30 s, since the engine ended the stream and the row is about to settle,
   and finishes the run when it does; a dropped connection is not waited on, because the run may
   well still be going. Either way, a report still live at the end shows the dashboard's "Lost the
-  live metrics stream" callout and the user's Reconnect re-attaches (issue #1925). Nothing
-  reconnects on its own. `ScenarioRunService` ignores the second argument.
+  live metrics stream" callout and the user's Reconnect re-attaches, resuming after the last
+  frame held (issues #1925, #3571). Nothing reconnects on its own. `ScenarioRunService` ignores the second argument.
 - **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
   `complete` event, `error` handling
 - **One client, and a hand-off when it changes hands**: the client is a singleton, so a second
@@ -1980,6 +1987,12 @@ again in the engine's message and no cookie name in it. Unlike
 `httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
 and saw none, absent a run stored before the count existed.
 
+A constant-rate run with a `timer.think` carries `think_timer_skipped_open_loop`
+([#3541](https://github.com/athrvk/vayu/issues/3541)): the timer is skipped, not
+waited, because requests go out on a schedule. `timers` is the number of enabled
+timers skipped, `RunWarnings` titles it "Think timer skipped on a constant-rate
+run", and the Elements card tallies the element `skipped`.
+
 `authNotice` is the engine's sentence for a request whose auth sent nothing: a
 mode it stores but does not execute (`digest`, `ntlm`, ..., issue #2474), or a
 bearer token or API key name that is empty (issue #3203). The request is still
@@ -2425,7 +2438,10 @@ when the check is unmeasurable, or on an older report. `thresholds.failRun: true
 `BUDGET_FIELDS` - it is a flag over the budgets, not one itself) changes what a
 missed budget *does*: the run's terminal status becomes `"failed"` instead of
 `"completed"`, so the history list and the taskbar failure cue pick it up, not
-only the verdict section.
+only the verdict section. A collection run's list row is marked failed by a
+missed budget with or without that flag (#3539): its `resultSummary.verdict` is
+what the row reads, and `ScenarioRunView` draws the `ThresholdVerdict` card that
+names the budget.
 
 **A collection (design-mode) run is judged too** (issue #1564):
 `RunCollectionDialog`'s own Pass/fail budgets disclosure sends the identical
@@ -2434,7 +2450,8 @@ only the verdict section.
 a second copy. It is **not** gated by the dialog's Load test switch - the
 engine evaluates `thresholds` for a design-mode run and a load run of the same
 folder alike - so the same `thresholdValidation` section and `ThresholdVerdict`
-rendering apply whichever executor ran the sequence. See
+rendering apply whichever executor ran the sequence: the history Overview for a
+load run, `ScenarioRunView` above its step list for a collection run. See
 [POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for
 how a collection run's error rate, latency percentiles and throughput are
 derived from the steps it actually sent.
@@ -2537,9 +2554,10 @@ if (error.isTimeout) {
 
 ### SSE Errors
 
-The SSE client does **not** reconnect. `EventSource` cannot set `Last-Event-ID`
-on a fresh connection, so a manual reconnect would re-request the topic from
-offset 0 and duplicate every tick already plotted.
+The SSE client does **not** reconnect by itself. `EventSource` cannot set
+`Last-Event-ID` on a fresh connection, so the user's Reconnect passes the last
+frame it held as `?lastEventId=` instead; without it the engine would replay the
+topic from offset 0 and duplicate every tick already plotted (#3571).
 
 - Transient errors (`CONNECTING`): left to the browser's own retry, which does
   carry `Last-Event-ID`

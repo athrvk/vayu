@@ -219,6 +219,11 @@
  * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
  * went to 223,200 / 218,900.
  *
+ * #3552's `error` clause in `run_collection_smoke` (an engine failure rides the
+ * row) added 67 B to every row, taking them to 150,757 / 148,161 / 221,912 /
+ * 217,645 B; the four caps went to 150,800 / 148,200 / 223,300 / 219,000 (the writes-on
+ * rows had also moved under #3550, so they are re-measured after the merge).
+ *
  * #3538's `drainCut` clause in `list_runs` and sentence in `get_run_report`
  * (each paid once) took the rows to 150,995 / 148,399 / 223,446 / 219,179 B;
  * the four caps went to 151,100 / 148,500 / 223,600 / 219,300 (one measurement

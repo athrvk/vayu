@@ -51,12 +51,17 @@ export function resultSubtitle(summary: LoadResultSummary): string | null {
 
 /**
  * The line a finished collection run's history row prints when a step did not
- * pass (#3458): "2 passed, 1 failed, 4 errored", zero counts left out. A clean
- * run has no line - its row reads as it did before the engine sent counts.
+ * pass (#3458) or a budget was missed (#3539): "2 passed, 1 failed, 4 errored",
+ * zero counts left out, with "budgets missed" ahead of the counts when both
+ * apply. A clean run has no line - its row reads as it did before the engine
+ * sent counts.
  */
 export function collectionSubtitle(summary: CollectionResultSummary): string | null {
-	if (!stepCountsPhrase(summary, ["failed", "errored"])) return null;
-	return stepCountsPhrase(summary);
+	const budgets = summary.verdict === "failed" ? "budgets missed" : null;
+	const unclean = stepCountsPhrase(summary, ["failed", "errored"]);
+	const steps = unclean ? stepCountsPhrase(summary) : null;
+	const parts = [budgets, steps].filter(Boolean);
+	return parts.length > 0 ? parts.join(", ") : null;
 }
 
 /**

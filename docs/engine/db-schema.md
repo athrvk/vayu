@@ -797,7 +797,12 @@ Stores individual HTTP request definitions.
 [{"key":"Content-Type","value":"application/json","enabled":true,"description":""}]
 ```
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
-Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
+Duplicate keys are allowed. A query row may carry `"valueless": true` for a
+bare `key` with no `=` (issue #1772). The enabled query rows of `params` follow
+`url`: a write that states `url` and no `params` reconciles them with the URL's
+query, and rewrites the column only when that changes a row (issue #3551, see
+[`POST /requests`](api-reference.md#post-requests)); no startup pass touches
+rows stored before it. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issues-1487-1491)
 disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
 An optional `source` key (`"body-mode"` | `"stream"` | `"legacy-default"`) marks a row
@@ -1727,8 +1732,8 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
   "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "error_types": { "timeout": 2, "connection_failed": 1 },
-  "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
-               "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "latency": { "count": 97, "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0,
+               "p75": 15.0, "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
   "phases": {
     "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100, "mean": 0.15 },
     "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100, "mean": 0.42 },
@@ -1993,7 +1998,9 @@ sample rather than a histogram. It is computed once and is the same sample the r
 judge, so `latency.p99` equals a `latencyP99Ms` check's `actual`. A run in which no step sent
 stores `{"count": 0}` alone, and the report omits its `latency` block on that marker; a summary
 with no `latency` key (a run stored before the issue) reports from the stored rows. A load run's
-`latency` carries no `count`.
+`latency` carries `count` too (#3540): a load run that timed no request stores zeroed percentiles
+with `count: 0`, its report omits the `latency` block on that marker, and its history row omits
+`p95Ms`. A load summary stored before `count` existed has none, so its stored percentiles stand.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
