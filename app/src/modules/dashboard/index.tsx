@@ -31,7 +31,13 @@ import {
 	useToastStore,
 } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/shared";
+import {
+	EmptyState,
+	Callout,
+	TabBreadcrumb,
+	drainCutCancelledOf,
+	reportOutcome,
+} from "@/components/shared";
 import { Button, HeadingSection } from "@/components/ui";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
@@ -347,7 +353,8 @@ export default function LoadTestDashboard() {
 					exportRequestUrl={report.metadata?.requestUrl}
 					exportRequestMethod={report.metadata?.requestMethod}
 				/>
-				{stopArrivedLate && (
+				{/* A Stop that cut the drain did something; the verdict line says so. */}
+				{stopArrivedLate && drainCutCancelledOf(report.summary) === undefined && (
 					<div className="enter-fade px-5 pt-3 shrink-0">
 						<Callout severity="info">
 							The run had already finished when Stop arrived.

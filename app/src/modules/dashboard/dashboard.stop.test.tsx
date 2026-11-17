@@ -19,7 +19,8 @@
  *
  * Mutation check: call `stopMonitoring` / `stopRun` for every answer again and
  * the completed, failed and running cases redden; drop the callout from
- * `index.tsx` and the note cases redden. The store's own settle-as-the-report
+ * `index.tsx` and the note cases redden; drop the `drainCutCancelledOf` condition
+ * there and the drain-cut case reddens (#3538). The store's own settle-as-the-report
  * rule is held in `dashboard-store.test.ts`.
  */
 
@@ -142,6 +143,32 @@ describe.each(["completed", "failed"] as const)("Stop answered %s", (status) => 
 
 		expect(store().phase).toMatchObject({ phase: "finished", kind: status });
 		expect(lastHeader()).toMatchObject({ live: false, endedAs: status });
+		expect(await screen.findByText(LATE_NOTE)).toBeInTheDocument();
+	});
+});
+
+describe("Stop answered completed, then cut the drain", () => {
+	beforeEach(() => answerStopWith("completed"));
+
+	it("does not say the run had already finished when the report records the cut", async () => {
+		renderStreamingRun();
+		await pressStop();
+
+		const report = reportFor("completed");
+		report.summary.drainCut = { cancelled: 3 };
+		act(() => store().setFinalReport("run_1", report));
+
+		expect(store().stopArrivedLate).toBe(true);
+		expect(store().phase).toMatchObject({ phase: "finished", kind: "completed" });
+		expect(screen.queryByText(LATE_NOTE)).toBeNull();
+	});
+
+	it("still says it when the report records no cut", async () => {
+		renderStreamingRun();
+		await pressStop();
+
+		act(() => store().setFinalReport("run_1", reportFor("completed")));
+
 		expect(await screen.findByText(LATE_NOTE)).toBeInTheDocument();
 	});
 });
