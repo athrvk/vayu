@@ -692,9 +692,11 @@ written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 backup or deleted it as unrecoverable.
 
 `engineStartFailure` is the main process's own account of why no engine is
-coming, when the user can fix it: another program holding every port the engine
-may use (issue #2118). `useHealthQuery` asks for it (`getEngineStartFailure`) on
-a failed poll and writes it here; the poll an engine answers clears it, and so
+coming, when no crashed child explains it: another program holding every port
+the engine may use (issue #2118), or a start or Retry that failed before it had
+a child, such as a missing binary, in one sentence (issue #3610).
+`useHealthQuery` asks for it (`getEngineStartFailure`) on a failed poll and
+writes it here; the poll an engine answers clears it, and so
 does `useEngineRestart` when Retry is pressed. A reply that lands after a
 restart opened its start window is dropped, because it describes the start
 Retry just cleared. While it is set the status is `unreachable` whatever the
@@ -745,9 +747,14 @@ notification per loss. The dashboard reads `engineCrash` too, by way of
 `useEngineServing` (`selectKnownEngineStatus`): its engine-stopped notice offers
 Restart while no engine serves, and its report fetch waits for one. For the gap until it does, `selectKnownEngineStatus` (exported
 beside the store) derives the status the app shows: `unreachable` when a crash
-was pushed after the poll's last verdict and that verdict is `connected`,
-`engineStatus` itself otherwise. `engineCrashAheadOfPoll` carries the "after":
-`setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
+was pushed after the poll's last verdict and that verdict is `connected`;
+`unreachable` too when a crash is recorded, the verdict is `starting` and no
+restart is in flight (`engineRestarting`, issue #3610), because a failed poll
+inside the startup grace reads `starting` for up to 45 s and an engine that
+exited at spawn is not coming; `engineStatus` itself otherwise, so a restart's
+own `starting` passes through. That second rule keys on `engineCrash`, not on
+the flag below, which the very poll that wrote `starting` cleared.
+`engineCrashAheadOfPoll` carries the "after": `setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
 including the one `useHealthQuery` makes for each answered poll, an unchanged
 answer too (structural sharing would otherwise keep the sync effect from
 running). The crash alone cannot decide, because it stays until `ready`, which
@@ -760,7 +767,7 @@ put there. The health poll's own gating (`queries/health.ts`) and the store's
 internals read `engineStatus` directly: they are the poll's own verdict. The Dock reads `engineCrash`
 for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
-`engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
+the derived status is `starting`; `engineStartFailure` takes precedence over it in
 both the tooltip and the button (Retry, not Restart).
 
 `engineRestarting` is whether a restart is in flight, held here rather than in
@@ -3826,9 +3833,13 @@ running). `electron/quit-flow.ts` is the one state machine both gestures go
 through - `idle`, `confirmingServices`, `flushing`, `confirmingLoss`,
 `proceeding` - and owns the flush and its 2s ACK ceiling, which is why
 "already flushed" is shared state: a quit that flushed and then closes the
-window must not ask a dying renderer twice. It lives outside `main.ts` so it
-can be tested - `main.ts` creates windows and starts the engine at import
-time. Once a quit is let through, `quit-shutdown.ts` stops the engine and the
+window must not ask a dying renderer twice. A flush is only requested of a page
+that can answer (`createFlushRequest`): no window, a gone renderer, or a page
+that has not finished loading (`openIntents.isReady()`, the open intents' own
+`did-finish-load` signal) settles at once with nothing to save, rather than
+waiting out the ceiling and asking about edits that page never held (#3610). It lives outside `main.ts`
+so it can be tested - `main.ts` creates windows and starts the engine at
+import time. Once a quit is let through, `quit-shutdown.ts` stops the engine and the
 MCP server.
 
 **A running service is asked about before either path flushes** (#1363). A close

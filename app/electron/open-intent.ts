@@ -149,6 +149,11 @@ export interface OpenIntents {
 	 * intents again until the next `ready`. Intents already waiting stay queued.
 	 */
 	notReady(): void;
+	/**
+	 * Whether the page can hear main: `ready` since the last `notReady`. The
+	 * quit flow's flush request reads it too, so there is one account of that.
+	 */
+	isReady(): boolean;
 }
 
 export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
@@ -193,5 +198,7 @@ export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 		},
 
 		notReady,
+
+		isReady: () => loaded,
 	};
 }

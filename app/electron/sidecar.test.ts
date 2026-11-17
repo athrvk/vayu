@@ -1525,10 +1525,10 @@ describe("EngineSidecar - lifecycle", () => {
 });
 
 /*
- * What `main.ts`'s `startEngine` reads when the first start rejects, to tell a
- * launch that failed (error box, quit) from a start a quit or a restart
- * overtook. The caller asks in its own rejection handler, so that is where
- * these read the answer.
+ * What `classifyEngineStartFailure` (engine-start-failure.ts) reads when the
+ * first start rejects, to tell a launch that failed from a start a quit or a
+ * restart overtook. The caller asks in its own rejection handler, so that is
+ * where these read the answer.
  */
 describe("EngineSidecar - whether a failed start is the last word", () => {
 	/** The start's rejection, with the two facts read the moment it reaches the caller. */

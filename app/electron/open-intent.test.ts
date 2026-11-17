@@ -278,6 +278,20 @@ describe("createOpenIntents", () => {
 		expect(os.sent).toEqual([{ kind: "import", path: "a.json" }]);
 	});
 
+	it("says whether the page can hear main, which the quit flush reads too (#3610)", () => {
+		const os = harness();
+		expect(os.intents.isReady()).toBe(false);
+		os.intents.ready();
+		expect(os.intents.isReady()).toBe(true);
+		os.intents.notReady();
+		expect(os.intents.isReady()).toBe(false);
+		// A send that found no window is a page that is not there after all.
+		os.intents.ready();
+		os.setSends(false);
+		os.intents.offer({ kind: "import", path: "a.json" });
+		expect(os.intents.isReady()).toBe(false);
+	});
+
 	it("delivers each waiting intent once", () => {
 		const os = harness();
 		os.intents.offer({ kind: "import", path: "a.json" });
