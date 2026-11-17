@@ -47,11 +47,7 @@ import {
 	ToolArgError,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
-import {
-	boundRunReport,
-	MAX_INLINE_BODY_BYTES,
-	MAX_REPORT_TRACE_BYTES,
-} from "./inline-body-bounds.js";
+import { MAX_INLINE_BODY_BYTES, MAX_REPORT_TRACE_BYTES } from "./inline-body-bounds.js";
 import {
 	DEFAULT_RUN_SAMPLE_LIMIT,
 	DEFAULT_RUN_SERIES_LIMIT,
@@ -63,7 +59,7 @@ import {
 	runListQuery,
 } from "./run-housekeeping.js";
 import {
-	markPartialReport,
+	boundAndMarkRunReport,
 	projectRunStatus,
 	RUN_STATUS_WORDS,
 	TERMINAL_STATUS_WORDS,
@@ -441,7 +437,7 @@ export const READ_TOOLS: McpTool[] = [
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
-				bound: (report) => markPartialReport(boundRunReport(report)),
+				bound: boundAndMarkRunReport,
 				structured: true,
 				signal,
 			});

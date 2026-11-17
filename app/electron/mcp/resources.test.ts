@@ -554,3 +554,63 @@ describe("a masked run read whose secret lookup failed", () => {
 		});
 	});
 });
+
+/*
+ * The report resource reads a run the way get_run_report does (#3557): the same
+ * body cap and trace budget, and a run still going is marked `partial`. The
+ * parity case pins the one composition against the tool itself, so a third
+ * reader cannot drift from it again.
+ */
+describe("vayu://run/{runId}/report bounds the report as get_run_report does", () => {
+	const BIG_BODY = "x".repeat(100 * 1024);
+	const traced = (status: string, rows = 1) => ({
+		metadata: { status },
+		summary: { avgRps: 0 },
+		results: Array.from({ length: rows }, (_, id) => ({
+			id,
+			status: 200,
+			trace: { response: { body: BIG_BODY } },
+		})),
+	});
+
+	const ctxFor = (report: unknown): ToolContext => {
+		const client = {
+			getRunReport: vi.fn().mockResolvedValue(report),
+			getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+			listCollections: vi.fn().mockResolvedValue([]),
+			listAllRequests: vi.fn().mockResolvedValue([]),
+		} as unknown as EngineClient;
+		return { client, config: resolveSafetyConfig(), host: "app" };
+	};
+
+	const resourceRead = (report: unknown) =>
+		RUN_REPORT_RESOURCE.read(ctxFor(report), "run_1") as Promise<{
+			results: Array<{ trace: { response: { body: string; bodyTruncated?: boolean } } }>;
+			partial?: boolean;
+		}>;
+
+	test("a 100 KB stored body is cut and says so", async () => {
+		const out = await resourceRead(traced("completed"));
+		const response = out.results[0].trace.response;
+		expect(response.bodyTruncated).toBe(true);
+		expect(response.body.length).toBeLessThan(BIG_BODY.length);
+	});
+
+	test("a run still going is marked partial, and a finished one is not", async () => {
+		expect((await resourceRead(traced("running"))).partial).toBe(true);
+		expect(await resourceRead(traced("completed"))).not.toHaveProperty("partial");
+	});
+
+	test("the resource answers what the tool answers, trace budget included", async () => {
+		const tool = TOOLS.find((t) => t.name === "get_run_report");
+		if (!tool) throw new Error("get_run_report is not registered");
+		// Four 32 KB bodies are past the 98,304-byte trace budget, so the tool
+		// omits traces: a resource that skipped the budget would differ.
+		const report = traced("running", 4);
+		const viaTool = await tool.handler({ runId: "run_1" }, ctxFor(report));
+		const viaResource = await resourceRead(report);
+		expect(viaTool.structuredContent).toHaveProperty("tracesOmitted");
+		expect(viaResource).toEqual(viaTool.structuredContent);
+	});
+});
