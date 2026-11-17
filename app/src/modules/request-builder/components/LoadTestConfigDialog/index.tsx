@@ -11,7 +11,7 @@
  * notices, the saved memo and the payload are the files beside it.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config, ResolvedElement } from "@/types";
 import { requestReference, type ThresholdOwner } from "@/lib/agent-reference";
@@ -235,6 +235,7 @@ export default function LoadTestConfigDialog({
 		monitorIntervalMs: monitorSettings.defaultIntervalMs,
 	});
 
+	const runLabelRef = useRef<HTMLInputElement>(null);
 	const [profile, setProfile] = useState(initial.profile);
 	const updateProfile = (patch: Partial<LoadTestProfile>) =>
 		setProfile((prev) => ({ ...prev, ...patch }));
@@ -385,7 +386,15 @@ export default function LoadTestConfigDialog({
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-xl lg:max-w-4xl">
+			<DialogContent
+				className="max-w-xl lg:max-w-4xl"
+				// Radix would focus the first tabbable, TargetLine's Copy for agent
+				// button, whose tooltip opens on focus (#3608).
+				onOpenAutoFocus={(e) => {
+					e.preventDefault();
+					runLabelRef.current?.focus();
+				}}
+			>
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
@@ -450,6 +459,7 @@ export default function LoadTestConfigDialog({
 								</Label>
 								<Input
 									id="lt-comment"
+									ref={runLabelRef}
 									type="text"
 									value={comment}
 									onChange={(e) => setComment(e.target.value)}

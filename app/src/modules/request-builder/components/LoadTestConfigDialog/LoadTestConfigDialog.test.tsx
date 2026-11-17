@@ -1868,6 +1868,38 @@ describe("the agent affordances (#2230)", () => {
 		);
 	});
 
+	describe("initial focus (#3608)", () => {
+		const SAVED = { url: "https://api.example.com/", referenceOwner: OWNER } as const;
+		const runLabel = () => screen.getByLabelText(/Run label/);
+
+		it("lands on the Run label, so the Copy for agent tooltip does not open on mount", () => {
+			open(SAVED);
+
+			expect(document.activeElement).toBe(runLabel());
+			expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		});
+
+		it("lands on the Run label for an unsaved request too", () => {
+			open({ url: "https://api.example.com/" });
+
+			expect(document.activeElement).toBe(runLabel());
+		});
+
+		// jsdom has no sequential focus navigation and `userEvent` is not a
+		// dependency (`keyboard-reachability.test.tsx`), so Shift+Tab is asserted
+		// by what it walks: a tabbable button that sits before the field.
+		it("leaves the Copy for agent button tabbable, one Shift+Tab before the field", () => {
+			open(SAVED);
+
+			const button = screen.getByRole("button", COPY_REQUEST);
+			expect(button).not.toBeDisabled();
+			expect(button.tabIndex).toBeGreaterThanOrEqual(0);
+			expect(
+				button.compareDocumentPosition(runLabel()) & Node.DOCUMENT_POSITION_FOLLOWING
+			).toBeTruthy();
+		});
+	});
+
 	it("offers no request copy for an unsaved request or a run owner", () => {
 		// Mutation check: drop the `referenceOwner?.type === "request"` gate and
 		// the unsaved case grows a button copying a line with no id; this reds.
