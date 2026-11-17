@@ -1648,7 +1648,8 @@ from the tick and from `Failed`'s cross; `passed` keeps the tick. The word stays
 outcome *string* as a prop, not the judgement object: it is memo'd on `Object.is`
 and a fresh `{outcome, reason}` per render would defeat it (#1714). The history run tab
 (`HistoryDetail.tsx`) passes a load run's verdict from the report it already
-loads (`reportOutcome`, else `rowOutcome`), so the tab, the dashboard header and
+loads (`reportOutcome`), or a finished collection run's (`collectionReportOutcome`,
+#3543), else `rowOutcome`, so the tab, the dashboard header and
 the sidebar row draw one run in one colour (#2872); design runs pass none and
 keep the tick. A collection run's sidebar row refines its own glyph from its
 step counts and its budget verdict (#3458, #3539, `rowOutcome`), and Welcome's recent-runs row and the context
