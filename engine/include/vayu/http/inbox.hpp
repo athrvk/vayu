@@ -169,7 +169,8 @@ std::expected<InboxCannedResponse, InboxParseError>
 parse_inbox_response_update (const nlohmann::json& json, const InboxCannedResponse& current);
 
 /**
- * Resolve where `GET /inbox/:id/live` resumes from.
+ * Resolve where a live SSE stream resumes from: `GET /inbox/:id/live`,
+ * `GET /runs/:id/events`, `GET /runs/:id/live` and `GET /changes`.
  *
  * @p header_value is `Last-Event-ID`, which the browser sets on its own
  * reconnect; @p param_value is `?lastEventId=`, which is how a client owning
@@ -184,7 +185,8 @@ parse_inbox_response_update (const nlohmann::json& json, const InboxCannedRespon
  * had just arrived.
  *
  * @p id_noun names what the id identifies in that error ("capture" for the
- * inbox, "event" for a run's event relay), so a caller reads its own vocabulary.
+ * inbox, "event" for a run's event relay and the change feed, "frame" for a
+ * run's live metrics), so a caller reads its own vocabulary.
  */
 std::expected<int64_t, InboxParseError> parse_live_resume_point (const std::string& header_value,
 const std::string& param_value,

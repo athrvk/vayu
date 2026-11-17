@@ -13,9 +13,9 @@
  *
  * The window is **not** a renderer-only preference. It is stored engine-side as
  * the `liveReplayWindowMs` config entry, because the engine needs the same
- * number: it sizes the in-memory SSE tick ring that `/runs/:id/live` replays
- * from offset 0, which is what rebuilds these charts when the dashboard
- * attaches or re-attaches mid-run. Two settings would let the retained span and
+ * number: it sizes the in-memory SSE tick ring that `/runs/:id/live` replays,
+ * from offset 0 on a first attach, which is what rebuilds these charts when the
+ * dashboard attaches mid-run. Two settings would let the retained span and
  * the displayed span disagree - the engine replaying less than the chart is set
  * to show - so there is one value and both sides read it.
  *
