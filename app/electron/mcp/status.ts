@@ -39,6 +39,12 @@ export interface McpStatus {
 	running: boolean;
 	url: string;
 	enabled: boolean;
+	/**
+	 * Enabled, with no listener and no failure to report: the start has not
+	 * finished (or, before launch reaches it, has not begun), so there is nothing
+	 * wrong yet and nothing to retry (#3579). Mirrored in `src/types/domain.ts`.
+	 */
+	starting: boolean;
 	/** Present only while the server is enabled and failed to start. */
 	error?: McpStartError;
 	/**
@@ -86,6 +92,10 @@ export function classifyStartError(
  * The `mcp:status` answer. A listener that is up has no error to report even if
  * a stale one is passed; `url` falls back to the configured endpoint so Settings
  * can still name which port is affected.
+ *
+ * `starting` is derived rather than stored: the lifecycle publishes a listener
+ * only once it is bound and a failure only once the bind has thrown, so an
+ * enabled server with neither is one that has not finished starting.
  */
 export function buildMcpStatus(state: {
 	listener: McpListenerState | null;
@@ -98,6 +108,7 @@ export function buildMcpStatus(state: {
 		running,
 		url: state.listener?.url ?? MCP_ENDPOINT_URL,
 		enabled: state.enabled,
+		starting: state.enabled && !state.listener && !state.error,
 	};
 	if (state.error && !running) status.error = state.error;
 	if (state.corruptCopy) status.corruptCopy = state.corruptCopy;

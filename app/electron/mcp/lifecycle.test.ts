@@ -16,6 +16,7 @@ import type http from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_MCP_SAFETY_CONFIG, type McpSafetyConfig } from "./config.js";
 import type { McpRequestHandler } from "./listener.js";
+import { buildMcpStatus } from "./status.js";
 import {
 	createMcpLifecycle,
 	type McpLifecycle,
@@ -281,6 +282,39 @@ describe("createMcpLifecycle", () => {
 		await lifecycle.stop();
 
 		expect(lifecycle.startError()).toBeNull();
+	});
+
+	// `buildMcpStatus` derives `starting` from "no listener and no failure", so
+	// that pair has to hold in every phase: both absent until the bind settles
+	// (including before `start()` is ever called), then exactly one is present
+	// (#3579).
+	it("holds neither a listener nor a failure until the bind settles, then exactly one", async () => {
+		const status = (lifecycle: McpLifecycle<FakeService>) =>
+			buildMcpStatus({
+				listener: lifecycle.listener(),
+				enabled: true,
+				error: lifecycle.startError(),
+				corruptCopy: null,
+			});
+
+		const bound = harness();
+		expect(status(bound.lifecycle).starting).toBe(true);
+		const held = gate();
+		bound.h.configure = (l) => (l.startGate = held);
+		const binding = bound.nextBind();
+		const starting = bound.lifecycle.start();
+		await binding;
+		expect(status(bound.lifecycle).starting).toBe(true);
+		held.open();
+		await starting;
+		expect(status(bound.lifecycle)).toMatchObject({ running: true, starting: false });
+
+		const failed = harness();
+		failed.h.configure = (l) => (l.startFailure = new Error("listen EACCES"));
+		await failed.lifecycle.start();
+		const failure = status(failed.lifecycle);
+		expect(failure.starting).toBe(false);
+		expect(failure.error).toBeDefined();
 	});
 
 	it("does not record a bind failure for a start that was already stopped", async () => {
