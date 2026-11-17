@@ -27,7 +27,9 @@ ways; until then the live view stays, with the report fetch's Retry.
   status once it lands, "stopped" only from the engine's confirmed Stop before that (#3367). Stop
   reads the engine's answer: `stopped` ends the run as the user's, `completed` / `failed` mean the
   run had already finished, so the run settles on that status and the finished view carries one
-  line saying the Stop came late, and `running` changes nothing. A report
+  line saying the Stop came late (not when the report's `summary.drainCut` shows the Stop
+  cancelled requests during the drain: it did something, and the verdict line already says not
+  judged, #3538), and `running` changes nothing. A report
   fetch that keeps finding the run still running gives up to that same callout rather than
   to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
   and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
