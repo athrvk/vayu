@@ -26,16 +26,22 @@ import type { Logger } from "../log.js";
  * Node's `close()` closes only the connections idle at that moment; one still
  * answering would then stay open for `keepAliveTimeout` after its answer and
  * hold the close back (#3575). So once the server has stopped listening, each
- * response that finishes ends its own connection, after the answer is flushed.
- * Not `closeIdleConnections()` there: it destroys the socket, and lost the
+ * response that finishes closes its own connection after the answer is
+ * flushed, when its request was read in full. One whose request is still
+ * arriving (an oversized upload, answered 413 before it ends) is only
+ * half-closed, so the rest is drained rather than reset under the answer, and
+ * the connection goes when the client closes its side. Not
+ * `closeIdleConnections()` there: it destroys the socket at once, and lost the
  * answer when probed. Not `closeAllConnections()` at close either: a request
- * still arriving is answered (an oversized upload is drained for its 413).
+ * still arriving is answered.
  */
 export function createMcpSocketServer(onRequest: http.RequestListener): http.Server {
 	const server = http.createServer(onRequest);
 	server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {
 		res.once("finish", () => {
-			if (!server.listening) req.socket.end();
+			if (server.listening) return;
+			if (req.complete) req.socket.destroySoon();
+			else req.socket.end();
 		});
 	});
 	return server;

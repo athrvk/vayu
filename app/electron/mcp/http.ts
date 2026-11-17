@@ -26,6 +26,7 @@ import {
 	createMcpHandler,
 	isInitializeRequest,
 	isJSONRPCRequest,
+	isLegacyRequest,
 	isSpecType,
 	type McpHandlerRequestOptions,
 	type McpHttpHandler,
@@ -63,6 +64,8 @@ export class McpHttpServer {
 	private readonly opts: McpHttpServerOptions;
 	private readonly sessions = new ClientSessions();
 	private readonly inFlight: InFlightCalls;
+	/** The response of every 2025-era exchange still open, which a stop drops. */
+	private readonly legacyExchanges = new Set<http.ServerResponse>();
 	private handler: McpHttpHandler;
 	private readonly hostIsLoopback = localhostHostValidation();
 	private readonly originIsLoopback = localhostOriginValidation();
@@ -106,15 +109,20 @@ export class McpHttpServer {
 	/**
 	 * End every exchange a socket's close would otherwise wait on: what a
 	 * 2026-07-28 client holds open (a `subscriptions/listen` stream lasts as long
-	 * as the client likes), and every 2025-era call in flight, whose connection
-	 * is dropped with no result and no error written, so its engine request is
-	 * aborted and its client's call fails at once (#3575). Everything else
-	 * finishes as it would have: an upload still arriving is drained and
-	 * answered (see `readJsonBody`), not cut off. The SDK's `close()` is final,
-	 * so a fresh handler takes the next request.
+	 * as the client likes), which the SDK ends; and every 2025-era exchange in
+	 * flight, whose connection is dropped with no result and no error written
+	 * (#3575). The drop reaches the handler as a disconnect does, so the tool's
+	 * signal fires and its engine request is aborted. A client still waiting for
+	 * the response headers sees its fetch fail at once; one already reading the
+	 * stream (a keep-alive comment or a progress event was sent) holds the call
+	 * until its own timeout. Everything else finishes as it would have: an
+	 * upload still arriving is drained and answered (see `readJsonBody`), not
+	 * cut off. The SDK's `close()` is final, so a fresh handler takes the next
+	 * request.
 	 */
 	async endStreams(): Promise<void> {
-		this.inFlight.abortAll();
+		for (const res of this.legacyExchanges) res.destroy();
+		this.legacyExchanges.clear();
 		const ending = this.handler;
 		this.handler = this.createHandler();
 		await ending.close();
@@ -184,22 +192,25 @@ export class McpHttpServer {
 		}
 		// An adapter per request, so that a stop can drop this one's connection.
 		const serveMcp = toNodeHandler({
-			fetch: (request, options) => this.serve(request, options, () => res.destroy()),
+			fetch: (request, options) => this.serve(request, options, res),
 		});
 		await serveMcp(req, res, body);
 	}
 
 	/**
-	 * The web-standard face `toNodeHandler` calls: one request, both eras, on
-	 * a connection @p dropConnection closes.
+	 * The web-standard face `toNodeHandler` calls: one request, both eras,
+	 * answered on @p res.
 	 */
 	private async serve(
 		request: Request,
 		options: McpHandlerRequestOptions | undefined,
-		dropConnection: () => void
+		res: http.ServerResponse
 	): Promise<Response> {
+		// The SDK's own routing predicate, so the host and the handler cannot
+		// disagree about which leg serves the request.
+		if (await isLegacyRequest(request, options?.parsedBody)) this.holdUntilClosed(res);
 		const message = soleMessageOf(options?.parsedBody);
-		const response = await this.fetchCancellable(request, options, message, dropConnection);
+		const response = await this.fetchCancellable(request, options, message);
 		const handshake = handshakeOf(message);
 		if (!handshake || !response.ok) return response;
 		// The stateless legacy leg sends no session id of its own and accepts any
@@ -218,19 +229,30 @@ export class McpHttpServer {
 	}
 
 	/**
+	 * Count @p res among the 2025-era exchanges a stop drops until it closes,
+	 * however it closes. Every one, not only the calls `inFlight` holds: that
+	 * registry is keyed and capped for cancels, and a call without a session
+	 * id, inside a longer batch, evicted or replaced under its key still holds
+	 * its connection open.
+	 */
+	private holdUntilClosed(res: http.ServerResponse): void {
+		if (res.destroyed) return;
+		this.legacyExchanges.add(res);
+		res.once("close", () => this.legacyExchanges.delete(res));
+	}
+
+	/**
 	 * Hand the request to the handler, wiring a 2025-era client's
 	 * `notifications/cancelled` to the request it names: each request is served
 	 * under a signal of the host's own, held in `inFlight` under the session id
 	 * and request id until its exchange ends, however it ends. The SDK's legacy
 	 * leg tears a request's server down when that signal aborts, which aborts
-	 * the tool's `mcpReq.signal` (#3574). A stop drops the connection instead
-	 * (`endStreams`), which reaches the handler as a disconnect does.
+	 * the tool's `mcpReq.signal` (#3574).
 	 */
 	private async fetchCancellable(
 		request: Request,
 		options: McpHandlerRequestOptions | undefined,
-		message: unknown,
-		dropConnection: () => void
+		message: unknown
 	): Promise<Response> {
 		// Absent on every 2026-07-28 exchange, which the SDK cancels itself; and
 		// without one a cancel cannot be matched, since every client counts its
@@ -242,7 +264,7 @@ export class McpHttpServer {
 		if (cancelled !== undefined) this.inFlight.cancel(sessionId, cancelled);
 		if (!isJSONRPCRequest(message)) return this.handler.fetch(request, options);
 
-		const call = this.inFlight.track(sessionId, message.id, dropConnection);
+		const call = this.inFlight.track(sessionId, message.id);
 		// The client's disconnect still reaches the handler through this signal.
 		const signal = AbortSignal.any([request.signal, call.signal]);
 		try {

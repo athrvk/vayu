@@ -16,6 +16,7 @@
  */
 
 import http from "node:http";
+import net from "node:net";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
 	Client,
@@ -1948,10 +1949,23 @@ describe("stopping the MCP server through its lifecycle", () => {
 	let lifecycle: McpLifecycle<McpHttpServer> | null = null;
 	let rebound: McpListener | null = null;
 	const agents: http.Agent[] = [];
+	const sockets: net.Socket[] = [];
+
+	const INITIALIZE_BODY = JSON.stringify({
+		jsonrpc: "2.0",
+		id: 1,
+		method: "initialize",
+		params: {
+			protocolVersion: "2025-06-18",
+			capabilities: {},
+			clientInfo: { name: "raw", version: "1.0.0" },
+		},
+	});
 
 	afterEach(async () => {
 		for (const c of clients.splice(0)) await c.close().catch(() => {});
 		for (const agent of agents.splice(0)) agent.destroy();
+		for (const socket of sockets.splice(0)) socket.destroy();
 		await lifecycle?.stop();
 		lifecycle = null;
 		await rebound?.stop();
@@ -1967,14 +1981,18 @@ describe("stopping the MCP server through its lifecycle", () => {
 	 */
 	function keepIdleConnectionsOpen() {
 		const create = http.createServer;
-		vi.spyOn(http, "createServer").mockImplementation(((...args: Parameters<typeof create>) => {
+		return vi.spyOn(http, "createServer").mockImplementation(((
+			...args: Parameters<typeof create>
+		) => {
 			const server = create(...args);
 			server.keepAliveTimeout = 10 * TEST_TIMEOUT_MS;
 			return server;
 		}) as typeof create);
 	}
 
-	async function serve(engine: EngineClient): Promise<number> {
+	/** Bind the port through the lifecycle, with idle connections kept open. */
+	async function serve(engine: EngineClient, safety?: Partial<McpSafetyConfig>): Promise<number> {
+		const keptOpen = keepIdleConnectionsOpen();
 		const port = await freePort();
 		lifecycle = createMcpLifecycle({
 			isEnabled: () => true,
@@ -1985,12 +2003,34 @@ describe("stopping the MCP server through its lifecycle", () => {
 					host: HOST,
 					port,
 					info: { name: "vayu", version: "test" },
-					contextProvider: contextProvider(undefined, engine),
+					contextProvider: contextProvider(safety, engine),
 				}),
 			log: () => {},
 		});
 		await lifecycle.start();
+		// Else the server that holds the port closes idle connections after 5 s
+		// on its own, and a lingering one is a delay the bound does not see.
+		expect(keptOpen).toHaveBeenCalled();
 		return port;
+	}
+
+	async function connectLegacy(port: number): Promise<Client> {
+		const c = new Client({ name: "legacy-e2e", version: "1.0.0" });
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		clients.push(c);
+		expect(c.getProtocolEra()).toBe("legacy");
+		return c;
+	}
+
+	/** The port rebinds the moment the stop resolves. */
+	async function expectPortFree(port: number) {
+		rebound = new McpListener({
+			host: HOST,
+			port,
+			loadHandler: () => Promise.reject(new Error("not served")),
+		});
+		await rebound.start();
+		expect(rebound.isRunning()).toBe(true);
 	}
 
 	/** What @p settling settles to, or "still waiting" if it hangs. */
@@ -2006,20 +2046,16 @@ describe("stopping the MCP server through its lifecycle", () => {
 	const stopping = () => lifecycle!.stop().then(() => "stopped");
 
 	/*
-	 * The mutation checks, in `http.ts`: drop `abortAll()` from `endStreams()`
-	 * and the stop waits on the engine call; make the connection drop a no-op
-	 * and the client's call waits for an answer. Either loses its race.
+	 * The mutation checks, in `http.ts`: drop the `res.destroy()` sweep from
+	 * `endStreams()` and the stop waits on the engine call; skip
+	 * `holdUntilClosed` for the call and the same. Either loses its race.
 	 */
-	it("stops while a 2025-era call is in flight, dropping its connection", async () => {
-		keepIdleConnectionsOpen();
+	it("stops while a 2025-era call waits for its headers, failing the client's fetch", async () => {
 		const hang = hangingEngineCall();
 		const port = await serve(
 			fakeClient({ health: (signal?: AbortSignal) => hang.call(signal) })
 		);
-		const c = new Client({ name: "legacy-e2e", version: "1.0.0" });
-		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
-		clients.push(c);
-		expect(c.getProtocolEra()).toBe("legacy");
+		const c = await connectLegacy(port);
 		const outcome = c.callTool({ name: "get_engine_health", arguments: {} }).then(
 			() => "answered",
 			(err: unknown) => err
@@ -2028,22 +2064,90 @@ describe("stopping the MCP server through its lifecycle", () => {
 
 		expect(await within(stopping())).toBe("stopped");
 		await hang.aborted;
-		// The client's own fetch fails; a JSON-RPC error the server wrote would
-		// arrive as a ProtocolError, and a stream ended cleanly would leave the
-		// call waiting for its timeout.
+		// Nothing was sent yet, so the client's own fetch fails; a JSON-RPC error
+		// the server wrote would arrive as a ProtocolError.
 		const err = await within(outcome);
 		expect(err).not.toBeInstanceOf(ProtocolError);
 		expect(err).toBeInstanceOf(TypeError);
 		expect(err).toHaveProperty("message", "fetch failed");
+		await expectPortFree(port);
+	});
 
-		// The port is free the moment the stop resolves.
-		rebound = new McpListener({
-			host: HOST,
-			port,
-			loadHandler: () => Promise.reject(new Error("not served")),
-		});
-		await rebound.start();
-		expect(rebound.isRunning()).toBe(true);
+	/*
+	 * Once a progress event (or a keep-alive comment, every 15 s) is out, the
+	 * client is reading a 200 stream, and a dropped one ends with no answer: the
+	 * SDK client holds the call until its own timeout, so nothing here waits on
+	 * it. The server's side is the same as before the headers. The mutation
+	 * check is the first test's.
+	 */
+	it("stops while a 2025-era call is streaming, its headers already sent", async () => {
+		const hang = hangingEngineCall();
+		const port = await serve(
+			fakeClient({
+				listRequests: async () => [
+					{ id: "a", name: "req a", method: "GET", url: "https://api.example.com/a" },
+				],
+				composeRequest: async () => ({ method: "GET", url: "https://api.example.com/a" }),
+				executeRequest: (_payload: unknown, signal?: AbortSignal) => hang.call(signal),
+			}),
+			{ allowlist: ["api.example.com"] }
+		);
+		const c = await connectLegacy(port);
+		let heardProgress!: () => void;
+		const progressed = new Promise<void>((resolve) => (heardProgress = resolve));
+		const call = c.callTool(
+			{ name: "run_collection_smoke", arguments: { collectionId: "c1" } },
+			{ onprogress: () => heardProgress() }
+		);
+		void call.catch(() => {});
+		await progressed;
+		await hang.started;
+
+		expect(await within(stopping())).toBe("stopped");
+		await hang.aborted;
+		await expectPortFree(port);
+	});
+
+	/*
+	 * The cancel registry holds a call only under an issued session id, keyed
+	 * and capped; a stop has to end the rest too. The mutation check: drop
+	 * every call but the registry's from the sweep in `endStreams()` and the
+	 * stop waits on the untracked ones.
+	 */
+	it("drops the 2025-era calls the cancel registry does not hold", async () => {
+		const hangs = [hangingEngineCall(), hangingEngineCall(), hangingEngineCall()];
+		let served = 0;
+		const port = await serve(
+			fakeClient({ health: (signal?: AbortSignal) => hangs[served++].call(signal) })
+		);
+		const call = (id: number, headers: Record<string, string>) =>
+			fetch(`http://${HOST}:${port}/mcp`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json, text/event-stream",
+					...headers,
+				},
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id,
+					method: "tools/call",
+					params: { name: "get_engine_health", arguments: {} },
+				}),
+			}).then((res) => res.text());
+		// No session id, which no cancel can name; and two calls under one key,
+		// of which the registry holds only the later.
+		const calls = [
+			call(1, {}),
+			call(9, { "mcp-session-id": "s1" }),
+			call(9, { "mcp-session-id": "s1" }),
+		];
+		for (const sent of calls) void sent.catch(() => {});
+		await Promise.all(hangs.map((hang) => hang.started));
+
+		expect(await within(stopping())).toBe("stopped");
+		await Promise.all(hangs.map((hang) => hang.aborted));
+		await expectPortFree(port);
 	});
 
 	/*
@@ -2052,18 +2156,8 @@ describe("stopping the MCP server through its lifecycle", () => {
 	 * connection, losing the race.
 	 */
 	it("still answers a request whose body is arriving when the stop is requested", async () => {
-		keepIdleConnectionsOpen();
 		const port = await serve(fakeClient());
-		const body = JSON.stringify({
-			jsonrpc: "2.0",
-			id: 1,
-			method: "initialize",
-			params: {
-				protocolVersion: "2025-06-18",
-				capabilities: {},
-				clientInfo: { name: "raw", version: "1.0.0" },
-			},
-		});
+		const body = INITIALIZE_BODY;
 		const half = Math.floor(body.length / 2);
 		// Node's global agent closes an idle socket itself after 5 s.
 		const agent = new http.Agent({ keepAlive: true });
@@ -2102,6 +2196,46 @@ describe("stopping the MCP server through its lifecycle", () => {
 		expect(status).toBe(200);
 		expect(text).toMatch(/"serverInfo"/);
 		expect(await stopped).toBe("stopped");
+	});
+
+	/*
+	 * A client that does not answer the server's FIN with its own: only the
+	 * server closing the socket ends the connection. The mutation check: half-
+	 * close it in `createMcpSocketServer` (`req.socket.end()`) for a request
+	 * read in full too, and the stop waits on this connection.
+	 */
+	it("closes an answered connection whose client keeps its own side open", async () => {
+		const port = await serve(fakeClient());
+		const body = INITIALIZE_BODY;
+		const half = Math.floor(body.length / 2);
+		const socket = net.connect({ host: HOST, port, allowHalfOpen: true });
+		sockets.push(socket);
+		let received = "";
+		socket.on("data", (chunk) => (received += chunk));
+		socket.on("error", () => {});
+		// The server's FIN, read after every byte before it.
+		const ended = new Promise((resolve) => socket.once("end", resolve));
+		socket.write(
+			[
+				"POST /mcp HTTP/1.1",
+				`Host: ${HOST}:${port}`,
+				"Content-Type: application/json",
+				"Accept: application/json, text/event-stream",
+				`Content-Length: ${Buffer.byteLength(body)}`,
+				"",
+				body.slice(0, half),
+			].join("\r\n")
+		);
+		await vi.waitFor(() => expect(lifecycle!.service()).not.toBeNull(), {
+			timeout: ASYNC_UTIL_TIMEOUT_MS,
+		});
+
+		const stopped = within(stopping());
+		socket.write(body.slice(half));
+		expect(await stopped).toBe("stopped");
+		await ended;
+		expect(received).toMatch(/^HTTP\/1\.1 200 /);
+		expect(received).toMatch(/"serverInfo"/);
 	});
 });
 
