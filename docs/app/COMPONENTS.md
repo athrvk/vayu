@@ -572,8 +572,9 @@ run posts "Load test stopped" with its numbers alone, whoever stopped it and
 however this window learns of it (a frame, the stored report, the settle wait);
 a collection run posts "Collection run stopped" with its step counts (issue
 #3606). The end-of-run cue (the taskbar flash) follows who stopped the run:
-this window's own Stop is silent, a stop from MCP, History or another client
-raises it.
+a load test's own Stop from this window is silent, a stop from MCP, History or
+another client raises it, and every collection-run stop raises it (that service
+has no `stopMonitoring`, so its Stop arrives as a stream frame).
 
 The run's progress is also mirrored onto the OS chrome: the Windows taskbar
 button and the macOS Dock icon fill as it advances and clear when it ends, and

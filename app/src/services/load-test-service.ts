@@ -383,8 +383,9 @@ class LoadTestService {
 	 * title would misreport what happened. `options.stoppedHere` says this
 	 * window's own Stop ended the run: the user was here and already knows, so
 	 * the end-of-run cue is skipped. A stop learned from the stream or the
-	 * stored report was somebody else's and raises it (#3606). The taskbar mark is unchanged: a
-	 * stream error still reddens it (#1364, pinned by the Dock/taskbar test
+	 * stored report was somebody else's and raises it (#3606).
+	 *
+	 * The taskbar mark is unchanged: a stream error still reddens it (#1364, pinned by the Dock/taskbar test
 	 * below), because the user has no live view into whether the run itself is
 	 * still healthy once its updates stop arriving.
 	 */
