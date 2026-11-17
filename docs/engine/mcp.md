@@ -62,7 +62,8 @@ counts. If `vayu` is registered with a different URL (the engine moved ports),
 the old entry is removed at user scope and the new one added. That replace is
 remove then add, not atomic: should the add fail, the old entry is already gone
 and the error says the earlier registration was removed. If `get` fails,
-Connect adds as usual. VS Code has no lookup command, so its Connect always runs `--add-mcp`.
+Connect adds as usual. VS Code has no lookup command, so its Connect always
+runs `--add-mcp`.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
