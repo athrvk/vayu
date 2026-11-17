@@ -39,7 +39,7 @@ interface RawSseMetrics {
 	currentSendRate?: number;
 	windowAvgLatencyMs?: number | null;
 	windowAvgQueueWaitMs?: number | null;
-	/** Mean requests on the wire over the window; `0` for one with no completion (issue #2821). */
+	/** Mean requests on the wire over the window: the time they spent in flight over its span, `0` when nothing was open (issues #2821, #3567). */
 	windowAvgInFlight?: number | null;
 	activeConnections?: number;
 	/** The worker's phase (issue #3568); absent from an older engine. */
@@ -354,9 +354,19 @@ export class SSEClient {
 	 */
 	private onSuperseded: SSESupersededHandler | null = null;
 
-	// Current metrics state (reset on each connect)
+	// Current metrics state. Reset by a connect that starts a run from its first
+	// frame, and kept by one that resumes (see `resumeFrom`).
 	private currentMetrics: LoadTestMetrics = this.createEmptyMetrics();
 	private startTime: number = 0;
+
+	/**
+	 * The run the two fields below belong to, and the id of the last frame of any
+	 * kind received from it (#3571). One slot, not a map per run: a run another
+	 * run displaced is not resumed, because the client keeps the frames of the
+	 * run it last served and nothing about any other.
+	 */
+	private heldRunId: string | null = null;
+	private lastEventId: string | null = null;
 
 	private createEmptyMetrics(): LoadTestMetrics {
 		return {
@@ -424,12 +434,13 @@ export class SSEClient {
 		// that hangs up on itself is not superseded by anyone.
 		this.supersede();
 
-		// Reset metrics state for new connection
-		this.currentMetrics = this.createEmptyMetrics();
-		this.startTime = 0;
-
 		const endpoint = API_ENDPOINTS.METRICS_LIVE(runId);
-		const url = `${API_ENDPOINTS.BASE_URL}${endpoint}`;
+		const resumeFrom = this.resumeFrom(runId);
+		// `Last-Event-ID` is a header the browser sets on its own retry and that
+		// no API lets us set on a fresh connection, so ours travels as a query
+		// parameter the engine reads on the same terms (as the inbox stream's).
+		const query = resumeFrom === null ? "" : `?lastEventId=${encodeURIComponent(resumeFrom)}`;
+		const url = `${API_ENDPOINTS.BASE_URL}${endpoint}${query}`;
 
 		try {
 			this.eventSource = new EventSource(url);
@@ -440,6 +451,7 @@ export class SSEClient {
 
 			// Handle metrics event - unified format from both endpoints
 			this.eventSource.addEventListener("metrics", (event) => {
+				this.noteEventId(event);
 				try {
 					// Both endpoints now send complete metrics object in same format
 					const metrics = JSON.parse(event.data);
@@ -463,6 +475,7 @@ export class SSEClient {
 			// listener would be dead wiring on that path.
 			if (onStep) {
 				this.eventSource.addEventListener("step", (event) => {
+					this.noteEventId(event);
 					try {
 						const step = parseStepEvent(JSON.parse(event.data));
 						// A payload this client cannot read is dropped, not
@@ -479,6 +492,7 @@ export class SSEClient {
 			// it is the denominator for: a load run publishes no such frame.
 			if (onPlan) {
 				this.eventSource.addEventListener("plan", (event) => {
+					this.noteEventId(event);
 					try {
 						const plan = parsePlanEvent(JSON.parse(event.data));
 						if (plan) onPlan(plan);
@@ -493,6 +507,7 @@ export class SSEClient {
 			// emits one, so an unconditional listener would be dead wiring.
 			if (onMonitor) {
 				this.eventSource.addEventListener("monitor", (event) => {
+					this.noteEventId(event);
 					try {
 						const sample = parseMonitorEvent(JSON.parse(event.data));
 						if (sample) onMonitor(sample);
@@ -517,15 +532,14 @@ export class SSEClient {
 				// The engine now sends an explicit `complete` event for normal run end,
 				// so a CLOSED error state means a genuine connection failure.
 				//
-				// NOTE: we intentionally do NOT reconnect here. Standard `EventSource`
-				// has no API to set the `Last-Event-ID` header on a fresh connection,
-				// so a manual reconnect would request `from=0` and the engine would
-				// replay the entire retained topic - duplicating every tick already
-				// shown and clobbering live RPS / throughput visuals. The browser's
-				// own intra-connection retry (while in CONNECTING) does carry
-				// Last-Event-ID and is fine; once the browser gives up (CLOSED), the
-				// canonical recovery is to converge on `GET /runs/:id/report`, which
-				// the load-test service does in its onClose handler.
+				// NOTE: we intentionally do NOT reconnect here. Whether the client
+				// should resume by itself once the browser gives up (CLOSED) is
+				// undecided; until it is, the recovery is to converge on
+				// `GET /runs/:id/report`, which the load-test service does in its
+				// onClose handler, and the user's Reconnect, which re-attaches
+				// through `connect` and resumes from the last frame held. The
+				// browser's own retry (while in CONNECTING) carries `Last-Event-ID`
+				// itself.
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
 					// A warn, not chatter: the stream ended without the engine's
 					// `complete`, so the metrics shown are whatever arrived before
@@ -546,6 +560,34 @@ export class SSEClient {
 					: new Error("Couldn't connect to the event stream from Vayu's engine.")
 			);
 		}
+	}
+
+	/**
+	 * The id to resume `runId`'s stream after, or null to start it from offset 0.
+	 *
+	 * Also the one place that decides what the held ticks depend on: a resume
+	 * keeps `currentMetrics` and `startTime`, because the ticks it will not
+	 * replay are the ones they came from, and a start resets them along with the
+	 * id. The same run with no frame yet received is a start, not a resume: the
+	 * caller holds nothing of it.
+	 */
+	private resumeFrom(runId: string): string | null {
+		if (this.heldRunId === runId && this.lastEventId !== null) return this.lastEventId;
+		this.heldRunId = runId;
+		this.lastEventId = null;
+		this.currentMetrics = this.createEmptyMetrics();
+		this.startTime = 0;
+		return null;
+	}
+
+	/**
+	 * Remember the id a frame carried. Every kind of frame that has one counts,
+	 * not only the metrics ticks: ticks, steps, plans and scrapes share one ring
+	 * and one id sequence, so a resume point taken from the ticks alone would
+	 * re-deliver the scrapes that came after the last tick.
+	 */
+	private noteEventId(event: MessageEvent): void {
+		if (event.lastEventId) this.lastEventId = event.lastEventId;
 	}
 
 	/**

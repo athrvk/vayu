@@ -1372,6 +1372,38 @@ std::vector<StatusSecondEntry> MetricsCollector::drain_status_seconds (int64_t n
     return status_seconds_.drain (now_steady_ms - load_start);
 }
 
+int64_t MetricsCollector::open_request () {
+    return open_request (steady_now_ms ());
+}
+
+int64_t MetricsCollector::open_request (int64_t now_steady_ms) {
+    std::lock_guard<std::mutex> lock (open_requests_mutex_);
+    ++open_requests_.open;
+    open_requests_.opened_sum_ms += now_steady_ms;
+    return now_steady_ms;
+}
+
+void MetricsCollector::close_open (int64_t opened_steady_ms) {
+    close_open (opened_steady_ms, steady_now_ms ());
+}
+
+void MetricsCollector::close_open (int64_t opened_steady_ms, int64_t now_steady_ms) {
+    std::lock_guard<std::mutex> lock (open_requests_mutex_);
+    --open_requests_.open;
+    open_requests_.opened_sum_ms -= opened_steady_ms;
+    open_requests_.closed_ms += now_steady_ms - opened_steady_ms;
+}
+
+double MetricsCollector::average_in_flight (double duration_s) const {
+    return average_in_flight (duration_s, steady_now_ms ());
+}
+
+int64_t MetricsCollector::inflight_integral_ms (int64_t now_steady_ms) const {
+    std::lock_guard<std::mutex> lock (open_requests_mutex_);
+    return open_requests_.closed_ms + (open_requests_.open * now_steady_ms) -
+    open_requests_.opened_sum_ms;
+}
+
 size_t MetricsCollector::flush_to_database (db::Database& db) {
     std::vector<db::Result> batch;
     std::vector<db::PendingResultBody> bodies;

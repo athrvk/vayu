@@ -17,6 +17,7 @@ export { queryKeys } from "./keys";
 // Collections & Requests
 export {
 	useCollectionsQuery,
+	useCollectionName,
 	usePrefetchCollectionsAndRequests,
 	useRequestsQuery,
 	useMultipleCollectionRequests,
@@ -76,6 +77,7 @@ export {
 	isRunNotFound,
 } from "./runs";
 export { RunNotFoundError } from "./runs";
+export type { RunIdentity, BaselineTarget } from "./runs";
 
 // Environments
 export {

@@ -1578,6 +1578,14 @@ it is: when the last scan found only deferred VUs (as opposed to none ready beca
 already in flight or retired, which the plain predicate already handles), the wait is bounded to
 the soonest deferral instead, on a predicate that only a real completion or `should_stop` satisfies.
 
+A step a controller skips (`control.if`, `control.once`, `control.throughput`) is the third: it
+puts nothing in flight either. `ScenarioLoadDriver::submit_one` walks a claimed VU on past a
+skipped step to its next send, so a skipped login in front of the request that does go out costs
+no wait, and stops after one whole iteration with nothing sent. A refill pass that was owed work
+and left `requests_sent` unchanged then takes the same bounded wait, one 50ms tick or until a
+completion or `should_stop` (#3540): a plan whose every step is skipped iterates about once per
+VU per tick rather than pinning a core.
+
 **The `target_fn` invariant, restated.** Every mode but `capacity` passes a
 `target_fn` that is a pure function of `elapsed_ms` and constants fixed when the
 run started - which is what makes a ramp reproducible and a constant run flat.

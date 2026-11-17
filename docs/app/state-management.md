@@ -1496,7 +1496,7 @@ nearest option for the delay, to the default for the other two - because
 
 Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, default 5m, `null` = full run), backstopped by a `maxRetainedTicks` ceiling (default 50,000). Both are kept in sync by `useLiveWindowSync`, mounted once at the App root (not scoped to Settings, so a run streaming with the panel never opened still uses the engine's values), and drive what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
 
-**The window is engine config, not a renderer preference.** It is stored as the engine's `liveReplayWindowMs` entry (milliseconds; `0` = full run), so `useLiveChartSettings` (the picker's editor) reads it from `useConfigQuery` and writes it with `useUpdateConfigMutation` - there is no localStorage key. The engine needs the same number: it sizes the in-memory SSE tick ring that `GET /runs/:runId/live` replays **from offset 0**, and that replay is what rebuilds these charts when the dashboard attaches or re-attaches mid-run. Two settings would let the retained span and the displayed span disagree, with the engine replaying less than the chart is configured to show. `constants/live-window.ts` owns the option list and the `liveWindowToMs` / `liveWindowFromMs` mapping. The Dashboard picker is its **only** editor: the engine settings list rendered a second one until #586, under a different label and a different save model, and `ENGINE_SETTINGS_EDITED_IN_APP` (`modules/settings/engine-settings-edited-in-app.ts`) is what keeps that row out of it now.
+**The window is engine config, not a renderer preference.** It is stored as the engine's `liveReplayWindowMs` entry (milliseconds; `0` = full run), so `useLiveChartSettings` (the picker's editor) reads it from `useConfigQuery` and writes it with `useUpdateConfigMutation` - there is no localStorage key. The engine needs the same number: it sizes the in-memory SSE tick ring that `GET /runs/:runId/live` replays - from offset 0 for a first attach, which is what rebuilds these charts when the dashboard attaches mid-run, and from the last frame held for a Reconnect (#3571). Two settings would let the retained span and the displayed span disagree, with the engine replaying less than the chart is configured to show. `constants/live-window.ts` owns the option list and the `liveWindowToMs` / `liveWindowFromMs` mapping. The Dashboard picker is its **only** editor: the engine settings list rendered a second one until #586, under a different label and a different save model, and `ENGINE_SETTINGS_EDITED_IN_APP` (`modules/settings/engine-settings-edited-in-app.ts`) is what keeps that row out of it now.
 
 The **tick ceiling** is shared the same way, as `liveMaxRetainedTicks` (default 50,000). It is a memory bound, not a rendering one - `bucketColumns` collapses ticks into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, and uPlot draws to canvas, so a full window reaches the screen as a few thousand points however many ticks back it. It also costs nothing at stock settings, since the *window* is what sizes the retained history; it only binds when window / tick-interval exceeds it. `DEFAULT_MAX_RETAINED_TICKS` here and `DEFAULT_MAX_LIVE_TICKS` in the engine are the pre-config defaults and must move together.
 
@@ -2214,6 +2214,8 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 - **`useCollectionsQuery()`** - Fetch all collections (there is no
   single-collection query: a collection is read out of this list)
+- **`useCollectionName(collectionId)`** - A run's collection by name, read out of
+  that list; the id stands in once the collection is deleted, never a blank
 - **`useRequestsQuery(collectionId)`** - Fetch requests in a collection, as
   `RequestSummary` rows (`types/domain.ts`, #2546): `id`, `collectionId`,
   `name`, `method`, `url`, `order`, `createdAt` and `specOperation`, from
@@ -2718,10 +2720,12 @@ runs: {
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],
   lastCollectionRuns: () => ["runs", "lastCollectionRun"], // prefix: invalidate every collection's row
   lastCollectionRun: (collectionId) => ["runs", "lastCollectionRun", collectionId],
-  baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's pin
+  baselines: () => ["runs", "baseline"],                  // prefix: invalidate every request's and collection's pin
   baseline: (requestId) => ["runs", "baseline", requestId],
-  requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's compare picker
+  collectionBaseline: (collectionId) => ["runs", "baseline", "collection", collectionId],
+  requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's and collection's compare picker
   requestRun: (requestId) => ["runs", "requestRun", requestId],
+  collectionRun: (collectionId) => ["runs", "requestRun", "collection", collectionId],
   count: () => ["runs", "count"],                         // Settings' stored-run count, a bare number
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
@@ -2742,12 +2746,19 @@ request: invalidating one request's subtree drops its examples with it, which is
 what a request delete needs, and what a restored example needs, since
 `requests.all` reaches it by prefix (#2971). `runs.lastDesign`,
 `runs.recentDesign`, `runs.lastCollectionRun`, `runs.baseline` and
-`runs.requestRun` sit under
-`runs.all` but deliberately **not** under `runs.lists()` - see below.
+`runs.requestRun` (and the `collectionBaseline` / `collectionRun` keys beside
+them) sit under `runs.all` but deliberately **not** under `runs.lists()` - see below.
 
-`runs.baseline(requestId)` caches the run pinned as that request's baseline
+`runs.baseline(requestId)` caches the run pinned as that request's (or collection's) baseline
 (`GET /runs?baseline=true&requestId=&limit=1`), which the history report's
-vs-baseline strip reads. Pinning, unpinning and deleting a run all **invalidate
+vs-baseline strip reads. A collection load run has no `requestId`, so its pin is
+cached under `runs.collectionBaseline(collectionId)`
+(`GET /runs?baseline=true&type=load&collectionId=&limit=1`), a segment of its own
+inside the same `baselines()` prefix, so no id can read as the other kind and
+every invalidation below reaches both. Which key a run uses is
+`runIdentity(run)` (`lib/run-reference-input.ts`: `requestId`, else the scenario
+`collectionId`), and `usePinnedBaseline` and `RunComparisonView` look the pin up
+by the same identity. Pinning, unpinning and deleting a run all **invalidate
 the `baselines()` prefix** rather than patching it: the pin moves, and a run id
 gives no way back to the request whose baseline it was - a run of an unsaved
 request has no `requestId` at all. The pin *flag* on the loaded list rows is
@@ -2757,7 +2768,10 @@ pin invisible on any page the user had scrolled to.
 
 `runs.requestRun(requestId)` caches the load runs of one request
 (`useRequestRunsQuery`: `GET /runs?requestId=&type=load&limit=50`, newest first),
-which the History compare view's run picker reads. A plain `RunListResponse`, so
+which the History compare view's run picker and the run trend read. A collection
+load run's list is `runs.collectionRun(collectionId)`
+(`GET /runs?collectionId=&type=load&limit=50`), under the same `requestRuns()`
+prefix. A plain `RunListResponse`, so
 its own family for the sixth time and the same shape reason as the five above it,
 and under the `requestRuns()` prefix that a delete, a pin, a cleared history
 (`useInvalidateRuns`) and an MCP `run` event all invalidate. The query returns
@@ -3106,9 +3120,17 @@ loadTestService.startMonitoring(runId);  // after useDashboardStore().startRun(.
 loadTestService.stopMonitoring();
 ```
 
-- Connects to `GET /runs/:runId/live`, a **replayable** tick topic read from
-  offset 0 - so attaching, or re-attaching from History mid-run, rebuilds the
-  charts rather than starting blank.
+- Connects to `GET /runs/:runId/live`, a **replayable** tick topic. A first
+  attach reads it from offset 0, so a run that finishes before the client
+  attaches, or one attached to mid-run, rebuilds the charts rather than starting
+  blank. A re-attach to the run the client already holds frames for (Reconnect,
+  or the dashboard's re-attach on mount) resumes instead: `SSEClient` records the
+  `lastEventId` of every frame it receives - ticks, steps, plans and monitor
+  scrapes share one id sequence - and `connect` sends the last one as
+  `?lastEventId=`, so the engine replays only what the dashboard has not seen
+  (#3571). A resume keeps `currentMetrics`, so the header does not flash zero.
+  The client holds one slot, for the run it last served: attaching another run
+  replaces it, and a run attached again after that starts from offset 0.
 - Every tick is buffered; commits into `useDashboardStore().addMetricsBatch()`
   are throttled to `METRICS_UI_THROTTLE_MS` so `historicalMetrics` keeps the
   full 10 Hz signal while renders stay bounded. The buffer, the leading edge and
@@ -3118,12 +3140,15 @@ loadTestService.stopMonitoring();
   flush, which is why that second buffer stays in the service rather than
   moving into the batcher.
 - The engine sends an explicit `complete` event, so a `CLOSED` readyState is a
-  genuine failure. **There is no custom reconnect**: `EventSource` cannot set
-  `Last-Event-ID` on a fresh connection, so a manual reconnect would replay the
-  whole topic and duplicate every tick already plotted. The browser's own
-  intra-connection retry does carry it and is left alone; once the browser gives
-  up, recovery is converging on `GET /runs/:id/report`, which the service does in
-  its close handler.
+  genuine failure. **Nothing reconnects by itself**: `EventSource` cannot set
+  `Last-Event-ID` on a fresh connection, which is why the resume point travels as
+  `?lastEventId=` when the user's Reconnect asks. The browser's own
+  intra-connection retry does carry the header and is left alone; once the
+  browser gives up, the service converges on `GET /runs/:id/report` in its close
+  handler, and Reconnect is the way back to the stream. A close flushes the ticks
+  buffered at the drop (their ids were recorded as they arrived, so the resume
+  starts after them), and a release that discards them (`stopMonitoring`, a
+  superseded run) is for a run that is not resumed.
 
 ### `useVariableResolver()` - Variable Resolution
 
@@ -3739,7 +3764,7 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 
     **The dashboard's Stop reads the engine's answer** (#3367). `POST /runs/:runId/stop` answers `stopped` (the Stop took effect), `completed` or `failed` (the run had already finished when Stop arrived), or `running` (the strategy returned on its own and the run ends by its own verdict). On `stopped`, `handleStop` calls `stopMonitoring()` and `stopRun()` as before, so the Running pill and Stop drop at once. On `completed` / `failed` it does neither: the stream's close or the report effect settles the run with the engine's status, `noteLateStop()` sets `stopArrivedLate` (cleared by the next `startRun`), and the finished view shows an info callout, "The run had already finished when Stop arrived.", between the header and the report; from a lost stream, which nothing will close, `noteLateStop` also awaits the report. On `running` nothing changes: the run keeps streaming and no note is shown.
 10. Dashboard settles as `finished` with kind "completed" (or "failed" / "stopped", which lay out the same final report) showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll, and so are the run's detail, report and series, which a History tab on the same run read while it was live
-11. **A stream that ends without a `complete` status is not a finished run** (issues #1925, #2140). The engine's `complete` frame normally carries the run's `status`, which `handleClose(status, { frame })` believes over the stored row. With no status it reads the same stored report, and if its `metadata.status` is still `running` or `pending` the two endings part ways. A dropped connection (`frame: false`) moves the phase to `streamLost` instead of landing the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A bare `complete` frame (`frame: true`, the engine's 60 s settle timeout) is waited out instead: the service re-reads the report every 500 ms for up to 30 s and finishes the run as soon as it is terminal, falling back to the report's own status to tell failed from finished, then loses the stream the same way only if the bound passes. That wait is cancelled by a generation counter on the service (`settleGeneration`), bumped by `startMonitoring`, `releaseRun` (so `stopMonitoring` and `handleSuperseded`) and `handleError`; a bare `activeRunId` check could not do it, because Reconnect puts the same id back. A cancelled wait does nothing: no report, no notification, no error. A collection run taking the shared stream (`handleSuperseded`) loses the stream the same way, and fetches nothing, and so does a stream error (`handleError`). Either way the run stays live, so the dashboard keeps its running layout, the Running pill and Stop, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch armed only in the `awaitingReport` phase, so it holds off while that callout is up, and re-armed by the report callout's Retry. A fetch that keeps failing gives up to `reportError`, whose Retry re-arms it; a report that still says running after every attempt gives up to `streamLost` instead, with the body "The stream closed, but Vayu's engine still reports this load test as running.", because `reportError` is not live and would take the pill and Stop away while the engine still generates load. From there Reconnect is the user's to press, so nothing re-fetches on its own. A run whose Stop the engine confirmed is not raised back to live: its still-running report gives up to `reportError` like a failed fetch.
+11. **A stream that ends without a `complete` status is not a finished run** (issues #1925, #2140). The engine's `complete` frame normally carries the run's `status`, which `handleClose(status, { frame })` believes over the stored row. With no status it reads the same stored report, and if its `metadata.status` is still `running` or `pending` the two endings part ways. A dropped connection (`frame: false`) moves the phase to `streamLost` instead of landing the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. Reconnect resumes the stream after the last frame the client received (`?lastEventId=`, #3571), so the series carries on without a repeated tick and `currentMetrics` is kept; the ticks buffered when the stream dropped are committed once by that close and are not delivered again. A bare `complete` frame (`frame: true`, the engine's 60 s settle timeout) is waited out instead: the service re-reads the report every 500 ms for up to 30 s and finishes the run as soon as it is terminal, falling back to the report's own status to tell failed from finished, then loses the stream the same way only if the bound passes. That wait is cancelled by a generation counter on the service (`settleGeneration`), bumped by `startMonitoring`, `releaseRun` (so `stopMonitoring` and `handleSuperseded`) and `handleError`; a bare `activeRunId` check could not do it, because Reconnect puts the same id back. A cancelled wait does nothing: no report, no notification, no error. A collection run taking the shared stream (`handleSuperseded`) loses the stream the same way, and fetches nothing, and so does a stream error (`handleError`). Either way the run stays live, so the dashboard keeps its running layout, the Running pill and Stop, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch armed only in the `awaitingReport` phase, so it holds off while that callout is up, and re-armed by the report callout's Retry. A fetch that keeps failing gives up to `reportError`, whose Retry re-arms it; a report that still says running after every attempt gives up to `streamLost` instead, with the body "The stream closed, but Vayu's engine still reports this load test as running.", because `reportError` is not live and would take the pill and Stop away while the engine still generates load. From there Reconnect is the user's to press, so nothing re-fetches on its own. A run whose Stop the engine confirmed is not raised back to live: its still-running report gives up to `reportError` like a failed fetch.
 
 ### Saving a Request with Auto-Save
 

@@ -624,7 +624,10 @@ before #1515 the load path had nothing to read that decision at all (`pm.executi
 there outright). `submit_one` now checks it right after `step.before` runs: a skip never reaches
 `EventLoop::submit`, the VU still advances exactly as a sent step would, and the run's
 `steps_skipped` counter (`ScenarioLoadState`) feeds the summary's `skipped` key, which every
-scenario load run reported as a hardcoded `0` before this.
+scenario load run reported as a hardcoded `0` before this. The same claim walks the VU on to its
+next step, up to one whole iteration, and a refill pass in which every claimed VU skipped a whole
+iteration waits one controller tick before the next (#3540, `docs/engine/architecture.md`,
+Closed-loop controller).
 
 **Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
 `"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into

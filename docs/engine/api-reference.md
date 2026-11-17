@@ -9887,9 +9887,11 @@ transfer began *is* timed (see [Latency
 population](#latency-population)), so a run where every request timed out is
 evaluated and its percentiles sit at the timeout. An unevaluated check
 counts toward `failed`: a budget the run could not measure was not met. The
-error rate and the throughput floor have no such gap - `maxErrorRatePct` is
-0/0-safe by request count, and a starved `minThroughputRps` already fails on
-its own - so both are always `evaluated: true`.
+error rate is the same: a run that sent no request has no share to take, so
+`maxErrorRatePct` is `evaluated: false` there (issue #3540) rather than a
+clean 0% that passes any ceiling, including 0. The throughput floor has no
+such gap - a starved `minThroughputRps` already fails on its own - so it is
+always `evaluated: true`.
 
 #### Carried-over budgets (`carriedBudgets`)
 
@@ -11693,8 +11695,7 @@ the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
 the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
 trailing-window means (`windowAvg*Ms` live, `window_avg_*_ms` stored), the
-mean in flight (`windowAvgInFlight`, `window_avg_in_flight` and the report's
-`avgInFlight`, issue #2821), the exports, and the
+exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
 with the percentiles and the max. It is not divided by `totalRequests`.
@@ -11840,13 +11841,23 @@ everything since its first tick. `window_avg_latency_ms` and
 `window_avg_queue_wait_ms` are the mean latency and queue wait of the
 [latency population](#latency-population) that completed in the same window,
 `null` when nothing did. `window_avg_in_flight` is the mean number of
-requests in flight over the same window (issue #2821), by Little's law the
-latency that population carried divided by the window's span: a request is in
-flight from submission to completion, its queue wait inside the generator or
-libcurl included, and a virtual user in a timer wait (`timer.think`,
-`timer.pacing`, `timer.throughput`) has none. A request cancelled or refused
-before the wire adds nothing. With no think time it equals the virtual user
-count. It is a number, `0` for a window that completed nothing, never `null`.
+requests in flight over the same window (issue #2821): the time requests
+spent in flight during the window, divided by its span (issue #3567). A
+request is in flight from its submission to the event loop until it
+completes, its queue wait inside the generator or libcurl included, and it
+counts for every part of the window it was open in, so requests open across
+the whole window with none completing read their count, and a request longer
+than the window never reads above one. A virtual user in a timer wait
+(`timer.think`, `timer.pacing`, `timer.throughput`) has none in flight, and
+neither does a request refused or skipped before it reached the event loop (a
+`maxInFlight` drop, a data-binding failure, a step a controller skipped). A
+request a Stop cancels after submission was in flight until the cancellation.
+With no think time it equals the virtual user count. It is a number, `0` for a
+window with nothing in flight, never `null`. Before issue #3567 the same key
+held the latency the window's completions carried divided by its span, which
+read `0` while a request longer than the window was still open and spiked when
+it completed; rows stored before the change keep that value under the same
+key.
 The live frame of the same tick carries the same five values as `currentRps`,
 `currentSendRate`, `windowAvgInFlight`, `windowAvgLatencyMs` and
 `windowAvgQueueWaitMs`. `current_concurrency` and `backpressure` are
@@ -12050,7 +12061,8 @@ samples.
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
 in-memory tick topic. The engine produces one wire-ready `metrics` tick per
 `liveTickIntervalMs` (default 100ms) into a per-run buffer; this endpoint
-replays that buffer **from offset 0** and then tails new ticks until the run
+replays that buffer **from offset 0** (or, for a reconnecting client that names
+a resume point, from the frame after it) and then tails new ticks until the run
 finishes, ending with a `complete` event. Because the topic is retained for
 `liveRetentionMs` (default 60000ms) after completion, a client that connects
 late - even after a sub-second run has already finished - still receives the
@@ -12238,7 +12250,7 @@ no frame.
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
-| `windowAvgInFlight` | Mean requests in flight over the same trailing window (issue #2821): the latency the window's completions carried divided by its span (Little's law). A request is in flight from submission to completion, queue wait included; a timer wait between requests and a request cancelled or refused before the wire are not. With no think time it equals the virtual user count, and it does not alias the way `activeConnections` does. `0` for a window that completed nothing, never `null`. A gate frame's value is its stored row's `window_avg_in_flight` |
+| `windowAvgInFlight` | Mean requests in flight over the same trailing window (issue #2821): the time requests spent in flight during the window divided by its span (issue #3567), so a request open across the window counts whether or not anything completed. A request is in flight from submission to completion, queue wait included, and a Stop's cancellation ends it; a timer wait between requests and a request refused or skipped before it reached the event loop are not. With no think time it equals the virtual user count, and it does not alias the way `activeConnections` does. `0` for a window with nothing in flight, never `null`. A gate frame's value is its stored row's `window_avg_in_flight` |
 | `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
@@ -12273,6 +12285,17 @@ browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
 needed), and the stream resumes from `Last-Event-ID + 1`.
 
+**`?lastEventId=<id>` is the same resume point as a query parameter**, for a
+client that reconnects by hand: `EventSource` sets `Last-Event-ID` only on its
+*own* retry and exposes no way to set a header on a fresh connection. The
+header wins when both are given. Frame ids start at **0**, so `lastEventId=0`
+means "I saw frame 0" rather than "from the start"; absence is what means the
+start. A value that is not a non-negative frame id is refused with `400` and
+code `invalid_last_event_id` rather than resumed from the start, which would
+replay every retained tick to a client that already holds them - the
+[change feed](#get-changes) and [inbox](#get-inboxinboxidlive) streams'
+rule.
+
 **Replay window.** The in-memory tick topic is a bounded ring, so a long run's
 memory does not grow with its duration. Its span is `liveReplayWindowMs`
 (default 300000, i.e. 5 minutes) and the tick count is derived from that window
@@ -12290,9 +12313,10 @@ older than the retained window resumes from the oldest retained tick rather than
 replaying from 0, which means a client that was disconnected for longer than the
 window sees a gap, not a duplicate flood.
 
-The window also bounds the **replay-from-0** path below, which is the one the
-bundled app actually exercises: a dashboard attaching (or re-attaching) mid-run
-rebuilds its chart from the retained ring. That is why `liveReplayWindowMs` is
+The window also bounds the **replay-from-0** path, which the bundled app takes
+on a first attach: a dashboard attaching mid-run rebuilds its chart from the
+retained ring. Its Reconnect resumes with `?lastEventId=` instead and is sent
+only the frames after the last one it holds. That is why `liveReplayWindowMs` is
 the *same* setting as the app's live-chart window rather than a second one to
 keep aligned - the app's **Settings → Live Dashboard → Chart window** picker
 reads and writes this entry (`GET`/`POST /config`), so the span the engine
@@ -12305,13 +12329,14 @@ requests are cancelled and counted as `cancelled`, so the last live numbers
 agree with the stored report rather than freezing at the moment of the stop
 request.
 
-**Application-level reconnect**: clients that close the EventSource themselves
-(e.g. after observing `readyState === CLOSED`) should NOT open a new connection
-and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
-API, so a fresh connect would request `from=0` and replay the entire retained
-topic, duplicating ticks already shown. The canonical recovery is to converge
-on the stored report via `GET /runs/:runId/report` (the same path used at normal
-run end). This is the pattern the bundled app uses.
+**Application-level reconnect**: a client that closes the EventSource itself
+(e.g. after observing `readyState === CLOSED`) and opens a new connection
+resumes with `?lastEventId=<id of the last frame it held>`, because a fresh
+`EventSource` sends no `Last-Event-ID` and would otherwise start at offset 0
+and replay the entire retained topic, duplicating ticks already shown. A
+connection that names no resume point is the first attach and does start at 0.
+The other recovery is to converge on the stored report via
+`GET /runs/:runId/report` (the same path used at normal run end).
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).
@@ -12458,22 +12483,24 @@ seconds.
 - `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
 - `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
 - `requestId` - exact match on the run's linked request.
-- `collectionId` - exact match on a **collection run's** stored
-  `scenario.collectionId`, read out of the snapshot as JSON. This is the
-  deliberate opposite of `q` below: it matches the field, never the text around
-  it, so a design run whose URL happens to contain the id does not come back.
-  Only a collection run records the path, so `type: "design"` and `type: "load"`
-  runs can never match; an id nothing has run is an empty page, not an error. A
-  collection's most recent run is `?collectionId=<id>&limit=1`, since the list
-  is already `start_time DESC`.
+- `collectionId` - exact match on a run's stored `scenario.collectionId`, read
+  out of the snapshot as JSON. This is the deliberate opposite of `q` below: it
+  matches the field, never the text around it, so a design run whose URL
+  happens to contain the id does not come back. A collection run records the
+  path, and so does a load run driven over a collection (#3544); a
+  single-request design or load run never does, so it can never match. Add
+  `type=load` to leave the collection's sequential runs out. An id nothing has
+  run is an empty page, not an error. A collection's most recent run is
+  `?collectionId=<id>&limit=1`, since the list is already `start_time DESC`.
 - `q` - case-insensitive substring **over the stored `config_snapshot` text**
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
 - `baseline` - `true` lists only runs pinned as baselines, `false` only unpinned
   ones (any other value is ignored, like an unrecognised `type`). Leaving it out
   lists both, so omit it rather than passing `false` to mean "either". A
-  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, since
-  the list is already `start_time DESC` - the lookup both the history view's
+  request's current baseline is `?baseline=true&requestId=<id>&limit=1`, and a
+  collection's `?baseline=true&type=load&collectionId=<id>&limit=1`, since the
+  list is already `start_time DESC` - the lookups both the history view's
   vs-baseline strip and the MCP `compare_runs` tool make.
 - `origin` - `app` | `mcp` | `other`, exact match on the run's stored
   `origin.kind` (#1817; see [POST /execute](#post-execute)). Like an
@@ -12604,7 +12631,7 @@ run stored, never from its result rows, which are many and unbounded:
 | Key | Meaning |
 |-----|---------|
 | `rps` | Achieved requests per second over the run, the report's `summary.avgRps` |
-| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
+| `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95`; omitted when the run timed no request (`latency.count` 0), not a stored 0 |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertions` | The run's assertion block (#3537), the report's top-level [`assertions`](#get-runsrunidreport) as it serves it, for both load run kinds: `exact` and `sampled` (each `{passed, failed}`), `errored` and `teardownFailed`. Beside `errorRate`, not folded into it |
@@ -13066,6 +13093,16 @@ tick or failed on a path that writes none, carries **`summary.summaryMissing: tr
 counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist, and no `peakConcurrency` or `avgQueueWaitMs`. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
+
+**`metadata.scenario`** appears on every collection run, finished or not (issue
+#3569), and on no other: `collectionId`, `iterations`, `recursive`, the data
+file's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` and `stepCount`,
+each omitted when the snapshot lacks it. It is the run's snapshot identity,
+echoed as the list row's `scenario` is, and not the top-level
+[`scenario`](#the-scenario-block-collection-runs) breakdown, which is built from
+the stored summary and is absent for a run the engine did not finish. A client
+that names a collection run reads it here; the manifest's per-step `steps` array
+is not repeated, only its count.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
@@ -13922,13 +13959,19 @@ never written. A partial report of a running load run reads it from the live
 counter.
 
 `summary.avgInFlight` is the mean number of requests in flight over the run
-(issue #2821): the latency sum of the [latency population](#latency-population)
-divided by `testDuration`, by Little's law. A request is in flight from
-submission to completion, its queue wait inside the generator or libcurl
-included; a virtual user in a timer wait between requests has none, and a
-request cancelled or refused before the wire adds nothing. With no think time
-it equals the virtual user count, and over that count it is the run's
-utilisation. `peakConcurrency` beside it is the high-water mark of the
+(issue #2821): the time requests spent in flight, summed over every request,
+divided by `testDuration` (issue #3567). A request is in flight from its
+submission to the event loop until it completes, its queue wait inside the
+generator or libcurl included, and a Stop's cancellation ends it, so a request
+the Stop cancelled counts the time it was open. A virtual user in a timer wait
+between requests has none, and neither does a request refused or skipped
+before it reached the event loop (a `maxInFlight` drop, a data-binding
+failure, a step a controller skipped). A step's script time (`elements.includeScriptTime`)
+is not part of it. With no think time it equals the virtual user count, and
+over that count it is the run's utilisation. A run stored before issue #3567
+keeps the old figure under the same key: the latency sum of the
+[latency population](#latency-population) divided by `testDuration`, which
+left out cancelled requests and folded in included script time. `peakConcurrency` beside it is the high-water mark of the
 instantaneous in-flight gauge (the live stream's `backpressure`), which the load
 generator reads after each batch of submissions in every mode: the closed-loop
 controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`
@@ -14199,7 +14242,8 @@ Two things follow from a pin, and both are the point of it:
   `maxRunsRetained` or `maxDesignRunsRetained` either - a pin a cap could
   expire is not a pin, and pins crowding a cap would evict the recent history
   the cap exists to keep.
-- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
+- **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`,
+  or `...&collectionId=<id>&...` for a load run over a collection.
 
 The engine's own meaning of the flag stops there - it holds no opinion about
 *why* a run is kept. A client's vs-baseline comparison is a narrower, load-only
@@ -14209,7 +14253,7 @@ diff needs, so a comparison lists `type=load` alongside `baseline=true`
 treating any pinned row as its baseline - otherwise a more-recently-pinned
 design or scenario run of the same request would shadow it.
 
-Several runs may be pinned at once (one per request is the expected use). The
+Several runs may be pinned at once (one per request or collection is the expected use). The
 engine records the pin and holds no opinion about which baseline applies to
 which run - that selection is the client's, so a pin never unpins anything else.
 

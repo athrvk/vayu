@@ -20,7 +20,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { runDetailOptions, useCollectionsQuery } from "@/queries";
+import { runDetailOptions, useCollectionName } from "@/queries";
 import { scenarioOfSnapshot } from "@/components/layout/context-bar/run-scenario";
 
 export interface CollectionRunTarget {
@@ -32,13 +32,9 @@ export function useCollectionRunTarget(runId: string | null): CollectionRunTarge
 	// The snapshot is written once at run start, so the in-progress poll
 	// `runDetailOptions` carries would only re-read what cannot change.
 	const { data: run } = useQuery({ ...runDetailOptions(runId), refetchInterval: false });
-	const { data: collections = [] } = useCollectionsQuery();
 
 	const scenario = scenarioOfSnapshot(run?.configSnapshot);
-	const collectionId = scenario?.collectionId;
-	if (!collectionId) return {};
-	return {
-		collectionName: collections.find((c) => c.id === collectionId)?.name ?? collectionId,
-		stepCount: scenario.steps?.length,
-	};
+	const collectionName = useCollectionName(scenario?.collectionId);
+	if (!collectionName) return {};
+	return { collectionName, stepCount: scenario?.steps?.length };
 }

@@ -124,6 +124,9 @@ function listPageParams(query: ListPageQuery): URLSearchParams {
 	return params;
 }
 
+/** What a run is a run of: the saved request it sent, or the collection a load run drove. */
+export type RunIdentity = { requestId: string } | { collectionId: string };
+
 /**
  * The filters `GET /runs` accepts, as the engine spells them.
  *
@@ -139,7 +142,10 @@ export interface RunListQuery {
 	/** "pending" | "running" | "completed" | "failed" | "stopped" (`parse_run_status`). */
 	status?: string;
 	requestId?: string;
-	/** Matches a scenario run's stored `scenario.collectionId` only. */
+	/**
+	 * Matches a run whose snapshot names this collection: a collection run, and
+	 * a load run driven over one (its `scenario.collectionId`, #3544).
+	 */
 	collectionId?: string;
 	/** Case-insensitive substring over the stored config snapshot. */
 	q?: string;
@@ -587,17 +593,18 @@ export class EngineClient {
 	}
 
 	/**
-	 * The runs pinned as baselines for one saved request, newest first. One row
-	 * is all any caller needs - "the baseline" is the most recent pin - so the
-	 * page is bounded to it rather than to the 100 `listRuns` allows.
+	 * The runs pinned as baselines for one saved request or one collection,
+	 * newest first. One row is all any caller needs - "the baseline" is the most
+	 * recently started pinned run - so the page is bounded to it rather than to
+	 * the 100 `listRuns` allows.
 	 *
 	 * `type: "load"` because a pin is not load-specific (#1509) but a
 	 * comparison is: only a load run has the percentiles and throughput a
 	 * baseline diff needs, so a more-recently-pinned design or scenario run of
 	 * the same request must never shadow the load baseline this resolves.
 	 */
-	listBaselineRuns(requestId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.listRuns({ baseline: true, type: "load", limit: 1, requestId }, signal);
+	listBaselineRuns(identity: RunIdentity, signal?: AbortSignal): Promise<unknown> {
+		return this.listRuns({ baseline: true, type: "load", limit: 1, ...identity }, signal);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {

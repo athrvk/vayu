@@ -12,8 +12,8 @@
  * They live **engine-side**, as the `liveReplayWindowMs` and
  * `liveMaxRetainedTicks` config entries, not in localStorage. The engine needs
  * the same two numbers to size the in-memory SSE tick ring that
- * `/runs/:id/live` replays from offset 0 - the replay that rebuilds these charts
- * when the dashboard attaches or re-attaches mid-run - so a renderer-local copy
+ * `/runs/:id/live` replays - from offset 0 on a first attach, which rebuilds
+ * these charts when the dashboard attaches mid-run - so a renderer-local copy
  * could only drift from it, with one side retaining less than the other assumes.
  * Reading and writing the same entries is what keeps them equal by construction.
  *

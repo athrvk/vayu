@@ -495,42 +495,57 @@ export function useLastCollectionRunQuery(collectionId: string | null | undefine
 }
 
 /**
- * The load runs of one request, newest first, for the compare picker.
+ * What a load run is a run *of*: a saved request, or the collection a scenario
+ * load run drove (its `requestId` is null, the collection is in its scenario
+ * manifest). The two are the only identities the engine can filter runs by, so
+ * this is what compare, trend and baseline are scoped to. `runIdentity`
+ * (`@/lib/run-reference-input`) reads one off a run.
+ */
+export type RunIdentity = { requestId: string } | { collectionId: string };
+
+/** The `queryKeys.runs.requestRuns()` entry that lists @p identity's load runs. */
+function identityRunsKey(identity: RunIdentity | null | undefined) {
+	if (identity && "collectionId" in identity) {
+		return queryKeys.runs.collectionRun(identity.collectionId);
+	}
+	return queryKeys.runs.requestRun(identity?.requestId ?? "");
+}
+
+/**
+ * The load runs of one request or one collection, newest first, for the
+ * compare picker and the trend.
  *
- * One page of the engine's own `start_time DESC` order, so a request run more
+ * One page of the engine's own `start_time DESC` order, so an identity run more
  * than a page's worth of times offers its newest runs and not its oldest. The
  * rows are returned whole: which of them are comparable (finished, not the open
  * run) is the caller's rule, because a status takes one value engine-side and
  * the picker wants two.
  */
-export function useRequestRunsQuery(requestId: string | null | undefined) {
+export function useRequestRunsQuery(identity: RunIdentity | null | undefined) {
 	return useQuery({
 		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.requestRuns`.
-		queryKey: queryKeys.runs.requestRun(requestId ?? ""),
+		queryKey: identityRunsKey(identity),
 		queryFn: () =>
 			apiService.listRuns({
-				requestId: requestId!,
+				...identity!,
 				type: "load",
 				limit: RUNS_PAGE_LIMIT,
 			}),
-		enabled: !!requestId,
+		enabled: !!identity,
 	});
 }
 
 /**
- * How the run being viewed says which request it was - the two ways a baseline
- * can be looked up, in the order they are tried.
+ * How the run being viewed says which baseline it is judged against - the ways
+ * a baseline can be looked up, in the order they are tried.
  *
- * A saved request has an id, and the engine filters on it exactly. A run of an
- * unsaved request has none (its `requestId` is null), and the only identity it
+ * A saved request has an id, and a scenario load run has its collection's; the
+ * engine filters on either exactly. A run of an unsaved request has neither
+ * (its `requestId` is null and it ran no collection), and the only identity it
  * left behind is the url and method on its row summary - so those are matched
  * instead, over a bounded page of pinned runs.
  */
-export interface BaselineTarget {
-	requestId?: string | null;
-	url?: string | null;
-	method?: string | null;
-}
+export type BaselineTarget = RunIdentity | { url: string; method: string };
 
 /**
  * How many pinned runs the url/method fallback looks at. `q` is a substring
@@ -541,15 +556,60 @@ export interface BaselineTarget {
  */
 const BASELINE_SCAN_LIMIT = 20;
 
-function baselineCacheKey(target: BaselineTarget): string | null {
-	if (target.requestId) return target.requestId;
-	if (target.url && target.method) return `${target.method} ${target.url}`;
-	return null;
+/** The first pinned load run the engine finds for @p identity, or `null`. */
+async function pinnedLoadRun(identity: RunIdentity): Promise<Run | null> {
+	const page = await apiService.listRuns({
+		baseline: true,
+		type: "load",
+		...identity,
+		limit: 1,
+	});
+	return page.data[0] ?? null;
 }
 
 /**
- * The load run pinned as baseline for the same request as @p target, or
- * `null` when nothing is pinned.
+ * The unsaved-request fallback. `q` narrows server-side; the row's own summary
+ * decides, so a url that merely *contains* this one is not mistaken for it.
+ */
+async function pinnedLoadRunByUrl(url: string, method: string): Promise<Run | null> {
+	const page = await apiService.listRuns({
+		baseline: true,
+		type: "load",
+		q: url,
+		limit: BASELINE_SCAN_LIMIT,
+	});
+	const wanted = method.toUpperCase();
+	return (
+		page.data.find(
+			(run) =>
+				run.summary?.url === url && (run.summary?.method ?? "GET").toUpperCase() === wanted
+		) ?? null
+	);
+}
+
+/** One lookup: the cache key it lives under and the fetch that fills it. */
+function baselineLookup(target: BaselineTarget) {
+	if ("requestId" in target) {
+		return {
+			queryKey: queryKeys.runs.baseline(target.requestId),
+			fetch: () => pinnedLoadRun(target),
+		};
+	}
+	if ("collectionId" in target) {
+		return {
+			queryKey: queryKeys.runs.collectionBaseline(target.collectionId),
+			fetch: () => pinnedLoadRun(target),
+		};
+	}
+	return {
+		queryKey: queryKeys.runs.baseline(`${target.method} ${target.url}`),
+		fetch: () => pinnedLoadRunByUrl(target.url, target.method),
+	};
+}
+
+/**
+ * The load run pinned as baseline for the same request or collection as
+ * @p target, or `null` when nothing is pinned.
  *
  * `GET /runs?baseline=true` is ordered newest-first, so "the baseline" is the
  * first row - the engine allows several pins (one per request is the expected
@@ -567,40 +627,13 @@ function baselineCacheKey(target: BaselineTarget): string | null {
  * "no baseline" state at every run it opens.
  */
 export function useBaselineRunQuery(target: BaselineTarget | null) {
-	const key = target ? baselineCacheKey(target) : null;
+	const lookup = target ? baselineLookup(target) : null;
 
 	return useQuery<Run | null>({
 		// Its own key family, not `runs.list(...)` - see `queryKeys.runs.baseline`.
-		queryKey: queryKeys.runs.baseline(key ?? ""),
-		queryFn: async () => {
-			if (target?.requestId) {
-				const page = await apiService.listRuns({
-					baseline: true,
-					type: "load",
-					requestId: target.requestId,
-					limit: 1,
-				});
-				return page.data[0] ?? null;
-			}
-			// The unsaved-request fallback. `q` narrows server-side; the row's
-			// own summary decides, so a url that merely *contains* this one is
-			// not mistaken for it.
-			const page = await apiService.listRuns({
-				baseline: true,
-				type: "load",
-				q: target!.url!,
-				limit: BASELINE_SCAN_LIMIT,
-			});
-			const method = target!.method!.toUpperCase();
-			return (
-				page.data.find(
-					(run) =>
-						run.summary?.url === target!.url &&
-						(run.summary?.method ?? "GET").toUpperCase() === method
-				) ?? null
-			);
-		},
-		enabled: !!key,
+		queryKey: lookup?.queryKey ?? queryKeys.runs.baseline(""),
+		queryFn: () => lookup!.fetch(),
+		enabled: !!lookup,
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
 	});
 }
@@ -696,11 +729,11 @@ export function useDeleteRunMutation() {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.runs.lastCollectionRuns(),
 			});
-			// And the per-request baseline caches, for the third time and the
+			// And the per-request and per-collection baseline caches, for the third time and the
 			// same reason: the deleted run may have been the pin, and its id
 			// gives no way back to the request it was pinned for.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
-			// And the compare picker's per-request lists, for the same reason.
+			// And the compare picker's per-request and per-collection lists, for the same reason.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 			// And the per-request last-design caches, for the fourth time and
 			// the same reason. This one is the tab-visible case: every open
@@ -765,8 +798,8 @@ export function useSetRunBaselineMutation() {
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
  * stored-run count Settings shows, the per-request Recent sends and per-collection
- * Last run lists, the per-request baseline lookups, the compare picker's
- * per-request lists and the per-request last-design lookups, which are their
+ * Last run lists, the baseline lookups and the compare picker's lists (per
+ * request and per collection) and the per-request last-design lookups, which are their
  * own families and would otherwise survive a cleared history.
  */
 export function useInvalidateRuns() {

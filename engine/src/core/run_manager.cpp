@@ -432,17 +432,18 @@ SamplingRetention read_retention (const MetricsCollector& mc) {
 }
 
 RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
+    const int64_t now = steady_now_ms ();
     RunSummaryInputs inputs;
-    auto& mc              = *context.metrics_collector;
-    inputs.total_requests = mc.total_requests ();
-    inputs.cancelled      = mc.cancelled ();
-    const double elapsed_s = context.seconds_since_load_start (steady_now_ms ());
+    auto& mc               = *context.metrics_collector;
+    inputs.total_requests  = mc.total_requests ();
+    inputs.cancelled       = mc.cancelled ();
+    const double elapsed_s = context.seconds_since_load_start (now);
     inputs.rps =
     elapsed_s > 0 ? static_cast<double> (inputs.total_requests) / elapsed_s : 0.0;
     inputs.throughput              = inputs.rps;
     inputs.test_duration_s         = elapsed_s;
     inputs.peak_concurrency        = context.peak_in_flight.load ();
-    inputs.avg_in_flight           = mc.average_in_flight (elapsed_s);
+    inputs.avg_in_flight           = mc.average_in_flight (elapsed_s, now);
     inputs.dropped_requests        = mc.dropped_requests ();
     inputs.skipped_requests        = mc.skipped_requests ();
     inputs.stalled_ms              = mc.stalled_ms ();
@@ -3078,11 +3079,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // "looked, and every request got the protocol it asked for".
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
     summary["status_codes"]            = codes;
-    summary["latency"]                 = { { "min", inputs.latency.min },
-        { "max", inputs.latency.max }, { "avg", inputs.latency_avg_ms },
-        { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
-        { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
-        { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+    // `count` is what a reader checks before trusting a percentile: a run that
+    // timed no request still stores zeros here, which are not measurements.
+    summary["latency"] = { { "count", inputs.latency.count },
+        { "min", inputs.latency.min }, { "max", inputs.latency.max },
+        { "avg", inputs.latency_avg_ms }, { "p50", inputs.latency.p50 },
+        { "p75", inputs.latency.p75 }, { "p90", inputs.latency.p90 },
+        { "p95", inputs.latency.p95 }, { "p99", inputs.latency.p99 },
+        { "p999", inputs.latency.p999 } };
     // Always written, the downgrade's rule: absent is a run stored before
     // #2799, whose report then omits `connectionReplays`.
     summary["connection_replays"] = inputs.connection_replays;
@@ -3237,12 +3241,13 @@ void put_window_reading (nlohmann::json& stats, const WindowReading& window) {
 CumulativeCounters
 cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t completed, size_t sent) {
     CumulativeCounters counters;
-    counters.steady_ms         = steady_ms;
-    counters.completed         = completed;
-    counters.sent              = sent;
-    counters.latency_samples   = mc.latency_samples ();
-    counters.latency_sum_ms    = mc.total_latency_sum ();
-    counters.queue_wait_sum_ms = mc.total_queue_wait_sum ();
+    counters.steady_ms            = steady_ms;
+    counters.completed            = completed;
+    counters.sent                 = sent;
+    counters.latency_samples      = mc.latency_samples ();
+    counters.latency_sum_ms       = mc.total_latency_sum ();
+    counters.queue_wait_sum_ms    = mc.total_queue_wait_sum ();
+    counters.inflight_integral_ms = mc.inflight_integral_ms (steady_ms);
     return counters;
 }
 

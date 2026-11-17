@@ -180,7 +180,7 @@ describe("the history sidebar's pinned filter", () => {
 		fireEvent.click(pinnedToggle());
 
 		expect(screen.getByText("No pinned runs found")).toBeInTheDocument();
-		expect(screen.getByText(/Pin a run as its request's baseline/i)).toBeInTheDocument();
+		expect(screen.getByText(/Pin a run to keep it here/i)).toBeInTheDocument();
 	});
 
 	it("keeps the widen-your-search advice when a search is also narrowing the list", () => {

@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
+#include "load_start_stamp.hpp"
 #include "log_capture.hpp"
 #include "mock_server.hpp"
 #include "task_queue.hpp"
@@ -4261,13 +4263,54 @@ TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
     EXPECT_EQ (context->peak_in_flight.load (), VUS);
 }
 
+// #3567: a step is in flight from `open_request` until its completion closes
+// it, and a Stop's cancellation is a completion. `/hang` answers nothing, so
+// every virtual user holds one open step until `stop (false)` cancels it, and
+// the integral then stops growing. Mutation check: close only a result that is
+// not an error in `submit_one`'s callback and the integral still grows after
+// the stop.
+TEST_F (ScenarioLoadTest, AStopsCancellationClosesEveryOpenStep) {
+    vayu::tests::SlowMockServer upstream;
+    const auto execution = plan_over ({ upstream.hang_url () });
+
+    const size_t VUS  = 4;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "300ms" }, { "concurrency", VUS } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-open-cancel", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    auto base_scopes =
+    vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
+    (void)vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+
+    const auto& mc    = *context->metrics_collector;
+    const int64_t now = vayu::tests::steady_now_ms ();
+    const auto open   = static_cast<int64_t> (context->requests_sent.load ());
+    ASSERT_EQ (open, static_cast<int64_t> (VUS)) << "the users never all sent";
+    EXPECT_EQ (mc.inflight_integral_ms (now + 1000) - mc.inflight_integral_ms (now),
+    1000 * open);
+
+    context->event_loop->stop (false);
+    const int64_t after = vayu::tests::steady_now_ms ();
+    EXPECT_GT (mc.inflight_integral_ms (after), 0);
+    EXPECT_EQ (mc.inflight_integral_ms (after + 60'000), mc.inflight_integral_ms (after))
+    << "a cancelled step is still open";
+}
+
 // #2821: a virtual user in a think wait has nothing on the wire, so the run's
 // mean in flight is its share of time spent sending: two 20 ms steps around a
 // 200 ms think is about 0.17 of each user, under 2 of 10 here, and 10 if the
-// think wait were counted. Mutation check: divide the latency sum by the
+// think wait were counted. Since #3567 the mean is the time each step was open
+// over the run, not the latency its completions carried, so a step's script
+// time is no longer folded in. Mutation check: divide the integral by the
 // completion count in `MetricsCollector::average_in_flight` and this reads the
-// mean latency, about 20. The 1 Hz peak sample is the instantaneous gauge this
-// mean replaces, so it is only bounded here, not pinned (#2397 item 3).
+// mean time a step was open, about 20. The 1 Hz peak sample is the
+// instantaneous gauge this mean replaces, so it is only bounded here, not
+// pinned (#2397 item 3).
 TEST_F (ScenarioLoadTest, AThinkTimeRunsMeanInFlightIsItsShareOfTimeOnTheWire) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/slow"), server.url ("/slow") });
@@ -4318,6 +4361,76 @@ TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
     const double avg_in_flight = summary.at ("avgInFlight").get<double> ();
     EXPECT_GT (avg_in_flight, static_cast<double> (VUS) / 2.0) << summary.dump ();
     EXPECT_LE (avg_in_flight, static_cast<double> (VUS) + 1e-6) << summary.dump ();
+}
+
+// ============================================================================
+// A skipped step puts nothing in flight (#3540)
+// ============================================================================
+
+namespace {
+
+/// A `control.once`: the step runs in a virtual user's first iteration only.
+std::shared_ptr<const std::vector<vayu::core::CompiledElement>> once_elements () {
+    return vayu::tests::compiled_elements ({ json{ { "id", "el_once" },
+    { "kind", "control.once" }, { "enabled", true }, { "config", json::object () } } });
+}
+
+} // namespace
+
+// After each virtual user's first iteration every step is skipped, so no
+// refill pass puts anything in flight. Healthy, each pass that sent nothing
+// waits a controller tick: about users x duration / 50 ms iterations, 40 here
+// (42 measured). Broken, the producer re-enters at once on an already-true
+// predicate and spins: about 100,000 here (the issue's 3 s run read 215,883).
+// Mutation check: drop `idle_pass` from `maintain_concurrency`'s bounded-wait
+// condition and this reads 106,628.
+TEST_F (ScenarioLoadTest, AnAllSkippedPlanWaitsATickPerPassInsteadOfSpinning) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements = once_elements ();
+
+    const size_t VUS  = 2;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", VUS } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), VUS)
+    << "control.once must still send its step once per virtual user";
+    const size_t iterations = state->iterations_started.load ();
+    EXPECT_GT (iterations, VUS) << "the skipped iterations never ran";
+    EXPECT_LT (iterations, 2000u)
+    << "the producer spun on a pass that sent nothing: " << iterations
+    << " iterations in 1s";
+}
+
+// A skipped step in front of one that sends is not a pass without work: the
+// claim walks the virtual user on to the send, so one user with a skipped
+// login sends about as often as one without it. Healthy, the ratio of the two
+// runs' sends is about 1. Broken, each skip costs a 50 ms tick, so it is
+// round trip / (round trip + 50 ms): about 0.01 on a loopback mock, and under
+// 0.2 on a runner whose round trip is 10 ms. A slow runner slows both runs, so
+// the ratio holds where a count would not. Mutation check: make `submit_one`
+// submit one step and return, and it reads 20 sends against 2,215 (0.98
+// healthy).
+TEST_F (ScenarioLoadTest, ASkippedStepInFrontOfASendCostsTheVirtualUserNoWait) {
+    ScenarioMockServer server;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", 1 } };
+
+    run (config, plan_over ({ server.url ("/s1") }));
+    const size_t sends_alone = server.hits_for ("/s1").size ();
+
+    auto behind_a_skip = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    behind_a_skip.plan.steps[0].elements = once_elements ();
+    run (config, behind_a_skip);
+    const size_t sends_behind_a_skip = server.hits_for ("/s1").size () - sends_alone;
+
+    ASSERT_GT (sends_alone, 0u);
+    EXPECT_EQ (server.hits_for ("/s0").size (), 1u);
+    const double ratio =
+    static_cast<double> (sends_behind_a_skip) / static_cast<double> (sends_alone);
+    EXPECT_GT (ratio, 0.4) << sends_behind_a_skip << " sends behind a skipped step against "
+                           << sends_alone << " without one";
 }
 
 // ============================================================================

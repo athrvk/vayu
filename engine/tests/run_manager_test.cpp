@@ -1935,9 +1935,11 @@ TEST (LoadClock, GateFramesCarryTheScenarioSequenceTheSummaryEndsOn) {
 // the >= 100 ms delta back on the frame's `currentRps`, or store
 // `current_total / run_elapsed_s` as the row's `current_rps`, and the
 // frame/row equality fails; read the run's mean into the window's and the
-// 5 ms assertions fail. #2821's mean in flight rides the same reading:
-// store the run-long `average_in_flight` as the row's `window_avg_in_flight`
-// and its frame/row equality fails.
+// 5 ms assertions fail. #2821's mean in flight rides the same reading, off
+// three requests held open for the whole test (#3567), so every window reads
+// exactly 3: store the run-long `average_in_flight` as the row's
+// `window_avg_in_flight` and its frame/row equality fails; leave
+// `inflight_integral_ms` out of `cumulative_counters` and it reads 0.
 TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     const std::string db_path = "test_collect_metrics_trailing_window.db";
     vayu::tests::remove_database_files (db_path);
@@ -1959,7 +1961,11 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     for (int i = 0; i < 100; ++i) {
         mc.record_success (200, 50.0, 4.0);
     }
-    ctx->requests_sent = 100;
+    constexpr int OPEN = 3;
+    for (int i = 0; i < OPEN; ++i) {
+        (void)mc.open_request ();
+    }
+    ctx->requests_sent = 100 + OPEN;
     ctx->is_running    = true;
     vayu::tests::stamp_load_start (*ctx);
 
@@ -1984,7 +1990,8 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     EXPECT_GT (stored.at ("current_send_rate").get<double> (), 0.0) << stored.dump ();
     EXPECT_DOUBLE_EQ (stored.at ("window_avg_latency_ms").get<double> (), 5.0);
     EXPECT_DOUBLE_EQ (stored.at ("window_avg_queue_wait_ms").get<double> (), 0.5);
-    EXPECT_GT (stored.at ("window_avg_in_flight").get<double> (), 0.0) << stored.dump ();
+    EXPECT_DOUBLE_EQ (stored.at ("window_avg_in_flight").get<double> (), OPEN)
+    << stored.dump ();
 
     const auto batch = ctx->ticks_since (0);
     ASSERT_FALSE (batch.payloads.empty ());

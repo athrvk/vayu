@@ -1642,7 +1642,7 @@ reconciliation, so it reports the end it kept, or its `start_time`.
 
 **`baseline`** is the pin set by
 [`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
-known-good run later runs of the same request are compared against. Several rows
+known-good run later runs of the same request (or, for a load run, the same collection) are compared against. Several rows
 may carry it at once - the engine records the pin and leaves the choice of which
 baseline applies to a given run to the client. NOT NULL with a `default_value`,
 which is what lets `sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing
@@ -1732,8 +1732,8 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
   "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "error_types": { "timeout": 2, "connection_failed": 1 },
-  "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
-               "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "latency": { "count": 97, "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0,
+               "p75": 15.0, "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
   "phases": {
     "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100, "mean": 0.15 },
     "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100, "mean": 0.42 },
@@ -1789,9 +1789,12 @@ A summary stored before the issue has no key, and the report then leaves
 `summary.connectionReplays` out rather than reading it as `0`.
 
 `avg_in_flight` (issue #2821) is the mean number of requests in flight over the run: the
-collector's latency sum over `test_duration` (`MetricsCollector::average_in_flight`), by Little's
-law, so timer waits between requests count for nothing. Written by the completed and the failed
-run alike, `0` included; the report's `summary.avgInFlight` reads it. A summary stored before the
+collector's in-flight integral over `test_duration` (`MetricsCollector::average_in_flight`, issue
+#3567), the time every request spent between its submission to the event loop and its completion,
+a Stop's cancellation included, so timer waits between requests and requests refused before the
+event loop count for nothing. A summary stored before issue #3567 holds the old figure under the
+same key, the latency sum over `test_duration`, which left cancelled requests out; no schema
+version marks the change. Written by the completed and the failed run alike, `0` included; the report's `summary.avgInFlight` reads it. A summary stored before the
 issue has no key, and the report leaves `avgInFlight` out rather than reading it as `0`. A
 collection (design-mode) run's summary does not carry it.
 
@@ -1990,7 +1993,9 @@ sample rather than a histogram. It is computed once and is the same sample the r
 judge, so `latency.p99` equals a `latencyP99Ms` check's `actual`. A run in which no step sent
 stores `{"count": 0}` alone, and the report omits its `latency` block on that marker; a summary
 with no `latency` key (a run stored before the issue) reports from the stored rows. A load run's
-`latency` carries no `count`.
+`latency` carries `count` too (#3540): a load run that timed no request stores zeroed percentiles
+with `count: 0`, its report omits the `latency` block on that marker, and its history row omits
+`p95Ms`. A load summary stored before `count` existed has none, so its stored percentiles stand.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
@@ -2233,8 +2238,12 @@ completed. The three keys besides `current_rps` are absent from a tick stored be
 whose `current_rps` was the completions since the previous row over the time since it. No schema
 version marks the change: they are keys inside `payload`, which `sync_schema()` never reads.
 
-`window_avg_in_flight` (issue #2821) is the same window's mean requests in flight: the latency its
-completions carried over its span. Always a number, `0` for a window that completed nothing.
+`window_avg_in_flight` (issue #2821) is the same window's mean requests in flight: the time
+requests spent in flight during the window over its span (issue #3567), so a request open across
+the window counts whether or not anything completed. Always a number, `0` for a window with
+nothing in flight. A tick stored before issue #3567 holds the latency its window's completions
+carried over its span under the same key, which read `0` while a request longer than the window
+was open.
 `current_concurrency` and `backpressure` beside it are instantaneous gauges (curl transfers
 active at the tick, and `RunContext::in_flight`), which a virtual user in a timer wait does not
 hold, so a run whose users wait in step aliases them between 0 and the user count. Absent from a

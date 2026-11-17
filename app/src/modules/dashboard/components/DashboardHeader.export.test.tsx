@@ -109,7 +109,6 @@ describe("Export in the dashboard header", () => {
 		});
 
 		expect(baselineTargets[baselineTargets.length - 1]).toEqual({
-			requestId: null,
 			url: "https://api.test/orders",
 			method: "POST",
 		});

@@ -1854,9 +1854,11 @@ export interface RunResult {
 /**
  * What a collection run's list row says about the sequence that ran, from the
  * snapshot's scenario manifest (`add_scenario`,
- * `engine/src/http/routes/runs.cpp`). Present on `type: "scenario"` rows only -
- * its presence is what tells a row it is a collection run without a second
- * fetch.
+ * `engine/src/http/routes/runs.cpp`). Present on a collection run's row, which
+ * is `type: "scenario"` or a scenario `type: "load"` run - its presence is what
+ * tells a row it is a collection run without a second fetch, and its
+ * `collectionId` is the identity a load run's compare, trend and baseline are
+ * scoped to when it has no `requestId`.
  *
  * `stepCount` and not the manifest's `steps` array: the array carries a name, a
  * method and a URL per step, and shipping it on every list row would undo the
@@ -2808,8 +2810,8 @@ export interface LoadTestMetrics {
 	window_avg_latency_ms?: number | null;
 	window_avg_queue_wait_ms?: number | null;
 	/**
-	 * Mean requests on the wire over the same window (Little's law: the latency
-	 * that completed in it over its span), `0` for a window with no completion.
+	 * Mean requests on the wire over the same window (the time requests spent
+	 * in flight in it over its span, #3567), `0` when nothing was open.
 	 * `current_concurrency` is the instant a virtual user in a timer wait holds
 	 * nothing at, so it reads 0-and-N for users that never stopped (#2821).
 	 * Absent on a tick stored before the window mean existed.
@@ -3224,6 +3226,14 @@ export interface RunReport {
 		endTime: number | null;
 		requestUrl?: string;
 		requestMethod?: string;
+		/**
+		 * A collection run's identity, from its snapshot, on every such report
+		 * finished or not (issue #3569) - the same shape as the list row's
+		 * `scenario`. Not the top-level {@link RunReport.scenario} breakdown, which
+		 * is built from the stored summary and is absent for a run the engine did
+		 * not finish. Absent on a single-request run.
+		 */
+		scenario?: RunScenarioSummary;
 		configuration?: {
 			mode?: string;
 			duration?: string;

@@ -22,13 +22,14 @@ namespace vayu::core {
  * pushed with a smaller count than the one before it is a caller's bug.
  */
 struct CumulativeCounters {
-    int64_t steady_ms        = 0;
-    size_t completed         = 0; // MetricsCollector::total_requests
-    size_t sent              = 0; // RunContext::requests_sent
-    size_t latency_samples   = 0; // MetricsCollector::latency_samples
-    double latency_sum_ms    = 0.0;
-    double queue_wait_sum_ms = 0.0;
-    size_t stream_events     = 0; // the frame's `streamEvents`, 0 if none
+    int64_t steady_ms            = 0;
+    size_t completed             = 0; // MetricsCollector::total_requests
+    size_t sent                  = 0; // RunContext::requests_sent
+    size_t latency_samples       = 0; // MetricsCollector::latency_samples
+    double latency_sum_ms        = 0.0;
+    double queue_wait_sum_ms     = 0.0;
+    size_t stream_events         = 0; // the frame's `streamEvents`, 0 if none
+    int64_t inflight_integral_ms = 0; // MetricsCollector::inflight_integral_ms
 };
 
 /**
@@ -41,12 +42,13 @@ struct WindowReading {
     double completed_per_s = 0.0;
     double sent_per_s      = 0.0;
     double events_per_s    = 0.0;
-    /// Mean requests in flight over the window (#2821), by Little's law: the
-    /// latency the window's completions carried over its span. A request is
-    /// in flight from submission to completion, its queue wait included, so a
-    /// timer wait between requests is not. 0 for a window that completed
-    /// nothing: unlike the means below, no completion does mean none on the
-    /// wire for the whole span.
+    /// Mean requests in flight over the window (#2821): the time in flight it
+    /// gained over its span (#3567), so a request open the whole window counts
+    /// one whether or not it has completed. A request is in flight from
+    /// submission to completion, its queue wait included, so a timer wait
+    /// between requests is not, and neither is a request refused or skipped
+    /// before it reached the event loop. Unlike the means below it has a value
+    /// for every window: nothing open is zero in flight.
     double avg_in_flight = 0.0;
     /// Means over the latency samples the window gained; nullopt when it
     /// gained none, so an idle window never reads as an instant answer.
@@ -99,10 +101,12 @@ class TrailingWindow {
         reading.sent_per_s = static_cast<double> (now.sent - base.sent) / seconds;
         reading.events_per_s =
         static_cast<double> (now.stream_events - base.stream_events) / seconds;
-        const double latency_ms = now.latency_sum_ms - base.latency_sum_ms;
-        reading.avg_in_flight   = latency_ms / static_cast<double> (span_ms);
+        reading.avg_in_flight =
+        static_cast<double> (now.inflight_integral_ms - base.inflight_integral_ms) /
+        static_cast<double> (span_ms);
 
-        const size_t samples = now.latency_samples - base.latency_samples;
+        const double latency_ms = now.latency_sum_ms - base.latency_sum_ms;
+        const size_t samples    = now.latency_samples - base.latency_samples;
         if (samples == 0) {
             return reading;
         }

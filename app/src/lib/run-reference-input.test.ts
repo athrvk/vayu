@@ -17,7 +17,12 @@
 
 import { describe, it, expect } from "vitest";
 import { formatInstant } from "./time-value";
-import { loadedRunReference, runReferenceInput } from "./run-reference-input";
+import {
+	loadedRunReference,
+	runIdentity,
+	runIdentityNoun,
+	runReferenceInput,
+} from "./run-reference-input";
 import type { Run, RunConfigSnapshot } from "@/types";
 
 const SENTINEL = "s3cr3t-sentinel";
@@ -115,5 +120,52 @@ describe("loadedRunReference", () => {
 		});
 
 		expect(loadedRunReference(run, [])).toContain('collection "col_gone"');
+	});
+});
+
+describe("runIdentity", () => {
+	it("is the request when the run has one, ahead of any collection", () => {
+		const run = loadedRun({
+			requestId: "req_1",
+			configSnapshot: { scenario: { collectionId: "col_1" } },
+		});
+
+		expect(runIdentity(run)).toEqual({ requestId: "req_1" });
+	});
+
+	it("is the collection a loaded run's snapshot names", () => {
+		const run = loadedRun({
+			requestId: null,
+			configSnapshot: { scenario: { collectionId: "col_1" } },
+		});
+
+		expect(runIdentity(run)).toEqual({ collectionId: "col_1" });
+	});
+
+	it("is the collection a list row's summary names", () => {
+		const row = loadedRun({
+			requestId: null,
+			configSnapshot: undefined,
+			summary: { scenario: { collectionId: "col_1" } },
+		});
+
+		expect(runIdentity(row)).toEqual({ collectionId: "col_1" });
+	});
+
+	it("is null for a manifest that names no collection", () => {
+		const run = loadedRun({ requestId: null, configSnapshot: { scenario: { steps: [] } } });
+
+		expect(runIdentity(run)).toBeNull();
+	});
+
+	it("is null for a run with neither a request nor a scenario", () => {
+		expect(runIdentity(loadedRun({ requestId: null }))).toBeNull();
+	});
+});
+
+describe("runIdentityNoun", () => {
+	it("names what each identity is", () => {
+		expect(runIdentityNoun({ requestId: "req_1" })).toBe("request");
+		expect(runIdentityNoun({ collectionId: "col_1" })).toBe("collection");
 	});
 });

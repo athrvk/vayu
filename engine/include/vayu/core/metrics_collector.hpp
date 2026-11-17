@@ -949,15 +949,56 @@ class MetricsCollector {
     }
 
     /**
-     * @brief Mean requests in flight over @p duration_s, by Little's law: the
-     *        latency sum over the duration (#2821).
+     * @brief Count one request handed to the event loop as in flight (#3567)
+     *        and return the stamp its completion passes to `close_open`.
+     *
+     * In flight runs from submission to completion, queue wait included
+     * (#2821). Call it before the submit: the completion can run on a worker
+     * before the submitting thread returns. A request that never reaches the
+     * loop (a bind failure, a skipped step, a drop) and a think-timer
+     * reservation are not submissions and must not open.
+     * The overload without @p now_steady_ms reads the steady clock, in the
+     * milliseconds `CumulativeCounters::steady_ms` is taken in.
+     */
+    [[nodiscard]] int64_t open_request ();
+    [[nodiscard]] int64_t open_request (int64_t now_steady_ms);
+
+    /**
+     * @brief Close the request `open_request` stamped @p opened_steady_ms,
+     *        crediting its time in flight. The completion's first act, for
+     *        every outcome: an answer, a failure, a refusal and a Stop's
+     *        cancellation all end the time the request was in flight.
+     */
+    void close_open (int64_t opened_steady_ms);
+    void close_open (int64_t opened_steady_ms, int64_t now_steady_ms);
+
+    /**
+     * @brief Request-milliseconds spent in flight up to @p now_steady_ms: the
+     *        integral of the open count over time, the closed requests' whole
+     *        durations plus each open one's time so far.
+     *
+     * Only grows, so the difference between two readings is the time in
+     * flight between them, whether or not anything completed.
+     */
+    [[nodiscard]] int64_t inflight_integral_ms (int64_t now_steady_ms) const;
+
+    /**
+     * @brief Mean requests in flight over @p duration_s ending at
+     *        @p now_steady_ms (#2821, #3567): the in-flight integral over the
+     *        duration.
      *
      * The whole-run twin of `WindowReading::avg_in_flight`, so it counts the
-     * same thing: submission to completion, queue wait included, timer waits
-     * and requests with no attempt not. 0 for a run with no duration.
+     * same thing, a request cancelled after submission included. 0 for a run
+     * with no duration. The overload without @p now_steady_ms ends the
+     * duration at the steady clock's now; once every submission has
+     * completed the integral no longer grows, so a finished run reads the
+     * same at any later instant.
      */
-    [[nodiscard]] double average_in_flight (double duration_s) const {
-        return duration_s > 0.0 ? total_latency_sum () / (duration_s * 1000.0) : 0.0;
+    [[nodiscard]] double average_in_flight (double duration_s) const;
+    [[nodiscard]] double average_in_flight (double duration_s, int64_t now_steady_ms) const {
+        return duration_s > 0.0 ?
+        static_cast<double> (inflight_integral_ms (now_steady_ms)) / (duration_s * 1000.0) :
+        0.0;
     }
 
     // ========================================================================
@@ -1378,6 +1419,17 @@ class MetricsCollector {
     std::atomic<size_t> http_version_downgraded_{ 0 };
     std::atomic<size_t> connection_replays_{ 0 };
     std::atomic<size_t> set_cookie_headers_dropped_{ 0 };
+
+    // The in-flight integral at T is closed_ms + open * T - opened_sum_ms.
+    // One lock for all three, not three atomics: a reader that pairs one
+    // request's count with the stamps before its open is off by about T.
+    struct OpenRequests {
+        int64_t open          = 0;
+        int64_t opened_sum_ms = 0; // the open requests' stamps, summed
+        int64_t closed_ms     = 0; // the closed requests' durations, summed
+    };
+    mutable std::mutex open_requests_mutex_;
+    OpenRequests open_requests_;
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).

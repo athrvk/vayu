@@ -113,7 +113,12 @@ function renderCompare(open: RunReport, other: RunReport) {
 	mocked.getRunReport.mockImplementation(async () => other);
 	render(
 		withQueryClient(
-			<RunComparisonView report={open} runId="run_open" requestId="req_1" onClose={vi.fn()} />
+			<RunComparisonView
+				report={open}
+				runId="run_open"
+				identity={{ requestId: "req_1" }}
+				onClose={vi.fn()}
+			/>
 		)
 	);
 }
