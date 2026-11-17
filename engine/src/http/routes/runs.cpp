@@ -1160,6 +1160,25 @@ ReportExtras& extras) {
     apply_summary_sections (summary, extras);
 }
 
+// The stored whole-run p95, unless the run timed no request: a stored 0 there
+// is no measurement, the marker `apply_summary_latency` reads too. A summary
+// written before `latency.count` existed has none, so its p95 stands as stored.
+std::optional<double> read_timed_p95 (const nlohmann::json& summary) {
+    const auto latency = summary.find ("latency");
+    if (latency == summary.end () || !latency->is_object ()) {
+        return std::nullopt;
+    }
+    const auto count = latency->find ("count");
+    if (count != latency->end () && count->is_number () && count->get<double> () <= 0) {
+        return std::nullopt;
+    }
+    const auto p95 = latency->find ("p95");
+    if (p95 == latency->end () || !p95->is_number ()) {
+        return std::nullopt;
+    }
+    return p95->get<double> ();
+}
+
 // The budget verdict the stored summary recorded, or no key when no budget
 // judged the run - as stored, so a stopped run keeps the verdict it was given.
 void record_verdict (const nlohmann::json& summary, nlohmann::json& outcome) {
@@ -1204,9 +1223,8 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     if (summary.contains ("rps") && summary["rps"].is_number ()) {
         outcome["rps"] = summary["rps"];
     }
-    if (summary.contains ("latency") && summary["latency"].is_object () &&
-    summary["latency"].contains ("p95") && summary["latency"]["p95"].is_number ()) {
-        outcome["p95Ms"] = summary["latency"]["p95"];
+    if (const auto p95 = read_timed_p95 (summary)) {
+        outcome["p95Ms"] = *p95;
     }
     if (summary.contains ("status_codes") && summary["status_codes"].is_object ()) {
         const auto failures = vayu::count_status_failures (

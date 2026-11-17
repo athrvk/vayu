@@ -3078,11 +3078,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // "looked, and every request got the protocol it asked for".
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
     summary["status_codes"]            = codes;
-    summary["latency"]                 = { { "min", inputs.latency.min },
-        { "max", inputs.latency.max }, { "avg", inputs.latency_avg_ms },
-        { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
-        { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
-        { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+    // `count` is what a reader checks before trusting a percentile: a run that
+    // timed no request still stores zeros here, which are not measurements.
+    summary["latency"] = { { "count", inputs.latency.count },
+        { "min", inputs.latency.min }, { "max", inputs.latency.max },
+        { "avg", inputs.latency_avg_ms }, { "p50", inputs.latency.p50 },
+        { "p75", inputs.latency.p75 }, { "p90", inputs.latency.p90 },
+        { "p95", inputs.latency.p95 }, { "p99", inputs.latency.p99 },
+        { "p999", inputs.latency.p999 } };
     // Always written, the downgrade's rule: absent is a run stored before
     // #2799, whose report then omits `connectionReplays`.
     summary["connection_replays"] = inputs.connection_replays;

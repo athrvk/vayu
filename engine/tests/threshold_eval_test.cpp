@@ -262,14 +262,40 @@ TEST (ThresholdEval, TalliesSplitPassedFromFailed) {
     EXPECT_EQ (outcome->checks.size (), 5u);
 }
 
-TEST (ThresholdEval, ARunThatSentNothingHasNoErrorRate) {
-    // A run stopped before its first completion is judged on what it measured,
-    // and 0/0 is 0% - not a division that takes the summary write down with it.
+TEST (ThresholdEval, AnErrorRateBudgetOnARunThatSentNothingIsNotEvaluatedAndCountsAsFailed) {
+    // 0/0 is no rate, not a clean 0%: a run stopped before its first request
+    // met no error budget, the way a latency ceiling is unmet with no sample
+    // (#3540). Reading it as 0% passed a budget nothing had been measured
+    // against, and a 0 ceiling passed the same way.
     RunSummaryInputs empty;
-    auto check = only_check (
-    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 1 } }), empty));
-    EXPECT_DOUBLE_EQ (check.actual, 0.0);
+    for (const double ceiling : { 1.0, 0.0 }) {
+        auto outcome =
+        evaluate_thresholds (config_with ({ { "maxErrorRatePct", ceiling } }), empty);
+        ASSERT_HAS_VALUE (outcome);
+        ASSERT_EQ (outcome->checks.size (), 1u);
+        const auto& check = outcome->checks[0];
+        EXPECT_FALSE (check.evaluated) << ceiling;
+        EXPECT_FALSE (check.passed) << ceiling;
+        EXPECT_EQ (outcome->passed, 0u);
+        EXPECT_EQ (outcome->failed, 1u);
+
+        const auto row = build_threshold_outcome_payload (*outcome)["checks"][0];
+        EXPECT_EQ (row["evaluated"], false);
+        EXPECT_FALSE (row.contains ("actual")) << row.dump ();
+    }
+}
+
+TEST (ThresholdEval, AnErrorRateBudgetOnARunWithRequestsAndNoErrorsStillPasses) {
+    // The data-present guard is on requests, not on errors: a clean run is
+    // evaluated at 0% and meets even a 0 ceiling.
+    RunSummaryInputs clean;
+    clean.total_requests = 50;
+    clean.status_codes   = { { 200, 50 } };
+    auto check           = only_check (
+    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 0 } }), clean));
+    EXPECT_TRUE (check.evaluated);
     EXPECT_TRUE (check.passed);
+    EXPECT_DOUBLE_EQ (check.actual, 0.0);
 }
 
 // --- Zero samples: a latency ceiling must not read a default as a measurement
@@ -336,9 +362,9 @@ TEST (ThresholdEval, ALatencyBudgetJudgesTheTimeoutsBesideTheAnswers) {
 
 TEST (ThresholdEval, AnUnevaluatedLatencyCheckDoesNotHideAFailingErrorRateBudget) {
     // The bug's own reproduction: a 100% error rate run with both a latency
-    // ceiling and an error-rate ceiling declared. The error rate still reads
-    // correctly (measured_error_rate has always been 0/0-safe by total
-    // requests, not by latency samples); the fix must not disturb it.
+    // ceiling and an error-rate ceiling declared. The error rate is judged by
+    // the requests the run made, not by its latency samples, so the missing
+    // samples must not take it down with the latency check.
     RunSummaryInputs inputs;
     inputs.total_requests = 5999;
     inputs.status_codes   = { { 0, 5999 } };
@@ -349,20 +375,16 @@ TEST (ThresholdEval, AnUnevaluatedLatencyCheckDoesNotHideAFailingErrorRateBudget
     ASSERT_EQ (outcome->checks.size (), 2u);
     EXPECT_FALSE (outcome->checks[0].evaluated); // latencyP99Ms: no completions
     EXPECT_FALSE (outcome->checks[0].passed);
-    EXPECT_TRUE (outcome->checks[1].evaluated); // maxErrorRatePct: always evaluated
-    EXPECT_FALSE (outcome->checks[1].passed); // 100% > 1%
+    EXPECT_TRUE (outcome->checks[1].evaluated); // maxErrorRatePct: 5999 requests
+    EXPECT_FALSE (outcome->checks[1].passed);   // 100% > 1%
     EXPECT_EQ (outcome->passed, 0u);
     EXPECT_EQ (outcome->failed, 2u);
 }
 
-TEST (ThresholdEval, AThroughputOrErrorRateBudgetIsAlwaysEvaluated) {
-    // Neither metric has a "no data" state of its own: 0/0 error rate is
-    // already correct (ARunThatSentNothingHasNoErrorRate) and a starved
-    // throughput floor already fails on its own numbers.
+TEST (ThresholdEval, AThroughputBudgetIsAlwaysEvaluated) {
+    // Throughput has no "no data" state of its own: a starved floor already
+    // fails on its own numbers.
     RunSummaryInputs empty;
-    auto rate = only_check (
-    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 50 } }), empty));
-    EXPECT_TRUE (rate.evaluated);
     auto throughput = only_check (
     evaluate_thresholds (config_with ({ { "minThroughputRps", 10 } }), empty));
     EXPECT_TRUE (throughput.evaluated);
