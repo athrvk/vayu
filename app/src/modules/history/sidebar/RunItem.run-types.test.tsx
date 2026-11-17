@@ -260,7 +260,7 @@ describe("RunItem run types", () => {
 		});
 
 		// #3539: a missed budget fails the row on its own, steps all clean.
-		// Mutation check: stop `collectionRowOutcome` reading `verdict` and the name
+		// Mutation check: stop `rowOutcome` reading a collection row's `verdict` and the name
 		// reddens; stop `collectionSubtitle` reading it and the line reddens.
 		it("marks a run that only missed a budget as failed and says so under it", () => {
 			render(
