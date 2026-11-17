@@ -235,6 +235,12 @@
  * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
  * merged rows to 150,934 / 148,338 / 223,441 / 219,174 B; the four caps went to
  * 151,000 / 148,400 / 223,500 / 219,200.
+ *
+ * #3538's `drainCut` clause in `list_runs` and sentence in `get_run_report`
+ * (each paid once) took the rows, merged with #3544's and #3568's wording
+ * around it, to 151,243 / 148,647 / 223,750 / 219,483 B; the four caps went to
+ * 151,300 / 148,700 / 223,800 / 219,500 (one measurement plus a few hundred
+ * bytes).
  */
 
 import { describe, it, expect } from "vitest";
@@ -254,10 +260,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_000 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_400 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_500 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_200 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_300 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_700 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_500 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

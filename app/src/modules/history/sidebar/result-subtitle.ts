@@ -10,9 +10,14 @@ import {
 	failedChecksOf,
 	rowAssertionsOf,
 } from "@/components/shared/run-assertions";
-import { formatErrorRate, stepCountsPhrase } from "@/components/shared/run-outcome";
+import {
+	drainCutCancelledOf,
+	formatErrorRate,
+	stepCountsPhrase,
+} from "@/components/shared/run-outcome";
 import { STOP_REASONS } from "@/components/shared/capacityStop";
 import { formatLatency, formatNumber, formatRate } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } from "@/types";
 
 /**
@@ -21,7 +26,9 @@ import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } f
  * out rather than zeroed, and a row that recorded none has no line at all. A
  * run with a failed check ends it with the words its verdict names them in
  * (#3537): "4,580 assertions failed", "4 assertions failed in the sampled
- * replay", "3 elements errored", what its HTTP-only error rate cannot say.
+ * replay", "3 elements errored", what its HTTP-only error rate cannot say. A run
+ * whose drain a Stop cut ends it with "15 requests unanswered" (#3538): the
+ * row's glyph reads not judged and the verdict's sentence is not on the row.
  *
  * A capacity run's row carries the search's levels (#2930) and prints those
  * instead: its run-average rate blends every level the search stepped through
@@ -36,6 +43,9 @@ export function resultSubtitle(summary: LoadResultSummary): string | null {
 	if (p95Ms !== undefined) parts.push(`p95 ${formatLatency(p95Ms)}`);
 	if (errorRate !== undefined) parts.push(`${formatErrorRate(errorRate)} errors`);
 	parts.push(...failedCheckPhrases(failedChecksOf(rowAssertionsOf(summary))));
+	const unanswered = drainCutCancelledOf(summary);
+	if (unanswered)
+		parts.push(`${formatNumber(unanswered)} ${pluralize(unanswered, "request")} unanswered`);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 

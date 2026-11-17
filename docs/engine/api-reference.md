@@ -5367,9 +5367,9 @@ run ran, else the method and path; the URL is cut to its path.
 
 `verdict` reads the report fields the app's run verdict reads (`judgeRun` in
 `app/src/components/shared/run-outcome.ts`): `status`, `summary.totalRequests`
-and `summary.errorRate`, `thresholdValidation`, and the report's top-level
-[`assertions`](#get-runsrunidreport) block, for a single-request run and a
-scenario load run alike (#3537). A failed check is a failed assertion of
+and `summary.errorRate`, `summary.drainCut`, `thresholdValidation`, and the
+report's top-level [`assertions`](#get-runsrunidreport) block, for a
+single-request run and a scenario load run alike (#3537). A failed check is a failed assertion of
 either population (`exact.failed` or `sampled.failed`), an errored element
 execution (`errored`) or a failed teardown (`teardownFailed`); like an errored
 request, it keeps met budgets from reading `passed` without failing a run that
@@ -5380,6 +5380,7 @@ declared no budget for it. The first matching row wins:
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
+| A Stop cut the run's own drain (`summary.drainCut.cancelled > 0`; #3538) | `not_judged` | `drain_stopped` |
 | No budget declared | `not_judged` | `no_budgets` |
 | Every budget met, some requests errored (`summary.errorRate > 0`) | `not_judged` | `budgets_met_with_errors` |
 | Every budget met, an assertion failed (`assertions.exact.failed` or `assertions.sampled.failed` > 0; #2820, #3458) | `not_judged` | `budgets_met_with_assertion_failures` |
@@ -5388,7 +5389,10 @@ declared no budget for it. The first matching row wins:
 | Every budget met, none of the above | `passed` | `budgets_met` |
 
 `reason` names the first failed check; the Markdown and HTML line names every
-one (below). A report with no `assertions` block (a run that asserted nothing
+one (below). A cut drain removed the run's slowest requests from every figure,
+so what is left is not judged however well it did: its line is `15 requests
+were still unanswered when the drain was stopped`, and a budget the answered
+requests already missed still fails the run. A report with no `assertions` block (a run that asserted nothing
 and errored nowhere, or one stored before the block whose old fields derive
 none) has no failed check. `engine/tests/fixtures/run-verdict-conformance.json`
 pins this table to the app's: the engine's suite replays it through the export
@@ -5488,7 +5492,9 @@ The sections, in order:
    `3 elements errored`; `1 teardown script failed` (`**Not judged** - 3 of 3
    budgets met, but 0.4% of requests errored, 68 assertions failed`,
    `**Not judged** - no budgets declared; 91 assertions failed in the sampled
-   replay`, #3537). For a stopped run a line `Stopped early at 3 s of 20 s` follows,
+   replay`, #3537). A cut drain is its count alone: `**Not judged** - 15
+   requests were still unanswered when the drain was stopped` (`1 request
+   was`, #3538). For a stopped run a line `Stopped early at 3 s of 20 s` follows,
    and for a run with `summary.partial` or `summary.summaryMissing` one
    sentence each follows that, saying the totals are the last saved tick's or
    not whole-run totals, and that latency was not recorded (the latency table
@@ -9875,7 +9881,11 @@ flag, or on a run that met every budget, a failing budget is reported but
 never changes the terminal status. Only a Stop that decided the outcome (one
 before the strategy returned) makes a run `stopped`: a Stop that cuts the
 natural-end drain short leaves the run to its own end, so `failRun` still judges
-it (issue #3341, see [POST /runs/:runId/stop](#post-runsrunidstop)).
+it (issue #3341, see [POST /runs/:runId/stop](#post-runsrunidstop)). The
+requests that Stop cut are the run's slowest and are in none of its figures,
+so its summary records them as `drainCut` (#3538) and a reader judges the run
+not judged unless a budget already failed it; the stored verdict here is
+still the budgets' own.
 
 Each check carries `evaluated`. A latency percentile needs a timed request
 to mean anything, so a run that recorded none (every request was refused
@@ -11655,6 +11665,15 @@ were in flight. The surfaces that carry it:
 | Stop response (`POST /runs/:runId/stop`) | `summary.cancelled` |
 | Report (`GET /runs/:runId/report`) | `summary.cancelledRequests` |
 
+The cancelled requests of a drain a Stop cut are also counted once more, as
+`drainCut: {cancelled}` (issue #3538): on the stored summary, the report's
+`summary` and the load row's `resultSummary`, and only there, never on a run a
+Stop stopped or one the Stop cancelled nothing from. They are the requests that
+outlived the sending window, the slowest and the hung, so leaving them out of
+every figure leaves the run judged on its fastest answers: a reader treats such
+a run as not judged once no budget failed it
+([verdict](#post-exportrun-report)). They are still not errors.
+
 So `totalRequests` is the requests that got an outcome,
 `successfulRequests + failedRequests`, and every request the run sent is in
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
@@ -12637,6 +12656,7 @@ run stored, never from its result rows, which are many and unbounded:
 | `assertions` | The run's assertion block (#3537), the report's top-level [`assertions`](#get-runsrunidreport) as it serves it, for both load run kinds: `exact` and `sampled` (each `{passed, failed}`), `errored` and `teardownFailed`. Beside `errorRate`, not folded into it |
 | `assertionsPassed`, `assertionsFailed` | `assertions.exact` plus `assertions.sampled`, for readers older than the block (#2820, #3458). A required `extract.*` miss is in `assertionsFailed`, the count a `maxAssertionFailureRatePct` check's `assertionsExact` reports. `errored` and `teardownFailed` are not in it |
 | `capacity` | A capacity run's headline (#2930), the same three keys of the report's [`capacity` section](#get-runsrunidreport): `stopReason`, and `maxHealthyConcurrency` / `kneeConcurrency` each only when the search found that level |
+| `drainCut` | `{cancelled}`, the requests a Stop cut from the run's own drain (#3538), the report's `summary.drainCut`. Present only on such a run, which a reader treats as not judged unless `verdict` is `"failed"`; `verdict` itself stays the budgets' own |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
@@ -12658,7 +12678,9 @@ is absent when the very first level already breached the budget and
 `kneeConcurrency` when the search ended without the target giving out, the
 report's rules for the same keys. A capacity search that stopped on its
 latency budget reads `"capacity": { "stopReason": "slo_exceeded",
-"maxHealthyConcurrency": 48, "kneeConcurrency": 64 }`. A `pending` or `running` load row, and
+"maxHealthyConcurrency": 48, "kneeConcurrency": 64 }`. A run whose drain a
+Stop cut with 15 requests unanswered reads `"verdict": "passed", "drainCut":
+{ "cancelled": 15 }` when the answered requests met every budget. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all.
 
@@ -12910,7 +12932,12 @@ stored; while the run is active it is published as `phase` on every live
   `cancelled`, not as errors, because the operator asked for it. The run keeps
   its own end - `completed`, or `failed` when `thresholds.failRun` judges it
   so - and its sending window is what it would have been without the Stop,
-  since the Stop ended no sending. A Stop in either phase also ends the
+  since the Stop ended no sending. When the Stop cancelled anything, the
+  summary records it as `drainCut: {cancelled}` (issue #3538), and the run
+  reads **not judged** ("15 requests were still unanswered when the drain was
+  stopped") unless a budget it already missed fails it: the requests the Stop
+  cut are the slowest the run sent, and judging what is left would pass a run
+  on its fastest answers. A Stop in either phase also ends the
   deferred test replay and any script still running (#3460): the running
   script stops at its next interrupt poll and no further sample is replayed,
   so `testValidation.samplesTested` counts the samples the replay reached and
@@ -13918,6 +13945,10 @@ in none of the figures above - a healthy target stopped mid-run reports
 `errorRate` 0 beside them. Always present: `0` for a run nothing cancelled,
 and for a run whose stored summary predates the count, because only the
 stored summary records it (the status-code distribution never held them).
+`summary.drainCut` (`{cancelled}`, issue #3538) is present only when a Stop
+cut the drain of a run that ended on its own: the part of `cancelledRequests`
+still unanswered when the drain was stopped, which keeps the run's verdict
+[not judged](#post-exportrun-report) unless a budget already failed it.
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load

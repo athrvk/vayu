@@ -433,6 +433,10 @@ struct ReportExtras {
     // knows it - the status distribution never held them - so a run stored
     // before the key existed reads 0.
     size_t cancelled_requests = 0;
+    // The part of `cancelled_requests` a Stop cut from the drain of a run
+    // that ended on its own (#3538), the report's `summary.drainCut`. Empty
+    // for every other run, which leaves the key out.
+    std::optional<size_t> drain_cut;
     // Per-phase latency distributions, verbatim from the summary and already in
     // the report's shape. Empty for a run that recorded none - the toggle off,
     // nothing successful completed, or an engine older than the phase bank -
@@ -641,6 +645,22 @@ nlohmann::json run_assertions_json (const RunAssertions& assertions) {
     return block;
 }
 
+// The requests a Stop cut from the run's drain (#3538), or nothing when the
+// summary records no cut. The one reader of `drainCut`, for the report's
+// `summary` and the list row, which both answer it as `{cancelled}`.
+std::optional<size_t> read_drain_cut (const nlohmann::json& summary) {
+    const auto block = summary.find ("drainCut");
+    if (block == summary.end () || !block->is_object ()) {
+        return std::nullopt;
+    }
+    const auto cancelled = read_count (*block, "cancelled");
+    return cancelled.value_or (0) > 0 ? cancelled : std::nullopt;
+}
+
+nlohmann::json drain_cut_json (size_t cancelled) {
+    return { { "cancelled", cancelled } };
+}
+
 // Read a boolean out of a JSON object as an optional, so a key an older engine
 // never wrote stays *absent* rather than becoming `false`. A number reads as
 // nothing on purpose: the report says what the summary recorded, and a
@@ -794,6 +814,7 @@ vayu::DetailedReport& report,
 ReportExtras& extras) {
     read_number (summary, "total_requests", report.total_requests);
     read_number (summary, "cancelled", extras.cancelled_requests);
+    extras.drain_cut = read_drain_cut (summary);
     read_number (summary, "send_rate", report.send_rate);
     read_number (summary, "throughput", report.throughput);
     read_number (summary, "test_duration", report.total_duration_s);
@@ -1198,10 +1219,19 @@ void record_assertions (const nlohmann::json& summary, nlohmann::json& outcome) 
     }
 }
 
+// The drain a Stop cut (#3538), beside the stored `verdict` it leaves as it
+// is: a reader judges a cut run not judged once no budget failed it.
+void record_drain_cut (const nlohmann::json& summary, nlohmann::json& outcome) {
+    if (const auto drain_cut = read_drain_cut (summary)) {
+        outcome["drainCut"] = drain_cut_json (*drain_cut);
+    }
+}
+
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate, budget verdict, its assertion block (#3537) or, for a capacity
- * run, the search's headline (#2930), read from the run's
+ * error rate, budget verdict, its assertion block (#3537), the drain a Stop
+ * cut (#3538) or, for a capacity run, the search's headline (#2930), read
+ * from the run's
  * stored `summary` - the load-run counterpart of a design row's
  * `{statusCode, latencyMs}`.
  *
@@ -1236,6 +1266,7 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     }
     record_verdict (summary, outcome);
     record_assertions (summary, outcome);
+    record_drain_cut (summary, outcome);
     if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
         if (auto headline = read_capacity_headline (summary["capacity"])) {
             outcome["capacity"] = std::move (*headline);
@@ -2294,6 +2325,9 @@ double target_rps) {
     }
     if (const auto& avg_in_flight = extras.avg_in_flight) {
         json_report["summary"]["avgInFlight"] = *avg_in_flight;
+    }
+    if (const auto& drain_cut = extras.drain_cut) {
+        json_report["summary"]["drainCut"] = drain_cut_json (*drain_cut);
     }
     if (extras.summary_partial) {
         json_report["summary"]["partial"] = true;

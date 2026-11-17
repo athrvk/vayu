@@ -47,7 +47,7 @@
           "enum": [
             "stopped", "run_failed", "budgets_missed", "budgets_met", "budgets_met_with_errors",
             "budgets_met_with_assertion_failures", "budgets_met_with_element_errors",
-            "budgets_met_with_teardown_failures", "no_budgets"
+            "budgets_met_with_teardown_failures", "drain_stopped", "no_budgets"
           ]
         }
       }
@@ -126,6 +126,13 @@
             "httpErrorRequests": {"type": "number"},
             "noResponseRequests": {"type": "number"},
             "cancelledRequests": {"type": "number"},
+            "drainCut": {
+              "description": "Present only when a Stop cut the drain of a run that ended on its own (issue #3538): cancelled is how many requests were still unanswered, all of them inside cancelledRequests and none in any other figure. Such a run is not judged (verdict.reason drain_stopped) unless a budget already failed it.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["cancelled"],
+              "properties": {"cancelled": {"type": "integer", "minimum": 1}}
+            },
             "errorRate": {"type": "number"},
             "totalDurationSeconds": {"type": "number"},
             "avgRps": {"type": "number"},

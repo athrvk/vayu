@@ -515,6 +515,29 @@ TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
     document["report"]["summary"].contains ("completedWhileSending"));
 }
 
+// #3538: a run whose drain a Stop cut, stored, reported and exported: the cut
+// reaches the document's summary, validates, and keeps met budgets from
+// passing. Mutation check: drop the `drainCut` pick in `summary_section` and
+// the presence assertion fails; drop the property or the `drain_stopped`
+// reason from the schema and the validation does.
+TEST_F (RunExportSchemaTest, ARunWhoseDrainAStopCutValidatesAndIsNotJudged) {
+    json summary         = healthy_summary ();
+    summary["cancelled"] = 15;
+    summary["drainCut"]  = { { "cancelled", 15 }, { "unlisted", "dropped" } };
+    seed ("run_drain_cut", vayu::RunStatus::Completed, summary);
+
+    const json document = expect_valid (json{ { "runId", "run_drain_cut" } });
+    EXPECT_EQ (document["report"]["summary"].value ("drainCut", json ()),
+    (json{ { "cancelled", 15 } }));
+    EXPECT_EQ (document["report"]["summary"].value ("cancelledRequests", -1), 15);
+    EXPECT_EQ (document["verdict"].value ("state", ""), "not_judged");
+    EXPECT_EQ (document["verdict"].value ("reason", ""), "drain_stopped");
+
+    seed ("run_whole_drain", vayu::RunStatus::Completed, healthy_summary ());
+    const json whole = expect_valid (json{ { "runId", "run_whole_drain" } });
+    EXPECT_FALSE (whole["report"]["summary"].contains ("drainCut"));
+}
+
 // #2817: the allowlist has to name the saturation keys or the export drops the
 // level a plateau reports, and the schema has to name them or the document is
 // refused. Mutation check: drop "saturationRps" from CAPACITY_KEYS and the

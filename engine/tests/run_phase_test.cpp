@@ -130,6 +130,27 @@ TEST (RunContextStop, OnlyAStopBeforeTheDrainDecidesTheOutcome) {
     }
 }
 
+// #3538: what a Stop cancelled is a drain cut only when the Stop left the
+// run's own end standing, and only when it cancelled something. Mutation
+// check: drop the `stop_decides_outcome ()` test from `RunContext::drain_cut`
+// and the setup and sending phases report a cut.
+TEST (RunContextStop, OnlyAStopFromTheDrainOnCutsTheDrain) {
+    for (const auto phase : PHASES) {
+        auto context = make_context ();
+        context->advance_phase (phase);
+        EXPECT_FALSE (context->drain_cut (4).has_value ())
+        << "no Stop, phase " << static_cast<int> (phase);
+
+        context->request_stop ();
+        const bool from_drain = phase >= RunPhase::draining;
+        EXPECT_EQ (context->drain_cut (4), from_drain ? std::optional<size_t> (4) : std::nullopt)
+        << "latched in phase " << static_cast<int> (phase);
+        EXPECT_FALSE (context->drain_cut (0).has_value ())
+        << "a Stop that cancelled nothing cut nothing, phase "
+        << static_cast<int> (phase);
+    }
+}
+
 // The worker advances while a stopper latches. Whichever the atomic orders
 // first is what the other sees, so the worker's own read of the latch right
 // after an advance agrees with where the latch ends up: no latch seen means

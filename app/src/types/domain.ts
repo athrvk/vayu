@@ -2110,6 +2110,12 @@ export interface LoadResultSummary {
 	assertionsPassed?: number;
 	assertionsFailed?: number;
 	/**
+	 * Present when a Stop cut the end-of-run drain with requests still
+	 * outstanding (#3538): the run is `completed` but not judged, and
+	 * `rowOutcome` says so. Absent unless `cancelled` is a positive integer.
+	 */
+	drainCut?: { cancelled: number };
+	/**
 	 * What a **terminal capacity run's** search found (#2930): present on that
 	 * row alone, absent for every other mode and for a row an older engine sent.
 	 * `rps`, `p95Ms` and `errorRate` stay on the row, but they average a search
@@ -3337,6 +3343,12 @@ export interface RunReport {
 		 * than #2136; absent means none.
 		 */
 		cancelledRequests?: number;
+		/**
+		 * Present when that Stop landed in the natural-end drain and cancelled
+		 * requests (#3538): the answered requests are not the run, so
+		 * `reportOutcome` leaves it not judged. Absent otherwise.
+		 */
+		drainCut?: { cancelled: number };
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;

@@ -31,6 +31,8 @@ import { capacitySubtitle, collectionSubtitle, resultSubtitle } from "./result-s
  * the assertion rows redden. The block (#3537): read the flat
  * `assertionsFailed` instead of `rowAssertionsOf` and the block rows redden.
  *
+ * A drain cut (#3538): drop the `drainCutCancelledOf` push and the cut rows redden.
+ *
  * Capacity (#2930): drop the `summary.capacity` guard in `resultSubtitle` and
  * the average-rate case reddens; make `capacitySubtitle` ignore `finding` and
  * the plateau, knee-gate and unknown-reason rows redden; print `held 0` for an
@@ -89,6 +91,17 @@ describe("resultSubtitle", () => {
 			},
 			"0.0% errors · 2,202 elements errored",
 		],
+		// A Stop that cut the drain (#3538), after the failed checks.
+		[
+			{ rps: 485, p95Ms: 42, errorRate: 0, drainCut: { cancelled: 15 } },
+			"485 req/s · p95 42ms · 0.0% errors · 15 requests unanswered",
+		],
+		[{ errorRate: 0, drainCut: { cancelled: 1 } }, "0.0% errors · 1 request unanswered"],
+		[
+			{ errorRate: 0, assertionsFailed: 2, drainCut: { cancelled: 1500 } },
+			"0.0% errors · 2 assertions failed · 1,500 requests unanswered",
+		],
+		[{ errorRate: 0, drainCut: { cancelled: 0 } }, "0.0% errors"],
 	])("%j reads %j", (summary, line) => {
 		expect(resultSubtitle(summary)).toBe(line);
 	});

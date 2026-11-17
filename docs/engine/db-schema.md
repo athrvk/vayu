@@ -1780,6 +1780,14 @@ are in neither `total_requests` nor `status_codes`, which is why the count is st
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
 
+`drainCut` (`{"cancelled": 15}`, issue #3538) is written only when a Stop cut the drain of a run
+that ended on its own and cancelled something (`RunContext::drain_cut`): its `cancelled` repeats
+the top-level `cancelled`, because every request such a Stop cancels is one the drain was waiting
+on. Absent on every other run, a stopped one included, never `0`. The report serves it as
+`summary.drainCut` and the list row as `resultSummary.drainCut`, and a verdict reader treats the
+run as not judged unless a budget already failed it, since the cut requests are the slowest of the
+run and in no other figure.
+
 `connection_replays` (issue #2799) counts the requests libcurl re-sent on a new connection after
 the server dropped or refused a reused one before answering. Each replayed request is still one
 entry in `total_requests` and `status_codes`, by the outcome of its last attempt, so the target
@@ -1913,7 +1921,7 @@ The list row's `resultSummary` on a terminal load run (#2130) *is* read from
 this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 `thresholds` verdict, the `assertions` block as `assertions`, with its two
 populations summed as `assertionsPassed` / `assertionsFailed` (#2820, #3458,
-#3537), and for a capacity run the
+#3537), `drainCut` as it is stored (#3538), and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`

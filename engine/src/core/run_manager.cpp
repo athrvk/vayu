@@ -2182,6 +2182,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     RunSummaryInputs inputs;
     inputs.total_requests     = totals.completed;
     inputs.cancelled          = context->metrics_collector->cancelled ();
+    inputs.drain_cut          = context->drain_cut (inputs.cancelled);
     inputs.rps                = totals.actual_rps;
     inputs.throughput         = totals.actual_rps;
     inputs.test_duration_s    = totals.total_duration_s;
@@ -3128,6 +3129,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     }
     if (auto assertions = build_run_assertions_payload (inputs)) {
         summary["assertions"] = std::move (*assertions);
+    }
+    if (const auto& drain_cut = inputs.drain_cut) {
+        summary["drainCut"] = { { "cancelled", *drain_cut } };
     }
     // The run's verdict against the budgets it declared. Omitted when it
     // declared none, for the same reason `tests` is: "no budget" and "a budget

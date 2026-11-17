@@ -1,5 +1,5 @@
 {
-  "description": "Cross-language conformance fixture for a load run's verdict (issue #3537). Read by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through the run-report export's `verdict` and the Markdown/HTML verdict line) and by the app's vitest suite (app/src/components/shared/run-outcome.test.ts, through `reportOutcome`). Each case's `report` is a GET /runs/:runId/report answer cut to what a verdict reads - `metadata.status`, `summary.totalRequests` and `summary.errorRate`, `thresholdValidation` and the top-level `assertions` block - plus the sections that block summarises (`scenario`, `testValidation`, `elements`, `lifecycle`), kept consistent with it so a reader that re-derives a failed check from them instead of reading the block answers differently on some case. `expected.state` is the export's `verdict.state` (`not_judged` is the app's `not-judged`); `expected.reason` is the export's `verdict.reason`; `expected.names` are the phrases the verdict's words must contain, in this order, on every surface: the export's Markdown and HTML line and the app's not-judged reason. The error-rate phrase is each surface's own and is never listed. A case with no `names` must name no failed check. A report stored before the block carries one derived from what it stored (GET /runs/:runId/report, `assertions`); the `old run` cases are those reports.",
+  "description": "Cross-language conformance fixture for a load run's verdict (issues #3537, #3538). Read by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through the run-report export's `verdict` and the Markdown/HTML verdict line) and by the app's vitest suite (app/src/components/shared/run-outcome.test.ts, through `reportOutcome`). Each case's `report` is a GET /runs/:runId/report answer cut to what a verdict reads - `metadata.status`, `summary.totalRequests` and `summary.errorRate`, `summary.drainCut.cancelled` (the requests a Stop cut from the drain of a run that ended on its own, issue #3538; a load row carries it as `resultSummary.drainCut.cancelled`), `thresholdValidation` and the top-level `assertions` block - plus the sections that block summarises (`scenario`, `testValidation`, `elements`, `lifecycle`), kept consistent with it so a reader that re-derives a failed check from them instead of reading the block answers differently on some case. `expected.state` is the export's `verdict.state` (`not_judged` is the app's `not-judged`); `expected.reason` is the export's `verdict.reason`; `expected.names` are the phrases the verdict's words must contain, in this order, on every surface: the export's Markdown and HTML line and the app's not-judged reason. The error-rate phrase is each surface's own and is never listed. A case with no `names` must name no failed check. A report stored before the block carries one derived from what it stored (GET /runs/:runId/report, `assertions`); the `old run` cases are those reports.",
   "cases": [
     {
       "name": "collection load run, every deferred pm.test fails: the sampled replay alone",
@@ -419,6 +419,116 @@
         "assertions": {
           "exact": {"passed": 8, "failed": 150}, "sampled": {"passed": 0, "failed": 0},
           "errored": 0, "teardownFailed": 0
+        }
+      },
+      "expected": {"state": "not_judged", "reason": "stopped"}
+    },
+    {
+      "name": "a Stop cut the drain of a run whose budgets the answered requests met",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 285, "errorRate": 0, "cancelledRequests": 15, "drainCut": {"cancelled": 15}},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1000, "actual": 3.9, "passed": true, "evaluated": true}
+          ],
+          "passed": 2, "failed": 0, "verdict": "passed"
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "drain_stopped",
+        "names": ["15 requests were still unanswered when the drain was stopped"]
+      }
+    },
+    {
+      "name": "a Stop cut the drain of a run that declared no budgets",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 285, "errorRate": 0, "cancelledRequests": 15, "drainCut": {"cancelled": 15}}
+      },
+      "expected": {
+        "state": "not_judged", "reason": "drain_stopped",
+        "names": ["15 requests were still unanswered when the drain was stopped"]
+      }
+    },
+    {
+      "name": "a Stop cut the drain of a run whose answered requests errored: the cut names the reason",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 285, "errorRate": 0.4, "cancelledRequests": 15, "drainCut": {"cancelled": 15}},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0.4, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1000, "actual": 3.9, "passed": true, "evaluated": true}
+          ],
+          "passed": 2, "failed": 0, "verdict": "passed"
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "drain_stopped",
+        "names": ["15 requests were still unanswered when the drain was stopped"]
+      }
+    },
+    {
+      "name": "a Stop cut the drain of one request",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 299, "errorRate": 0, "cancelledRequests": 1, "drainCut": {"cancelled": 1}},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1000, "actual": 3.9, "passed": true, "evaluated": true}
+          ],
+          "passed": 2, "failed": 0, "verdict": "passed"
+        }
+      },
+      "expected": {
+        "state": "not_judged", "reason": "drain_stopped",
+        "names": ["1 request was still unanswered when the drain was stopped"]
+      }
+    },
+    {
+      "name": "a Stop cut the drain, and a budget already missed on the answered requests stays failed",
+      "report": {
+        "metadata": {"status": "completed"},
+        "summary": {"totalRequests": 285, "errorRate": 0, "cancelledRequests": 15, "drainCut": {"cancelled": 15}},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1, "actual": 3.9, "passed": false, "evaluated": true}
+          ],
+          "passed": 1, "failed": 1, "verdict": "failed"
+        }
+      },
+      "expected": {"state": "failed", "reason": "budgets_missed"}
+    },
+    {
+      "name": "a Stop cut the drain of a failRun run whose budget the answered requests missed",
+      "report": {
+        "metadata": {"status": "failed"},
+        "summary": {"totalRequests": 285, "errorRate": 0, "cancelledRequests": 15, "drainCut": {"cancelled": 15}},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1, "actual": 3.9, "passed": false, "evaluated": true}
+          ],
+          "passed": 1, "failed": 1, "verdict": "failed"
+        }
+      },
+      "expected": {"state": "failed", "reason": "budgets_missed"}
+    },
+    {
+      "name": "a Stop before the drain stores no cut and stays stopped",
+      "report": {
+        "metadata": {"status": "stopped"},
+        "summary": {"totalRequests": 150, "errorRate": 0, "cancelledRequests": 15},
+        "thresholdValidation": {
+          "checks": [
+            {"metric": "maxErrorRatePct", "limit": 1, "actual": 0, "passed": true, "evaluated": true},
+            {"metric": "latencyP99Ms", "limit": 1000, "actual": 3.9, "passed": true, "evaluated": true}
+          ],
+          "passed": 2, "failed": 0, "verdict": "passed"
         }
       },
       "expected": {"state": "not_judged", "reason": "stopped"}

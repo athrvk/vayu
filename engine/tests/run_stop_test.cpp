@@ -517,6 +517,9 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
     EXPECT_EQ (summary["total_requests"].get<size_t> (), 0u);
     EXPECT_FALSE (summary["status_codes"].contains ("0"))
     << "a cancelled request was recorded as a request with no response";
+    // #3538: a Stop before the drain decides the outcome itself, so it is
+    // not a drain cut.
+    EXPECT_FALSE (summary.contains ("drainCut")) << stored->summary;
 }
 
 // #3340: a Stop that lands while a load run is still `pending`, before its
@@ -629,12 +632,14 @@ class StopAfterNaturalEndTest : public RunStopAccountingTest {
 // An `iterations` run returns on its last submission, so its four requests
 // are the drain. The Stop cuts it short; the run still completed on its own,
 // what the Stop cancelled is counted as cancelled (not as errors), and its
-// sending window is the whole run, as an `iterations` run's always is.
-// Mutation checks: read `should_stop` again for the final status in
+// sending window is the whole run, as an `iterations` run's always is. The
+// summary records the cut (#3538), so no verdict judges the run on what was
+// left. Mutation checks: read `should_stop` again for the final status in
 // `finish_load_test` and the run ends Stopped; drop the cancel from
 // `RunContext::request_stop` and the drain runs to its timeout; read
 // `should_stop` again in `sending_window` and the window is the submission
-// burst alone.
+// burst alone; drop the `drain_cut` write in `collect_summary_inputs` and the
+// summary has no `drainCut`.
 TEST_F (StopAfterNaturalEndTest, AStopInTheDrainCompletesTheRunAndCutsTheDrain) {
     constexpr size_t IN_FLIGHT = 4;
     const std::string run_id   = "run-stop-after-end";
@@ -674,6 +679,35 @@ TEST_F (StopAfterNaturalEndTest, AStopInTheDrainCompletesTheRunAndCutsTheDrain) 
     EXPECT_DOUBLE_EQ (summary.value ("sending_duration", 0.0),
     summary.value ("test_duration", -1.0))
     << "a Stop after the end shortened the sending window";
+    EXPECT_EQ (summary.value ("drainCut", nlohmann::json ()),
+    (nlohmann::json{ { "cancelled", IN_FLIGHT } }))
+    << stored->summary;
+    EXPECT_TRUE (summary.value ("status_codes", nlohmann::json ()).empty ())
+    << "a request the Stop cut was recorded with a status";
+}
+
+// The same run with nothing outstanding at its end and no Stop: no cut is
+// recorded, so the run is judged as it always was (#3538).
+TEST_F (StopAfterNaturalEndTest, ARunThatEndsWithoutAStopRecordsNoDrainCut) {
+    const std::string run_id = "run-ends-on-its-own";
+    create_pending_run (run_id);
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 3 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 } };
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
+    << "the run never settled";
+
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    const auto summary = parsed_summary (run_id);
+    ASSERT_TRUE (summary.is_object ()) << stored->summary;
+    EXPECT_EQ (summary.value ("total_requests", size_t{ 0 }), 3U) << stored->summary;
+    EXPECT_FALSE (summary.contains ("drainCut")) << stored->summary;
 }
 
 // The same for a collection load run, stopped through the route: two virtual
@@ -735,6 +769,9 @@ TEST_F (StopAfterNaturalEndTest, ACollectionRunStoppedInItsDrainAnswersItsOwnEnd
     const auto summary = parsed_summary (run_id);
     ASSERT_TRUE (summary.is_object ()) << stored->summary;
     EXPECT_EQ (summary.value ("cancelled", size_t{ 0 }), IN_FLIGHT) << stored->summary;
+    EXPECT_EQ (summary.value ("drainCut", nlohmann::json ()),
+    (nlohmann::json{ { "cancelled", IN_FLIGHT } }))
+    << stored->summary;
 }
 
 // #3568: the drain is visible on the wire. Once the strategy has returned with

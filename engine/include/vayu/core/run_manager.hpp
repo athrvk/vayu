@@ -498,6 +498,17 @@ struct RunContext {
         return phase_latch_.stop_phase ().has_value ();
     }
 
+    /// The requests a Stop cut from the run's own drain (#3538): @p cancelled
+    /// when a Stop that does not decide the outcome cancelled any, nothing
+    /// otherwise. They are the slowest of the run and in none of its figures,
+    /// so a verdict on what is left would judge the run without them.
+    [[nodiscard]] std::optional<size_t> drain_cut (size_t cancelled) const noexcept {
+        if (cancelled == 0 || !stop_was_requested () || stop_decides_outcome ()) {
+            return std::nullopt;
+        }
+        return cancelled;
+    }
+
     nlohmann::json config;
     // Monotonic reading (`steady_clock`, milliseconds) at the instant load
     // began: stamped by the worker beside the final report's `test_start`,
@@ -1672,6 +1683,10 @@ struct RunSummaryInputs {
     // rather than reporting a run that passed zero checks. Sibling of `tests`,
     // and the aggregate answer a per-response script structurally cannot give.
     std::optional<ThresholdOutcome> thresholds;
+    // `cancelled` again when a Stop cut the drain of a run that ended on its
+    // own (`RunContext::drain_cut`, #3538), under the summary's `drainCut`
+    // key. Absent on every other run, which a verdict may then judge.
+    std::optional<size_t> drain_cut;
     // This run's `metric.record` / `pm.metrics` values, under the summary's
     // `customMetrics` key (issue #1500), by name. Absent when the run
     // declared or recorded none, which keeps the report's section out
