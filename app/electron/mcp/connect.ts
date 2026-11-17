@@ -228,23 +228,32 @@ function run(bin: string, args: string[], spawnImpl: SpawnFn): Promise<McpConnec
 	});
 }
 
+// Built from a code point rather than written as `\x1b` in a literal, which
+// no-control-regex rejects.
+const ANSI_SGR = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "g");
+
 /**
  * Whether `claude mcp get` output names exactly `url`. Only the URL is read:
  * the surrounding labels and scope wording are the CLI's to change. A longer
  * port or path (`:98770/mcp`, `/mcp2`) is a different endpoint, so the URL must
- * be delimited on both sides.
+ * be delimited on both sides. Colour codes are stripped first: a coloured
+ * run puts `ESC[0m` right after the URL, which is not a delimiter.
  */
 function mentionsUrl(output: string | undefined, url: string): boolean {
 	if (!output) return false;
+	const plain = output.replace(ANSI_SGR, "");
 	const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`(?<=^|[\\s"'<(])${escaped}(?=[\\s"'<>),;]|$)`).test(output);
+	return new RegExp(`(?<=^|[\\s"'<(])${escaped}(?=[\\s"'<>),;]|$)`).test(plain);
 }
 
 /**
  * `claude mcp add` refuses a name that is already registered, so a second
  * Connect would fail with a duplicate error. Ask first: the same URL needs
  * nothing, a stale one (the engine moved ports) is replaced, and any failure of
- * the lookup falls through to a plain add.
+ * the lookup falls through to a plain add. "Already connected" is decided by
+ * the URL alone: `get` resolves a name across scopes, so a project- or
+ * local-scoped entry with the same URL counts. Replacing is remove then add,
+ * not atomic: if the add fails the old entry is already gone.
  */
 async function connectClaude(
 	bin: string,

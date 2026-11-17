@@ -452,7 +452,9 @@ describe("McpSettingsPanel connect failures", () => {
 
 		const [toast] = useToastStore.getState().toasts;
 		expect(toast.message).toBe("Vayu is already connected to Claude Code.");
-		expect(toast.variant).not.toBe("error");
+		// Below the user's minSeverity floor a toast is dropped, so an "info" here
+		// would show nothing after a manual click.
+		expect(toast.variant).toBe("success");
 		expect(toastMessages().join(" ")).not.toMatch(/added/i);
 	});
 

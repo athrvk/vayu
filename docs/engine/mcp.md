@@ -56,11 +56,13 @@ snippet below it is the manual path.
 
 Connect is safe to click again. For Claude Code it first runs `claude mcp get
 vayu` and reads only whether the exact endpoint URL appears in the output: if it
-does, nothing is run and the panel says Vayu is already connected. If `vayu` is
-registered with a different URL (the engine moved ports), the old entry is
-removed at user scope and the new one added; should that add fail, the error
-says the earlier registration was removed. If `get` fails, Connect adds as
-usual. VS Code has no lookup command, so its Connect always runs `--add-mcp`.
+does, nothing is run and the panel says Vayu is already connected. The URL alone
+decides this, not the scope: a project- or local-scoped entry with the same URL
+counts. If `vayu` is registered with a different URL (the engine moved ports),
+the old entry is removed at user scope and the new one added. That replace is
+remove then add, not atomic: should the add fail, the old entry is already gone
+and the error says the earlier registration was removed. If `get` fails,
+Connect adds as usual. VS Code has no lookup command, so its Connect always runs `--add-mcp`.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)

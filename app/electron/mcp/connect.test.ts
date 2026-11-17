@@ -354,6 +354,34 @@ describe("connectClient for claude is idempotent", () => {
 		expect(calls.slice(2).map((c) => c.args)).toEqual([REMOVE, ADD]);
 	});
 
+	it.each([
+		["a reset after the URL", `URL: ${URL}\x1b[0m\n`],
+		["colour around the URL", `URL: \x1b[36m${URL}\x1b[39m\n`],
+		["a compound code", `URL: \x1b[1;36m${URL}\x1b[0m`],
+	])("still matches when the CLI colours the output: %s", async (_label, output) => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, output),
+			(child) => finish(child, "unexpected")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res).toEqual({ ok: true, alreadyConnected: true });
+		expect(calls).toHaveLength(2);
+	});
+
+	it("does not let colour codes hide a longer port or path", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, `URL: \x1b[36mhttp://127.0.0.1:98770/mcp\x1b[0m\n`),
+			(child) => finish(child, "ok")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.alreadyConnected).toBeUndefined();
+		expect(calls.slice(2).map((c) => c.args)).toEqual([REMOVE, ADD]);
+	});
+
 	it("adds once, with no remove, when `get` fails", async () => {
 		const { spawnImpl, calls } = scenario(
 			(child) => finish(child, "", 1, "No MCP server found with name: vayu"),
@@ -396,6 +424,47 @@ describe("connectClient for claude is idempotent", () => {
 
 		expect(res.ok).toBe(false);
 		expect(res.message).toBe("add refused");
+	});
+
+	describe("through a .cmd shim on Windows", () => {
+		const NPM = "C:\\Users\\me\\AppData\\Roaming\\npm";
+		const SHIM = `"${NPM}\\claude.cmd"`;
+
+		beforeEach(() => setPlatform("win32"));
+
+		function winScenario(get: (child: FakeChild) => void) {
+			return recorder((call, child, index) => {
+				if (index === 0) finish(child, `${NPM}\\claude\r\n${NPM}\\claude.cmd\r\n`);
+				else if (index === 1) get(child);
+				else finish(child, "ok");
+			});
+		}
+
+		it("spawns no add when the same endpoint is already registered", async () => {
+			const { spawnImpl, calls } = winScenario((child) => finish(child, registered(URL)));
+
+			const res = await connectClient("claude", URL, spawnImpl);
+
+			expect(res).toEqual({ ok: true, alreadyConnected: true });
+			expect(calls.map((c) => c.command)).toEqual(["where", `${SHIM} "mcp" "get" "vayu"`]);
+			expect(calls[1].options.shell).toBe(true);
+		});
+
+		it("removes then adds a registration that points elsewhere, every line quoted", async () => {
+			const { spawnImpl, calls } = winScenario((child) =>
+				finish(child, registered("http://127.0.0.1:9876/mcp"))
+			);
+
+			const res = await connectClient("claude", URL, spawnImpl);
+
+			expect(res.ok).toBe(true);
+			expect(res.alreadyConnected).toBeUndefined();
+			expect(calls.slice(1).map((c) => c.command)).toEqual([
+				`${SHIM} "mcp" "get" "vayu"`,
+				`${SHIM} "mcp" "remove" "--scope" "user" "vayu"`,
+				`${SHIM} "mcp" "add" "--transport" "http" "--scope" "user" "vayu" "${URL}"`,
+			]);
+		});
 	});
 });
 
