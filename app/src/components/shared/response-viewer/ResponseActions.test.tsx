@@ -161,6 +161,24 @@ describe("what Download says about the save", () => {
 		expect(toasts()).toEqual([]);
 	});
 
+	it("names the file the user chose when a byte body's save fails", async () => {
+		vi.mocked(downloadBlob).mockResolvedValueOnce({
+			outcome: "failed",
+			fileName: "mine.pdf",
+			message: "Disk full",
+		});
+		renderActions({
+			content: "",
+			rawBytes: { data: PDF, isText: false },
+			contentType: "application/pdf",
+		});
+
+		download();
+
+		await waitFor(() => expect(toasts()).toHaveLength(1));
+		expect(toasts()[0]).toEqual(["Couldn't save mine.pdf - Disk full", "error"]);
+	});
+
 	it("names the file and the reason when a byte body's save fails", async () => {
 		vi.mocked(downloadBlob).mockResolvedValueOnce({ outcome: "failed", message: "Disk full" });
 		renderActions({

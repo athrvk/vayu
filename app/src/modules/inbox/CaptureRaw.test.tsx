@@ -136,6 +136,23 @@ describe("a base64 capture body", () => {
 		expect(useToastStore.getState().toasts).toEqual([]);
 	});
 
+	it("names the file the user chose when the save fails", async () => {
+		vi.mocked(downloadBlob).mockResolvedValueOnce({
+			outcome: "failed",
+			fileName: "mine.png",
+			message: "Disk full",
+		});
+		render(<CaptureRaw capture={capture()} url={URL_} />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download body" }));
+
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+		expect(useToastStore.getState().toasts[0]).toMatchObject({
+			message: "Couldn't save mine.png - Disk full",
+			variant: "error",
+		});
+	});
+
 	it("names the file and the reason when the save fails", async () => {
 		vi.mocked(downloadBlob).mockResolvedValueOnce({ outcome: "failed", message: "Disk full" });
 		render(<CaptureRaw capture={capture()} url={URL_} />);

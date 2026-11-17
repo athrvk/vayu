@@ -99,7 +99,9 @@ beforeEach(() => {
 	queries.run = loadRun("run_1");
 	queries.baseline = null;
 	exportRunReport.mockReset().mockResolvedValue(envelope());
-	download.mockReset().mockResolvedValue({ outcome: "saved" });
+	download
+		.mockReset()
+		.mockResolvedValue({ outcome: "saved", fileName: "Orders 2026-10-17 0841.run.json" });
 	writeText.mockReset().mockResolvedValue(undefined);
 	Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 	useToastStore.setState({ toasts: [] });
@@ -276,6 +278,18 @@ describe("saving", () => {
 		]);
 	});
 
+	it("names the file the user saved, not the one suggested", async () => {
+		download.mockResolvedValue({ outcome: "saved", fileName: "Q3 orders.json" });
+		renderMenu();
+		fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: "Save as JSON" }));
+
+		await waitFor(() =>
+			expect(toasts().map((t) => [t.message, t.variant])).toEqual([
+				["Exported Q3 orders.json", "success"],
+			])
+		);
+	});
+
 	it("says what the URL lost on the way out", async () => {
 		exportRunReport.mockResolvedValue(envelope(2));
 		renderMenu();
@@ -284,6 +298,22 @@ describe("saving", () => {
 		await waitFor(() =>
 			expect(toasts().map((t) => t.message)).toEqual([
 				"Exported Orders 2026-10-17 0841.run.json - 2 URL credentials left out",
+			])
+		);
+	});
+
+	it("names the file the user chose in the failure too", async () => {
+		download.mockResolvedValue({
+			outcome: "failed",
+			fileName: "Q3 orders.json",
+			message: "ENOSPC: no space left on device",
+		});
+		renderMenu();
+		fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: "Save as JSON" }));
+
+		await waitFor(() =>
+			expect(toasts().map((t) => [t.message, t.variant])).toEqual([
+				["Couldn't save Q3 orders.json - ENOSPC: no space left on device", "error"],
 			])
 		);
 	});

@@ -486,7 +486,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	// Write an export to the path the user picks in the system save dialog, and
 	// say whether it was written (#3246). The renderer suggests a file name and
-	// main keeps only its last segment; the dialog opens in Downloads. Rejects,
+	// main keeps only its last segment; the dialog opens in Downloads. A reply
+	// names the file the user chose, not the suggestion (#3607). Rejects,
 	// before any dialog, when the sender is not the app window or the arguments
 	// are not text-or-bytes and a name. The shape mirrors `SaveFileReply` in
 	// electron/save-file-ipc.ts, inlined because this file is a CommonJS script
@@ -495,7 +496,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		contents: string | Uint8Array,
 		suggestedName: string
 	): Promise<
-		{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string }
+		| { outcome: "saved"; fileName: string }
+		| { outcome: "cancelled" }
+		| { outcome: "failed"; fileName: string; message: string }
 	> =>
 		ipcRenderer.invoke("file:save", contents, suggestedName).catch((e: unknown) => {
 			throw unwrapIpcError(e);

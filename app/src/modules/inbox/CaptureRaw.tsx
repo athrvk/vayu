@@ -54,7 +54,7 @@ export function CaptureRaw({ capture, url }: CaptureRawProps) {
 		const fileName = `capture-${capture.id}.${extensionForContentType(type)}`;
 		const saved = await downloadBlob(new Blob([bytes], { type }), fileName);
 		if (saved.outcome === "failed") {
-			showToast(saveFailedMessage(fileName, saved.message), "error");
+			showToast(saveFailedMessage(fileName, saved), "error");
 		}
 	};
 

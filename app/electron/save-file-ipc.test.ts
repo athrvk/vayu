@@ -52,6 +52,7 @@ describe("saveFile", () => {
 
 		await expect(saveFile('{"a":1}', "report.json", deps)).resolves.toEqual({
 			outcome: "saved",
+			fileName: "report.json",
 		});
 
 		expect(deps.showSaveDialog).toHaveBeenCalledWith({
@@ -67,6 +68,20 @@ describe("saveFile", () => {
 		await saveFile(bytes, "body.bin", deps);
 
 		expect(deps.writeFile).toHaveBeenCalledWith("/home/ada/out/report.json", bytes);
+	});
+
+	it("names the file the user chose, not the one suggested, when it is saved", async () => {
+		const deps = depsWith({
+			showSaveDialog: vi.fn(async () => ({
+				canceled: false,
+				filePath: "/home/ada/out/Q3 orders.json",
+			})),
+		});
+
+		await expect(saveFile("x", "report.json", deps)).resolves.toEqual({
+			outcome: "saved",
+			fileName: "Q3 orders.json",
+		});
 	});
 
 	it("writes nothing when the user cancels", async () => {
@@ -88,9 +103,28 @@ describe("saveFile", () => {
 
 		await expect(saveFile("x", "report.json", deps)).resolves.toEqual({
 			outcome: "failed",
+			fileName: "report.json",
 			message: "EACCES: permission denied, open '/home/ada/out/report.json'",
 		});
 		expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+	});
+
+	it("names the file the user chose, not the one suggested, when the write fails", async () => {
+		const deps = depsWith({
+			showSaveDialog: vi.fn(async () => ({
+				canceled: false,
+				filePath: "/mnt/usb/Q3 orders.json",
+			})),
+			writeFile: vi.fn(async () => {
+				throw new Error("ENOSPC: no space left on device");
+			}),
+		});
+
+		await expect(saveFile("x", "report.json", deps)).resolves.toEqual({
+			outcome: "failed",
+			fileName: "Q3 orders.json",
+			message: "ENOSPC: no space left on device",
+		});
 	});
 
 	it.each([
@@ -206,9 +240,9 @@ describe("the wiring", () => {
 			"saveFile: (contents: string | Uint8Array, suggestedName: string) => Promise<SaveFileReply>;"
 		);
 		for (const source of [preload, declarations]) {
-			expect(source).toContain('{ outcome: "saved" }');
+			expect(source).toContain('{ outcome: "saved"; fileName: string }');
 			expect(source).toContain('{ outcome: "cancelled" }');
-			expect(source).toContain('{ outcome: "failed"; message: string }');
+			expect(source).toContain('{ outcome: "failed"; fileName: string; message: string }');
 		}
 	});
 });
