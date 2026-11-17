@@ -341,9 +341,9 @@ export default function VariablesCategoryTree() {
 			});
 			const saved = await downloadTextFile(text, fileName, "application/json");
 			if (saved.outcome === "failed") {
-				showToast(saveFailedMessage(fileName, saved.message), "error");
+				showToast(saveFailedMessage(fileName, saved), "error");
 			} else if (saved.outcome === "saved") {
-				showToast(postmanEnvironmentExportMessage(fileName, notes), "success");
+				showToast(postmanEnvironmentExportMessage(saved.fileName, notes), "success");
 			}
 		} catch (error) {
 			reportFailure(error, "Couldn't export the environment");

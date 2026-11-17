@@ -59,7 +59,7 @@ export interface RunExportMenuProps {
 }
 
 /** "Exported <file>", plus what the URL lost on the way out when it lost anything. */
-function savedMessage({ fileName, notes }: RunReportExportResponse): string {
+function savedMessage(fileName: string, { notes }: RunReportExportResponse): string {
 	const omitted = notes.urlCredentialsOmitted;
 	if (omitted <= 0) return `Exported ${fileName}`;
 	return `Exported ${fileName} - ${formatNumber(omitted)} URL ${pluralize(omitted, "credential")} left out`;
@@ -98,10 +98,10 @@ export default function RunExportMenu({ runId, requestUrl, requestMethod }: RunE
 		}
 		const saved = await downloadTextFile(result.text, result.fileName, result.mimeType);
 		if (saved.outcome === "failed") {
-			showToast(saveFailedMessage(result.fileName, saved.message), "error");
+			showToast(saveFailedMessage(result.fileName, saved), "error");
 			return;
 		}
-		if (saved.outcome === "saved") showToast(savedMessage(result), "success");
+		if (saved.outcome === "saved") showToast(savedMessage(saved.fileName, result), "success");
 	};
 
 	// Withdrawn while one export is in flight, as the items are disabled: a

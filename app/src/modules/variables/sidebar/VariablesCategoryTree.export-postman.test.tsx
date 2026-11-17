@@ -150,6 +150,16 @@ describe("Export as Postman environment on an environment row", () => {
 		);
 	});
 
+	it("names the file the user saved, not the one the engine suggested", async () => {
+		saveAnswer.mockResolvedValueOnce({ outcome: "saved", fileName: "staging-env.json" });
+
+		await clickExport();
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith("Exported staging-env.json", "success")
+		);
+	});
+
 	it("says how many secret values were left blank", async () => {
 		exportPostmanEnvironment.mockResolvedValue(answer({ secretsOmitted: 3 }));
 
@@ -204,6 +214,23 @@ describe("Export as Postman environment on an environment row", () => {
 			)
 		);
 		expect(showToast).not.toHaveBeenCalledWith(expect.anything(), "success");
+	});
+
+	it("names the file the user chose when the write fails", async () => {
+		saveAnswer.mockResolvedValueOnce({
+			outcome: "failed",
+			fileName: "staging-env.json",
+			message: "Disk full",
+		});
+
+		await clickExport();
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't save staging-env.json - Disk full",
+				"error"
+			)
+		);
 	});
 
 	it("reports a failed export as an error and downloads nothing", async () => {

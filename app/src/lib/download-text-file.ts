@@ -14,9 +14,18 @@
  * `<a download>`, which cannot report back and resolves `saved`.
  */
 
-/** What a save came to: written, declined at the dialog, or failed with a sentence to show. */
+/**
+ * What a save came to: written, declined at the dialog, or failed with a
+ * sentence to show. `fileName` is the file the user chose in the dialog, which
+ * may differ from the name suggested (#3607); a `failed` has none when it came
+ * before a path was chosen (main refused the call, the bytes could not be read).
+ * The `<a download>` fallback never learns the chosen name and answers the
+ * suggested one.
+ */
 export type FileSaveOutcome =
-	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
+	| { outcome: "saved"; fileName: string }
+	| { outcome: "cancelled" }
+	| { outcome: "failed"; message: string; fileName?: string };
 
 type SaveFileBridge = NonNullable<Window["electronAPI"]>["saveFile"];
 
@@ -31,8 +40,7 @@ async function saveThroughBridge(
 	fileName: string
 ): Promise<FileSaveOutcome> {
 	try {
-		const reply = await save(await contents, fileName);
-		return reply.outcome === "saved" ? { outcome: "saved" } : reply;
+		return await save(await contents, fileName);
 	} catch (error) {
 		return {
 			outcome: "failed",
@@ -48,7 +56,7 @@ function clickDownloadAnchor(blob: Blob, fileName: string): FileSaveOutcome {
 	anchor.download = fileName;
 	anchor.click();
 	URL.revokeObjectURL(url);
-	return { outcome: "saved" };
+	return { outcome: "saved", fileName };
 }
 
 /** Save `blob` as a file called `fileName`, its bytes untouched. */
@@ -77,7 +85,14 @@ export async function downloadTextFile(
 	return saveThroughBridge(save, text, fileName);
 }
 
-/** What a toast says for a save that `failed`: the file and the system's reason. */
-export function saveFailedMessage(fileName: string, message: string): string {
-	return `Couldn't save ${fileName} - ${message}`;
+/**
+ * What a toast says for a save that `failed`: the file and the system's reason.
+ * The file is the one the user chose when main got that far, else the name the
+ * caller suggested.
+ */
+export function saveFailedMessage(
+	suggestedName: string,
+	failure: Extract<FileSaveOutcome, { outcome: "failed" }>
+): string {
+	return `Couldn't save ${failure.fileName ?? suggestedName} - ${failure.message}`;
 }

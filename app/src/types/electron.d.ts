@@ -241,12 +241,15 @@ export type AllowFolderReply =
 export type RemoveFolderReply = { outcome: "done"; value: null } | EngineWriteFailure;
 
 /**
- * What `saveFile` resolves to: written to `path`, the dialog cancelled, or the
- * write failed after a path was chosen. Mirrors `SaveFileReply` in
- * `electron/save-file-ipc.ts`.
+ * What `saveFile` resolves to: written, the dialog cancelled, or the write
+ * failed after a path was chosen. `fileName` is the last segment of the path
+ * the user chose (the dialog lets them rename the suggestion), never the full
+ * path. Mirrors `SaveFileReply` in `electron/save-file-ipc.ts`.
  */
 export type SaveFileReply =
-	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
+	| { outcome: "saved"; fileName: string }
+	| { outcome: "cancelled" }
+	| { outcome: "failed"; fileName: string; message: string };
 
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };

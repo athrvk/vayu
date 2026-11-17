@@ -39,12 +39,18 @@ export const SAVE_FILE_CHANNEL = "file:save";
 export const SAVE_FILE_MAX_BYTES = 1024 * 1024 * 1024;
 
 /**
- * What `file:save` answers. Mirrored by `saveFile`'s return type in
- * `preload.ts` and `SaveFileReply` in `src/types/electron.d.ts`, neither of
- * which can import from here.
+ * What `file:save` answers. `fileName` is the last segment of the path the user
+ * confirmed, which the dialog lets them change from the suggestion, so a toast
+ * names the file that exists. Never the full path: the renderer has no use for
+ * the user's directory layout. A `failed` before the dialog resolves is a
+ * rejection, not this reply, so `failed` always carries the name. Mirrored by
+ * `saveFile`'s return type in `preload.ts` and `SaveFileReply` in
+ * `src/types/electron.d.ts`, neither of which can import from here.
  */
 export type SaveFileReply =
-	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
+	| { outcome: "saved"; fileName: string }
+	| { outcome: "cancelled" }
+	| { outcome: "failed"; fileName: string; message: string };
 
 /** The subset of `dialog.showSaveDialog`'s options this channel sets. */
 export interface SaveDialogOptions {
@@ -118,14 +124,15 @@ export async function saveFile(
 		defaultPath: path.join(deps.defaultDirectory(), fileName),
 	});
 	if (chosen.canceled || !chosen.filePath) return { outcome: "cancelled" };
+	const savedName = path.basename(chosen.filePath);
 	try {
 		await (deps.writeFile ?? fs.writeFile)(chosen.filePath, data);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		deps.log(`Couldn't write a saved file: ${message}`);
-		return { outcome: "failed", message };
+		return { outcome: "failed", fileName: savedName, message };
 	}
-	return { outcome: "saved" };
+	return { outcome: "saved", fileName: savedName };
 }
 
 export function registerSaveFileIpc(ipc: IpcLike, deps: SaveFileIpcDeps): void {

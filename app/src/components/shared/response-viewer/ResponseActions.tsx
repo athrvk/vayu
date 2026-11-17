@@ -90,7 +90,7 @@ export function ResponseActions({
 			? await downloadBlob(new Blob([rawBytes.data], { type }), fileName)
 			: await downloadTextFile(content, fileName, "text/plain");
 		if (saved.outcome === "failed") {
-			showToast(saveFailedMessage(fileName, saved.message), "error");
+			showToast(saveFailedMessage(fileName, saved), "error");
 		}
 	};
 

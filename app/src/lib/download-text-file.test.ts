@@ -69,9 +69,10 @@ describe("downloadTextFile without the Electron bridge", () => {
 		expect(clicks[0].revokedAtClick).toBe(false);
 	});
 
-	it("resolves saved, since an anchor cannot report a cancel", async () => {
+	it("resolves saved under the suggested name, since an anchor cannot report a cancel or a rename", async () => {
 		await expect(downloadTextFile("x", "response.txt", "text/plain")).resolves.toEqual({
 			outcome: "saved",
+			fileName: "response.txt",
 		});
 	});
 });
@@ -88,11 +89,12 @@ describe("downloadTextFile and downloadBlob through the Electron bridge", () => 
 
 	it("hands main the text and the name, and clicks no anchor", async () => {
 		const saveFile = stubBridge(
-			vi.fn().mockResolvedValue({ outcome: "saved", path: "/d/a.json" })
+			vi.fn().mockResolvedValue({ outcome: "saved", fileName: "a.json" })
 		);
 
 		await expect(downloadTextFile("{}", "a.json", "application/json")).resolves.toEqual({
 			outcome: "saved",
+			fileName: "a.json",
 		});
 
 		expect(saveFile).toHaveBeenCalledWith("{}", "a.json");
@@ -101,7 +103,7 @@ describe("downloadTextFile and downloadBlob through the Electron bridge", () => 
 
 	it("hands main a blob's exact bytes", async () => {
 		const saveFile = stubBridge(
-			vi.fn().mockResolvedValue({ outcome: "saved", path: "/d/b.bin" })
+			vi.fn().mockResolvedValue({ outcome: "saved", fileName: "b.bin" })
 		);
 		const bytes = new Uint8Array([0, 255, 128, 10]);
 
@@ -111,6 +113,15 @@ describe("downloadTextFile and downloadBlob through the Electron bridge", () => 
 		expect(name).toBe("b.bin");
 		expect(Array.from(sent)).toEqual([0, 255, 128, 10]);
 		expect(clicks).toEqual([]);
+	});
+
+	it("resolves the name the user chose, not the one suggested", async () => {
+		stubBridge(vi.fn().mockResolvedValue({ outcome: "saved", fileName: "renamed.json" }));
+
+		await expect(downloadTextFile("{}", "a.json", "application/json")).resolves.toEqual({
+			outcome: "saved",
+			fileName: "renamed.json",
+		});
 	});
 
 	it("resolves cancelled when the user dismisses the dialog", async () => {
@@ -123,11 +134,16 @@ describe("downloadTextFile and downloadBlob through the Electron bridge", () => 
 
 	it("resolves failed with main's sentence when the write fails", async () => {
 		stubBridge(
-			vi.fn().mockResolvedValue({ outcome: "failed", message: "EACCES: permission denied" })
+			vi.fn().mockResolvedValue({
+				outcome: "failed",
+				fileName: "renamed.txt",
+				message: "EACCES: permission denied",
+			})
 		);
 
 		await expect(downloadTextFile("x", "a.txt", "text/plain")).resolves.toEqual({
 			outcome: "failed",
+			fileName: "renamed.txt",
 			message: "EACCES: permission denied",
 		});
 	});
