@@ -219,6 +219,16 @@ describe("McpSettingsPanel endpoint", () => {
 		expect(screen.getAllByText("http://127.0.0.1:9999/mcp").length).toBeGreaterThan(0);
 	});
 
+	it("offers a Claude Code command that registers Vayu at user scope (#3576)", async () => {
+		await renderPanel();
+
+		expect(
+			screen.getByText(
+				"claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp"
+			)
+		).toBeInTheDocument();
+	});
+
 	it("shows no URL at all, and nothing to copy, when the status never arrives", async () => {
 		getMcpStatus.mockRejectedValue(new Error("no answer"));
 

@@ -117,7 +117,7 @@ export const MCP_PORT = 9877;
  * live URL over `mcp:status` rather than keeping a copy.
  */
 export const MCP_PATH = "/mcp";
-/** URL agents connect to, e.g. `claude mcp add --transport http vayu <url>`. */
+/** URL agents connect to, e.g. `claude mcp add --transport http --scope user vayu <url>`. */
 export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}${MCP_PATH}`;
 
 // Engine lifecycle
