@@ -28,10 +28,10 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
   nothing is listening). Until the first start has bound or failed, the status
   carries `starting: true` and no error, and Settings says "Starting" with no
   port and no Retry, re-reading the status until it settles (#3579). Only the
-  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the tool registry and the service are loaded by the first
-  `POST /mcp` that arrives, so a launch no agent connects to never evaluates
-  them - 5-7 MB of the main process at idle, measured on the packaged Windows
-  app.
+  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the
+  tool registry and the service are loaded by the first `POST /mcp` that
+  arrives, so a launch no agent connects to never evaluates them - 5-7 MB of
+  the main process at idle, measured on the packaged Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
