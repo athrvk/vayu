@@ -678,6 +678,175 @@ describe("LoadTestService", () => {
 			});
 		});
 
+		/*
+		 * The verdict is the banner's, in the notification (#3546): the same report
+		 * reads Failed, Passed or Not judged, and a missed budget is the one the
+		 * user must hear about, so it is `failed` kind even though the engine ended
+		 * the run `completed`.
+		 *
+		 * Mutation check: drop the verdict from `terminalNotification`'s body and
+		 * the three body assertions redden; drop `judgement?.outcome === "failed"`
+		 * from `failed` and the missed-budget kind reddens.
+		 */
+		describe("the verdict (issue #3546)", () => {
+			const budgetBlock = (missed: boolean) => ({
+				checks: [
+					{ metric: "latencyP50Ms", limit: 100, actual: 40, passed: true },
+					{ metric: "latencyP95Ms", limit: 300, actual: 210, passed: true },
+					{
+						metric: "latencyP99Ms",
+						limit: 400,
+						actual: missed ? 900 : 380,
+						passed: !missed,
+					},
+				],
+				passed: missed ? 2 : 3,
+				failed: missed ? 1 : 0,
+			});
+			const completed = (extra: Record<string, unknown>) =>
+				({
+					metadata: { status: "completed" },
+					summary: { totalRequests: 12400, errorRate: 0 },
+					latency: { p95: 210.4 },
+					...extra,
+				}) as never;
+
+			async function endWith(runId: string, report: never | null): Promise<void> {
+				dashboard.currentRunId = runId;
+				if (report === null) {
+					vi.mocked(apiService.getRunReport).mockRejectedValueOnce(
+						new Error("engine gone")
+					);
+					vi.spyOn(console, "warn").mockImplementation(() => {});
+				} else {
+					vi.mocked(apiService.getRunReport).mockResolvedValueOnce(report);
+				}
+				loadTestService.startMonitoring(runId);
+				await closeStream("completed");
+			}
+
+			it("posts a missed budget as a failure, with what was missed", async () => {
+				await endWith("run_v1", completed({ thresholdValidation: budgetBlock(true) }));
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFailed,
+						title: "Load test failed",
+						body: "Failed. 1 of 3 budgets missed: p99. 12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+				expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+			});
+
+			it("posts met budgets as a pass", async () => {
+				await endWith("run_v2", completed({ thresholdValidation: budgetBlock(false) }));
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "Passed. All 3 budgets met. 12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+				expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			});
+
+			it("posts a run that met its budgets but failed assertions as finished, saying why", async () => {
+				await endWith(
+					"run_v3",
+					completed({
+						thresholdValidation: budgetBlock(false),
+						assertions: { exact: { passed: 95, failed: 5 } },
+					})
+				);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "Not judged. All 3 budgets met, but 5 assertions failed. 12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+			});
+
+			it("posts a run with no budgets as finished, saying it was not judged", async () => {
+				await endWith("run_v4", completed({}));
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "Not judged. No budgets set. 0.0% errors. 12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+			});
+
+			it("keeps the numbers alone for a report that states no status", async () => {
+				await endWith("run_v5", {
+					summary: { totalRequests: 12400, errorRate: 0.3 },
+					latency: { p95: 210.4 },
+				} as never);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "12,400 requests, p95 210ms, 0.3% errors",
+					})
+				);
+			});
+
+			it("keeps the plain line when the report could not be read", async () => {
+				await endWith("run_v6", null);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "Couldn't read this run's report.",
+					})
+				);
+			});
+
+			it("leaves a stopped run's body as its numbers, with no verdict", async () => {
+				dashboard.currentRunId = "run_v7";
+				vi.mocked(apiService.getRunReport).mockResolvedValueOnce(
+					completed({ metadata: { status: "stopped" } })
+				);
+				loadTestService.startMonitoring("run_v7");
+
+				await closeStream("stopped");
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({ body: "12,400 requests, p95 210ms, 0.0% errors" })
+				);
+			});
+
+			it("leaves the stop the user pressed unchanged", () => {
+				loadTestService.startMonitoring("run_v8");
+
+				loadTestService.stopMonitoring();
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunStopped,
+						body: "The run was stopped before it finished.",
+					})
+				);
+			});
+
+			it("posts a verdict found on mount the same way (settleOnStoredReport)", () => {
+				loadTestService.startMonitoring("run_v9");
+
+				loadTestService.settleOnStoredReport(
+					"run_v9",
+					completed({ thresholdValidation: budgetBlock(true) })
+				);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFailed,
+						body: "Failed. 1 of 3 budgets missed: p99. 12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+			});
+		});
+
 		it("reports the share of HTTP errors, not only transport failures (issue #2124)", async () => {
 			// The report's errorRate is the one definition: 15 responses of 100 with a
 			// 5xx status are errors even though every request got an answer.
@@ -731,7 +900,7 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({
 					kind: NOTIFY_KINDS.loadRunFailed,
-					body: "The run ended before its totals were saved.",
+					body: "Failed. The run failed before it finished. The run ended before its totals were saved.",
 				})
 			);
 		});
@@ -750,7 +919,7 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({
 					kind: NOTIFY_KINDS.loadRunFailed,
-					body: "At least 12,400 requests, 0.3% errors, latency not recorded",
+					body: "Failed. The run failed before it finished. At least 12,400 requests, 0.3% errors, latency not recorded",
 				})
 			);
 		});

@@ -16,6 +16,7 @@
 import { sseClient, type SSECloseInfo, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
+import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";
 import { queryKeys } from "@/queries/keys";
 import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
@@ -67,6 +68,40 @@ function runSummaryLine(report: RunReport): string | null {
 		return null;
 	}
 	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}, ${formatPercent(errorRate)}% errors`;
+}
+
+/**
+ * The kind and body of the notification for a run that ended and was not
+ * stopped by this window's Stop.
+ *
+ * The body leads with the verdict the dashboard banner shows (`reportOutcome`),
+ * so a missed budget or a failed check is in the notification and not behind a
+ * click (#3546), and the numbers follow when the report has them. A report with
+ * no verdict, or none that can be read, keeps the numbers or the plain line.
+ *
+ * The kind is `failed` for a run the engine ended as failed and for a run that
+ * completed and missed a budget; a run judged passed or not judged is
+ * `finished`, its reason in the body. The frame's status is preferred over the
+ * report's, which is the fallback for a stream that ended without one (#1415):
+ * the fetch can fail, and a failure that could not be read must still report a
+ * failure rather than quietly report success. A stopped run keeps its numbers
+ * alone, as the spoken line does, since its verdict says nothing more.
+ */
+function terminalNotification(
+	status: SSETerminalStatus,
+	report: RunReport | null
+): { kind: LoadRunNotifyKind; body: string } {
+	const endedAs = status ?? report?.metadata?.status;
+	const judgement = endedAs === "stopped" ? null : reportOutcome(report);
+	const verdict = judgement ? `${OUTCOME_TITLE[judgement.outcome]}. ${judgement.reason}` : null;
+	const summary = report && runSummaryLine(report);
+	const failed = endedAs === "failed" || judgement?.outcome === "failed";
+	return {
+		kind: failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
+		// The summary stands in only when the report carries all three numbers: a
+		// run that ended is worth saying even when what it did cannot be read.
+		body: [verdict, summary].filter(Boolean).join(". ") || "Couldn't read this run's report.",
+	};
 }
 
 /**
@@ -582,21 +617,9 @@ class LoadTestService {
 		// First, because the dashboard is the terminal surface that matters and
 		// nothing done for a notification may come before it.
 		if (report) useDashboardStore.getState().setFinalReport(runId, report);
-		// A failed run is not a finished one, and until #1415 this said finished
-		// for both: the frame's status is preferred, and the report's own is the
-		// fallback for a stream that ended without one. The frame first,
-		// deliberately - the fetch can fail, and a failure that could not be read
-		// must still report a failure rather than quietly report success.
-		const failed =
-			status === "failed" || (status === null && report?.metadata?.status === "failed");
-		// The summary stands in only when the report carries all three numbers: a
-		// run that ended is worth saying even when what it did cannot be read. A
-		// run that already reported a failure has had its one notification.
-		this.notifyTerminal(
-			runId,
-			failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
-			(report && runSummaryLine(report)) ?? "Couldn't read this run's report."
-		);
+		// A run that already reported a failure has had its one notification.
+		const { kind, body } = terminalNotification(status, report);
+		this.notifyTerminal(runId, kind, body);
 		// The run has reached a terminal state, so the lists that carry its status
 		// are stale until the next 5s poll - and once the user has paged History,
 		// that poll is off.
