@@ -33,6 +33,9 @@ import { ID_KINDS, unknownIdText } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 import { refuseRedactedVariable } from "./redacted-input.js";
 
+/** The description of a member a read returns and a write does not store. */
+const READ_ONLY_MEMBER = "As a read returns it; ignored.";
+
 /**
  * One variable as an agent may state it: a bare value, or a value with the
  * flags the Variables drawer sets beside it.
@@ -42,10 +45,15 @@ import { refuseRedactedVariable } from "./redacted-input.js";
  * reachable at all - every field is optional, and an omitted one keeps whatever
  * is stored rather than resetting it, which is the same merge rule the value
  * itself follows.
+ *
+ * Strict (#3556), so it also declares what a read row carries beside the
+ * flags: `description` is written, and `valueWithheld` and `createdAt` are
+ * accepted and the stored ones kept, so an entry written back as read is not
+ * refused and loses nothing.
  */
 const VARIABLE_INPUT = z.union([
 	z.string(),
-	z.object({
+	z.strictObject({
 		value: z.string().optional().describe("New value. Omitted keeps the stored one."),
 		secret: z
 			.boolean()
@@ -61,8 +69,14 @@ const VARIABLE_INPUT = z.union([
 			.boolean()
 			.optional()
 			.describe("Whether the variable takes part in {{...}} resolution."),
+		description: z.string().optional().describe("Free-text note stored with the variable."),
+		valueWithheld: z.boolean().optional().describe(READ_ONLY_MEMBER),
+		createdAt: z.number().optional().describe(READ_ONLY_MEMBER),
 	}),
 ]);
+
+/** The members of an object entry a write stores; the rest of a read row is kept as stored. */
+const WRITTEN_VARIABLE_FIELDS = ["value", "secret", "type", "enabled", "description"] as const;
 
 /** The `variables` argument, described for whichever blob it is writing. */
 export function variablesInput(subject: string) {
@@ -70,7 +84,7 @@ export function variablesInput(subject: string) {
 		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on (the user can ${REVEAL_SETTING_TOKEN}). A blank or whitespace-padded name is refused with a 400 naming the key. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled, description} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on (the user can ${REVEAL_SETTING_TOKEN}). A blank or whitespace-padded name is refused with a 400 naming the key. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
 }
 
@@ -284,11 +298,11 @@ export function mergeVariables(
 		}
 		if (!isRecord(input)) {
 			throw new ToolArgError(
-				`"${name}" must be a string value, or an object with any of value, secret, type, enabled.`
+				`"${name}" must be a string value, or an object with any of ${WRITTEN_VARIABLE_FIELDS.join(", ")}.`
 			);
 		}
 		const stated: Record<string, unknown> = {};
-		for (const field of ["value", "secret", "type", "enabled"] as const) {
+		for (const field of WRITTEN_VARIABLE_FIELDS) {
 			if (input[field] !== undefined) stated[field] = input[field];
 		}
 		if (stated.value === undefined && typeof base.value !== "string") {

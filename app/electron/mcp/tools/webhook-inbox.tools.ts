@@ -75,7 +75,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 					'Browser origins allowed to read the inbox\'s answers, e.g. ["https://app.example.com"]: only those pages get CORS headers, with credentials. Omit or leave empty (the default) for any origin, without credentials. Each is http:// or https:// plus a host and optional port - no path, trailing slash, wildcard or "null" - at most 32 of them. A bad entry is refused by name. Fixed for the inbox\'s life.'
 				),
 			response: z
-				.object({
+				.strictObject({
 					status: z
 						.number()
 						.int()

@@ -44,7 +44,7 @@ import {
 import type { McpHost } from "./tools/contract.js";
 import { engineCode } from "./tools/failure.js";
 import { composeLoadRunRequest } from "./tools/compose.js";
-import { INPUT_REQUIRED } from "./tools/kit.js";
+import { argumentsSchema, INPUT_REQUIRED } from "./tools/kit.js";
 import { RUN_STATUSES } from "./tools/run-housekeeping.js";
 import { classifyRunStatus, PARTIAL_REPORT_NOTE } from "./tools/run-status.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
@@ -1867,6 +1867,47 @@ describe("environments, globals and the cookie jar", () => {
 			secret: true,
 			type: "string",
 			createdAt: 42,
+		});
+	});
+
+	test("update_environment takes an entry written back as read, and writes its description (#3556)", async () => {
+		// The strict entry declares what a read row carries, so the row an agent
+		// read (a withheld secret: no `value`, `valueWithheld: true`) is not
+		// refused; the stored value and stamp are kept, and only `description`,
+		// the one edited member, is written. Mutation check: drop
+		// `"description"` from WRITTEN_VARIABLE_FIELDS and the note is lost.
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: {
+					apiKey: { value: "old", enabled: true, secret: true, createdAt: 42 },
+				},
+			}),
+		});
+		const schema = argumentsSchema(
+			TOOLS.find((t) => t.name === "update_environment")!.inputSchema
+		);
+		const args = schema.parse({
+			environmentId: "env_1",
+			variables: {
+				apiKey: {
+					valueWithheld: true,
+					enabled: true,
+					secret: true,
+					createdAt: 7,
+					description: "Rotated monthly",
+				},
+			},
+		});
+		const res = await dispatchTool("update_environment", args, ctxWith(client, WRITES));
+		expect(res.isError).toBeFalsy();
+		expect(varsOf(lastCall(client.updateEnvironment)[1]).apiKey).toEqual({
+			value: "old",
+			enabled: true,
+			secret: true,
+			createdAt: 42,
+			description: "Rotated monthly",
 		});
 	});
 
@@ -5733,7 +5774,7 @@ describe("run_collection_smoke", () => {
 
 		test("the advertised input bounds limit at 100 and offset at 0", () => {
 			const shape = TOOLS.find((t) => t.name === "run_collection_smoke")!.inputSchema!;
-			const input = z.object(shape);
+			const input = argumentsSchema(shape);
 			expect(input.safeParse({ collectionId: "c1", limit: 100, offset: 0 }).success).toBe(
 				true
 			);
@@ -6047,7 +6088,9 @@ describe("run_collection", () => {
 
 	test("the schema refuses a reading that is not a boolean, on every tool that takes one", () => {
 		const schemaOf = (name: string) =>
-			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+			argumentsSchema(
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>
+			);
 		const cases = [
 			[
 				"run_collection",
@@ -6070,7 +6113,9 @@ describe("run_collection", () => {
 
 	test("the schema refuses a hash that is not 64 lowercase hex, on every tool that takes one", () => {
 		const schemaOf = (name: string) =>
-			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+			argumentsSchema(
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>
+			);
 		const hash = "c".repeat(64);
 		const cases = [
 			["run_collection", (dataFileHash: string) => ({ collectionId: "c1", dataFileHash })],
@@ -6093,7 +6138,9 @@ describe("run_collection", () => {
 	// case passes the schema.
 	test("the schema refuses a path as a file name, pointing at dataFile.fileName", () => {
 		const schemaOf = (name: string) =>
-			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+			argumentsSchema(
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>
+			);
 		const cases = [
 			["run_collection", (dataFileName: string) => ({ collectionId: "c1", dataFileName })],
 			["start_load_run", (dataFileName: string) => ({ dataFileName })],
@@ -6477,14 +6524,12 @@ describe("run_collection", () => {
 
 		test("take exactly the engine's ranges and no `stream` argument", () => {
 			const parseArgs = (args: Record<string, unknown>) =>
-				z
-					.object(
-						TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
-							string,
-							z.ZodType
-						>
-					)
-					.parse(args);
+				argumentsSchema(
+					TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
+						string,
+						z.ZodType
+					>
+				).parse(args);
 			for (const ok of [
 				{ maxStreamDurationMs: 1000 },
 				{ maxStreamDurationMs: 86_400_000 },
@@ -6840,7 +6885,7 @@ describe("start_load_run scenario runs", () => {
 			string,
 			z.ZodType
 		>;
-		const parsed = z.object(shape).parse({ scenario: { collectionId: "c1" } });
+		const parsed = argumentsSchema(shape).parse({ scenario: { collectionId: "c1" } });
 		expect(parsed.elements).toBeUndefined();
 	});
 
@@ -6852,7 +6897,7 @@ describe("start_load_run scenario runs", () => {
 			string,
 			z.ZodType
 		>;
-		const schema = z.object(shape);
+		const schema = argumentsSchema(shape);
 		expect(() =>
 			schema.parse({ scenario: { collectionId: "c1" }, elements: { timers: "disabled" } })
 		).toThrow();
@@ -6896,8 +6941,8 @@ describe("start_load_run scenario runs", () => {
 	 * The schema gate is the design-mode runner's (issue #766): no load path
 	 * reads `failOnSchemaError`, so both of this tool's paths refuse it rather
 	 * than starting a run whose flag nothing applies. It is *declared* on the
-	 * tool for the refusal to be reachable at all - the MCP SDK strips whatever
-	 * the schema does not name before a handler sees it.
+	 * tool so the refusal can name the executor; an undeclared key gets only the
+	 * schema's `Unrecognized key`.
 	 */
 	test.each([
 		["a scenario", { scenario: { collectionId: "c1" } }],
@@ -6921,9 +6966,8 @@ describe("start_load_run scenario runs", () => {
 	});
 
 	test("declares failOnSchemaError so the refusal survives schema validation", () => {
-		// An argument the schema does not declare is stripped by the SDK before
-		// the handler runs, which would drop the flag in silence - the failure
-		// this refusal exists to prevent.
+		// An argument the schema does not declare is refused by the schema
+		// before the handler runs, with no word on the surface that honours it.
 		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
 			string,
 			z.ZodType
@@ -6934,8 +6978,8 @@ describe("start_load_run scenario runs", () => {
 
 	/**
 	 * `stopOnError` is the design-mode runner's too (issue #2526), refused on the
-	 * same terms and for the same reason: declared so the SDK does not strip it
-	 * before the handler can say no.
+	 * same terms and for the same reason: declared so the handler's refusal,
+	 * which names run_collection, is what the agent reads.
 	 */
 	test.each([
 		["a scenario", { scenario: { collectionId: "c1" } }],
@@ -8351,15 +8395,15 @@ describe("dispatchTool", () => {
 	test("run_request folds an ad-hoc pre/post script into elements, never as a raw field", async () => {
 		// Parsed through the tool's own inputSchema first, because that is the
 		// only thing standing between the agent and the engine: `registerTool`
-		// hands the SDK this shape, and a zod object *strips* keys it does not
-		// declare. dispatchTool alone does not validate, so asserting on it
-		// would pass with the field removed and prove nothing.
+		// hands the SDK this shape, which refuses a key it does not declare.
+		// dispatchTool alone does not validate, so asserting on it would pass
+		// with the field removed and prove nothing.
 		//
 		// The raw fields must never reach `/execute`: issue #1514 refuses
 		// `preRequestScript` / `postRequestScript` there outright, so a
 		// forwarded string would 400 rather than sign the request.
 		const tool = TOOLS.find((t) => t.name === "run_request");
-		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
+		const args = argumentsSchema(tool!.inputSchema as Record<string, z.ZodType>).parse({
 			url: "https://api.example.com/users",
 			preRequestScript: "pm.request.headers['X-Signature'] = 'abc';",
 			postRequestScript: "pm.test('ok', function () {});",
@@ -8431,23 +8475,26 @@ describe("dispatchTool", () => {
 		// payload says otherwise - and this layer must never say otherwise.
 		//
 		// Both halves matter. The first is that nothing here sets the field.
-		// The second is that an agent cannot set it either: the tool builds its
-		// request from named arguments, and the inputSchema does not declare
-		// `allowScriptRequests`, so zod strips it before it can ride through
-		// composition. Asserting only the first would stay green if the handler
-		// ever started spreading raw args into the payload.
+		// The second is that an agent cannot set it either: the inputSchema does
+		// not declare `allowScriptRequests`, so the call is refused naming it
+		// (#3556) before any handler runs. Asserting only the first would stay
+		// green if the schema ever came to accept the key.
 		const tool = TOOLS.find((t) => t.name === "run_request");
-		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
+		const schema = argumentsSchema(tool!.inputSchema as Record<string, z.ZodType>);
+		const args = {
 			url: "https://api.example.com/users",
-			allowScriptRequests: true,
 			preRequestScript: "pm.sendRequest('https://evil.example.com', function () {});",
-		});
-		expect(args).not.toHaveProperty("allowScriptRequests");
+		};
+		const asked = schema.safeParse({ ...args, allowScriptRequests: true });
+		expect(asked.success).toBe(false);
+		expect(asked.error?.issues.map((issue) => issue.message)).toEqual([
+			'Unrecognized key: "allowScriptRequests"',
+		]);
 
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"run_request",
-			args,
+			schema.parse(args),
 			ctxWith(client, { allowlist: ["api.example.com"], revealSecretsToAgents: true })
 		);
 
@@ -8460,18 +8507,20 @@ describe("dispatchTool", () => {
 		// The renderer declines the parsed copy because its pane reads `bodyRaw`;
 		// this tool's result exposes `body`, so the engine's default (true) is the
 		// behaviour it needs. An agent cannot decline it either: the field is not
-		// in the schema, so zod strips it.
+		// in the schema, so the call is refused naming it (#3556).
 		const tool = TOOLS.find((t) => t.name === "run_request");
-		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
-			url: "https://api.example.com/users",
-			includeParsedBody: false,
-		});
-		expect(args).not.toHaveProperty("includeParsedBody");
+		const schema = argumentsSchema(tool!.inputSchema as Record<string, z.ZodType>);
+		const args = { url: "https://api.example.com/users" };
+		const declined = schema.safeParse({ ...args, includeParsedBody: false });
+		expect(declined.success).toBe(false);
+		expect(declined.error?.issues.map((issue) => issue.message)).toEqual([
+			'Unrecognized key: "includeParsedBody"',
+		]);
 
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"run_request",
-			args,
+			schema.parse(args),
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 
@@ -8530,23 +8579,21 @@ describe("dispatchTool", () => {
 				z.ZodType
 			>;
 			expect(Object.keys(shape)).toContain("postRequestScript");
-			// The engine's own spelling stays accepted on both: a zod object
-			// strips what it does not declare, so dropping it from either tool
-			// would turn a script the agent believes is running into silence.
+			// The engine's own spelling stays accepted on both: dropping it from
+			// either tool would refuse a script an agent wrote in that spelling.
 			expect(Object.keys(shape)).toContain("tests");
 		}
 	});
 
 	/**
 	 * Parse through the tool's own `inputSchema` before dispatching, as the SDK
-	 * does in production: a zod object strips undeclared keys, so a test that
-	 * hands `dispatchTool` the argument directly passes even with the field
-	 * removed from the schema and proves nothing.
+	 * does in production: a test that hands `dispatchTool` the argument directly
+	 * passes even with the field removed from the schema and proves nothing.
 	 */
 	const parseArgs = (name: string, args: Record<string, unknown>) =>
-		z
-			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>)
-			.parse(args);
+		argumentsSchema(
+			TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>
+		).parse(args);
 
 	test("start_load_run sends postRequestScript to /runs as a script.post element", async () => {
 		const client = fakeClient();
@@ -8682,9 +8729,9 @@ describe("dispatchTool", () => {
 	});
 
 	test("start_load_run forwards a custom.<name>.<stat> threshold key (issue #1500)", async () => {
-		// Zod's object() strips any key it doesn't name by default, which would
-		// silently drop this budget before it ever reached POST /runs. The
-		// engine's own validate_thresholds is the real gate on the key's shape.
+		// A key `thresholdsInput` cannot name, so its object is open by design
+		// (`catchall`); the engine's own validate_thresholds is the real gate on
+		// the key's shape.
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"start_load_run",
@@ -8941,7 +8988,7 @@ describe("dispatchTool", () => {
 				name,
 				parseArgs(name, {
 					url: "https://api.example.com",
-					confirmed: true,
+					...(name === "start_load_run" ? { confirmed: true } : {}),
 					postRequestScript: "pm.test('a', () => {});",
 					tests: "pm.test('b', () => {});",
 				}),
@@ -10834,16 +10881,16 @@ describe("dispatchTool", () => {
  *
  * The engine has taken `disabledDefaultHeaders` on `POST /execute` and
  * `POST /runs` since #1229; what an agent could not do was name it, because the
- * MCP SDK parses arguments through each tool's zod `inputSchema` and a zod
- * object strips what it does not declare. So every case here parses through the
- * tool's own schema first, exactly as the SDK does: handing `dispatchTool` the
- * field directly would pass with the schema entry removed and prove nothing.
+ * MCP SDK parses arguments through each tool's zod `inputSchema` and the tools
+ * did not declare it. So every case here parses through the tool's own schema
+ * first, exactly as the SDK does: handing `dispatchTool` the field directly
+ * would pass with the schema entry removed and prove nothing.
  */
 describe("default-header opt-outs reach the engine", () => {
 	const parseArgs = (name: string, args: Record<string, unknown>) =>
-		z
-			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>)
-			.parse(args);
+		argumentsSchema(
+			TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>
+		).parse(args);
 
 	test("run_request forwards the refused names to /execute", async () => {
 		const client = fakeClient();
@@ -10998,14 +11045,9 @@ describe("start_load_run resolves and states the load shape", () => {
 	];
 
 	const parseArgs = (args: Record<string, unknown>) =>
-		z
-			.object(
-				TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
-					string,
-					z.ZodType
-				>
-			)
-			.parse(args);
+		argumentsSchema(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
+		).parse(args);
 
 	/** The `POST /runs` payload's load-shape fields, and nothing else. */
 	async function sentShape(
@@ -11247,14 +11289,9 @@ describe("start_load_run resolves and states the load shape", () => {
 	});
 
 	test("a misspelt mode is a schema refusal naming the five modes", () => {
-		const result = z
-			.object(
-				TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
-					string,
-					z.ZodType
-				>
-			)
-			.safeParse({ url: "https://api.example.com", mode: "constant-rps" });
+		const result = argumentsSchema(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
+		).safeParse({ url: "https://api.example.com", mode: "constant-rps" });
 		expect(result.success).toBe(false);
 		const message = result.error!.issues.map((issue) => issue.message).join("\n");
 		expect(LOAD_MODES).toHaveLength(5);
@@ -12329,7 +12366,7 @@ describe("mock issuer tools", () => {
 		expect(shape.clients.safeParse([{ clientId: "cid" }]).success).toBe(true);
 		// Every field is optional: an issuer with no config at all is the common
 		// "I just need a token" case.
-		expect(z.object(shape).safeParse({}).success).toBe(true);
+		expect(argumentsSchema(shape).safeParse({}).success).toBe(true);
 	});
 
 	test("an agent mints a token against its own issuer, end to end", async () => {
@@ -12759,8 +12796,8 @@ describe("mock server tools", () => {
 		expect(shape.allowedOrigins.safeParse("https://app.example.com").success).toBe(false);
 		expect(shape.allowedOrigins.safeParse([42]).success).toBe(false);
 		// The collection is the one thing a mock cannot be started without.
-		expect(z.object(shape).safeParse({}).success).toBe(false);
-		expect(z.object(shape).safeParse({ collectionId: "col_1" }).success).toBe(true);
+		expect(argumentsSchema(shape).safeParse({}).success).toBe(false);
+		expect(argumentsSchema(shape).safeParse({ collectionId: "col_1" }).success).toBe(true);
 	});
 
 	/*
@@ -14896,7 +14933,7 @@ describe("start_load_run recording knobs", () => {
 	});
 
 	test("a sampling period of 0 is refused at the schema, not sent as a divide by zero", () => {
-		const schema = z.object(
+		const schema = argumentsSchema(
 			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
 		);
 		expect(schema.safeParse({ successSamplePeriod: 0 }).success).toBe(false);
@@ -14984,7 +15021,7 @@ describe("start_load_run recording knobs", () => {
 	});
 
 	test("the schema holds the response-sample knobs to the engine's bounds", () => {
-		const schema = z.object(
+		const schema = argumentsSchema(
 			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
 		);
 		// A period of 0 is a division by zero engine-side.
@@ -15111,7 +15148,7 @@ describe("start_load_run recording knobs", () => {
 
 		expect(composed.request).toMatchObject({ followRedirects: false, maxRedirects: 3 });
 
-		const schema = z.object(
+		const schema = argumentsSchema(
 			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
 		);
 		expect(schema.safeParse({ maxRedirects: -1 }).success).toBe(false);
@@ -20166,8 +20203,8 @@ describe("the redaction marker written as a credential (#3553)", () => {
  * editor or it sits under an allowed folder, and decides that from its own
  * records, so the stored reference carries no trust member at all (#2356). An
  * agent may never *send* a file inline - the refusal points it at running the
- * saved request by id. `dispatchTool` hands handlers the raw arguments (no zod
- * stripping), so an agent's own `unresolved: false` really does reach
+ * saved request by id. `dispatchTool` hands handlers the raw arguments (no
+ * schema parse), so an agent's own `unresolved: false` really does reach
  * `shapeBody` here.
  */
 describe("binary file bodies", () => {
@@ -20290,12 +20327,14 @@ describe("binary file bodies", () => {
 			TOOLS.find((tool) => tool.name === name)?.inputSchema as Record<string, unknown>;
 		expect(schemaOf("create_request").file).toBeDefined();
 		expect(schemaOf("update_request").file).toBeDefined();
-		// The ad-hoc senders declare it too, only so it survives the SDK's zod
-		// parse and reaches the refusal: stripped, it would send no body at all.
+		// The ad-hoc senders declare it too, only so it passes the SDK's schema
+		// parse and reaches the handler's refusal, which names the route that
+		// does send a file.
 		for (const name of ["run_request", "start_load_run"]) {
-			const parsed = z
-				.object(schemaOf(name) as z.ZodRawShape)
-				.parse({ url: "https://x.test", file: { src: "/d/a" } });
+			const parsed = argumentsSchema(schemaOf(name) as Record<string, z.ZodType>).parse({
+				url: "https://x.test",
+				file: { src: "/d/a" },
+			});
 			expect(parsed.file, name).toEqual({ src: "/d/a" });
 		}
 		const descriptions = TOOLS.flatMap((tool) => {
