@@ -31,6 +31,7 @@ import type { ToolContext } from "./contract.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
+import { refuseRedactedVariable } from "./redacted-input.js";
 
 /**
  * One variable as an agent may state it: a bare value, or a value with the
@@ -239,11 +240,13 @@ interface MergedVariables {
  * that is not usable either (a bare string off disk, `lib/variable-resolution.ts`
  * D17), since there is no value there to keep.
  *
- * With `revealSecretsToAgents` off, `secret: false` over a stored `secret: true` is
+ * With `revealSecretsToAgents` off, a secret whose written value is the
+ * `<redacted>` marker is refused (#3553), the flag stated by the call or kept
+ * from the stored entry, and `secret: false` over a stored `secret: true` is
  * refused (#1809): the call would turn a withheld value into one the next read
- * returns, which is the switch the user has not thrown. `secret: true` and every
- * other edit pass, and so does everything once reveal is on. Removing and
- * re-creating a variable is not covered.
+ * returns, which is the switch the user has not thrown. Every other edit
+ * passes, and so does everything once reveal is on. Removing and re-creating
+ * a variable is not covered.
  */
 export function mergeVariables(
 	stored: unknown,
@@ -276,6 +279,7 @@ export function mergeVariables(
 			// enabled while an existing explicit flag survives: writing a value
 			// must not silently re-enable a variable the user disabled.
 			merged[name] = { enabled: true, ...base, value: input };
+			refuseRedactedVariable(ctx, name, merged[name] as Record<string, unknown>);
 			continue;
 		}
 		if (!isRecord(input)) {
@@ -299,6 +303,7 @@ export function mergeVariables(
 			);
 		}
 		merged[name] = { enabled: true, ...base, ...stated };
+		refuseRedactedVariable(ctx, name, merged[name] as Record<string, unknown>);
 	}
 
 	return { variables: merged, absentRemovals };

@@ -66,6 +66,16 @@ export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, cl
 /** The marker a masked value reads as in run output: the engine's `kRedactedMarker`. */
 export const REDACTED_MARKER = "<redacted>";
 
+/**
+ * Whether @p value is exactly {@link REDACTED_MARKER}: what a run's record shows
+ * in place of a credential, so written back into a credential slot (#3553) it
+ * would store, or send, the marker as the credential. Whole value only - text
+ * that merely contains the marker is data, not a stand-in.
+ */
+export function isRedactionMarker(value: unknown): boolean {
+	return value === REDACTED_MARKER;
+}
+
 /** What the run resources say about the secrets a run sent. */
 export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map, a header row list (\`headerLines\`, \`requestHeaderLines\`, \`sentHeaderLines\`, a followed redirect's \`redirects[].headerLines\` included) and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, and in a followed redirect's \`redirects[].url\`, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
@@ -388,7 +398,7 @@ function valuesWithheldBy(original: unknown, withheld: unknown): string[] {
  * withholds (the same set {@link withheldAuthMembers} names on the way back),
  * so an empty value or a lone `{{variable}}` is not one.
  */
-function authCredentialValues(auth: unknown): string[] {
+export function authCredentialValues(auth: unknown): string[] {
 	return valuesWithheldBy(auth, withholdAuth(auth));
 }
 
@@ -799,6 +809,29 @@ function restorePassword(storedHead: string, head: string): string | undefined {
 function pairName(pair: string): string {
 	const equals = pair.indexOf("=");
 	return equals === -1 ? pair : pair.slice(0, equals);
+}
+
+/**
+ * The credential slot of @p url that holds {@link isRedactionMarker}, named for
+ * an error message, or undefined: the slots {@link withholdRequestUrl} empties
+ * (the userinfo password, a credential query or fragment pair), judged under
+ * the same @p auth.
+ */
+export function redactedUrlSlot(url: string, auth: unknown): string | undefined {
+	const apiKeyParam = apiKeyParamName(auth);
+	const { head, query, fragment } = urlParts(url);
+	const span = userinfoSpan(head);
+	const held = span && withheldPassword(span.userinfo);
+	if (held && isRedactionMarker(held.password)) return "userinfo password";
+	const pairs = [query, fragment].flatMap((part) => (part === undefined ? [] : part.split("&")));
+	const pair = pairs.find((candidate) => {
+		const name = pairName(candidate);
+		return (
+			isRedactionMarker(candidate.slice(name.length + 1)) &&
+			isSecretParamName(name, apiKeyParam)
+		);
+	});
+	return pair === undefined ? undefined : `"${pairName(pair)}" parameter`;
 }
 
 /**

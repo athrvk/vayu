@@ -88,9 +88,9 @@ function adHocElements(args: Record<string, unknown>): unknown[] {
 }
 
 /** The inline fields the call gave, as `/compose` takes them over a stored request or alone. */
-function requestFields(args: Record<string, unknown>): Record<string, unknown> {
-	const fields = readRequestOverrides(args);
-	const authArg = readAuthArg(args);
+function requestFields(args: Record<string, unknown>, ctx: ToolContext): Record<string, unknown> {
+	const fields = readRequestOverrides(args, ctx);
+	const authArg = readAuthArg(args, ctx);
 	if (authArg) fields.auth = authArg;
 	return fields;
 }
@@ -106,10 +106,11 @@ function requestFields(args: Record<string, unknown>): Record<string, unknown> {
  */
 function composeTarget(
 	args: Record<string, unknown>,
+	ctx: ToolContext,
 	url: string | undefined,
 	savedId: string | undefined
 ): Record<string, unknown> | undefined {
-	const fields = requestFields(args);
+	const fields = requestFields(args, ctx);
 	if (url !== undefined) {
 		const elements = adHocElements(args);
 		return {
@@ -247,7 +248,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			// An empty `url` names no target, the same as an absent one.
 			const url = str(args, "url") || undefined;
 			const linkId = str(args, "requestId");
-			const target = composeTarget(args, url, linkId);
+			const target = composeTarget(args, ctx, url, linkId);
 			if (target === undefined) return errorResult(NO_TARGET_ERROR, "input");
 			const sendsSaved = url === undefined;
 

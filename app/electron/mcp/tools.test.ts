@@ -19484,6 +19484,419 @@ describe("secret withholding", () => {
 });
 
 /**
+ * The `<redacted>` marker a run's record shows in place of a credential must not
+ * come back as one (#3553). Written into a credential slot it would be stored,
+ * or sent, as the credential itself. The slots are the ones a read withholds, so
+ * a request body or a description holding the text is data in both modes, and
+ * the whole check is off once the user has chosen to reveal secrets.
+ */
+describe("the redaction marker written as a credential (#3553)", () => {
+	const OFF = { allowWrites: true, allowlist: ["api.example.com"] };
+	const ON = { ...OFF, revealSecretsToAgents: true };
+	const R = REDACTED_MARKER;
+	const NEW_REQUEST = { collectionId: "c1", name: "Users", url: "https://api.example.com/users" };
+
+	const storedRequest = (extra: Record<string, unknown> = {}) => ({
+		getRequest: vi.fn().mockResolvedValue({
+			id: "req_1",
+			name: "Users",
+			url: "https://api.example.com/users",
+			headers: [],
+			elements: [],
+			updatedAt: 7,
+			...extra,
+		}),
+	});
+	const storedEnvironment = (variables: Record<string, unknown>) => ({
+		getEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev", variables }),
+	});
+	const storedSecret = { token: { value: "t0k", enabled: true, secret: true } };
+
+	interface MarkerCase {
+		label: string;
+		tool: string;
+		args: Record<string, unknown>;
+		/** What the refusal names. */
+		names: string;
+		/** The engine method the call reaches when it is let through. */
+		reached: keyof EngineClient;
+		/** Built per call: a mock shared across cases would carry the last one's calls. */
+		seed?: () => Partial<Record<keyof EngineClient, unknown>>;
+		/** Engine reads a refused call may still have made, because it needed the stored row. */
+		reads?: string[];
+	}
+
+	const REFUSED: MarkerCase[] = [
+		{
+			label: "create_request auth.token",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, auth: { mode: "bearer", token: R } },
+			names: '"auth"',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request oauth2 config.clientSecret",
+			tool: "create_request",
+			args: {
+				...NEW_REQUEST,
+				auth: { mode: "oauth2", config: { clientId: "app", clientSecret: R } },
+			},
+			names: '"auth"',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request Authorization header",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, headers: [{ key: "Authorization", value: R }] },
+			names: '"Authorization" header',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request header map",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, headers: { "x-api-key": R } },
+			names: '"x-api-key" header',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request header named by the API-key auth",
+			tool: "create_request",
+			args: {
+				...NEW_REQUEST,
+				auth: { mode: "apikey", key: "X-Token", value: "{{k}}", in: "header" },
+				headers: [{ key: "X-Token", value: R }],
+			},
+			names: '"X-Token" header',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request ?access_token=",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, url: `https://api.example.com/users?access_token=${R}` },
+			names: '"access_token" parameter',
+			reached: "createRequest",
+		},
+		{
+			label: "create_request userinfo password",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, url: `https://u:${R}@api.example.com/users` },
+			names: "userinfo password",
+			reached: "createRequest",
+		},
+		{
+			label: "create_request fragment credential",
+			tool: "create_request",
+			args: { ...NEW_REQUEST, url: `https://api.example.com/users#page=2&signature=${R}` },
+			names: '"signature" parameter',
+			reached: "createRequest",
+		},
+		{
+			label: "update_request auth",
+			tool: "update_request",
+			args: { requestId: "req_1", auth: { mode: "basic", username: "u", password: R } },
+			names: '"auth"',
+			reached: "updateRequest",
+		},
+		{
+			label: "update_request Set-Cookie row",
+			tool: "update_request",
+			args: { requestId: "req_1", headers: [{ key: "Set-Cookie", value: R }] },
+			names: '"Set-Cookie" header',
+			reached: "updateRequest",
+		},
+		{
+			label: "update_request URL",
+			tool: "update_request",
+			args: { requestId: "req_1", url: `https://api.example.com/users?api_key=${R}` },
+			names: '"api_key" parameter',
+			reached: "updateRequest",
+		},
+		{
+			label: "update_request header the stored API-key auth names",
+			tool: "update_request",
+			args: { requestId: "req_1", headers: [{ key: "X-Token", value: R }] },
+			names: '"X-Token" header',
+			reached: "updateRequest",
+			seed: () => storedRequest({ auth: { mode: "apikey", key: "X-Token", value: "{{k}}" } }),
+			reads: ["getRequest"],
+		},
+		{
+			label: "update_request URL the stored API-key auth names",
+			tool: "update_request",
+			args: { requestId: "req_1", url: `https://api.example.com/users?k=${R}` },
+			names: '"k" parameter',
+			reached: "updateRequest",
+			seed: () =>
+				storedRequest({ auth: { mode: "apikey", key: "k", value: "{{k}}", in: "query" } }),
+			reads: ["getRequest"],
+		},
+		{
+			label: "create_request_example Set-Cookie row",
+			tool: "create_request_example",
+			args: { requestId: "req_1", name: "200", headers: [{ key: "Set-Cookie", value: R }] },
+			names: '"Set-Cookie" header',
+			reached: "createRequestExample",
+		},
+		{
+			label: "update_request_example Authorization row",
+			tool: "update_request_example",
+			args: { requestId: "req_1", exampleId: "ex_1", headers: { Authorization: R } },
+			names: '"Authorization" header',
+			reached: "updateRequestExample",
+		},
+		{
+			label: "run_request Authorization header",
+			tool: "run_request",
+			args: {
+				url: "https://api.example.com/x",
+				headers: [{ name: "Authorization", value: R }],
+			},
+			names: '"Authorization" header',
+			reached: "composeRequest",
+		},
+		{
+			label: "run_request URL credential query",
+			tool: "run_request",
+			args: { url: `https://api.example.com/x?access_token=${R}` },
+			names: "URL",
+			reached: "composeRequest",
+		},
+		{
+			label: "run_request header map",
+			tool: "run_request",
+			args: { url: "https://api.example.com/x", headers: { Cookie: R } },
+			names: '"Cookie" header',
+			reached: "composeRequest",
+		},
+		{
+			label: "run_request auth",
+			tool: "run_request",
+			args: { url: "https://api.example.com/x", auth: { mode: "bearer", token: R } },
+			names: '"auth"',
+			reached: "composeRequest",
+		},
+		{
+			label: "start_load_run header",
+			tool: "start_load_run",
+			args: {
+				url: "https://api.example.com/x",
+				headers: [{ name: "X-Auth-Token", value: R }],
+			},
+			names: '"X-Auth-Token" header',
+			reached: "composeRequest",
+		},
+		{
+			label: "get_graphql_schema header",
+			tool: "get_graphql_schema",
+			args: { url: "https://api.example.com/graphql", headers: { Authorization: R } },
+			names: '"Authorization" header',
+			reached: "composeRequest",
+			seed: () => ({
+				executeRequest: vi.fn().mockResolvedValue({
+					status: 200,
+					bodyRaw: JSON.stringify({
+						data: introspectionFromSchema(buildSchema("type Query { id: ID }")),
+					}),
+				}),
+			}),
+		},
+		{
+			label: "create_environment secret",
+			tool: "create_environment",
+			args: { name: "Dev", variables: { token: { value: R, secret: true } } },
+			names: 'secret variable "token"',
+			reached: "createEnvironment",
+		},
+		{
+			label: "update_environment secret",
+			tool: "update_environment",
+			args: { environmentId: "env_1", variables: { token: { value: R, secret: true } } },
+			names: 'secret variable "token"',
+			reached: "updateEnvironment",
+			seed: () => storedEnvironment({}),
+			reads: ["getEnvironment"],
+		},
+		{
+			label: "update_environment bare string over a stored secret",
+			tool: "update_environment",
+			args: { environmentId: "env_1", variables: { token: R } },
+			names: 'secret variable "token"',
+			reached: "updateEnvironment",
+			seed: () => storedEnvironment(storedSecret),
+			reads: ["getEnvironment"],
+		},
+		{
+			label: "update_environment value over a stored secret",
+			tool: "update_environment",
+			args: { environmentId: "env_1", variables: { token: { value: R } } },
+			names: 'secret variable "token"',
+			reached: "updateEnvironment",
+			seed: () => storedEnvironment(storedSecret),
+			reads: ["getEnvironment"],
+		},
+		{
+			label: "update_globals secret",
+			tool: "update_globals",
+			args: { variables: { token: { value: R, secret: true } } },
+			names: 'secret variable "token"',
+			reached: "saveGlobals",
+			reads: ["getGlobals"],
+		},
+		{
+			label: "create_collection secret",
+			tool: "create_collection",
+			args: { name: "API", variables: { token: { value: R, secret: true } } },
+			names: 'secret variable "token"',
+			reached: "createCollection",
+		},
+		{
+			label: "create_collection auth",
+			tool: "create_collection",
+			args: { name: "API", auth: { mode: "bearer", token: R } },
+			names: '"auth"',
+			reached: "createCollection",
+		},
+	];
+
+	const engineMethodsCalled = (client: EngineClient) =>
+		Object.entries(client as unknown as Record<string, unknown>)
+			.filter(([, fn]) => vi.isMockFunction(fn) && fn.mock.calls.length > 0)
+			.map(([name]) => name)
+			.sort();
+
+	const callWith = (testCase: MarkerCase, config: Partial<McpSafetyConfig>) => {
+		const client = fakeClient(testCase.seed?.() as Partial<Record<keyof EngineClient, never>>);
+		return dispatchTool(testCase.tool, testCase.args, ctxWith(client, config)).then((res) => ({
+			res,
+			client,
+		}));
+	};
+
+	// Mutation check, per slot: drop the call that judges it (readAuthArg's
+	// refuseRedactedAuth, refuseRedactedHeaders in the create, update, example and
+	// override paths, refuseRedactedUrl, mergeVariables' refuseRedactedVariable)
+	// and that slot's rows go red.
+	test.each(REFUSED)("refuses $label while secrets are withheld", async (testCase) => {
+		const { res, client } = await callWith(testCase, OFF);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(R);
+		expect(firstText(res)).toContain(testCase.names);
+		expect(firstText(res)).toContain("{{variable}} reference");
+		expect(engineMethodsCalled(client)).toEqual(testCase.reads ?? []);
+	});
+
+	test.each(REFUSED)("accepts $label once reveal is on", async (testCase) => {
+		const { res, client } = await callWith(testCase, ON);
+		expect(res.isError).toBeFalsy();
+		expect(client[testCase.reached]).toHaveBeenCalled();
+	});
+
+	describe.each([
+		["withheld", OFF],
+		["revealed", ON],
+	])("what is not a credential slot, secrets %s", (_mode, config) => {
+		const ACCEPTED: Array<[string, string, Record<string, unknown>, keyof EngineClient]> = [
+			[
+				"a body holding the text",
+				"create_request",
+				{ ...NEW_REQUEST, body: `{"token":"${R}"}`, bodyType: "json" },
+				"createRequest",
+			],
+			[
+				"a description holding the text",
+				"update_request",
+				{ requestId: "req_1", description: R },
+				"updateRequest",
+			],
+			[
+				"a body on update",
+				"update_request",
+				{ requestId: "req_1", body: R, bodyType: "text" },
+				"updateRequest",
+			],
+			[
+				"a header no read withholds",
+				"create_request",
+				{ ...NEW_REQUEST, headers: [{ key: "X-Trace-Id", value: R }] },
+				"createRequest",
+			],
+			[
+				"a credential header whose value only contains the text",
+				"create_request",
+				{ ...NEW_REQUEST, headers: [{ key: "Authorization", value: `Bearer ${R}` }] },
+				"createRequest",
+			],
+			[
+				"a query parameter no read withholds",
+				"create_request",
+				{ ...NEW_REQUEST, url: `https://api.example.com/users?page=${R}` },
+				"createRequest",
+			],
+			[
+				"a credential parameter whose value only contains the text",
+				"create_request",
+				{ ...NEW_REQUEST, url: `https://api.example.com/users?token=${R}x` },
+				"createRequest",
+			],
+			[
+				"a variable that is not a secret",
+				"create_environment",
+				{ name: "Dev", variables: { note: R, label: { value: R, secret: false } } },
+				"createEnvironment",
+			],
+			[
+				"a secret whose value only contains the text",
+				"create_environment",
+				{ name: "Dev", variables: { token: { value: `${R}!`, secret: true } } },
+				"createEnvironment",
+			],
+			[
+				"an auth credential written as a variable reference",
+				"create_request",
+				{ ...NEW_REQUEST, auth: { mode: "bearer", token: "{{token}}" } },
+				"createRequest",
+			],
+		];
+
+		test.each(ACCEPTED)("accepts %s", async (_label, tool, args, reached) => {
+			const client = fakeClient();
+			const res = await dispatchTool(tool, args, ctxWith(client, config));
+			expect(res.isError).toBeFalsy();
+			expect(client[reached]).toHaveBeenCalled();
+		});
+	});
+
+	test("a kept row, as read with valueWithheld, is not judged by a value it does not carry", async () => {
+		const client = fakeClient(
+			storedRequest({
+				headers: [{ key: "Authorization", value: "Bearer real", enabled: true }],
+			})
+		);
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", headers: [{ key: "Authorization", valueWithheld: true }] },
+			ctxWith(client, OFF)
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload).toMatchObject({
+			headers: [{ key: "Authorization", value: "Bearer real" }],
+		});
+	});
+
+	test("a refused URL on update leaves the stored credentials unread and unwritten", async () => {
+		const client = fakeClient(storedRequest({ url: "https://u:PW@h/x?api_key=S" }));
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", url: `https://u@h/x?api_key=${R}` },
+			ctxWith(client, OFF)
+		);
+		expect(res.isError).toBe(true);
+		expect(engineMethodsCalled(client)).toEqual([]);
+	});
+});
+
+/**
  * A `binary` body names a file on the user's machine. An agent may store one,
  * but never choose it: the engine sends it only once a person picks it in the
  * editor or it sits under an allowed folder, and decides that from its own

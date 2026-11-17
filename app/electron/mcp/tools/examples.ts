@@ -12,8 +12,10 @@
  */
 
 import { isRecord, str } from "./kit.js";
+import type { ToolContext } from "./contract.js";
 import { newHeaderRows } from "./header-rows.js";
 import { boundText, MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
+import { refuseRedactedHeaders } from "./redacted-input.js";
 
 /**
  * How much of a stored example body one result carries, and how much a whole
@@ -101,9 +103,17 @@ export function exampleFields(args: Record<string, unknown>): Record<string, unk
  * one is refused by name. An update reads the stored list first
  * (`update_request_example`), so it builds its own.
  */
-export function exampleWritePayload(args: Record<string, unknown>): Record<string, unknown> {
+export function exampleWritePayload(
+	args: Record<string, unknown>,
+	ctx: ToolContext
+): Record<string, unknown> {
 	const payload = exampleFields(args);
-	if (args.headers !== undefined) payload.headers = newHeaderRows(args.headers);
+	if (args.headers !== undefined) {
+		const headers = newHeaderRows(args.headers);
+		// An example has no auth block, so no API-key header joins the credential names.
+		refuseRedactedHeaders(ctx, headers, undefined);
+		payload.headers = headers;
+	}
 	return payload;
 }
 

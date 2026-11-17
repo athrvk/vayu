@@ -17,6 +17,7 @@
 
 import type { IntrospectionQuery } from "graphql";
 import { readRequestOverrides } from "./compose.js";
+import type { ToolContext } from "./contract.js";
 import type { FailureClass } from "./failure.js";
 import { isRecord, str, ToolArgError } from "./kit.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
@@ -51,7 +52,8 @@ const INLINE_ONLY_ARGS = ["url", "headers", "auth", "collectionId"] as const;
  */
 export function schemaComposeBody(
 	args: Record<string, unknown>,
-	auth: Record<string, unknown> | undefined
+	auth: Record<string, unknown> | undefined,
+	ctx: ToolContext
 ): Record<string, unknown> {
 	const requestId = str(args, "requestId");
 	if (requestId !== undefined) {
@@ -69,7 +71,7 @@ export function schemaComposeBody(
 			'Pass "requestId" to read a saved request\'s schema, or "url" for an endpoint with no saved request.'
 		);
 	}
-	const { headers } = readRequestOverrides({ headers: args.headers });
+	const { headers } = readRequestOverrides({ headers: args.headers, auth }, ctx);
 	return {
 		request: {
 			method: "POST",
