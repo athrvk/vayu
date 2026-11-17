@@ -1246,7 +1246,10 @@ std::optional<int64_t> run_end_ms) {
         return;
     }
 
-    size_t seed = compute_refill_deficit (target_fn (0), 0, budget_fn ());
+    // The last target the controller refilled toward, which the end-of-run
+    // refill measures its shortfall from.
+    size_t last_target = target_fn (0);
+    size_t seed        = compute_refill_deficit (last_target, 0, budget_fn ());
     for (size_t i = 0; i < seed && !context->should_stop; ++i) {
         submit_one ();
     }
@@ -1255,9 +1258,9 @@ std::optional<int64_t> run_end_ms) {
     // Answers whether the pass was owed a submission and put none in flight:
     // a scenario VU whose every step was skipped (#3540). The strategy thread
     // is `requests_sent`'s only writer, so an unchanged count is exact.
-    auto refill_toward = [&] (size_t target) {
-        const size_t deficit =
-        compute_refill_deficit (target, context->in_flight (), budget_fn ());
+    auto refill_toward = [&] (size_t target, size_t at_most) {
+        const size_t deficit     = std::min (at_most,
+        compute_refill_deficit (target, context->in_flight (), budget_fn ()));
         const size_t sent_before = context->requests_sent.load ();
         for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
             // A false return means the remaining candidates are all deferred
@@ -1314,13 +1317,18 @@ std::optional<int64_t> run_end_ms) {
         if (context->should_stop || !should_continue (el)) {
             break;
         }
-        idle_pass = refill_toward (target_fn (el));
+        last_target = target_fn (el);
+        idle_pass = refill_toward (last_target, std::numeric_limits<size_t>::max ());
     }
 
     // Only a run the clock ended: a stop owes nothing more, and a loop that
-    // left before `run_end_ms` ended on its own predicate, not on time.
+    // left before `run_end_ms` ended on its own predicate, not on time. The
+    // refill owes only the target the last wake fell short of (#2913), never
+    // a replacement for what completed during it: the run's time is up
+    // (#3545).
     if (run_end_ms && !context->should_stop && el >= *run_end_ms) {
-        refill_toward (target_fn (*run_end_ms - 1));
+        const size_t end_target = target_fn (*run_end_ms - 1);
+        refill_toward (end_target, end_target - std::min (end_target, last_target));
     }
 }
 
