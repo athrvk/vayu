@@ -329,7 +329,7 @@ const CAP_FIELDS: CapField[] = [
 		key: "maxResponseSamples",
 		label: "Max response samples",
 		description:
-			"Ceiling on the response bodies an agent may ask a load run to keep for it to read back. Each one is held in memory until the run's retention window ends. A run that asks for none keeps 1000, so a cap under 1000 refuses those runs until the agent asks for fewer.",
+			"Ceiling on the responses an agent may ask a load run to keep for the sampled replay of its scripts and schema checks. Each one is a body held in memory until the replay has run. A run that asks for none keeps 1000, so a cap under 1000 refuses those runs until the agent asks for fewer.",
 		ceiling: RESPONSE_SAMPLES_CEILING,
 	},
 ];
