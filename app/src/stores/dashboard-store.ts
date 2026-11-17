@@ -243,7 +243,8 @@ interface DashboardState {
 	/**
 	 * The engine answered the user's Stop with a terminal status other than
 	 * `stopped`: the run had already finished when it arrived (#3367). The
-	 * finished view says so, because the Stop the user pressed did nothing.
+	 * finished view says so, because the Stop the user pressed did nothing,
+	 * unless the report's `summary.drainCut` shows the Stop cut the drain (#3538).
 	 */
 	stopArrivedLate: boolean;
 	// Config and request info (available during live streaming)

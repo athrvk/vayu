@@ -1512,7 +1512,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   monitorSamples: MonitorSample[]       // Server vitals scraped this run (cap: maxRetainedTicks)
   liveWindowSeconds: number | null             // Live retention window; null = full run
   isStopping: boolean                          // A Stop request for the held run is in flight
-  stopArrivedLate: boolean                     // The engine answered Stop completed/failed: the run had finished first (#3367); the finished view says so
+  stopArrivedLate: boolean                     // The engine answered Stop completed/failed: the run had finished first (#3367); the finished view says so unless the report carries `summary.drainCut` (#3538)
   loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run; `runOwnSloMs(loadTestConfig)` (capacity `sloMs`, else the `latencyP99Ms` budget, else undefined) is the SLO line the live charts draw
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
   peakConcurrency: number                      // Running max (monotonic)
