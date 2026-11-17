@@ -103,7 +103,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		invalidates: ["environment"],
 		notFound: { ...ID_KINDS.environment, idArg: "environmentId" },
 		description: (config) =>
-			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. " +
+			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled/description. removeVariables deletes names outright, which blanking a value cannot do. " +
 			GUARDED_WRITE_SENTENCE +
 			". " +
 			precedenceNote(
