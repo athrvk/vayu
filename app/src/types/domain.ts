@@ -3184,6 +3184,8 @@ export interface RunReport {
 		/** `per_host_limit_raised` (#2394): the setting, and the limit the run used. */
 		configured?: number;
 		effective?: number;
+		/** `think_timer_skipped_open_loop` (#3541): the enabled timers skipped. */
+		timers?: number;
 	}>;
 	metadata?: {
 		runId: string;

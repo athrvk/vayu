@@ -147,7 +147,10 @@ json healthy_summary () {
         json::array ({ { { "code", "unresolved_tokens" }, { "message", "1 request sent with an unresolved variable: token" },
                        { "count", 1 }, { "names", { "token" } } },
         { { "code", "connection_replayed" },
-        { "message", "2 requests were re-sent on a new connection" }, { "count", 2 } } }) },
+        { "message", "2 requests were re-sent on a new connection" }, { "count", 2 } },
+        { { "code", "think_timer_skipped_open_loop" },
+        { "message", "A think timer does not apply to a constant-rate run" },
+        { "timers", 1 } } }) },
         { "thresholds",
         { { "checks",
           json::array ({ { { "metric", "latencyP99Ms" }, { "limit", 50 },
@@ -292,6 +295,9 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // And the completions each level was judged on (#2926). Mutation check:
     // drop "samples" from CAPACITY_LEVEL_KEYS and this fails.
     EXPECT_EQ (capacity["levels"].at (0).value ("samples", -1), 50);
+    // The allowlist has to name it, or the export drops the skipped-timer count
+    // (#3541). Mutation check: drop "timers" from WARNING_KEYS and this fails.
+    EXPECT_EQ (document["report"]["warnings"].at (2).value ("timers", -1), 1);
     // The allowlist has to name it, or the export drops the replays (#2799).
     // Mutation check: drop "connectionReplays" from SUMMARY_KEYS and this fails.
     EXPECT_EQ (document["report"]["summary"].value ("connectionReplays", -1), 2);

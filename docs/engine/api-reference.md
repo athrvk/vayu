@@ -10076,7 +10076,16 @@ is made, shared with the scenario load path's own step dispatch.
 `timer.think`'s wait is folded into `maintain_concurrency`'s own
 backpressure (`RunContext::reserve_think_wait`) rather than a blocking sleep
 on a worker thread, so a request-level timer costs no new thread the way the
-scenario load path's per-VU wait does.
+scenario load path's per-VU wait does. That is the closed loop only: every
+mode but `constant_rps`. **A `constant_rps` run skips `timer.think`**
+([#3541](https://github.com/athrvk/vayu/issues/3541)): its pacer sends on a
+schedule, so there is no next request for a wait to hold back, and a
+reservation would only fill `maxInFlight` with slots no request holds,
+dropping arrivals and inflating `peakConcurrency`. The element is tallied
+`skipped` in `summary["elements"]`, nothing is reserved, and the report
+carries one `think_timer_skipped_open_loop` warning. The element is not
+refused, because an inherited timer would then block load-testing every
+request under its collection in the default mode.
 
 **A `script.pre` element's edits reach the wire, and its scope's writes reach
 later `{{tokens}}` in the same submission.** When a run's submissions are
@@ -12222,7 +12231,7 @@ no frame.
 | `sendRate` | Requests dispatched per second, **cumulative**: `requestsSent` over the time since load start |
 | `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
 | `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
-| `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight. The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
+| `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **closed-loop single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight, and a `constant_rps` run reserves none, because it skips the timer ([#3541](#the-requestelements-array-a-single-request-runs-own-step-level-elements)). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `skippedRequests` / `stalledMs` | `constant_rps` only (#2911): requests a stalled pacer owed beyond its 100 ms catch-up window and skipped (never sent, not in `droppedRequests`), and the schedule time they cover in ms, `skippedRequests ÷ targetRps`. `0` on every other mode |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
@@ -13587,6 +13596,14 @@ run's steps carry cookies, so only it can raise this; a step with
 `disableCookies` drops nothing. The outgoing caps (a `Cookie` line over 8190
 bytes, more than 150 jar cookies) are not detected under load: reading libcurl's
 notice needs `CURLOPT_VERBOSE` on every transfer.
+`think_timer_skipped_open_loop` ([#3541](https://github.com/athrvk/vayu/issues/3541))
+is raised once by a `constant_rps` single-request run that sent anything and
+whose `requestElements` hold an enabled `timer.think`: the pacer sends on a
+schedule, so the timer was skipped on every submission (each tallied `skipped`
+under `summary.elements`) and held no slot. Its `message` is "A think timer
+does not apply to a constant-rate run: requests are sent on a schedule, not
+one after another", and it carries `timers` (how many enabled timers were
+skipped). A closed-loop mode runs the timer and raises nothing.
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
@@ -13903,7 +13920,10 @@ instantaneous in-flight gauge (the live stream's `backpressure`), which the load
 generator reads after each batch of submissions in every mode: the closed-loop
 controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`
 and every scenario run, and the open-loop pacer behind `constant_rps` (issue
-#2912). The once-a-second metrics sample is a backstop writer. The peak is the
+#2912). The once-a-second metrics sample is a backstop writer. A
+closed-loop single-request run's gauge counts the slots a `timer.think` wait
+holds too; a `constant_rps` run's counts requests alone, because it skips the
+timer (#3541). The peak is the
 most requests ever in flight at once, so on a run whose users wait in step it
 can read the full user count though most of the run had far fewer in flight;
 `avgInFlight` is the figure that measures utilisation. `avgInFlight` is present

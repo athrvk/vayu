@@ -878,8 +878,9 @@ const ResultAnnotations& annotations) {
  * Runs @p context's `requestElements` `step.after` and `step.between`
  * elements for one completed submission - `step.after` against the response
  * that came back, `step.between` for `timer.think`'s non-blocking wait
- * (issue #1594), reserved on @p context through `reserve_think_wait` rather
- * than applied to a `VirtualUser::ready_at_ms` there is none of here. Never
+ * (issue #1594), reserved on a closed-loop @p context through
+ * `reserve_think_wait` rather than applied to a `VirtualUser::ready_at_ms`
+ * there is none of here, and skipped on an open-loop one (#3541). Never
  * blocks: this runs on an event-loop worker thread, inside the curl
  * completion drain.
  */
@@ -960,7 +961,8 @@ const ResultAnnotations& annotations) {
     // the sequential run's own dispatch, run here instead of blocking a
     // worker thread. There is no `VirtualUser::ready_at_ms` to stamp on a
     // single-request run's anonymous submissions, so the wait is reserved on
-    // the run itself instead - see `RunContext::reserve_think_wait`. A fresh
+    // the run itself instead - see `RunContext::reserve_think_wait`. An
+    // open-loop run skips the timer and reserves nothing (#3541). A fresh
     // context, on the same terms `scenario_load.cpp`'s own `run_step_between`
     // builds one: never read or written by a `step.between` kind
     // (`timer.think`) beyond the request it is bound to for `pm.request`.
@@ -981,7 +983,10 @@ const ResultAnnotations& annotations) {
         .record_metric    = nullptr,
     };
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
-    between_ctx, *context->step_elements, between_outcomes);
+    between_ctx, *context->step_elements, between_outcomes,
+    [&context] (const vayu::core::CompiledElement& element) {
+        return context->open_loop_timer_skip_reason (element);
+    });
     int64_t total_wait_ms = 0;
     for (const auto& outcome : between_outcomes) {
         total_wait_ms += outcome.waited_ms.value_or (0);

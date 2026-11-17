@@ -1976,6 +1976,12 @@ again in the engine's message and no cookie name in it. Unlike
 `httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
 and saw none, absent a run stored before the count existed.
 
+A constant-rate run with a `timer.think` carries `think_timer_skipped_open_loop`
+([#3541](https://github.com/athrvk/vayu/issues/3541)): the timer is skipped, not
+waited, because requests go out on a schedule. `timers` is the number of enabled
+timers skipped, `RunWarnings` titles it "Think timer skipped on a constant-rate
+run", and the Elements card tallies the element `skipped`.
+
 `authNotice` is the engine's sentence for a request whose auth sent nothing: a
 mode it stores but does not execute (`digest`, `ntlm`, ..., issue #2474), or a
 bearer token or API key name that is empty (issue #3203). The request is still

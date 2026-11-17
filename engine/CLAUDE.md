@@ -667,7 +667,8 @@ logged as a warning: it means a client skipped composition.
   and discarded once that submission
   settles - and `timer.think`'s wait is a run-level concurrency reservation
   (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
-  per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its
+  per-VU `ready_at_ms`, since there is no VU to hold one on. Closed loop only:
+  a constant-rate run skips the timer and reserves nothing (#3541). It also has its
   own place to declare `script.setup` / `script.teardown` - the run-boundary
   kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
   (#1573), dispatched through the same `run_setup_elements` /

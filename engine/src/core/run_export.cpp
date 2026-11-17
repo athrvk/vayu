@@ -192,7 +192,7 @@ std::to_array<std::string_view> ({ "errorsDropped", "successTracesDropped",
 "slowTracesDropped", "responseSamplesDropped", "exemplarsDropped",
 "sampleBodiesDropped", "responseBodiesCaptured", "responseSampleBudgetSpent" });
 constexpr auto WARNING_KEYS = std::to_array<std::string_view> (
-{ "code", "message", "count", "names", "steps", "configured", "effective" });
+{ "code", "message", "count", "names", "steps", "configured", "effective", "timers" });
 constexpr auto SCENARIO_KEYS = std::to_array<std::string_view> ({ "iterations",
 "iterationsCompleted", "stepsExecuted", "passed", "failed", "skipped", "errored",
 "stepsStored", "stepsDropped", "virtualUsers", "iterationsAbandoned" });

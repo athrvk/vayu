@@ -3180,3 +3180,63 @@ TEST_F (LoadRunTimeoutTest, AnExplicitTimeoutBeatsTheSetting) {
     config["timeout"] = 100;
     expect_timeouts (run_to_terminal_row ("run-explicit-timeout-e2e", config), 2);
 }
+
+namespace {
+
+/// The `think_timer_skipped_open_loop` entry of @p context's warnings, or a
+/// null json.
+nlohmann::json open_loop_timer_warning (const std::shared_ptr<RunContext>& context) {
+    for (const auto& warning : build_run_warnings (context)) {
+        if (warning["code"] == "think_timer_skipped_open_loop") {
+            return warning;
+        }
+    }
+    return nullptr;
+}
+
+/// A context carrying @p elements as its `requestElements`, with @p sent
+/// requests counted as submitted and `closed_loop` as @p closed_loop.
+std::shared_ptr<RunContext>
+think_timer_context (const nlohmann::json& elements, size_t sent, bool closed_loop) {
+    auto context = std::make_shared<RunContext> ("run-open-loop-timer",
+    nlohmann::json{ { "mode", "constant_rps" }, { "requestElements", elements } });
+    context->requests_sent = sent;
+    context->closed_loop   = closed_loop;
+    return context;
+}
+
+nlohmann::json think_element (const std::string& id, bool enabled) {
+    return { { "id", id }, { "kind", "timer.think" }, { "enabled", enabled },
+        { "config", { { "ms", 100 } } } };
+}
+
+} // namespace
+
+// #3541: the warning counts the enabled timers an open-loop run that sent
+// requests skipped, and nothing else does: a closed loop keeps its timers, and
+// a run that sent nothing never reached the pacer that skips them. Mutation
+// check: drop the `requests_sent` guard in `open_loop_skipped_timers` and the
+// unsent case warns.
+TEST (OpenLoopTimerWarning, CountsTheEnabledTimersAnOpenLoopRunSkipped) {
+    const auto elements = nlohmann::json::array ({ think_element ("t1", true),
+    think_element ("t2", true), think_element ("t3", false),
+    nlohmann::json{ { "id", "a1" }, { "kind", "assert.status" },
+    { "config", { { "in", nlohmann::json::array ({ 200 }) } } } } });
+
+    const auto warning =
+    open_loop_timer_warning (think_timer_context (elements, 1, false));
+    ASSERT_TRUE (warning.is_object ());
+    EXPECT_EQ (warning["timers"], 2);
+    EXPECT_EQ (warning["message"].get<std::string> (), RunContext::OPEN_LOOP_TIMER_SKIP_REASON);
+
+    EXPECT_TRUE (
+    open_loop_timer_warning (think_timer_context (elements, 1, true)).is_null ())
+    << "a closed-loop run keeps its timers";
+    EXPECT_TRUE (
+    open_loop_timer_warning (think_timer_context (elements, 0, false)).is_null ())
+    << "a run that sent nothing skipped nothing";
+    EXPECT_TRUE (open_loop_timer_warning (
+    think_timer_context (nlohmann::json::array ({ think_element ("t1", false) }), 1, false))
+    .is_null ())
+    << "a disabled timer is the pipeline's skip, not the pacer's";
+}
