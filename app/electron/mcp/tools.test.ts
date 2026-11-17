@@ -15066,6 +15066,7 @@ describe("start_load_run recording knobs", () => {
 
 		// A scan that found nothing would pass forever.
 		expect(named).toEqual(CHANGES_CAPTURE);
+		expect(description).toMatch(/about three per status code/);
 		for (const name of named) {
 			expect(Object.keys(load.inputSchema), `${name} is named by get_run_samples`).toContain(
 				name
@@ -15075,6 +15076,11 @@ describe("start_load_run recording knobs", () => {
 
 	test("responseSamplePeriod and maxResponseSamples describe the replay, not get_run_samples", () => {
 		const load = TOOLS.find((t) => t.name === "start_load_run")!;
+		const loadSentences = resolveDescription(load, resolveSafetyConfig())
+			.split(". ")
+			.filter((x) => /responseSamplePeriod|maxResponseSamples/.test(x));
+		expect(loadSentences.length).toBeGreaterThan(0);
+		for (const sentence of loadSentences) expect(sentence).not.toContain("get_run_samples");
 		for (const name of ["responseSamplePeriod", "maxResponseSamples"]) {
 			const description = (load.inputSchema[name] as z.ZodType).description ?? "";
 			expect(description, name).not.toBe("");

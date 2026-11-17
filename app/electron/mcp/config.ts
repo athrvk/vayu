@@ -50,7 +50,8 @@ export interface McpSafetyConfig {
 	/**
 	 * Hard ceiling on `maxResponseSamples` for a load run: how many full
 	 * response bodies the engine keeps in memory for the sampled script and
-	 * schema replay, until it has run. An omitted `maxResponseSamples` is judged as the engine's default of 1000.
+	 * schema replay, until it has run. An omitted `maxResponseSamples` is judged
+	 * as the engine's default of 1000.
 	 */
 	maxResponseSamples: number;
 	/**
