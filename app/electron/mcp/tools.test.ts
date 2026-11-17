@@ -13148,6 +13148,12 @@ describe("run housekeeping tools", () => {
 				row: { id: "req_1", name: "Get", method: "GET", url: "https://a.test" },
 			},
 			{
+				tool: "list_requests",
+				args: {},
+				method: "listRequestsPage",
+				row: { id: "req_1", name: "Get", method: "GET", url: "https://a.test" },
+			},
+			{
 				tool: "get_cookies",
 				args: {},
 				method: "getCookiesPage",
@@ -17178,6 +17184,37 @@ describe("secret withholding", () => {
 			valueWithheld: true,
 			in: "header",
 		});
+	});
+
+	test("a workspace-wide list_requests withholds credentials in every collection's rows", async () => {
+		const rows = [
+			{ ...REQUESTS[3], collectionId: "c1" },
+			{
+				id: "req_5",
+				collectionId: "c2",
+				name: "Typed header",
+				auth: { mode: "none" },
+				headers: [
+					{ key: "Authorization", value: "Bearer typed-live-token", enabled: true },
+				],
+			},
+		];
+		const listRequestsPage = vi.fn().mockResolvedValue(page(rows));
+		const { text, body } = await readFull("list_requests", fakeClient({ listRequestsPage }));
+		expect(listRequestsPage.mock.calls[0][0]).toBeUndefined();
+		for (const secret of ["k-456", "typed-live-token"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body.map((row: { collectionId: string }) => row.collectionId)).toEqual(["c1", "c2"]);
+		expect(body[0].auth).toEqual({
+			mode: "apikey",
+			key: "X-Api-Key",
+			valueWithheld: true,
+			in: "header",
+		});
+		expect(body[1].headers).toEqual([
+			{ key: "Authorization", enabled: true, valueWithheld: true },
+		]);
 	});
 
 	test("list_requests returns auth whole with reveal on", async () => {
