@@ -23,7 +23,9 @@
  * requests take, however long that is.
  *
  * The cap is the bound against whoever can reach the port; a call evicted past
- * it keeps running and can no longer be cancelled by its client.
+ * it keeps running and can no longer be cancelled by its client. A stop does
+ * not read this registry: it ends every 2025-era exchange, held or not
+ * (`http.ts`, #3575).
  */
 
 import type { RequestId } from "@modelcontextprotocol/server";

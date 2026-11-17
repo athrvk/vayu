@@ -8,17 +8,44 @@
 /**
  * @file gates.ts
  * @brief The answers the MCP endpoint gives without the SDK: the wrong path,
- *        the wrong method, and a handler that threw past its own error paths.
+ *        the wrong method, and a handler that threw past its own error paths;
+ *        and the server that holds the port, with how it closes.
  *
  * Shared by `listener.ts`, which binds the port at launch and must refuse a
  * stray GET before it pays to load the SDK, and `http.ts`, which answers the
  * same way once the SDK is up. One definition, so the two servers cannot drift
- * into answering a probe of `/` differently.
+ * into answering a probe of `/` differently, or into closing differently.
  */
 
-import type http from "node:http";
+import http from "node:http";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
+
+/**
+ * An HTTP server for the MCP port, passing every request to @p onRequest.
+ * Node's `close()` closes only the connections idle at that moment; one still
+ * answering would then stay open for `keepAliveTimeout` after its answer and
+ * hold the close back (#3575). So once the server has stopped listening, each
+ * response that finishes closes its own connection after the answer is
+ * flushed, when its request was read in full. One whose request is still
+ * arriving (an oversized upload, answered 413 before it ends) is only
+ * half-closed, so the rest is drained rather than reset under the answer, and
+ * the connection goes when the client closes its side. Not
+ * `closeIdleConnections()` there: it destroys the socket at once, and lost the
+ * answer when probed. Not `closeAllConnections()` at close either: a request
+ * still arriving is answered.
+ */
+export function createMcpSocketServer(onRequest: http.RequestListener): http.Server {
+	const server = http.createServer(onRequest);
+	server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {
+		res.once("finish", () => {
+			if (server.listening) return;
+			if (req.complete) req.socket.destroySoon();
+			else req.socket.end();
+		});
+	});
+	return server;
+}
 
 function jsonRpcError(
 	res: http.ServerResponse,

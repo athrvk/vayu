@@ -133,10 +133,24 @@ error while reading. That message is a fixed string too: the thrown error goes t
 the MCP log (`src: "mcp"`, with the request path), not to the client. The
 handler answers a failure to build the server the same way (500, `-32603`, its
 own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
-Stopping the server ends what a 2026-07-28 client holds open first - a
-`subscriptions/listen` stream lasts as long as the client likes, and the socket's
-close would wait on it - then closes the socket gracefully, so a request still
-arriving is answered rather than cut off. One owner, `lifecycle.ts`, orders
+Stopping the server (MCP switched off in Settings, or the app quitting) first
+ends every exchange the socket's close would otherwise wait on, on both legs.
+What a 2026-07-28 client holds open is ended by the SDK: a
+`subscriptions/listen` stream lasts as long as the client likes, and a call in
+flight is cut with an empty response. Every 2025-era exchange in flight has its
+connection dropped (#3575), whether or not the cancel registry below holds it:
+no result and no JSON-RPC error is written, and the engine request behind it is
+aborted as a cancel would abort it. What the client sees depends on how far its
+answer got. Before any of the response is sent, an SDK client's call fails at
+once with a connection error. Once a progress event or a keep-alive comment
+(every 15 s) is out, the client is reading a stream that ends with no answer,
+and it holds the call until its own request timeout. Then the socket closes
+gracefully, so a request still arriving is answered rather than cut off. A
+connection still answering at that moment is closed once its answer is
+flushed, rather than held for its keep-alive timeout; one whose request is
+itself still arriving (an oversized upload drained for its `413`) is only
+half-closed, and the stop waits for the client to close its side. The port is
+free when the stop resolves. One owner, `lifecycle.ts`, orders
 starts and stops (#3337): a stop that lands while the port is still binding
 waits for the bind and closes it, a re-enable binds only once the previous
 close has finished, and a service whose lazy load outlives its listener is
@@ -229,10 +243,11 @@ ends that request's exchange, which aborts the signal; the cancel still gets its
 `202`. A cancel with no session id, or another session's, reaches nothing: every
 client counts its request ids from 0, so the id alone names no one call. The
 handle is dropped when the exchange ends however it ends - an answer, a cancel,
-the client disconnecting - and at most 256 are held, the oldest dropped first
-(its call keeps running, no longer cancellable). The issued session id is the
-whole binding: a loopback caller that presents it and a request id can abort
-that call.
+the client disconnecting, a stop - and at most 256 are held, the oldest dropped
+first (its call keeps running, no longer cancellable). A stop does not need the
+handle: it drops every 2025-era exchange, held or not. The issued session id is
+the whole binding: a loopback caller that presents it and a request id can
+abort that call.
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer

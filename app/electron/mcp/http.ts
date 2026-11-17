@@ -20,12 +20,13 @@
  *        requirement).
  */
 
-import http from "node:http";
+import type http from "node:http";
 import { randomUUID } from "node:crypto";
 import {
 	createMcpHandler,
 	isInitializeRequest,
 	isJSONRPCRequest,
+	isLegacyRequest,
 	isSpecType,
 	type McpHandlerRequestOptions,
 	type McpHttpHandler,
@@ -40,7 +41,7 @@ import {
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost, createMcpSocketServer } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 import { InFlightCalls, type InFlightCall } from "./in-flight-calls.js";
 
@@ -63,8 +64,9 @@ export class McpHttpServer {
 	private readonly opts: McpHttpServerOptions;
 	private readonly sessions = new ClientSessions();
 	private readonly inFlight: InFlightCalls;
+	/** The response of every 2025-era exchange still open, which a stop drops. */
+	private readonly legacyExchanges = new Set<http.ServerResponse>();
 	private handler: McpHttpHandler;
-	private readonly serveMcp: ReturnType<typeof toNodeHandler>;
 	private readonly hostIsLoopback = localhostHostValidation();
 	private readonly originIsLoopback = localhostOriginValidation();
 
@@ -72,9 +74,6 @@ export class McpHttpServer {
 		this.opts = opts;
 		this.inFlight = opts.inFlightCalls ?? new InFlightCalls();
 		this.handler = this.createHandler();
-		this.serveMcp = toNodeHandler({
-			fetch: (request, options) => this.serve(request, options),
-		});
 	}
 
 	get url(): string {
@@ -88,7 +87,7 @@ export class McpHttpServer {
 	start(): Promise<void> {
 		if (this.server) return Promise.resolve();
 		return new Promise((resolve, reject) => {
-			const server = http.createServer((req, res) => {
+			const server = createMcpSocketServer((req, res) => {
 				void this.handleRequest(req, res);
 			});
 			server.on("error", reject);
@@ -108,13 +107,22 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * End every exchange a 2026-07-28 client holds open - a `subscriptions/listen`
-	 * stream lasts as long as the client likes - so a socket can close without
-	 * waiting on one. Everything else finishes as it would have: an upload still
-	 * arriving is drained and answered (see `readJsonBody`), not cut off. The
-	 * SDK's `close()` is final, so a fresh handler takes the next request.
+	 * End every exchange a socket's close would otherwise wait on: what a
+	 * 2026-07-28 client holds open (a `subscriptions/listen` stream lasts as long
+	 * as the client likes), which the SDK ends; and every 2025-era exchange in
+	 * flight, whose connection is dropped with no result and no error written
+	 * (#3575). The drop reaches the handler as a disconnect does, so the tool's
+	 * signal fires and its engine request is aborted. A client still waiting for
+	 * the response headers sees its fetch fail at once; one already reading the
+	 * stream (a keep-alive comment or a progress event was sent) holds the call
+	 * until its own timeout. Everything else finishes as it would have: an
+	 * upload still arriving is drained and answered (see `readJsonBody`), not
+	 * cut off. The SDK's `close()` is final, so a fresh handler takes the next
+	 * request.
 	 */
 	async endStreams(): Promise<void> {
+		for (const res of this.legacyExchanges) res.destroy();
+		this.legacyExchanges.clear();
 		const ending = this.handler;
 		this.handler = this.createHandler();
 		await ending.close();
@@ -182,11 +190,25 @@ export class McpHttpServer {
 			);
 			return;
 		}
-		await this.serveMcp(req, res, body);
+		// An adapter per request: `serve` needs this exchange's response, which a stop destroys.
+		const serveMcp = toNodeHandler({
+			fetch: (request, options) => this.serve(request, options, res),
+		});
+		await serveMcp(req, res, body);
 	}
 
-	/** The web-standard face `toNodeHandler` calls: one request, both eras. */
-	private async serve(request: Request, options?: McpHandlerRequestOptions): Promise<Response> {
+	/**
+	 * The web-standard face `toNodeHandler` calls: one request, both eras,
+	 * answered on @p res.
+	 */
+	private async serve(
+		request: Request,
+		options: McpHandlerRequestOptions | undefined,
+		res: http.ServerResponse
+	): Promise<Response> {
+		// The SDK's own routing predicate, so the host and the handler cannot
+		// disagree about which leg serves the request.
+		if (await isLegacyRequest(request, options?.parsedBody)) this.holdUntilClosed(res);
 		const message = soleMessageOf(options?.parsedBody);
 		const response = await this.fetchCancellable(request, options, message);
 		const handshake = handshakeOf(message);
@@ -204,6 +226,19 @@ export class McpHttpServer {
 			statusText: response.statusText,
 			headers,
 		});
+	}
+
+	/**
+	 * Count @p res among the 2025-era exchanges a stop drops until it closes,
+	 * however it closes. Every one, not only the calls `inFlight` holds: that
+	 * registry is keyed and capped for cancels, and a call without a session
+	 * id, inside a longer batch, evicted or replaced under its key still holds
+	 * its connection open.
+	 */
+	private holdUntilClosed(res: http.ServerResponse): void {
+		if (res.destroyed) return;
+		this.legacyExchanges.add(res);
+		res.once("close", () => this.legacyExchanges.delete(res));
 	}
 
 	/**
