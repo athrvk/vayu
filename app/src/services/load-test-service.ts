@@ -54,20 +54,34 @@ const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
  * and a partial one must not turn into "0 requests, p95 0ms" - a number the
  * user would read as the run's own.
  */
-function runSummaryLine(report: RunReport): string | null {
+function runSummaryLine(
+	report: RunReport,
+	{ withErrors }: { withErrors: boolean } = { withErrors: true }
+): string | null {
 	const requests = report.summary?.totalRequests;
 	const p95 = report.latency?.p95;
 	const errorRate = report.summary?.errorRate;
+	const errors = (rate: number) => (withErrors ? `, ${formatPercent(rate)}% errors` : "");
 	// A failed run the engine could not fully record (#2895): its counts are not
 	// whole-run totals, and the line must not read as one.
 	if (report.summary?.summaryMissing) return "The run ended before its totals were saved.";
 	if (report.summary?.partial && typeof requests === "number" && typeof errorRate === "number") {
-		return `At least ${formatNumber(requests)} requests, ${formatPercent(errorRate)}% errors, latency not recorded`;
+		return `At least ${formatNumber(requests)} requests${errors(errorRate)}, latency not recorded`;
 	}
 	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
 		return null;
 	}
-	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}, ${formatPercent(errorRate)}% errors`;
+	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}${errors(errorRate)}`;
+}
+
+/**
+ * Whether a verdict's reason already carries the run's error rate ("No budgets
+ * set. 0.0% errors", "..., but 3.0% errors"), so the numbers after it need not
+ * repeat it. A missed budget's reason names the budget ("error rate"), never the
+ * measured share, and keeps the clause.
+ */
+function reasonStatesErrorRate(reason: string): boolean {
+	return /% errors\b/.test(reason);
 }
 
 /**
@@ -94,7 +108,11 @@ function terminalNotification(
 	const endedAs = status ?? report?.metadata?.status;
 	const judgement = endedAs === "stopped" ? null : reportOutcome(report);
 	const verdict = judgement ? `${OUTCOME_TITLE[judgement.outcome]}. ${judgement.reason}` : null;
-	const summary = report && runSummaryLine(report);
+	const summary =
+		report &&
+		runSummaryLine(report, {
+			withErrors: !judgement || !reasonStatesErrorRate(judgement.reason),
+		});
 	const failed = endedAs === "failed" || judgement?.outcome === "failed";
 	return {
 		kind: failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,

@@ -83,6 +83,7 @@ import { NOTIFY_KINDS } from "./notify";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "./http-client";
+import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";
 
 /**
  * `handleClose` is private; the SSE client is what calls it in production, with
@@ -773,9 +774,39 @@ describe("LoadTestService", () => {
 				expect(mockNotifyPost).toHaveBeenCalledWith(
 					expect.objectContaining({
 						kind: NOTIFY_KINDS.loadRunFinished,
-						body: "Not judged. No budgets set. 0.0% errors. 12,400 requests, p95 210ms, 0.0% errors",
+						body: "Not judged. No budgets set. 0.0% errors. 12,400 requests, p95 210ms",
 					})
 				);
+			});
+
+			it("does not say the error rate twice when the verdict already does", async () => {
+				await endWith(
+					"run_v4b",
+					completed({
+						summary: { totalRequests: 12400, errorRate: 3 },
+						thresholdValidation: budgetBlock(false),
+					})
+				);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunFinished,
+						body: "Not judged. All 3 budgets met, but 3.0% errors. 12,400 requests, p95 210ms",
+					})
+				);
+			});
+
+			it("leads with exactly the verdict the banner shows for the same report", async () => {
+				const report = completed({ thresholdValidation: budgetBlock(true) });
+				const judgement = reportOutcome(report);
+				expect(judgement).not.toBeNull();
+
+				await endWith("run_v4c", report);
+
+				const body = mockNotifyPost.mock.calls[0]?.[0].body as string;
+				expect(
+					body.startsWith(`${OUTCOME_TITLE[judgement!.outcome]}. ${judgement!.reason}. `)
+				).toBe(true);
 			});
 
 			it("keeps the numbers alone for a report that states no status", async () => {
