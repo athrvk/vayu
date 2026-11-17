@@ -721,8 +721,14 @@ only classifier of `engineStatus`**, and `engineCrash` never writes it. A
 poll's verdict follows within a retry rather than a whole healthy interval
 (issue #3493). For the gap until it does, `selectKnownEngineStatus` (exported
 beside the store) derives the status the app shows: `unreachable` when a crash
-was pushed after the poll's last verdict and that verdict is `connected`,
-`engineStatus` itself otherwise. `engineCrashAheadOfPoll` carries the "after":
+was pushed after the poll's last verdict and that verdict is `connected`;
+`unreachable` too when a crash is recorded, the verdict is `starting` and no
+restart is in flight (`engineRestarting`, issue #3610), because a failed poll
+inside the startup grace reads `starting` for up to 45 s and an engine that
+exited at spawn is not coming; `engineStatus` itself otherwise, so a restart's
+own `starting` passes through. That second rule keys on `engineCrash`, not on
+the flag below, which the very poll that wrote `starting` cleared.
+`engineCrashAheadOfPoll` carries the "after":
 `setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
 including the one `useHealthQuery` makes for each answered poll, an unchanged
 answer too (structural sharing would otherwise keep the sync effect from
@@ -736,7 +742,7 @@ put there. The health poll's own gating (`queries/health.ts`) and the store's
 internals read `engineStatus` directly: they are the poll's own verdict. The Dock reads `engineCrash`
 for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
-`engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
+the derived status is `starting`; `engineStartFailure` takes precedence over it in
 both the tooltip and the button (Retry, not Restart).
 
 `engineRestarting` is whether a restart is in flight, held here rather than in

@@ -78,7 +78,8 @@ interface EngineState {
 	 *
 	 * A fact about the process, not a status: `engineStatus` stays the health
 	 * poll's verdict, and this explains it, offers the Dock's Restart, and keeps
-	 * a stale `connected` off screen (`selectKnownEngineStatus`). Written by
+	 * a stale `connected`, and a `starting` no restart is behind, off screen
+	 * (`selectKnownEngineStatus`). Written by
 	 * `useEngineLifecycle` from each pushed transition, so it clears when the
 	 * sidecar moves on rather than when a restart is asked for.
 	 */
@@ -175,22 +176,32 @@ interface EngineState {
 
 /**
  * The engine's status as the app shows it: the health poll's verdict, except
- * that a crash the sidecar reported outranks a `connected` the poll gave before
- * the push (#3493).
+ * where a crash the sidecar reported says more.
+ *
+ * - A `connected` the poll gave before the crash was pushed (#3493). The
+ *   override lasts until the poll's next verdict, whatever it says, but a strip
+ *   reading "Engine connected" beside a Restart button, or a drawer of green
+ *   services the dead process took with it, is wrong for all of it.
+ * - A `starting` with no restart in flight (#3610). A failed poll inside the
+ *   startup grace is `starting` for up to `ENGINE_STARTUP_GRACE_MS`, and an
+ *   engine that exited at spawn is not coming. Keyed on the crash itself, not
+ *   on `engineCrashAheadOfPoll`: every failed poll rewrites the status and
+ *   clears that flag. With a restart in flight `starting` passes through: the
+ *   restart is the crash's successor.
  *
  * Derived on read, never written back: the poll stays the one writer of
  * `engineStatus`, and the crash push only asks it to look again
- * (`useEngineLifecycle`). The override lasts until the poll's next verdict,
- * whatever it says, but a strip reading "Engine connected" beside a Restart
- * button, or a drawer of green services the dead process took with it, is
- * wrong for all of it. `starting` passes through: a restart in flight is the
- * crash's successor.
+ * (`useEngineLifecycle`).
  */
 export function selectKnownEngineStatus(
-	s: Pick<EngineState, "engineStatus" | "engineCrash" | "engineCrashAheadOfPoll">
+	s: Pick<
+		EngineState,
+		"engineStatus" | "engineCrash" | "engineCrashAheadOfPoll" | "engineRestarting"
+	>
 ): EngineStatus {
-	const crashIsNewer = s.engineCrash !== null && s.engineCrashAheadOfPoll;
-	if (crashIsNewer && s.engineStatus === "connected") return "unreachable";
+	if (s.engineCrash === null) return s.engineStatus;
+	if (s.engineStatus === "connected" && s.engineCrashAheadOfPoll) return "unreachable";
+	if (s.engineStatus === "starting" && !s.engineRestarting) return "unreachable";
 	return s.engineStatus;
 }
 

@@ -546,7 +546,10 @@ which case the app picks a fallback (below).
   next verdict ends the override, whatever it says: the crash itself stays
   recorded until `ready`, which can trail the poll that sees a restarted engine
   answer, and that engine is connected. A crash pushed inside a
-  restart's start window refetches like any poll there and reads "Starting…".
+  restart's start window refetches like any poll there and reads "Starting…"
+  while that restart is in flight. With no restart in flight a recorded crash
+  reads "Engine disconnected" even inside the startup grace, where a failed
+  poll is otherwise "Starting…": an engine that exited at spawn is not coming.
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
