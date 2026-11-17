@@ -36,6 +36,18 @@
  * words and order of the run-report export's verdict line
  * (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
+ * A Stop that cuts the end-of-run drain with requests still outstanding leaves
+ * the run `completed` with the budgets its answered requests met, but those
+ * answered requests are not the run: a cancelled request is in no total, rate or
+ * latency, and the ones the drain was still waiting on are by construction its
+ * slowest and hung ones (#3538). Such a run (`summary.drainCut`, absent unless a
+ * Stop cut something) is **not-judged**, naming how many requests were
+ * unanswered and nothing else. It ranks below **failed** (a missed budget is
+ * already known) and above every met-budget and no-budget reason, the failed
+ * checks and errors included; a Stop before the drain is **stopped**, as above.
+ * The export's `drain_stopped` code is the same verdict
+ * (`run-verdict-conformance.json`).
+ *
  * A budget the run could not measure (`evaluated: false`, issue #1484) is
  * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
  * **failed** here and is named like any other missed budget.
@@ -91,6 +103,8 @@ export interface RunOutcomeInput extends Partial<FailedChecks> {
 	verdict?: "passed" | "failed";
 	/** Percent, 0-100. Absent when the run recorded no request. */
 	errorRate?: number;
+	/** Requests a Stop cancelled in the end-of-run drain (#3538); absent or 0 means none. */
+	drainCutCancelled?: number;
 }
 
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
@@ -133,6 +147,29 @@ function metReason(budgets: Extract<Budgets, { state: "met" }>): string {
 	});
 }
 
+function drainCutReason(cancelled: number): string {
+	const requests = `${formatNumber(cancelled)} ${pluralize(cancelled, "request")}`;
+	const was = pickByCount(cancelled, { one: "was", other: "were" });
+	return `${requests} ${was} still unanswered when the drain was stopped`;
+}
+
+/**
+ * The cancelled count of a `drainCut` block (`summary` of a report, a list row's
+ * `resultSummary`), or `undefined` unless it is a positive integer: the engine
+ * writes the block only for a cut that cancelled something, and a malformed one
+ * must not turn a run not-judged.
+ */
+export function drainCutCancelledOf(
+	summary: { drainCut?: unknown } | undefined
+): number | undefined {
+	const drainCut = summary?.drainCut;
+	if (typeof drainCut !== "object" || drainCut === null) return undefined;
+	const { cancelled } = drainCut as { cancelled?: unknown };
+	return typeof cancelled === "number" && Number.isInteger(cancelled) && cancelled > 0
+		? cancelled
+		: undefined;
+}
+
 /** The verdict for a run, or `null` when it is not (yet) a run that can be judged. */
 export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 	const { status, errorRate } = input;
@@ -144,6 +181,11 @@ export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 	const budgets = readBudgets(input);
 	if (status === "failed" || budgets.state === "missed") {
 		return { outcome: "failed", reason: failedReason(budgets) };
+	}
+
+	const { drainCutCancelled } = input;
+	if (drainCutCancelled !== undefined && drainCutCancelled > 0) {
+		return { outcome: "not-judged", reason: drainCutReason(drainCutCancelled) };
 	}
 
 	const errors =
@@ -175,6 +217,7 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 		status,
 		thresholdValidation: report.thresholdValidation,
 		...failedChecksOf(reportAssertionsOf(report)),
+		drainCutCancelled: drainCutCancelledOf(report.summary),
 		// A run that sent nothing has no error rate; the report's 0 there is
 		// an empty denominator, not 0.0% measured.
 		errorRate: totalRequests && totalRequests > 0 ? errorRate : undefined,
@@ -235,5 +278,6 @@ export function rowOutcome(run: Run): RunJudgement | null {
 		verdict,
 		errorRate,
 		...failedChecksOf(rowAssertionsOf(run.resultSummary)),
+		drainCutCancelled: drainCutCancelledOf(run.resultSummary),
 	});
 }

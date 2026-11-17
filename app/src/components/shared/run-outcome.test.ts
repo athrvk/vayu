@@ -32,6 +32,11 @@
  * flat `assertionsFailed` instead of `rowAssertionsOf` and the row block cases
  * redden. The conformance replay below reddens on any reason worded apart from
  * the engine's.
+ *
+ * A drain cut (#3538): drop `drainCutCancelled` from `judgeRun` and the drain
+ * rows and the fixture's drain_stopped cases redden; move its branch above the
+ * failed/missed-budget one and the ordering rows redden; make `reportOutcome` or
+ * `rowOutcome` stop passing it and only that wrapper's drain test reddens.
  */
 
 import { readFileSync } from "node:fs";
@@ -532,6 +537,76 @@ describe("reportOutcome", () => {
 		);
 	});
 
+	// #3538: `summary.drainCut`, read for every report kind.
+	describe("a drain a Stop cut", () => {
+		const cut = (cancelled: unknown) =>
+			({
+				summary: {
+					totalRequests: 285,
+					successfulRequests: 285,
+					failedRequests: 0,
+					errorRate: 0,
+					drainCut: { cancelled },
+				},
+			}) as Partial<RunReport>;
+
+		it("leaves a run that met its budgets not judged, naming the unanswered requests", () => {
+			expect(reportOutcome(report({ thresholdValidation: THREE_MET, ...cut(15) }))).toEqual({
+				outcome: "not-judged",
+				reason: "15 requests were still unanswered when the drain was stopped",
+			});
+		});
+
+		it("is singular for one request", () => {
+			expect(reportOutcome(report(cut(1)))?.reason).toBe(
+				"1 request was still unanswered when the drain was stopped"
+			);
+		});
+
+		it("does not append the run's failed checks", () => {
+			const failedChecks = report({
+				thresholdValidation: THREE_MET,
+				assertions: { exact: { passed: 0, failed: 9 }, errored: 2 },
+				...cut(15),
+			} as Partial<RunReport>);
+			expect(reportOutcome(failedChecks)?.reason).toBe(
+				"15 requests were still unanswered when the drain was stopped"
+			);
+		});
+
+		it.each([
+			["a missed budget", { thresholdValidation: TWO_OF_FOUR_MISSED }, "failed"],
+			["a failed status", { status: "failed" }, "failed"],
+			["a stopped status", { status: "stopped" }, "not-judged"],
+		])("loses to %s", (_name, overrides, outcome) => {
+			const judged = reportOutcome(
+				report({ ...overrides, ...cut(15) } as Partial<RunReport>)
+			);
+			expect(judged?.outcome).toBe(outcome);
+			expect(judged?.reason).not.toMatch(/drain/);
+		});
+
+		it.each([
+			["zero", 0],
+			["negative", -3],
+			["fractional", 1.5],
+			["a string", "15"],
+			["null", null],
+		])("ignores a count that is %s", (_name, cancelled) => {
+			expect(
+				reportOutcome(report({ thresholdValidation: THREE_MET, ...cut(cancelled) }))
+			).toEqual({ outcome: "passed", reason: "All 3 budgets met" });
+		});
+
+		it("ignores a drainCut that is not a block", () => {
+			const malformed = report({
+				thresholdValidation: THREE_MET,
+				summary: { totalRequests: 100, errorRate: 0, drainCut: 15 },
+			} as unknown as Partial<RunReport>);
+			expect(reportOutcome(malformed)?.outcome).toBe("passed");
+		});
+	});
+
 	it("leaves a scenario report with no assertions block as it was", () => {
 		const without = report({
 			thresholdValidation: THREE_MET,
@@ -656,6 +731,54 @@ describe("rowOutcome", () => {
 		});
 	});
 
+	// #3538: the row's own `resultSummary.drainCut`, the same verdict as the report's.
+	describe("a drain a Stop cut", () => {
+		const cut = (cancelled: number) => ({ drainCut: { cancelled } });
+
+		it("leaves a row whose budgets passed not judged", () => {
+			expect(
+				rowOutcome(row({ resultSummary: { errorRate: 0, verdict: "passed", ...cut(15) } }))
+			).toEqual({
+				outcome: "not-judged",
+				reason: "15 requests were still unanswered when the drain was stopped",
+			});
+		});
+
+		it("is singular for one request, and replaces the row's failed assertions", () => {
+			expect(
+				rowOutcome(
+					row({
+						resultSummary: {
+							errorRate: 0,
+							verdict: "passed",
+							assertionsFailed: 4,
+							...cut(1),
+						},
+					})
+				)?.reason
+			).toBe("1 request was still unanswered when the drain was stopped");
+		});
+
+		it.each([
+			["a failed verdict", { status: "completed", verdict: "failed" }, "failed"],
+			["a failed status", { status: "failed", verdict: "passed" }, "failed"],
+			["a stopped status", { status: "stopped", verdict: "passed" }, "not-judged"],
+		])("loses to %s", (_name, { status, verdict }, outcome) => {
+			const judged = rowOutcome(
+				row({
+					status: status as Run["status"],
+					resultSummary: {
+						errorRate: 0,
+						verdict: verdict as "passed" | "failed",
+						...cut(15),
+					},
+				})
+			);
+			expect(judged?.outcome).toBe(outcome);
+			expect(judged?.reason).not.toMatch(/drain/);
+		});
+	});
+
 	it("says nothing for a load row with no summary, so the status glyph stays", () => {
 		expect(rowOutcome(row({}))).toBeNull();
 	});
@@ -725,6 +848,7 @@ describe("run verdict conformance", () => {
 	function reasonCodeOf({ outcome, reason }: RunJudgement): string | undefined {
 		if (reason === "Stopped before it finished") return "stopped";
 		if (reason === "The run failed before it finished") return "run_failed";
+		if (/ still unanswered when the drain was stopped$/.test(reason)) return "drain_stopped";
 		if (outcome === "failed") return "budgets_missed";
 		if (reason.startsWith("No budgets set")) return "no_budgets";
 		if (outcome === "passed") return "budgets_met";
@@ -746,7 +870,7 @@ describe("run verdict conformance", () => {
 	const FAILED_CHECK = /assertions? failed|elements? errored|teardown scripts? failed/;
 
 	it("replays every case of the fixture", () => {
-		expect(CASES.length).toBeGreaterThanOrEqual(22);
+		expect(CASES.length).toBeGreaterThanOrEqual(29);
 	});
 
 	it.each(CASES.map((c) => [c.name, c] as const))("%s", (_name, { report, expected }) => {

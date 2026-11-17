@@ -1207,7 +1207,12 @@ teardownFailed}`, #3537) with `assertionsPassed` and `assertionsFailed` summed
 over its two populations (#2820, #3458). The renderer reads the block (the row's
 verdict and its result line, through `rowAssertionsOf`), and an older engine's
 flat `assertionsFailed` as exact in its place; `assertionsPassed` has no
-renderer reader and is there for the MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
+renderer reader and is there for the MCP `list_runs` rows. A load run whose
+drain a Stop cut with requests outstanding also carries `drainCut` (`{cancelled}`,
+#3538; absent otherwise), the report's `summary.drainCut` too: the run stays
+`completed` and its verdict stays the stored budget one, and `rowOutcome` /
+`reportOutcome` read the cut as **Not judged** ahead of any met-budget reason
+(`run-outcome.ts`). A terminal capacity run's row also carries `capacity`
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
 when the search found no such level, #2930), which the row's result line reads
 in place of the run-average `rps`; an engine that predates it sends none.

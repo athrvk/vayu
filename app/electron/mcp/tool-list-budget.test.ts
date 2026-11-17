@@ -218,6 +218,11 @@
  * tools that take one, and the sentence saying to write them back as read on
  * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
  * went to 223,200 / 218,900.
+ *
+ * #3538's `drainCut` clause in `list_runs` and sentence in `get_run_report`
+ * (each paid once) took the rows to 150,995 / 148,399 / 223,446 / 219,179 B;
+ * the four caps went to 151,100 / 148,500 / 223,600 / 219,300 (one measurement
+ * plus a few hundred bytes).
  */
 
 import { describe, it, expect } from "vitest";
@@ -237,10 +242,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_200 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 218_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 151_100 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_500 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

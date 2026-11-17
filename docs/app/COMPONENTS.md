@@ -1673,7 +1673,7 @@ row's `verdict` (which does not), the error rate, and the run's failed checks
 (#3537) in four inputs, `failedChecksOf` over its assertion block:
 `assertionsFailed` (`exact.failed`, every response), `sampledAssertionsFailed`
 (`sampled.failed`, the replay), `elementsErrored` (`errored`) and
-`teardownsFailed` (`teardownFailed`). The block is the report's top-level
+`teardownsFailed` (`teardownFailed`), plus `drainCutCancelled` (#3538, below). The block is the report's top-level
 `assertions` (`reportAssertionsOf`) or the row's `resultSummary.assertions`
 (`rowAssertionsOf`), the same for a single-request and a scenario load run. An
 engine before the block is read as it was: a scenario report's
@@ -1701,6 +1701,20 @@ element row and skipped by the replay); a row's flat `assertionsFailed` as exact
   `engine/tests/fixtures/run-verdict-conformance.json` holds the state and these
   phrases to the export's verdict, replayed by `run-outcome.test.ts`. The
   success rate stays HTTP-based.
+
+  A run whose drain a Stop cut with requests still outstanding (#3538: the
+  report's `summary.drainCut.cancelled`, the row's `resultSummary.drainCut`, read
+  by `drainCutCancelledOf` as a positive integer only) is **completed** with
+  budgets its answered requests met, but a cancelled request is in no total,
+  rate or latency, and the ones the drain was still waiting on are the run's
+  slowest. It is **not-judged**, and the reason is the sentence alone, "15
+  requests were still unanswered when the drain was stopped" ("1 request was"),
+  with no errors or failed checks appended. It sits after the **failed** line
+  (a missed budget or a failed status still reads failed) and before every
+  met-budget and no-budget reason; a Stop before the drain is still "Stopped
+  before it finished". The history row's result line ends with "15 requests
+  unanswered", because its glyph alone would read not judged with no cause on the
+  row.
 - **`null`** - still pending or running, or no report: the banner renders
   nothing, because "Not judged" over a report that has not arrived is a claim
   about a run nobody has looked at.
