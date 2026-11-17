@@ -8,17 +8,38 @@
 /**
  * @file gates.ts
  * @brief The answers the MCP endpoint gives without the SDK: the wrong path,
- *        the wrong method, and a handler that threw past its own error paths.
+ *        the wrong method, and a handler that threw past its own error paths;
+ *        and the server that holds the port, with how it closes.
  *
  * Shared by `listener.ts`, which binds the port at launch and must refuse a
  * stray GET before it pays to load the SDK, and `http.ts`, which answers the
  * same way once the SDK is up. One definition, so the two servers cannot drift
- * into answering a probe of `/` differently.
+ * into answering a probe of `/` differently, or into closing differently.
  */
 
-import type http from "node:http";
+import http from "node:http";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
+
+/**
+ * An HTTP server for the MCP port, passing every request to @p onRequest.
+ * Node's `close()` closes only the connections idle at that moment; one still
+ * answering would then stay open for `keepAliveTimeout` after its answer and
+ * hold the close back (#3575). So once the server has stopped listening, each
+ * response that finishes ends its own connection, after the answer is flushed.
+ * Not `closeIdleConnections()` there: it destroys the socket, and lost the
+ * answer when probed. Not `closeAllConnections()` at close either: a request
+ * still arriving is answered (an oversized upload is drained for its 413).
+ */
+export function createMcpSocketServer(onRequest: http.RequestListener): http.Server {
+	const server = http.createServer(onRequest);
+	server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {
+		res.once("finish", () => {
+			if (!server.listening) req.socket.end();
+		});
+	});
+	return server;
+}
 
 function jsonRpcError(
 	res: http.ServerResponse,

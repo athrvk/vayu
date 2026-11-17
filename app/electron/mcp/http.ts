@@ -20,7 +20,7 @@
  *        requirement).
  */
 
-import http from "node:http";
+import type http from "node:http";
 import { randomUUID } from "node:crypto";
 import {
 	createMcpHandler,
@@ -40,7 +40,7 @@ import {
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost, createMcpSocketServer } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 import { InFlightCalls, type InFlightCall } from "./in-flight-calls.js";
 
@@ -64,7 +64,6 @@ export class McpHttpServer {
 	private readonly sessions = new ClientSessions();
 	private readonly inFlight: InFlightCalls;
 	private handler: McpHttpHandler;
-	private readonly serveMcp: ReturnType<typeof toNodeHandler>;
 	private readonly hostIsLoopback = localhostHostValidation();
 	private readonly originIsLoopback = localhostOriginValidation();
 
@@ -72,9 +71,6 @@ export class McpHttpServer {
 		this.opts = opts;
 		this.inFlight = opts.inFlightCalls ?? new InFlightCalls();
 		this.handler = this.createHandler();
-		this.serveMcp = toNodeHandler({
-			fetch: (request, options) => this.serve(request, options),
-		});
 	}
 
 	get url(): string {
@@ -88,7 +84,7 @@ export class McpHttpServer {
 	start(): Promise<void> {
 		if (this.server) return Promise.resolve();
 		return new Promise((resolve, reject) => {
-			const server = http.createServer((req, res) => {
+			const server = createMcpSocketServer((req, res) => {
 				void this.handleRequest(req, res);
 			});
 			server.on("error", reject);
@@ -108,13 +104,17 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * End every exchange a 2026-07-28 client holds open - a `subscriptions/listen`
-	 * stream lasts as long as the client likes - so a socket can close without
-	 * waiting on one. Everything else finishes as it would have: an upload still
-	 * arriving is drained and answered (see `readJsonBody`), not cut off. The
-	 * SDK's `close()` is final, so a fresh handler takes the next request.
+	 * End every exchange a socket's close would otherwise wait on: what a
+	 * 2026-07-28 client holds open (a `subscriptions/listen` stream lasts as long
+	 * as the client likes), and every 2025-era call in flight, whose connection
+	 * is dropped with no result and no error written, so its engine request is
+	 * aborted and its client's call fails at once (#3575). Everything else
+	 * finishes as it would have: an upload still arriving is drained and
+	 * answered (see `readJsonBody`), not cut off. The SDK's `close()` is final,
+	 * so a fresh handler takes the next request.
 	 */
 	async endStreams(): Promise<void> {
+		this.inFlight.abortAll();
 		const ending = this.handler;
 		this.handler = this.createHandler();
 		await ending.close();
@@ -182,13 +182,24 @@ export class McpHttpServer {
 			);
 			return;
 		}
-		await this.serveMcp(req, res, body);
+		// An adapter per request, so that a stop can drop this one's connection.
+		const serveMcp = toNodeHandler({
+			fetch: (request, options) => this.serve(request, options, () => res.destroy()),
+		});
+		await serveMcp(req, res, body);
 	}
 
-	/** The web-standard face `toNodeHandler` calls: one request, both eras. */
-	private async serve(request: Request, options?: McpHandlerRequestOptions): Promise<Response> {
+	/**
+	 * The web-standard face `toNodeHandler` calls: one request, both eras, on
+	 * a connection @p dropConnection closes.
+	 */
+	private async serve(
+		request: Request,
+		options: McpHandlerRequestOptions | undefined,
+		dropConnection: () => void
+	): Promise<Response> {
 		const message = soleMessageOf(options?.parsedBody);
-		const response = await this.fetchCancellable(request, options, message);
+		const response = await this.fetchCancellable(request, options, message, dropConnection);
 		const handshake = handshakeOf(message);
 		if (!handshake || !response.ok) return response;
 		// The stateless legacy leg sends no session id of its own and accepts any
@@ -212,12 +223,14 @@ export class McpHttpServer {
 	 * under a signal of the host's own, held in `inFlight` under the session id
 	 * and request id until its exchange ends, however it ends. The SDK's legacy
 	 * leg tears a request's server down when that signal aborts, which aborts
-	 * the tool's `mcpReq.signal` (#3574).
+	 * the tool's `mcpReq.signal` (#3574). A stop drops the connection instead
+	 * (`endStreams`), which reaches the handler as a disconnect does.
 	 */
 	private async fetchCancellable(
 		request: Request,
 		options: McpHandlerRequestOptions | undefined,
-		message: unknown
+		message: unknown,
+		dropConnection: () => void
 	): Promise<Response> {
 		// Absent on every 2026-07-28 exchange, which the SDK cancels itself; and
 		// without one a cancel cannot be matched, since every client counts its
@@ -229,7 +242,7 @@ export class McpHttpServer {
 		if (cancelled !== undefined) this.inFlight.cancel(sessionId, cancelled);
 		if (!isJSONRPCRequest(message)) return this.handler.fetch(request, options);
 
-		const call = this.inFlight.track(sessionId, message.id);
+		const call = this.inFlight.track(sessionId, message.id, dropConnection);
 		// The client's disconnect still reaches the handler through this signal.
 		const signal = AbortSignal.any([request.signal, call.signal]);
 		try {

@@ -25,10 +25,10 @@
  * install). Concurrent first requests share one load.
  */
 
-import http from "node:http";
+import type http from "node:http";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
+import { answerInternalError, answerUnlessMcpPost, createMcpSocketServer } from "./gates.js";
 
 export type McpRequestHandler = (
 	req: http.IncomingMessage,
@@ -64,7 +64,7 @@ export class McpListener {
 	start(): Promise<void> {
 		if (this.server) return Promise.resolve();
 		return new Promise((resolve, reject) => {
-			const server = http.createServer((req, res) => {
+			const server = createMcpSocketServer((req, res) => {
 				this.dispatch(req, res).catch((err) =>
 					answerInternalError(req, res, err, this.opts.log)
 				);

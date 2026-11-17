@@ -92,7 +92,8 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 	async function close(service: S | null, listener: McpLifecycleListener): Promise<void> {
 		try {
 			// The service first: it holds the exchanges a 2026-07-28 client keeps
-			// open, which the listener's close would otherwise wait on.
+			// open and the 2025-era calls in flight, which the listener's close
+			// would otherwise wait on.
 			await service?.stop();
 			await listener.stop();
 			deps.log("info", "MCP server stopped");

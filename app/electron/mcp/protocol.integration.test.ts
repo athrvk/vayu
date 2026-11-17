@@ -20,6 +20,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
 	Client,
 	InMemoryTransport,
+	ProtocolError,
 	StreamableHTTPClientTransport,
 	type ElicitResult,
 } from "@modelcontextprotocol/client";
@@ -28,6 +29,8 @@ import { createMcpServer } from "./server.js";
 import { VayuMcpService } from "./index.js";
 import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
 import { InFlightCalls } from "./in-flight-calls.js";
+import { McpListener } from "./listener.js";
+import { createMcpLifecycle, type McpLifecycle } from "./lifecycle.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
@@ -36,7 +39,7 @@ import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
 import { EngineRequestError, type EngineClient } from "./engine-client.js";
 import type { Logger } from "../log.js";
 import { freePort } from "./free-port.testkit.js";
-import { ASYNC_UTIL_TIMEOUT_MS } from "@/test/timeouts";
+import { ASYNC_UTIL_TIMEOUT_MS, TEST_TIMEOUT_MS } from "@/test/timeouts";
 
 const REPORT = {
 	summary: { totalRequests: 100, errorCount: 1 },
@@ -1932,6 +1935,173 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 			}),
 		});
 		expect(res.status).toBe(403);
+	});
+});
+
+/*
+ * MCP switched off or the app quitting, as `main.ts` does it: the lifecycle
+ * stops the service, then the listener that holds the port (#3575).
+ */
+describe("stopping the MCP server through its lifecycle", () => {
+	const HOST = "127.0.0.1";
+	const clients: Client[] = [];
+	let lifecycle: McpLifecycle<McpHttpServer> | null = null;
+	let rebound: McpListener | null = null;
+	const agents: http.Agent[] = [];
+
+	afterEach(async () => {
+		for (const c of clients.splice(0)) await c.close().catch(() => {});
+		for (const agent of agents.splice(0)) agent.destroy();
+		await lifecycle?.stop();
+		lifecycle = null;
+		await rebound?.stop();
+		rebound = null;
+		vi.restoreAllMocks();
+	});
+
+	/**
+	 * Every server bound from here on keeps an idle connection open for longer
+	 * than a test runs, so a stop that waited out a keep-alive connection
+	 * (Node's default is 5 s) is a hang the bound below catches, not a delay
+	 * under it.
+	 */
+	function keepIdleConnectionsOpen() {
+		const create = http.createServer;
+		vi.spyOn(http, "createServer").mockImplementation(((...args: Parameters<typeof create>) => {
+			const server = create(...args);
+			server.keepAliveTimeout = 10 * TEST_TIMEOUT_MS;
+			return server;
+		}) as typeof create);
+	}
+
+	async function serve(engine: EngineClient): Promise<number> {
+		const port = await freePort();
+		lifecycle = createMcpLifecycle({
+			isEnabled: () => true,
+			endpoint: { host: HOST, port },
+			makeListener: (loadHandler) => new McpListener({ host: HOST, port, loadHandler }),
+			loadServiceFactory: async () => () =>
+				new McpHttpServer({
+					host: HOST,
+					port,
+					info: { name: "vayu", version: "test" },
+					contextProvider: contextProvider(undefined, engine),
+				}),
+			log: () => {},
+		});
+		await lifecycle.start();
+		return port;
+	}
+
+	/** What @p settling settles to, or "still waiting" if it hangs. */
+	function within<T>(settling: Promise<T>): Promise<T | "still waiting"> {
+		// A healthy stop takes milliseconds; the bound only has to outlast a
+		// runner that stalls the event loop, not an exchange that never ends.
+		const waited = new Promise<"still waiting">((resolve) =>
+			setTimeout(() => resolve("still waiting"), ASYNC_UTIL_TIMEOUT_MS)
+		);
+		return Promise.race([settling, waited]);
+	}
+
+	const stopping = () => lifecycle!.stop().then(() => "stopped");
+
+	/*
+	 * The mutation checks, in `http.ts`: drop `abortAll()` from `endStreams()`
+	 * and the stop waits on the engine call; make the connection drop a no-op
+	 * and the client's call waits for an answer. Either loses its race.
+	 */
+	it("stops while a 2025-era call is in flight, dropping its connection", async () => {
+		keepIdleConnectionsOpen();
+		const hang = hangingEngineCall();
+		const port = await serve(
+			fakeClient({ health: (signal?: AbortSignal) => hang.call(signal) })
+		);
+		const c = new Client({ name: "legacy-e2e", version: "1.0.0" });
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		clients.push(c);
+		expect(c.getProtocolEra()).toBe("legacy");
+		const outcome = c.callTool({ name: "get_engine_health", arguments: {} }).then(
+			() => "answered",
+			(err: unknown) => err
+		);
+		await hang.started;
+
+		expect(await within(stopping())).toBe("stopped");
+		await hang.aborted;
+		// The client's own fetch fails; a JSON-RPC error the server wrote would
+		// arrive as a ProtocolError, and a stream ended cleanly would leave the
+		// call waiting for its timeout.
+		const err = await within(outcome);
+		expect(err).not.toBeInstanceOf(ProtocolError);
+		expect(err).toBeInstanceOf(TypeError);
+		expect(err).toHaveProperty("message", "fetch failed");
+
+		// The port is free the moment the stop resolves.
+		rebound = new McpListener({
+			host: HOST,
+			port,
+			loadHandler: () => Promise.reject(new Error("not served")),
+		});
+		await rebound.start();
+		expect(rebound.isRunning()).toBe(true);
+	});
+
+	/*
+	 * The mutation check: drop the connection end in `createMcpSocketServer`
+	 * (`gates.ts`) and the stop waits on the answered request's idle
+	 * connection, losing the race.
+	 */
+	it("still answers a request whose body is arriving when the stop is requested", async () => {
+		keepIdleConnectionsOpen();
+		const port = await serve(fakeClient());
+		const body = JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "raw", version: "1.0.0" },
+			},
+		});
+		const half = Math.floor(body.length / 2);
+		// Node's global agent closes an idle socket itself after 5 s.
+		const agent = new http.Agent({ keepAlive: true });
+		agents.push(agent);
+		let answered!: (answer: { status: number; text: string }) => void;
+		const answer = new Promise<{ status: number; text: string }>((r) => (answered = r));
+		const upload = http.request(
+			{
+				host: HOST,
+				port,
+				agent,
+				path: "/mcp",
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json, text/event-stream",
+					"Content-Length": Buffer.byteLength(body),
+				},
+			},
+			(res) => {
+				let text = "";
+				res.on("data", (d) => (text += d));
+				res.on("end", () => answered({ status: res.statusCode ?? 0, text }));
+			}
+		);
+		upload.on("error", (err) => answered({ status: 0, text: String(err) }));
+		upload.write(body.slice(0, half));
+		// The request has reached the service, which is now reading its body.
+		await vi.waitFor(() => expect(lifecycle!.service()).not.toBeNull(), {
+			timeout: ASYNC_UTIL_TIMEOUT_MS,
+		});
+
+		const stopped = within(stopping());
+		upload.end(body.slice(half));
+		const { status, text } = await answer;
+		expect(status).toBe(200);
+		expect(text).toMatch(/"serverInfo"/);
+		expect(await stopped).toBe("stopped");
 	});
 });
 

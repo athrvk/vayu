@@ -133,10 +133,19 @@ error while reading. That message is a fixed string too: the thrown error goes t
 the MCP log (`src: "mcp"`, with the request path), not to the client. The
 handler answers a failure to build the server the same way (500, `-32603`, its
 own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
-Stopping the server ends what a 2026-07-28 client holds open first - a
-`subscriptions/listen` stream lasts as long as the client likes, and the socket's
-close would wait on it - then closes the socket gracefully, so a request still
-arriving is answered rather than cut off. One owner, `lifecycle.ts`, orders
+Stopping the server (MCP switched off in Settings, or the app quitting) first
+ends every exchange the socket's close would otherwise wait on, on both legs.
+What a 2026-07-28 client holds open is ended by the SDK: a
+`subscriptions/listen` stream lasts as long as the client likes, and a call in
+flight is cut with an empty response. A 2025-era call in flight under the
+session id the host issued (an SDK client always sends it back) has its
+connection dropped (#3575): no result and no JSON-RPC error is written, the
+engine request behind it is aborted as a cancel would abort it, and an SDK
+client's call fails at once with a connection error rather than waiting out its
+own timeout. Then the socket closes gracefully, so a request still arriving is
+answered rather than cut off, and each connection still answering at that
+moment is closed once its answer is sent, not left open for its keep-alive
+timeout; the port is free when the stop resolves. One owner, `lifecycle.ts`, orders
 starts and stops (#3337): a stop that lands while the port is still binding
 waits for the bind and closes it, a re-enable binds only once the previous
 close has finished, and a service whose lazy load outlives its listener is
@@ -229,8 +238,8 @@ ends that request's exchange, which aborts the signal; the cancel still gets its
 `202`. A cancel with no session id, or another session's, reaches nothing: every
 client counts its request ids from 0, so the id alone names no one call. The
 handle is dropped when the exchange ends however it ends - an answer, a cancel,
-the client disconnecting - and at most 256 are held, the oldest dropped first
-(its call keeps running, no longer cancellable). The issued session id is the
+the client disconnecting, a stop - and at most 256 are held, the oldest dropped
+first (its call keeps running, no longer cancellable, and a stop waits for it). The issued session id is the
 whole binding: a loopback caller that presents it and a request id can abort
 that call.
 
@@ -3076,7 +3085,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
-| `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
+| `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names, and a stop drops every call's connection (`abortAll`). |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
