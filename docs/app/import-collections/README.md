@@ -191,7 +191,9 @@ on every build.
 A stored request carries its **enabled** query inside `url`; `params[]` mirrors
 it for the editor, disabled rows included (see
 [request-storage-design.md](../../request-storage-design.md)). `url` is what
-every execution path sends, and no engine path reads a query row of `params[]`.
+every execution path sends, and no send path reads a query row of `params[]`.
+An import item states `params`, so it is stored as the parser wrote it; only a
+write that leaves `params` out has its rows derived from `url` (issue #3551).
 A path row (`"in": "path"`, issue #1764) is the exception and never joins the
 query: composition writes its value into the URL's `:name` segment instead.
 

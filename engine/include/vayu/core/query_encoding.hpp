@@ -12,7 +12,8 @@
  * @brief How a query row's key and value are written into a URL, by Postman's
  *        own rule (issue #1771), how a query is read back into pairs, and how
  *        URL text is encoded by the component it lands in (issues #1773,
- *        #2465).
+ *        #2465), and how a URL's query is read into a request's Params rows
+ *        (issue #3551).
  *
  * Pinned to the app's copy (`request-builder/utils/query-encoding.ts`) by
  * `tests/fixtures/query-encoding-conformance.json`, read by
@@ -23,6 +24,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace vayu::core {
 
@@ -70,6 +73,41 @@ struct QueryPair {
  * a pair ends.
  */
 [[nodiscard]] std::vector<QueryPair> split_query_pairs (std::string_view query);
+
+/**
+ * @brief The pairs of @p url's query as the engine sends them.
+ *
+ * The URL is cut at its first `#` and then at the first `?` before it, and
+ * what lies between is read by `split_query_pairs`. Every whole `{{...}}`
+ * token is opaque (`mask_template_tokens`), so `{{a#b}}` opens no fragment and
+ * `{{p&q}}` splits no pair - the cut the app's `splitQuery` makes.
+ */
+[[nodiscard]] std::vector<QueryPair> url_query_pairs (std::string_view url);
+
+/**
+ * @brief @p params, a request's Params rows, with its query rows brought into
+ *        line with @p url's query (issue #3551).
+ *
+ * `url` is what the engine sends, so a write that states it and no rows makes
+ * the enabled query rows follow its pairs in URL order: an enabled row claims
+ * the first unclaimed pair whose key its own key writes, and keeps every other
+ * member; a pair no row claims becomes a fresh `{key, value, enabled}` row (and
+ * `valueless` for a bare `key`); an enabled row the URL no longer carries is
+ * dropped. A disabled row is invisible in a URL, so it is kept, after the
+ * nearest enabled row before it that survives, or leading. A path row
+ * (`"in": "path"`) is left alone. The app's `mergeParamsFromUrl` is the same
+ * rule for the query rows.
+ *
+ * A row's key and value are compared as the query join writes them, under any
+ * of the three `QueryEncoding`s, because a row does not record which built its
+ * URL: an OpenAPI import's `a b` agrees with `a%20b`. A claimed row that
+ * already writes its pair is kept as it is; one that does not takes the pair's
+ * text, as a fresh row would. When every query row agrees and keeps its place,
+ * @p params comes back unchanged, so a URL-only write that leaves the query
+ * alone rewrites nothing. A @p params that is not an array has no rows.
+ */
+[[nodiscard]] nlohmann::json
+reconcile_query_rows (const nlohmann::json& params, std::string_view url);
 
 /**
  * Which part of a URL a point in its text sits in, for the rule text written

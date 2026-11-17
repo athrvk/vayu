@@ -133,7 +133,9 @@ are things Vayu plans to catch up on:
   imports and runs; a team fluent in JMeter's full plugin ecosystem is still
   better served staying there.
 - **Your load model needs a load-run logic jump.** Think time and pacing
-  timers work under load now (`timer.think`, including a gaussian option;
+  timers work under load now (`timer.think`, including a gaussian option,
+  on every virtual-user mode; a constant-rate run sends on a schedule and
+  skips it with a warning;
   `timer.pacing`, including its shared-cadence case, `perUser: false` -
   one cadence held across every virtual user, not one per user; and
   `timer.throughput`, the analogue of JMeter's Constant Throughput Timer,

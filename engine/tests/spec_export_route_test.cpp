@@ -385,6 +385,41 @@ TEST_F (SpecExportRouteTest, ExportsAFreeFormCollectionAsASkeleton) {
     EXPECT_TRUE (document["paths"].contains ("/pets"));
 }
 
+/// The `name` of each `in: query` parameter @p operation declares, in order.
+std::vector<std::string> query_parameter_names (const json& operation) {
+    std::vector<std::string> names;
+    for (const json& parameter : operation.value ("parameters", json::array ())) {
+        if (parameter.value ("in", "") == "query") {
+            names.push_back (parameter.value ("name", ""));
+        }
+    }
+    return names;
+}
+
+// A request written with a query URL and no rows (every MCP request) exports
+// its query as parameters, and a URL-only edit moves them (#3551): the export
+// reads `params`, which the write derived from the URL. Mutation check: drop
+// the `reconcile_params_with_url` call from `apply_request_params_field` and
+// the export declares no query parameter.
+TEST_F (SpecExportRouteTest, ExportsAURLOnlyQueryAsQueryParameters) {
+    const std::string id = create_request (root_, "GET", "{{baseUrl}}/pets?limit=10&tag=a");
+
+    json document = json::parse (export_collection ()["text"].get<std::string> ());
+    EXPECT_EQ (query_parameter_names (document["paths"]["/pets"]["get"]),
+    (std::vector<std::string>{ "limit", "tag" }))
+    << document.dump ();
+    EXPECT_EQ (document["paths"]["/pets"]["get"]["parameters"][0]["example"], "10");
+
+    ASSERT_EQ (routes::update_request_response (
+               *db_, id, json{ { "url", "{{baseUrl}}/pets?tag=b&page=2" } })
+               .first,
+    200);
+    document = json::parse (export_collection ()["text"].get<std::string> ());
+    EXPECT_EQ (query_parameter_names (document["paths"]["/pets"]["get"]),
+    (std::vector<std::string>{ "tag", "page" }))
+    << document.dump ();
+}
+
 /**
  * The route-level round trip issue #1649 exists for: a request's `"fixed"`
  * mock target, exported as OpenAPI and imported into a fresh collection,

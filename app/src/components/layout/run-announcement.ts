@@ -83,20 +83,28 @@ export function dashboardAnnouncement(
 	return loadTestEnded(stage, next.phase.phase === "finished" ? next.phase.report : null);
 }
 
+/** What the scenario store holds about a run once it has ended. */
+export interface ScenarioEnding {
+	counts: OutcomeCounts;
+	thresholdValidation: RunReport["thresholdValidation"] | null;
+}
+
 /**
- * `endedCounts` is the store's step tally, read once the run has ended. A run
+ * `ended` is the store's step tally and budget block, read once the run has
+ * ended; the service writes the ending and the budgets in one `runEnded`, so a
+ * missed budget is in the one sentence rather than a second (#3539). A run
  * that started and ended between two renders is announced by its ending alone.
  */
 export function scenarioAnnouncement(
 	prev: ScenarioSnapshot,
 	next: ScenarioSnapshot,
-	endedCounts: OutcomeCounts | null
+	ended: ScenarioEnding | null
 ): string | null {
 	if (!next.runId) return null;
 	const name = RUN_TYPE_NAME.scenario;
 	const sameRun = prev.runId === next.runId;
-	if (next.endedAs && endedCounts && (!sameRun || next.endedAs !== prev.endedAs)) {
-		return `${name} ${next.endedAs}. ${stepOutcomeLine(endedCounts)}`;
+	if (next.endedAs && ended && (!sameRun || next.endedAs !== prev.endedAs)) {
+		return `${name} ${next.endedAs}. ${stepOutcomeLine(ended.counts, ended.thresholdValidation)}`;
 	}
 	if (!sameRun && next.isStreaming) return `${name} started`;
 	return null;

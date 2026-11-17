@@ -30,7 +30,7 @@
  */
 
 import { create } from "zustand";
-import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
+import type { RunReport, ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 import type { TerminalRunStatus } from "@/lib/run-status";
 import {
 	emptyStepSummary,
@@ -87,6 +87,13 @@ interface ScenarioRunState {
 	 * not ended. Read by `RunAnnouncer`; the run tab reads the stored record.
 	 */
 	endedAs: TerminalRunStatus | null;
+	/**
+	 * The stored report's budget block, written with {@link endedAs} in the
+	 * same `runEnded` so the one announcement of the ending can name a missed
+	 * budget (#3539). Null for a run that declared none, one still running, or
+	 * one whose report could not be read. Read by `RunAnnouncer`.
+	 */
+	thresholdValidation: RunReport["thresholdValidation"] | null;
 
 	/*
 	 * `startRun` is the one action that replaces the held run. Every other
@@ -106,8 +113,15 @@ interface ScenarioRunState {
 	 * its stored status for that once the stream says nothing more.
 	 */
 	streamLost: (runId: string, message: string) => void;
-	/** The run ended as `status`: records it and lowers {@link isStreaming} in one write. */
-	runEnded: (runId: string, status: TerminalRunStatus) => void;
+	/**
+	 * The run ended as `status`, judged against `thresholdValidation`: records
+	 * both and lowers {@link isStreaming} in one write.
+	 */
+	runEnded: (
+		runId: string,
+		status: TerminalRunStatus,
+		thresholdValidation?: RunReport["thresholdValidation"] | null
+	) => void;
 }
 
 export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
@@ -119,6 +133,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	isStreaming: false,
 	error: null,
 	endedAs: null,
+	thresholdValidation: null,
 
 	// An emptied list is the sharpest case of "not the list you were reading",
 	// so the epoch moves here too - without it, a second run's first batches
@@ -133,6 +148,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 			isStreaming: true,
 			error: null,
 			endedAs: null,
+			thresholdValidation: null,
 		})),
 
 	// A batch that changed nothing - every event in it a replay of a row
@@ -162,6 +178,8 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	streamLost: (runId, error) =>
 		set((state) => (state.runId === runId ? { error, isStreaming: false } : state)),
 
-	runEnded: (runId, endedAs) =>
-		set((state) => (state.runId === runId ? { endedAs, isStreaming: false } : state)),
+	runEnded: (runId, endedAs, thresholdValidation = null) =>
+		set((state) =>
+			state.runId === runId ? { endedAs, thresholdValidation, isStreaming: false } : state
+		),
 }));

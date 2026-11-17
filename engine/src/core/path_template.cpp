@@ -149,12 +149,7 @@ std::size_t template_token_end (std::string_view text, std::size_t at) {
     return std::string_view::npos;
 }
 
-namespace {
-
-/// @p text with every `{{...}}` token's characters replaced by `_`, the same
-/// length - so offsets into it are offsets into @p text, and a separator
-/// inside a token is no longer one.
-std::string mask_tokens (std::string_view text) {
+std::string mask_template_tokens (std::string_view text) {
     std::string out (text);
     for (std::size_t at = 0; at < out.size ();) {
         const std::size_t end = template_token_end (text, at);
@@ -169,11 +164,9 @@ std::string mask_tokens (std::string_view text) {
     return out;
 }
 
-} // namespace
-
 std::vector<PathVariableSegment> path_variable_segments (std::string_view url) {
     std::vector<PathVariableSegment> out;
-    const std::string masked = mask_tokens (url);
+    const std::string masked = mask_template_tokens (url);
     const std::string_view view (masked);
 
     // Leading whitespace is not part of the URL (`trimLeft`).

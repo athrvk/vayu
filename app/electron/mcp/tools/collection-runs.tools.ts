@@ -73,6 +73,18 @@ interface SmokeTarget {
 const FOLDER_SEPARATOR = " / ";
 
 /**
+ * The engine's own account of an exchange it could not complete (`status: 0`
+ * with an `errorCode` such as TIMEOUT or DNS_ERROR), as a row's `error`; absent
+ * when the answer names no code (#3552).
+ */
+function engineErrorOf(resp: Record<string, unknown>): { error: string } | undefined {
+	const code = typeof resp.errorCode === "string" ? resp.errorCode : "";
+	if (!code) return undefined;
+	const message = typeof resp.errorMessage === "string" ? resp.errorMessage : "";
+	return { error: message ? `${code}: ${message}` : code };
+}
+
+/**
  * What a smoke run sends: the collection's direct requests, or - `recursive` -
  * the whole tree in the order `run_collection` runs it.
  */
@@ -100,7 +112,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		retry: "never-blind",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a collection takes as long as its requests added together: past about 25 requests or on a slow API use run_collection (one stored run with a run id, `recursive` available, read with get_run_report), and keep this for a bounded pass/fail matrix. Runs 25 requests a call by default (`limit`, max 100): page with `offset` from the result's `next` (a collection edited between pages shifts the window). Reports progress when the client asks. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. An engine failure (timeout, DNS) rides `error` as `CODE: message`. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a collection takes as long as its requests added together: past about 25 requests or on a slow API use run_collection (one stored run with a run id, `recursive` available, read with get_run_report), and keep this for a bounded pass/fail matrix. Runs 25 requests a call by default (`limit`, max 100): page with `offset` from the result's `next` (a collection edited between pages shifts the window). Reports progress when the client asks. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -318,6 +330,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						url: shownUrl,
 						ok,
 						statusCode: code,
+						...engineErrorOf(resp),
 						...(schema ? { schema } : {}),
 						...(tests ? { tests } : {}),
 					});

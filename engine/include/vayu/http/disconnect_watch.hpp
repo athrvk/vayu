@@ -61,6 +61,14 @@ class DisconnectWatch {
             throw std::invalid_argument (
             "DisconnectWatch needs a connection probe");
         }
+        // A server already stopping raises the flag before the watch exists as
+        // far as the handler can tell: a send that reaches its late token
+        // fetch before the thread's first poll would otherwise read it down
+        // and start a transfer the stop should have refused. The connection
+        // is not read here; that stays the watch thread's.
+        if (stopping ()) {
+            cancel_.store (true, std::memory_order_release);
+        }
         thread_ = std::thread ([this] { watch (); });
     }
 

@@ -40,11 +40,16 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 editor, disabled entries included.**
 
 `url` is the wire truth: every execution path - design Send, collection scenario
-run, load run - sends its query verbatim, and no engine path reads the query
-rows of `params[]` (they are builder display state, see
-[engine/api-reference.md](engine/api-reference.md)). The Params table maintains
-the invariant on the app's side by rewriting `url` on every edit, keeping
-disabled rows in `params[]` only.
+run, load run - sends its query verbatim, and no send path reads the query
+rows of `params[]`. The Params table maintains the invariant on the app's side
+by rewriting `url` on every edit, keeping disabled rows in `params[]` only.
+The engine maintains it on every write (issue #3551): a `POST` or `PUT
+/requests` that states `url` and no `params` has its query rows reconciled with
+the URL by the same rule the URL bar uses (below), so a request written from a
+URL alone (an MCP or API caller) stores one row per pair, and the exports and
+the spec diff, which read `params[]`, see its query. Rows that already agree
+are left byte for byte; a write that states `params` stores them as sent (see
+[engine/api-reference.md](engine/api-reference.md#post-requests)).
 
 A **path row** (`"in": "path"`, issue #1764) is the one row the engine reads:
 `url` keeps the `:name` segment verbatim and composition writes the row's value
@@ -122,8 +127,9 @@ row is not given one until its value is edited: the Params tab shows an empty
 row for it (`displayPathRows`), so opening a request does not change it, and
 an import stores only the rows the source declares.
 
-A writer that stores the query *only* in `params[]` therefore stores a request
-that sends nothing of it. That was issue #590: every importer split the query
+A writer that stores the query *only* in `params[]` (stating `params` with no
+query in `url`) therefore stores a request that sends nothing of it; the
+write-time reconcile runs only for a write that leaves `params` out. That was issue #590: every importer split the query
 out of the URL, so an imported request dropped its query on every send until the
 user happened to edit the Params table once. Imports now restore the invariant at
 parse time (`parseImport`, see

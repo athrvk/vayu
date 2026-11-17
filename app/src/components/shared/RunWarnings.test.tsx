@@ -124,6 +124,25 @@ describe("RunWarnings", () => {
 		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
 	});
 
+	// Mutation check: drop the think_timer_skipped_open_loop title and this reads
+	// the generic "did not do everything it was asked", which this run did.
+	it("reports a skipped think timer under its own title", () => {
+		render(
+			<RunWarnings
+				warnings={[
+					{
+						code: "think_timer_skipped_open_loop",
+						message:
+							"A think timer does not apply to a constant-rate run: requests are sent on a schedule, not one after another",
+						timers: 1,
+					},
+				]}
+			/>
+		);
+		expect(screen.getByText("Think timer skipped on a constant-rate run")).toBeTruthy();
+		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
+	});
+
 	it("renders one callout per warning when a run carries both", () => {
 		render(
 			<RunWarnings

@@ -45,6 +45,7 @@ export function RunAnnouncer() {
 	const endedAs = useScenarioRunStore((s) => s.endedAs);
 	// Only once ended, so a streaming run's batches do not re-render this.
 	const endedCounts = useScenarioRunStore((s) => (s.endedAs ? s.summary.counts : null));
+	const endedBudgets = useScenarioRunStore((s) => (s.endedAs ? s.thresholdValidation : null));
 
 	const dashboard: DashboardSnapshot = { runId: dashboardRunId, phase };
 	const scenario: ScenarioSnapshot = { runId: scenarioRunId, isStreaming, endedAs };
@@ -62,7 +63,11 @@ export function RunAnnouncer() {
 	if (moved) {
 		const said = [
 			dashboardAnnouncement(heard.dashboard, dashboard),
-			scenarioAnnouncement(heard.scenario, scenario, endedCounts),
+			scenarioAnnouncement(
+				heard.scenario,
+				scenario,
+				endedCounts && { counts: endedCounts, thresholdValidation: endedBudgets }
+			),
 		]
 			.filter(Boolean)
 			.join(". ");

@@ -108,6 +108,11 @@ struct PathVariableSegment {
 /// keeps a separator inside a variable name from splitting the URL.
 [[nodiscard]] std::size_t template_token_end (std::string_view text, std::size_t at);
 
+/// @p text with every whole `{{...}}` token's characters replaced by `_`, the
+/// same length - so offsets into it are offsets into @p text, and a separator
+/// inside a token is no longer one. The app's `maskTokens`.
+[[nodiscard]] std::string mask_template_tokens (std::string_view text);
+
 /// @p text with every byte @p in_set answers true for written as `%XX`
 /// (uppercase hex) and every whole `{{...}}` token kept verbatim. The one
 /// encoder behind Postman's path-variable and query rules, which differ only
