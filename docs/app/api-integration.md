@@ -1403,7 +1403,12 @@ collection run's per-step progress.
 
 - **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
   topic, so the client connects immediately after `POST /runs` with no attach race - it replays
-  from offset 0 and tails to the `complete` event (even for sub-second runs).
+  from offset 0 and tails to the `complete` event (even for sub-second runs). The client records
+  the `lastEventId` of every `metrics`, `step`, `plan` and `monitor` frame (one id sequence; the
+  `complete` frame carries none), and a `connect` to the run it already holds frames for opens
+  `?lastEventId=<last id>` so the engine resumes after it (issue #3571). A first attach, or an
+  attach to another run, sends no parameter. A resume keeps the held metrics and start time; a
+  start resets them.
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   carrying the run's terminal `status` (issue #2140). Transient `CONNECTING` errors are left to
   the browser's built-in `EventSource` retry. `onClose` is called as `onClose(status, { frame })`
@@ -1415,8 +1420,8 @@ collection run's per-step progress.
   every 500 ms for up to 30 s, since the engine ended the stream and the row is about to settle,
   and finishes the run when it does; a dropped connection is not waited on, because the run may
   well still be going. Either way, a report still live at the end shows the dashboard's "Lost the
-  live metrics stream" callout and the user's Reconnect re-attaches (issue #1925). Nothing
-  reconnects on its own. `ScenarioRunService` ignores the second argument.
+  live metrics stream" callout and the user's Reconnect re-attaches, resuming after the last
+  frame held (issues #1925, #3571). Nothing reconnects on its own. `ScenarioRunService` ignores the second argument.
 - **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
   `complete` event, `error` handling
 - **One client, and a hand-off when it changes hands**: the client is a singleton, so a second
@@ -2532,9 +2537,10 @@ if (error.isTimeout) {
 
 ### SSE Errors
 
-The SSE client does **not** reconnect. `EventSource` cannot set `Last-Event-ID`
-on a fresh connection, so a manual reconnect would re-request the topic from
-offset 0 and duplicate every tick already plotted.
+The SSE client does **not** reconnect by itself. `EventSource` cannot set
+`Last-Event-ID` on a fresh connection, so the user's Reconnect passes the last
+frame it held as `?lastEventId=` instead; without it the engine would replay the
+topic from offset 0 and duplicate every tick already plotted (#3571).
 
 - Transient errors (`CONNECTING`): left to the browser's own retry, which does
   carry `Last-Event-ID`

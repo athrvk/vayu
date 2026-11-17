@@ -167,8 +167,10 @@ class LoadTestService {
 		// to register it (currentRunId, config, the streaming phase) and that
 		// already wipes the historical series, currentMetrics and the report.
 		// Nulling currentRunId would leave the dashboard showing no active test
-		// while one streams (replay-from-0 renders clean off startRun's wipe
-		// already). This only lifts a lost stream back to streaming (Reconnect).
+		// while one streams. A first attach replays from offset 0 and renders
+		// clean off that wipe; a Reconnect keeps the series it holds and the
+		// client resumes after it (#3571). This only lifts a lost stream back to
+		// streaming.
 		useDashboardStore.getState().streamOpened(runId);
 
 		// The OS indicator starts the moment the run does (#1362), claimed for

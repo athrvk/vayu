@@ -12264,9 +12264,10 @@ older than the retained window resumes from the oldest retained tick rather than
 replaying from 0, which means a client that was disconnected for longer than the
 window sees a gap, not a duplicate flood.
 
-The window also bounds the **replay-from-0** path below, which is the one the
-bundled app actually exercises: a dashboard attaching (or re-attaching) mid-run
-rebuilds its chart from the retained ring. That is why `liveReplayWindowMs` is
+The window also bounds the **replay-from-0** path, which the bundled app takes
+on a first attach: a dashboard attaching mid-run rebuilds its chart from the
+retained ring. Its Reconnect resumes with `?lastEventId=` instead and is sent
+only the frames after the last one it holds. That is why `liveReplayWindowMs` is
 the *same* setting as the app's live-chart window rather than a second one to
 keep aligned - the app's **Settings → Live Dashboard → Chart window** picker
 reads and writes this entry (`GET`/`POST /config`), so the span the engine
