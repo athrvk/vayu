@@ -48,6 +48,7 @@ import {
 	type HeaderRowArg,
 } from "./header-rows.js";
 import { storedHeadersInput } from "./input-schemas.js";
+import { refuseRedactedHeaders } from "./redacted-input.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const EXAMPLE_TOOLS: McpTool[] = [
@@ -121,7 +122,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
 			const requestId = requireStr(args, "requestId");
-			const payload = exampleWritePayload(args);
+			const payload = exampleWritePayload(args, ctx);
 			payload.name = requireStr(args, "name");
 			// Stated rather than left to the engine's default, which is `import`:
 			// this row was written by an agent, and the sync that replaces
@@ -172,6 +173,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			const exampleId = requireStr(args, "exampleId");
 			const fields = exampleFields(args);
 			const headers = args.headers === undefined ? undefined : readHeaderRows(args.headers);
+			if (headers !== undefined) refuseRedactedHeaders(ctx, headers, undefined);
 			if (Object.keys(fields).length === 0 && headers === undefined) {
 				return errorResult(
 					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").',

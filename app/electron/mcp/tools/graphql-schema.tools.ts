@@ -86,7 +86,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 		outputSchema: graphqlSdlSchema,
 		handler: async (args, ctx, signal) => {
 			const only = stringArray(args, "types");
-			const composeBody = schemaComposeBody(args, readAuthArg(args));
+			const composeBody = schemaComposeBody(args, readAuthArg(args, ctx), ctx);
 
 			// Gate on the composed URL before any traffic, as run_request does: the
 			// stored row or a {{variable}} decides the host, not the arguments.

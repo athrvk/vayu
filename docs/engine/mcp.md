@@ -2950,7 +2950,29 @@ any `...Withheld` marker on or in place of a `config` extra parameter row or
 list)
 is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
-authenticate with nothing. The server instructions state the withholding rules
+authenticate with nothing.
+
+The other marker, `<redacted>`, is what a run's record shows in place of a
+credential (above), and a request copied out of one carries it back. It is
+refused as `input` in the credential slots a read withholds, exactly as the
+`...Withheld` markers are, and only as the *whole* value
+(`isRedactionMarker` in `withhold.ts`; `tools/redacted-input.ts` holds the
+refusals): an auth member (`readAuthArg`, so every tool that takes `auth`), the
+value of a credential-named header (a row of `create_request`, `update_request`,
+`create_request_example` and `update_request_example`, or a `headers` override
+of `run_request`, `start_load_run` and `get_graphql_schema`; a row written back
+as `valueWithheld: true` has no value to judge), the value of a credential-named
+query or fragment parameter or the userinfo password of a request's `url`
+(`create_request`, `update_request`, or the `url` override of `run_request` and
+`start_load_run`), and the value of a variable that is, or is
+being written as, `secret: true` (every tool that writes a variable blob). The
+call is refused before anything is written or sent, and the error says to pass
+the real value or a `{{variable}}` reference. A request body, a description, a
+header or parameter no read withholds, and a value that only contains the text
+are stored as written, and with reveal on nothing is refused: the marker then
+stands for nothing.
+
+The server instructions state the withholding rules
 once, in full, in every session where reveal is off, beside the write gate's
 sentence and for the same reason, and the run and config resources repeat the
 rule for their own output. Each tool that carries one of the rows above gets
@@ -3047,7 +3069,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
-| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
+| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `redacted-input.ts` (the refusal of a credential slot written as `<redacted>`), `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`, including `progress` when the call carries a `progressToken`). |

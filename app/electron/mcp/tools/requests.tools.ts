@@ -53,6 +53,7 @@ import {
 	restoreWithheldHeaderRows,
 	type HeaderRowArg,
 } from "./header-rows.js";
+import { refuseRedactedHeaders, refuseRedactedUrl } from "./redacted-input.js";
 import { BINARY_FILE_ACCESS_TOKEN, GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const REQUEST_TOOLS: McpTool[] = [
@@ -109,10 +110,15 @@ export const REQUEST_TOOLS: McpTool[] = [
 				url: requireStr(args, "url"),
 				method: str(args, "method") ?? "GET",
 			};
-			const auth = readAuthArg(args);
+			const auth = readAuthArg(args, ctx);
 			if (auth) payload.auth = auth;
+			refuseRedactedUrl(ctx, payload.url, auth);
 			applyRequestSettings(args, payload);
-			if (args.headers !== undefined) payload.headers = newHeaderRows(args.headers);
+			if (args.headers !== undefined) {
+				const headers = newHeaderRows(args.headers);
+				refuseRedactedHeaders(ctx, headers, auth);
+				payload.headers = headers;
+			}
 			// The engine stores the body blob verbatim; the canonical shape keys
 			// off `mode` (not `type`), so a `type`-keyed body would not round-trip
 			// in the app. `bodyType` mirrors it into the denormalized column.
@@ -232,8 +238,10 @@ export const REQUEST_TOOLS: McpTool[] = [
 			// above: stated is written, absent is left alone. The block replaces
 			// the stored one wholesale because the engine stores it as one JSON
 			// column - there is no per-credential patch to offer.
-			const auth = readAuthArg(args);
+			const auth = readAuthArg(args, ctx);
 			if (auth) payload.auth = auth;
+			// Before any read of the stored row, so a refused call touches nothing.
+			refuseRedactedCredentials(ctx, payload.url, headers, auth);
 			applyRequestSettings(args, payload);
 			const mockResponseMode = args.mockResponseMode as
 				"first" | "fixed" | "random" | undefined;
@@ -353,6 +361,17 @@ export const REQUEST_TOOLS: McpTool[] = [
 	},
 ];
 
+/** Refuse the call's URL and header rows that hold the redaction marker as a credential (#3553). */
+function refuseRedactedCredentials(
+	ctx: ToolContext,
+	url: unknown,
+	headers: HeaderRowArg[] | undefined,
+	auth: unknown
+): void {
+	refuseRedactedUrl(ctx, url, auth);
+	if (headers !== undefined) refuseRedactedHeaders(ctx, headers, auth);
+}
+
 /** The `update_request` edits that may need the stored row to be written. */
 interface StoredEdits {
 	scripts: ReturnType<typeof readScriptEdits>;
@@ -387,6 +406,8 @@ async function writeRequestEdits(
 		subject: `request "${requestId}"`,
 		read: () => ctx.client.getRequest(requestId, signal),
 		merge: (stored) => {
+			// The stored auth can name a credential header or query key the call's own does not.
+			refuseRedactedCredentials(ctx, payload.url, edits.headers, payload.auth ?? stored.auth);
 			const merged = mergeRequestEdits(stored, payload, edits, reveal);
 			caveat = merged.caveat;
 			return merged.body;
