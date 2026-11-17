@@ -17,6 +17,7 @@ export { queryKeys } from "./keys";
 // Collections & Requests
 export {
 	useCollectionsQuery,
+	useCollectionName,
 	usePrefetchCollectionsAndRequests,
 	useRequestsQuery,
 	useMultipleCollectionRequests,

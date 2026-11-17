@@ -50,6 +50,7 @@ import { p99AtPeak } from "@/modules/dashboard/utils/p99AtPeak";
 import { buildRampOverlay } from "@/modules/dashboard/utils/metricsTransforms";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
+import { useCollectionName } from "@/queries/collections";
 import { useRunMonitorSeriesQuery, useRunQuery, useRunTimeSeriesQuery } from "@/queries/runs";
 import { useClientSettingsStore, useLayoutStore, useTabsStore } from "@/stores";
 import {
@@ -65,6 +66,29 @@ import {
 import { authRefreshNote } from "./auth-refresh-note";
 import type { SampleDestination, SampleFilter } from "./sample-filter";
 import { RUN_TYPE_NAME, type LoadTestDetailProps, type SeriesFailure } from "../types";
+
+/**
+ * What the request bar says a collection run was: the collection, its length
+ * and its concurrency, each only when known. `TruncatedText` measures one
+ * string, so the sentence is built rather than composed out of nodes it would
+ * have to flatten.
+ */
+function describeSequence(target: {
+	collectionName?: string;
+	stepCount?: number;
+	virtualUsers?: number;
+}): string {
+	const { collectionName, stepCount, virtualUsers } = target;
+	return [
+		collectionName,
+		stepCount === undefined
+			? undefined
+			: `${formatNumber(stepCount)} ${pluralize(stepCount, "step")} per iteration`,
+		virtualUsers === undefined ? undefined : formatConcurrency(virtualUsers),
+	]
+		.filter(Boolean)
+		.join(" - ");
+}
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// On the dashboard this report is the whole pane and its crumb is the pane's
@@ -86,28 +110,35 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
 
 	/*
-	 * A scenario load run: `type: "load"` (it publishes ticks and reports
+	 * A collection load run: `type: "load"` (it publishes ticks and reports
 	 * percentiles like any load run), but its target is a sequence, so it has no
 	 * single method or URL and reports its per-step numbers as a breakdown
 	 * rather than as `results[]` rows.
 	 *
-	 * Detected by the breakdown's presence rather than by a run-type flag,
-	 * because that is what this pane actually needs to render: a report without
-	 * one has nothing to put in the tab, whatever the run called itself.
+	 * Two questions, two answers. Whether the run *is* a collection run decides
+	 * the request bar, and the snapshot identity in `metadata.scenario` answers it
+	 * for every such run; a run the engine did not finish has no stored summary
+	 * and so no breakdown, and reading the breakdown for this would name it
+	 * "GET Unknown URL" (#3569). The breakdown's presence decides the Steps tab
+	 * alone, because that is what the tab renders. A report from an engine that
+	 * predates `metadata.scenario` is recognised by its breakdown instead.
 	 */
 	const scenarioSteps = report.scenario?.steps;
-	const isScenarioLoad = !!scenarioSteps?.length;
+	const hasStepBreakdown = !!scenarioSteps?.length;
+	const scenarioIdentity = report.metadata?.scenario;
+	const isCollectionRun = !!scenarioIdentity || hasStepBreakdown;
+	const collectionName = useCollectionName(scenarioIdentity?.collectionId);
 	// A selection the rendered tabs no longer include (Steps, when the report
 	// changes to a single-request run) would match no panel and leave the pane blank.
 	const availableTabs = new Set(["overview", "performance", "samples"]);
-	if (isScenarioLoad) availableTabs.add("steps");
+	if (hasStepBreakdown) availableTabs.add("steps");
 	const tab = availableTabs.has(activeTab) ? activeTab : "overview";
-	// `TruncatedText` measures one string, so the sentence is built rather than
-	// composed out of nodes it would have to flatten.
-	const virtualUsers = report.scenario?.virtualUsers;
-	const sequenceLabel = isScenarioLoad
-		? `${formatNumber(scenarioSteps.length)} ${pluralize(scenarioSteps.length, "step")} per iteration` +
-			(virtualUsers === undefined ? "" : ` - ${formatConcurrency(virtualUsers)}`)
+	const sequenceLabel = isCollectionRun
+		? describeSequence({
+				collectionName,
+				stepCount: scenarioSteps?.length || scenarioIdentity?.stepCount,
+				virtualUsers: report.scenario?.virtualUsers,
+			})
 		: "";
 
 	// Fetch the persisted time-series once, here, so both the Overview stat cards
@@ -269,7 +300,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			    its target is a sequence - so it says what the sequence was instead
 			    of claiming a "GET Unknown URL" that never existed. */}
 			<div className="flex items-center gap-3 bg-muted/50 p-3">
-				{isScenarioLoad ? (
+				{isCollectionRun ? (
 					<>
 						<SequenceBadge />
 						<TruncatedText className="text-sm text-foreground flex-1">
@@ -379,7 +410,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					    would get an empty tab, and the breakdown is the *only* place a
 					    scenario load run says what each step did - it stores no
 					    per-step results rows. */}
-							{isScenarioLoad && (
+							{hasStepBreakdown && (
 								<TabsTrigger value="steps">
 									<ListOrdered className="size-icon-sm" />
 									<TabLabel>Steps</TabLabel>
@@ -424,7 +455,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									<RunTrend requestId={compareRequestId} openRunId={runId} />
 								</TabsContent>
 
-								{isScenarioLoad && (
+								{hasStepBreakdown && (
 									<TabsContent value="steps" className="mt-0 space-y-4">
 										<ScenarioStepsTab
 											steps={scenarioSteps}

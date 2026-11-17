@@ -3194,6 +3194,14 @@ export interface RunReport {
 		endTime: number | null;
 		requestUrl?: string;
 		requestMethod?: string;
+		/**
+		 * A collection run's identity, from its snapshot, on every such report
+		 * finished or not (issue #3569) - the same shape as the list row's
+		 * `scenario`. Not the top-level {@link RunReport.scenario} breakdown, which
+		 * is built from the stored summary and is absent for a run the engine did
+		 * not finish. Absent on a single-request run.
+		 */
+		scenario?: RunScenarioSummary;
 		configuration?: {
 			mode?: string;
 			duration?: string;

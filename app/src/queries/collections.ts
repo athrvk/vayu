@@ -57,6 +57,18 @@ export function useCollectionsQuery() {
 }
 
 /**
+ * The name a run's collection goes by on a surface that has only its id.
+ *
+ * The id stands in once the collection is deleted, and while the tree is still
+ * loading, never a blank. `undefined` only when the run names no collection.
+ */
+export function useCollectionName(collectionId: string | undefined): string | undefined {
+	const { data: collections = [] } = useCollectionsQuery();
+	if (!collectionId) return undefined;
+	return collections.find((c) => c.id === collectionId)?.name ?? collectionId;
+}
+
+/**
  * Every collection's request list, keyed by collection id, from one
  * `GET /requests?fields=summary` - every collection the collections list names
  * has an entry, an empty one included.
