@@ -1849,6 +1849,37 @@ TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileCastNumbers"));
 }
 
+// A collection run the engine did not finish has no stored summary, so the
+// report's top-level `scenario` breakdown is absent; the snapshot's identity
+// (which collection, how many steps) must still reach `metadata.scenario`
+// (issue #3569), without the manifest's per-step array. A single-request run
+// has no manifest and so no `scenario`. Mutation check: drop the
+// `add_scenario` call in `build_report_metadata` and this reds.
+TEST (RunReportMetadataTest, NamesTheCollectionARunWithoutASummaryRan) {
+    vayu::db::Run run;
+    run.type            = vayu::RunType::Scenario;
+    run.status          = vayu::RunStatus::Failed;
+    run.config_snapshot = R"({"mode":"scenario","iterations":3,"scenario":{
+    "source":"collection","collectionId":"col_1","iterations":3,"recursive":true,
+    "steps":[{"name":"a","method":"GET","url":"https://x.test/a"},
+    {"name":"b","method":"POST","url":"https://x.test/b"}]}})";
+
+    const auto metadata = vayu::http::routes::build_report_metadata ("run_1", run);
+    ASSERT_TRUE (metadata.contains ("scenario")) << metadata.dump ();
+    const auto& scenario = metadata["scenario"];
+    EXPECT_EQ (scenario.value ("collectionId", ""), "col_1");
+    EXPECT_EQ (scenario.value ("iterations", 0), 3);
+    EXPECT_EQ (scenario.value ("recursive", false), true);
+    EXPECT_EQ (scenario.value ("stepCount", 0), 2);
+    EXPECT_FALSE (scenario.contains ("steps")) << scenario.dump ();
+
+    run.type            = vayu::RunType::Load;
+    run.config_snapshot = R"({"mode":"constant_rps","url":"https://x.test/a",
+    "method":"GET","rps":10})";
+    const auto single = vayu::http::routes::build_report_metadata ("run_2", run);
+    EXPECT_FALSE (single.contains ("scenario")) << single.dump ();
+}
+
 // ============================================================================
 // GET /runs/:id/report - the stored whole-run summary, and the sampled-results
 // fallback when it is malformed or absent

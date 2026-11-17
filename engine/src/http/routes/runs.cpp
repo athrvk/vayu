@@ -2006,6 +2006,13 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["configuration"] = config_obj;
         }
 
+        // Which collection ran, the snapshot's own identity (#3569): the
+        // top-level `scenario` breakdown exists only once a summary was
+        // stored, which a run the engine did not finish never gets. The same
+        // object the list row carries, so the two cannot name a run
+        // differently.
+        add_scenario (metadata, config);
+
         // The spec this run was planned against (issue #637), echoed from the
         // snapshot the scenario manifest stamped it into. Echoed rather than
         // re-read from the collection: the binding is free to have moved since,

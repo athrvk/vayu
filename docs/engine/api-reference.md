@@ -13017,6 +13017,16 @@ counts are not whole-run totals (those of whatever sampled `results` rows were s
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
 
+**`metadata.scenario`** appears on every collection run, finished or not (issue
+#3569), and on no other: `collectionId`, `iterations`, `recursive`, the data
+file's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` and `stepCount`,
+each omitted when the snapshot lacks it. It is the run's snapshot identity,
+echoed as the list row's `scenario` is, and not the top-level
+[`scenario`](#the-scenario-block-collection-runs) breakdown, which is built from
+the stored summary and is absent for a run the engine did not finish. A client
+that names a collection run reads it here; the manifest's per-step `steps` array
+is not repeated, only its count.
+
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
 echoed from the run's snapshot rather than re-read from the collection: a report
