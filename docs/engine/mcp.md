@@ -141,10 +141,13 @@ starts and stops (#3337): a stop that lands while the port is still binding
 waits for the bind and closes it, a re-enable binds only once the previous
 close has finished, and a service whose lazy load outlives its listener is
 never built. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
-take effect on the next request with no extra bookkeeping. The one thing carried
-from one request to the next is a 2025-era client's name from its handshake,
-under an `Mcp-Session-Id` the host issues - see
-[How History names the client](#how-history-names-the-client).
+take effect on the next request with no extra bookkeeping. Two things are
+carried from one request to the next, both for a 2025-era client and both
+under an `Mcp-Session-Id` the host issues: the client's name from its handshake
+(see [How History names the client](#how-history-names-the-client)), and an
+abort handle for each of its requests still in flight, so a cancel it sends
+reaches the call it names (see
+[What is live on each transport](#what-is-live-on-each-transport)).
 
 ### stdio CLI (Zed / headless / CI)
 
@@ -198,12 +201,12 @@ to what the list answers, not only to which tools it names: the Reveal secrets
 toggle lists the same tools and rewrites their descriptions (a tool's
 withholding pointer is dropped with it, #2441), so it fires the notice too.
 
-| Client | Confirmation question | `tools/list` changed |
-| ------ | --------------------- | -------------------- |
-| 2026-07-28, HTTP | ✅ asked in-band, the call retried with the answer | ✅ on a `subscriptions/listen` stream |
-| 2026-07-28, stdio | ✅ asked in-band | - (the CLI's config cannot change) |
-| 2025-era, stdio | ✅ the SDK puts the question to the client | - (as above) |
-| 2025-era, HTTP | `confirmed: true` flag | on the client's next `tools/list` |
+| Client | Confirmation question | `tools/list` changed | Cancellation |
+| ------ | --------------------- | -------------------- | ------------ |
+| 2026-07-28, HTTP | ✅ asked in-band, the call retried with the answer | ✅ on a `subscriptions/listen` stream | ✅ the SDK aborts the call when the client cancels |
+| 2026-07-28, stdio | ✅ asked in-band | - (the CLI's config cannot change) | ✅ `notifications/cancelled`, read by the SDK |
+| 2025-era, stdio | ✅ the SDK puts the question to the client | - (as above) | ✅ `notifications/cancelled`, read by the SDK |
+| 2025-era, HTTP | `confirmed: true` flag | on the client's next `tools/list` | ✅ `notifications/cancelled`, matched by the host |
 
 Only a client that declared elicitation is asked; any other client gets the
 `confirmed: true` flag instead, because asking one that cannot answer is a
@@ -211,8 +214,25 @@ protocol error the tool cannot recover from. A 2025-era client over HTTP gets
 the flag even when it declared elicitation: the server that would ask is gone
 when its request ends, so there is no one to carry the answer back to. Neither
 fallback is unsafe, only less direct. `tools.listChanged` is advertised only to
-the clients in the ✅ row, so no client waits for a notice that never comes. See
+the clients with a ✅ under `tools/list` changed, so no client waits for a
+notice that never comes. See
 [Design notes](#design-notes).
+
+A cancel ends the call on every leg, with the same effect: the call's
+`AbortSignal` fires and the engine request behind it is aborted (the
+Cancellation bullet under [Tools](#tools)). On 2025-era HTTP the cancel is its
+own `POST`, and the fresh server it reaches never saw the call, so the SDK
+alone would answer `202` and drop it. The host keeps an abort handle for
+each 2025-era request it is serving instead (`in-flight-calls.ts`, #3574), under the `Mcp-Session-Id` it
+issued and the JSON-RPC request id, and a `notifications/cancelled` naming both
+ends that request's exchange, which aborts the signal; the cancel still gets its
+`202`. A cancel with no session id, or another session's, reaches nothing: every
+client counts its request ids from 0, so the id alone names no one call. The
+handle is dropped when the exchange ends however it ends - an answer, a cancel,
+the client disconnecting - and at most 256 are held, the oldest dropped first
+(its call keeps running, no longer cancellable). The issued session id is the
+whole binding: a loopback caller that presents it and a request id can abort
+that call.
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
@@ -1157,7 +1177,10 @@ Notes:
   for it, or the connection closing), so the partial result is what a caller
   that reads the handler's return value gets - the tests, `dispatchTool` - and
   what the cancelled loop no longer does is walk the remaining rows, each a
-  failed fetch the instant after the abort.
+  failed fetch the instant after the abort. That holds on every transport: on
+  2025-era HTTP the host matches the client's cancel to the call and ends its
+  exchange, so no request goes out after the cancel there either (see
+  [What is live on each transport](#what-is-live-on-each-transport)).
   When the client sent a `progressToken` (#2451) the call reports
   `notifications/progress` - `0/total` before the first request, then one per
   row on every path (sent, skipped off the allowlist or failed to compose), with
@@ -1305,10 +1328,15 @@ Notes:
   start result and `list_webhook_inboxes`. It is CORS policy, which browser pages
   may read the canned answer, and does not touch who can connect, so it sits
   beside the loopback guarantee rather than loosening it.
-- **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
-  is threaded into the engine `fetch` for every tool call, resource read,
-  template list and prompt, so a client cancelling an in-flight call actually
-  aborts it rather than leaving the engine request running detached. The one
+- **Cancellation:** the `AbortSignal` the SDK hands each call fires when the
+  client cancels it, and it is threaded into the engine `fetch` for every tool
+  call, resource read, template list and prompt, so a client cancelling an
+  in-flight call actually aborts it rather than leaving the engine request
+  running detached. How the cancel reaches the signal differs by leg: over
+  stdio the SDK reads the `notifications/cancelled` itself, a 2026-07-28 HTTP
+  client's cancel is handled by the SDK itself, and on 2025-era HTTP the host matches the
+  cancel to the call by `Mcp-Session-Id` and request id (see
+  [What is live on each transport](#what-is-live-on-each-transport)). The one
   exception is the run-ID **completion** callback, which the SDK invokes as
   `(value, context?)` with no request context to carry a signal.
 - **Timeouts:** engine-local calls are bounded at 35s, but `POST /execute` waits
@@ -3015,6 +3043,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
+| `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
@@ -3291,7 +3320,9 @@ serves both eras from one factory, so a 2025-era client keeps what it had and a
 2026-07-28 client gets both (see
 [What is live on each transport](#what-is-live-on-each-transport)). A stateful
 2025-era server - real sessions, a GET stream each, servers mutated on toggle -
-is not built: it would grow the mechanism the spec retired.
+is not built: it would grow the mechanism the spec retired. What the host does
+keep for that leg is an abort handle per request in flight, so a cancel reaches
+a call whose server it cannot reach, and nothing else.
 
 ### The size of `tools/list` is budgeted
 

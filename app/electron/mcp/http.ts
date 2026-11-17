@@ -11,11 +11,13 @@
  *        SDK's `createMcpHandler`: a fresh server per request, for both
  *        protocol eras. A 2026-07-28 client is served per request by design;
  *        a 2025-era one statelessly, which keeps the safety config current on
- *        every call. The one thing carried across requests is a 2025-era
- *        client's handshake name, keyed by an `Mcp-Session-Id`
- *        (`client-sessions.ts`). The Host and Origin checks the handler does
- *        not make are made here, so a browser tab cannot reach the endpoint
- *        through DNS rebinding (MCP spec requirement).
+ *        every call. What a 2025-era client carries across requests is keyed
+ *        by the `Mcp-Session-Id` issued here: its handshake name
+ *        (`client-sessions.ts`), and an abort handle per request still in
+ *        flight, so its cancel reaches it (`in-flight-calls.ts`). The Host and
+ *        Origin checks the handler does not make are made here, so a browser
+ *        tab cannot reach the endpoint through DNS rebinding (MCP spec
+ *        requirement).
  */
 
 import http from "node:http";
@@ -23,9 +25,12 @@ import { randomUUID } from "node:crypto";
 import {
 	createMcpHandler,
 	isInitializeRequest,
+	isJSONRPCRequest,
+	isSpecType,
 	type McpHandlerRequestOptions,
 	type McpHttpHandler,
 	type McpServer,
+	type RequestId,
 } from "@modelcontextprotocol/server";
 import {
 	localhostHostValidation,
@@ -37,6 +42,7 @@ import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
 import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
+import { InFlightCalls, type InFlightCall } from "./in-flight-calls.js";
 
 export interface McpHttpServerOptions {
 	host: string;
@@ -45,6 +51,8 @@ export interface McpHttpServerOptions {
 	contextProvider: ToolContextProvider;
 	/** Where the cause of a 500 goes; the wire carries none of it. */
 	log?: Logger;
+	/** The 2025-era requests a cancel can reach; a test passes its own to read it. */
+	inFlightCalls?: InFlightCalls;
 }
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -54,6 +62,7 @@ export class McpHttpServer {
 	private server: http.Server | null = null;
 	private readonly opts: McpHttpServerOptions;
 	private readonly sessions = new ClientSessions();
+	private readonly inFlight: InFlightCalls;
 	private handler: McpHttpHandler;
 	private readonly serveMcp: ReturnType<typeof toNodeHandler>;
 	private readonly hostIsLoopback = localhostHostValidation();
@@ -61,6 +70,7 @@ export class McpHttpServer {
 
 	constructor(opts: McpHttpServerOptions) {
 		this.opts = opts;
+		this.inFlight = opts.inFlightCalls ?? new InFlightCalls();
 		this.handler = this.createHandler();
 		this.serveMcp = toNodeHandler({
 			fetch: (request, options) => this.serve(request, options),
@@ -177,8 +187,9 @@ export class McpHttpServer {
 
 	/** The web-standard face `toNodeHandler` calls: one request, both eras. */
 	private async serve(request: Request, options?: McpHandlerRequestOptions): Promise<Response> {
-		const response = await this.handler.fetch(request, options);
-		const handshake = handshakeOf(options?.parsedBody);
+		const message = soleMessageOf(options?.parsedBody);
+		const response = await this.fetchCancellable(request, options, message);
+		const handshake = handshakeOf(message);
 		if (!handshake || !response.ok) return response;
 		// The stateless legacy leg sends no session id of its own and accepts any
 		// it is sent, so the host issues one and records the handshake's name
@@ -193,6 +204,41 @@ export class McpHttpServer {
 			statusText: response.statusText,
 			headers,
 		});
+	}
+
+	/**
+	 * Hand the request to the handler, wiring a 2025-era client's
+	 * `notifications/cancelled` to the request it names: each request is served
+	 * under a signal of the host's own, held in `inFlight` under the session id
+	 * and request id until its exchange ends, however it ends. The SDK's legacy
+	 * leg tears a request's server down when that signal aborts, which aborts
+	 * the tool's `mcpReq.signal` (#3574).
+	 */
+	private async fetchCancellable(
+		request: Request,
+		options: McpHandlerRequestOptions | undefined,
+		message: unknown
+	): Promise<Response> {
+		// Absent on every 2026-07-28 exchange, which the SDK cancels itself; and
+		// without one a cancel cannot be matched, since every client counts its
+		// request ids from 0.
+		const sessionId = request.headers.get("mcp-session-id") ?? undefined;
+		if (sessionId === undefined) return this.handler.fetch(request, options);
+		const cancelled = cancelledRequestIdOf(message);
+		// The cancel itself still goes on, for the 202 the client is owed.
+		if (cancelled !== undefined) this.inFlight.cancel(sessionId, cancelled);
+		if (!isJSONRPCRequest(message)) return this.handler.fetch(request, options);
+
+		const call = this.inFlight.track(sessionId, message.id);
+		// The client's disconnect still reaches the handler through this signal.
+		const signal = AbortSignal.any([request.signal, call.signal]);
+		try {
+			const response = await this.handler.fetch(new Request(request, { signal }), options);
+			return releasedAtEnd(response, call);
+		} catch (err) {
+			call.release();
+			throw err;
+		}
 	}
 
 	/** The handler's factory: a server for one request of era @p era. */
@@ -218,18 +264,68 @@ export class McpHttpServer {
 }
 
 /**
- * The client named by a body that is an `initialize`, alone or as the
- * one-message batch the SDK also accepts. Read from the body rather than from a
- * server: the one that answered is gone with its request, and the stateless leg
- * runs no server that sees the `initialized` notification and the handshake
- * both. `isInitializeRequest` is the SDK's own schema check of the handshake, so
- * a name it passes is one the SDK accepted.
+ * The one message a body carries, alone or as the one-message batch the SDK
+ * also accepts; undefined for a longer batch.
  */
-function handshakeOf(body: unknown): { clientName: string } | undefined {
-	const message = Array.isArray(body) && body.length === 1 ? body[0] : body;
+function soleMessageOf(body: unknown): unknown {
+	if (!Array.isArray(body)) return body;
+	return body.length === 1 ? body[0] : undefined;
+}
+
+/**
+ * The client named by a message that is an `initialize`. Read from the body
+ * rather than from a server: the one that answered is gone with its request,
+ * and the stateless leg runs no server that sees the `initialized`
+ * notification and the handshake both. `isInitializeRequest` is the SDK's own
+ * schema check of the handshake, so a name it passes is one the SDK accepted.
+ */
+function handshakeOf(message: unknown): { clientName: string } | undefined {
 	return isInitializeRequest(message)
 		? { clientName: message.params.clientInfo.name }
 		: undefined;
+}
+
+/** The request id a `notifications/cancelled` message names, by the SDK's own schema. */
+function cancelledRequestIdOf(message: unknown): RequestId | undefined {
+	return isSpecType.CancelledNotification(message) ? message.params.requestId : undefined;
+}
+
+/**
+ * @p response with its body passed through on demand, releasing @p call when
+ * the body ends, fails or is cancelled. Nothing is read ahead of the reader:
+ * the handler tears its server down when its own stream ends.
+ */
+function releasedAtEnd(response: Response, call: InFlightCall): Response {
+	if (response.body === null) {
+		call.release();
+		return response;
+	}
+	const reader = response.body.getReader();
+	const body = new ReadableStream<Uint8Array>(
+		{
+			async pull(controller) {
+				try {
+					const { done, value } = await reader.read();
+					if (!done) return controller.enqueue(value);
+					call.release();
+					controller.close();
+				} catch (err) {
+					call.release();
+					controller.error(err);
+				}
+			},
+			cancel(reason) {
+				call.release();
+				return reader.cancel(reason);
+			},
+		},
+		{ highWaterMark: 0 }
+	);
+	return new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
 }
 
 /**

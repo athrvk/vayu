@@ -27,6 +27,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createMcpServer } from "./server.js";
 import { VayuMcpService } from "./index.js";
 import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
+import { InFlightCalls } from "./in-flight-calls.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
@@ -35,6 +36,7 @@ import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
 import { EngineRequestError, type EngineClient } from "./engine-client.js";
 import type { Logger } from "../log.js";
 import { freePort } from "./free-port.testkit.js";
+import { ASYNC_UTIL_TIMEOUT_MS } from "@/test/timeouts";
 
 const REPORT = {
 	summary: { totalRequests: 100, errorCount: 1 },
@@ -1345,6 +1347,7 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 	const HOST = "127.0.0.1";
 	let httpServer: McpHttpServer | null = null;
 	let client: Client | null = null;
+	let inFlight = new InFlightCalls();
 
 	afterEach(async () => {
 		await client?.close().catch(() => {});
@@ -1355,11 +1358,13 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 
 	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
 		const port = await freePort();
+		inFlight = new InFlightCalls();
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port,
 			info: { name: "vayu", version: "test" },
 			contextProvider: contextProvider(opts.safety, opts.client),
+			inFlightCalls: inFlight,
 		});
 		await httpServer.start();
 		return port;
@@ -1492,6 +1497,148 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 			{ kind: "mcp", client: "raw-client" },
 		]);
 	});
+
+	/*
+	 * Every POST reaches a fresh server, so a 2025-era client's cancel lands on
+	 * one that never saw the call it names; the host holds the call's abort
+	 * handle instead, under the session id it issued and the request id (#3574).
+	 * The mutation check is the `inFlight.cancel` in `http.ts`: drop it and
+	 * `hang.aborted` never settles in the cancelling tests below.
+	 */
+	describe("a 2025-era client's cancel", () => {
+		/** Shake hands as a raw client and answer the session id the host issued. */
+		async function openSession(port: number): Promise<string> {
+			const init = await post(port, {
+				jsonrpc: "2.0",
+				id: 0,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "raw-client", version: "1.0.0" },
+				},
+			});
+			const issued = init.headers.get("mcp-session-id");
+			expect(issued).not.toBeNull();
+			return issued!;
+		}
+
+		const healthCall = (id: string | number) => ({
+			jsonrpc: "2.0",
+			id,
+			method: "tools/call",
+			params: { name: "get_engine_health", arguments: {} },
+		});
+
+		const cancelOf = (requestId: string | number) => ({
+			jsonrpc: "2.0",
+			method: "notifications/cancelled",
+			params: { requestId, reason: "test" },
+		});
+
+		function hangingHealth() {
+			const hang = hangingEngineCall();
+			const engine = fakeClient({ health: (signal?: AbortSignal) => hang.call(signal) });
+			return { hang, engine };
+		}
+
+		it("aborts the call an SDK client cancels", async () => {
+			const { hang, engine } = hangingHealth();
+			const c = await connect({ client: engine });
+			expect(c.getProtocolEra()).toBe("legacy");
+			const controller = new AbortController();
+			const call = c.callTool(
+				{ name: "get_engine_health", arguments: {} },
+				{ signal: controller.signal }
+			);
+			void call.catch(() => {});
+			await hang.started;
+			expect(inFlight.size).toBe(1);
+			controller.abort();
+			await hang.aborted;
+			expect(hang.handedSignal()?.aborted).toBe(true);
+			await expect(call).rejects.toThrow();
+			expect(inFlight.size).toBe(0);
+		});
+
+		it("aborts a raw call by session id and request id, and ends its stream without a result", async () => {
+			const { hang, engine } = hangingHealth();
+			const port = await host({ client: engine });
+			const session = await openSession(port);
+			// Not awaited: the host flushes the stream's headers with its first event.
+			const call = post(port, healthCall(77), { "mcp-session-id": session });
+			await hang.started;
+			const cancel = await post(port, cancelOf(77), { "mcp-session-id": session });
+			expect(cancel.status).toBe(202);
+			await hang.aborted;
+			const answered = await call;
+			expect(answered.status).toBe(200);
+			expect(await answered.text()).not.toMatch(/"result"/);
+			expect(inFlight.size).toBe(0);
+		});
+
+		it("is matched only within the session that sent the call", async () => {
+			const { hang, engine } = hangingHealth();
+			const port = await host({ client: engine });
+			const session = await openSession(port);
+			const otherSession = await openSession(port);
+			const call = post(port, healthCall(77), { "mcp-session-id": session });
+			await hang.started;
+
+			// Each cancel is answered only after the host has looked it up, so a
+			// match would already have removed the entry by the time it returns.
+			const strays: Array<Record<string, string>> = [{ "mcp-session-id": otherSession }, {}];
+			for (const headers of strays) {
+				expect((await post(port, cancelOf(77), headers)).status).toBe(202);
+			}
+			// A string id is a different request from the number the call used.
+			await post(port, cancelOf("77"), { "mcp-session-id": session });
+			expect(inFlight.size).toBe(1);
+			expect(hang.handedSignal()?.aborted).toBe(false);
+
+			// As the one-message batch the SDK also accepts.
+			const batched = await post(port, [cancelOf(77)], { "mcp-session-id": session });
+			expect(batched.status).toBe(202);
+			await hang.aborted;
+			await (await call).text();
+			expect(inFlight.size).toBe(0);
+		});
+
+		it("forgets a call that completes", async () => {
+			const c = await connect();
+			await c.callTool({ name: "get_engine_health", arguments: {} });
+			// The result reaches the client a moment before its stream ends.
+			await vi.waitFor(() => expect(inFlight.size).toBe(0), {
+				timeout: ASYNC_UTIL_TIMEOUT_MS,
+			});
+		});
+
+		it("forgets a call whose client disconnects", async () => {
+			const { hang, engine } = hangingHealth();
+			const port = await host({ client: engine });
+			const session = await openSession(port);
+			const call = http.request({
+				host: HOST,
+				port,
+				path: "/mcp",
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json, text/event-stream",
+					"mcp-session-id": session,
+				},
+			});
+			call.on("error", () => {});
+			call.end(JSON.stringify(healthCall(5)));
+			await hang.started;
+			expect(inFlight.size).toBe(1);
+			call.destroy();
+			await hang.aborted;
+			await vi.waitFor(() => expect(inFlight.size).toBe(0), {
+				timeout: ASYNC_UTIL_TIMEOUT_MS,
+			});
+		});
+	});
 });
 
 /*
@@ -1504,6 +1651,7 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 	let httpServer: McpHttpServer | null = null;
 	let service: VayuMcpService | null = null;
 	const clients: Client[] = [];
+	let inFlight = new InFlightCalls();
 
 	afterEach(async () => {
 		for (const c of clients.splice(0)) await c.close().catch(() => {});
@@ -1515,11 +1663,13 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 
 	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
 		const port = await freePort();
+		inFlight = new InFlightCalls();
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port,
 			info: { name: "vayu", version: "test" },
 			contextProvider: contextProvider(opts.safety, opts.client),
+			inFlightCalls: inFlight,
 		});
 		await httpServer.start();
 		return port;
@@ -1736,6 +1886,29 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		expect(await Promise.race([stopped, waited])).toBe("stopped");
 		httpServer = null;
 		expect(await subscription.closed).not.toBe("local");
+	});
+
+	/*
+	 * The SDK ends a 2026-07-28 call when its client cancels; the host's own
+	 * registry is for the 2025-era leg and holds nothing of this one.
+	 */
+	it("cancels a 2026-07-28 call without the host's in-flight registry", async () => {
+		const hang = hangingEngineCall();
+		const port = await host({
+			client: fakeClient({ health: (signal?: AbortSignal) => hang.call(signal) }),
+		});
+		const c = await connectTo(port, { modern: true });
+		const controller = new AbortController();
+		const call = c.callTool(
+			{ name: "get_engine_health", arguments: {} },
+			{ signal: controller.signal }
+		);
+		void call.catch(() => {});
+		await hang.started;
+		expect(inFlight.size).toBe(0);
+		controller.abort();
+		await hang.aborted;
+		expect(inFlight.size).toBe(0);
 	});
 
 	it("refuses a request a browser page sent from another origin", async () => {
