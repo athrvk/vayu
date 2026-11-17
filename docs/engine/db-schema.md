@@ -797,7 +797,12 @@ Stores individual HTTP request definitions.
 [{"key":"Content-Type","value":"application/json","enabled":true,"description":""}]
 ```
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
-Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
+Duplicate keys are allowed. A query row may carry `"valueless": true` for a
+bare `key` with no `=` (issue #1772). The enabled query rows of `params` follow
+`url`: a write that states `url` and no `params` reconciles them with the URL's
+query, and rewrites the column only when that changes a row (issue #3551, see
+[`POST /requests`](api-reference.md#post-requests)); no startup pass touches
+rows stored before it. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issues-1487-1491)
 disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
 An optional `source` key (`"body-mode"` | `"stream"` | `"legacy-default"`) marks a row

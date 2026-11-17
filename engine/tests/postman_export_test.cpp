@@ -418,7 +418,7 @@ TEST (PostmanExport, ARowIsRecognisedByTheTextItsJoinWritesIntoTheUrl) {
 // A `{{variable}}` holding a separator is one value, as the part-splitting of
 // the URL keeps it; the placeholder after the host's variable is the query's.
 // Mutation check: split `raw` in `url_query_pairs` without
-// `protect_variables`, or start `next` at zero.
+// `mask_template_tokens`.
 TEST (PostmanExport, AVariableHoldingASeparatorStaysInOnePair) {
     EXPECT_EQ (exported_query ("{{base.url}}/x?a={{p&q}}&{{k=v}}=1&b=2#f?z=1"),
     R"([{"key":"a","value":"{{p&q}}"},{"key":"{{k=v}}","value":"1"},{"key":"b","value":"2"}])");

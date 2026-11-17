@@ -2119,7 +2119,8 @@ the null-vs-absent rule.
   "name": "Get Users",               // Required, no default (null is a 400)
   "method": "GET",                   // Required: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
   "url": "{{baseUrl}}/users",        // Required, no default (null is a 400)
-  "params": [],                      // Optional, array of {key, value, enabled, in?} - see below
+  "params": [],                      // Optional, array of {key, value, enabled, in?, valueless?};
+                                      // derived from `url`'s query when absent - see below
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
@@ -2151,19 +2152,41 @@ the null-vs-absent rule.
 }
 ```
 
-**A query row in `params` is builder display state, not the query the engine
-sends.** The engine stores it and hands it back verbatim; nothing in the
-request-composition path reads a query row. `url` is the wire truth, so a query
-parameter that must reach the wire belongs **in `url`** - the app's Params table
-keeps the two in step by rewriting `url` on every edit, and stores disabled rows
-in `params` only. A raw API, MCP or import caller that puts the query only in
-`params` stores a request that sends none of it (issue #590). The
-[Postman export](#post-exportpostman) writes the query the URL states as
-`url.query[]` even when `params` holds no row for it (issue #3242); a pair in
-`params` only is written there too, but it is still not sent. The other
-direction is the app's to bridge: a request stored with its query only in `url`
-(`params` absent or `[]`) opens in the Params table with those pairs as rows,
-merged with any stored rows, and is not marked unsaved by it (issue #3491).
+**A query row in `params` describes the query in `url`; `url` is the wire
+truth.** Nothing in the request-composition path reads a query row, so a query
+parameter that must reach the wire belongs **in `url`**: a caller that puts the
+query only in `params` stores a request that sends none of it (issue #590).
+The write keeps the rows in step with the URL (issue #3551). A `POST` or `PUT`
+that states `url` and **no** `params` has its query rows reconciled with the
+URL's query, the rule the app's Params table follows on every URL keystroke
+(`mergeParamsFromUrl`):
+
+- each enabled row claims the first unclaimed pair whose key its own key
+  writes (under any of the query joins, so an OpenAPI import's `a b` claims
+  `a%20b`), rows in stored order, and the merged rows follow the URL's pair
+  order;
+- a claimed row keeps every other member (`description`, `source`, ...); one
+  that no longer writes its pair takes the pair's key and value, and
+  `valueless` follows the pair (`true` for a bare `key` with no `=`);
+- a pair no row claims becomes a fresh `{key, value, enabled: true}` row
+  (plus `valueless: true` for a bare `key`), and an enabled row the URL no
+  longer carries is dropped;
+- a disabled row is kept, after the nearest enabled row before it that the URL
+  still carries, or first when there is none; path rows are left untouched.
+
+Rows that already state the URL's query are left byte for byte, so a host or
+path edit sent as `url` alone rewrites nothing. A body that states `params`
+stores them as sent, whatever `url` says, and a body that states neither keeps
+the stored rows. `POST /import/apply` and `POST /specs/sync` reach the same
+applier: a sync update that applies a request's `url` without its `params`
+reconciles the kept rows with the new URL's query. So a request created from a URL alone (every MCP request)
+reads back with one row per query pair, and the
+[OpenAPI export](#post-specsexport), the [spec diff](#post-specsdiff) and the
+[Postman export](#post-exportpostman) see its query. Rows stored before the
+rule are not rewritten until their next URL-only write, so the Postman export
+still writes a URL pair no enabled row states into `url.query[]` (issue
+#3242), and the app still merges a URL-only query into the Params table when
+it opens one, without marking the tab unsaved (issue #3491).
 
 **A path row is the one row composition reads** (issue #1764). A row carrying
 `"in": "path"` is a Postman-style path variable: `key` is the name without its
@@ -3561,7 +3584,10 @@ is neither what the new document produces nor what the **bound** one did - the
 only evidence that a person put it there, and the flag an apply may not overwrite
 silently. `previousUnknown` says the bound document does not declare this
 operation, so no such claim can be made about it at all, and every `userTouched`
-on that request is `false`.
+on that request is `false`. A query typed into the URL is a Params change too:
+the write that stored the URL derived the query rows from it (see
+[`POST /requests`](#post-requests), issue #3551), so `params` is flagged beside
+`url`.
 
 **Response examples are deliberately not compared.** The rule that governs them
 (`origin="import"` is replaced, `origin="user"` survives) only means anything at
@@ -3734,7 +3760,8 @@ paragraphs describe. `full` writes everything the collection holds, into the
 document's own dialect (Swagger 2.0 included): each request's name (as
 `summary`, only where it differs from the name an import would read) and
 description, a parameter for every Params or Headers row the operation does not
-declare (2.0's `type` and `x-example` in a 2.0 document), the body as the media
+declare (a query stated only in the URL included, since the write derives its
+rows, issue #3551; 2.0's `type` and `x-example` in a 2.0 document), the body as the media
 type's `example` (2.0: an `in: body` or `formData` parameter, added only where
 the operation declares none), the auth wherever the operation does not already
 state it (a scheme the document declares with the same credential is reused,
@@ -3813,7 +3840,7 @@ collection's own `baseUrl` variable has a value - written as the single-brace
 `default` - and the bare double-brace token otherwise, since an undeclared
 single-brace variable is invalid OpenAPI. A path segment that is exactly one
 token becomes the OpenAPI `{petId}` it came from, every Params and Headers row
-is declared without a `required` it was never given but carries its toggle
+(a query written only in the URL has its rows, issue #3551) is declared without a `required` it was never given but carries its toggle
 explicitly as `x-vayu-enabled` (neither a value nor its absence says whether a
 row is on), and a body or response is described only where there is a stored
 example to read a shape off - carrying a `description` that says the shape is
@@ -5102,7 +5129,8 @@ variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `file.src` (`file: {}` when no file is chosen); `url.query[]` is every stored
 query row in stored order (a turned-off one `disabled: true`), then the pairs
 of the URL's own query that no enabled row states, in URL order, so a request
-created with its query only in `url` (every MCP request) keeps it - Postman and
+stored with its query only in `url` before the write kept the rows in step (see
+[`POST /requests`](#post-requests), issue #3551) keeps it - Postman and
 Newman read `query[]` over `raw`, and a row matches a pair by key and value (as
 the row is written into the URL), each row accounting for one pair so a repeated
 key is not doubled; `script.pre` /

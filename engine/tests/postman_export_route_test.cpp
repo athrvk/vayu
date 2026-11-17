@@ -231,6 +231,35 @@ TEST_F (PostmanExportRouteTest, AUrlOnlyQueryExportsTheQueryTheSameRequestWithRo
     }
 }
 
+// #3551: Postman reads `query[]` over `raw`, so a row the URL no longer
+// carries would send a parameter Vayu does not. A URL-only edit re-derives the
+// enabled rows, and the export's `query[]` is the URL's pairs.
+// Mutation check: drop the `reconcile_params_with_url` call from
+// `apply_request_params_field` and the stale `b` row is exported before `c`.
+TEST_F (PostmanExportRouteTest, AURLOnlyEditLeavesNoStaleRowInTheQuery) {
+    using vayu::http::routes::create_collection_response;
+    using vayu::http::routes::create_request_response;
+    using vayu::http::routes::update_request_response;
+    auto [collection_status, collection] =
+    create_collection_response (*db_, json{ { "name", "Stale" } });
+    ASSERT_EQ (collection_status, 200) << collection.dump ();
+    const std::string id   = collection["id"].get<std::string> ();
+    auto [status, created] = create_request_response (*db_,
+    json{ { "collectionId", id }, { "name", "Edited" }, { "method", "GET" },
+    { "url", "https://h.test/x?a=1&b=2" }, { "params", json::parse (R"([{"key":"a","value":"1","enabled":true},
+        {"key":"b","value":"2","enabled":true}])") } });
+    ASSERT_EQ (status, 200) << created.dump ();
+    auto [edit_status, edited] = update_request_response (*db_,
+    created["id"].get<std::string> (), json{ { "url", "https://h.test/x?a=1&c=3" } });
+    ASSERT_EQ (edit_status, 200) << edited.dump ();
+
+    const std::string text = export_text (id);
+    const ordered doc      = ordered::parse (text);
+    const ordered& url     = doc.at ("item").at (0).at ("request").at ("url");
+    ASSERT_TRUE (url.contains ("query")) << text;
+    EXPECT_EQ (url.at ("query").dump (), R"([{"key":"a","value":"1"},{"key":"c","value":"3"}])");
+}
+
 /// The exported `protocolProfileBehavior` of the root item named @p name, as
 /// the text it was written as (member order is the point).
 std::string exported_protocol_behavior (const std::string& text, const std::string& name) {
