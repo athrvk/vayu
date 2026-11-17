@@ -16,6 +16,7 @@
 import { sseClient, type SSECloseInfo, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
+import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";
 import { queryKeys } from "@/queries/keys";
 import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
@@ -53,20 +54,72 @@ const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
  * and a partial one must not turn into "0 requests, p95 0ms" - a number the
  * user would read as the run's own.
  */
-function runSummaryLine(report: RunReport): string | null {
+function runSummaryLine(
+	report: RunReport,
+	{ withErrors }: { withErrors: boolean } = { withErrors: true }
+): string | null {
 	const requests = report.summary?.totalRequests;
 	const p95 = report.latency?.p95;
 	const errorRate = report.summary?.errorRate;
+	const errors = (rate: number) => (withErrors ? `, ${formatPercent(rate)}% errors` : "");
 	// A failed run the engine could not fully record (#2895): its counts are not
 	// whole-run totals, and the line must not read as one.
 	if (report.summary?.summaryMissing) return "The run ended before its totals were saved.";
 	if (report.summary?.partial && typeof requests === "number" && typeof errorRate === "number") {
-		return `At least ${formatNumber(requests)} requests, ${formatPercent(errorRate)}% errors, latency not recorded`;
+		return `At least ${formatNumber(requests)} requests${errors(errorRate)}, latency not recorded`;
 	}
 	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
 		return null;
 	}
-	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}, ${formatPercent(errorRate)}% errors`;
+	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}${errors(errorRate)}`;
+}
+
+/**
+ * Whether a verdict's reason already carries the run's error rate ("No budgets
+ * set. 0.0% errors", "..., but 3.0% errors"), so the numbers after it need not
+ * repeat it. A missed budget's reason names the budget ("error rate"), never the
+ * measured share, and keeps the clause.
+ */
+function reasonStatesErrorRate(reason: string): boolean {
+	return /% errors\b/.test(reason);
+}
+
+/**
+ * The kind and body of the notification for a run that ended and was not
+ * stopped by this window's Stop.
+ *
+ * The body leads with the verdict the dashboard banner shows (`reportOutcome`),
+ * so a missed budget or a failed check is in the notification and not behind a
+ * click (#3546), and the numbers follow when the report has them. A report with
+ * no verdict, or none that can be read, keeps the numbers or the plain line.
+ *
+ * The kind is `failed` for a run the engine ended as failed and for a run that
+ * completed and missed a budget; a run judged passed or not judged is
+ * `finished`, its reason in the body. The frame's status is preferred over the
+ * report's, which is the fallback for a stream that ended without one (#1415):
+ * the fetch can fail, and a failure that could not be read must still report a
+ * failure rather than quietly report success. A stopped run keeps its numbers
+ * alone, as the spoken line does, since its verdict says nothing more.
+ */
+function terminalNotification(
+	status: SSETerminalStatus,
+	report: RunReport | null
+): { kind: LoadRunNotifyKind; body: string } {
+	const endedAs = status ?? report?.metadata?.status;
+	const judgement = endedAs === "stopped" ? null : reportOutcome(report);
+	const verdict = judgement ? `${OUTCOME_TITLE[judgement.outcome]}. ${judgement.reason}` : null;
+	const summary =
+		report &&
+		runSummaryLine(report, {
+			withErrors: !judgement || !reasonStatesErrorRate(judgement.reason),
+		});
+	const failed = endedAs === "failed" || judgement?.outcome === "failed";
+	return {
+		kind: failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
+		// The summary stands in only when the report carries all three numbers: a
+		// run that ended is worth saying even when what it did cannot be read.
+		body: [verdict, summary].filter(Boolean).join(". ") || "Couldn't read this run's report.",
+	};
 }
 
 /**
@@ -582,21 +635,9 @@ class LoadTestService {
 		// First, because the dashboard is the terminal surface that matters and
 		// nothing done for a notification may come before it.
 		if (report) useDashboardStore.getState().setFinalReport(runId, report);
-		// A failed run is not a finished one, and until #1415 this said finished
-		// for both: the frame's status is preferred, and the report's own is the
-		// fallback for a stream that ended without one. The frame first,
-		// deliberately - the fetch can fail, and a failure that could not be read
-		// must still report a failure rather than quietly report success.
-		const failed =
-			status === "failed" || (status === null && report?.metadata?.status === "failed");
-		// The summary stands in only when the report carries all three numbers: a
-		// run that ended is worth saying even when what it did cannot be read. A
-		// run that already reported a failure has had its one notification.
-		this.notifyTerminal(
-			runId,
-			failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
-			(report && runSummaryLine(report)) ?? "Couldn't read this run's report."
-		);
+		// A run that already reported a failure has had its one notification.
+		const { kind, body } = terminalNotification(status, report);
+		this.notifyTerminal(runId, kind, body);
 		// The run has reached a terminal state, so the lists that carry its status
 		// are stale until the next 5s poll - and once the user has paged History,
 		// that poll is off.

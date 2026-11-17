@@ -562,7 +562,13 @@ own (`stores/host-sleep-store.ts`, keyed by run id): the engine was suspended
 too and its report has no field for it.
 
 A run reaching its end also posts a system notification when the user has
-opted in and Vayu is not the window in front (issue #1358).
+opted in and Vayu is not the window in front (issue #1358). A load test's body
+leads with the banner's verdict (`reportOutcome`), then the numbers: "Failed. 1
+of 3 budgets missed: p99. 12,400 requests, p95 210ms, 0.3% errors". The kind
+follows the verdict, so a run that completed but missed a budget posts as
+"Load test failed" (and marks the Dock or taskbar failed); a pass, or a run not
+judged, posts as finished with the reason in the body (issue #3546). A stopped
+run says its numbers alone.
 
 The run's progress is also mirrored onto the OS chrome: the Windows taskbar
 button and the macOS Dock icon fill as it advances and clear when it ends, and
