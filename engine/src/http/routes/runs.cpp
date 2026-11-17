@@ -2687,9 +2687,14 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
  * The snapshot's body is the payload a history entry is re-opened into the
  * editor from, so its file references carry the `unresolved` the allowed
  * folders and picked files derive now, never what was sent (#2356).
+ *
+ * A run @p live_runs holds active carries its worker's `phase` (#3568). The
+ * phase is never stored, so a retained or stored run, and any run with a null
+ * @p live_runs, has no `phase` key.
  */
-std::pair<int, nlohmann::json>
-get_run_response (vayu::db::Database& db, const std::string& run_id) {
+std::pair<int, nlohmann::json> get_run_response (vayu::db::Database& db,
+const std::string& run_id,
+vayu::core::RunManager* live_runs) {
     const auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
@@ -2705,6 +2710,10 @@ get_run_response (vayu::db::Database& db, const std::string& run_id) {
     if (snapshot != payload.end () && snapshot->is_object () && snapshot->contains ("body")) {
         vayu::json::derive_file_trust (
         snapshot->at ("body"), vayu::http::FileAccessPolicy::from_database (db));
+    }
+    const auto context = live_runs != nullptr ? live_runs->get_run (run_id) : nullptr;
+    if (context) {
+        payload["phase"] = vayu::core::to_string (context->phase ());
     }
     return { 200, std::move (payload) };
 }
@@ -2753,7 +2762,7 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
 void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     try {
-        auto [status, body] = get_run_response (ctx.db, run_id);
+        auto [status, body] = get_run_response (ctx.db, run_id, &ctx.run_manager);
         if (status == 404) {
             vayu::utils::log_warning ("run", "GET /runs/:id - Run not found: " + run_id);
         }

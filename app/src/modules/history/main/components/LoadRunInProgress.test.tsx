@@ -9,20 +9,36 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { render as renderBare, screen, fireEvent, waitFor } from "@testing-library/react";
 import LoadRunInProgress from "./LoadRunInProgress";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { useDashboardStore, useTabsStore, useToastStore } from "@/stores";
 
 const stopRun = vi.fn<(id: string) => Promise<unknown>>();
+const getRun = vi.fn<(id: string) => Promise<unknown>>();
 vi.mock("@/services/api", () => ({
-	apiService: { stopRun: (id: string) => stopRun(id) },
+	apiService: { stopRun: (id: string) => stopRun(id), getRun: (id: string) => getRun(id) },
 }));
 
+/** The tab reads the run's phase off the same query History polls, so it needs a client. */
+function render(ui: ReactElement) {
+	return renderBare(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
+/** `GET /runs/:id` of a run the engine still executes, with the phase it reports (absent: none). */
+function activeRun(phase?: string) {
+	return { id: "run-1", type: "load", status: "running", startTime: 1, endTime: null, phase };
+}
+
 beforeEach(() => {
+	queryClient.clear();
 	stopRun.mockReset();
 	stopRun.mockResolvedValue({});
+	getRun.mockReset();
+	getRun.mockResolvedValue(activeRun());
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useDashboardStore.setState({ currentRunId: null });
 	useToastStore.setState({ toasts: [] });
@@ -79,5 +95,44 @@ describe("LoadRunInProgress", () => {
 		fireEvent.click(screen.getByRole("button", { name: /open dashboard/i }));
 
 		expect(useTabsStore.getState().openTabs.map((t) => t.type)).toEqual(["dashboard"]);
+	});
+
+	/*
+	 * The engine owns the phase (#3568): while it reports `draining` the one thing
+	 * left to stop is the wait. Mutation check: drop the `label` prop from the
+	 * button and the draining case reddens; read "draining" off anything but the
+	 * run's `phase` (elapsed against the plan) and the absent and unknown cases
+	 * redden.
+	 */
+	describe("the run's phase", () => {
+		it("reads Stop waiting while the engine reports the run draining", async () => {
+			getRun.mockResolvedValue(activeRun("draining"));
+			render(<LoadRunInProgress runId="run-1" />);
+
+			expect(await screen.findByRole("button", { name: /^stop waiting$/i })).toBeTruthy();
+		});
+
+		it.each([["sending"], ["summarising"], ["settled"], [undefined], ["unheard-of"]])(
+			"keeps Stop when the phase is %s",
+			async (phase) => {
+				getRun.mockResolvedValue(activeRun(phase));
+				render(<LoadRunInProgress runId="run-1" />);
+
+				// The run's fetch has landed in the cache before the label is judged.
+				await waitFor(() =>
+					expect(queryClient.getQueryData(queryKeys.runs.detail("run-1"))).toBeTruthy()
+				);
+				expect(screen.getByRole("button", { name: /^stop$/i })).toBeTruthy();
+			}
+		);
+
+		it("stops the run from the Stop waiting button too", async () => {
+			getRun.mockResolvedValue(activeRun("draining"));
+			render(<LoadRunInProgress runId="run-1" />);
+
+			fireEvent.click(await screen.findByRole("button", { name: /^stop waiting$/i }));
+
+			await waitFor(() => expect(stopRun).toHaveBeenCalledWith("run-1"));
+		});
 	});
 });

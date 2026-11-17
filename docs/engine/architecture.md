@@ -452,7 +452,10 @@ Manages the lifecycle of load test runs:
   longer than `timeout` + 2s. A sequential collection run has no drain. The phase and the latch
   are one atomic byte (`RunPhaseLatch`) that only compare-exchange loops write, so the worker's
   advance and a Stop's latch are totally ordered. **The phase is memory only**: it is not
-  stored, there is no schema change, and a stored run carries only its `RunStatus`. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
+  stored, there is no schema change, and a stored run carries only its `RunStatus`. It is
+  published while the run is active (issue #3568), as `phase` on every live `metrics` frame
+  (`emit_live_tick`) and on `GET /runs/:id` (`get_run_response`, from
+  `RunManager::get_run`, so a retained or stored run has no `phase` key). A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
   stream's duration cap (`maxStreamDurationMs`) plus the 5s backstop grace plus 2s
   (`natural_end_drain_ms`, issue #2834), so the drain never cuts a healthy stream short of its
   cap. A collection run waits for the longer of the two: its longest streaming step's cap the

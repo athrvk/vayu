@@ -32,6 +32,15 @@ ways; until then the live view stays, with the report fetch's Retry.
   to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
   and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
   run streams they leave its stream alone, Reconnect opening that run with a toast instead.
+  **A run draining its in-flight requests is the engine's word, never the app's** (#3568): every live
+  frame carries `phase`, and `index.tsx` hands the header `draining = live && phase === "draining"`,
+  `waitingOn` (the frame's `backpressure`) and `plannedSeconds` (the configured duration, handed
+  over only while the run is live), all primitives, `draining` and `waitingOn` set only while
+  draining so the memo'd header re-renders per tick for the drain alone. The pill then reads **Finishing** (a `label` override on `RunStatusPill`: the status
+  stays `running`), the config line says "waiting on N requests", and Stop reads **Stop waiting**.
+  The clock reads `00:18 / 00:15` (elapsed over plan) while a run with a duration is live, and `00:15 elapsed` once it is not. A phase the
+  client does not know, or none (an older engine), draws the run exactly as before: nothing here
+  compares elapsed with the duration, because a run that is merely slow runs past its plan too.
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions
@@ -109,7 +118,12 @@ consumes it.
   renders it. The throughput-led modes (`constant_rps`, `constant_concurrency`,
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
-  the stats row as p99 at peak.
+  the stats row as p99 at peak. A **live** bundle also says "N in flight" (the frame's
+  `backpressure`, `SubCount` in `StatCard.tsx`) under Throughput per virtual user and
+  Remaining (ETA); a finished bundle does not, because `reportToDerived` has no frame and
+  hardcodes 0. The live Duration card states the plan and the time left
+  (`DashboardDerived.plannedDurationSeconds`, from `MetricsView`'s `runDurationSeconds`) in place of
+  the overheads that only exist once the run has ended.
 - **A scenario load run's latency figures pool every step** (#2823). The run
   has one histogram over all its requests, so a sequence's p99 is the tail of
   the whole mix and the slowest step sets it. `DashboardDerived.pooledLatency`

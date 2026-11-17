@@ -47,6 +47,9 @@ function DashboardHeader({
 	exportRequestUrl,
 	exportRequestMethod,
 	elapsedDuration = 0,
+	draining = false,
+	waitingOn,
+	plannedSeconds,
 	outcome,
 	configuration,
 }: DashboardHeaderProps) {
@@ -73,6 +76,8 @@ function DashboardHeader({
 	// Running for as long as the engine may still be executing the run, a lost
 	// stream included; then how it ended, or nothing before anyone knows.
 	const status = live ? "running" : endedAs;
+	// Still `running` as far as the status goes; only the word changes (#3568).
+	const pillLabel = live && draining ? "Finishing" : undefined;
 
 	// Config summary line
 	const configParts: string[] = [];
@@ -100,7 +105,12 @@ function DashboardHeader({
 				: rows
 		);
 	}
-	if (displayMs > 0) configParts.push(`${formatClock(displayMs)} elapsed`);
+	if (displayMs > 0) configParts.push(runClock(displayMs, plannedSeconds));
+	// A drain with nothing left in flight is the instant before the run settles.
+	if (draining && waitingOn)
+		configParts.push(
+			`waiting on ${formatNumber(waitingOn)} ${pluralize(waitingOn, "request")}`
+		);
 	const configSummary = configParts.join(" · ");
 
 	return (
@@ -116,7 +126,7 @@ function DashboardHeader({
 			)}
 
 			{/* Status pill */}
-			{status && <RunStatusPill status={status} outcome={outcome} />}
+			{status && <RunStatusPill status={status} outcome={outcome} label={pillLabel} />}
 
 			{/* Method badge */}
 			{requestMethod && <MethodBadge method={requestMethod} size="md" />}
@@ -160,9 +170,21 @@ function DashboardHeader({
 			)}
 
 			{/* Stop button */}
-			{live && <StopRunButton onStop={onStop} isStopping={isStopping} />}
+			{live && (
+				<StopRunButton
+					onStop={onStop}
+					isStopping={isStopping}
+					label={draining ? "Stop waiting" : undefined}
+				/>
+			)}
 		</div>
 	);
+}
+
+/** `00:18 / 00:15` against a plan, `00:18 elapsed` for a run with none. */
+function runClock(elapsedMs: number, plannedSeconds: number | undefined): string {
+	if (plannedSeconds === undefined) return `${formatClock(elapsedMs)} elapsed`;
+	return `${formatClock(elapsedMs)} / ${formatClock(plannedSeconds * 1000)}`;
 }
 
 function headerPropsEqual(prev: DashboardHeaderProps, next: DashboardHeaderProps): boolean {

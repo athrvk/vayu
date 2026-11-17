@@ -17,12 +17,18 @@
  * until the run is over, says so, and keeps the two things that are useful in
  * the meantime: Stop, and the live dashboard when this window is the one
  * watching the run.
+ *
+ * The phase comes off the run's own query, the one the tab already polls
+ * (#1934), so this adds no request: while the engine reports the run draining,
+ * the one thing left to stop is the wait (#3568).
  */
 
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { EmptyState, StopRunButton } from "@/components/shared";
 import { useStopRun } from "@/hooks/useStopRun";
+import { runPhaseOf } from "@/lib/run-status";
+import { useRunQuery } from "@/queries";
 import { useDashboardStore, useTabsStore } from "@/stores";
 
 interface LoadRunInProgressProps {
@@ -35,6 +41,8 @@ export default function LoadRunInProgress({ runId }: LoadRunInProgressProps) {
 	// The dashboard shows whichever run this window is streaming. A run started
 	// elsewhere (another window, a relaunch) is not on it, and a button that
 	// opened an empty dashboard would promise a view that is not there.
+	const { data: run } = useRunQuery(runId);
+	const draining = runPhaseOf(run?.phase) === "draining";
 	const dashboardShowsThisRun = useDashboardStore((s) => s.currentRunId === runId);
 
 	return (
@@ -46,7 +54,11 @@ export default function LoadRunInProgress({ runId }: LoadRunInProgressProps) {
 				description="Its results appear here when it finishes."
 				action={
 					<div className="flex items-center gap-2">
-						<StopRunButton onStop={() => void stop()} isStopping={isStopping} />
+						<StopRunButton
+							onStop={() => void stop()}
+							isStopping={isStopping}
+							label={draining ? "Stop waiting" : undefined}
+						/>
 						{dashboardShowsThisRun && (
 							<Button
 								variant="outline"

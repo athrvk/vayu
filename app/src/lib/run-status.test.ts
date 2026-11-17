@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { isRunInProgress, isRunLive, isRunTerminal } from "./run-status";
+import { isRunInProgress, isRunLive, isRunTerminal, runPhaseOf } from "./run-status";
 
 const STATUSES: ReadonlyArray<{
 	status: string | null | undefined;
@@ -54,4 +54,18 @@ describe("isRunLive", () => {
 	it.each(STATUSES)("$status with no stream", ({ status, inProgress }) => {
 		expect(isRunLive(status, false)).toBe(inProgress);
 	});
+});
+
+describe("runPhaseOf (#3568)", () => {
+	it.each(["setup", "sending", "draining", "summarising", "settled"])("keeps %s", (phase) => {
+		expect(runPhaseOf(phase)).toBe(phase);
+	});
+
+	// Mutation check: return the value as given and the unknown rows redden.
+	it.each([["paused"], ["Draining"], [""], [null], [undefined], [7]])(
+		"reads %s as absent",
+		(value) => {
+			expect(runPhaseOf(value)).toBeUndefined();
+		}
+	);
 });

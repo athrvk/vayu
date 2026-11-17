@@ -8,6 +8,7 @@
 import { type ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { formatNumber } from "@/lib/format-number";
 import { InfoChip, EYEBROW_CLASS } from "../shared";
 
 /** Secondary metric pattern (22px values) - one Row 4 stat. */
@@ -38,5 +39,30 @@ export function StatCard({
 			</div>
 			{sub && <div className="mt-1.5 font-mono text-micro text-muted-foreground">{sub}</div>}
 		</Card>
+	);
+}
+
+/**
+ * A count in a card's sub-line: "backpressure 3" (the peak card) or "3 in flight"
+ * (`countFirst`, the live closed-loop cards). One treatment, so the two read alike.
+ */
+export function SubCount({
+	label,
+	count,
+	countFirst = false,
+}: {
+	label: string;
+	count: number;
+	countFirst?: boolean;
+}) {
+	const figure = <span className="text-muted-foreground">{formatNumber(count)}</span>;
+	return countFirst ? (
+		<>
+			{figure} {label}
+		</>
+	) : (
+		<>
+			{label} {figure}
+		</>
 	);
 }

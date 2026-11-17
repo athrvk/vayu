@@ -29,14 +29,26 @@ import { StopCircle, Loader2 } from "lucide-react";
 import { Button, LabelSwap } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
+const DEFAULT_LABEL = "Stop";
+
 interface StopRunButtonProps {
 	onStop: () => void;
 	/** True while the stop request is in flight; the button disables and says so. */
 	isStopping?: boolean;
+	/**
+	 * The word for the idle state. "Stop waiting" while a run only drains its
+	 * in-flight requests (#3568): there is no load left to stop.
+	 */
+	label?: string;
 	className?: string;
 }
 
-export function StopRunButton({ onStop, isStopping = false, className }: StopRunButtonProps) {
+export function StopRunButton({
+	onStop,
+	isStopping = false,
+	label = DEFAULT_LABEL,
+	className,
+}: StopRunButtonProps) {
 	return (
 		<Button
 			size="sm"
@@ -58,7 +70,7 @@ export function StopRunButton({ onStop, isStopping = false, className }: StopRun
 			) : (
 				<StopCircle className="size-icon-sm" />
 			)}
-			<LabelSwap label={isStopping ? "Stopping…" : "Stop"} states={["Stop", "Stopping…"]} />
+			<LabelSwap label={isStopping ? "Stopping…" : label} states={[label, "Stopping…"]} />
 		</Button>
 	);
 }

@@ -31,7 +31,7 @@ import { formatNumber, formatSeconds } from "@/lib/format-number";
 import { orDash } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
-import { StatCard } from "./StatCard";
+import { StatCard, SubCount } from "./StatCard";
 import {
 	BreakpointStat,
 	ElapsedStat,
@@ -94,11 +94,17 @@ function renderModeStats(d: DashboardDerived) {
 }
 
 /**
- * Duration - wall-clock with the overhead sub. A run stored before the engine
- * measured setup carries only cleanup (#2894), and its setup is left out
- * rather than shown as a number it never had.
+ * Duration. Finished: wall-clock with the overhead sub. A run stored before the
+ * engine measured setup carries only cleanup (#2894), and its setup is left out
+ * rather than shown as a number it never had. Live, those overheads do not
+ * exist yet, so the card states the plan and how much of it is left (#3568).
  */
 function DurationStat({ d }: { d: DashboardDerived }) {
+	if (!d.isCompleted && d.plannedDurationSeconds !== undefined) {
+		return (
+			<PlannedDurationStat planned={d.plannedDurationSeconds} elapsed={d.elapsedSeconds} />
+		);
+	}
 	return (
 		<StatCard
 			label="Duration"
@@ -116,6 +122,24 @@ function DurationStat({ d }: { d: DashboardDerived }) {
 				)
 			}
 			infoTip={TOOLTIPS.duration}
+		/>
+	);
+}
+
+function PlannedDurationStat({ planned, elapsed }: { planned: number; elapsed: number }) {
+	return (
+		<StatCard
+			label="Duration"
+			value={formatSeconds(planned)}
+			sub={
+				<>
+					<span className="text-muted-foreground">
+						{formatSeconds(Math.max(0, planned - elapsed))}
+					</span>{" "}
+					left
+				</>
+			}
+			infoTip={TOOLTIPS.plannedDuration}
 		/>
 	);
 }
@@ -160,12 +184,7 @@ function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 		<StatCard
 			label={closedLoop ? `Peak ${CONCURRENCY_UNIT}` : "Peak in-flight requests"}
 			value={orDash(d.peakConcurrency, formatNumber)}
-			sub={
-				<>
-					backpressure{" "}
-					<span className="text-muted-foreground">{formatNumber(d.backpressure)}</span>
-				</>
-			}
+			sub={<SubCount label="backpressure" count={d.backpressure} />}
 			infoTip={closedLoop ? TOOLTIPS.peakVirtualUsers : TOOLTIPS.peakInFlight}
 		/>
 	);

@@ -238,6 +238,7 @@ function MetricsView({
 		return {
 			mode: loadMode,
 			isCompleted: false,
+			plannedDurationSeconds: runDurationSeconds,
 			targetRps,
 			actualRps: fidelity?.actualRps,
 			rateAchievementPct: fidelity?.achievementPct,

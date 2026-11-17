@@ -231,10 +231,16 @@
  * measure 150,796 / 148,200 / 223,303 / 219,036 B; the four caps went to
  * 150,900 / 148,300 / 223,400 / 219,100.
  *
+ * #3568's `phase` clause in `get_live_metrics` (the five phases and what
+ * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
+ * merged rows to 150,934 / 148,338 / 223,441 / 219,174 B; the four caps went to
+ * 151,000 / 148,400 / 223,500 / 219,200.
+ *
  * #3538's `drainCut` clause in `list_runs` and sentence in `get_run_report`
- * (each paid once) took the rows, merged with #3544's wording above, to
- * 151,105 / 148,509 / 223,612 / 219,345 B; the four caps went to 151,300 /
- * 148,700 / 223,800 / 219,500 (one measurement plus a few hundred bytes).
+ * (each paid once) took the rows, merged with #3544's and #3568's wording
+ * around it, to 151,243 / 148,647 / 223,750 / 219,483 B; the four caps went to
+ * 151,300 / 148,700 / 223,800 / 219,500 (one measurement plus a few hundred
+ * bytes).
  */
 
 import { describe, it, expect } from "vitest";

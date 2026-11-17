@@ -12096,7 +12096,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "httpErrors":5,"noResponse":0,"cancelled":0,
        "currentRps":150.5,"currentSendRate":151.0,
        "sendRate":150.0,"throughput":149.5,
-       "activeConnections":100,"backpressure":0,"droppedRequests":0,
+       "activeConnections":100,"backpressure":0,"phase":"sending","droppedRequests":0,
        "skippedRequests":0,"stalledMs":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
        "windowAvgInFlight":6.7,"windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
@@ -12263,6 +12263,7 @@ no frame.
 | `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
 | `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
 | `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **closed-loop single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight, and a `constant_rps` run reserves none, because it skips the timer ([#3541](#the-requestelements-array-a-single-request-runs-own-step-level-elements)). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
+| `phase` | Where the run's worker is at the sample (issue #3568), on every frame: `setup`, `sending`, `draining` (the strategy returned on its own and `backpressure` is the in-flight requests the natural-end drain waits out, no longer new load), `summarising` or `settled`. A run moves forward only and may skip one; see [Stop semantics](#post-runsrunidstop) for what a Stop does in each. Live only: no [stored row](#get-runsrunidmetrics) carries it, and an older engine sends no such key |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `skippedRequests` / `stalledMs` | `constant_rps` only (#2911): requests a stalled pacer owed beyond its 100 ms catch-up window and skipped (never sent, not in `droppedRequests`), and the schedule time they cover in ms, `skippedRequests ÷ targetRps`. `0` on every other mode |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
@@ -12781,6 +12782,15 @@ Get details for a specific run.
 `baseline`, `origin`). `endTime` is `null` until the run's `status` is
 `completed`, `failed` or `stopped`, as on the list row.
 
+While the engine holds the run active, the object also carries `phase`, where
+its worker is: `setup`, `sending`, `draining`, `summarising` or `settled`
+(issue #3568), the same value as the live frame's
+[`phase`](#get-runsrunidlive). `draining` means the run's own end has come and
+it is waiting out the requests still in flight, which a Stop
+[cuts short without changing the outcome](#post-runsrunidstop). The phase is
+never stored, so a run no longer active (finished, or the engine restarted) has
+no `phase` key at all; read `status` there.
+
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
 place it appears is `GET /runs/:runId/report`, whose `results` array and
@@ -12897,7 +12907,10 @@ actually did. A collection run's summary is optional; see
 
 **What a Stop means depends on the phase it lands in** (issue #3341). A load
 run moves through `setup`, `sending`, `draining`, `summarising` and `settled`,
-in memory only, and the first Stop is latched with the phase it arrived in.
+and the first Stop is latched with the phase it arrived in. The phase is never
+stored; while the run is active it is published as `phase` on every live
+[`metrics` frame](#get-runsrunidlive) and on [`GET /runs/:runId`](#get-runsrunid)
+(issue #3568).
 
 - **A Stop before the strategy returns (`setup` or `sending`) decides the
   outcome, and the run ends `stopped`.** The queued backlog is thrown away
