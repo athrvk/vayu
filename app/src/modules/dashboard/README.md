@@ -31,7 +31,11 @@ ways; until then the live view stays, with the report fetch's Retry.
   cancelled requests during the drain: it did something, and the verdict line already says not
   judged, #3538), and `running` changes nothing. A report
   fetch that keeps finding the run still running gives up to that same callout rather than
-  to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
+  to the report's Retry, so the pill and Stop stay while the engine generates load. A run whose
+  engine's process ended under it (the sidecar's `crashed` push, #3605) is neither: the store moves
+  it to `engineStopped`, which is not live and has no ending until its stored report lands from
+  the restarted engine, and `LoadTestService.handleEngineStopped` has already let go of the stream,
+  the wake lock and the OS bar without a notification of its own. Reconnect
   and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
   run streams they leave its stream alone, Reconnect opening that run with a toast instead.
   **A run draining its in-flight requests is the engine's word, never the app's** (#3568): every live

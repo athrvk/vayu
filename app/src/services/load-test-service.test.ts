@@ -12,6 +12,7 @@ const mockStreamLost = vi.fn();
 const mockStreamClosed = vi.fn();
 const mockSetFinalReport = vi.fn();
 const mockAddMetricsBatch = vi.fn();
+const mockEngineStopped = vi.fn();
 // Which run the dashboard is showing *right now*. Every writer names its run
 // and the real store drops one for a run it is not holding
 // (`dashboard-store.test.ts`), so what this suite pins is the run named.
@@ -29,6 +30,7 @@ vi.mock("@/stores", () => ({
 			streamClosed: mockStreamClosed,
 			setFinalReport: mockSetFinalReport,
 			addMetricsBatch: mockAddMetricsBatch,
+			engineStopped: mockEngineStopped,
 		}),
 	},
 	useClientSettingsStore: {
@@ -582,6 +584,89 @@ describe("LoadTestService", () => {
 	// dashboard shows "no active tests". The store no longer has a `reset`, so
 	// that mistake is now a compile error rather than a mock assertion. What is
 	// still worth pinning is the positive form: start only opens the stream.
+	/*
+	 * The sidecar's `crashed` push, through `useEngineLifecycle` (#3605): the run
+	 * ended with its engine, and the engine-lost notification is the only one
+	 * the user gets. Mutation checks: drop `sseClient.disconnect()` from
+	 * `handleEngineStopped` and the first case reddens (the `EventSource` keeps
+	 * retrying the dead port); drop the `notifiedRunId` latch and the second
+	 * does (the close already awaiting the report posts the run's ending);
+	 * drop the store call outside the `activeRunId` guard and the third does.
+	 */
+	describe("an engine that stops under the run (#3605)", () => {
+		type Report = Awaited<ReturnType<typeof apiService.getRunReport>>;
+		const failedReport = {
+			summary: { totalRequests: 40, errorRate: 0, partial: true },
+			latency: {},
+			metadata: { status: "failed" },
+		} as unknown as Report;
+
+		it("lets go of the stream, the wake lock and the run, and says nothing", () => {
+			dashboard.currentRunId = "run_crash_1";
+			loadTestService.startMonitoring("run_crash_1");
+
+			loadTestService.handleEngineStopped();
+
+			expect(sseClient.disconnect).toHaveBeenCalledTimes(1);
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.loadRun);
+			expect(mockEngineStopped).toHaveBeenCalledExactlyOnceWith("run_crash_1");
+			expect(loadTestService.getActiveRunId()).toBeNull();
+			expect(loadTestService.isMonitoring()).toBe(false);
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			expect(mockOsIconRunFinished).not.toHaveBeenCalled();
+		});
+
+		it("posts nothing when a close already reading the report lands after it", async () => {
+			let answer: (report: Report) => void = () => undefined;
+			vi.mocked(apiService.getRunReport).mockImplementationOnce(
+				() => new Promise<Report>((resolve) => (answer = resolve))
+			);
+			dashboard.currentRunId = "run_crash_2";
+			loadTestService.startMonitoring("run_crash_2");
+			const closing = closeStream("completed", { frame: true });
+			await vi.waitFor(() =>
+				expect(apiService.getRunReport).toHaveBeenCalledWith("run_crash_2")
+			);
+
+			loadTestService.handleEngineStopped();
+			answer(failedReport);
+			await closing;
+
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		it("settles the dashboard's run when no stream is attached to it", () => {
+			// A lost or superseded stream leaves the run live with nothing watching.
+			dashboard.currentRunId = "run_crash_3";
+
+			loadTestService.handleEngineStopped();
+
+			expect(mockEngineStopped).toHaveBeenCalledExactlyOnceWith("run_crash_3");
+			expect(sseClient.disconnect).not.toHaveBeenCalled();
+			expect(mockWakeLockRelease).not.toHaveBeenCalled();
+		});
+
+		it("does nothing without a run", () => {
+			loadTestService.handleEngineStopped();
+
+			expect(mockEngineStopped).not.toHaveBeenCalled();
+			expect(sseClient.disconnect).not.toHaveBeenCalled();
+		});
+
+		// The dashboard's mount check finding the run terminal once an engine is back.
+		it("posts nothing when the stored report is found afterwards", () => {
+			dashboard.currentRunId = "run_crash_4";
+			loadTestService.startMonitoring("run_crash_4");
+			loadTestService.handleEngineStopped();
+
+			loadTestService.settleOnStoredReport("run_crash_4", failedReport);
+
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(sseClient.disconnect).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	it("only opens the stream on start, touching no run state the caller registered", () => {
 		loadTestService.startMonitoring("run_3");
 		expect(mockStreamOpened).toHaveBeenCalledWith("run_3");

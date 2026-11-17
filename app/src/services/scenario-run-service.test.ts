@@ -31,6 +31,7 @@ const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
 const mockSetPlan = vi.fn();
 const mockRunEnded = vi.fn();
+const mockEngineStopped = vi.fn();
 /** The fold the store keeps beside the rows; the notification body reads it. */
 const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
@@ -42,6 +43,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			setStreaming: mockSetStreaming,
 			streamLost: mockStreamLost,
 			runEnded: mockRunEnded,
+			engineStopped: mockEngineStopped,
 			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
 		}),
 	},
@@ -409,6 +411,59 @@ describe("ScenarioRunService", () => {
 			vi.advanceTimersByTime(FLUSH_MS * 2);
 
 			expect(mockAddSteps).not.toHaveBeenCalled();
+		});
+	});
+
+	/*
+	 * The sidecar's `crashed` push, through `useEngineLifecycle` (#3605): the run
+	 * ended with its engine. Mutation checks: drop `sseClient.disconnect()` from
+	 * `handleEngineStopped` and the first case reddens; drop the flush and the
+	 * last step goes missing; drop `failProgress` and the bar is cleared rather
+	 * than failed; write `streamLost` instead of `engineStopped` and the run tab
+	 * still promises a run that keeps executing.
+	 */
+	describe("an engine that stops under the run (#3605)", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("lets go of the stream, the wake lock and the bar, and says nothing", () => {
+			scenarioRunService.startMonitoring("run_crash_1");
+			deliverStep(0);
+			// Inside the flush window, so still buffered.
+			deliverStep(1);
+			mockWakeLockRelease.mockClear();
+
+			scenarioRunService.handleEngineStopped();
+
+			expect(sseClient.disconnect).toHaveBeenCalledTimes(1);
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
+			expect(mockSetStreaming).toHaveBeenCalledWith("run_crash_1", false);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_crash_1"
+			);
+			expect(mockProgressClear).not.toHaveBeenCalled();
+			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1]);
+			expect(mockEngineStopped).toHaveBeenCalledExactlyOnceWith(
+				"run_crash_1",
+				expect.stringContaining("engine stopped")
+			);
+			expect(mockStreamLost).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			expect(mockOsIconRunFinished).not.toHaveBeenCalled();
+		});
+
+		it("does nothing without a run", () => {
+			scenarioRunService.handleEngineStopped();
+
+			expect(sseClient.disconnect).not.toHaveBeenCalled();
+			expect(mockEngineStopped).not.toHaveBeenCalled();
+			expect(mockWakeLockRelease).not.toHaveBeenCalled();
 		});
 	});
 

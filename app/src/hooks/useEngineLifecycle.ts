@@ -18,6 +18,12 @@
  * lands inside a restart's start window is safe to ask about, because the poll
  * classifies a failure there as `starting`.
  *
+ * A crash is also the one signal that a live run has ended with its engine
+ * (#3605): the run services let go of the stream, the wake lock and the OS
+ * progress claim, and the dashboard's run leaves the live phases. The health
+ * poll is not that signal, because it cannot tell a dead engine from a slow
+ * one, and its push and the poll's verdict arrive in either order.
+ *
  * Pushes arrive in the order the sidecar made them, so each one simply
  * replaces the last, with one exception: a crash is only ended by an engine
  * that is up or was stopped on purpose (`ready`, `slow`, `stopping`,
@@ -35,6 +41,8 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/queries/keys";
+import { loadTestService } from "@/services/load-test-service";
+import { scenarioRunService } from "@/services/scenario-run-service";
 import { useEngineStore } from "@/stores";
 import type { EngineLifecyclePayload } from "@/types/electron";
 
@@ -52,6 +60,8 @@ function applyEngineLifecycle(lifecycle: EngineLifecyclePayload, queryClient: Qu
 		const { code, signal, stderrTail, error } = lifecycle;
 		setEngineCrash({ code, signal, stderrTail, error });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
+		loadTestService.handleEngineStopped();
+		scenarioRunService.handleEngineStopped();
 		return;
 	}
 	if (CRASH_SURVIVES.has(lifecycle.kind)) return;
