@@ -64,7 +64,9 @@ import {
 	ScriptLifecycleSummary,
 	StopRunButton,
 	StoredExchangeWarning,
+	ThresholdVerdict,
 	TransactionsSummary,
+	stoppedRunOf,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
@@ -461,6 +463,17 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					steps={steps.length}
 					dataBound={dataBound}
 					dataFileName={dataFileName}
+				/>
+
+				{/* The run's budgets, first of the whole-run answers: a missed one
+				    is what marks the run's row failed in every list, and the row
+				    names no budget, so this card is where it is read (#3539).
+				    Absent for a run that declared none and for a report still in
+				    flight, which holds no verdict. */}
+				<ThresholdVerdict
+					verdict={report?.thresholdValidation}
+					runId={run.id}
+					stopped={report ? stoppedRunOf(report) : undefined}
 				/>
 
 				{/* Above the steps rather than after them: "which of the contract

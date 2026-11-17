@@ -1701,10 +1701,12 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
   isStreaming: boolean       // Between startRun and the stream closing or failing
   error: string | null       // A transport failure on the stream
   endedAs: TerminalRunStatus | null  // How the run ended, once this window knows
+  thresholdValidation: RunReport["thresholdValidation"] | null  // The stored
+                             // report's budget block, written with endedAs
 }
 ```
 
-`runEnded(runId, status)` records `endedAs` and lowers `isStreaming` in one write. `ScenarioRunService.handleClose` calls it with the engine's completion frame, or, for a stream that closed without one (#1415), with the stored report's status once the refetch below reads it as terminal; a run the report still calls running only lost its stream, and `endedAs` stays null. Its reader is `RunAnnouncer` (#3498), which says how the run ended; the run tab reads the stored record, not this field.
+`runEnded(runId, status, thresholdValidation)` records `endedAs` and the stored report's budget block and lowers `isStreaming` in one write. `ScenarioRunService.handleClose` calls it once the report refetch below has answered: with the engine's completion frame, or, for a stream that closed without one (#1415), with the stored report's status when it reads as terminal; a run the report still calls running only lost its stream, and `endedAs` stays null. The wait is for the budgets (#3539): the frame carries a status alone, and one write is what lets `RunAnnouncer` (#3498) say the ending once with a missed budget in it, rather than the counts first and the budget in a second announcement. A refetch that failed records no block, and the ending is still said with the counts. The terminal notification is posted at the same point and from the same block. Both fields' one reader is `RunAnnouncer`; the run tab reads the stored record, not these.
 
 `streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `useRunLiveness(run.id, run.status)`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
 

@@ -666,7 +666,8 @@ TEST_F (DeferredCompositionTest, OAuth2ALateTokenRequestEndsWithTheServer) {
     EXPECT_FALSE (db_->get_oauth_token (vayu::http::oauth::cache_key (config)).has_value ())
     << "a token request the stop flag should have ended completed";
     EXPECT_EQ (echo.requests_seen (), 0);
-    EXPECT_EQ (tokens.hits (), 0);
+    EXPECT_EQ (tokens.hits (), 0) << "the token endpoint saw " << tokens.last_target ()
+                                  << " carrying " << tokens.last_body ();
 }
 
 // A token endpoint that never answers fails the send at the request's own

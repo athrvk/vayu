@@ -259,6 +259,26 @@ describe("RunItem run types", () => {
 			).toBeInTheDocument();
 		});
 
+		// #3539: a missed budget fails the row on its own, steps all clean.
+		// Mutation check: stop `collectionRowOutcome` reading `verdict` and the name
+		// reddens; stop `collectionSubtitle` reading it and the line reddens.
+		it("marks a run that only missed a budget as failed and says so under it", () => {
+			render(
+				<RunItem
+					run={counted({ passed: 8, verdict: "failed" })}
+					{...props}
+					collectionName="Checkout flow"
+				/>
+			);
+
+			expect(screen.getByText("budgets missed")).toBeInTheDocument();
+			expect(
+				screen.getByRole("button", {
+					name: "Open Collection run, completed, verdict failed, Checkout flow",
+				})
+			).toBeInTheDocument();
+		});
+
 		it("draws the failed glyph where a clean row draws the completed one", () => {
 			const glyphOf = (run: Run) => {
 				const view = render(<RunItem run={run} {...props} />);

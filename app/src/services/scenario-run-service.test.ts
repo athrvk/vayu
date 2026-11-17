@@ -424,8 +424,8 @@ describe("ScenarioRunService", () => {
 	});
 
 	/*
-	 * What `RunAnnouncer` says the run ended as (#3498). Mutation check: drop
-	 * the frame's `runEnded` and the first case reddens; drop the stored-report
+	 * What `RunAnnouncer` says the run ended as (#3498). Mutation check: leave
+	 * the frame out of `endedAs` and the first case reddens; drop the stored-report
 	 * fallback and the second does; drop its `isRunTerminal` guard and the third
 	 * does.
 	 */
@@ -443,7 +443,7 @@ describe("ScenarioRunService", () => {
 			await closeStream("stopped");
 
 			expect(mockRunEnded).toHaveBeenCalledTimes(1);
-			expect(mockRunEnded).toHaveBeenCalledWith("run_e1", "stopped");
+			expect(mockRunEnded).toHaveBeenCalledWith("run_e1", "stopped", null);
 		});
 
 		it("reads the stored report's status for a stream that closed without a frame", async () => {
@@ -451,7 +451,7 @@ describe("ScenarioRunService", () => {
 			scenarioRunService.startMonitoring("run_e2");
 			await closeStream(null);
 
-			expect(mockRunEnded).toHaveBeenCalledWith("run_e2", "failed");
+			expect(mockRunEnded).toHaveBeenCalledWith("run_e2", "failed", null);
 		});
 
 		it("records nothing while the stored run is still running, or when it cannot be read", async () => {
@@ -559,6 +559,106 @@ describe("ScenarioRunService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ body: "2 passed, 0 failed, 1 stopped" })
 			);
+		});
+
+		/*
+		 * A missed budget is only in the stored report, so the notification
+		 * waits for the fetch (#3539). Mutation checks: post the counts alone
+		 * (drop `thresholdValidation` from the `stepOutcomeLine` call in
+		 * `handleClose`) and the two missed-budget cases redden; notify before
+		 * the fetch again and they redden too, the report not yet read; make a
+		 * failed fetch skip the notification and the counts-only case reddens.
+		 */
+		describe("naming a missed budget (#3539)", () => {
+			function storedWithBudgets(status: string, checks: Array<[string, boolean]>) {
+				const failed = checks.filter(([, passed]) => !passed).length;
+				vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+					...storedReport,
+					metadata: { status },
+					thresholdValidation: {
+						checks: checks.map(([metric, passed]) => ({ metric, limit: 100, passed })),
+						passed: checks.length - failed,
+						failed,
+						verdict: failed === 0 ? "passed" : "failed",
+					},
+				} as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>);
+			}
+
+			it("names the budget a run failed by 'Fail the run' missed, not only its counts", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("failed", [
+					["latencyP95Ms", true],
+					["latencyP99Ms", false],
+				]);
+				scenarioRunService.startMonitoring("run_b1");
+
+				await closeStream("failed");
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunFailed,
+						title: "Collection run failed",
+						body: "12 passed, 0 failed. 1 of 2 budgets missed: p99",
+					})
+				);
+			});
+
+			it("names a missed budget on a run that still completed", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("completed", [["latencyP99Ms", false]]);
+				scenarioRunService.startMonitoring("run_b2");
+
+				await closeStream("completed");
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunFinished,
+						body: "12 passed, 0 failed. 1 of 1 budget missed: p99",
+					})
+				);
+			});
+
+			it("leaves the body on the counts when every budget was met", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("completed", [["latencyP99Ms", true]]);
+				scenarioRunService.startMonitoring("run_b3");
+
+				await closeStream("completed");
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({ body: "12 passed, 0 failed" })
+				);
+			});
+
+			it("still posts the counts when the report cannot be read", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				vi.mocked(apiService.getRunReport).mockRejectedValueOnce(new Error("engine gone"));
+				scenarioRunService.startMonitoring("run_b4");
+
+				await closeStream("failed");
+
+				expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunFailed,
+						body: "12 passed, 0 failed",
+					})
+				);
+			});
+
+			it("hands the budget block to the store with the ending, for the announcement", async () => {
+				storedWithBudgets("completed", [["latencyP99Ms", false]]);
+				scenarioRunService.startMonitoring("run_b5");
+
+				await closeStream("completed");
+
+				expect(mockRunEnded).toHaveBeenCalledTimes(1);
+				expect(mockRunEnded).toHaveBeenCalledWith(
+					"run_b5",
+					"completed",
+					expect.objectContaining({ failed: 1, verdict: "failed" })
+				);
+			});
 		});
 
 		it("posts once for a run that fails and then closes", async () => {
@@ -791,21 +891,15 @@ describe("ScenarioRunService", () => {
 		});
 
 		/*
-		 * The quieter cue (#1364 item 4). This service has no stopped kind -
-		 * every terminal state it reports is one the user did not ask for - so
-		 * the cue follows all of them. Mutation check: drop the `runFinished`
-		 * call and a user with notifications off learns nothing when a
-		 * collection run ends.
-		 */
-		/*
 		 * #1415: until the completion frame's status was read, every terminal
 		 * close reported `collectionRunFinished`, so a failed collection run
 		 * said finished and marked nothing.
 		 *
-		 * The frame is the only source here, unlike the load service's: this
-		 * service notifies before it fetches the report, deliberately, so there
-		 * is no stored verdict to fall back to at this point. Mutation check:
-		 * restore the unconditional finished kind and this reddens.
+		 * The frame wins, and the stored report's status is the fallback for a
+		 * stream that closed without one, as in the load service: the
+		 * notification waits for that report (#3539). Mutation checks: restore
+		 * the unconditional finished kind and the first case reddens; read the
+		 * frame alone and the stored-failure case does.
 		 */
 		it("marks the icon when the engine's frame says the run failed", async () => {
 			scenarioRunService.startMonitoring("run_32");
@@ -813,6 +907,21 @@ describe("ScenarioRunService", () => {
 			await closeStream("failed");
 
 			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("marks the icon when a run with no frame is stored as failed", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				...storedReport,
+				metadata: { status: "failed" },
+			} as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>);
+			scenarioRunService.startMonitoring("run_32b");
+
+			await closeStream(null);
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.collectionRunFailed })
+			);
 		});
 
 		it("marks nothing when the frame says the run completed", async () => {
@@ -823,6 +932,13 @@ describe("ScenarioRunService", () => {
 			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 		});
 
+		/*
+		 * The quieter cue (#1364 item 4). This service has no stopped kind -
+		 * every terminal state it reports is one the user did not ask for - so
+		 * the cue follows all of them. Mutation check: drop the `runFinished`
+		 * call and a user with notifications off learns nothing when a
+		 * collection run ends.
+		 */
 		it("raises the quieter end-of-run cue when a collection run ends", async () => {
 			scenarioRunService.startMonitoring("run_31");
 

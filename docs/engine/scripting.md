@@ -4587,8 +4587,9 @@ submission gets its own fresh `ScopeOverlay`, discarded after, so a
 same submission's own residual-token pass and later steps, never to a
 concurrent submission's. `timer.think` costs no new thread here either:
 `RunContext::reserve_think_wait` folds its wait into the same
-`maintain_concurrency` in-flight accounting every load strategy already
-polls, rather than blocking a worker.
+`maintain_concurrency` in-flight accounting every closed-loop strategy already
+polls, rather than blocking a worker; a `constant_rps` run skips the timer
+(#3541).
 
 See [`elements.md`](elements.md#load-paths) for the full mechanics -
 `ScopeOverlay`, the per-thread `ScriptEngine`, `elements.includeScriptTime`,

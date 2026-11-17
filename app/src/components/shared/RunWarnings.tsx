@@ -35,6 +35,9 @@ const TITLES: Record<string, string> = {
 	// The run finished; some virtual users just went on without a cookie the
 	// server set (#3307).
 	cookies_dropped: "Some cookies the server set were dropped",
+	// The run sent everything it planned; a constant-rate run just has no
+	// think time to wait out (#3541).
+	think_timer_skipped_open_loop: "Think timer skipped on a constant-rate run",
 };
 
 export interface RunWarningsProps {

@@ -209,6 +209,42 @@ describe("RunAnnouncer", () => {
 		expect(region()).toHaveTextContent(sentence);
 	});
 
+	/*
+	 * The service lowers `isStreaming` when the stream closes and writes the
+	 * ending with the report's budgets a round trip later (#3539), so the
+	 * ending is said once, with the budget in it. Mutation checks: drop the
+	 * budget block from `scenarioAnnouncement`'s line, or from the store's
+	 * `runEnded` write, and the first two cases redden.
+	 */
+	it.each([
+		["completed", "Collection run completed. 2 passed, 0 failed. 1 of 2 budgets missed: p99"],
+		["failed", "Collection run failed. 2 passed, 0 failed. 1 of 2 budgets missed: p99"],
+	] as const)("names the budget a %s collection run missed, once", (status, sentence) => {
+		render(<RunAnnouncer />);
+		act(() => scenario().startRun("coll_1"));
+		act(() => scenario().addSteps("coll_1", [step(0, "passed"), step(1, "passed")]));
+		act(() => scenario().setStreaming("coll_1", false));
+		const beforeEnding = region().firstElementChild;
+		expect(region()).toHaveTextContent("Collection run started");
+
+		const budgets = report(status, [
+			["latencyP95Ms", true],
+			["latencyP99Ms", false],
+		]).thresholdValidation;
+		act(() => scenario().runEnded("coll_1", status, budgets));
+		expect(region().textContent).toBe(sentence);
+		expect(region().firstElementChild).not.toBe(beforeEnding);
+	});
+
+	it("says only the counts for a collection run whose budgets were met", () => {
+		render(<RunAnnouncer />);
+		act(() => scenario().startRun("coll_1"));
+		act(() => scenario().addSteps("coll_1", [step(0, "passed")]));
+		const budgets = report("completed", [["latencyP99Ms", true]]).thresholdValidation;
+		act(() => scenario().runEnded("coll_1", "completed", budgets));
+		expect(region().textContent).toBe("Collection run completed. 1 passed, 0 failed");
+	});
+
 	it("says nothing when a collection run's stream drops without an ending", () => {
 		render(<RunAnnouncer />);
 		act(() => scenario().startRun("coll_1"));

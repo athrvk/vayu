@@ -2133,8 +2133,10 @@ export interface LoadResultSummary {
  *
  * `failed` and `errored` are what the history row reads (#3458): a completed run
  * with either reads as failed, and its subtitle prints the counts
- * (`rowOutcome`, `collectionSubtitle`). `verdict` has no renderer reader; the
- * MCP `list_runs` row, which passes the summary through, is its consumer.
+ * (`rowOutcome`, `collectionSubtitle`). So does a `verdict` of `"failed"`
+ * (#3539): a missed budget fails the row with or without "Fail the run". A
+ * `"passed"` verdict changes nothing on the row. The MCP `list_runs` row, which
+ * passes the summary through, reads it too.
  */
 export interface CollectionResultSummary {
 	passed?: number;
@@ -3210,6 +3212,8 @@ export interface RunReport {
 		/** `per_host_limit_raised` (#2394): the setting, and the limit the run used. */
 		configured?: number;
 		effective?: number;
+		/** `think_timer_skipped_open_loop` (#3541): the enabled timers skipped. */
+		timers?: number;
 	}>;
 	metadata?: {
 		runId: string;

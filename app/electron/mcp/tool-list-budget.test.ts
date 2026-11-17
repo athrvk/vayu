@@ -219,10 +219,14 @@
  * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
  * went to 223,200 / 218,900.
  *
+ * #3552's `error` clause in `run_collection_smoke` (an engine failure rides the
+ * row) added 67 B to every row, taking them to 150,757 / 148,161 / 221,912 /
+ * 217,645 B; the four caps went to 150,800 / 148,200 / 223,300 / 219,000 (the writes-on
+ * rows had also moved under #3550, so they are re-measured after the merge).
  * #3568's `phase` clause in `get_live_metrics` (the five phases and what
  * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
- * rows to 150,824 / 148,228 / 223,275 / 219,008 B; the four caps went to
- * 150,900 / 148,300 / 223,300 / 219,100.
+ * rows to 150,891 / 148,295 / 223,342 / 219,075 B; the four caps went to
+ * 150,900 / 148,300 / 223,400 / 219,100.
  */
 
 import { describe, it, expect } from "vitest";
@@ -244,7 +248,7 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_900 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_300 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_300 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 223_400 },
 	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 219_100 },
 ];
 

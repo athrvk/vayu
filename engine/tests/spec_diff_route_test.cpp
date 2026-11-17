@@ -57,6 +57,9 @@ std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 delete_request_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -231,6 +234,28 @@ TEST_F (SpecDiffRouteTest, ReportsTheFieldsTheDocumentMovedAndTheDraftAnApplyWou
     EXPECT_EQ (changed["draft"]["examples"][0]["status"], 200);
     EXPECT_EQ (changed["draft"]["examples"][0]["contentType"], "application/json");
     EXPECT_EQ (changed["draft"]["examples"][0]["headers"][0]["key"], "Content-Type");
+}
+
+// A query typed into the URL alone (no `params` in the write) is a change to
+// the request's Params a sync would destroy, so it reads as user-touched
+// beside the URL (#3551). Mutation check: drop the `reconcile_params_with_url`
+// call from `apply_request_params_field` and only `url` is reported.
+TEST_F (SpecDiffRouteTest, AURLOnlyQueryEditReadsAsAUserTouchedParamsChange) {
+    const std::string listed = create_listed_request (root_);
+    ASSERT_EQ (routes::update_request_response (
+               *db_, listed, json{ { "url", "{{baseUrl}}/pets?limit=5" } })
+               .first,
+    200);
+
+    const json body = diff ();
+
+    ASSERT_EQ (body["changed"].size (), 1u);
+    json touched = json::object ();
+    for (const json& field : body["changed"][0]["fields"]) {
+        touched[field["field"].get<std::string> ()] = field["userTouched"];
+    }
+    EXPECT_EQ (touched, (json{ { "name", false }, { "url", true }, { "params", true } }))
+    << body.dump ();
 }
 
 TEST_F (SpecDiffRouteTest, SaysWhenTheDocumentIsByteForByteTheStoredOne) {
