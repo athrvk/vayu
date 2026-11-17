@@ -529,8 +529,8 @@ which case the app picks a fallback (below).
   the innermost error, beside Retry; a Retry that fails the same way keeps it,
   because `restartEngine` classifies through the same function. The full error
   is in the main log either way. The main process pushes every lifecycle
-  change to the window on `engine:lifecycle` (and answers an invoke on the same channel with the current
-  state, for a window that loaded or reloaded after the last push). The renderer
+  change to the window on `engine:lifecycle` (and answers an invoke on the same channel with the
+  current state, for a window that loaded or reloaded after the last push). The renderer
   keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
   how the engine left (signal, exit code or error, with the last lines it
   printed) and offers **Restart**, which a crash never did. The lifecycle is
