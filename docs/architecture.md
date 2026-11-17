@@ -573,8 +573,13 @@ which case the app picks a fallback (below).
   process, `quit-flow.ts`: `idle`, then the running-services question below,
   then the flush, then the loss question, then `proceeding`, after which a quit
   hands over to `quit-shutdown.ts` to stop the engine and the MCP server. The
-  flush waits out its round trip unconditionally (the renderer's ACK, or a 2 s
-  ceiling if it never comes); what matters is what happens once it settles. The renderer's `flushAll`
+  flush waits out its round trip (the renderer's ACK, or a 2 s ceiling if it
+  never comes) whenever there is a page to ask. With no window, a renderer
+  that is gone, or a page that has not finished loading, nothing is sent and
+  the flush settles at once with nothing to save (`createFlushRequest`, issue
+  #3610): "has loaded" is the same `did-finish-load` signal the open intents
+  wait on, so the app keeps one account of whether the page can hear main.
+  What matters is what happens once it settles. The renderer's `flushAll`
   resolves to how many contexts saved, failed or stayed pending (a save the
   editor declined to send); a ceiling with no ACK at all is read the same as
   a failure, since nothing is known to have landed. Either case holds the

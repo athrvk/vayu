@@ -94,7 +94,7 @@ import { showApplicationMenu } from "./app-menu.js";
 import { menuAccelerators } from "./menu-accelerators.js";
 import { menuLabels } from "./menu-labels.js";
 import type { FlushFailurePrompt } from "./save-flush.js";
-import { createQuitFlow, FLUSH_REQUEST_CHANNEL, registerFlushAckIpc } from "./quit-flow.js";
+import { createFlushRequest, createQuitFlow, registerFlushAckIpc } from "./quit-flow.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
@@ -506,16 +506,14 @@ const serviceStopGuard = createServiceStopGuard({
 // quit-flow.ts; `quitShutdown` below is its tail once a quit is let through.
 const quitFlow = createQuitFlow({
 	services: serviceStopGuard,
-	requestFlush: (flushId) => {
-		if (!mainWindow || mainWindow.webContents.isDestroyed()) return false;
-		// A dead renderer's WebContents object outlives the process it drove, so
-		// `isDestroyed()` above stays false and this would ask for an ACK that
-		// can never come - the whole 2s ceiling, on a window whose unsaved work
-		// died with the process. See renderer-recovery.ts.
-		if (rendererRecovery.isRendererGone()) return false;
-		mainWindow.webContents.send(FLUSH_REQUEST_CHANNEL, flushId);
-		return true;
-	},
+	requestFlush: createFlushRequest({
+		contents: () => {
+			const contents = mainWindow?.webContents;
+			return contents && !contents.isDestroyed() ? contents : null;
+		},
+		rendererGone: () => rendererRecovery.isRendererGone(),
+		pageLoaded: () => openIntents.isReady(),
+	}),
 	schedule: (run, ms) => {
 		setTimeout(run, ms);
 	},

@@ -3803,7 +3803,11 @@ running). `electron/quit-flow.ts` is the one state machine both gestures go
 through - `idle`, `confirmingServices`, `flushing`, `confirmingLoss`,
 `proceeding` - and owns the flush and its 2s ACK ceiling, which is why
 "already flushed" is shared state: a quit that flushed and then closes the
-window must not ask a dying renderer twice. It lives outside `main.ts` so it
+window must not ask a dying renderer twice. A flush is only requested of a page
+that can answer (`createFlushRequest`): no window, a gone renderer, or a page
+that has not finished loading (`openIntents.isReady()`, the open intents' own
+`did-finish-load` signal) settles at once with nothing to save, rather than
+waiting out the ceiling and asking about edits that page never held (#3610). It lives outside `main.ts` so it
 can be tested - `main.ts` creates windows and starts the engine at import
 time. Once a quit is let through, `quit-shutdown.ts` stops the engine and the
 MCP server.

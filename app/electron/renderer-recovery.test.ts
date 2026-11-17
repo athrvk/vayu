@@ -366,10 +366,11 @@ describe("main.ts wiring", () => {
 	});
 
 	it("teaches the flush transport that a gone renderer cannot ACK", () => {
-		expect(main).toContain("requestFlush: (flushId) => {");
-		const requestFlush = main.slice(main.indexOf("requestFlush: (flushId) => {"));
-		expect(requestFlush.slice(0, requestFlush.indexOf("},"))).toContain(
-			"rendererRecovery.isRendererGone()"
+		// The gate itself is driven in quit-flow.test.ts (`createFlushRequest`).
+		expect(main).toContain("requestFlush: createFlushRequest({");
+		const requestFlush = main.slice(main.indexOf("requestFlush: createFlushRequest({"));
+		expect(requestFlush.slice(0, requestFlush.indexOf("}),"))).toContain(
+			"rendererGone: () => rendererRecovery.isRendererGone()"
 		);
 	});
 

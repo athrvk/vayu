@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 import { transformWithOxc } from "vite";
 import {
+	createFlushRequest,
 	createQuitFlow,
 	FLUSH_ACK_CHANNEL,
 	FLUSH_REQUEST_CHANNEL,
@@ -648,6 +649,89 @@ describe("registerFlushAckIpc", () => {
 });
 
 /*
+ * #3610. A failed engine start quit before the window's page had loaded, the
+ * request went to a page with no listener, and the ceiling asked about "some
+ * edits" over a session with nothing edited. The gate is driven inside a real
+ * flow, so what is asserted is the question the user sees, not a boolean.
+ *
+ * Mutation check: drop the `pageLoaded` condition from `createFlushRequest` and
+ * the first case reddens with `askLoss` called on the `null` prompt.
+ */
+describe("createFlushRequest", () => {
+	function gated(page: { loaded: boolean; rendererGone?: boolean; window?: boolean }) {
+		const sent: Array<[string, number]> = [];
+		const loss = fakeDialog<FlushFailurePrompt>();
+		const ceilings: Array<() => void> = [];
+		const deferred: Array<() => void> = [];
+		const flow = createQuitFlow({
+			services: { wouldStop: () => false, confirm: async () => true },
+			requestFlush: createFlushRequest({
+				contents: () =>
+					page.window === false
+						? null
+						: { send: (channel, flushId) => sent.push([channel, flushId]) },
+				rendererGone: () => page.rendererGone ?? false,
+				pageLoaded: () => page.loaded,
+			}),
+			schedule: (run) => ceilings.push(run),
+			defer: (run) => deferred.push(run),
+			askLoss: loss.ask,
+			log: vi.fn(),
+		});
+		const resumeQuit = vi.fn();
+		return {
+			flow,
+			sent,
+			loss,
+			resumeQuit,
+			quit: () => flow.gesture("quit", { preventDefault: vi.fn() }, resumeQuit),
+			/** Every ceiling fires, then the next turn runs. */
+			runOut: () => {
+				for (const run of ceilings.splice(0)) run();
+				for (const run of deferred.splice(0)) run();
+			},
+		};
+	}
+
+	it("asks a page that has not loaded nothing, and the quit proceeds without a question", () => {
+		const g = gated({ loaded: false });
+
+		g.quit();
+		g.runOut();
+
+		// First, so the mutation reads as the defect: the "some edits" prompt.
+		expect(g.loss.asked).toEqual([]);
+		expect(g.sent).toEqual([]);
+		expect(g.resumeQuit).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["no window", { loaded: true, window: false }],
+		["a gone renderer", { loaded: true, rendererGone: true }],
+	])("asks nothing of %s either", (_name, page) => {
+		const g = gated(page);
+
+		g.quit();
+		g.runOut();
+
+		expect(g.sent).toEqual([]);
+		expect(g.loss.ask).not.toHaveBeenCalled();
+		expect(g.resumeQuit).toHaveBeenCalledTimes(1);
+	});
+
+	it("still flushes a loaded page, and still asks when that flush fails", () => {
+		const g = gated({ loaded: true });
+
+		g.quit();
+		expect(g.sent).toEqual([[FLUSH_REQUEST_CHANNEL, expect.any(Number)]]);
+		g.flow.flushed(g.sent[0][1], FAILED);
+
+		expect(g.loss.asked).toEqual([buildFlushFailurePrompt("quit", FAILED)]);
+		expect(g.resumeQuit).not.toHaveBeenCalled();
+	});
+});
+
+/*
  * main.ts creates windows and starts the engine at import time, so its half of
  * the wiring can only be read. Every case above would still pass with a handler
  * that skipped the flow, which is the bug the flow exists to close.
@@ -678,8 +762,14 @@ describe("main.ts wiring", () => {
 		expect(main).toContain("const resumeQuit = () => app.quit();");
 	});
 
-	it("tags each flush request with its id, and takes the ACK through the parser", () => {
-		expect(main).toContain("mainWindow.webContents.send(FLUSH_REQUEST_CHANNEL, flushId)");
+	it("asks through the readiness gate, on the open intents' signal, and takes the ACK through the parser", () => {
+		const flowAt = main.indexOf("const quitFlow = createQuitFlow({");
+		const flowDeps = main.slice(flowAt, main.indexOf("\n});\n", flowAt));
+		expect(flowDeps).toContain("requestFlush: createFlushRequest({");
+		expect(flowDeps).toContain("rendererGone: () => rendererRecovery.isRendererGone(),");
+		expect(flowDeps).toContain("pageLoaded: () => openIntents.isReady(),");
+		// No second sender beside the gate.
+		expect(main).not.toContain("FLUSH_REQUEST_CHANNEL");
 		expect(main).toContain("registerFlushAckIpc(ipcMain, quitFlow,");
 	});
 
