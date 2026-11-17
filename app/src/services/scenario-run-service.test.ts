@@ -618,6 +618,38 @@ describe("ScenarioRunService", () => {
 				);
 			});
 
+			it("announces a stop as stopped, with the same counts line (#3606)", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("stopped", [["latencyP99Ms", true]]);
+				scenarioRunService.startMonitoring("run_b6");
+
+				await closeStream("stopped");
+
+				expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunStopped,
+						title: "Collection run stopped",
+						body: "12 passed, 0 failed",
+					})
+				);
+			});
+
+			it("announces a stop the stored report records when the frame carried no status", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("stopped", []);
+				scenarioRunService.startMonitoring("run_b7");
+
+				await closeStream(null);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunStopped,
+						title: "Collection run stopped",
+					})
+				);
+			});
+
 			it("leaves the body on the counts when every budget was met", async () => {
 				Object.assign(stepCounts, { passed: 12 });
 				storedWithBudgets("completed", [["latencyP99Ms", true]]);
@@ -933,16 +965,25 @@ describe("ScenarioRunService", () => {
 		});
 
 		/*
-		 * The quieter cue (#1364 item 4). This service has no stopped kind -
-		 * every terminal state it reports is one the user did not ask for - so
-		 * the cue follows all of them. Mutation check: drop the `runFinished`
-		 * call and a user with notifications off learns nothing when a
-		 * collection run ends.
+		 * The quieter cue (#1364 item 4). This service has no Stop of its own, so
+		 * every stopped run it reports was stopped from elsewhere (the runner
+		 * tab's Stop included, which ends on the stream like any other) and the
+		 * cue follows every terminal state. Mutation check: drop the
+		 * `runFinished` call and a user with notifications off learns nothing
+		 * when a collection run ends.
 		 */
 		it("raises the quieter end-of-run cue when a collection run ends", async () => {
 			scenarioRunService.startMonitoring("run_31");
 
 			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
+		it("raises the cue for a stopped collection run too (#3606)", async () => {
+			scenarioRunService.startMonitoring("run_31b");
+
+			await closeStream("stopped");
 
 			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
 		});

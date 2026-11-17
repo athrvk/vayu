@@ -84,6 +84,7 @@ vi.mock("./notify", () => ({
 		loadRunStopped: "load-run-stopped",
 		loadRunFailed: "load-run-failed",
 		collectionRunFinished: "collection-run-finished",
+		collectionRunStopped: "collection-run-stopped",
 		collectionRunFailed: "collection-run-failed",
 	},
 }));
