@@ -737,6 +737,34 @@ TEST_F (RequestComposerTest, ARequestsOwnTimeoutIsComposedOnlyWhenStated) {
     EXPECT_TRUE (overlay_payload["timeout"].is_null ());
 }
 
+// A by-id send follows the saved request's Event stream setting (#3561), so the
+// flag is always emitted: an omitted `true` would buffer a stream that never
+// ends. An inline overlay states its own over the stored one.
+TEST_F (RequestComposerTest, AStoredStreamFlagIsAlwaysComposed) {
+    seed_collection ("root", "");
+    auto streaming   = make_request ("req_stream", "root");
+    streaming.stream = true;
+    db_->save_request (streaming);
+    db_->save_request (make_request ("req_plain", "root"));
+
+    auto [stream_status, stream_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_stream" } });
+    ASSERT_EQ (stream_status, 200) << stream_payload.dump ();
+    ASSERT_TRUE (stream_payload.contains ("stream")) << stream_payload.dump ();
+    EXPECT_EQ (stream_payload["stream"], true);
+
+    auto [plain_status, plain_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_plain" } });
+    ASSERT_EQ (plain_status, 200) << plain_payload.dump ();
+    ASSERT_TRUE (plain_payload.contains ("stream")) << plain_payload.dump ();
+    EXPECT_EQ (plain_payload["stream"], false);
+
+    auto [overlay_status, overlay_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_stream" }, { "request", { { "stream", false } } } });
+    ASSERT_EQ (overlay_status, 200) << overlay_payload.dump ();
+    EXPECT_EQ (overlay_payload.value ("stream", true), false) << overlay_payload.dump ();
+}
+
 // The same chain with no pre-request script anywhere above the request: every
 // name resolves here, environment over leaf over root, and nothing is deferred.
 TEST_F (RequestComposerTest, ResolvesAnUnscriptedRequestThroughTheChainsPrecedence) {

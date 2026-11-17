@@ -749,7 +749,9 @@ logged as a warning: it means a client skipped composition.
   shutdown is `SseEndReason::Shutdown` (`request_shutdown`), never a user's
   `Stopped`, though both leave the row `stopped` (#3342); an end read before
   one is recorded is `Error`, never `Completed`. `stream` with `transient` is a
-  `400`. A final hop that is not `text/event-stream` also keeps its bytes as
+  `400`. A by-id `POST /compose` always carries the stored `stream` (#3561), so
+  a client that spreads it into `POST /execute` states its own or parses the
+  `202`. A final hop that is not `text/event-stream` also keeps its bytes as
   the body, up to `maxDesignResponseBodyBytes`, and every response's trace
   carries `response.bodyBytes` (a stream's wire count in place of the held
   length), which `cap_trace_bodies` keeps (#3238, #3423). `POST /runs` takes `stream` too (#576) through the same
@@ -759,7 +761,7 @@ logged as a warning: it means a client skipped composition.
   both caps are always set because the load loop refills concurrency per
   completion and an unending transfer would leak its slot. A collection run
   streams the steps whose stored request has `stream` set (#3235): the plan
-  reads the row (composition drops the flag) and gives each one
+  reads the row's flag (`vayu::Request` has no mirror of it) and gives each one
   `Request::stream_bounds` from the run's caps over the `sse*` settings
   (`vayu::http::resolve_stream_bounds`, the one resolution both run shapes
   use); its caps stand without `stream` (`read_collection_run_stream_caps`),

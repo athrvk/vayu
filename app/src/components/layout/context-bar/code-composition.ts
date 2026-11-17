@@ -37,7 +37,7 @@ import type { ComposedRequest, ComposeRequestRequest } from "@/types";
 
 /**
  * The execution settings the snippet reads beside the composed payload, which
- * `POST /compose` does not carry (see `CodeSection` on `stream`).
+ * an inline `POST /compose` does not carry (see `CodeSection` on `stream`).
  */
 export type SnippetSettings = Pick<RequestState, "stream" | "disableCookies">;
 

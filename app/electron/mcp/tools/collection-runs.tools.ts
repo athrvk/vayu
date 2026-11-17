@@ -277,8 +277,11 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					continue;
 				}
 				try {
+					// Buffered whatever the row's Event stream setting, which a by-id
+					// compose carries (#3561): a row here is judged by its exchange,
+					// and a stream answers `202 {runId}` with no status to judge.
 					const resp = ((await ctx.client.executeRequest(
-						asMcpSend(outgoing, ctx),
+						asMcpSend({ ...outgoing, stream: false }, ctx),
 						signal
 					)) ?? {}) as Record<string, unknown>;
 					// The engine's own allowlist refusal of where a script

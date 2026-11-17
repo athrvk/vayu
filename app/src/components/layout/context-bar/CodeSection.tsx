@@ -109,11 +109,9 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 	/*
 	 * `stream` is laid over the composed payload rather than read out of it,
-	 * because `POST /compose` deliberately does not carry the flag (see the
-	 * `stream` column in engine types.hpp): a composed payload is handed
-	 * straight to `/execute` by callers that would then get a `202` they never
-	 * asked to parse. It comes from whatever the payload was composed from -
-	 * the draft, or else the row - and the jar note below reads the same.
+	 * because only a by-id compose carries the flag (#3561); the editor's
+	 * inline compose does not. It comes from whatever the payload was composed
+	 * from - the draft, or else the row - and the jar note below reads the same.
 	 */
 	const editorSettings = mode === "resolved" ? composed.data?.editorSettings : null;
 	const settings = editorSettings ?? request;
