@@ -1276,8 +1276,10 @@ first decides. The estimate is a documented upper bound, not a measurement: a
 string counts two bytes per UTF-16 code unit (V8 stores Latin-1 text in one, so
 this errs toward evicting early), a binary body counts its `byteLength`, and
 `body` and `bodyRaw` count once when they are equal - past the pane's formatting
-threshold `paneBody` hands the raw string back as `body`. Headers and the small
-fields are not counted. The response just written is never evicted, even when it
+threshold `paneBody` hands the raw string back as `body`. The request and
+response bodies of the scripts' `pm.sendRequest` records (#3633) count the same
+way, by the text held and never by a record's `bodyBytes`, which is the size
+before the engine cut or shed it. Headers and the small fields are not counted. The response just written is never evicted, even when it
 alone exceeds the budget: it is the one on screen, and the next write evicts it.
 So "the 24 most recently sent" is the ceiling, and a session that sends large
 bodies holds fewer.

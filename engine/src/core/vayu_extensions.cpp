@@ -18,6 +18,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/log_redact.hpp"
 
 #include <algorithm>
@@ -604,6 +605,81 @@ UrlOmitted& omitted) {
     omitted.password += password;
     omitted.query += total - password;
     return out;
+}
+
+namespace {
+
+/// What a `pm.sendRequest` record withholds besides the static names: the
+/// header names and the query parameter the call's own auth wrote.
+struct RecordSecrets {
+    const std::vector<std::string>& header_names;
+    const std::vector<std::string>& param_names;
+};
+
+/// Whether @p member holds a header set: a folded map (`headers`,
+/// `sentHeaders`) or a `{name, value}` line list (`headerLines`,
+/// `sentHeaderLines`), matched by suffix as the MCP server's
+/// `HEADER_SET_MEMBER` is, so a header set the trace gains is masked rather
+/// than leaked. `authHeaders` matches too and is a list of names, which no
+/// branch below touches.
+bool names_header_set (std::string_view member) {
+    const auto ends_with = [member] (std::string_view suffix) {
+        return member.size () >= suffix.size () &&
+        utils::ascii_lower_equal (member.substr (member.size () - suffix.size ()), suffix);
+    };
+    return ends_with ("headers") || ends_with ("headerlines");
+}
+
+/// A recorded value in place of a credential: the run-record marker, because
+/// an empty value would read as "sent empty". A value sent empty stays empty.
+void redact_recorded (nlohmann::json& value) {
+    if (value.is_string () && !value.get_ref<const std::string&> ().empty ()) {
+        value = std::string (utils::kRedactedMarker);
+    }
+}
+
+void mask_header_set (nlohmann::json& set, const RecordSecrets& secrets) {
+    json::for_each_header_value (
+    set, [&secrets] (const std::string& name, nlohmann::json& value) {
+        if (utils::is_secret_header_name (name, secrets.header_names)) {
+            redact_recorded (value);
+        }
+    });
+}
+
+void mask_record_node (nlohmann::json& node, const RecordSecrets& secrets) {
+    if (node.is_array ()) {
+        for (auto& item : node) {
+            mask_record_node (item, secrets);
+        }
+        return;
+    }
+    if (!node.is_object ()) {
+        return;
+    }
+    for (auto& [member, value] : node.items ()) {
+        if (names_header_set (member)) {
+            mask_header_set (value, secrets);
+        } else if (member == "url" && value.is_string ()) {
+            int omitted = 0;
+            value       = redact_url_credentials (
+            value.get_ref<const std::string&> (), secrets.param_names, omitted);
+        } else {
+            mask_record_node (value, secrets);
+        }
+    }
+}
+
+} // namespace
+
+void mask_script_request_record (nlohmann::json& record,
+const std::vector<std::string>& auth_header_names,
+const std::string& auth_query_param) {
+    std::vector<std::string> param_names;
+    if (!auth_query_param.empty ()) {
+        param_names.push_back (auth_query_param);
+    }
+    mask_record_node (record, RecordSecrets{ auth_header_names, param_names });
 }
 
 Json portable_body (const Json& body) {

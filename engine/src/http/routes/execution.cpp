@@ -1115,12 +1115,39 @@ std::string script_failure_text (const vayu::ScriptResult& result, std::string_v
     return text + " script failed - " + result.error_message;
 }
 
+namespace {
+
+/// Both phases' `pm.sendRequest` records (#3633), pre before test, each
+/// stamped with its phase as a console line is, their bodies sharing one
+/// budget: here, because this node is both the live answer and the stored
+/// trace's.
+nlohmann::json script_requests_node (const vayu::ScriptResult& pre_script_result,
+const vayu::ScriptResult& post_script_result,
+size_t max_trace_body_bytes) {
+    nlohmann::json records = nlohmann::json::array ();
+    const auto append      = [&records] (const char* source,
+                             const std::vector<nlohmann::json>& phase) {
+        for (const auto& record : phase) {
+            records.push_back (record);
+            records.back ()["source"] = source;
+        }
+    };
+    append ("pre", pre_script_result.script_requests);
+    append ("test", post_script_result.script_requests);
+    vayu::json::cap_trace_bodies_together (
+    records.get_ref<nlohmann::json::array_t&> (), max_trace_body_bytes);
+    return records;
+}
+
+} // namespace
+
 /**
- * @brief Build the four script-result keys - see routes.hpp for why one builder
+ * @brief Build the script-result keys - see routes.hpp for why one builder
  *        serves both the live response body and the stored trace.
  */
 nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result) {
+const vayu::ScriptResult& post_script_result,
+size_t max_trace_body_bytes) {
     nlohmann::json node = nlohmann::json::object ();
 
     /*
@@ -1172,23 +1199,37 @@ const vayu::ScriptResult& post_script_result) {
      * carry: the prefix was indistinguishable from a script that logged a line
      * beginning with those six characters, and adding a second prefix for the
      * level would have doubled that ambiguity instead of removing it.
+     *
+     * A `pm.sendRequest` summary line's `scriptRequest` indexes
+     * `scriptRequests` below, so a test-phase line's moves past the
+     * pre-phase records.
      */
     nlohmann::json all_console_output = nlohmann::json::array ();
     const auto append = [&all_console_output] (const char* source,
-                        const std::vector<vayu::ConsoleEntry>& entries) {
+                        const std::vector<vayu::ConsoleEntry>& entries,
+                        size_t records_before) {
         for (const auto& entry : entries) {
             nlohmann::json line = { { "source", source },
                 { "level", vayu::to_string (entry.level) }, { "message", entry.message } };
             if (!entry.scope.empty ()) {
                 line["scope"] = entry.scope;
             }
+            if (const auto& index = entry.script_request) {
+                line["scriptRequest"] = *index + records_before;
+            }
             all_console_output.push_back (std::move (line));
         }
     };
-    append ("pre", pre_script_result.console_output);
-    append ("test", post_script_result.console_output);
+    append ("pre", pre_script_result.console_output, 0);
+    append ("test", post_script_result.console_output,
+    pre_script_result.script_requests.size ());
     if (!all_console_output.empty ()) {
         node["consoleLogs"] = all_console_output;
+    }
+    if (auto records = script_requests_node (
+        pre_script_result, post_script_result, max_trace_body_bytes);
+    !records.empty ()) {
+        node["scriptRequests"] = std::move (records);
     }
 
     // Add script errors if any
@@ -2005,6 +2046,8 @@ DesignSend& send) {
     // of *who asked for this execution*, not of the installation. Absent means
     // no - see ScriptConfig::allow_send_request.
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
+    // A send stores one trace, and its scripts' requests ride it (#3633).
+    vayu::core::record_script_requests (send.script_config, ctx.db);
 
     send.data_row            = payload.data_row;
     send.target_policy       = payload.target_policy;
@@ -2314,7 +2357,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         const bool has_element_output = elements && !elements->empty ();
         const bool has_script_output  = has_element_output ||
         !pre_script_result.tests.empty () ||
-        !pre_script_result.console_output.empty () || !pre_script_result.success;
+        !pre_script_result.console_output.empty () ||
+        !pre_script_result.script_requests.empty () || !pre_script_result.success;
         if (has_script_output) {
             // Guarded as a whole: a script surface that threw where
             // `execute_script` does not catch - building the runtime,
@@ -2384,7 +2428,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     // already captured, exactly as on the buffered path.
                     jar.apply (cookie_scope, post_cookie_writes);
                 }
-                scripts = build_script_result_node (pre_script_result, post_script_result);
+                scripts = build_script_result_node (pre_script_result,
+                post_script_result, script_config.max_trace_body_bytes);
             } catch (const std::exception& e) {
                 vayu::utils::log_error ("http",
                 "Stream post-request script failed: " + std::string (e.what ()));
@@ -2532,8 +2577,8 @@ std::chrono::steady_clock::time_point handler_start) {
     // trace's `scripts` node are the same object, so a restored Tests tab
     // shows the assertions this send actually made rather than the
     // empty-state that used to make "passed" and "never ran" identical.
-    const nlohmann::json scripts =
-    build_script_result_node (exchange.pre_script_result, exchange.post_script_result);
+    const nlohmann::json scripts = build_script_result_node (exchange.pre_script_result,
+    exchange.post_script_result, send.script_config.max_trace_body_bytes);
     // Every compiled element's outcome (issue #1514) - `extract.*` /
     // `assert.*` beside `script.pre` / `script.post`, on the same one-object-
     // two-homes rule as `scripts` above.

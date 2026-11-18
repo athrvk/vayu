@@ -20,6 +20,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { ElementMessages } from "./ElementMessages";
+import { ScriptRequestRow } from "./response-viewer/ScriptRequestRow";
 import type { LifecycleElementOutcome, RunReport } from "@/types/domain";
 
 const PHASE_LABELS: Record<"setup" | "teardown", string> = {
@@ -66,6 +67,17 @@ function LifecycleRow({
 				<span className={cn("font-medium", tone.className)}>{label}</span>
 			</div>
 			<ElementMessages element={outcome} />
+			{/* The `console` sample folds repeats, so no line can stand in for
+			    a record: they are listed on their own, in call order (#3633). */}
+			{outcome.scriptRequests && outcome.scriptRequests.length > 0 && (
+				<ul aria-label={`${PHASE_LABELS[phase]} script requests`} className="mt-1">
+					{outcome.scriptRequests.map((record, index) => (
+						<li key={index}>
+							<ScriptRequestRow record={record} />
+						</li>
+					))}
+				</ul>
+			)}
 		</li>
 	);
 }

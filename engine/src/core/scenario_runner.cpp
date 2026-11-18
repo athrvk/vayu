@@ -988,7 +988,7 @@ ScenarioStepStore& store) {
     // said something - an empty node would put a Tests pane's worth
     // of nothing on every stored step.
     if (auto scripts = vayu::http::routes::build_script_result_node (
-        exchange.pre_script_result, exchange.post_script_result);
+        exchange.pre_script_result, exchange.post_script_result, ctx.max_trace_body_bytes);
     !scripts.empty ()) {
         record.trace["scripts"] = std::move (scripts);
     }
@@ -1560,6 +1560,9 @@ RunManager& manager) {
         // may send is a property of who asked for this run.
         script_config.allow_send_request =
         vayu::http::read_allow_script_requests (context->config);
+        // Every step stores its trace, and the setup and teardown rows their
+        // lifecycle node, so their scripts' requests ride them (#3633).
+        vayu::core::record_script_requests (script_config, db);
 
         // One engine for the whole run: QuickJS contexts are pooled and reset
         // per execution, so a per-step engine would pay for a runtime setup per

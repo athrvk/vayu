@@ -230,14 +230,305 @@ function isPriorityTraceRow(row: Record<string, unknown>): boolean {
 	return typeof row.error === "string" && row.error !== "";
 }
 
-/** One report row, with its trace bounded per node and measured. */
-interface MeasuredRow {
-	row: unknown;
-	/** Set only for a row that carries a trace; the per-node-bounded copy. */
-	traced?: { record: Record<string, unknown>; trace: Record<string, unknown>; priority: boolean };
-	/** True when bounding changed the trace, so the row must be rebuilt. */
-	rebuilt: boolean;
+/** The nodes a trace, and each `pm.sendRequest` record on it, holds an exchange in. */
+const EXCHANGE_NODES = ["request", "response"] as const;
+
+type JsonRecord = Record<string, unknown>;
+
+/**
+ * @p holder with its `request` and `response` nodes each passed through
+ * @p perNode; same reference when neither changed. An absent node stays
+ * absent: a skipped step's erased `response` must not come back as a server
+ * that answered with nothing.
+ */
+function mapExchangeNodes(holder: JsonRecord, perNode: (node: unknown) => unknown): JsonRecord {
+	let out = holder;
+	for (const key of EXCHANGE_NODES) {
+		if (!(key in holder)) continue;
+		const next = perNode(holder[key]);
+		if (next !== holder[key]) out = { ...out, [key]: next };
+	}
+	return out;
+}
+
+/**
+ * @p holder with each of its `scriptRequests` records (#3633) passed through
+ * @p perRecord; same reference when none changed. The member sits on a trace's
+ * `scripts` node and on a `lifecycle` row alike.
+ */
+function mapScriptRequests(
+	holder: JsonRecord,
+	perRecord: (record: JsonRecord) => JsonRecord
+): JsonRecord {
+	const records = holder.scriptRequests;
+	if (!Array.isArray(records)) return holder;
+	const next = records.map((record) => (isRecord(record) ? perRecord(record) : record));
+	return next.some((record, i) => record !== records[i])
+		? { ...holder, scriptRequests: next }
+		: holder;
+}
+
+/** @p trace with its `scripts` node passed through @p change, when it has one. */
+function mapScriptsNode(
+	trace: JsonRecord,
+	change: (scripts: JsonRecord) => JsonRecord
+): JsonRecord {
+	if (!isRecord(trace.scripts)) return trace;
+	const scripts = change(trace.scripts);
+	return scripts === trace.scripts ? trace : { ...trace, scripts };
+}
+
+/** A `pm.sendRequest` record with its two nodes bounded as a trace's are. */
+function boundRecordNodes(record: JsonRecord): JsonRecord {
+	return mapExchangeNodes(record, boundTraceNode);
+}
+
+/**
+ * A node with its body given up whole, written as the engine writes a record
+ * body its shared budget had no room left for: `""` beside `bodyTruncated` and
+ * the true `bodyBytes`, so a shed body reads like one the engine shed.
+ */
+function shedNodeBody(node: unknown): unknown {
+	if (!isRecord(node) || typeof node.body !== "string" || node.body === "") return node;
+	const bytes =
+		typeof node.bodyBytes === "number" ? node.bodyBytes : boundBody(node, node.body).bytes;
+	return { ...node, body: "", bodyTruncated: true, bodyBytes: bytes };
+}
+
+/**
+ * @p holder with every body of its `scriptRequests` records given up and
+ * `scriptRequestBodiesOmitted: true` beside them; same reference when there was
+ * no body to give up. The records themselves stay: without their bodies they
+ * are each call's method, URL, status, headers and timing.
+ */
+function shedScriptRequestBodies(holder: JsonRecord): JsonRecord {
+	const shed = mapScriptRequests(holder, (record) => mapExchangeNodes(record, shedNodeBody));
+	return shed === holder ? holder : { ...shed, scriptRequestBodiesOmitted: true };
+}
+
+/** The members of a record, top level and `request`, that its summary keeps. */
+const SUMMARY_MEMBERS = ["source", "scope", "status", "error_type", "totalMs"] as const;
+const SUMMARY_REQUEST_MEMBERS = ["method", "url"] as const;
+
+function pickMembers(from: JsonRecord, keys: readonly string[]): JsonRecord {
+	return Object.fromEntries(keys.filter((key) => key in from).map((key) => [key, from[key]]));
+}
+
+/**
+ * A record cut to which call it was and how it ended: its source and scope,
+ * `request.method` and `request.url`, status, error code and total time. What
+ * is gone is what has no fixed size: the header maps and lines, the redirect
+ * hops, the timing phases and the response node.
+ */
+function summarizeRecord(record: JsonRecord): JsonRecord {
+	const summary = pickMembers(record, SUMMARY_MEMBERS);
+	if (isRecord(record.request)) {
+		summary.request = pickMembers(record.request, SUMMARY_REQUEST_MEMBERS);
+	}
+	return summary;
+}
+
+/**
+ * @p holder with every `scriptRequests` record cut to its summary and
+ * `scriptRequestDetailOmitted: true` beside them; same reference when it has no
+ * records. The array keeps its order, so a console line's `scriptRequest`
+ * index still names its call.
+ */
+function summarizeScriptRequests(holder: JsonRecord): JsonRecord {
+	const records = holder.scriptRequests;
+	if (!Array.isArray(records) || records.length === 0) return holder;
+	return {
+		...holder,
+		scriptRequests: records.map((record) =>
+			isRecord(record) ? summarizeRecord(record) : record
+		),
+		scriptRequestDetailOmitted: true,
+	};
+}
+
+/**
+ * @p holder without its `scriptRequests`, their count in `scriptRequestsOmitted`
+ * instead; same reference when it has no records. The earlier steps' flags go
+ * with the records they described.
+ */
+function omitScriptRequests(holder: JsonRecord): JsonRecord {
+	const records = holder.scriptRequests;
+	if (!Array.isArray(records) || records.length === 0) return holder;
+	const out: JsonRecord = { ...holder, scriptRequestsOmitted: records.length };
+	delete out.scriptRequests;
+	delete out.scriptRequestBodiesOmitted;
+	delete out.scriptRequestDetailOmitted;
+	return out;
+}
+
+/**
+ * What a holder of `scriptRequests` gives up, least first, while it is over
+ * what is left of its budget: the records' bodies, then each record's detail
+ * down to its summary, then the records themselves. The last step leaves
+ * nothing of the records to measure, so a holder that is still over after it
+ * is over on its own account, never theirs.
+ */
+const SCRIPT_REQUEST_SHEDS: readonly ((holder: JsonRecord) => JsonRecord)[] = [
+	shedScriptRequestBodies,
+	summarizeScriptRequests,
+	omitScriptRequests,
+];
+
+/**
+ * @p value after the fewest {@link SCRIPT_REQUEST_SHEDS} steps that bring it
+ * within @p remaining, each applied through @p apply, with its size by
+ * @p measure; every step applied when none does. @p bytes is @p value's size.
+ */
+function shedToFit(
+	value: JsonRecord,
+	bytes: number,
+	remaining: number,
+	apply: (value: JsonRecord, shed: (holder: JsonRecord) => JsonRecord) => JsonRecord,
+	measure: (value: JsonRecord) => number
+): { value: JsonRecord; bytes: number } {
+	let out = { value, bytes };
+	for (const shed of SCRIPT_REQUEST_SHEDS) {
+		if (out.bytes <= remaining) break;
+		const next = apply(out.value, shed);
+		if (next !== out.value) out = { value: next, bytes: measure(next) };
+	}
+	return out;
+}
+
+/** @p trace with every node bounded per node, its `pm.sendRequest` records' included. */
+function boundTrace(trace: JsonRecord): JsonRecord {
+	return mapScriptsNode(mapExchangeNodes(trace, boundTraceNode), (scripts) =>
+		mapScriptRequests(scripts, boundRecordNodes)
+	);
+}
+
+function jsonBytes(value: unknown): number {
+	return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+/** One report row that carries a trace, with that trace bounded per node and measured. */
+interface TracedRow {
+	row: JsonRecord;
+	/** The per-node-bounded trace, the records' nodes included. */
+	trace: JsonRecord;
+	/** The compact size of {@link TracedRow.trace}, what the row would embed. */
 	bytes: number;
+	priority: boolean;
+}
+
+/**
+ * The trace @p entry embeds out of the @p remaining budget, or undefined when
+ * it embeds none. A trace over what is left gives up its script requests
+ * (#3633) step by step ({@link SCRIPT_REQUEST_SHEDS}) before anything of its
+ * own, so the records never cost a row its main exchange; only a trace still
+ * over with no records left loses it. The @p first trace is embedded whatever
+ * it costs, but sheds the same way before it is, so a lone design row is
+ * bounded too.
+ */
+function fitTrace(
+	entry: TracedRow,
+	remaining: number,
+	first: boolean
+): { trace: JsonRecord; bytes: number } | undefined {
+	const fitted = shedToFit(entry.trace, entry.bytes, remaining, mapScriptsNode, jsonBytes);
+	return first || fitted.bytes <= remaining
+		? { trace: fitted.value, bytes: fitted.bytes }
+		: undefined;
+}
+
+function isTraced(entry: TracedRow | undefined): entry is TracedRow {
+	return entry !== undefined;
+}
+
+/**
+ * The report's `results` with every trace bounded per node, and the traces
+ * together held to {@link MAX_REPORT_TRACE_BYTES} (see {@link boundRunReport}).
+ */
+function boundResultTraces(report: JsonRecord): JsonRecord {
+	if (!Array.isArray(report.results)) return report;
+	const results: unknown[] = report.results;
+	const traced = results.map((row): TracedRow | undefined => {
+		if (!isRecord(row) || !isRecord(row.trace)) return undefined;
+		const trace = boundTrace(row.trace);
+		return { row, trace, bytes: jsonBytes(trace), priority: isPriorityTraceRow(row) };
+	});
+
+	// Spend the budget on the rows that matter first, then in run order.
+	const candidates = traced.filter(isTraced);
+	const spendOrder = [
+		...candidates.filter((entry) => entry.priority),
+		...candidates.filter((entry) => !entry.priority),
+	];
+	const kept = new Map<TracedRow, JsonRecord>();
+	let spent = 0;
+	for (const entry of spendOrder) {
+		const fitted = fitTrace(entry, MAX_REPORT_TRACE_BYTES - spent, kept.size === 0);
+		if (!fitted) break;
+		kept.set(entry, fitted.trace);
+		spent += fitted.bytes;
+	}
+
+	const omitted = spendOrder.length - kept.size;
+	const untouched = [...kept].every(([entry, trace]) => trace === entry.row.trace);
+	if (omitted === 0 && untouched) return report;
+
+	const bounded = results.map((row, i) => {
+		const entry = traced[i];
+		if (!entry) return row;
+		const trace = kept.get(entry);
+		if (trace === entry.row.trace) return row;
+		if (trace) return { ...entry.row, trace };
+		const withoutTrace = { ...entry.row };
+		delete withoutTrace.trace;
+		return { ...withoutTrace, traceOmitted: true };
+	});
+
+	if (omitted === 0) return { ...report, results: bounded };
+	return {
+		...report,
+		results: bounded,
+		tracesOmitted: omitted,
+		traceBudgetBytes: MAX_REPORT_TRACE_BYTES,
+	};
+}
+
+/**
+ * The report's `lifecycle` rows (`script.setup` / `script.teardown`) with their
+ * `pm.sendRequest` records (#3633) bounded as a trace's are: every node per
+ * node, then the rows' records together held to
+ * {@link MAX_REPORT_TRACE_BYTES} in run order, setup before teardown, a row
+ * past what is left giving them up as a trace does
+ * ({@link SCRIPT_REQUEST_SHEDS}). A budget of its own rather than a share of
+ * the traces': a setup script's token fetch is not a step, and should not cost
+ * one its trace.
+ */
+function boundLifecycleRecords(report: JsonRecord): JsonRecord {
+	const lifecycle = report.lifecycle;
+	if (!isRecord(lifecycle)) return report;
+	const recordBytes = (row: JsonRecord) => jsonBytes(row.scriptRequests ?? []);
+	let spent = 0;
+	const boundRow = (row: unknown): unknown => {
+		if (!isRecord(row)) return row;
+		const bounded = mapScriptRequests(row, boundRecordNodes);
+		const fitted = shedToFit(
+			bounded,
+			recordBytes(bounded),
+			MAX_REPORT_TRACE_BYTES - spent,
+			(holder, shed) => shed(holder),
+			recordBytes
+		);
+		spent += fitted.bytes;
+		return fitted.value;
+	};
+
+	let next = lifecycle;
+	for (const phase of ["setup", "teardown"] as const) {
+		const rows = lifecycle[phase];
+		if (!Array.isArray(rows)) continue;
+		const bounded = rows.map(boundRow);
+		if (bounded.some((row, i) => row !== rows[i])) next = { ...next, [phase]: bounded };
+	}
+	return next === lifecycle ? report : { ...report, lifecycle: next };
 }
 
 /**
@@ -249,7 +540,16 @@ interface MeasuredRow {
  * scalar and lose only their trace, flagged `traceOmitted` on the row with
  * `tracesOmitted` and `traceBudgetBytes` on the report - the same disclose-in-
  * band shape `list_runs` uses for its 100-row page, so an agent that reads a
- * short report never mistakes it for the whole run.
+ * short report never mistakes it for the whole run. The first trace is always
+ * embedded, whatever it costs: a design run's report is one row, and a report
+ * that dropped it would answer nothing at all.
+ *
+ * A trace's `scripts.scriptRequests` (#3633), one record per `pm.sendRequest`,
+ * has each record's nodes cut the same way, and a trace over the budget gives
+ * up those records' bodies, then their detail, then the records, before
+ * anything of its own. The engine bounds only their bodies, to
+ * `maxTraceBodyBytes` together, so left alone they would cost a row its main
+ * exchange. A `lifecycle` row's records are bounded the same way.
  *
  * Design and scenario rows only: a load run's results never go through
  * `build_result_trace` (it is called from `record_design_result` and the
@@ -258,66 +558,6 @@ interface MeasuredRow {
  * nothing over either bound comes back as the object the engine returned.
  */
 export function boundRunReport(value: unknown): unknown {
-	if (!isRecord(value) || !Array.isArray(value.results)) return value;
-
-	let nodeBounded = false;
-	const measured: MeasuredRow[] = value.results.map((row) => {
-		if (!isRecord(row) || !isRecord(row.trace)) return { row, rebuilt: false, bytes: 0 };
-		const trace = row.trace;
-		const next: Record<string, unknown> = { ...trace };
-		let rebuilt = false;
-		for (const key of ["request", "response"] as const) {
-			if (!(key in trace)) continue;
-			next[key] = boundTraceNode(trace[key]);
-			if (next[key] !== trace[key]) rebuilt = true;
-		}
-		if (rebuilt) nodeBounded = true;
-		const bounded = rebuilt ? next : trace;
-		// The compact size of what this row would embed. Measured after the
-		// per-node cut, since that is what the result would actually carry.
-		return {
-			row,
-			traced: { record: row, trace: bounded, priority: isPriorityTraceRow(row) },
-			rebuilt,
-			bytes: Buffer.byteLength(JSON.stringify(bounded), "utf8"),
-		};
-	});
-
-	// Spend the budget on the rows that matter first, then in run order. The
-	// first trace is always embedded, whatever it costs: a design run's report
-	// is one row, and a report that dropped it would answer nothing at all.
-	const spendOrder = [
-		...measured.filter((m) => m.traced?.priority),
-		...measured.filter((m) => m.traced && !m.traced.priority),
-	];
-	const keep = new Set<MeasuredRow>();
-	let spent = 0;
-	for (const entry of spendOrder) {
-		if (keep.size > 0 && spent + entry.bytes > MAX_REPORT_TRACE_BYTES) break;
-		keep.add(entry);
-		spent += entry.bytes;
-	}
-
-	const omitted = spendOrder.length - keep.size;
-	if (!nodeBounded && omitted === 0) return value;
-
-	const results = measured.map((entry) => {
-		if (!entry.traced) return entry.row;
-		if (keep.has(entry)) {
-			return entry.rebuilt
-				? { ...entry.traced.record, trace: entry.traced.trace }
-				: entry.row;
-		}
-		const withoutTrace = { ...entry.traced.record };
-		delete withoutTrace.trace;
-		return { ...withoutTrace, traceOmitted: true };
-	});
-
-	if (omitted === 0) return { ...value, results };
-	return {
-		...value,
-		results,
-		tracesOmitted: omitted,
-		traceBudgetBytes: MAX_REPORT_TRACE_BYTES,
-	};
+	if (!isRecord(value)) return value;
+	return boundLifecycleRecords(boundResultTraces(value));
 }

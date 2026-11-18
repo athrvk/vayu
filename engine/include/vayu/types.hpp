@@ -38,6 +38,11 @@
 // on nothing but the standard library, so it cannot cycle back here either.
 #include "vayu/utils/ascii_case.hpp"
 
+// For `ScriptResult::script_requests`, which are trace nodes (#3633). A
+// forward declaration is not enough: every file that copies or destroys a
+// `ScriptResult` instantiates the vector's members.
+#include <nlohmann/json.hpp>
+
 namespace vayu::http {
 class ApprovedFile; // vayu/http/file_ref.hpp
 }
@@ -1468,6 +1473,11 @@ struct ConsoleEntry {
     std::string message;
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string scope{};
+    /// On a `pm.sendRequest` summary line, the index of its record in the
+    /// same `ScriptResult::script_requests` (#3633). Whoever concatenates two
+    /// results' records rebases it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<std::size_t> script_request{};
 };
 
 /**
@@ -1510,6 +1520,10 @@ struct ScriptResult {
     bool success = true;
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
+    /// One trace-shaped, masked record per `pm.sendRequest`, in call order,
+    /// when `ScriptConfig::record_send_requests` asked for them (#3633);
+    /// `ConsoleEntry::script_request` indexes it.
+    std::vector<nlohmann::json> script_requests;
     std::string error_message;
     /// Flow control the script asked for - read by the scenario runner, and
     /// `Kind::None` for every other caller (see ScriptControl).

@@ -1042,6 +1042,47 @@ TEST (CapTraceBodies, ABase64BodyUnderTheCapIsLeftWhole) {
 }
 
 // ============================================================================
+// cap_trace_bodies_together - one budget across several traces (issue #3633)
+// ============================================================================
+
+// A base64 body is charged the bytes it decodes to, as `cap_trace_bodies`
+// counts it, so a budget it fits in is left whole for the text after it.
+// Mutation check: charge the encoded length in `held_body_bytes` and the text
+// body after it is cut to 4.
+TEST (CapTraceBodiesTogether, ABase64BodyIsChargedWhatItDecodesTo) {
+    auto first = make_trace ("", vayu::utils::base64_encode ("\xFF\xFE\xFD\xFC\xFB\xFA"));
+    first["request"].erase ("body");
+    first["response"]["bodyEncoding"] = "base64";
+    auto second                       = make_trace ("", "abcdef");
+    second["request"].erase ("body");
+    std::vector<nlohmann::json> traces{ first, second };
+
+    vayu::json::cap_trace_bodies_together (traces, 12);
+
+    EXPECT_FALSE (traces[0]["response"].contains ("bodyTruncated"));
+    EXPECT_EQ (traces[1]["response"]["body"], "abcdef");
+    EXPECT_FALSE (traces[1]["response"].contains ("bodyTruncated"));
+}
+
+// A second pass over a list whose head one pass already capped leaves that
+// head as it was: a body is charged what it keeps, not what it once held. The
+// scripts node relies on it, re-capping each script's capped records together.
+TEST (CapTraceBodiesTogether, ASecondPassLeavesAnAlreadyCappedHeadAsItWas) {
+    std::vector<nlohmann::json> traces{ make_trace ("", "0123456789") };
+    traces[0]["request"].erase ("body");
+    vayu::json::cap_trace_bodies_together (traces, 4);
+    const auto once = traces[0];
+    traces.push_back (make_trace ("", "later"));
+    traces[1]["request"].erase ("body");
+
+    vayu::json::cap_trace_bodies_together (traces, 4);
+
+    EXPECT_EQ (traces[0], once);
+    EXPECT_EQ (traces[1]["response"]["body"], "");
+    EXPECT_EQ (traces[1]["response"]["bodyBytes"].get<size_t> (), 5u);
+}
+
+// ============================================================================
 // cap_trace_bodies - rawRequest (issue #348)
 //
 // The stored wire message ends with the same body the node's `body` field

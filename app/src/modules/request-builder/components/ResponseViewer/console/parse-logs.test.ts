@@ -45,6 +45,22 @@ describe("structured entries", () => {
 		expect(own.scope).toBeUndefined();
 	});
 
+	it("carries a summary line's script request index, and adds none to other lines", () => {
+		// #3633: the same named-fields rebuild would drop the index, and the
+		// Console would draw the call as a plain line with its record unreached.
+		const [summary, plain] = parseConsoleLogs([
+			{
+				source: "pre",
+				level: "info",
+				message: "pm.sendRequest GET https://a.test -> 200 (3 ms)",
+				scriptRequest: 2,
+			},
+			{ source: "pre", level: "log", message: "token refreshed" },
+		]);
+		expect(summary.scriptRequest).toBe(2);
+		expect(plain).not.toHaveProperty("scriptRequest");
+	});
+
 	it("reads a level it has never heard of as `log` rather than dropping the line", () => {
 		// What a *newer* engine would send. A line the panel refuses to draw is
 		// worse than one drawn in the plain tone.

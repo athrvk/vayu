@@ -46,6 +46,7 @@ import type {
 	ResolvedElement,
 	ResolvedVariable,
 	ResponseTiming,
+	ScriptRequestRecord,
 	TestResult,
 	StreamEndReason,
 	StreamEvent,
@@ -489,6 +490,12 @@ export interface ResponseState {
 	testResults?: TestResult[];
 	preScriptError?: string;
 	postScriptError?: string;
+	/**
+	 * Every `pm.sendRequest` the scripts made (#3633), the engine's record as
+	 * the live body and the stored `scripts` node both carry it. A console
+	 * line's `scriptRequest` indexes this list.
+	 */
+	scriptRequests?: ScriptRequestRecord[];
 	/**
 	 * What each of this send's non-script elements did (issue #1512) -
 	 * extractors, assertions and timers, beside `testResults` above (which

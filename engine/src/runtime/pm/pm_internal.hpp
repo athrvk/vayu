@@ -190,14 +190,22 @@ struct ContextData {
      * `console_output.push_back` (#3134). Cuts @p message at
      * `CONSOLE_LINE_MAX_BYTES` on a character boundary, and once the entry or
      * total-bytes cap is reached drops every further line, keeping one final
-     * warning that says so. Never throws into the script.
+     * warning that says so. Never throws into the script. Answers whether
+     * @p message itself was kept, as the last entry.
      */
-    void add_console_entry (ConsoleLevel level, std::string message);
+    bool add_console_entry (ConsoleLevel level, std::string message);
 
     /// `ScriptConfig::enable_console`. Gates the lines the engine writes on a
     /// script's behalf (`pm.sendRequest`'s, #3462), so a console-off run
     /// builds none of them.
     bool console_enabled = true;
+
+    /// `ScriptConfig::record_send_requests`: whether `pm.sendRequest` builds
+    /// a record into @ref script_requests (#3633).
+    bool record_send_requests = false;
+    /// What this execution's `pm.sendRequest` calls left, in call order;
+    /// moved onto `ScriptResult::script_requests`.
+    std::vector<nlohmann::json> script_requests;
 
     /// Bytes of `console_output` messages kept so far (the limit marker aside).
     std::size_t console_bytes = 0;

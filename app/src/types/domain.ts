@@ -1522,6 +1522,41 @@ export interface RunResultScripts {
 	consoleLogs?: ConsoleLogEntry[];
 	preScriptError?: string;
 	postScriptError?: string;
+	scriptRequests?: ScriptRequestRecord[];
+}
+
+/**
+ * One `pm.sendRequest` exchange a script made (#3633), in the stored trace's
+ * own shape: `request`, `response`, the error pair and the eight `*Ms` timings
+ * are {@link RunResultTrace}'s members for the call. The engine masks
+ * credentials where it builds the record (`<redacted>` in a header value, a
+ * blanked URL credential), so a reader renders it as written.
+ *
+ * `status` is `0` for a transport failure, with the code in `error_type` and
+ * no `response` when nothing answered.
+ */
+export interface ScriptRequestRecord extends Pick<
+	RunResultTrace,
+	| "totalMs"
+	| "wireMs"
+	| "queueWaitMs"
+	| "dnsMs"
+	| "connectMs"
+	| "tlsMs"
+	| "firstByteMs"
+	| "downloadMs"
+	| "error_type"
+	| "error_message"
+> {
+	/** Absent on a setup or teardown row's record: the row names its phase. */
+	source?: ScriptSource;
+	scope?: ElementScope;
+	/** When the call began, in epoch milliseconds. */
+	startedAt?: number;
+	status: number;
+	statusText?: string;
+	request: NonNullable<RunResultTrace["request"]>;
+	response?: NonNullable<RunResultTrace["response"]>;
 }
 
 /**
@@ -1663,6 +1698,14 @@ export interface RunResultTrace {
 		 * is present on a failed exchange (no `response` node) too.
 		 */
 		authNotice?: string;
+		/**
+		 * The header names and the query parameter the auth block wrote
+		 * (`record_auth_provenance`, request_exchange.cpp), each present only
+		 * when there was one. A script request's record masks the values under
+		 * these names (#3633).
+		 */
+		authHeaders?: string[];
+		authQueryParam?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -2660,6 +2703,11 @@ export interface ConsoleLogEntry {
 	scope?: ElementScope;
 	level: ConsoleLevel;
 	message: string;
+	/**
+	 * On a `pm.sendRequest` summary line only: the index of the call's record
+	 * in the same answer's `scriptRequests` (#3633).
+	 */
+	scriptRequest?: number;
 }
 
 export interface SanityResult extends HttpResponse {
@@ -2678,6 +2726,8 @@ export interface SanityResult extends HttpResponse {
 	consoleLogs?: Array<ConsoleLogEntry | string>;
 	preScriptError?: string;
 	postScriptError?: string;
+	/** Every `pm.sendRequest` the scripts made, pre before test (#3633). */
+	scriptRequests?: ScriptRequestRecord[];
 	error?: string;
 	/**
 	 * What checking this response against its declared schema found (issue
@@ -3029,6 +3079,10 @@ export interface RunScenarioStepElementTally {
  * inline element's tally row carries them. `message` is empty or absent for a
  * row that ran clean; a failed row's carries the reason, including a failing
  * `pm.test`.
+ *
+ * `scriptRequests` is a sequential run's only (#3633): every `pm.sendRequest`
+ * the script made, in call order. The `console` sample folds repeats, so no
+ * line indexes a record and the records are listed on their own.
  */
 export interface LifecycleElementOutcome
 	extends
@@ -3036,7 +3090,9 @@ export interface LifecycleElementOutcome
 		Pick<
 			RunScenarioStepElementTally,
 			"messages" | "messagesDropped" | "console" | "consoleDropped"
-		> {}
+		> {
+	scriptRequests?: ScriptRequestRecord[];
+}
 
 /** One thing an inline script element reported: the error it threw, or a failing test as `name: message`. */
 export interface ElementTallyMessage {

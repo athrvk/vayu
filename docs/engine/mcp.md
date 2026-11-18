@@ -720,6 +720,41 @@ Notes:
   payloads cannot come along. Bounded sizes for the fixtures above: 33 K
   characters for the single 1 MB row, 76 K for 100 steps x 1 MB, 120 K for
   200 rows with all three nodes populated (24.7 M unbounded).
+- **A trace can also carry `scripts.scriptRequests`** (issue #3633): one
+  record per `pm.sendRequest` a design send's or a collection-run step's
+  scripts made, each with its own `request` and `response` nodes. The engine
+  writes them masked (credential headers `<redacted>`, URL credentials
+  blanked) and holds all of one trace's record bodies to one
+  `maxTraceBodyBytes` together, so a row's records add at most what its own
+  response may (see [`POST /execute`](api-reference.md#post-execute)). That
+  engine bound is 5 MiB, so `get_run_report` bounds the records as it bounds
+  the main exchange: **each record's `request` and `response` body is cut to
+  the same 32 KB**, with the same `bodyTruncated` / `bodyBytes` pair, and the
+  records count toward the row's share of the 96 KB budget. **A trace over
+  what is left of the budget gives up its records before anything of its
+  own**, one step at a time, stopping at the first that fits. First the
+  bodies: each one is stored `""` with `bodyTruncated: true` and its true
+  `bodyBytes`, the engine's own spelling for a record body past its shared
+  budget, and the `scripts` node gains `scriptRequestBodiesOmitted: true`.
+  Then the detail: each record is cut to `source`, `scope`, `status`,
+  `error_type`, `totalMs` and `request.method` / `request.url` (header maps,
+  redirect hops, timing phases and the `response` node go), in the same
+  order so a console line's `scriptRequest` index still names its call, and
+  the node gains `scriptRequestDetailOmitted: true`. Last the records
+  themselves: `scriptRequests` and both flags are removed and
+  `scriptRequestsOmitted` holds how many there were. The main exchange is
+  never cut for them; only a trace still over with no records left is
+  omitted, as above. The first trace sheds the same way before it is
+  embedded, so a design run's single row is bounded too. A sequential
+  collection run's `lifecycle` rows (`script.setup` / `script.teardown`)
+  carry records as `scriptRequests` too: their nodes are cut per node the
+  same way, and their records together are held to a 96 KB budget of their
+  own in run order, setup before teardown, a row past what is left giving
+  them up by the same three steps under the same flags. A secret
+  variable's value in any string of a record, a body included, is masked like
+  the rest of the run's output, since a record uses the trace's own member
+  names. The MCP server never sets `allowScriptRequests`, so only a run the
+  app made carries records.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the

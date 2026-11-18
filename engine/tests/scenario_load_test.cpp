@@ -1470,6 +1470,34 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
     EXPECT_FALSE (row.contains ("messagesDropped")) << row.dump ();
 }
 
+// A load run's step scripts build no `pm.sendRequest` record (#3633): the
+// run stores no trace per request to keep one on. The one-line summary stays
+// on the step's element row. Mutation check: call `record_script_requests` on
+// the `script_config` `execute_scenario_load` builds and the flag reads true.
+TEST_F (ScenarioLoadTest, AStepScriptsSendRequestBuildsNoRecordAndKeepsItsLine) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post",
+    "pm.sendRequest('" + server.url ("/s0") + "', function () {});") });
+
+    auto state = run (json{ { "mode", "iterations" }, { "iterations", 2 },
+                      { "concurrency", 1 }, { "allowScriptRequests", true } },
+    execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_FALSE (state->script_config.record_send_requests);
+    const auto& row    = summary.at ("steps").at (0).at ("elements").at (0);
+    const auto console = row.value ("console", json::array ());
+    ASSERT_FALSE (console.empty ()) << row.dump ();
+    for (const auto& line : console) {
+        EXPECT_TRUE (
+        line.value ("text", "").starts_with ("pm.sendRequest GET " + server.url ("/s0") + " -> 200 ("))
+        << row.dump ();
+    }
+}
+
 // ============================================================================
 // Flow control is read the same on both run kinds (#2974)
 // ============================================================================

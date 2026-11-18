@@ -395,7 +395,9 @@ namespace {
 /// A lifecycle element's `to_json` plus the `messages` and `console` lists an
 /// inline element's report row carries (#3455): the same samples, so the same
 /// cap, repeat counts and `*Dropped` keys. `to_json` stays without them, as a
-/// step trace already shows the whole script result.
+/// step trace already shows the whole script result. Its `pm.sendRequest`
+/// records ride as `scriptRequests` (#3633), in call order; a console line
+/// does not index one, as the sample folds repeated lines into one.
 nlohmann::json lifecycle_row (const ElementOutcome& outcome) {
     nlohmann::json row = outcome.to_json ();
     DistinctMessageSample messages;
@@ -407,6 +409,9 @@ nlohmann::json lifecycle_row (const ElementOutcome& outcome) {
     row, "messages", "messagesDropped", messages.kept (), messages.dropped ());
     write_message_sample (
     row, "console", "consoleDropped", console.kept (), console.dropped ());
+    if (!outcome.script_requests.empty ()) {
+        row["scriptRequests"] = outcome.script_requests;
+    }
     return row;
 }
 
@@ -609,6 +614,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_duration_us.reset ();
         ctx.outcome_messages.clear ();
+        ctx.outcome_script_requests.clear ();
         ctx.element_id    = compiled.id;
         ctx.element_scope = compiled.scope;
 
@@ -647,6 +653,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         deferred,
         ctx.outcome_duration_us,
         std::move (ctx.outcome_messages),
+        std::move (ctx.outcome_script_requests),
         });
     }
 }

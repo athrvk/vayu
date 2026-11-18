@@ -54,6 +54,7 @@ import { Callout, EmptyState, ExchangeWarnings } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
+import { consoleRowCount } from "./console/console-rows";
 import SchemaValidation from "./SchemaValidation";
 import ElementOutcomes from "./ElementOutcomes";
 import TestResults from "./TestResults";
@@ -420,7 +421,7 @@ export default function ResponseViewer() {
 	 * empty state is reachable only for a `status: 0` response with no recorded
 	 * request.
 	 */
-	const consoleLogCount = shown.consoleLogs?.length ?? 0;
+	const consoleLogCount = consoleRowCount(shown.consoleLogs ?? [], shown.scriptRequests);
 	const hasScriptError = !!shown.preScriptError || !!shown.postScriptError;
 	const testResults = shown.testResults ?? [];
 	// Non-script outcomes (issue #1512) - extractors, assertions and timers,
@@ -830,6 +831,7 @@ export default function ResponseViewer() {
 				<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
 					<ConsoleOutput
 						logs={shown.consoleLogs || []}
+						scriptRequests={shown.scriptRequests}
 						errors={{
 							pre: shown.preScriptError,
 							post: shown.postScriptError,

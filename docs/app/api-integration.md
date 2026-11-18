@@ -1930,8 +1930,18 @@ replay puts the run's recorded list back on its seeded rows.
     { name: "Status 200", passed: true, source: "test", scope: "request" }
   ],
   consoleLogs: [
+    { source: "pre", scope: "collection", level: "info",
+      message: "pm.sendRequest POST https://auth.example.test/token -> 200 (41 ms)",
+      scriptRequest: 0 },
     { source: "pre", scope: "collection", level: "log", message: "Pre-request" },
     { source: "test", scope: "request", level: "warn", message: "slow response" }
+  ],
+  scriptRequests: [
+    { source: "pre", scope: "collection", startedAt: 1763452800123,
+      status: 200, statusText: "OK",
+      request: { method: "POST", url: "https://auth.example.test/token", ... },
+      response: { headers: { ... }, headerLines: [...], body: "...", ... },
+      totalMs: 41.2, dnsMs: 0, connectMs: 0.4, ... }
   ]
 }
 ```
@@ -1960,6 +1970,19 @@ that was called. A bare `string` is the pre-structured shape an older engine
 sidecar sends; `console/parse-logs.ts` decodes both and is the only place that
 knows the difference (see
 [the engine API reference](../engine/api-reference.md#post-execute)).
+
+`scriptRequests` is every `pm.sendRequest` the scripts made (issue #3633), one
+record per call in execution order, in the stored trace's own shape
+(`ScriptRequestRecord` in `types/domain.ts`). The call's summary line carries
+`scriptRequest`, the record's index, and the Console draws the two as one
+expandable row in the line's position; a record no line points at (the console
+was off, or its cap dropped the line) is drawn after the last line of its
+script. The engine masks credentials where it builds the record, so the app
+renders it as written and adds no masking of its own. Both funnels carry it:
+`responseFromExecuteResult` from the live body and `scriptsFromTrace` from the
+stored `scripts` node, and `script-funnels.test.ts` holds them equal. A setup
+or teardown script's records ride its `lifecycle` row instead, with no line
+index, and the run's Setup / teardown card lists them under the row.
 
 `httpVersion` here is the **negotiated** protocol (`"HTTP/1.1"` / `"HTTP/2"` /
 `""` when nothing was negotiated) - an outcome, not an echo of the request's

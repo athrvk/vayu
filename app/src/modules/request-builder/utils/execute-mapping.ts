@@ -382,6 +382,9 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		elements: result.elements,
 		preScriptError: result.preScriptError,
 		postScriptError: result.postScriptError,
+		// Spread, not assigned: the stored node writes the key only when a script
+		// sent something, and the two funnels must build the same state.
+		...(Array.isArray(result.scriptRequests) && { scriptRequests: result.scriptRequests }),
 		// Absent stays absent: the engine writes no `validation` at all for a
 		// request whose collection binds no document, and spreading a key with
 		// `undefined` would make the pane render an "unchecked" state for a
