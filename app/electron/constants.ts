@@ -113,9 +113,10 @@ export const MCP_HOST = "127.0.0.1";
 /**
  * The MCP port when Settings has not set one, and only that (#3580). The
  * configured port is `readMcpPort()` in `mcp/store.ts`, passed to each engine
- * spawn as its `--mcp-port`; the port in force is the one the listener holds,
- * which is the one the engine was last spawned with (`mcp:status` reports
- * `restartRequired` while the two differ).
+ * spawn as its `--mcp-port`; the port in force is the one the listener holds
+ * or last failed to bind, else the one the engine was last spawned with
+ * (`inForce` in `mcp/status.ts`, which reports `restartRequired` while the two
+ * differ).
  */
 export const MCP_PORT = 9877;
 /** The range `validateMcpPort` accepts: unprivileged, so binding needs no elevated rights on Linux or macOS. */
