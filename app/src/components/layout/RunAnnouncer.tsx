@@ -42,13 +42,19 @@ export function RunAnnouncer() {
 	const phase = useDashboardStore((s) => s.phase);
 	const scenarioRunId = useScenarioRunStore((s) => s.runId);
 	const isStreaming = useScenarioRunStore((s) => s.isStreaming);
+	const endedByEngineStop = useScenarioRunStore((s) => s.endedByEngineStop);
 	const endedAs = useScenarioRunStore((s) => s.endedAs);
 	// Only once ended, so a streaming run's batches do not re-render this.
 	const endedCounts = useScenarioRunStore((s) => (s.endedAs ? s.summary.counts : null));
 	const endedBudgets = useScenarioRunStore((s) => (s.endedAs ? s.thresholdValidation : null));
 
 	const dashboard: DashboardSnapshot = { runId: dashboardRunId, phase };
-	const scenario: ScenarioSnapshot = { runId: scenarioRunId, isStreaming, endedAs };
+	const scenario: ScenarioSnapshot = {
+		runId: scenarioRunId,
+		isStreaming,
+		endedByEngineStop,
+		endedAs,
+	};
 
 	// React's adjust-state-during-render pattern, as in `ResponseAnnouncer`: the
 	// first render records where the runs stand and says nothing, and each later
@@ -59,6 +65,7 @@ export function RunAnnouncer() {
 		heard.dashboard.phase !== dashboard.phase ||
 		heard.scenario.runId !== scenario.runId ||
 		heard.scenario.isStreaming !== scenario.isStreaming ||
+		heard.scenario.endedByEngineStop !== scenario.endedByEngineStop ||
 		heard.scenario.endedAs !== scenario.endedAs;
 	if (moved) {
 		const said = [

@@ -65,13 +65,13 @@ export function argumentsSchema<Shape extends Record<string, z.ZodType>>(shape: 
 // --- Result helpers ----------------------------------------------------------
 
 export function jsonResult(value: unknown): ToolResult {
-	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+	return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
 
 /** Result that carries both a text rendering and structured content. */
 export function structuredResult(value: Record<string, unknown>): ToolResult {
 	return {
-		content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+		content: [{ type: "text", text: JSON.stringify(value) }],
 		structuredContent: value,
 	};
 }
@@ -165,7 +165,7 @@ export function engineFailure(err: unknown, ctx: ToolContext): Failure {
 }
 
 /** {@link engineFailure} for a cause it can name; undefined for the `Unexpected error` fallback. */
-function recognisedEngineFailure(err: unknown, ctx: ToolContext): Failure | undefined {
+export function recognisedEngineFailure(err: unknown, ctx: ToolContext): Failure | undefined {
 	if (err instanceof EngineRequestError) return engineRefusal(err, ctx);
 	const msg = err instanceof Error ? err.message : String(err);
 	// An abort means the engine was reachable and working - the opposite of the

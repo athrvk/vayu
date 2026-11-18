@@ -597,7 +597,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
 					`${summary}\n\n` +
 					"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
-					`Planned run:\n${JSON.stringify(shown, null, 2)}${caveat}`,
+					`Planned run:\n${JSON.stringify(shown)}${caveat}`,
 			});
 			if (unconfirmed) return unconfirmed;
 

@@ -197,6 +197,7 @@ export const NOTIFY_KINDS: readonly string[] = [
 	"load-run-stopped",
 	"load-run-failed",
 	"collection-run-finished",
+	"collection-run-stopped",
 	"collection-run-failed",
 	"engine-lost",
 	"engine-restart-failed",

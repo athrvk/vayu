@@ -75,7 +75,7 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						"Summarize this Vayu run for an engineer in a few sentences. Call out throughput " +
 							"(RPS), latency p50/p95/p99, error rate, and the status-code mix, and say whether " +
-							`it looks healthy or concerning. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`it looks healthy or concerning. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report)}`
 					),
 				],
 			};
@@ -136,7 +136,7 @@ export const PROMPTS: McpPromptDef[] = [
 							"Read `comparability` first: each entry is a way the runs were not the same " +
 							"experiment, and a verdict has to say how it limits the comparison. " +
 							`${RUN_ERROR_DEFINITION_SENTENCE}\n\n` +
-							`Comparison (${baseRunId} -> ${targetRunId}):\n${JSON.stringify(comparison, null, 2)}`
+							`Comparison (${baseRunId} -> ${targetRunId}):\n${JSON.stringify(comparison)}`
 					),
 				],
 			};
@@ -155,7 +155,7 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						"Diagnose the errors in this Vayu run. Identify which status codes / error types " +
 							"dominate, whether failures correlate with load (latency climbing toward saturation), " +
-							`and suggest likely causes and the next checks to run. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report, null, 2)}`
+							`and suggest likely causes and the next checks to run. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report)}`
 					),
 				],
 			};

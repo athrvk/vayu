@@ -15,10 +15,18 @@
  * dialog rather than Electron, which is the whole reason it lives outside
  * main.ts.
  *
- * Mutation checks: make `closeStopsServices` true on every platform and the
- * macOS case reddens; return the snapshot without the `rendererGone` gate and
- * the crashed-renderer case reddens. Whether an answer carries over to the
- * next gesture is `quit-flow.ts`'s, and is tested there.
+ * A live run is stopped by the same close, and #3604 is the same silence for
+ * it: the X button ended a 30 minute load test with no question.
+ *
+ * Mutation checks: make `closeQuits` true on every platform and the macOS
+ * cases redden; return the snapshot without the `rendererGone` gate and the
+ * crashed-renderer case reddens; drop the run from `wouldStop` and "asks
+ * about a quit with only a load test live" reddens; drop the restart line from
+ * `wouldStop` and the services-alone restart case reddens; answer `false` there
+ * and the three restart cases that ask redden; give restart the macOS close
+ * rule and its macOS case reddens.
+ * Whether an answer carries
+ * over to the next gesture is `quit-flow.ts`'s, and is tested there.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -27,12 +35,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
 	buildStopPrompt,
+	CONFIRM_RESTART_CHANNEL,
 	createServiceStopGuard,
+	describeLiveRun,
 	describeRunningService,
+	LIVE_RUN_CHANNEL,
+	parseLiveRun,
 	parseRunningServices,
 	registerRunningServicesIpc,
 	RUNNING_SERVICES_CHANNEL,
 	type IpcLike,
+	type LiveRun,
 	type RunningService,
 	type ServiceStopGuard,
 	type ServiceStopPrompt,
@@ -42,11 +55,14 @@ import type { NavigationDetails } from "./renderer-watch";
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read. Everything above this line would still pass with the
 // close handler's interception deleted, which is precisely the bug being fixed.
-const main = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "main.ts"), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const main = readFileSync(join(here, "main.ts"), "utf8");
+const preload = readFileSync(join(here, "preload.ts"), "utf8");
 
 const inbox: RunningService = { kind: "inbox", name: null, port: 9880 };
 const mock: RunningService = { kind: "mock-server", name: "Orders API", port: 9881 };
 const issuer: RunningService = { kind: "issuer", name: null, port: 9882 };
+const loadRun: LiveRun = { kind: "load", label: "GET https://api.example.com/orders" };
 
 /** The guard plus the dialog it would have shown, for a given platform. */
 function fakeGuard(
@@ -120,7 +136,82 @@ describe("parseRunningServices", () => {
 	});
 });
 
+describe("parseLiveRun", () => {
+	it("reads a load test and a collection run", () => {
+		expect(parseLiveRun(loadRun)).toEqual({ run: loadRun });
+		expect(parseLiveRun({ kind: "collection", label: null })).toEqual({
+			run: { kind: "collection", label: null },
+		});
+	});
+
+	it("reads null as no run live, not as a malformed message", () => {
+		expect(parseLiveRun(null)).toEqual({ run: null });
+	});
+
+	it("reads a missing or empty label as no label", () => {
+		expect(parseLiveRun({ kind: "load" })).toEqual({ run: { kind: "load", label: null } });
+		expect(parseLiveRun({ kind: "load", label: "" })).toEqual({
+			run: { kind: "load", label: null },
+		});
+	});
+
+	it("refuses anything that is not a run", () => {
+		expect(parseLiveRun(undefined)).toBeNull();
+		expect(parseLiveRun("load")).toBeNull();
+		expect(parseLiveRun([loadRun])).toBeNull();
+		expect(parseLiveRun({ kind: "design", label: null })).toBeNull();
+		expect(parseLiveRun({ kind: "load", label: 42 })).toBeNull();
+	});
+});
+
 describe("the sentence the dialog says", () => {
+	it("names a load test by what it is aimed at, and falls back to the kind", () => {
+		expect(describeLiveRun(loadRun)).toBe(
+			"the load test of GET https://api.example.com/orders"
+		);
+		expect(describeLiveRun({ kind: "load", label: null })).toBe("the load test");
+		expect(describeLiveRun({ kind: "collection", label: null })).toBe("the collection run");
+	});
+
+	it("names a run alone, and says how it ends", () => {
+		const prompt = buildStopPrompt("window-close", { run: loadRun, services: [] });
+
+		expect(prompt.message).toBe("Close Vayu and stop the load test it is running?");
+		expect(prompt.detail).toBe(
+			"• the load test of GET https://api.example.com/orders\n\n" +
+				"It ends as stopped, with what it has measured so far."
+		);
+		expect(prompt.buttons).toEqual(["Close anyway", "Cancel"]);
+	});
+
+	it("names a run and two services in one question, the run first", () => {
+		const prompt = buildStopPrompt("quit", { run: loadRun, services: [inbox, mock] });
+
+		expect(prompt.message).toBe(
+			"Quit Vayu and stop the load test and the 2 services it is running?"
+		);
+		expect(prompt.detail).toBe(
+			"• the load test of GET https://api.example.com/orders\n" +
+				"• the inbox on port 9880\n" +
+				"• the mock server for Orders API, on port 9881\n\n" +
+				"The load test ends as stopped, with what it has measured so far. " +
+				"Anything pointed at the services stops getting answers."
+		);
+		expect(prompt.buttons).toEqual(["Quit anyway", "Cancel"]);
+	});
+
+	it("says one service in the singular beside a collection run", () => {
+		const prompt = buildStopPrompt("quit", {
+			run: { kind: "collection", label: null },
+			services: [inbox],
+		});
+
+		expect(prompt.message).toBe(
+			"Quit Vayu and stop the collection run and the service it is running?"
+		);
+		expect(prompt.detail).toContain("Anything pointed at the service stops getting answers.");
+	});
+
 	it("names an inbox by its port, which is what the drawer names it by", () => {
 		expect(describeRunningService(inbox)).toBe("the inbox on port 9880");
 	});
@@ -140,7 +231,7 @@ describe("the sentence the dialog says", () => {
 	});
 
 	it("leads with the count and lists what will stop", () => {
-		const prompt = buildStopPrompt("window-close", [inbox, mock]);
+		const prompt = buildStopPrompt("window-close", { run: null, services: [inbox, mock] });
 
 		expect(prompt.message).toBe("Close Vayu and stop the 2 services it is running?");
 		expect(prompt.detail).toContain("• the inbox on port 9880");
@@ -149,13 +240,13 @@ describe("the sentence the dialog says", () => {
 	});
 
 	it("says one service in the singular", () => {
-		expect(buildStopPrompt("window-close", [inbox]).message).toBe(
+		expect(buildStopPrompt("window-close", { run: null, services: [inbox] }).message).toBe(
 			"Close Vayu and stop the service it is running?"
 		);
 	});
 
 	it("says quit, not close, for a quit", () => {
-		const prompt = buildStopPrompt("quit", [inbox]);
+		const prompt = buildStopPrompt("quit", { run: null, services: [inbox] });
 
 		expect(prompt.message).toBe("Quit Vayu and stop the service it is running?");
 		expect(prompt.buttons).toEqual(["Quit anyway", "Cancel"]);
@@ -297,6 +388,143 @@ describe("createServiceStopGuard", () => {
 	});
 });
 
+describe("a live run (#3604)", () => {
+	it("asks about a quit with only a load test live, and names it", async () => {
+		const { guard, prompts, answerDialog } = fakeGuard();
+		guard.publishRun(loadRun);
+
+		expect(guard.wouldStop("quit")).toBe(true);
+		const proceed = guard.confirm("quit");
+		answerDialog(true);
+
+		await expect(proceed).resolves.toBe(true);
+		expect(prompts[0].message).toBe("Quit Vayu and stop the load test it is running?");
+		expect(prompts[0].detail).toContain("the load test of GET https://api.example.com/orders");
+	});
+
+	it.each(["linux", "win32"] as const)("asks about a window close on %s", (platform) => {
+		const { guard, ask } = fakeGuard({ platform });
+		guard.publishRun(loadRun);
+
+		expect(guard.wouldStop("window-close")).toBe(true);
+		void guard.confirm("window-close");
+		expect(ask).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not ask about a window close on macOS, where the run keeps going", async () => {
+		const { guard, ask } = fakeGuard({ platform: "darwin" });
+		guard.publishRun(loadRun);
+
+		expect(guard.wouldStop("window-close")).toBe(false);
+		await expect(guard.confirm("window-close")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+		expect(guard.wouldStop("quit")).toBe(true);
+	});
+
+	it("puts a run beside two services in one prompt listing all three", async () => {
+		const { guard, ask, prompts, answerDialog } = fakeGuard();
+		guard.publish([inbox, mock]);
+		guard.publishRun(loadRun);
+
+		const proceed = guard.confirm("window-close");
+		answerDialog(true);
+		await proceed;
+
+		expect(ask).toHaveBeenCalledTimes(1);
+		expect(prompts[0]).toEqual(
+			buildStopPrompt("window-close", { run: loadRun, services: [inbox, mock] })
+		);
+	});
+
+	it("asks nothing once the run is withdrawn", () => {
+		const { guard } = fakeGuard();
+		guard.publishRun(loadRun);
+
+		guard.publishRun(null);
+
+		expect(guard.liveRun()).toBeNull();
+		expect(guard.wouldStop("quit")).toBe(false);
+	});
+
+	it("names nothing once the renderer that published it is gone", async () => {
+		let gone = false;
+		const { guard, ask } = fakeGuard({ rendererGone: () => gone });
+		guard.publishRun(loadRun);
+		expect(guard.wouldStop("quit")).toBe(true);
+
+		gone = true;
+
+		expect(guard.liveRun()).toBeNull();
+		await expect(guard.confirm("quit")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+	});
+
+	it("forgets the run with the services", () => {
+		const { guard } = fakeGuard();
+		guard.publish([inbox]);
+		guard.publishRun(loadRun);
+
+		guard.forget();
+
+		expect(guard.liveRun()).toBeNull();
+		expect(guard.wouldStop("quit")).toBe(false);
+	});
+});
+
+describe("Restart engine with a run live (#3604)", () => {
+	it("asks before a restart only when a run is live", async () => {
+		const { guard, ask, prompts, answerDialog } = fakeGuard();
+
+		await expect(guard.confirm("restart")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+
+		guard.publishRun(loadRun);
+		expect(guard.wouldStop("restart")).toBe(true);
+		const proceed = guard.confirm("restart");
+		answerDialog(false);
+
+		await expect(proceed).resolves.toBe(false);
+		expect(prompts[0].message).toBe(
+			"Restart Vayu's engine and stop the load test it is running?"
+		);
+		expect(prompts[0].buttons).toEqual(["Restart anyway", "Cancel"]);
+	});
+
+	it("does not ask for services alone, which a toast names afterwards", async () => {
+		const { guard, ask } = fakeGuard();
+		guard.publish([inbox, mock]);
+
+		expect(guard.wouldStop("restart")).toBe(false);
+		await expect(guard.confirm("restart")).resolves.toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+	});
+
+	it("asks on macOS too, where a restart stops the run all the same", () => {
+		const { guard, ask } = fakeGuard({ platform: "darwin" });
+		guard.publishRun(loadRun);
+
+		expect(guard.wouldStop("restart")).toBe(true);
+		void guard.confirm("restart");
+		expect(ask).toHaveBeenCalledTimes(1);
+	});
+
+	it("names the services beside the run when it asks", async () => {
+		const { guard, prompts, answerDialog } = fakeGuard();
+		guard.publish([mock]);
+		guard.publishRun(loadRun);
+
+		const proceed = guard.confirm("restart");
+		answerDialog(true);
+		await proceed;
+
+		expect(prompts[0].message).toBe(
+			"Restart Vayu's engine and stop the load test and the service it is running?"
+		);
+		expect(prompts[0].detail).toContain("the load test of GET https://api.example.com/orders");
+		expect(prompts[0].detail).toContain("Orders API");
+	});
+});
+
 describe("registerRunningServicesIpc", () => {
 	/** The slice of `ipcMain` the channel uses, plus the renderer that sent it. */
 	function fakeIpc() {
@@ -311,6 +539,8 @@ describe("registerRunningServicesIpc", () => {
 			ipc,
 			send: (sender: RendererStub, payload: unknown) =>
 				handlers.get(RUNNING_SERVICES_CHANNEL)?.({ sender }, payload),
+			sendRun: (sender: RendererStub, payload: unknown) =>
+				handlers.get(LIVE_RUN_CHANNEL)?.({ sender }, payload),
 		};
 	}
 
@@ -339,17 +569,23 @@ describe("registerRunningServicesIpc", () => {
 	function stubGuard(): ServiceStopGuard & { published: RunningService[][] } {
 		const published: RunningService[][] = [];
 		let snapshot: RunningService[] = [];
+		let run: LiveRun | null = null;
 		return {
 			published,
 			publish: (services) => {
 				published.push(services);
 				snapshot = services;
 			},
+			publishRun: (next) => {
+				run = next;
+			},
 			forget: () => {
 				snapshot = [];
+				run = null;
 			},
 			running: () => snapshot,
-			wouldStop: () => snapshot.length > 0,
+			liveRun: () => run,
+			wouldStop: () => snapshot.length > 0 || run !== null,
 			confirm: () => Promise.resolve(true),
 		};
 	}
@@ -400,6 +636,68 @@ describe("registerRunningServicesIpc", () => {
 
 		expect(guard.running()).toEqual([]);
 	});
+
+	it("publishes the run the renderer sent, and its withdrawal", () => {
+		const guard = stubGuard();
+		const { ipc, sendRun } = fakeIpc();
+		registerRunningServicesIpc(ipc, guard);
+		const renderer = new RendererStub();
+
+		sendRun(renderer, loadRun);
+		expect(guard.liveRun()).toEqual(loadRun);
+
+		sendRun(renderer, null);
+		expect(guard.liveRun()).toBeNull();
+	});
+
+	it("ignores a run message it cannot read rather than clearing the run", () => {
+		const guard = stubGuard();
+		const { ipc, sendRun } = fakeIpc();
+		const log = vi.fn();
+		registerRunningServicesIpc(ipc, guard, log);
+		sendRun(new RendererStub(), loadRun);
+
+		sendRun(new RendererStub(), { kind: "everything" });
+
+		expect(guard.liveRun()).toEqual(loadRun);
+		expect(log).toHaveBeenCalled();
+	});
+
+	it("drops the run and the services with the renderer that published them", () => {
+		const guard = stubGuard();
+		const { ipc, send, sendRun } = fakeIpc();
+		registerRunningServicesIpc(ipc, guard);
+		const renderer = new RendererStub();
+		send(renderer, [inbox]);
+		sendRun(renderer, loadRun);
+
+		renderer.destroy();
+
+		expect(guard.running()).toEqual([]);
+		expect(guard.liveRun()).toBeNull();
+	});
+
+	it("drops the run when its renderer reloads, even if only the run was published", () => {
+		const guard = stubGuard();
+		const { ipc, sendRun } = fakeIpc();
+		registerRunningServicesIpc(ipc, guard);
+		const renderer = new RendererStub();
+		sendRun(renderer, loadRun);
+
+		renderer.reload();
+
+		expect(guard.liveRun()).toBeNull();
+	});
+});
+
+describe("the preload's half of the channels", () => {
+	it("spells both channels the way this side does", () => {
+		// The preload is CommonJS and cannot import the constants.
+		expect(preload.length).toBeGreaterThan(10_000);
+		expect(preload).toContain(`ipcRenderer.send("${RUNNING_SERVICES_CHANNEL}", services)`);
+		expect(preload).toContain(`ipcRenderer.send("${LIVE_RUN_CHANNEL}", run)`);
+		expect(preload).toContain(`ipcRenderer.invoke("${CONFIRM_RESTART_CHANNEL}")`);
+	});
 });
 
 describe("main.ts wiring", () => {
@@ -416,6 +714,12 @@ describe("main.ts wiring", () => {
 	it("asks through the quit flow, which both gestures drive", () => {
 		const flowWiring = main.slice(main.indexOf("createQuitFlow("));
 		expect(flowWiring).toContain("services: serviceStopGuard,");
+	});
+
+	it("answers Restart engine's question from the guard, as the restart gesture", () => {
+		expect(main).toContain(
+			'ipcMain.handle(CONFIRM_RESTART_CHANNEL, () => serviceStopGuard.confirm("restart"))'
+		);
 	});
 
 	it("reads the running list through the renderer's own liveness", () => {

@@ -66,9 +66,24 @@ function recorder(respond: (call: SpawnCall, child: FakeChild, index: number) =>
 }
 
 /** Finish a fake process: what it printed, and the code it exited with. */
-function finish(child: FakeChild, stdout: string, code = 0) {
+function finish(child: FakeChild, stdout: string, code = 0, stderr = "") {
 	if (stdout) child.stdout.emit("data", Buffer.from(stdout));
+	if (stderr) child.stderr.emit("data", Buffer.from(stderr));
 	child.emit("close", code);
+}
+
+/**
+ * The `claude` flow is position-indexed: call 0 resolves the binary, call 1 is
+ * `mcp get vayu`, and what follows is a remove and/or the add. This answers the
+ * resolve probe with `resolved` and the lookup as "nothing registered yet", then
+ * every later call with `rest`.
+ */
+function freshClaude(resolved: string, rest = "Added vayu.") {
+	return (child: FakeChild, index: number) => {
+		if (index === 0) finish(child, resolved);
+		else if (index === 1) finish(child, "", 1, "No MCP server found with name: vayu");
+		else finish(child, rest);
+	};
 }
 
 const realPlatform = process.platform;
@@ -128,14 +143,15 @@ describe("connectClient on Windows", () => {
 
 	it("quotes an npm-shimmed `claude` the same way", async () => {
 		const NPM = "C:\\Users\\me\\AppData\\Roaming\\npm";
-		const { spawnImpl, calls } = recorder((call, child, index) => {
-			finish(child, index === 0 ? `${NPM}\\claude\r\n${NPM}\\claude.cmd\r\n` : "Added vayu.");
-		});
+		const { spawnImpl, calls } = recorder((call, child, index) =>
+			freshClaude(`${NPM}\\claude\r\n${NPM}\\claude.cmd\r\n`)(child, index)
+		);
 
 		const res = await connectClient("claude", URL, spawnImpl);
 
 		expect(res.ok).toBe(true);
-		expect(calls[1].command).toBe(
+		expect(calls[1].command).toBe(`"${NPM}\\claude.cmd" "mcp" "get" "vayu"`);
+		expect(calls[2].command).toBe(
 			`"${NPM}\\claude.cmd" "mcp" "add" "--transport" "http" ` +
 				`"--scope" "user" "vayu" "${URL}"`
 		);
@@ -143,16 +159,16 @@ describe("connectClient on Windows", () => {
 
 	it("spawns a native .exe directly, with no shell and an argument array", async () => {
 		const EXE = "C:\\Program Files\\Claude\\claude.exe";
-		const { spawnImpl, calls } = recorder((call, child, index) => {
-			finish(child, index === 0 ? `${EXE}\r\n` : "Added vayu.");
-		});
+		const { spawnImpl, calls } = recorder((call, child, index) =>
+			freshClaude(`${EXE}\r\n`)(child, index)
+		);
 
 		const res = await connectClient("claude", URL, spawnImpl);
 
 		expect(res.ok).toBe(true);
-		expect(calls[1].command).toBe(EXE);
-		expect(calls[1].options.shell).toBeUndefined();
-		expect(calls[1].args).toEqual([
+		expect(calls[2].command).toBe(EXE);
+		expect(calls[2].options.shell).toBeUndefined();
+		expect(calls[2].args).toEqual([
 			"mcp",
 			"add",
 			"--transport",
@@ -197,9 +213,9 @@ describe("connectClient on POSIX", () => {
 
 	it("probes the login shell first, since that is what sources the real PATH", async () => {
 		process.env.SHELL = "/bin/zsh";
-		const { spawnImpl, calls } = recorder((call, child, index) => {
-			finish(child, index === 0 ? "/opt/homebrew/bin/claude\n" : "Added vayu.");
-		});
+		const { spawnImpl, calls } = recorder((call, child, index) =>
+			freshClaude("/opt/homebrew/bin/claude\n")(child, index)
+		);
 
 		const res = await connectClient("claude", URL, spawnImpl);
 
@@ -207,9 +223,9 @@ describe("connectClient on POSIX", () => {
 		expect(calls[0].command).toBe("/bin/zsh");
 		expect(calls[0].args).toEqual(["-lc", "command -v claude 2>/dev/null"]);
 		// The JSON/URL is never interpolated into a shell string off Windows.
-		expect(calls[1].command).toBe("/opt/homebrew/bin/claude");
-		expect(calls[1].options.shell).toBeUndefined();
-		expect(calls[1].args).toContain(URL);
+		expect(calls[2].command).toBe("/opt/homebrew/bin/claude");
+		expect(calls[2].options.shell).toBeUndefined();
+		expect(calls[2].args).toContain(URL);
 	});
 
 	it("falls back to /bin/sh when the login shell does not speak -lc", async () => {
@@ -243,9 +259,9 @@ describe("connectClient on POSIX", () => {
 	it("survives a login shell that is not on disk at all", async () => {
 		process.env.SHELL = "/usr/bin/xonsh";
 		// The throwing shell never reaches the recorder, so /bin/sh is call 0.
-		const { spawnImpl, calls } = recorder((call, child, index) => {
-			finish(child, index === 0 ? "/usr/bin/claude\n" : "Added vayu.");
-		});
+		const { spawnImpl, calls } = recorder((call, child, index) =>
+			freshClaude("/usr/bin/claude\n")(child, index)
+		);
 		const throwingSpawn: SpawnFn = (command, args, options) => {
 			if (command === "/usr/bin/xonsh") throw new Error("ENOENT");
 			return spawnImpl(command, args, options);
@@ -255,6 +271,200 @@ describe("connectClient on POSIX", () => {
 
 		expect(res.ok).toBe(true);
 		expect(calls[0].command).toBe("/bin/sh");
+	});
+});
+
+describe("connectClient for claude is idempotent", () => {
+	const BIN = "/usr/local/bin/claude";
+	const ADD = ["mcp", "add", "--transport", "http", "--scope", "user", "vayu", URL];
+	const REMOVE = ["mcp", "remove", "--scope", "user", "vayu"];
+
+	beforeEach(() => setPlatform("darwin"));
+
+	/** `mcp get` prints what the CLI does, wording and scope included; the code reads only the URL. */
+	const registered = (url: string) =>
+		`vayu:\n  Scope: User config (available in all your projects)\n  Status: Connected\n  Type: http\n  URL: ${url}\n`;
+
+	/** Resolve to BIN, answer `get` with `get`, and every later call with `rest`. */
+	function scenario(
+		get: (child: FakeChild) => void,
+		rest: (child: FakeChild, args: readonly string[]) => void
+	) {
+		return recorder((call, child, index) => {
+			if (index === 0) finish(child, `${BIN}\n`);
+			else if (index === 1) get(child);
+			else rest(child, call.args);
+		});
+	}
+
+	it("spawns no add when the same endpoint is already registered", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, registered(URL)),
+			(child) => finish(child, "unexpected")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res).toEqual({ ok: true, alreadyConnected: true });
+		expect(calls.map((c) => c.args)).toEqual([
+			["-lc", "command -v claude 2>/dev/null"],
+			["mcp", "get", "vayu"],
+		]);
+	});
+
+	it("reads the endpoint from stderr too, in case the CLI prints there", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, "", 0, registered(URL)),
+			(child) => finish(child, "unexpected")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res).toEqual({ ok: true, alreadyConnected: true });
+		expect(calls).toHaveLength(2);
+	});
+
+	it("replaces a registration that points elsewhere: remove, then add, in that order", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, registered("http://127.0.0.1:9876/mcp")),
+			(child) => finish(child, "ok")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.ok).toBe(true);
+		expect(res.alreadyConnected).toBeUndefined();
+		expect(calls.slice(1).map((c) => c.args)).toEqual([["mcp", "get", "vayu"], REMOVE, ADD]);
+	});
+
+	it.each([
+		["a longer port", "http://127.0.0.1:98770/mcp"],
+		["a longer path", "http://127.0.0.1:9877/mcp2"],
+		["a deeper path", "http://127.0.0.1:9877/mcp/extra"],
+		["a prefixed host", "http://x127.0.0.1:9877/mcp"],
+	])("does not count %s as the same endpoint", async (_label, other) => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, registered(other)),
+			(child) => finish(child, "ok")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.alreadyConnected).toBeUndefined();
+		expect(calls.slice(2).map((c) => c.args)).toEqual([REMOVE, ADD]);
+	});
+
+	it.each([
+		["a reset after the URL", `URL: ${URL}\x1b[0m\n`],
+		["colour around the URL", `URL: \x1b[36m${URL}\x1b[39m\n`],
+		["a compound code", `URL: \x1b[1;36m${URL}\x1b[0m`],
+	])("still matches when the CLI colours the output: %s", async (_label, output) => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, output),
+			(child) => finish(child, "unexpected")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res).toEqual({ ok: true, alreadyConnected: true });
+		expect(calls).toHaveLength(2);
+	});
+
+	it("does not let colour codes hide a longer port or path", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, `URL: \x1b[36mhttp://127.0.0.1:98770/mcp\x1b[0m\n`),
+			(child) => finish(child, "ok")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.alreadyConnected).toBeUndefined();
+		expect(calls.slice(2).map((c) => c.args)).toEqual([REMOVE, ADD]);
+	});
+
+	it("adds once, with no remove, when `get` fails", async () => {
+		const { spawnImpl, calls } = scenario(
+			(child) => finish(child, "", 1, "No MCP server found with name: vayu"),
+			(child) => finish(child, "Added vayu.")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res).toEqual({ ok: true, message: "Added vayu." });
+		expect(calls.slice(1).map((c) => c.args)).toEqual([["mcp", "get", "vayu"], ADD]);
+	});
+
+	it("says the earlier registration is gone when the add fails after a remove", async () => {
+		const { spawnImpl } = scenario(
+			(child) => finish(child, registered("http://127.0.0.1:9876/mcp")),
+			(child, args) =>
+				args[1] === "remove"
+					? finish(child, "Removed.")
+					: finish(child, "", 1, "add refused")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.ok).toBe(false);
+		expect(res.reason).toBe("error");
+		expect(res.message).toContain("add refused");
+		expect(res.message).toMatch(/earlier Vayu registration was removed/);
+	});
+
+	it("does not claim a removal when the remove itself failed", async () => {
+		const { spawnImpl } = scenario(
+			(child) => finish(child, registered("http://127.0.0.1:9876/mcp")),
+			(child, args) =>
+				args[1] === "remove"
+					? finish(child, "", 1, "No user-scoped server")
+					: finish(child, "", 1, "add refused")
+		);
+
+		const res = await connectClient("claude", URL, spawnImpl);
+
+		expect(res.ok).toBe(false);
+		expect(res.message).toBe("add refused");
+	});
+
+	describe("through a .cmd shim on Windows", () => {
+		const NPM = "C:\\Users\\me\\AppData\\Roaming\\npm";
+		const SHIM = `"${NPM}\\claude.cmd"`;
+
+		beforeEach(() => setPlatform("win32"));
+
+		function winScenario(get: (child: FakeChild) => void) {
+			return recorder((call, child, index) => {
+				if (index === 0) finish(child, `${NPM}\\claude\r\n${NPM}\\claude.cmd\r\n`);
+				else if (index === 1) get(child);
+				else finish(child, "ok");
+			});
+		}
+
+		it("spawns no add when the same endpoint is already registered", async () => {
+			const { spawnImpl, calls } = winScenario((child) => finish(child, registered(URL)));
+
+			const res = await connectClient("claude", URL, spawnImpl);
+
+			expect(res).toEqual({ ok: true, alreadyConnected: true });
+			expect(calls.map((c) => c.command)).toEqual(["where", `${SHIM} "mcp" "get" "vayu"`]);
+			expect(calls[1].options.shell).toBe(true);
+		});
+
+		it("removes then adds a registration that points elsewhere, every line quoted", async () => {
+			const { spawnImpl, calls } = winScenario((child) =>
+				finish(child, registered("http://127.0.0.1:9876/mcp"))
+			);
+
+			const res = await connectClient("claude", URL, spawnImpl);
+
+			expect(res.ok).toBe(true);
+			expect(res.alreadyConnected).toBeUndefined();
+			expect(calls.slice(1).map((c) => c.command)).toEqual([
+				`${SHIM} "mcp" "get" "vayu"`,
+				`${SHIM} "mcp" "remove" "--scope" "user" "vayu"`,
+				`${SHIM} "mcp" "add" "--transport" "http" "--scope" "user" "vayu" "${URL}"`,
+			]);
+		});
 	});
 });
 

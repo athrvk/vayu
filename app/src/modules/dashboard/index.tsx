@@ -42,8 +42,10 @@ import { Button, HeadingSection } from "@/components/ui";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { DashboardHeader, MetricsView } from "./components";
+import { EngineStoppedNotice } from "./components/EngineStoppedNotice";
 import { useCollectionRunTarget } from "./hooks/useCollectionRunTarget";
 import { useStopLiveRun } from "@/hooks/useStopLiveRun";
+import { useEngineServing } from "@/modules/services/useRunningServices";
 import { TIMING } from "@/config/timing";
 import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress, isRunTerminal } from "@/lib/run-status";
@@ -95,7 +97,13 @@ export default function LoadTestDashboard() {
 	const { stop: stopLiveRun } = useStopLiveRun();
 
 	const live = isDashboardRunLive(phase);
-	const awaitingReport = phase.phase === "awaitingReport";
+	// An engine-stopped run's report is the restarted engine's to serve, so
+	// there is nothing to fetch until one answers (#3605). Never through
+	// `awaitingReport`: that phase is live, and would bring the Running pill and
+	// Stop back for a run no engine is executing.
+	const serving = useEngineServing();
+	const reportFetchable =
+		phase.phase === "awaitingReport" || (phase.phase === "engineStopped" && serving);
 
 	// A collection load run has no URL; this is what the header says instead.
 	const { collectionName, stepCount } = useCollectionRunTarget(currentRunId);
@@ -111,6 +119,13 @@ export default function LoadTestDashboard() {
 	// `streamLost` for a run still going): a swallowed throw once re-ran the
 	// fetch forever, silently, showing an empty dashboard the whole time.
 	const loadAttemptRef = useRef(0);
+	// An engine-stopped run has no phase to give up into (the notice stays, and
+	// the live-looking ones are exactly what it must not reach), so the fetch
+	// records here that it stopped trying. Each engine coming up is a new chance.
+	const reportAbandonedRef = useRef(false);
+	useEffect(() => {
+		reportAbandonedRef.current = false;
+	}, [currentRunId, serving]);
 	const hasCheckedStatus = useRef(false);
 
 	// Check run status on mount - handles case where user navigated away and returned
@@ -152,9 +167,11 @@ export default function LoadTestDashboard() {
 	// first delay and this fetches nothing. A lost stream means the run is still
 	// going and Reconnect is the way on, so this waits for that, and does not
 	// re-arm itself out of it. Retry returns the phase to `awaitingReport`,
-	// which re-arms this.
+	// which re-arms this. An engine-stopped run is fetched the same way once an
+	// engine serves again (#3605); if the cap is spent there, the notice stays.
 	useEffect(() => {
-		if (!currentRunId || !awaitingReport || isLoadingReport) return;
+		if (!currentRunId || !reportFetchable || isLoadingReport || reportAbandonedRef.current)
+			return;
 		// Longer initial delay to allow database writes to complete
 		// This helps avoid "database is locked" issues
 		const delay =
@@ -170,6 +187,9 @@ export default function LoadTestDashboard() {
 			}
 			loadAttemptRef.current = 0;
 			giveUp();
+			if (useDashboardStore.getState().phase.phase === "engineStopped") {
+				reportAbandonedRef.current = true;
+			}
 		};
 
 		const timeoutId = setTimeout(async () => {
@@ -214,7 +234,7 @@ export default function LoadTestDashboard() {
 		return () => clearTimeout(timeoutId);
 	}, [
 		currentRunId,
-		awaitingReport,
+		reportFetchable,
 		isLoadingReport,
 		setFinalReport,
 		reportFailed,
@@ -299,13 +319,17 @@ export default function LoadTestDashboard() {
 	}
 
 	/*
-	 * One notice slot for both failures the dashboard can hit. Each is a phase
-	 * of its own, so the two never stand together, and a report on screen has
-	 * nothing left to retry or reconnect.
+	 * One notice slot for the failures the dashboard can hit. Each is a phase
+	 * of its own, so no two stand together, and a report on screen has nothing
+	 * left to retry or reconnect.
 	 */
-	const notices = (phase.phase === "streamLost" || phase.phase === "reportError") && (
+	const notices = (phase.phase === "streamLost" ||
+		phase.phase === "reportError" ||
+		phase.phase === "engineStopped") && (
 		<div className="enter-fade px-5 pt-3 shrink-0">
-			{phase.phase === "streamLost" ? (
+			{phase.phase === "engineStopped" ? (
+				<EngineStoppedNotice />
+			) : phase.phase === "streamLost" ? (
 				<Callout
 					severity="blocking"
 					title="Lost the live metrics stream"

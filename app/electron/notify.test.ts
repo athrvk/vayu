@@ -485,8 +485,8 @@ describe("the kinds main accepts match the renderer's", () => {
 	const block = /export const NOTIFY_KINDS = \{([\s\S]*?)\} as const;/.exec(source)?.[1] ?? "";
 	const rendererKinds = [...block.matchAll(/^\s*\w+:\s*"([a-z-]+)",?\s*$/gm)].map((m) => m[1]);
 
-	it("finds all ten renderer kinds, so an empty scan cannot pass", () => {
-		expect(rendererKinds).toHaveLength(10);
+	it("finds all eleven renderer kinds, so an empty scan cannot pass", () => {
+		expect(rendererKinds).toHaveLength(11);
 	});
 
 	it("lists every renderer kind", () => {

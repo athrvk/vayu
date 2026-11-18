@@ -1433,6 +1433,10 @@ collection run's per-step progress.
   well still be going. Either way, a report still live at the end shows the dashboard's "Lost the
   live metrics stream" callout and the user's Reconnect re-attaches, resuming after the last
   frame held (issues #1925, #3571). Nothing reconnects on its own. `ScenarioRunService` ignores the second argument.
+  The browser's own retry does not end by itself when the engine process has died: the
+  `EventSource` stays in `CONNECTING`, retrying a dead port. The sidecar's `crashed` push is
+  what ends it (issue #3605): `useEngineLifecycle` calls each service's
+  `handleEngineStopped()`, which `disconnect()`s and settles its run without a notification.
 - **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
   `complete` event, `error` handling
 - **One client, and a hand-off when it changes hands**: the client is a singleton, so a second

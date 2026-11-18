@@ -15,8 +15,9 @@ server is TypeScript, hosted in the Electron main process, built on the official
 when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
-Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
+Once Vayu is running, any agent opts in with one command; with MCP switched off
+or Vayu closed, nothing listens, the connection is refused and the agent's
+client shows its own connection error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -25,11 +26,13 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
   sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
   continues without it, and `mcp:status` reports why so Settings can show it:
   another program holding the port is named, and no endpoint is offered while
-  nothing is listening). Only the port is bound at launch (`listener.ts`, which
-  imports no SDK); the SDK, the tool registry and the service are loaded by the
-  first `POST /mcp` that arrives, so a launch no agent connects to never
-  evaluates them - 5-7 MB of the main process at idle, measured on the packaged
-  Windows app.
+  nothing is listening). Until the first start has bound or failed, the status
+  carries `starting: true` and no error, and Settings says "Starting" with no
+  port and no Retry, re-reading the status until it settles (#3579). Only the
+  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the
+  tool registry and the service are loaded by the first `POST /mcp` that
+  arrives, so a launch no agent connects to never evaluates them - 5-7 MB of
+  the main process at idle, measured on the packaged Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
@@ -53,6 +56,17 @@ shim over the extensionless POSIX script VS Code also installs. A `.cmd`/`.bat`
 shim is run through `cmd.exe`, which Node has required since 20.12. If the CLI
 is not installed, or the run fails for any reason, Connect says so and the
 snippet below it is the manual path.
+
+Connect is safe to click again. For Claude Code it first runs `claude mcp get
+vayu` and reads only whether the exact endpoint URL appears in the output: if it
+does, nothing is run and the panel says Vayu is already connected. The URL alone
+decides this, not the scope: a project- or local-scoped entry with the same URL
+counts. If `vayu` is registered with a different URL (the engine moved ports),
+the old entry is removed at user scope and the new one added. That replace is
+remove then add, not atomic: should the add fail, the old entry is already gone
+and the error says the earlier registration was removed. If `get` fails,
+Connect adds as usual. VS Code has no lookup command, so its Connect always
+runs `--add-mcp`.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
@@ -308,6 +322,14 @@ rejected result as a broken tool and hides the body.
 `output-schema.conformance.test.ts` fails a read tool that is on neither side
 of that line, and an exception that stops being true.
 
+**Result text is compact JSON** (#3560): `JSON.stringify` with no indent in every
+tool result, resource and prompt that embeds JSON, because the reader is a
+model's context window and indentation is cost with no reader (about 50% more
+bytes on a nested answer). A result with `structuredContent` sends the same
+document in both places. `tools.test.ts` ("result text is compact JSON") fails
+when a pretty printer returns to `jsonResult`, `structuredResult` or a tool
+built on them; the resource and prompt sites are not pinned by a test.
+
 **Argument names are uniform** (#2446), held by
 `schema-naming.conformance.test.ts` over every tool's top-level inputs: an id
 is named for what it identifies (`requestId`, `runId`, `entryId`, `itemId`),
@@ -339,8 +361,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `unknownStatus` (`true` only for a status outside the engine's five, else absent), `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run; a status outside the engine's five is treated as unfinished and adds `unknownStatus: true`); a failed load run the engine could not fully record carries `summary.partial: true` (the last saved tick's counts, no `latency` block, `peakConcurrency` or `avgQueueWaitMs` - absent, not zero) or `summary.summaryMissing: true` (no summary: the counts are not whole-run totals, and again none of those three), both absent otherwise and unrelated to the top-level key (#2895); a completed run whose drain a Stop cut carries `summary.drainCut` `{cancelled}` (#3538: its figures cover only the answered requests, and the app shows it as "Not judged"), absent otherwise; on a collection run `summary.totalRequests` is requests sent and `scenario.stepsExecuted` is steps, so a skipped step is neither a request nor a failure, and the load-only figures (`sendRate`, `throughput`, the byte counts, `peakConcurrency`, `droppedRequests`, `avgQueueWaitMs`, the overheads) are absent rather than `0` (#2822); stored trace bodies capped at 32 KB per node, and 96 KB across the report; an inline script's element row (`elements`, a scenario step's or `summary.elements`) carries `messages` and `console` (the first 10 distinct each, an entry seen more than once with its `count`) with `messagesDropped` / `consoleDropped`, the sampled replay's failures are the `results` row whose `trace.failures` lists each distinct message once beside `failureCounts`, and its console lines are `testValidation.console` / `consoleDropped` (a scenario load run's per step, on `scenario.steps[].tests`) (#3127), all passed through as the engine sends them; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max, with `pagination.nextOffset` / `note` as `list_runs`; a load run captures every transport error, every completion at or above `slowRequestThresholdMs` and the first three of each status code, so a healthy 300-request run returns about three samples per status code (`responseSamplePeriod` / `maxResponseSamples` do not feed it); a body that is not UTF-8 text (or holds a zero byte) is base64 in `body` with `bodyEncoding: "base64"`; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000; `pagination.nextOffset` / `note` as `list_runs`; a tick's `status_seconds` (#2866) is passed through as the engine stored it - the responses that completed in the seconds the tick closed, by class, `[]` for a tick that closed none, absent on a tick stored before it |
-| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
+| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=` or `?maxPoints=` | Raw ticks by default: 100 per call, 1000 max - the engine's own cap is 50000; `pagination.nextOffset` / `note` as `list_runs`; `maxPoints` (#3560; whole run, at most 1000, refused beside `limit` / `offset` as an `input` error because the engine would ignore them) answers the run folded to at most that many points with `bucketed` and `ticksPerBucket` on the envelope, a folded p50 / p95 / p99 the max over its ticks and `current_rps` the mean ([the engine's fold](api-reference.md#downsampling-with-maxpoints)); `fields` is `"full"` (default, the whole tick) or `"summary"` (`elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `latency_p95_ms`, `error_rate`, the last the run-so-far percentage the tick stores, each key only when the tick has it); a tick's `status_seconds` (#2866) is passed through as the engine stored it - the responses that completed in the seconds the tick closed, by class, `[]` for a tick that closed none, absent on a tick stored before it |
+| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=` or `?maxPoints=` | Same bounds, `pagination.nextOffset` / `note` and `maxPoints` fold as `get_run_timeseries` (a folded series value is the max over its samples, [the engine's fold](api-reference.md#downsampling-the-monitor-series)); no `fields`, because a sample's keys are the target's own series names and no key set is a summary of them |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format, `hasPassphrase`, and `usable` with a `problem` when the engine would not present the entry; the engine never answers a passphrase; an entry the user removed is in the Trash and not listed until restored, #2973) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number from 1 to 3000 (refused above, not clamped: 3000 is the stock live buffer, `liveReplayWindowMs` 300,000 ms at the 100 ms tick cadence), and there is no `offset` - it answers the tail of the buffer, so a page position has nothing to count from; the answer is `{ticks, completed}` (#2955): `completed` is the stream's own `complete` event, `true` once the run ended and `false` when the time budget ended the read with the run still going, and only when `true` a `note` says the final tick's latency window may be empty (its percentiles can read 0) and the run's percentiles come from `get_run_report`; a tick that closes a second carries `statusSeconds` (#2866, as the engine sends it: the responses that completed in each second it closed, `[]` for none), the others do not; a capacity run's ticks carry `capacity` (#2928, as the engine sends it: `{level, levelElapsedMs, levelsJudged, stopReason?}`, `stopReason` once the search has ended), other runs' do not; a streaming run's ticks carry `streamEvents` (so far), `streamsOpen` and `eventsPerSecond`, and the `statusSeconds` ones also `streamTimeToFirstEvent` (#3236, as the engine sends them: absent when not measured, never `0`). Every tick carries `phase` (#3568, as the engine sends it: `setup`, `sending`, `draining`, `summarising` or `settled`; in `draining` the run's end has come and `backpressure` is the in-flight requests it waits out). The ticks that carry `statusSeconds` also carry `cumulativeLatency` / `cumulativePhases` (the run-so-far distributions) and, for a scenario load run, `scenario` (#2823: `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, meanIterationMs?, steps: [{index, name, executed, errors}]}`, the final tick included; `meanIterationMs` (#3570) is the mean completed pass so far, absent until one completes, and the one timing it carries). The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
@@ -804,8 +826,9 @@ Notes:
   sized for the dashboard's charts, which draw every point for a human, and an
   agent reads the same rows as JSON through a context window. The ceilings are
   500 (the engine's own page cap, shared with `GET /runs`) and 1000 for the two
-  series, well under the engine's 50000. A `limit` past a ceiling is **refused,
-  not clamped** - the #319 precedent - because a short page silently substituted
+  series, well under the engine's 50000. `maxPoints` on the two series reads
+  (#3560) folds the whole run in one call, under the same 1000 ceiling. A
+  `limit` past a ceiling is **refused, not clamped** - the #319 precedent - because a short page silently substituted
   for the one asked for reads as the whole answer. A page with more behind it
   says so inside the JSON document, never in a second text block that would
   stop the answer parsing (#2445): `pagination.nextOffset` is the `offset` to
@@ -2439,7 +2462,15 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
-IDs).
+IDs). With the engine unreachable the list callback answers no runs, so the
+static resources above still list (#3577); any other failure still fails the
+list. Every resource, prompt and completion callback words an unreachable
+engine the way a tool does (`server.ts`, `worded`): a read of
+`vayu://scripting/types` with the engine down fails with `Could not reach the
+Vayu engine ...` and the host's remedy, not a bare `fetch failed`. Other
+failures keep their own text: an engine refusal's body is unmasked engine text,
+and the interrupted-call advice describes a tool call that may have completed,
+which a read never was.
 
 ### The script sandbox surface
 
@@ -3161,12 +3192,12 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 
@@ -3328,7 +3359,7 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
 | A tool switched off                                  | `VAYU_MCP_DISABLED_TOOLS`               | Settings → MCP, Tools                |
-| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | make sure the Vayu app is running  |
+| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | the app is open but its engine is not answering: wait, or Settings → Restart engine |
 | `verifySSL: false` on a one-off send                 | add the authority to the engine's `customCaCertificates` through `update_engine_config`, which needs `VAYU_MCP_ALLOW_WRITES` and `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | Settings > Network & connectivity |
 | A `binary` body's file path                          | no setting: the stdio server has no request editor to pick a file in and nothing that allows a folder, so only a folder the engine already allows works | the request editor, or Settings > Files |
 | A collection's remembered data file (`dataFile`)     | never present: `dataFileLocation` is absent on stdio, so no path is remembered; ask the user for it | the app remembers the path |

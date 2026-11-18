@@ -31,6 +31,7 @@ const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
 const mockSetPlan = vi.fn();
 const mockRunEnded = vi.fn();
+const mockEngineStopped = vi.fn();
 /** The fold the store keeps beside the rows; the notification body reads it. */
 const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
@@ -42,6 +43,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			setStreaming: mockSetStreaming,
 			streamLost: mockStreamLost,
 			runEnded: mockRunEnded,
+			engineStopped: mockEngineStopped,
 			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
 		}),
 	},
@@ -412,6 +414,61 @@ describe("ScenarioRunService", () => {
 		});
 	});
 
+	/*
+	 * The sidecar's `crashed` push, through `useEngineLifecycle` (#3605): the run
+	 * ended with its engine. Mutation checks: drop `sseClient.disconnect()` from
+	 * `handleEngineStopped` and the first case reddens; drop the flush and the
+	 * last step goes missing; drop `failProgress` and the bar is cleared rather
+	 * than failed; write `streamLost` instead of `engineStopped` and the run tab
+	 * still promises a run that keeps executing.
+	 */
+	describe("an engine that stops under the run (#3605)", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("lets go of the stream, the wake lock and the bar, and says nothing", () => {
+			scenarioRunService.startMonitoring("run_crash_1");
+			deliverStep(0);
+			// Inside the flush window, so still buffered.
+			deliverStep(1);
+			mockWakeLockRelease.mockClear();
+
+			// The answer `useEngineLifecycle` records beside the crash, for the
+			// engine-lost notification's sentence.
+			expect(scenarioRunService.handleEngineStopped()).toBe(true);
+
+			expect(sseClient.disconnect).toHaveBeenCalledTimes(1);
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
+			expect(mockSetStreaming).toHaveBeenCalledWith("run_crash_1", false);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_crash_1"
+			);
+			expect(mockProgressClear).not.toHaveBeenCalled();
+			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1]);
+			expect(mockEngineStopped).toHaveBeenCalledExactlyOnceWith(
+				"run_crash_1",
+				expect.stringContaining("engine stopped")
+			);
+			expect(mockStreamLost).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			expect(mockOsIconRunFinished).not.toHaveBeenCalled();
+		});
+
+		it("does nothing without a run", () => {
+			expect(scenarioRunService.handleEngineStopped()).toBe(false);
+
+			expect(sseClient.disconnect).not.toHaveBeenCalled();
+			expect(mockEngineStopped).not.toHaveBeenCalled();
+			expect(mockWakeLockRelease).not.toHaveBeenCalled();
+		});
+	});
+
 	it("keeps the run visible when the report refetch fails", async () => {
 		queryClient.setQueryData(queryKeys.runs.report("run_4"), emptyReport);
 		vi.mocked(apiService.getRunReport).mockRejectedValue(new Error("engine gone"));
@@ -614,6 +671,38 @@ describe("ScenarioRunService", () => {
 					expect.objectContaining({
 						kind: NOTIFY_KINDS.collectionRunFinished,
 						body: "12 passed, 0 failed. 1 of 1 budget missed: p99",
+					})
+				);
+			});
+
+			it("announces a stop as stopped, with the same counts line (#3606)", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("stopped", [["latencyP99Ms", true]]);
+				scenarioRunService.startMonitoring("run_b6");
+
+				await closeStream("stopped");
+
+				expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunStopped,
+						title: "Collection run stopped",
+						body: "12 passed, 0 failed",
+					})
+				);
+			});
+
+			it("announces a stop the stored report records when the frame carried no status", async () => {
+				Object.assign(stepCounts, { passed: 12 });
+				storedWithBudgets("stopped", []);
+				scenarioRunService.startMonitoring("run_b7");
+
+				await closeStream(null);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.collectionRunStopped,
+						title: "Collection run stopped",
 					})
 				);
 			});
@@ -933,16 +1022,25 @@ describe("ScenarioRunService", () => {
 		});
 
 		/*
-		 * The quieter cue (#1364 item 4). This service has no stopped kind -
-		 * every terminal state it reports is one the user did not ask for - so
-		 * the cue follows all of them. Mutation check: drop the `runFinished`
-		 * call and a user with notifications off learns nothing when a
-		 * collection run ends.
+		 * The quieter cue (#1364 item 4). This service has no Stop of its own, so
+		 * every stopped run it reports was stopped from elsewhere (the runner
+		 * tab's Stop included, which ends on the stream like any other) and the
+		 * cue follows every terminal state. Mutation check: drop the
+		 * `runFinished` call and a user with notifications off learns nothing
+		 * when a collection run ends.
 		 */
 		it("raises the quieter end-of-run cue when a collection run ends", async () => {
 			scenarioRunService.startMonitoring("run_31");
 
 			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
+		it("raises the cue for a stopped collection run too (#3606)", async () => {
+			scenarioRunService.startMonitoring("run_31b");
+
+			await closeStream("stopped");
 
 			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
 		});

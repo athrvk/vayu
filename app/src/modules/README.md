@@ -79,7 +79,9 @@ Some modules have components displayed in both the sidebar and main content area
   the Dock's ambient indicator reads - one list over all three sources, because they disagree on
   their own terms (a stopped inbox stays listed, a stopped issuer or mock server does not), and
   `useRunningServicesPublisher()`, which pushes that list to the main process so a close can name
-  what it is about to stop (issue #1363)
+  what it is about to stop (issue #1363), and `useLiveRunPublisher()`, which pushes the run the
+  app shows live (`stores/run-gate.ts`) beside it, so the same close names that run first. Both
+  are gated on `useEngineServing`: a dead engine is running nothing (issue #3604)
 - **Usage:**
     ```tsx
     import { ServicesPanel, useRunningServiceCount } from "@/modules/services";

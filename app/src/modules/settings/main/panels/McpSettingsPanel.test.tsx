@@ -38,7 +38,12 @@ const updateMcpSafety = vi.fn();
 const setMcpEnabled = vi.fn();
 const connectMcpClient = vi.fn();
 
-const STATUS: McpStatus = { running: true, url: "http://127.0.0.1:9877/mcp", enabled: true };
+const STATUS: McpStatus = {
+	running: true,
+	url: "http://127.0.0.1:9877/mcp",
+	enabled: true,
+	starting: false,
+};
 
 const SAVED: McpSafetyConfig = {
 	allowlist: ["api.example.com", "internal.test"],
@@ -262,6 +267,7 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		running: false,
 		url: "http://127.0.0.1:9877/mcp",
 		enabled: true,
+		starting: false,
 		error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
 	};
 
@@ -358,12 +364,13 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		await expectNoUsableEndpoint();
 	});
 
-	it("falls back to the generic notice when main reported no reason", async () => {
+	it("guesses no reason when main reported none for a listener that is gone", async () => {
 		getMcpStatus.mockResolvedValue({ ...IN_USE, error: undefined });
 
 		await renderPanel();
 
-		expect(screen.getByText(/the port may be in use/i)).toBeInTheDocument();
+		expect(screen.getByText(/enabled but not listening/i)).toBeInTheDocument();
+		expect(screen.queryByText(/port may be in use/i)).not.toBeInTheDocument();
 		await expectNoUsableEndpoint();
 	});
 
@@ -392,6 +399,127 @@ describe("McpSettingsPanel when the server is not listening", () => {
 			expect(button).toBeDisabled();
 			expect(await connectReason(button)).toBe("Enable the MCP server first");
 		}
+	});
+});
+
+/**
+ * The server is enabled and main has neither a listener nor a failure: the
+ * engine is still starting, so nothing is wrong yet (#3579). It must not read
+ * as a port conflict, and it must come up on its own.
+ */
+describe("McpSettingsPanel while the server is starting", () => {
+	const STARTING: McpStatus = {
+		running: false,
+		url: "http://127.0.0.1:9877/mcp",
+		enabled: true,
+		starting: true,
+	};
+
+	/** Fake time, so it only has to exceed the panel's poll interval, not equal it. */
+	const POLL_WINDOW_MS = 10_000;
+
+	const connectionCard = () =>
+		within(screen.getByText("Connection").closest("[data-slot=card]") as HTMLElement);
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("says Starting, names no port and offers no Retry or usable endpoint", async () => {
+		getMcpStatus.mockResolvedValue(STARTING);
+
+		await renderPanel();
+
+		const card = connectionCard();
+		expect(card.getByText("Starting")).toBeInTheDocument();
+		expect(card.getByText("Starting the MCP server…")).toBeInTheDocument();
+		expect(card.queryByText(/\bport\b/i)).toBeNull();
+		expect(card.queryByText(/enabled but not listening/i)).toBeNull();
+		expect(card.queryByText(/another program/i)).toBeNull();
+		expect(card.queryByRole("button", { name: /retry/i })).toBeNull();
+		expect(card.queryByText(/127\.0\.0\.1/)).toBeNull();
+		expect(card.getAllByText(/the mcp server is starting/i).length).toBeGreaterThan(0);
+		for (const button of card.getAllByRole("button", { name: /^copy$/i })) {
+			expect(button).toBeDisabled();
+		}
+		for (const button of card.getAllByRole("button", { name: /^connect$/i })) {
+			expect(button).toBeDisabled();
+		}
+	});
+
+	it("shows the endpoint once the status settles, without a refocus", async () => {
+		vi.useFakeTimers();
+		getMcpStatus.mockResolvedValue(STARTING);
+
+		await renderPanel();
+		expect(connectionCard().getByText("Starting")).toBeInTheDocument();
+
+		getMcpStatus.mockResolvedValue(STATUS);
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+
+		const card = connectionCard();
+		expect(card.queryByText("Starting")).toBeNull();
+		expect(card.getAllByText("http://127.0.0.1:9877/mcp").length).toBeGreaterThan(0);
+		expect(card.getByText("Running")).toBeInTheDocument();
+	});
+
+	it("shows the real reason when the start then fails", async () => {
+		vi.useFakeTimers();
+		getMcpStatus.mockResolvedValue(STARTING);
+
+		await renderPanel();
+		getMcpStatus.mockResolvedValue({
+			...STARTING,
+			starting: false,
+			error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+
+		expect(screen.getByText(/another program holds 127\.0\.0\.1:9877/i)).toBeInTheDocument();
+		expect(screen.queryByText("Starting the MCP server…")).toBeNull();
+		expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+	});
+
+	it("stops polling once settled, and when the panel unmounts", async () => {
+		vi.useFakeTimers();
+		getMcpStatus.mockResolvedValue(STARTING);
+
+		await renderPanel();
+		getMcpStatus.mockResolvedValue(STATUS);
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+		const settledCalls = getMcpStatus.mock.calls.length;
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+		expect(getMcpStatus).toHaveBeenCalledTimes(settledCalls);
+
+		cleanup();
+		getMcpStatus.mockResolvedValue(STARTING);
+		await renderPanel();
+		cleanup();
+		const unmountedCalls = getMcpStatus.mock.calls.length;
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+		expect(getMcpStatus).toHaveBeenCalledTimes(unmountedCalls);
+	});
+
+	it("does not poll a server that is not starting", async () => {
+		vi.useFakeTimers();
+
+		await renderPanel();
+		const calls = getMcpStatus.mock.calls.length;
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(POLL_WINDOW_MS);
+		});
+
+		expect(getMcpStatus).toHaveBeenCalledTimes(calls);
 	});
 });
 
@@ -440,6 +568,35 @@ describe("McpSettingsPanel connect failures", () => {
 		});
 
 		expect(toastMessages().join(" ")).toMatch(/couldn't connect .*mcp server is off/i);
+	});
+
+	it("tells the user an existing registration was left alone, not that it was added", async () => {
+		await renderPanel();
+		connectMcpClient.mockResolvedValue({ ok: true, alreadyConnected: true });
+
+		await act(async () => {
+			fireEvent.click(screen.getAllByRole("button", { name: /^connect$/i })[0]);
+		});
+
+		const [toast] = useToastStore.getState().toasts;
+		expect(toast.message).toBe("Vayu is already connected to Claude Code.");
+		// Below the user's minSeverity floor a toast is dropped, so an "info" here
+		// would show nothing after a manual click.
+		expect(toast.variant).toBe("success");
+		expect(toastMessages().join(" ")).not.toMatch(/added/i);
+	});
+
+	it("confirms a fresh registration with a success toast", async () => {
+		await renderPanel();
+		connectMcpClient.mockResolvedValue({ ok: true });
+
+		await act(async () => {
+			fireEvent.click(screen.getAllByRole("button", { name: /^connect$/i })[0]);
+		});
+
+		const [toast] = useToastStore.getState().toasts;
+		expect(toast.message).toBe("Added Vayu to Claude Code.");
+		expect(toast.variant).toBe("success");
 	});
 });
 
@@ -527,6 +684,17 @@ describe("McpSettingsPanel copy that described only half its mechanism", () => {
 
 		// It described only the OFF state, on a switch that ships on.
 		expect(screen.getByText(/on by default/i)).toBeInTheDocument();
+	});
+
+	it("says a switched-off or closed server refuses the connection, not that the agent is told to start Vayu (#3577)", async () => {
+		await renderPanel();
+
+		const row = screen.getByText(/on by default/i).parentElement as HTMLElement;
+		fireEvent.click(within(row).getByRole("button", { name: /show more/i }));
+		const description = screen.getByText(/on by default/i);
+		expect(description).toHaveTextContent(/refuses connections/i);
+		expect(description).toHaveTextContent(/client shows its own connection error/i);
+		expect(description).not.toHaveTextContent(/start vayu/i);
 	});
 
 	it("says what an allowed host's remove button does on keyboard focus (#3498)", async () => {

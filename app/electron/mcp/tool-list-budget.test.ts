@@ -254,6 +254,13 @@
  * as read is not refused. That added 1,798 B to the writes-off rows and 4,392 B
  * to the writes-on rows, taking them to 153,130 / 150,534 / 228,231 / 223,964
  * B; the four caps went to 153,400 / 150,800 / 228,500 / 224,200.
+ *
+ * #3560's `maxPoints` on `get_run_timeseries` and `get_run_monitor` and `fields`
+ * on the first (two arguments each, a "whole run" sentence in each description)
+ * added 1,064 B to every row, taking them to 154,314 / 151,718 / 229,427 /
+ * 225,160 B; the four caps went to 154,400 / 151,800 / 229,500 / 225,200. The
+ * same change's compact result text (no indent) shrinks what a call returns,
+ * not `tools/list`, so it buys none of this back.
  */
 
 import { describe, it, expect } from "vitest";
@@ -273,10 +280,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 153_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 150_800 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 228_500 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 224_200 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 154_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 151_800 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 229_500 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 225_200 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -120,6 +120,7 @@ beforeEach(() => {
 		plan: null,
 		isStreaming: false,
 		error: null,
+		endedByEngineStop: false,
 	});
 	stopRun.mockReset();
 	stopRun.mockResolvedValue({});
@@ -893,6 +894,41 @@ describe("stopping a live run", () => {
 		// And the button is back, so the failure did not leave the tab stuck on
 		// "Stopping…" with nothing to click.
 		expect((stopButton() as HTMLButtonElement).disabled).toBe(false);
+	});
+});
+
+/*
+ * The "Live updates stopped" callout (#3605). A dropped stream leaves the run
+ * executing on the engine, and the callout says so; an engine that stopped took
+ * the run with it, and that promise would be false. Mutation check: drop the
+ * `endedByEngineStop` condition and the engine-stop case reddens.
+ */
+describe("the live-updates callout", () => {
+	function calloutText(): string {
+		// The title's own line holds the body after it.
+		return screen.getByText("Live updates stopped").parentElement?.textContent ?? "";
+	}
+
+	it("says the run keeps executing when only the stream dropped", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		act(() => {
+			useScenarioRunStore.getState().startRun("run-1");
+			useScenarioRunStore.getState().streamLost("run-1", "The connection closed.");
+		});
+
+		expect(calloutText()).toContain("The connection closed.");
+		expect(calloutText()).toContain("The run itself is unaffected");
+	});
+
+	it("promises no run left executing once the engine stopped", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		act(() => {
+			useScenarioRunStore.getState().startRun("run-1");
+			useScenarioRunStore.getState().engineStopped("run-1", "Vayu's engine stopped.");
+		});
+
+		expect(calloutText()).toContain("Vayu's engine stopped.");
+		expect(calloutText()).not.toContain("unaffected");
 	});
 });
 

@@ -44,6 +44,28 @@ import { isRunTerminal } from "@/lib/run-status";
 import { stepOutcomeLine } from "@/modules/history/main/scenario-steps";
 import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 
+/** The three ways a collection run ends, as the user hears about them (#1358, #3606). */
+type CollectionRunNotifyKind =
+	| typeof NOTIFY_KINDS.collectionRunFinished
+	| typeof NOTIFY_KINDS.collectionRunStopped
+	| typeof NOTIFY_KINDS.collectionRunFailed;
+
+const NOTIFY_TITLES: Record<CollectionRunNotifyKind, string> = {
+	[NOTIFY_KINDS.collectionRunFinished]: "Collection run finished",
+	[NOTIFY_KINDS.collectionRunStopped]: "Collection run stopped",
+	[NOTIFY_KINDS.collectionRunFailed]: "Collection run failed",
+};
+
+function collectionNotifyKind(endedAs: string | null): CollectionRunNotifyKind {
+	if (endedAs === "failed") return NOTIFY_KINDS.collectionRunFailed;
+	if (endedAs === "stopped") return NOTIFY_KINDS.collectionRunStopped;
+	return NOTIFY_KINDS.collectionRunFinished;
+}
+
+/** The run tab's "Live updates stopped" callout body for a run its engine took down. */
+const ENGINE_STOPPED_MESSAGE =
+	"Vayu's engine stopped, and this run ended with it. The steps below arrived before it stopped.";
+
 class ScenarioRunService {
 	private activeRunId: string | null = null;
 	/**
@@ -218,12 +240,13 @@ class ScenarioRunService {
 	/**
 	 * Let go of everything this service holds on `runId`'s behalf.
 	 *
-	 * The one place that does it, because two paths need it - the stream
-	 * ending, and a load run taking the shared client away (#1417) - and a
-	 * second copy is a release that drifts out of step with the first. What it
-	 * deliberately leaves to its callers is anything that *speaks* for the run:
-	 * a close has a notification and a stored record to converge on, and a
-	 * superseded run has neither, because it has not ended.
+	 * The one place that does it, because three paths need it - the stream
+	 * ending, a load run taking the shared client away (#1417), and the engine
+	 * stopping (#3605) - and a second copy is a release that drifts out of step
+	 * with the first. What it deliberately leaves to its callers is anything
+	 * that *speaks* for the run: a close has a notification and a stored record
+	 * to converge on, a superseded run has neither, because it has not ended,
+	 * and an engine stop leaves the telling to the engine-lost notification.
 	 */
 	private releaseRun(runId: string | null): void {
 		this.activeRunId = null;
@@ -269,13 +292,37 @@ class ScenarioRunService {
 		this.releaseRun(runId);
 	}
 
+	/**
+	 * The engine's process ended (the sidecar's `crashed` push, #3605), and the
+	 * watched run ended with it. Called by `useEngineLifecycle`.
+	 *
+	 * `handleError`'s sequence, less its notification: the engine-lost
+	 * notification is the one the user gets, and the latch keeps it the only
+	 * one. The stream is closed, because the `EventSource` would otherwise retry
+	 * the dead port every few seconds for the rest of the session, and no
+	 * stored record is fetched: there is no engine to answer. Returns whether
+	 * there was a run to end.
+	 */
+	handleEngineStopped(): boolean {
+		const runId = this.activeRunId;
+		if (!runId) return false;
+		this.notifiedRunId = runId;
+		this.failProgress(runId);
+		// The steps that did arrive go on screen under the notice, as on a stream error.
+		this.stepBatcher?.flush();
+		this.releaseRun(runId);
+		sseClient.disconnect();
+		useScenarioRunStore.getState().engineStopped(runId, ENGINE_STOPPED_MESSAGE);
+		return true;
+	}
+
 	/*
 	 * There is deliberately no `stopMonitoring` here, unlike `LoadTestService`.
 	 * The stream ends on its own - the engine sends `complete` when the run
 	 * reaches a terminal status - and that holds for a *stopped* run too: the
 	 * scenario runner observes `should_stop` per step, settles the run to
-	 * `Stopped` and closes the topic, so the runner tab's Stop control gets its
-	 * terminal event through the same path a run that finished normally does.
+	 * `Stopped` and closes the topic, so a stop from the runner tab, MCP or
+	 * History arrives through the same path a run that finished normally does.
 	 * A detach method with no caller is surface that cannot be verified.
 	 */
 
@@ -291,7 +338,7 @@ class ScenarioRunService {
 	 */
 	private notifyTerminal(
 		runId: string | null,
-		kind: typeof NOTIFY_KINDS.collectionRunFinished | typeof NOTIFY_KINDS.collectionRunFailed,
+		kind: CollectionRunNotifyKind,
 		body: string,
 		options?: { title?: string }
 	): void {
@@ -299,11 +346,7 @@ class ScenarioRunService {
 		this.notifiedRunId = runId;
 		systemNotify.post({
 			kind,
-			title:
-				options?.title ??
-				(kind === NOTIFY_KINDS.collectionRunFinished
-					? "Collection run finished"
-					: "Collection run failed"),
+			title: options?.title ?? NOTIFY_TITLES[kind],
 			body,
 			target: { view: "run", runId },
 		});
@@ -312,8 +355,9 @@ class ScenarioRunService {
 		// once per run, and every terminal path reaches it - the SSE error
 		// handler and a clean close alike - not only the failure one.
 		if (kind === NOTIFY_KINDS.collectionRunFailed) osIcon.runFailed();
-		// Every terminal kind this service has is one the user did not ask for -
-		// it has no stopped kind - so the flash follows all of them (#1364).
+		// Every kind here is learned from the stream, including a stop: this
+		// service has no Stop of its own (see the note above), so the flash
+		// follows all of them (#1364).
 		osIcon.runFinished();
 	}
 
@@ -426,9 +470,7 @@ class ScenarioRunService {
 		if (endedAs) useScenarioRunStore.getState().runEnded(runId, endedAs, thresholdValidation);
 		this.notifyTerminal(
 			runId,
-			endedAs === "failed"
-				? NOTIFY_KINDS.collectionRunFailed
-				: NOTIFY_KINDS.collectionRunFinished,
+			collectionNotifyKind(endedAs),
 			stepOutcomeLine(counts, thresholdValidation)
 		);
 
