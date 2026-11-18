@@ -119,6 +119,30 @@ size_t index) {
     kind.label, index + 1);
 }
 
+/** The kind names @p registry holds, in registration order, comma separated;
+ *  what a client that misspelled one should have sent (#3559). */
+std::string registered_kind_names (const Registry& registry) {
+    std::string names;
+    for (const auto& kind : registry.kinds ()) {
+        if (!names.empty ()) {
+            names += ", ";
+        }
+        names += kind.kind;
+    }
+    return names;
+}
+
+std::string unrecognized_kind_message (const Registry& registry,
+size_t index,
+const std::string& kind_name) {
+    const std::string valid = registered_kind_names (registry);
+    if (valid.empty ()) {
+        return std::format ("Item {} has an unrecognized kind: '{}'", index + 1, kind_name);
+    }
+    return std::format ("Item {} has an unrecognized kind: '{}'. Kinds: {}",
+    index + 1, kind_name, valid);
+}
+
 /**
  * One `elements[index]` entry's whole validation, extracted out of
  * `Registry::validate`'s own loop (#1499's placement check pushed that
@@ -160,7 +184,7 @@ nlohmann::json& config_out) {
     kind_name_out    = entry["kind"].get<std::string> ();
     const auto* kind = registry.find (kind_name_out);
     if (kind == nullptr) {
-        return std::format ("Item {} has an unrecognized kind: '{}'", index + 1, kind_name_out);
+        return unrecognized_kind_message (registry, index, kind_name_out);
     }
     if (kind->collection_only && owner != ElementOwner::Collection) {
         return std::format (

@@ -43,7 +43,9 @@ validate against that kind's JSON Schema - both checked by
 `vayu::core::Registry::validate` (`engine/include/vayu/core/elements.hpp`), which every write route
 runs before storing and `POST /execute` runs on its inline list before sending (`400` naming the
 index, the kind and the field on a violation; `/execute` judges a collection-origin entry as a
-collection's own, see [its `elements`](api-reference.md#post-execute)). A rule the
+collection's own, see [its `elements`](api-reference.md#post-execute)). A `kind` the registry does not
+hold is refused with the ones it does (`Item 1 has an unrecognized kind: 'assert.sttus'. Kinds:
+inherit.disable, script.pre, ...`, #3559), in registration order. A rule the
 schema cannot express (a JSONPath that parses, a pattern RE2 compiles, an assertion having
 something to compare against) is the kind's optional `validate_config` hook, run after the schema
 accepts the config and worded the same way. A setting the kind does not declare

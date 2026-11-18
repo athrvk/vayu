@@ -237,7 +237,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Sent to the engine as an ad-hoc `script.pre` element (issue #1514 refuses the raw field). Read the `vayu://scripting/completions` resource for the full surface. Refused while Reveal secrets to agents is off."
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Sent to the engine as an ad-hoc `script.pre` element (issue #1514 refuses the raw field). Read get_script_api (or the `vayu://scripting/completions` resource) for the full surface. Refused while Reveal secrets to agents is off."
 				),
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
@@ -245,7 +245,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				.array(elementSchema)
 				.optional()
 				.describe(
-					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere, and alongside any preRequestScript/postRequestScript given on the same call rather than replacing them. A `script.*` entry is a script, and is refused while Reveal secrets to agents is off. Read the `vayu://elements/kinds` resource for the catalogue."
+					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere, and alongside any preRequestScript/postRequestScript given on the same call rather than replacing them. A `script.*` entry is a script, and is refused while Reveal secrets to agents is off. List the kinds and each one's config with list_element_kinds (or the `vayu://elements/kinds` resource)."
 				),
 			stream: streamInput,
 			maxStreamEvents: maxStreamEventsInput,
