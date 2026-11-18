@@ -32,6 +32,7 @@
 
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
+#include "mcp_port_stand_in.hpp"
 #include "optional_assert.hpp"
 #include "proxy_server.hpp"
 #include "vayu/core/constants.hpp"
@@ -303,22 +304,30 @@ TEST (LoopbackGuardRegistry, IsSetOnceAndRefusesASecondPort) {
     << "a refused registration must leave the first one in force";
 }
 
-// The registry is per process and the suite shares one (sharded runs), so this
-// registers the default MCP port: every other test's reading of 9877 as
-// reserved holds whether it runs before or after this one. Which port a
-// registered value reserves is the predicate's case above.
 TEST (LoopbackGuardRegistry, TheMcpPortIsSetOnceAndRefusesASecondPort) {
-    EXPECT_NO_THROW (vayu::http::set_mcp_port (MCP_PORT));
-    ASSERT_EQ (vayu::http::registered_mcp_port (), MCP_PORT);
+    const int port = vayu::tests::mcp_port_stand_in ();
+    ASSERT_EQ (vayu::http::registered_mcp_port (), port);
 
-    EXPECT_NO_THROW (vayu::http::set_mcp_port (MCP_PORT))
+    EXPECT_NO_THROW (vayu::http::set_mcp_port (port))
     << "repeating the registered port is a no-op";
-    EXPECT_THROW (vayu::http::set_mcp_port (MCP_PORT + 1), std::logic_error);
+    EXPECT_THROW (vayu::http::set_mcp_port (port + 1), std::logic_error);
     EXPECT_THROW (vayu::http::set_mcp_port (0), std::invalid_argument);
     EXPECT_THROW (vayu::http::set_mcp_port (65536), std::invalid_argument);
-    EXPECT_EQ (vayu::http::registered_mcp_port (), MCP_PORT)
+    EXPECT_EQ (vayu::http::registered_mcp_port (), port)
     << "a refused registration must leave the first one in force";
-    EXPECT_TRUE (vayu::http::is_reserved_loopback_target ("127.0.0.1", MCP_PORT));
+}
+
+// The public predicate reads the registry, not the default: the daemon's
+// `--mcp-port` is what it reserves. Mutation-check: pass `std::nullopt` for
+// the MCP port in the public overload and both halves fail.
+TEST (LoopbackGuardRegistry, TheRegisteredMcpPortIsReservedInPlaceOfTheDefault) {
+    const int port = vayu::tests::mcp_port_stand_in ();
+    ASSERT_NE (port, MCP_PORT);
+
+    EXPECT_TRUE (vayu::http::is_reserved_loopback_target ("127.0.0.1", port));
+    EXPECT_TRUE (vayu::http::is_reserved_loopback_target ("localhost", port));
+    EXPECT_FALSE (vayu::http::is_reserved_loopback_target ("127.0.0.1", MCP_PORT))
+    << "a registered MCP port frees the default";
 }
 
 TEST (LoopbackGuardRegistry, ReadsTheReservedPortOffAUrl) {
@@ -329,7 +338,10 @@ TEST (LoopbackGuardRegistry, ReadsTheReservedPortOffAUrl) {
     EXPECT_EQ (vayu::http::reserved_target_port ("http://localhost" + tail), port);
     EXPECT_EQ (vayu::http::reserved_target_port ("http://[::1]" + tail), port);
     EXPECT_EQ (vayu::http::reserved_target_port ("https://user:pw@127.0.0.1" + tail), port);
-    EXPECT_EQ (vayu::http::reserved_target_port ("http://127.0.0.1:9877/mcp"), MCP_PORT);
+    const int mcp = vayu::tests::mcp_port_stand_in ();
+    EXPECT_EQ (vayu::http::reserved_target_port (
+               "http://127.0.0.1:" + std::to_string (mcp) + "/mcp"),
+    mcp);
 
     EXPECT_EQ (vayu::http::reserved_target_port ("http://example.com" + tail), std::nullopt);
     EXPECT_EQ (vayu::http::reserved_target_port ("http://127.0.0.1/health"), std::nullopt)
