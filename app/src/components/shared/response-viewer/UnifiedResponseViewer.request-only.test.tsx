@@ -12,11 +12,14 @@
  * The viewer given a request and no response (an inbox capture, #3492) is the
  * body's home: the tab says "Body", the panels fill the card their caller sizes,
  * and the empty state does not blame a response that never existed. With a
- * response it is the sampled-run viewer it always was, panels fixed at 500px.
+ * response it is the sampled-run viewer it always was, panels fixed at 500px,
+ * plus a Request tab when the request carries a body (the session Console's
+ * rows, #3634). Mutation check: render the Request tab whatever the request
+ * carries and "adds no Request tab" fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("@/components/ui/code-editor", () => ({
 	CodeEditor: ({ value }: { value: string }) => <div data-testid="code-editor">{value}</div>,
@@ -77,5 +80,32 @@ describe("UnifiedResponseViewer with a response", () => {
 		);
 
 		expect(screen.getByText("No response body")).toBeInTheDocument();
+	});
+
+	it("puts a request body beside the response on a Request tab of its own", () => {
+		render(
+			<UnifiedResponseViewer
+				response={{ body: '{"ok":true}', headers: JSON_HEADERS }}
+				request={{ headers: JSON_HEADERS, body: '{"sent":true}' }}
+			/>
+		);
+
+		fireEvent.mouseDown(screen.getByRole("tab", { name: "Request" }));
+		expect(screen.getByRole("tabpanel").className).toContain("h-[500px]");
+		expect(JSON.parse(screen.getByTestId("code-editor").textContent ?? "")).toEqual({
+			sent: true,
+		});
+	});
+
+	it("adds no Request tab for a request without a body", () => {
+		render(
+			<UnifiedResponseViewer
+				response={{ body: '{"ok":true}', headers: JSON_HEADERS }}
+				request={{ headers: JSON_HEADERS }}
+			/>
+		);
+
+		expect(screen.queryByRole("tab", { name: "Request" })).toBeNull();
+		expect(screen.getAllByRole("tab")).toHaveLength(2);
 	});
 });

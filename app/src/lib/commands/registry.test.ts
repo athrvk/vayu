@@ -26,7 +26,6 @@ import { baseCommandContext } from "./context";
 import { tabElementId } from "@/components/layout/tab-aria";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
 import { SEND_CHORD, TOGGLE_BOTTOM_PANEL_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
-import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import {
 	useImportModalStore,
 	useLayoutStore,
@@ -603,7 +602,7 @@ describe("the bottom panel toggle (#3635)", () => {
 	it("is titled as its chord is labelled, from the panel's one name", () => {
 		const title = commandTitle(commandById("toggle-bottom-panel"), fullContext());
 		expect(title).toBe(TOGGLE_BOTTOM_PANEL_CHORD.label);
-		expect(title).toBe(`Show or hide the ${BOTTOM_PANEL_LABEL.toLowerCase()}`);
+		expect(title).toBe("Show or hide the console");
 		expect(commandById("toggle-bottom-panel").shortcut).toBe(TOGGLE_BOTTOM_PANEL_CHORD);
 	});
 

@@ -7,8 +7,8 @@
 
 /**
  * The shell's bottom band (#3635): a full-width panel between the main row and
- * the Dock, under the sidebar and the content alike, holding a strip of tabs.
- * Today it has one, Logs; the session Console (#3634) joins it.
+ * the Dock, under the sidebar and the content alike, holding a strip of tabs:
+ * the session Console (#3634) and Logs.
  *
  * Not a second `Drawer`: the Drawer is the left sidebar, and "drawer" is an
  * identifier a user never reads (`docs/ux-writing.md`). The panel is named for
@@ -43,12 +43,14 @@ import {
 } from "@/constants/layout";
 import { useWindowHeight } from "@/hooks/useWindowWidth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
+import { ConsoleTab } from "@/modules/console";
 import { LogsTab } from "@/modules/logs";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { regionProps } from "./region-focus";
 
 /** What each tab shows. A `Record`, so a tab with no body is a compile error. */
 const TAB_BODIES: Record<BottomPanelTab, ComponentType> = {
+	console: ConsoleTab,
 	logs: LogsTab,
 };
 
@@ -77,7 +79,7 @@ export function BottomPanel() {
 				size={shownHeight}
 				setSize={setHeight}
 				defaultSize={DEFAULT_BOTTOM_PANEL_HEIGHT}
-				label="Resize bottom panel"
+				label={`Resize ${BOTTOM_PANEL_LABEL.toLowerCase()}`}
 				min={BOTTOM_PANEL_MIN_HEIGHT}
 				max={bottomPanelMaxHeight(windowHeight)}
 			/>

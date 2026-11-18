@@ -179,6 +179,7 @@ src/
 │   ├── collections/      # Collections and requests tree
 │   ├── variables/        # Environment and variable editors
 │   ├── settings/         # App settings
+│   ├── console/          # The bottom panel's Console tab: what this session sent, and the rows its sends append
 │   ├── logs/             # The bottom panel's Logs tab body
 │   └── welcome/          # Onboarding screen
 ├── stores/             # Cross-cutting Zustand stores (UI state)
@@ -188,6 +189,7 @@ src/
 │   ├── engine-store.ts      # Engine health and connectivity
 │   ├── dashboard-store.ts   # Live metrics and test state
 │   ├── response-store.ts    # Response viewer state
+│   ├── console-store.ts     # The session Console's rows: in memory, bounded, never persisted
 │   ├── save-store.ts        # Auto-save orchestration
 │   ├── import-modal-store.ts # Import dialog state
 │   ├── env-switcher-store.ts # Whether the title bar environment menu is open
@@ -202,7 +204,7 @@ src/
 
 #### The shell's bands
 
-`Shell` stacks full-width bands, none of which a tab type can take over: the title bar, then the main row, then the **bottom panel** (`components/layout/BottomPanel.tsx`, #3635), then the Dock. The main row is the activity rail, the drawer and the content column (tab strip over main, context bar and context rail). The bottom panel is a band of its own rather than a part of the content column so that it sits under the sidebar and the content alike; it renders nothing while closed and takes its height from the main row, never more than half the window (the window's minimum height is 768px, which leaves the main pane a usable height, #3494). It holds a strip of tabs (`BOTTOM_PANEL_TABS`, `constants/layout.ts`); a tab's body is mounted only while the panel is open on it. Open state, height and the active tab are `layout-store` fields; the Dock button, the ⌘J chord and the palette row all flip the one `toggleBottomPanel` action. Each band is a stop in the F6 focus cycle (`region-focus.ts`).
+`Shell` stacks full-width bands, none of which a tab type can take over: the title bar, then the main row, then the **bottom panel** (`components/layout/BottomPanel.tsx`, #3635), then the Dock. The main row is the activity rail, the drawer and the content column (tab strip over main, context bar and context rail). The bottom panel is a band of its own rather than a part of the content column so that it sits under the sidebar and the content alike; it renders nothing while closed and takes its height from the main row, never more than half the window (the window's minimum height is 768px, which leaves the main pane a usable height, #3494). It holds a strip of tabs (`BOTTOM_PANEL_TABS`, `constants/layout.ts`): the session **Console** (`modules/console/`, #3634), which names the panel to the user, and **Logs** (`modules/logs/`); a tab's body is mounted only while the panel is open on it. The Console's rows outlive its tab: they are a session ring (`stores/console-store.ts`) that both Send completions and the collection-run service append to whether or not the panel is open. Open state, height and the active tab are `layout-store` fields; the Dock button, the ⌘J chord and the palette row all flip the one `toggleBottomPanel` action. Each band is a stop in the F6 focus cycle (`region-focus.ts`).
 
 #### State Management
 
@@ -215,6 +217,7 @@ The app uses a dual-state management approach:
    - `engine-store.ts`: Engine health, connectivity status
    - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), the run phase
    - `response-store.ts`: The last response per request id - status, headers, body, script results. LRU-bounded at twice `MAX_OPEN_TABS` and by a 256 MiB byte budget (`RESPONSE_CACHE_MAX_BYTES`, #2544), since each entry holds a body plus its raw copy
+   - `console-store.ts`: The session Console's rows (#3634) - each Send, collection-run step and their scripts' requests and lines, masked before they are stored. In memory only, bounded at 5,000 rows and 32 MiB, oldest out first, and emptied by Clear, a reload or a quit
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
    - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress

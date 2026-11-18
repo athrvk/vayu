@@ -216,7 +216,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   recentElementKinds: string[]           // Last 5 kinds added through the Add-element picker, most recent first
   bottomPanelOpen: boolean               // Is the bottom panel showing? Closed by default (#3635)
   bottomPanelHeight: number              // px; clamped to [BOTTOM_PANEL_MIN_HEIGHT, BOTTOM_PANEL_MAX_HEIGHT] here, and to half the window as it is drawn
-  bottomPanelTab: BottomPanelTab         // "logs" today; the id of one of BOTTOM_PANEL_TABS (constants/layout.ts)
+  bottomPanelTab: BottomPanelTab         // "console" (the default) or "logs"; the id of one of BOTTOM_PANEL_TABS (constants/layout.ts)
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```
@@ -1351,7 +1351,14 @@ response's `authHeaders`), the URL by `maskUrlCredentials`
 fragment value read `<redacted>`, with `authQueryParam` as an extra name; the
 engine's names, pinned by `url-credentials.conformance.test.ts`). Script
 requests arrive masked by the engine (#3633) and a step's URL is the engine's
-masked one, so both are kept as written. Bodies are not judged.
+masked one, so both are kept as written. Bodies are not judged. A step's
+exchange, read back from its stored row when the Console expands it, goes
+through the same `maskedExchange` before it is drawn, and is never put in the
+ring.
+
+**Who reads.** The bottom panel's Console tab (`modules/console/ConsoleTab.tsx`)
+and nothing else: it filters every row before it takes its window, and its
+Clear is this store's `clear`.
 
 **Bounded twice, newest kept.** `CONSOLE_MAX_ROWS` (5,000) and
 `CONSOLE_MAX_BYTES` (32 MiB) of retained text, whichever is reached first,

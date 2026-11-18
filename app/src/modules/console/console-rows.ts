@@ -26,6 +26,7 @@ import type { ScriptRequestRecord } from "@/types";
 import {
 	useConsoleStore,
 	type ConsoleBody,
+	type ConsoleExchange,
 	type ConsoleRowInput,
 	type ConsoleScriptRequestRow,
 	type ConsoleSendRow,
@@ -76,9 +77,24 @@ function sendResponseBody(response: ResponseState): ConsoleBody | undefined {
 	return bodyOf(response.bodyRaw ?? response.body);
 }
 
+/**
+ * A response's exchange as a row keeps it, its header values masked by name and
+ * by the `authHeaders` it carries: a Send's, and a collection-run step's when
+ * its stored row is read back for the Console's expansion.
+ */
+export function maskedExchange(response: ResponseState): ConsoleExchange {
+	const authHeaders = response.authHeaders ?? [];
+	return {
+		requestHeaders: maskSensitiveHeaders(response.requestHeaders ?? {}, authHeaders),
+		requestBody: rawRequestBody(response.rawRequest),
+		responseHeaders: maskSensitiveHeaders(response.headers, authHeaders),
+		responseBody: sendResponseBody(response),
+		timing: response.timing,
+	};
+}
+
 function sendRow(send: CompletedSend): ConsoleSendRow {
 	const { response } = send;
-	const authHeaders = response.authHeaders ?? [];
 	return {
 		kind: "send",
 		method: send.method,
@@ -91,13 +107,7 @@ function sendRow(send: CompletedSend): ConsoleSendRow {
 		...(response.errorMessage && { errorMessage: response.errorMessage }),
 		...(send.requestId && { requestId: send.requestId }),
 		...(send.runId && { runId: send.runId }),
-		exchange: {
-			requestHeaders: maskSensitiveHeaders(response.requestHeaders ?? {}, authHeaders),
-			requestBody: rawRequestBody(response.rawRequest),
-			responseHeaders: maskSensitiveHeaders(response.headers, authHeaders),
-			responseBody: sendResponseBody(response),
-			timing: response.timing,
-		},
+		exchange: maskedExchange(response),
 	};
 }
 

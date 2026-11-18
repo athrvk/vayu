@@ -7,3 +7,4 @@
 
 export { appendSendToConsole, sendConsoleRows, type CompletedSend } from "./console-rows";
 export { stepConsoleRow } from "./step-row";
+export { ConsoleTab } from "./ConsoleTab";

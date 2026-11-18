@@ -648,11 +648,11 @@ describe("layout-store bottom panel", () => {
 		});
 	});
 
-	it("starts closed, at the default height, on the first tab", () => {
+	it("starts closed, at the default height, on the Console tab", () => {
 		expect(useLayoutStore.getInitialState()).toMatchObject({
 			bottomPanelOpen: false,
 			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
-			bottomPanelTab: "logs",
+			bottomPanelTab: "console",
 		});
 	});
 
@@ -724,7 +724,7 @@ describe("layout-store bottom panel", () => {
 			expect(migrated).toMatchObject({
 				bottomPanelOpen: false,
 				bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
-				bottomPanelTab: "logs",
+				bottomPanelTab: "console",
 				drawerWidth: 300,
 				responsePosition: "below",
 			});

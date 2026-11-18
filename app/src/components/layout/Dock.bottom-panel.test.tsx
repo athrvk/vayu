@@ -9,8 +9,9 @@
  */
 
 /**
- * The Dock's bottom panel button (#3635): the one control in the right cluster
- * that is not per-tab. Mutation check: gate it on the request tab, as the
+ * The Dock's bottom panel button (#3635, named Console by #3634): the one
+ * control in the right cluster that is not per-tab. Mutation check: gate it on
+ * the request tab, as the
  * response-position button is, and every case below but the request one fails;
  * point its `onClick` anywhere but `toggleBottomPanel` and the toggle cases do.
  */
@@ -93,10 +94,12 @@ describe("the Dock's bottom panel button", () => {
 		expect(button()).toBeInTheDocument();
 	});
 
-	it("is an icon named by the panel's one label", () => {
+	it("is an icon named by the panel's one label, Console", () => {
 		renderDockOn("settings");
-		expect(button()).toHaveAccessibleName(BOTTOM_PANEL_LABEL);
+		expect(button()).toHaveAccessibleName("Console");
 		expect(button()).toHaveTextContent("");
+		// A console's prompt, not a panel glyph beside the response position's.
+		expect(button().querySelector("svg.lucide-square-terminal")).not.toBeNull();
 	});
 
 	it("leads the right cluster, before the request tab's response-position button", () => {

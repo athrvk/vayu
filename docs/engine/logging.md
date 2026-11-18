@@ -236,8 +236,9 @@ destroyed or its main frame navigates, and when the app quits. Nothing in the
 MCP server reaches these files: no tool, resource or prompt names a log, and
 `mcp/log-reader.guard.test.ts` holds that.
 
-**The Logs tab** (#3635) is the bottom panel's one tab today: the Dock's Logs
-button, the palette's "Show or hide the logs" row and Ctrl+J / ⌘J open it. It
+**The Logs tab** (#3635) is the bottom panel's second tab, beside the session
+Console (#3634): the Dock's Console button, the palette's "Show or hide the
+console" row and Ctrl+J / ⌘J open the panel, on the tab it was last left on. It
 reads the newest lines, then follows the files, and draws one row per line:
 the time in your zone (UTC and the zone on hover), the level, `src`, `cat`, the
 message and the record's remaining fields as `key=value`, the text rendering's

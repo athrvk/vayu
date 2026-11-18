@@ -361,7 +361,7 @@ const ACTION_COMMANDS: readonly Command[] = [
 	{
 		id: "toggle-bottom-panel",
 		title: `Show or hide the ${BOTTOM_PANEL_LABEL.toLowerCase()}`,
-		keywords: ["panel", "bottom", "footer", "logs", "collapse", "expand"],
+		keywords: ["panel", "bottom", "footer", "console", "logs", "network", "collapse", "expand"],
 		group: "action",
 		icon: PanelBottomOpen,
 		shortcut: TOGGLE_BOTTOM_PANEL_CHORD,

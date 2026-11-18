@@ -130,7 +130,7 @@ describe("layout-store rehydration", () => {
 		expect(s.responsePosition).toBe("below");
 		expect(s.bottomPanelOpen).toBe(false);
 		expect(s.bottomPanelHeight).toBe(DEFAULT_BOTTOM_PANEL_HEIGHT);
-		expect(s.bottomPanelTab).toBe("logs");
+		expect(s.bottomPanelTab).toBe("console");
 	});
 
 	it("carries a v7 blob's open panel and height across", async () => {

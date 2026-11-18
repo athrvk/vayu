@@ -162,6 +162,7 @@ describe("the bottom panel chord", () => {
 		const { TOGGLE_BOTTOM_PANEL_CHORD } = await import("./shortcuts");
 		const { formatChord } = await import("@/lib/platform");
 		expect(formatChord(TOGGLE_BOTTOM_PANEL_CHORD)).toBe(shown);
+		expect(TOGGLE_BOTTOM_PANEL_CHORD.label).toBe("Show or hide the console");
 	});
 
 	it.each(["darwin", "linux"] as const)(
