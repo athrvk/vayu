@@ -2483,6 +2483,186 @@ TEST_F (ScenarioRunnerTest, StepEventsCarryTheStepAndKeepMonotonicIdsAcrossEvict
     EXPECT_EQ (batch.next_offset, 5u);
 }
 
+namespace {
+
+json step_frame_data (const std::string& payload) {
+    const auto data_at = payload.find ("data: ");
+    EXPECT_NE (data_at, std::string::npos) << payload;
+    return json::parse (payload.substr (data_at + 6));
+}
+
+} // namespace
+
+// What a step sent rides its frame (#3634), on the stored row's terms: a bare
+// record - a skipped step, a row that could not bind - carries none of it.
+TEST_F (ScenarioRunnerTest, StepEventsCarryWhatTheStepSentOnlyWhenItSent) {
+    vayu::core::StepRecord record;
+    record.step_name = "Login";
+    EXPECT_FALSE (
+    step_frame_data (vayu::core::build_step_payload (record, 0)).contains ("method"));
+
+    record.method     = "POST";
+    record.url        = "http://localhost/login";
+    record.body_bytes = 42;
+    const auto sent = step_frame_data (vayu::core::build_step_payload (record, 0));
+    EXPECT_EQ (sent["method"].get<std::string> (), "POST");
+    EXPECT_EQ (sent["url"].get<std::string> (), "http://localhost/login");
+    EXPECT_EQ (sent["bodyBytes"].get<size_t> (), 42u);
+
+    // An empty body is a size of zero, not an absent one.
+    record.body_bytes = 0;
+    EXPECT_EQ (
+    step_frame_data (vayu::core::build_step_payload (record, 0))["bodyBytes"].get<size_t> (), 0u);
+}
+
+// The URL is a client string: a byte that is not UTF-8 must not throw out of
+// the frame (and out of the run), as the stored row's dump does not.
+TEST_F (ScenarioRunnerTest, AStepFrameWithAnInvalidUtf8UrlIsStillAFrame) {
+    vayu::core::StepRecord record;
+    record.method = "GET";
+    record.url    = "http://localhost/\xFF"
+                    "x";
+    std::string payload;
+    ASSERT_NO_THROW (payload = vayu::core::build_step_payload (record, 0));
+    EXPECT_EQ (step_frame_data (payload)["url"].get<std::string> (),
+    "http://localhost/\xEF\xBF\xBD"
+    "x");
+}
+
+TEST_F (ScenarioRunnerTest, ALiveStepFrameCarriesItsMethodUrlAndBodySize) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_post", 1, "/body", "", "", "", "", "", R"({"a":1})");
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 2u);
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    for (size_t i = 0; i < frames.size (); ++i) {
+        const auto frame = step_frame_data (frames[i]);
+        EXPECT_EQ (frame["method"], traces[i]["request"]["method"]) << frames[i];
+        EXPECT_EQ (frame["url"], traces[i]["request"]["url"]) << frames[i];
+        EXPECT_EQ (frame["bodyBytes"], traces[i]["response"]["bodyBytes"]) << frames[i];
+    }
+    EXPECT_EQ (step_frame_data (frames[0])["method"].get<std::string> (), "GET");
+    EXPECT_EQ (step_frame_data (frames[1])["method"].get<std::string> (), "POST");
+    EXPECT_EQ (step_frame_data (frames[0])["bodyBytes"].get<size_t> (), 2u) << "{}";
+}
+
+// A stream's size is what it delivered, which the stored trace states and the
+// frame must agree with: an event stream holds no body to measure.
+TEST_F (ScenarioRunnerTest, AStreamingStepFrameCarriesTheSizeTheTraceStates) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_stream", 0, "/sse-short", /*timeout_ms=*/200);
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 1u);
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    const auto frame = step_frame_data (frames[0]);
+    EXPECT_GT (traces[0]["response"]["bodyBytes"].get<size_t> (), 0u);
+    EXPECT_EQ (frame["bodyBytes"], traces[0]["response"]["bodyBytes"]) << frames[0];
+}
+
+// The frame is the one place a step's URL leaves the engine unmasked-by-default
+// (a stored row is the user's own record): the credential never rides it.
+// Mutation check: drop `redact_url_credentials` from `step_frame_url` and the
+// frame carries the token.
+TEST_F (ScenarioRunnerTest, ALiveStepFrameMasksTheUrlsCredentials) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?access_token=SECRET-TOKEN&page=2");
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 1u);
+    const auto url = step_frame_data (frames[0])["url"].get<std::string> ();
+    EXPECT_EQ (url, server_->url ("/ok?access_token=&page=2"));
+    EXPECT_EQ (frames[0].find ("SECRET-TOKEN"), std::string::npos) << frames[0];
+}
+
+// The frame is constant-size: a URL past STEP_FRAME_URL_MAX_BYTES is cut there.
+TEST_F (ScenarioRunnerTest, ALiveStepFrameCutsALongUrlAtTheBound) {
+    seed_collection ("col_1");
+    const std::string head = server_->url ("/ok?q=");
+    const std::string url  = head + std::string (700, 'a');
+    seed_request ("req_a", 0, "", "", "", url);
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 1u);
+    EXPECT_EQ (step_frame_data (frames[0])["url"].get<std::string> (),
+    url.substr (0, vayu::core::STEP_FRAME_URL_MAX_BYTES));
+}
+
+// The cut lands on a character boundary: a 3-byte character starting at byte
+// 510 straddles the bound, and its two kept bytes are dropped, not framed.
+// Mutation check: cut with a bare `substr` and the frame ends in `\xE2\x82`,
+// which the frame's dump then replaces with U+FFFD.
+TEST_F (ScenarioRunnerTest, ALiveStepFrameNeverSplitsACharacterAtTheBound) {
+    seed_collection ("col_1");
+    const std::string head = server_->url ("/ok?q=");
+    const std::string url  = head +
+    std::string (vayu::core::STEP_FRAME_URL_MAX_BYTES - 2 - head.size (), 'a') +
+    "\xE2\x82\xAC" + std::string (100, 'b');
+    ASSERT_EQ (url.find ("\xE2\x82\xAC"), vayu::core::STEP_FRAME_URL_MAX_BYTES - 2);
+    seed_request ("req_a", 0, "", "", "", url);
+    // Composition percent-encodes a non-ASCII byte, so only a request that
+    // opts out (Postman's `disableUrlEncoding`) puts the raw character on the
+    // step's request.
+    auto stored = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (stored);
+    stored->disable_url_encoding = true;
+    db_->save_request (*stored);
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 1u);
+    const auto framed = step_frame_data (frames[0])["url"].get<std::string> ();
+    EXPECT_EQ (framed.size (), vayu::core::STEP_FRAME_URL_MAX_BYTES - 2) << framed;
+    EXPECT_EQ (framed.find ("\xEF\xBF\xBD"), std::string::npos) << framed;
+}
+
+// A step that sent nothing has no request to name.
+TEST_F (ScenarioRunnerTest, ASkippedStepsFrameCarriesNoRequest) {
+    seed_collection ("col_1");
+    seed_request ("req_skip", 0, "/ok", R"(pm.execution.skipRequest();)");
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto frames = step_frames (context);
+    ASSERT_EQ (frames.size (), 1u);
+    const auto frame = step_frame_data (frames[0]);
+    EXPECT_EQ (frame["outcome"].get<std::string> (), "skipped") << frames[0];
+    EXPECT_FALSE (frame.contains ("method")) << frames[0];
+    EXPECT_FALSE (frame.contains ("url")) << frames[0];
+    EXPECT_FALSE (frame.contains ("bodyBytes")) << frames[0];
+}
+
 TEST_F (ScenarioRunnerTest, TheRunPublishesOneStepEventPerStepAndClosesTheStream) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");

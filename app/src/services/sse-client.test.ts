@@ -422,6 +422,11 @@ describe("parseStepEvent", () => {
 		{ field: "extractorMisses", value: 2, malformed: ["2", 0, -1] },
 		// Absent at 0 from the engine too (issue #3248).
 		{ field: "unresolvedTokens", value: 2, malformed: ["2", 0, -1] },
+		// What the step sent (issue #3634). An empty verb or URL names no request.
+		{ field: "method", value: "POST", malformed: ["", 7] },
+		{ field: "url", value: "https://api.example.com/login?token=", malformed: ["", 7] },
+		// 0 is a real size (an empty body), so it is carried; a non-number is not.
+		{ field: "bodyBytes", value: 812, malformed: ["812", -1] },
 	])(
 		"carries $field when present, and omits the key when absent or malformed",
 		({ field, value, malformed }) => {
@@ -441,6 +446,12 @@ describe("parseStepEvent", () => {
 			}
 		}
 	);
+
+	it("carries a zero body size, an empty body being a measured size", () => {
+		expect(
+			parseStepEvent({ iteration: 0, stepIndex: 0, outcome: "passed", bodyBytes: 0 })
+		).toHaveProperty("bodyBytes", 0);
+	});
 
 	it("reads a scenario run's step event", () => {
 		expect(

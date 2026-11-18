@@ -1538,7 +1538,9 @@ sseClient.isConnected(): boolean
 - **`metrics`**: Real-time metrics update (JSON payload). Load runs only - a scenario run's work
   is sequential, so a per-tick aggregate would describe one request at a time.
 - **`step`**: One step execution of a scenario run - `{iteration, stepIndex, name, outcome,
-  statusCode, latencyMs}`. Listened for only when `onStep` is passed, since a load run never
+  statusCode, latencyMs, method?, url?, bodyBytes?}`. `method`, `url` and `bodyBytes` (#3634) say
+  what the step sent and are absent for a step that sent nothing; `url` arrives masked by the
+  engine and cut to 512 bytes. Listened for only when `onStep` is passed, since a load run never
   emits one.
 - **`monitor`**: One scrape of the run's monitored endpoint - `{timestamp, series}`. Listened
   for only when `onMonitor` is passed. Interleaved with `metrics` ticks on one id space, so

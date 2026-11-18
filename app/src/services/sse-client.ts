@@ -165,6 +165,20 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 }
 
 /**
+ * What a `step` frame says the step sent (issue #3634): each key carried when
+ * well-formed and left absent otherwise, because the engine omits all three
+ * for a step that sent nothing and an empty verb or URL names no request.
+ */
+function parseSentRequest(e: Record<string, unknown>): Partial<ScenarioStepEvent> {
+	return {
+		...(typeof e.method === "string" && e.method ? { method: e.method } : {}),
+		...(typeof e.url === "string" && e.url ? { url: e.url } : {}),
+		// 0 is a real size - an empty body - so only a negative or a non-number is no claim.
+		...(typeof e.bodyBytes === "number" && e.bodyBytes >= 0 ? { bodyBytes: e.bodyBytes } : {}),
+	};
+}
+
+/**
  * Narrow a raw `step` payload to the shape the step list renders, or reject it.
  *
  * A malformed event is dropped rather than coerced: a step rendered with
@@ -207,6 +221,7 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		// carries a non-empty id: the step card keys the action off its
 		// presence, and an empty string would be a link to nothing.
 		...(typeof e.requestId === "string" && e.requestId ? { requestId: e.requestId } : {}),
+		...parseSentRequest(e),
 		// The schema verdict (issue #681), passed through as the object the
 		// engine wrote rather than re-narrowed field by field: it is the same
 		// node the stored trace carries and `validationFromTrace` passes through

@@ -12355,7 +12355,8 @@ event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
-       "requestId":"req_abc123",
+       "requestId":"req_abc123","method":"POST",
+       "url":"https://api.example.com/login?access_token=","bodyBytes":812,
        "tests":{"passed":2,"failed":0},"extractorMisses":1,
        "unresolvedTokens":1,
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
@@ -12393,7 +12394,17 @@ so a step read live and the same step read back from the report name one
 request, and a client watching a run can offer the way back to it before the
 rows are written. One id is constant-size, which is why it rides the frame where
 the assertion list does not; absent when the plan step names no stored request,
-because an empty id is not a request. A `stopped` step carries no `tests` and
+because an empty id is not a request. `method`, `url` and `bodyBytes` (#3634)
+say what the step sent, so a watched run can draw its row before the rows are
+written: the verb, the URL, and the response body's size in bytes (what the
+stored trace's `response.bodyBytes` reports; a stream's is what it delivered).
+The URL is masked as an export masks one - the password of `user:pass@` is
+dropped and the value of a credential query parameter, or of the one the
+step's own auth wrote, is emptied (`?access_token=`) - and then cut to 512
+bytes on a character boundary, which keeps the frame constant-size; the stored
+row holds the URL whole and unmasked. All three are absent for a step that sent
+nothing (a skip, a data row that would not bind), and `url` for a send refused
+before it had one; `bodyBytes` is `0`, not absent, for an empty body. A `stopped` step carries no `tests` and
 no `validation`: what its scripts made of a cancelled send is no verdict. A scenario
 run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
