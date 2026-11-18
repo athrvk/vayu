@@ -35,12 +35,12 @@
 		"@modelcontextprotocol/server": "^2.4.0",
 		"@sigstore/bundle": "^5.0.0",
 		"@sigstore/protobuf-specs": "^0.5.2",
-		"@sigstore/tuf": "^5.0.0",
+		"@sigstore/tuf": "^5.0.1",
 		"@sigstore/verify": "^4.1.2",
 		"electron-updater": "^6.8.9",
 		"graphql": "^17.0.2",
 		"koffi": "3.3.2",
-		"tuf-js": "^6.0.0",
+		"tuf-js": "^6.0.2",
 		"zod": "^4.6.7"
 	},
 	"devDependencies": {
