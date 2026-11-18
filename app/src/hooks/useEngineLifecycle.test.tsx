@@ -21,6 +21,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// The run services' half of a crash (#3605) is theirs to test; this file pins
+// which lifecycle kinds reach them.
+const { mockLoadEngineStopped, mockScenarioEngineStopped } = vi.hoisted(() => ({
+	mockLoadEngineStopped: vi.fn(),
+	mockScenarioEngineStopped: vi.fn(),
+}));
+vi.mock("@/services/load-test-service", () => ({
+	loadTestService: { handleEngineStopped: mockLoadEngineStopped },
+}));
+vi.mock("@/services/scenario-run-service", () => ({
+	scenarioRunService: { handleEngineStopped: mockScenarioEngineStopped },
+}));
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -88,7 +101,9 @@ function mountLifecycle(client = new QueryClient()) {
 }
 
 beforeEach(() => {
-	useEngineStore.setState({ engineCrash: null, engineStartWindow: 1000 });
+	useEngineStore.setState({ engineCrash: null, crashEndedRuns: [], engineStartWindow: 1000 });
+	mockLoadEngineStopped.mockReset();
+	mockScenarioEngineStopped.mockReset();
 });
 
 afterEach(() => {
@@ -140,6 +155,95 @@ describe("useEngineLifecycle", () => {
 		expect(client.getQueryState(queryKeys.health.status())?.isInvalidated).toBe(true);
 		expect(client.getQueryState(queryKeys.inbox.list())?.isInvalidated).toBe(false);
 	});
+
+	/*
+	 * #3605: a crash ended every run its engine was executing, and the run
+	 * services let go of them. Only a crash: the poll is not the signal, and
+	 * an engine that is starting or was stopped on purpose ended nothing the
+	 * user is watching. Mutation check: drop either call from the `crashed`
+	 * branch and the first case reddens; move them below it, for every kind,
+	 * and the second does.
+	 */
+	it("tells both run services on a pushed crash", async () => {
+		const bridge = stubBridge();
+		mountLifecycle();
+		await bridge.answerSnapshot({ kind: "ready" });
+
+		bridge.push(CRASHED);
+
+		expect(mockLoadEngineStopped).toHaveBeenCalledTimes(1);
+		expect(mockScenarioEngineStopped).toHaveBeenCalledTimes(1);
+	});
+
+	/*
+	 * Which runs the crash ended is recorded with the crash, for the engine-lost
+	 * notification's sentence. Mutation check: write the list without the
+	 * services' answers (always `[]`, or always both) and the first two cases
+	 * redden; leave the list in place for `ready` and the last one does.
+	 */
+	it.each([
+		[true, false, ["load"]],
+		[false, true, ["collection"]],
+		[true, true, ["load", "collection"]],
+		[false, false, []],
+	] as const)(
+		"records the runs the crash ended (load %s, collection %s)",
+		async (load, collection, ended) => {
+			mockLoadEngineStopped.mockReturnValue(load);
+			mockScenarioEngineStopped.mockReturnValue(collection);
+			const bridge = stubBridge();
+			mountLifecycle();
+			await bridge.answerSnapshot({ kind: "ready" });
+
+			bridge.push(CRASHED);
+
+			expect(useEngineStore.getState().crashEndedRuns).toEqual(ended);
+		}
+	);
+
+	it("forgets the ended runs when the engine is up again, and on a later crash that ended none", async () => {
+		mockLoadEngineStopped.mockReturnValueOnce(true);
+		const bridge = stubBridge();
+		mountLifecycle();
+		await bridge.answerSnapshot({ kind: "ready" });
+		bridge.push(CRASHED);
+		expect(useEngineStore.getState().crashEndedRuns).toEqual(["load"]);
+
+		bridge.push({ kind: "ready" });
+		expect(useEngineStore.getState().crashEndedRuns).toEqual([]);
+
+		mockLoadEngineStopped.mockReturnValueOnce(true);
+		bridge.push(CRASHED);
+		mockLoadEngineStopped.mockReturnValueOnce(false);
+		bridge.push(CRASHED);
+		expect(useEngineStore.getState().crashEndedRuns).toEqual([]);
+	});
+
+	it("keeps the ended runs through a restart's transient states", async () => {
+		mockLoadEngineStopped.mockReturnValue(true);
+		const bridge = stubBridge();
+		mountLifecycle();
+		await bridge.answerSnapshot({ kind: "ready" });
+		bridge.push(CRASHED);
+
+		bridge.push({ kind: "spawning" });
+
+		expect(useEngineStore.getState().crashEndedRuns).toEqual(["load"]);
+	});
+
+	it.each(["ready", "spawning", "stopped", "stopping", "slow", "idle"] as const)(
+		"leaves the run services alone on %s",
+		async (kind) => {
+			const bridge = stubBridge();
+			mountLifecycle();
+			await bridge.answerSnapshot({ kind: "ready" });
+
+			bridge.push({ kind });
+
+			expect(mockLoadEngineStopped).not.toHaveBeenCalled();
+			expect(mockScenarioEngineStopped).not.toHaveBeenCalled();
+		}
+	);
 
 	it("leaves the health poll alone on a transition that is not a crash", async () => {
 		const bridge = stubBridge();

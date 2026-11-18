@@ -19,7 +19,8 @@
  * `dashboardAnnouncement` and the stop-once case does; announce "started" for
  * the same run and the Retry case does; drop the verdict from `loadTestEnded`
  * and the four ending cases do; drop `spokenSymbols` and the less-than case
- * does. Removing `<RunAnnouncer />` from `Shell` reddens
+ * does; fall `engineStopped` through to `running` in `dashboardStage` and the
+ * engine-stop case does (it says nothing). Removing `<RunAnnouncer />` from `Shell` reddens
  * `shell-tab-identity.test.tsx`.
  */
 
@@ -178,6 +179,32 @@ describe("RunAnnouncer", () => {
 
 		act(() => dashboard().retryReport("load_1"));
 		expect(region()).toHaveTextContent("Couldn't load the run report");
+	});
+
+	it("says a load test ended with its engine, not that it is running, and then how it ended", () => {
+		render(<RunAnnouncer />);
+		act(() => dashboard().startRun("load_1"));
+		const started = region().firstElementChild;
+
+		act(() => dashboard().engineStopped("load_1"));
+		expect(region().textContent).toBe("Load test ended. Vayu's engine stopped");
+		expect(region().firstElementChild).not.toBe(started);
+		const ended = region().firstElementChild;
+
+		// A restarted engine has settled the orphaned run; its report says how.
+		act(() => dashboard().setFinalReport("load_1", report("failed")));
+		expect(region()).toHaveTextContent("Load test failed");
+		expect(region().firstElementChild).not.toBe(ended);
+	});
+
+	it("does not announce an engine stop for a run that had already ended", () => {
+		render(<RunAnnouncer />);
+		act(() => dashboard().startRun("load_1"));
+		act(() => dashboard().stopRun("load_1"));
+		const stopped = region().firstElementChild;
+
+		act(() => dashboard().engineStopped("load_1"));
+		expect(region().firstElementChild).toBe(stopped);
 	});
 
 	it("re-announces the same words for a second run", () => {

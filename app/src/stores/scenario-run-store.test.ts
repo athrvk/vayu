@@ -152,6 +152,7 @@ describe("writes addressed to a run", () => {
 		["setPlan", () => store().setPlan("run-1", PLAN)],
 		["setStreaming", () => store().setStreaming("run-1", false)],
 		["streamLost", () => store().streamLost("run-1", "The connection closed.")],
+		["engineStopped", () => store().engineStopped("run-1", "Vayu's engine stopped.")],
 	])("drops %s from a run the store no longer holds", (_name, write) => {
 		store().startRun("run-1");
 		store().startRun("run-2");
@@ -170,5 +171,26 @@ describe("writes addressed to a run", () => {
 
 		expect(store().error).toBe("The connection closed.");
 		expect(store().isStreaming).toBe(false);
+	});
+
+	// #3605. Mutation check: leave `endedByEngineStop` out of `engineStopped` and
+	// the first case reddens; out of `startRun` and the second does.
+	it("records a run its engine took down beside the message", () => {
+		store().startRun("run-1");
+
+		store().engineStopped("run-1", "Vayu's engine stopped.");
+
+		expect(store().error).toBe("Vayu's engine stopped.");
+		expect(store().isStreaming).toBe(false);
+		expect(store().endedByEngineStop).toBe(true);
+	});
+
+	it("starts the next run with no engine stop on record", () => {
+		store().startRun("run-1");
+		store().engineStopped("run-1", "Vayu's engine stopped.");
+
+		store().startRun("run-2");
+
+		expect(store().endedByEngineStop).toBe(false);
 	});
 });

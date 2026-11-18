@@ -555,11 +555,25 @@ which case the app picks a fallback (below).
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
   fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
-  held port or a failure before the spawn, with Retry), which takes precedence
-  over a crash. One restart runs
-  at a time across the Dock button and the Settings banner. The engine that
+  held port or a failure before the spawn, with Retry), which takes
+  precedence over a crash. One restart runs at a time across the Dock
+  button, the Settings banner and the dashboard's engine-stopped notice.
+  The engine that
   comes back is running none of the services the old one held, so the
   reconnect names them (local services, below).
+- **A crash ends the runs its engine was executing** (issue #3605). The
+  `crashed` push, not the health poll, is the signal: the load-test and
+  collection-run services close their streams (the `EventSource` would retry
+  the dead port for the rest of the session), release the wake lock and flash
+  the OS progress bar failed, and the dashboard's run moves to a non-live
+  `engineStopped` phase - no Running pill, no Stop, a notice with Restart. The
+  engine-lost notification is the one the user gets, with a sentence added when
+  a run ended; the services post none of their own. The run's ending is the
+  stored report: the restarted engine's startup settles the orphaned run as
+  failed, and once the app sees that engine serving, the dashboard fetches the
+  report and shows it with the partial-run banner. A run view of it in History
+  or the collection tab reads not-live from the crash on, whatever status it
+  cached.
 - **A dirty editor flushes itself the moment the engine comes back**, on an
   automatic reconnect (`useHealthQuery`) or a manual restart
   (`useEngineRestart`) alike - both invalidate every query and then flush

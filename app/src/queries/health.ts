@@ -27,6 +27,7 @@ import {
 	recordServicesBeforeOutage,
 	reportServicesStoppedByOutage,
 } from "@/lib/services-stopped-by-restart";
+import { describeCrashEndedRuns } from "@/lib/engine-crash";
 
 /**
  * How hard to poll `/health`, given how the last poll went.
@@ -67,6 +68,24 @@ function adoptEngineStartFailure(): void {
 		store.setEngineStartFailure(failure);
 		if (failure !== null) store.setEngineStatus("unreachable");
 	});
+}
+
+/**
+ * The engine-lost notification's body: the transport's reason, plus one
+ * sentence when the crash the sidecar pushed ended a run (#3605). That crash's
+ * record is spent here (`consumeCrashEndedRuns`), so a restart that then fails
+ * and loses the engine again does not claim the run a second time.
+ *
+ * A poll that fails before the crash push lands posts the reason alone, and
+ * nothing is posted afterwards: the run is on the dashboard, and one
+ * notification per loss is the rule this function sits under.
+ */
+function engineLostBody(reason: string): string {
+	const { crashEndedRuns, consumeCrashEndedRuns } = useEngineStore.getState();
+	const ended = describeCrashEndedRuns(crashEndedRuns);
+	if (!ended) return reason;
+	consumeCrashEndedRuns();
+	return `${reason.replace(/[.!?]?\s*$/, ".")} ${ended}`;
 }
 
 /**
@@ -211,7 +230,7 @@ export function useHealthQuery() {
 				systemNotify.post({
 					kind: NOTIFY_KINDS.engineLost,
 					title: "Vayu's engine stopped responding",
-					body: errorMessage,
+					body: engineLostBody(errorMessage),
 				});
 			}
 		}

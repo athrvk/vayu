@@ -44,6 +44,10 @@ import { isRunTerminal } from "@/lib/run-status";
 import { stepOutcomeLine } from "@/modules/history/main/scenario-steps";
 import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 
+/** The run tab's "Live updates stopped" callout body for a run its engine took down. */
+const ENGINE_STOPPED_MESSAGE =
+	"Vayu's engine stopped, and this run ended with it. The steps below arrived before it stopped.";
+
 class ScenarioRunService {
 	private activeRunId: string | null = null;
 	/**
@@ -218,12 +222,13 @@ class ScenarioRunService {
 	/**
 	 * Let go of everything this service holds on `runId`'s behalf.
 	 *
-	 * The one place that does it, because two paths need it - the stream
-	 * ending, and a load run taking the shared client away (#1417) - and a
-	 * second copy is a release that drifts out of step with the first. What it
-	 * deliberately leaves to its callers is anything that *speaks* for the run:
-	 * a close has a notification and a stored record to converge on, and a
-	 * superseded run has neither, because it has not ended.
+	 * The one place that does it, because three paths need it - the stream
+	 * ending, a load run taking the shared client away (#1417), and the engine
+	 * stopping (#3605) - and a second copy is a release that drifts out of step
+	 * with the first. What it deliberately leaves to its callers is anything
+	 * that *speaks* for the run: a close has a notification and a stored record
+	 * to converge on, a superseded run has neither, because it has not ended,
+	 * and an engine stop leaves the telling to the engine-lost notification.
 	 */
 	private releaseRun(runId: string | null): void {
 		this.activeRunId = null;
@@ -267,6 +272,30 @@ class ScenarioRunService {
 		const runId = this.activeRunId;
 		if (!runId) return;
 		this.releaseRun(runId);
+	}
+
+	/**
+	 * The engine's process ended (the sidecar's `crashed` push, #3605), and the
+	 * watched run ended with it. Called by `useEngineLifecycle`.
+	 *
+	 * `handleError`'s sequence, less its notification: the engine-lost
+	 * notification is the one the user gets, and the latch keeps it the only
+	 * one. The stream is closed, because the `EventSource` would otherwise retry
+	 * the dead port every few seconds for the rest of the session, and no
+	 * stored record is fetched: there is no engine to answer. Returns whether
+	 * there was a run to end.
+	 */
+	handleEngineStopped(): boolean {
+		const runId = this.activeRunId;
+		if (!runId) return false;
+		this.notifiedRunId = runId;
+		this.failProgress(runId);
+		// The steps that did arrive go on screen under the notice, as on a stream error.
+		this.stepBatcher?.flush();
+		this.releaseRun(runId);
+		sseClient.disconnect();
+		useScenarioRunStore.getState().engineStopped(runId, ENGINE_STOPPED_MESSAGE);
+		return true;
 	}
 
 	/*
