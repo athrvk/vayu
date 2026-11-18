@@ -1993,7 +1993,7 @@ collapsing goes through `toggleCollectionExpanded`.
 
 #### `modules/history/history-store.ts` - History Filter & Sort
 
-UI-only: Search, filter (type/status/pinned/origin), and sort (newest/oldest) for the history tab.
+UI-only: Search, filter (type/status/pinned/origin/outcome), and sort (newest/oldest) for the history tab.
 
 **State:**
 ```typescript
@@ -2003,13 +2003,14 @@ UI-only: Search, filter (type/status/pinned/origin), and sort (newest/oldest) fo
   filterStatus: "all" | "pending" | "running" | "completed" | "stopped" | "failed"
   pinnedOnly: boolean
   filterOrigin: "all" | "app" | "mcp"
+  filterOutcome: "all" | "passed" | "failed" | "not_judged"
   filterClient: string | null   // an MCP client's display name; client-side only
   sortBy: "newest" | "oldest"
 }
 ```
 
-**Helper:** `filterRuns(runs, filters)` re-applies the type, status, pin and origin
-filters the engine already applied, then narrows by MCP client and sorts, over the
+**Helper:** `filterRuns(runs, filters)` re-applies the type, status, pin, origin
+and outcome filters the engine already applied, then narrows by MCP client and sorts, over the
 loaded pages. Search is **not** handled here: `searchQuery` is
 debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
 runs, not just the pages loaded into the sidebar.
@@ -2035,6 +2036,12 @@ product are one entry, and `setFilterOrigin` clears it because a client belongs
 to the kind it was picked under. `mcpClientNames(runs, selected)` lists the
 Select's per-client entries from the rows *before* the client narrowing, so
 choosing one client does not hide the others.
+
+`filterOutcome` (#3547) has the two halves again: a verdict other than `"all"` is
+sent as `GET /runs?outcome=` through `useRunsQuery`'s sixth argument, and
+`filterRuns` re-applies it from the row's stored `outcome`, or from `rowOutcome`
+for a row without one (`rowStoredOutcome`, `run-outcome.ts`). A row the history
+draws no verdict for matches none of the three values.
 
 **Key Methods:**
 ```typescript
@@ -2494,7 +2501,7 @@ click; refetching either removes it or proves it real.
 
 #### Runs & History
 
-- **`useRunsQuery(q?, pinnedOnly?, origin?)`** - Run history as an **infinite
+- **`useRunsQuery(q?, pinnedOnly?, origin?, type?, status?, outcome?)`** - Run history as an **infinite
   query** over the paginated `GET /runs` `{data, pagination}` envelope, newest
   first. `fetchNextPage` pages older runs in on demand, by **keyset cursor**
   (#2978): the first page carries no cursor, and each next page is asked for
@@ -2503,7 +2510,9 @@ click; refetching either removes it or proves it real.
   the same at any depth and does not shift when a run starts between two pages;
   `nextBefore: null` ends the paging. `q` is the
   optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
-  all) is `GET /runs?origin=`.
+  all) is `GET /runs?origin=`, and `outcome` (`"passed"`, `"failed"` or
+  `"not_judged"`, #3547) is `GET /runs?outcome=`. `type`, `status` and `outcome`
+  join the query key only when set, so the unfiltered list keeps its entry.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
     only page 1 is loaded, **off** once the user has paged older runs in.
     Refetching an infinite query re-fetches *every* loaded page in sequence, so

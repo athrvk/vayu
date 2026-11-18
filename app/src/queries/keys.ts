@@ -65,7 +65,7 @@ export const queryKeys = {
 	runs: {
 		all: ["runs"] as const,
 		lists: () => [...queryKeys.runs.all, "list"] as const,
-		// Paginated list cache is keyed by its server-side filters (q, baseline, origin, type, status), so
+		// Paginated list cache is keyed by its server-side filters (q, baseline, origin, type, status, outcome), so
 		// different searches cache separately. `lists()` is the prefix used to
 		// invalidate/patch every variant at once.
 		list: (filters: Record<string, unknown> = {}) =>

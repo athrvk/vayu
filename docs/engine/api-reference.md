@@ -12652,6 +12652,12 @@ seconds.
   error. A run recorded before the field existed matches `other`. There is no
   client filter: narrowing to one MCP client is done client-side over the
   rows this returns.
+- `outcome` - `passed` | `failed` | `not_judged`, exact match on the run's
+  stored `outcome` (#3547, below), the verdict its row draws rather
+  than how it ended: `outcome=failed` lists a `completed` run that missed a
+  budget, which `status` alone never shows. A row with no outcome matches no
+  value, so a run recorded before the field existed is in no `outcome` page.
+  An unrecognised value is ignored, like an unrecognised `type`.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
@@ -12757,6 +12763,34 @@ run and `null` otherwise, and on an `mcp` run whose client sent no name. A run
 recorded before the field existed reads `{"kind": "other", "client": null}`.
 Metadata, not identity: nothing authorises on it.
 
+**`outcome`** (#3547) is the verdict the row's own
+`resultSummary` (below) gives the run, stored when the run ends so the list can
+filter on it: `"passed"`, `"failed"` or `"not_judged"`, the rule the app's
+history row draws by (`rowOutcome`, `run-outcome.ts`;
+`engine/tests/fixtures/run-row-outcome-conformance.json`). The key is
+**omitted** on a row with no verdict, never `null`.
+
+- A **load run**: `stopped` is `not_judged`; a `failed` status or a missed budget
+  (`verdict: "failed"`) is `failed`; a drain a Stop cut (`drainCut`) is
+  `not_judged`; no budget (no `verdict`) is `not_judged`; met budgets are
+  `passed`, unless `errorRate` is above zero or a check failed (`assertions`:
+  `exact.failed`, `sampled.failed`, `errored` or `teardownFailed`), which is
+  `not_judged`. In that order: the first rule that applies decides.
+- A **collection run** is `failed` when it `completed` with a missed budget or a
+  step that `failed` or `errored`, and has no outcome otherwise: a clean one is
+  never `passed`, and a `stopped` or `failed` one says nothing.
+- A **design run**, a `pending` or `running` row, and a terminal load or
+  collection row with no `resultSummary` (no stored summary yet, or one that
+  records none of its keys) have no outcome. Neither has a run recorded before
+  the field existed: the column is not backfilled.
+
+It is derived from the row's own status, type and stored summary whenever the
+engine writes either - the final status, a summary that lands after a Stop's
+status, and the startup reconcile that marks an abandoned run `failed` - so it
+never describes a status or summary the row no longer holds. It is on the
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline) row too, which is built by
+the same function; `GET /runs/:runId` does not carry it.
+
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
@@ -12853,6 +12887,7 @@ rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
       "endTime": 1234567891,
       "baseline": true,
       "origin": { "kind": "app", "client": null },
+      "outcome": "not_judged",
       "summary": {
         "url": "https://api.example.com/users",
         "method": "GET",
@@ -12890,6 +12925,9 @@ rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
   }
 }
 ```
+
+The load row's budgets passed, but `errorRate` is above zero, so its `outcome`
+is `not_judged`; the design row has none.
 
 `hasMore` is read off the rows: the engine fetches one row past `limit`, so it
 holds on a cursor page, which has no offset to add to `total`. `nextBefore` is
@@ -13239,7 +13277,9 @@ not measure for the whole run is absent rather than `0`: `avgInFlight`,
 `avgQueueWaitMs` (issue #2963), while `setupOverhead` and `httpVersionDowngraded` are `0`,
 `sampling` is absent, and the report has **no `latency` block** (issue #2938): the percentiles come from
 the stored `results` rows, of which such a run has none, so omitting the block says "not recorded"
-where a block of zeros would read as steps that answered instantly. A failed load run with no summary at all, because it wrote no
+where a block of zeros would read as steps that answered instantly. The same pass stamps the
+run's [`outcome`](#get-runs): `failed` for a load run whose summary, the partial one included,
+gives its row a `resultSummary`, and none for a run without one or for a collection run. A failed load run with no summary at all, because it wrote no
 tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
 counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist, and no `peakConcurrency` or `avgQueueWaitMs`. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it

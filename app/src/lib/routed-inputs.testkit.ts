@@ -463,6 +463,14 @@ export const ENGINE_READING_GUARDS = {
 		paths: ["engine/tests/fixtures/run-verdict-conformance.json"],
 	},
 	/*
+	 * The verdict a list row draws and the engine stores as `runs.outcome`
+	 * (#3547): `judge_run_row` and the app's `rowOutcome`, one table.
+	 */
+	runRowOutcome: {
+		reader: "app/src/components/shared/run-outcome.test.ts",
+		paths: ["engine/tests/fixtures/run-row-outcome-conformance.json"],
+	},
+	/*
 	 * The formats the run-report export can write (#2139): the renderer's
 	 * registry and the MCP server's list each read the fixture the engine's
 	 * `RUN_EXPORT_FORMATS` table is held to. `electron/` cannot import

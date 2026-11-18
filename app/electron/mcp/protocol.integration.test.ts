@@ -711,6 +711,13 @@ describe("undeclared arguments", () => {
 		);
 	});
 
+	// `GET /runs` leaves a filter it cannot parse unset, so the app's own
+	// spelling "not-judged" would answer every run, read as "nothing matched".
+	// Mutation check: declare `outcome` as `z.string()` and this reaches the engine.
+	it("list_runs refuses an outcome the engine would ignore (#3547)", async () => {
+		expectRefusedNaming(await call("list_runs", { outcome: "not-judged" }), "outcome");
+	});
+
 	/*
 	 * One row per nested input object, each otherwise valid so the unknown key
 	 * is the only issue the schema finds. The open shapes (`auth`,

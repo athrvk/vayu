@@ -1201,7 +1201,7 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
+renderer's derivation reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
 run with any of them gets the failed glyph and a line naming the missed budgets
 and the step counts, #3458, #3539) and the MCP `list_runs` rows read the whole
 summary. A `"passed"` verdict changes nothing on the row. A load run's results are
@@ -1222,6 +1222,17 @@ drain a Stop cut with requests outstanding also carries `drainCut` (`{cancelled}
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
 when the search found no such level, #2930), which the row's result line reads
 in place of the run-average `rps`; an engine that predates it sends none.
+
+A list row also carries the engine's stored verdict, `outcome` (`"passed"`,
+`"failed"` or `"not_judged"`, #3547), only when the engine judged one: no design
+run, no clean collection run, no run still in flight and no row stored before the
+column has it, and `GET /runs/:id` carries none. `rowOutcome` reads it first as
+the authority for the row's category, which is what `GET /runs?outcome=` filters
+on, so a row cannot wear a verdict it is not listed under; the `resultSummary`
+derivation above is the fallback for a row without one and supplies the reason
+when it reaches the same category. The derivation is the rule the engine stores
+by, held equal to it by `engine/tests/fixtures/run-row-outcome-conformance.json`
+(a collection row is `failed` or has no outcome, never `passed`).
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept

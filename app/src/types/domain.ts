@@ -2039,6 +2039,13 @@ export const RUN_PHASES: readonly RunPhase[] = [
 	"settled",
 ];
 
+/**
+ * The verdict the engine stores on a run row (#3547) and filters `GET /runs` on:
+ * the history row's outcome, with the renderer's `not-judged` spelled
+ * `not_judged` on the wire.
+ */
+export type StoredRunOutcome = "passed" | "failed" | "not_judged";
+
 /** What every run shares; {@link Run} adds the `type` and the `resultSummary` that goes with it. */
 interface RunFields {
 	id: string;
@@ -2077,6 +2084,14 @@ interface RunFields {
 	 * an engine older than the field has none; absent reads as `other`.
 	 */
 	origin?: RunOrigin;
+	/**
+	 * The row's verdict as the engine stored it (#3547), on list rows and the
+	 * pin's PUT answer; `GET /runs/:id` carries none. Absent when the engine
+	 * judged nothing (a design run, a clean collection run, a run still in
+	 * flight) and on every row stored before the column - absent is not
+	 * `passed`. `rowOutcome` reads it before it derives anything.
+	 */
+	outcome?: StoredRunOutcome;
 }
 
 /**
@@ -2254,6 +2269,12 @@ export interface RunListParams {
 	 * lists every origin. An engine older than the filter ignores it.
 	 */
 	origin?: RunOrigin["kind"];
+	/**
+	 * Only runs the engine stored this verdict on (`GET /runs?outcome=`). A row
+	 * with no stored outcome matches no value. Unset lists every run; an engine
+	 * older than the filter ignores it.
+	 */
+	outcome?: StoredRunOutcome;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */

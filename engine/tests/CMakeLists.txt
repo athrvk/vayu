@@ -223,6 +223,7 @@ add_executable(vayu_tests
     postman_export_test.cpp
     postman_export_route_test.cpp
     run_export_test.cpp
+    run_result_summary_test.cpp
     run_export_formats_test.cpp
     run_export_html_test.cpp
     run_export_markdown_test.cpp

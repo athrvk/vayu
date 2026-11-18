@@ -464,7 +464,11 @@ inline auto make_vayu_storage (const std::string& path) {
     // sync_schema ADD COLUMN it onto an existing table, and it is the honest
     // answer for every row stored before the column: nobody recorded one.
     make_column ("origin", &Run::origin, default_value ("other")),
-    make_column ("origin_client", &Run::origin_client)),
+    make_column ("origin_client", &Run::origin_client),
+    // The verdict the run's list row draws (#3547); see Run::outcome. Nullable
+    // with no default: a row stored before the column has no verdict, and a
+    // default would claim one nothing judged.
+    make_column ("outcome", &Run::outcome)),
 
     // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",

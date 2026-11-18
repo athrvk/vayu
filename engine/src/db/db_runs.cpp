@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/run_result_summary.hpp"
 #include "vayu/utils/logger.hpp"
 
 using namespace sqlite_orm;
@@ -99,6 +100,17 @@ int64_t end_time_after (const Run& run, RunStatus to) {
     return run.end_time > run.start_time ? run.end_time : now_epoch_ms ();
 }
 
+// `runs.outcome` from the status, type and summary @p run is about to be
+// stored with (#3547). Called by every write of either - a terminal move, a
+// summary landing on a terminal row (a Stop's status can land first), the
+// startup reconcile - so the column cannot describe a status or summary the
+// row no longer holds. A move to an in-flight status clears it.
+void stamp_run_outcome (Run& run) {
+    const auto outcome = vayu::core::stored_run_outcome (run);
+    run.outcome =
+    outcome ? std::optional<std::string> (vayu::to_string (*outcome)) : std::nullopt;
+}
+
 nlohmann::json status_names (std::initializer_list<RunStatus> statuses) {
     auto names = nlohmann::json::array ();
     for (const auto status : statuses) {
@@ -127,6 +139,7 @@ RunStatus to) {
         }
         run->end_time = end_time_after (*run, to);
         run->status   = to;
+        stamp_run_outcome (*run);
         impl_->storage.update (*run);
         outcome = RunStatusTransition{ .applied = true, .current = to };
     });
@@ -188,6 +201,7 @@ auto run_filter_condition (const RunFilter& filter) {
     const bool no_collection = !filter.collection_id.has_value ();
     const bool no_baseline   = !filter.baseline.has_value ();
     const bool no_origin     = !filter.origin.has_value ();
+    const bool no_outcome    = !filter.outcome.has_value ();
 
     const RunType type_val     = filter.type.value_or (RunType::Design);
     const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
@@ -196,6 +210,8 @@ auto run_filter_condition (const RunFilter& filter) {
     const std::string collection_val = filter.collection_id.value_or ("");
     const bool baseline_val          = filter.baseline.value_or (false);
     const std::string origin_val     = filter.origin.value_or ("");
+    const std::string outcome_val =
+    vayu::to_string (filter.outcome.value_or (RunOutcome::NotJudged));
 
     // The snapshot when it is JSON, an empty object when it is not - the guard
     // described above, so json_extract below is always handed valid JSON.
@@ -211,6 +227,7 @@ auto run_filter_condition (const RunFilter& filter) {
     unless_unset (no_q, like (&Run::config_snapshot, q_pat)) &&
     unless_unset (no_baseline, c (&Run::baseline) == baseline_val) &&
     unless_unset (no_origin, c (&Run::origin) == origin_val) &&
+    unless_unset (no_outcome, c (&Run::outcome) == outcome_val) &&
     unless_unset (no_collection,
     json_extract<std::string> (
     snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val);
@@ -304,6 +321,7 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
         nlohmann::json::parse (summary, nullptr, /*allow_exceptions=*/false);
         run->has_warnings = parsed.is_object () && parsed.contains ("warnings") &&
         parsed["warnings"].is_array () && !parsed["warnings"].empty ();
+        stamp_run_outcome (*run);
         impl_->storage.update (*run);
     });
 }
@@ -558,6 +576,7 @@ size_t Database::reconcile_orphaned_runs () {
                 run.summary = std::move (*summary);
                 ++summarised;
             }
+            stamp_run_outcome (run);
             impl_->storage.update (run);
         }
         return true; // Commit

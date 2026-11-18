@@ -17,6 +17,7 @@ import {
 	filterRuns,
 	mcpClientNames,
 	type FilterOrigin,
+	type FilterOutcome,
 	type FilterStatus,
 	type FilterType,
 } from "@/modules/history/history-store";
@@ -100,6 +101,8 @@ export default function HistoryList() {
 	const setPinnedOnly = useHistoryStore((s) => s.setPinnedOnly);
 	const filterOrigin = useHistoryStore((s) => s.filterOrigin);
 	const setFilterOrigin = useHistoryStore((s) => s.setFilterOrigin);
+	const filterOutcome = useHistoryStore((s) => s.filterOutcome);
+	const setFilterOutcome = useHistoryStore((s) => s.setFilterOutcome);
 	const filterClient = useHistoryStore((s) => s.filterClient);
 	const setFilterClient = useHistoryStore((s) => s.setFilterClient);
 	const sortBy = useHistoryStore((s) => s.sortBy);
@@ -144,7 +147,8 @@ export default function HistoryList() {
 		pinnedOnly,
 		filterOrigin === "all" ? undefined : filterOrigin,
 		filterType === "all" ? undefined : filterType,
-		filterStatus === "all" ? undefined : filterStatus
+		filterStatus === "all" ? undefined : filterStatus,
+		filterOutcome === "all" ? undefined : filterOutcome
 	);
 	const deleteRunMutation = useDeleteRunMutation();
 	// `mutateAsync` is stable across renders; the mutation object is not.
@@ -165,6 +169,7 @@ export default function HistoryList() {
 		filterStatus,
 		pinnedOnly,
 		filterOrigin,
+		filterOutcome,
 		filterClient,
 		sortBy,
 	});
@@ -184,7 +189,11 @@ export default function HistoryList() {
 	};
 	const originNarrowing = filterOrigin !== "all" || filterClient !== null;
 	const isNarrowed =
-		searchQuery !== "" || filterType !== "all" || filterStatus !== "all" || originNarrowing;
+		searchQuery !== "" ||
+		filterType !== "all" ||
+		filterStatus !== "all" ||
+		filterOutcome !== "all" ||
+		originNarrowing;
 	/*
 	 * Only the first `visible` rows are mounted; the rest arrive as the end is
 	 * reached (`useGrowingWindow` records why this is a growing window and not a
@@ -202,6 +211,7 @@ export default function HistoryList() {
 		filterClient,
 		filterType,
 		filterStatus,
+		filterOutcome,
 		sortBy,
 	]);
 	const {
@@ -398,6 +408,21 @@ export default function HistoryList() {
 							</SelectContent>
 						</Select>
 
+						<Select
+							value={filterOutcome}
+							onValueChange={(v) => setFilterOutcome(v as FilterOutcome)}
+						>
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Outcome">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All outcomes</SelectItem>
+								<SelectItem value="failed">Failed</SelectItem>
+								<SelectItem value="not_judged">Not judged</SelectItem>
+								<SelectItem value="passed">Passed</SelectItem>
+							</SelectContent>
+						</Select>
+
 						<Select value={originValue} onValueChange={handleOriginChange}>
 							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Origin">
 								<SelectValue />
@@ -545,6 +570,7 @@ export default function HistoryList() {
 												setSearchQuery("");
 												setFilterType("all");
 												setFilterStatus("all");
+												setFilterOutcome("all");
 												// Drops the client with it.
 												setFilterOrigin("all");
 											}}

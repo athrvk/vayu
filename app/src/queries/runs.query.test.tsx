@@ -568,6 +568,36 @@ describe("useRunsQuery", () => {
 		expect(failed.queryKey).not.toEqual(load.queryKey);
 	});
 
+	// The stored outcome is asked of the engine too (#3547): "Failed" has to find
+	// the runs older than the loaded pages that missed a budget.
+	it("passes the outcome to the engine, and sends none for all", async () => {
+		listRuns.mockResolvedValue(page([]));
+
+		renderHook(
+			() => useRunsQuery(undefined, false, undefined, undefined, undefined, "not_judged"),
+			{ wrapper: wrapper(makeClient()) }
+		);
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ outcome: "not_judged" }));
+
+		listRuns.mockClear();
+		renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalled());
+		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ outcome: undefined }));
+	});
+
+	it("keys the outcome in only when set, each verdict to its own entry", () => {
+		const unfiltered = runsListInfiniteOptions().queryKey;
+		expect(Object.keys(unfiltered[2])).not.toContain("outcome");
+
+		const none = [undefined, false, undefined, undefined, undefined] as const;
+		const failed = runsListInfiniteOptions(...none, "failed").queryKey;
+		const passed = runsListInfiniteOptions(...none, "passed").queryKey;
+		expect(failed[2]).toMatchObject({ outcome: "failed" });
+		expect(failed).not.toEqual(unfiltered);
+		expect(failed).not.toEqual(passed);
+	});
+
 	it("keys the origin in only when set, so the unfiltered list keeps its entry", () => {
 		const unfiltered = runsListInfiniteOptions().queryKey;
 		expect(unfiltered).toEqual(queryKeys.runs.list({ q: undefined, baseline: undefined }));

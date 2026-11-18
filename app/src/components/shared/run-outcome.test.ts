@@ -48,6 +48,13 @@
  * rows and the fixture's drain_stopped cases redden; move its branch above the
  * failed/missed-budget one and the ordering rows redden; make `reportOutcome` or
  * `rowOutcome` stop passing it and only that wrapper's drain test reddens.
+ *
+ * A stored outcome (#3547): make `rowOutcome` ignore `run.outcome` and the
+ * stored-wins cases redden; map `not_judged` to `failed` and its case reddens;
+ * return the derivation's reason whatever the category and the generic-reason
+ * case reddens. The row-outcome replay reddens on any derivation that parts
+ * from `run-row-outcome-conformance.json`, the engine's table: let a clean
+ * collection row read `passed`, or a stopped collection row `failed`.
  */
 
 import { readFileSync } from "node:fs";
@@ -61,6 +68,7 @@ import {
 	missedBudgetsReason,
 	reportOutcome,
 	rowOutcome,
+	rowStoredOutcome,
 	type RunJudgement,
 	type RunOutcomeInput,
 } from "./run-outcome";
@@ -1064,5 +1072,72 @@ describe("run verdict conformance", () => {
 		} else {
 			expect(judged.reason).not.toMatch(FAILED_CHECK);
 		}
+	});
+});
+
+/**
+ * The verdict the engine stores on a row and the one `rowOutcome` derives from
+ * the same row are one rule (#3547): `run-row-outcome-conformance.json`, whose
+ * engine half is `run_result_summary_test.cpp`. Each case is built without an
+ * `outcome`, so the renderer's derivation is what answers.
+ */
+describe("row outcome conformance", () => {
+	interface RowCase {
+		name: string;
+		type: Run["type"];
+		status: Run["status"];
+		resultSummary?: Run["resultSummary"];
+		expected: "passed" | "failed" | "not_judged" | null;
+	}
+
+	const [fixturePath] = ENGINE_READING_GUARDS.runRowOutcome.paths.map(fromRepoRoot);
+	const CASES = (JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: RowCase[] }).cases;
+
+	it("replays every case of the fixture", () => {
+		expect(CASES.length).toBeGreaterThanOrEqual(27);
+	});
+
+	it.each(CASES.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+		const derived = row({
+			type: c.type,
+			status: c.status,
+			resultSummary: c.resultSummary,
+		} as Partial<Run>);
+		expect(rowStoredOutcome(derived)).toBe(c.expected);
+	});
+});
+
+describe("rowOutcome with a stored outcome", () => {
+	const MISSED = { rps: 485, errorRate: 0, verdict: "failed" } as const;
+
+	it("keeps the derived reason when the stored category agrees", () => {
+		expect(rowOutcome(row({ outcome: "failed", resultSummary: MISSED }))).toEqual({
+			outcome: "failed",
+			reason: "Budgets missed",
+		});
+	});
+
+	it("lets the stored outcome win over a derivation that says otherwise", () => {
+		const judged = rowOutcome(row({ outcome: "not_judged", resultSummary: MISSED }));
+		expect(judged?.outcome).toBe("not-judged");
+		expect(judged?.reason).toBe("Judged by Vayu's engine");
+	});
+
+	it("reads a stored not_judged as the renderer's not-judged", () => {
+		expect(
+			rowOutcome(row({ outcome: "not_judged", resultSummary: { rps: 40 } }))?.outcome
+		).toBe("not-judged");
+	});
+
+	it("judges a row its summary cannot, when the engine stored a verdict", () => {
+		expect(rowOutcome(row({ outcome: "passed" }))).toEqual({
+			outcome: "passed",
+			reason: "Judged by Vayu's engine",
+		});
+	});
+
+	it("derives from the summary when no outcome was stored", () => {
+		expect(rowOutcome(row({ resultSummary: MISSED }))?.outcome).toBe("failed");
+		expect(rowOutcome(row({}))).toBeNull();
 	});
 });
