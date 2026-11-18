@@ -103,13 +103,26 @@ export const RESPONSE_CACHE_MAX_BYTES = 256 * 1024 * 1024;
  * `body` and `bodyRaw` are the same text for anything past the pane's formatting
  * threshold (`paneBody` hands the raw string back), so an equal pair is counted
  * once rather than twice.
+ *
+ * The scripts' `pm.sendRequest` records (#3633) add their request and response
+ * bodies, up to `maxTraceBodyBytes` more per send. A record's held text is
+ * counted, never its `bodyBytes`: that is the size before the engine cut or
+ * shed the body, which this map does not hold.
  */
 export function estimateResponseBytes(response: StoredResponse): number {
-	const { body, bodyRaw, rawBytes } = response;
+	const { body, bodyRaw, rawBytes, scriptRequests } = response;
 	let bytes = body.length * 2;
 	if (bodyRaw !== undefined && bodyRaw !== body) bytes += bodyRaw.length * 2;
 	if (rawBytes) bytes += rawBytes.data.byteLength;
+	for (const record of scriptRequests ?? []) {
+		bytes += textBytes(record.request.body) + textBytes(record.response?.body);
+	}
 	return bytes;
+}
+
+/** A body's estimated cost, as {@link estimateResponseBytes} counts strings. */
+function textBytes(body: unknown): number {
+	return typeof body === "string" ? body.length * 2 : 0;
 }
 
 interface ResponseStoreState {

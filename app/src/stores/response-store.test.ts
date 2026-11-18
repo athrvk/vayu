@@ -152,6 +152,30 @@ describe("estimateResponseBytes", () => {
 
 		expect(estimateResponseBytes(response)).toBe(5000);
 	});
+
+	// Mutation check: drop the `scriptRequests` loop and this reads 2000.
+	it("adds the held request and response bodies of the scripts' requests (#3633)", () => {
+		const response = {
+			...aResponse(text(1000)),
+			scriptRequests: [
+				{
+					status: 200,
+					request: { method: "POST", url: "http://t/token", body: text(300) },
+					response: { body: text(500, "y") },
+				},
+				// A failed call has no response; a body the engine shed is "" whatever
+				// its `bodyBytes` says, and is held as nothing.
+				{ status: 0, request: { method: "GET", url: "http://t/down" } },
+				{
+					status: 200,
+					request: { method: "GET", url: "http://t/big" },
+					response: { body: "", bodyTruncated: true, bodyBytes: 9_000_000 },
+				},
+			],
+		};
+
+		expect(estimateResponseBytes(response)).toBe(2000 + 600 + 1000);
+	});
 });
 
 describe("bounds the bytes", () => {
