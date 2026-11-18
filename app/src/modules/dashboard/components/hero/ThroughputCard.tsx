@@ -13,15 +13,17 @@ import { HeroCardShell, HeroValue } from "./HeroCardShell";
 /**
  * iterations hero card #2 - average req/s across the run. In iterations mode
  * throughput is an output of how fast the server responds (no rate target).
+ * The sub-line is the mean iteration time, whose meaning the caller settles
+ * (`DashboardDerived.meanIterationTime`); undefined reads `-`.
  */
 export function ThroughputCard({
 	throughput,
-	meanLatency,
+	meanIterationTime,
 }: {
 	throughput?: number;
-	meanLatency?: number;
+	meanIterationTime?: number;
 }) {
-	const mean = formatLatencyPartsOrDash(meanLatency);
+	const mean = formatLatencyPartsOrDash(meanIterationTime);
 	return (
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
 			<HeroValue value={fmtRate(throughput)} unit="req/s" />

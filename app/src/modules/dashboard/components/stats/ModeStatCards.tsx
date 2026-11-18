@@ -86,9 +86,9 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Mean iteration time - average wall-clock per iteration (tracks p50 closely). */
+/** Mean iteration time - average wall-clock per iteration (`DashboardDerived.meanIterationTime`). */
 export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
-	const { value, unit } = formatLatencyPartsOrDash(d.meanLatency);
+	const { value, unit } = formatLatencyPartsOrDash(d.meanIterationTime);
 	return (
 		<StatCard
 			label="Mean iteration time"

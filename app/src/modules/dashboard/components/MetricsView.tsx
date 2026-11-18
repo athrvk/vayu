@@ -268,6 +268,7 @@ function MetricsView({
 			backpressure: metrics.backpressure ?? 0,
 			p99Latency: cumulative.p99,
 			meanLatency: metrics.avg_latency_ms ?? 0,
+			meanIterationTime: sequence ? sequence.meanIterationMs : metrics.avg_latency_ms,
 			medianLatency: cumulative.p50,
 			p95Latency: cumulative.p95,
 			// Live steps carry no latency, so the card can say "pooled" but not which step.
@@ -290,6 +291,7 @@ function MetricsView({
 		lastElapsedSeconds,
 		loadMode,
 		isSequence,
+		sequence,
 		targetRps,
 		concurrency,
 		runDurationSeconds,

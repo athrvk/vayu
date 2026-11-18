@@ -133,6 +133,16 @@ consumes it.
   say so and name that step (`utils/pooledLatency.ts`: `slowestStepP99`,
   `pooledCaption`, `pooledTitle`); History's P99 tile and Performance-tab
   titles read the same helpers. A single-request run leaves it unset.
+- **Mean iteration time is the pass on a sequence and the request on a single
+  request** (#3570). `DashboardDerived.meanIterationTime` feeds the iterations
+  hero's Throughput sub-line and the Mean iteration time stat, and is not
+  `meanLatency`, which on a sequence is one request's latency (3 steps of 27 ms
+  is a pass of 83 ms with its timer waits). Live it is the latest gate frame's
+  `scenario.meanIterationMs` (`MetricsView`); finished it is the report's
+  `scenario.passDuration.mean` (`reportToDerived`); a single-request run reads
+  `avg_latency_ms` / `latency.avg`. A sequence with no figure (before its first
+  completed pass, or an engine from before the field) leaves it `undefined` and
+  the cards print `-`: it never falls back to the request latency.
 - **p99 at peak is read at the run's peak load, not at the breakpoint**
   (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
   `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals
@@ -174,8 +184,8 @@ consumes it.
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
 - **A scenario load run's sequence is read the same way** (#2823). The engine
-  sends `scenario` (iterations and each step's `executed` / `errors`, no
-  latency) on gate frames alone, so `utils/liveScenario.ts` takes the latest
+  sends `scenario` (iterations, each step's `executed` / `errors` and the mean
+  pass time `meanIterationMs`, no other latency) on gate frames alone, so `utils/liveScenario.ts` takes the latest
   frame carrying it, and `MetricsView` hands `LiveSequencePanel` (Row 1.5) the
   block itself: a stable reference between gates, which is what keeps the
   memo'd panel off the 10 Hz tick. The same block marks the run's latency

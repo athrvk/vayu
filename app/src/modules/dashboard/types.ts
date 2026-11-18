@@ -201,6 +201,14 @@ export interface DashboardDerived {
 	 * (#2823); absent for a single-request run, which pools nothing.
 	 */
 	pooledLatency?: PooledLatency;
+	/**
+	 * Mean wall clock of one iteration, ms (#3570): the completed passes' mean on
+	 * a sequence (timer waits included), the mean request latency on a
+	 * single-request run, where an iteration is one request. Absent, never 0,
+	 * where a sequence has no pass time yet or its engine reports none - not
+	 * `meanLatency`, which is one request's latency on a sequence.
+	 */
+	meanIterationTime?: number;
 	// Timing
 	testDuration?: number;
 	/** The configured duration, seconds; live only, so the Duration card has something to say before the run ends. */

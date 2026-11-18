@@ -120,7 +120,7 @@ describe("hero cards (characterization)", () => {
 		));
 	it("ProgressCard", () =>
 		snap(<ProgressCard requestsSent={1500} requestsExpected={4000} currentRps={500} />));
-	it("ThroughputCard", () => snap(<ThroughputCard throughput={1284} meanLatency={204} />));
+	it("ThroughputCard", () => snap(<ThroughputCard throughput={1284} meanIterationTime={204} />));
 	it("CurrentConcurrencyCard", () =>
 		snap(
 			<CurrentConcurrencyCard
@@ -145,7 +145,9 @@ describe("hero throughput reads grouped (Intl), a missing one reads '-'", () => 
 		render(<TooltipProvider>{ui}</TooltipProvider>).container.textContent;
 
 	it("ThroughputCard", () => {
-		expect(text(<ThroughputCard throughput={3940} meanLatency={204} />)).toContain("3,940");
+		expect(text(<ThroughputCard throughput={3940} meanIterationTime={204} />)).toContain(
+			"3,940"
+		);
 	});
 	it("AchievedThroughputCard, per-user rate included", () => {
 		const out = text(<AchievedThroughputCard throughput={3940} configuredConcurrency={2} />);
@@ -166,7 +168,7 @@ describe("hero throughput reads grouped (Intl), a missing one reads '-'", () => 
 		expect(out).toContain("Δ 560");
 	});
 	it.each([
-		["ThroughputCard", <ThroughputCard meanLatency={204} />],
+		["ThroughputCard", <ThroughputCard meanIterationTime={204} />],
 		["AchievedThroughputCard", <AchievedThroughputCard />],
 		["ThroughputTwinCard", <ThroughputTwinCard />],
 	])("%s draws '-', not a measured 0, without a value", (_name, ui) => {

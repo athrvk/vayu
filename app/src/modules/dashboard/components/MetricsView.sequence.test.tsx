@@ -21,6 +21,11 @@
  * title case fails; render the panel unconditionally and the absent case fails;
  * pass `expectedPerStep` to the live `ExecutedCell` and the no-short-marker case
  * fails.
+ *
+ * The iterations hero card's "mean iteration" is the gate frame's
+ * `meanIterationMs` on a sequence and the tick's request latency otherwise
+ * (#3570). Mutation-check: read `avg_latency_ms` for both and the sequence cases
+ * fail; read `meanIterationMs` for both and the single-request case fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -39,14 +44,14 @@ vi.mock("./charts/uplot", async (importOriginal) => ({
 
 const MetricsView = (await import("./MetricsView")).default;
 
-function renderView(history: LoadTestMetrics[]) {
+function renderView(history: LoadTestMetrics[], mode = "constant_concurrency") {
 	const metrics = history[history.length - 1] as DisplayMetrics;
 	return render(
 		<TooltipProvider>
 			<MetricsView
 				metrics={metrics}
 				historicalMetrics={history}
-				mode="constant_concurrency"
+				mode={mode}
 				concurrency={10}
 			/>
 		</TooltipProvider>
@@ -126,6 +131,43 @@ describe("MetricsView sequence panel", () => {
 		expect(
 			screen.getByRole("heading", { name: /Latency distribution \(all steps\)/ })
 		).toBeTruthy();
+	});
+});
+
+describe("MetricsView mean iteration time (#3570)", () => {
+	// The tick's request latency is 7 ms (`tick`); a pass over two steps took 83 ms.
+	const meanIteration = () => screen.getByText(/^mean iteration/).textContent;
+
+	it("reads the pass wall clock on a sequence, not the request latency", async () => {
+		renderView([tick(2, { scenario: { ...SCENARIO, meanIterationMs: 83 } })], "iterations");
+
+		await screen.findByText("SEQUENCE");
+		expect(meanIteration()).toBe("mean iteration 83ms");
+		expect(screen.getByText("Mean iteration time").closest("div")?.textContent).toContain("83");
+	});
+
+	it("reads - before a pass completes, never the request latency", async () => {
+		renderView([tick(2, { scenario: SCENARIO })], "iterations");
+
+		await screen.findByText("SEQUENCE");
+		expect(meanIteration()).toBe("mean iteration -");
+	});
+
+	it("keeps the figure across the plain ticks between two gate frames", async () => {
+		renderView(
+			[tick(2, { scenario: { ...SCENARIO, meanIterationMs: 83 } }), tick(2.1)],
+			"iterations"
+		);
+
+		await screen.findByText("SEQUENCE");
+		expect(meanIteration()).toBe("mean iteration 83ms");
+	});
+
+	it("is the request latency on a single-request run", async () => {
+		renderView([tick(2)], "iterations");
+
+		await screen.findByText(/^mean iteration/);
+		expect(meanIteration()).toBe("mean iteration 7ms");
 	});
 });
 
