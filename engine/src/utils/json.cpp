@@ -341,10 +341,11 @@ void cap_node_raw_request (nlohmann::json& node, size_t max_body_bytes) {
 // What @p node's `body` holds in the unit `cap_node_body` caps it by: its
 // bytes, or for a base64 body the bytes it decodes to. Zero for no body.
 size_t held_body_bytes (const nlohmann::json& node) {
-    if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+    const auto body = node.is_object () ? node.find ("body") : node.end ();
+    if (body == node.end () || !body->is_string ()) {
         return 0;
     }
-    const auto& text = node["body"].get_ref<const std::string&> ();
+    const auto& text = body->get_ref<const std::string&> ();
     if (node.value ("bodyEncoding", "") != BODY_ENCODING_BASE64) {
         return text.size ();
     }
