@@ -197,6 +197,30 @@ class OAuthRouteJwtBearerTest : public OAuthRouteTest {
         db_->init ();
     }
 
+    void TearDown () override {
+        std::error_code ignored;
+        if (!scratch_.empty ()) {
+            std::filesystem::remove_all (scratch_, ignored);
+        }
+        OAuthRouteTest::TearDown ();
+    }
+
+    /// A key file holding @p pem in a directory only this test uses, removed
+    /// with the fixture (a failing assertion included).
+    std::string key_file (const std::string& pem, const std::string& name) {
+        if (scratch_.empty ()) {
+            scratch_ = std::filesystem::temp_directory_path () /
+            (std::string ("vayu-oauth-route-jwt-") +
+            ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
+            std::filesystem::create_directories (scratch_);
+        }
+        const auto path = scratch_ / name;
+        std::ofstream (path, std::ios::binary) << pem;
+        return path.string ();
+    }
+
+    std::filesystem::path scratch_;
+
     static json jwt_config (const vayu::tests::MockTokenServer& idp, const std::string& key) {
         return json{ { "grantType", "jwt_bearer" },
             { "accessTokenUrl", idp.url ("/token") },
@@ -320,12 +344,7 @@ TEST_F (OAuthRouteJwtBearerTest, AScopeIdThatIsNotAStringIs400) {
 
 // A key file needs no scope: the path is the config's own.
 TEST_F (OAuthRouteJwtBearerTest, AKeyFileSignsWithNoScopeNamed) {
-    const std::string pem = jwt::pkcs8 (jwt::keys ().p256);
-    const std::filesystem::path dir =
-    std::filesystem::temp_directory_path () / "vayu-oauth-route-jwt-key-file";
-    std::filesystem::create_directories (dir);
-    const std::string path = (dir / "key.pem").string ();
-    std::ofstream (path, std::ios::binary) << pem;
+    const std::string path = key_file (jwt::pkcs8 (jwt::keys ().p256), "key.pem");
     const auto canonical = vayu::http::grantable_file_path (path);
     ASSERT_HAS_VALUE (canonical);
     vayu::FileGrant grant;
@@ -341,8 +360,6 @@ TEST_F (OAuthRouteJwtBearerTest, AKeyFileSignsWithNoScopeNamed) {
     config["signingAlgorithm"] = "ES256";
     auto [status, body]        = vayu::http::routes::oauth2_token_post (
     *db_, json{ { "config", config } }.dump ());
-    std::error_code ignored;
-    std::filesystem::remove_all (dir, ignored);
 
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_TRUE (jwt::verifies (

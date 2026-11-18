@@ -7333,8 +7333,8 @@ differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
-means non-expiring unless the config sets `fallbackExpiresIn` (seconds, any grant),
-which is then how long such a token is kept. One refresh is in flight per cache key (#3344): however
+means non-expiring unless the config sets `fallbackExpiresIn` (seconds, any grant,
+held to one year), which is then how long such a token is kept. One refresh is in flight per cache key (#3344): however
 many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.
@@ -7392,7 +7392,9 @@ key that cannot sign are each a `400` `oauth2_invalid_config` naming the member;
 no message holds any part of the key.
 
 `fallbackExpiresIn` (a number of seconds, any grant) is how long a token whose
-response states no `expires_in` is kept; absent, it never expires, as before.
+response states no `expires_in` is kept; absent, it never expires, as before. A
+value above one year (31536000, `MAX_FALLBACK_EXPIRES_IN_SECONDS`) is kept for
+a year, and a value that is not a positive number leaves the token non-expiring.
 
 **Request:**
 ```json
@@ -7438,8 +7440,8 @@ request header (`header`). A row is not sent when it is `enabled: false`, has
 no string `key`, has an unknown `sendAs`, or is named like a parameter the
 engine writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
 `redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
-`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`);
-a body or url row naming a form parameter already written (an `audience` the
+`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`,
+`assertion`); a body or url row naming a form parameter already written (an `audience` the
 config sends) and a header row naming a header already set (`Authorization`,
 `Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
 value wins and no name is sent twice. A malformed list or row is skipped, never

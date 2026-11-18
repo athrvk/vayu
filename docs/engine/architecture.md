@@ -861,8 +861,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
   the assertion itself with `utils/jwt.cpp`, RS256 or ES256, from a
   `privateKey` that is one `{{variable}}` reference or a `privateKeyFile` read
   through file trust, #3632; the reference is resolved only into the config the
-  token is acquired with and never stored, composed, logged or exported), the [`oauth_tokens`](db-schema.md#oauth_tokens)
-  cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
+  token is acquired with and never stored, composed, logged or exported), the
+  [`oauth_tokens`](db-schema.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
   in flight per cache key and a compare-before-delete on a refused refresh,
   #3344; only an `invalid_grant` or `invalid_client` refusal clears the row,
   and an unavailable endpoint on a refresh is an `oauth2_network_error`,

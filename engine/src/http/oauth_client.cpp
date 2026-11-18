@@ -144,14 +144,22 @@ int64_t parse_expires_in (const nlohmann::json& body) {
 }
 
 // What `fallbackExpiresIn` asks a token that states no lifetime to be kept for,
-// in seconds, or 0 (non-expiring, as before) when it is absent or not a
-// positive number.
+// in seconds, held to MAX_FALLBACK_EXPIRES_IN_SECONDS, or 0 (non-expiring, as
+// before) when it is absent or not a positive number. The comparison is written
+// so NaN falls to 0 and the cast sees only a value in range.
 int64_t fallback_expires_in (const nlohmann::json& config) {
     const auto it = config.find ("fallbackExpiresIn");
     if (it == config.end () || !it->is_number ()) {
         return 0;
     }
-    return std::max<int64_t> (static_cast<int64_t> (it->get<double> ()), 0);
+    const double seconds = it->get<double> ();
+    if (!(seconds > 0)) {
+        return 0;
+    }
+    if (seconds >= static_cast<double> (MAX_FALLBACK_EXPIRES_IN_SECONDS)) {
+        return MAX_FALLBACK_EXPIRES_IN_SECONDS;
+    }
+    return static_cast<int64_t> (seconds);
 }
 
 struct TokenRequest {

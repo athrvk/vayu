@@ -325,6 +325,20 @@ TEST (OAuthCacheKey, CredentialRowsAreKeyedByNameAlone) {
     EXPECT_NE (key, with_rows ("jwt-1", "other-api"));
 }
 
+// `assertion` is a name the jwt_bearer grant writes itself, so a row of it is
+// not sent and does not enter the key; the app's `computeOAuth2CacheKey` holds
+// the same line in `cache-key.test.ts`. Mutation check: remove "assertion" from
+// RESERVED_PARAM_NAMES and the key differs.
+TEST (OAuthCacheKey, ARowNamedAssertionAddsNothing) {
+    const json base = { { "grantType", "jwt_bearer" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+        { "subject", "alice" } };
+    json with_row   = base;
+    with_row["tokenParams"] =
+    json::array ({ { { "key", "assertion" }, { "value", "forged.jwt.value" } } });
+    EXPECT_EQ (oauth::cache_key (with_row), oauth::cache_key (base));
+}
+
 // Row order is not part of the key: two configs listing the same rows in a
 // different order share one cached token. A row's value is, so two audiences
 // on one token URL do not.
@@ -1529,6 +1543,33 @@ TEST_F (OAuthJwtBearerTest, ExtraClaimsAreSignedAndReservedOnesNeverReplaceTheEn
     { "iat", 1'900'000'000 }, { "tenant", "t-1" }, { "env", "prod" } }));
 }
 
+// A `tokenParams` row named `assertion` is not sent in any `sendAs`: the form
+// holds the one the engine signed, the query and the headers none. (A body or
+// url row is also skipped as a name already written; a header row is not, so it
+// is the one that holds the reserved name.) Mutation check: remove "assertion"
+// from RESERVED_PARAM_NAMES and the header row is sent.
+TEST_F (OAuthJwtBearerTest, ATokenParamRowNamedAssertionIsNotSent) {
+    MockTokenServer idp;
+    json cfg           = config (idp, rsa_pem ());
+    cfg["tokenParams"] = json::array ({
+    { { "key", "assertion" }, { "value", "FORGED-BODY" } },
+    { { "key", "assertion" }, { "value", "FORGED-URL" }, { "sendAs", "url" } },
+    { { "key", "assertion" }, { "value", "FORGED-HEADER" }, { "sendAs", "header" } },
+    { { "key", "audience" }, { "value", "api" } },
+    });
+
+    const auto result = acquire (cfg);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    const std::string& body = idp.last_body ();
+    EXPECT_EQ (form_occurrences (body, "assertion"), 1u);
+    EXPECT_EQ (body.find ("FORGED"), std::string::npos);
+    EXPECT_EQ (idp.last_target ().find ("assertion"), std::string::npos);
+    EXPECT_EQ (idp.header_count ("assertion"), 0u);
+    EXPECT_EQ (form_occurrences (body, "audience"), 1u)
+    << "an ordinary row still rides";
+}
+
 TEST_F (OAuthJwtBearerTest, RefusesAnAssertionItCannotSignNamingTheMembers) {
     MockTokenServer idp;
     const auto expect_names = [&] (const json& cfg, const std::string& pem,
@@ -1749,6 +1790,34 @@ TEST_F (OAuthClientTest, AFallbackThatIsNotAPositiveNumberKeepsTheTokenNonExpiri
         oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
         ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
         EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).expires_in, 0);
+        db_->delete_oauth_token (oauth::cache_key (config));
+    }
+}
+
+// A fallback past the bound is kept for the bound, never cast out of range
+// (1e300 is undefined behaviour at the double -> int64 cast) and never
+// multiplied by 1000 into an overflow downstream. At the bound and below, the
+// value stands. Mutation check: drop the clamp in `fallback_expires_in` and the
+// 1e300 and 1e18 rows fail.
+TEST_F (OAuthClientTest, AFallbackPastTheBoundIsClampedToIt) {
+    const int64_t bound = oauth::MAX_FALLBACK_EXPIRES_IN_SECONDS;
+    struct Case {
+        json fallback;
+        int64_t expected;
+    };
+    for (const Case& scenario : { Case{ json (1e300), bound }, Case{ json (1e18), bound },
+         Case{ json (bound + 1), bound }, Case{ json (bound), bound },
+         Case{ json (bound - 1), bound - 1 }, Case{ json (600.9), 600 } }) {
+        SCOPED_TRACE (scenario.fallback.dump ());
+        MockTokenServer idp;
+        json config                 = cc_config (idp, "/token-plain");
+        config["fallbackExpiresIn"] = scenario.fallback;
+        const auto result =
+        oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        const auto& token = std::get<vayu::db::OAuthToken> (result);
+        EXPECT_EQ (token.expires_in, scenario.expected);
+        EXPECT_FALSE (oauth::is_expired (token, token.created_at + 1'000));
         db_->delete_oauth_token (oauth::cache_key (config));
     }
 }
