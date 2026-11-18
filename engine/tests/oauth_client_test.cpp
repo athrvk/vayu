@@ -1813,7 +1813,8 @@ TEST_F (OAuthClientTest, AFallbackPastTheBoundIsClampedToIt) {
 
 // Stored as the bound, and read as expired only past it: the probes sit one
 // second either side, with the skew set to 0 so the bound itself is what is
-// read. Mutation check: drop the clamp in `parse_expires_in` and every row fails.
+// read. Mutation check: revert the clamps in `parse_expires_in` and
+// `parse_expires_in_text` and every row but the at-the-bound one fails.
 TEST_F (OAuthClientTest, AnExpiresInPastTheBoundIsStoredAsTheBound) {
     const int64_t bound = oauth::MAX_EXPIRES_IN_SECONDS;
     const std::string number = std::string (MockTokenServer::EXPIRES_IN_NUMBER_PREFIX);
@@ -1845,8 +1846,9 @@ TEST_F (OAuthClientTest, AnExpiresInPastTheBoundIsStoredAsTheBound) {
         ASSERT_HAS_VALUE (stored);
         EXPECT_EQ (stored->expires_in, scenario.expected);
         EXPECT_FALSE (
-        oauth::is_expired (token, token.created_at + bound * 1000 - 1'000, 0));
-        EXPECT_TRUE (oauth::is_expired (token, token.created_at + bound * 1000 + 1'000, 0));
+        oauth::is_expired (token, token.created_at + (bound * 1000) - 1'000, 0));
+        EXPECT_TRUE (
+        oauth::is_expired (token, token.created_at + (bound * 1000) + 1'000, 0));
         db_->delete_oauth_token (oauth::cache_key (config));
     }
 }

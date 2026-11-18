@@ -7338,7 +7338,7 @@ held to one year), which is then how long such a token is kept. A response's own
 `expires_in` is held to one year too (31536000, `MAX_EXPIRES_IN_SECONDS`, #3645),
 whether it is an integer, a float or a numeric string: a provider stating more
 is stored as a year, and a value that is zero, negative or unreadable states no
-lifetime, as before. One refresh is in flight per cache key (#3344): however
+lifetime (a negative one is stored as 0). One refresh is in flight per cache key (#3344): however
 many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.
