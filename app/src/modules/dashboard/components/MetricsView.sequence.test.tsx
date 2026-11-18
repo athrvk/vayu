@@ -25,7 +25,10 @@
  * The iterations hero card's "mean iteration" is the gate frame's
  * `meanIterationMs` on a sequence and the tick's request latency otherwise
  * (#3570). Mutation-check: read `avg_latency_ms` for both and the sequence cases
- * fail; read `meanIterationMs` for both and the single-request case fails.
+ * fail; read `meanIterationMs` for both and the single-request case fails. A
+ * run the run row names a collection run is a sequence before its first gate
+ * frame too: drop `isCollectionRun ||` from `isSequence` and the no-gate-frame
+ * cases fail.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -44,7 +47,11 @@ vi.mock("./charts/uplot", async (importOriginal) => ({
 
 const MetricsView = (await import("./MetricsView")).default;
 
-function renderView(history: LoadTestMetrics[], mode = "constant_concurrency") {
+function renderView(
+	history: LoadTestMetrics[],
+	mode = "constant_concurrency",
+	isCollectionRun?: boolean
+) {
 	const metrics = history[history.length - 1] as DisplayMetrics;
 	return render(
 		<TooltipProvider>
@@ -53,6 +60,7 @@ function renderView(history: LoadTestMetrics[], mode = "constant_concurrency") {
 				historicalMetrics={history}
 				mode={mode}
 				concurrency={10}
+				isCollectionRun={isCollectionRun}
 			/>
 		</TooltipProvider>
 	);
@@ -157,6 +165,27 @@ describe("MetricsView mean iteration time (#3570)", () => {
 		renderView(
 			[tick(2, { scenario: { ...SCENARIO, meanIterationMs: 83 } }), tick(2.1)],
 			"iterations"
+		);
+
+		await screen.findByText("SEQUENCE");
+		expect(meanIteration()).toBe("mean iteration 83ms");
+	});
+
+	it("reads - on a collection run before its first gate frame, never the request latency", async () => {
+		renderView([tick(0.5)], "iterations", true);
+
+		await screen.findByText(/^mean iteration/);
+		expect(meanIteration()).toBe("mean iteration -");
+		expect(screen.getByText("Mean iteration time").closest("div")?.textContent).not.toContain(
+			"7"
+		);
+	});
+
+	it("still reads the gate frame's figure on a collection run", async () => {
+		renderView(
+			[tick(2, { scenario: { ...SCENARIO, meanIterationMs: 83 } })],
+			"iterations",
+			true
 		);
 
 		await screen.findByText("SEQUENCE");

@@ -142,7 +142,11 @@ consumes it.
   `scenario.passDuration.mean` (`reportToDerived`); a single-request run reads
   `avg_latency_ms` / `latency.avg`. A sequence with no figure (before its first
   completed pass, or an engine from before the field) leaves it `undefined` and
-  the cards print `-`: it never falls back to the request latency.
+  the cards print `-`: it never falls back to the request latency. The first gate
+  frame is about a second into the run, so `MetricsView` takes the kind from the
+  run's row as well (`isCollectionRun`, set from the same `useCollectionRunTarget`
+  name the header shows): a collection run reads `-` from its first tick, not the
+  request latency until the sequence block arrives.
 - **p99 at peak is read at the run's peak load, not at the breakpoint**
   (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
   `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals

@@ -99,6 +99,10 @@ export default function LoadTestDashboard() {
 
 	// A collection load run has no URL; this is what the header says instead.
 	const { collectionName, stepCount } = useCollectionRunTarget(currentRunId);
+	// The same signal names the run to the header and sizes its cards: a run the
+	// header calls a collection run must not read as a single request before its
+	// first gate frame (#3570).
+	const isCollectionRun = Boolean(collectionName);
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -414,6 +418,7 @@ export default function LoadTestDashboard() {
 						mode={loadTestConfig?.mode}
 						runDurationSeconds={plannedSeconds}
 						rampConfig={rampConfig}
+						isCollectionRun={isCollectionRun}
 					/>
 				</div>
 			</HeadingSection>
