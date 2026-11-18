@@ -67,6 +67,11 @@ describe("API_ENDPOINTS canonical routes", () => {
 			"/runs?limit=50&origin=mcp"
 		);
 		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, origin: undefined })).toBe("/runs?limit=50");
+		// The stored-outcome filter (#3547), asked of the engine the same way.
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, outcome: "not_judged" })).toBe(
+			"/runs?limit=50&outcome=not_judged"
+		);
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, outcome: undefined })).toBe("/runs?limit=50");
 		// No params -> bare /runs, which the engine treats as the legacy array.
 		expect(API_ENDPOINTS.RUNS_LIST({})).toBe("/runs");
 	});

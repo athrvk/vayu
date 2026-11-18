@@ -947,6 +947,7 @@ export const apiService = {
 			q,
 			baseline,
 			origin,
+			outcome,
 		} = params;
 		// A cursor page has no offset to send; an explicit one still goes through
 		// so the engine's `before_with_offset` 400 stays loud.
@@ -963,6 +964,7 @@ export const apiService = {
 				q,
 				baseline,
 				origin,
+				outcome,
 			})
 		);
 	},

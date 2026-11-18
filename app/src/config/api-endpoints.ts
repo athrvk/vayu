@@ -188,6 +188,7 @@ export const API_ENDPOINTS = {
 		q?: string;
 		baseline?: boolean;
 		origin?: string;
+		outcome?: string;
 	}) => {
 		const qs = new URLSearchParams();
 		if (params.limit !== undefined) qs.set("limit", String(params.limit));
@@ -203,6 +204,7 @@ export const API_ENDPOINTS = {
 		// would drop it and answer with every run instead.
 		if (params.baseline !== undefined) qs.set("baseline", String(params.baseline));
 		if (params.origin) qs.set("origin", params.origin);
+		if (params.outcome) qs.set("outcome", params.outcome);
 		const s = qs.toString();
 		return s ? `/runs?${s}` : `/runs`;
 	},
