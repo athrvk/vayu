@@ -35,7 +35,7 @@ import {
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { dataFileDisplayName } from "@/lib/run-data-file";
 import { SectionEmpty, SectionLoading } from "./Section";
-import { scenarioFromSnapshot } from "./run-scenario";
+import { scenarioFromSnapshot, scenarioOfSnapshot } from "./run-scenario";
 import type { ContextBarSectionProps } from "./types";
 import type { ReactNode } from "react";
 
@@ -103,7 +103,15 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 	// A design run's snapshot carries no `mode` key - there is no strategy to
 	// record for one send. Naming it here rather than leaving the row out keeps
 	// the section from reading as "nothing was recorded" on every design run.
-	const mode = run.type === "design" ? "Single send" : loadTestModeLabel(config?.mode);
+	// A scenario *load* run is `type: "load"` with the manifest in its snapshot;
+	// its `iterations` count passes over the sequence.
+	const mode =
+		run.type === "design"
+			? "Single send"
+			: loadTestModeLabel(
+					config?.mode,
+					scenarioOfSnapshot(config) ? "collection" : undefined
+				);
 	const protocol = isHttpVersion(config?.httpVersion)
 		? HTTP_VERSIONS.find((v) => v.value === config.httpVersion)?.label
 		: undefined;

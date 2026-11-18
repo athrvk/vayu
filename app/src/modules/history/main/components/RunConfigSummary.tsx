@@ -32,6 +32,8 @@ interface RunConfigSummaryProps {
 	config: RunConfiguration | undefined;
 	/** `report.summary.httpVersionDowngraded`; 0 and absent both draw nothing. */
 	downgradedRequests: number;
+	/** A collection run: its mode reads "Fixed passes" and its count is passes. */
+	isCollectionRun: boolean;
 }
 
 interface ConfigEntry {
@@ -73,12 +75,15 @@ function ConfigFields({ entries }: { entries: ConfigEntry[] }) {
 }
 
 /** The mode and the two numbers that size it; protocol is drawn beside them. */
-function headlineEntries(config: RunConfiguration): ConfigEntry[] {
+function headlineEntries(config: RunConfiguration, isCollectionRun: boolean): ConfigEntry[] {
 	const entries: ConfigEntry[] = [];
 	if (config.mode) {
 		entries.push({
 			label: "Mode",
-			value: loadTestTypeToLabel(config.mode as LoadTestConfig["mode"]),
+			value: loadTestTypeToLabel(
+				config.mode as LoadTestConfig["mode"],
+				isCollectionRun ? "collection" : undefined
+			),
 			mono: false,
 		});
 	}
@@ -157,7 +162,11 @@ export function NotNegotiated({
 	);
 }
 
-export default function RunConfigSummary({ config, downgradedRequests }: RunConfigSummaryProps) {
+export default function RunConfigSummary({
+	config,
+	downgradedRequests,
+	isCollectionRun,
+}: RunConfigSummaryProps) {
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	if (!config) return null;
 
@@ -169,7 +178,7 @@ export default function RunConfigSummary({ config, downgradedRequests }: RunConf
 	const protocolLabel = requestedProtocolLabel(config);
 	if (!config.mode && !protocolLabel) return null;
 
-	const headline = headlineEntries(config);
+	const headline = headlineEntries(config, isCollectionRun);
 	const details = detailEntries(config);
 
 	return (

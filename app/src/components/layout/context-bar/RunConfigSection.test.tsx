@@ -69,6 +69,22 @@ describe("RunConfigSection", () => {
 		expect(screen.getByText(formatConcurrency(8))).toBeInTheDocument();
 	});
 
+	// Mutation check: drop the kind from the `loadTestModeLabel` call and the first case reddens.
+	it("reads Fixed passes for a collection load run and Fixed request count for a request (#3570)", () => {
+		run = makeRun("load", {
+			mode: "iterations",
+			iterations: 400,
+			scenario: { collectionId: "col_1", steps: [] },
+		});
+		const { unmount } = render(<RunConfigSection tab={TAB} />);
+		expect(screen.getByText("Fixed passes")).toBeInTheDocument();
+		unmount();
+
+		run = makeRun("load", { mode: "iterations", iterations: 400 });
+		render(<RunConfigSection tab={TAB} />);
+		expect(screen.getByText("Fixed request count")).toBeInTheDocument();
+	});
+
 	it("calls a design run a single send instead of reporting no configuration", () => {
 		// A design run's snapshot has no `mode` key - there is no strategy to
 		// record for one send - so a mode-only section would read as "nothing
