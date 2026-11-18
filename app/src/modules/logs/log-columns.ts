@@ -8,7 +8,7 @@
 /** Each Logs column's width, shared by the rows (`LogRow`) and the header over them. */
 export const LOG_COLUMNS = {
 	time: "w-28 shrink-0",
-	source: "w-16 shrink-0",
+	source: "w-[4.5rem] shrink-0 pl-2",
 	component: "w-20 shrink-0",
 	message: "min-w-0 flex-[3]",
 	fields: "min-w-0 flex-[2]",
