@@ -811,9 +811,9 @@ Notes:
   sized for the dashboard's charts, which draw every point for a human, and an
   agent reads the same rows as JSON through a context window. The ceilings are
   500 (the engine's own page cap, shared with `GET /runs`) and 1000 for the two
-  series, well under the engine's 50000. `maxPoints` on the two series reads (#3560)
-  reads the whole run folded in one call, under the same 1000 ceiling. A `limit` past a ceiling is **refused,
-  not clamped** - the #319 precedent - because a short page silently substituted
+  series, well under the engine's 50000. `maxPoints` on the two series reads
+  (#3560) folds the whole run in one call, under the same 1000 ceiling. A
+  `limit` past a ceiling is **refused, not clamped** - the #319 precedent - because a short page silently substituted
   for the one asked for reads as the whole answer. A page with more behind it
   says so inside the JSON document, never in a second text block that would
   stop the answer parsing (#2445): `pagination.nextOffset` is the `offset` to
