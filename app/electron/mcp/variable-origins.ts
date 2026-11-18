@@ -437,7 +437,7 @@ export const VARIABLE_RESOLUTION_MODEL = {
 		},
 		{
 			pattern: "$guid, $timestamp, $randomInt, ...",
-			rule: "Dynamic generators. Unlike `$vu`, a variable of the same name DOES win over the generator - a scope that defines `$guid` shadows it. `vayu://scripting/completions` carries the full generator list.",
+			rule: "Dynamic generators. Unlike `$vu`, a variable of the same name DOES win over the generator - a scope that defines `$guid` shadows it. A script-API read (`vayu://scripting/completions`) carries the full generator list.",
 		},
 	],
 	fromAScript: {
