@@ -211,6 +211,30 @@ dropped) before they are cut - the renderer is where a page's own errors quote
 the URL they failed on. This applies at that boundary only; a record the main
 process logs itself is redacted by field name alone, as above.
 
+## Reading the files in the app
+
+The Logs tab reads `<data-dir>/logs/` through the main process, never through a
+path the renderer names (#3635). `log-reader.ts` lists the files, reads a page
+backwards merged across them by `ts`, and follows them with a 500 ms poll;
+`log-reader-ipc.ts` puts it on five channels, `electronAPI.logs` in the
+renderer:
+
+| Channel | Direction | Carries |
+|---------|-----------|---------|
+| `logs:list` | invoke | the log files: name, source, size, modified time |
+| `logs:read` | invoke | `{ before?, around?, filter, limit }` in; `{ records, cursor, more, scannedTo }` out |
+| `logs:tail-start` | invoke | a filter; starts this window's tail, replacing one running |
+| `logs:tail-stop` | invoke | nothing; ends this window's tail |
+| `logs:records` | main to renderer, one-way | `{ records, dropped }`, one batch per poll that found matches |
+
+Every handler answers only the app window's main frame (`ipc-sender.ts`) and
+rejects any other sender. A payload is shape-checked before the reader sees it,
+and a cursor names files by the reader's own log-file pattern, so no path
+crosses the wire. A window's tail ends on `logs:tail-stop`, when the window is
+destroyed or its main frame navigates, and when the app quits. Nothing in the
+MCP server reaches these files: no tool, resource or prompt names a log, and
+`mcp/log-reader.guard.test.ts` holds that.
+
 ## Reading the files
 
 ```bash

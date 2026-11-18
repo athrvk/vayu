@@ -43,6 +43,55 @@ interface FlushResult {
 }
 
 /**
+ * What `electronAPI.logs` carries. Mirrors `LogFileInfo`, `LogFilter`,
+ * `LogCursor`, `ReadLogsResult` and `LogBatch` in electron/log-reader.ts,
+ * inlined for the same reason as `FlushResult`.
+ */
+interface LogFileInfoShape {
+	name: string;
+	source: "engine" | "app" | "cli" | "mcp";
+	size: number;
+	mtimeMs: number;
+}
+interface LogFilterShape {
+	minLevel?: "debug" | "info" | "warn" | "error";
+	sources?: string[];
+	categories?: string[];
+	text?: string;
+	terms?: { field: string; value: string; exact: boolean }[];
+}
+interface LogCursorShape {
+	files: { name: string; id: string; offset: number }[];
+}
+type LogEntryShape =
+	| ({
+			ts: string;
+			level: "debug" | "info" | "warn" | "error";
+			src: string;
+			cat: string;
+			msg: string;
+			pid: number;
+			tid?: string;
+	  } & Record<string, unknown>)
+	| { unparsed: true; raw: string };
+interface LogReadRequestShape {
+	before?: LogCursorShape;
+	around?: string;
+	filter: LogFilterShape;
+	limit: number;
+}
+interface LogReadResultShape {
+	records: LogEntryShape[];
+	cursor: LogCursorShape;
+	more: boolean;
+	scannedTo: string | null;
+}
+interface LogBatchShape {
+	records: LogEntryShape[];
+	dropped: number;
+}
+
+/**
  * Where the update download stands. Mirrors `UpdateDownloadState` in
  * electron/updater.ts, inlined for the same reason as `FlushResult`.
  */
@@ -441,6 +490,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		err?: { name: string; message: string; stack?: string };
 		fields?: Record<string, unknown>;
 	}): void => ipcRenderer.send("log:record", record),
+
+	// The Logs tab's reader over `<data-dir>/logs/` (#3635). Nothing here names a
+	// path: `read` takes a filter, a limit and a cursor an earlier read returned.
+	// Every call rejects, with the message main threw, when the sender is not the
+	// app window or the payload is malformed. `tailStart` replaces this window's
+	// tail; the records it follows arrive on `onRecords`, which returns its own
+	// unsubscribe. The shapes mirror `log-reader.ts` and `log-reader-ipc.ts`,
+	// inlined because this file is a CommonJS script and must not grow imports.
+	logs: {
+		list: (): Promise<LogFileInfoShape[]> =>
+			ipcRenderer.invoke("logs:list").catch((e: unknown) => {
+				throw unwrapIpcError(e);
+			}),
+		read: (request: LogReadRequestShape): Promise<LogReadResultShape> =>
+			ipcRenderer.invoke("logs:read", request).catch((e: unknown) => {
+				throw unwrapIpcError(e);
+			}),
+		tailStart: (filter: LogFilterShape): Promise<void> =>
+			ipcRenderer.invoke("logs:tail-start", filter).catch((e: unknown) => {
+				throw unwrapIpcError(e);
+			}),
+		tailStop: (): Promise<void> =>
+			ipcRenderer.invoke("logs:tail-stop").catch((e: unknown) => {
+				throw unwrapIpcError(e);
+			}),
+		onRecords: (callback: (batch: LogBatchShape) => void) => {
+			const handler = (_event: unknown, batch: LogBatchShape) => callback(batch);
+			ipcRenderer.on("logs:records", handler);
+			return () => ipcRenderer.removeListener("logs:records", handler);
+		},
+	},
 
 	// The absolute path of a `File` the user picked or dropped, for a body file:
 	// the engine opens the file itself, so the renderer needs its path and never

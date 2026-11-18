@@ -27,7 +27,7 @@ import {
 	shell,
 	WebContentsView,
 } from "electron";
-import { existsSync } from "fs";
+import { existsSync, promises as fsPromises } from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -113,6 +113,7 @@ import {
 	applyFloorFromEngine,
 } from "./app-log.js";
 import { registerLogIpc } from "./log-ipc.js";
+import { registerLogReaderIpc, type LogReaderIpc } from "./log-reader-ipc.js";
 import { registerFileIpc } from "./file-ipc.js";
 import { registerSaveFileIpc } from "./save-file-ipc.js";
 import { createFileRoots } from "./file-roots.js";
@@ -1007,6 +1008,9 @@ function isAppFrame(event: IpcSenderLike): boolean {
 	return isFromAppMainFrame(event, liveWindow());
 }
 
+/** The Logs tab's IPC, held so a quit can end the tails it started. */
+let logReaderIpc: LogReaderIpc | null = null;
+
 async function startEngine() {
 	try {
 		engineSidecar = new EngineSidecar(
@@ -1641,6 +1645,15 @@ function setupIpcHandlers() {
 		logsPath: appLogsPath,
 	});
 
+	// The Logs tab's list, paged read and pushed tail over the log files, for the
+	// app window's main frame only (#3635); see log-reader-ipc.ts.
+	logReaderIpc = registerLogReaderIpc(ipcMain, {
+		isAppFrame,
+		logsPath: appLogsPath,
+		fs: fsPromises,
+		timers: { setTimeout, clearTimeout },
+	});
+
 	// The folder picker behind Settings > Files and the body editor's "Allow
 	// folder...", which allows what was chosen with the grant secret (#2356),
 	// and the size-only stat behind the body editor's file line, which answers
@@ -1968,9 +1981,11 @@ app.on("before-quit", (event) => {
 	quitShutdown.handleQuit(event);
 });
 
-// The quit is settled by now, so stop the periodic update check and answer a
-// check the user is still waiting on - its events will never arrive.
+// The quit is settled by now, so end the Logs tab's tails, stop the periodic
+// update check and answer a check the user is still waiting on - its events
+// will never arrive.
 app.on("will-quit", () => {
+	logReaderIpc?.stopAll();
 	// Only a loaded updater has anything to stop; loading it now to dispose of
 	// it would be work for a process on its way out.
 	updaterModule?.disposeAutoUpdater();

@@ -11,7 +11,7 @@
  *        one-way - the `runs:progress` / `icon:signal` shape - forwarding a
  *        `error-logger.ts` record onto the app's `"renderer"` logger) and
  *        `app:openLogsFolder` (Settings, General's "Open logs folder"
- *        button).
+ *        button). Reading the files back is `log-reader-ipc.ts`.
  */
 
 import { shell } from "electron";
