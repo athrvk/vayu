@@ -545,7 +545,11 @@ export default function McpSettingsPanel() {
 			setConnecting(client);
 			try {
 				const res = await window.electronAPI.connectMcpClient(client);
-				if (res.ok) {
+				if (res.ok && res.alreadyConnected) {
+					// "success", not "info": the toast store drops anything below the
+					// user's minimum severity, and a click must always answer.
+					showToast(`Vayu is already connected to ${CLIENT_LABEL[client]}.`, "success");
+				} else if (res.ok) {
 					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
 				} else if (res.reason === "cli-not-found") {
 					showToast(

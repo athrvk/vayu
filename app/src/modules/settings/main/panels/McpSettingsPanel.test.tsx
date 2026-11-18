@@ -569,6 +569,35 @@ describe("McpSettingsPanel connect failures", () => {
 
 		expect(toastMessages().join(" ")).toMatch(/couldn't connect .*mcp server is off/i);
 	});
+
+	it("tells the user an existing registration was left alone, not that it was added", async () => {
+		await renderPanel();
+		connectMcpClient.mockResolvedValue({ ok: true, alreadyConnected: true });
+
+		await act(async () => {
+			fireEvent.click(screen.getAllByRole("button", { name: /^connect$/i })[0]);
+		});
+
+		const [toast] = useToastStore.getState().toasts;
+		expect(toast.message).toBe("Vayu is already connected to Claude Code.");
+		// Below the user's minSeverity floor a toast is dropped, so an "info" here
+		// would show nothing after a manual click.
+		expect(toast.variant).toBe("success");
+		expect(toastMessages().join(" ")).not.toMatch(/added/i);
+	});
+
+	it("confirms a fresh registration with a success toast", async () => {
+		await renderPanel();
+		connectMcpClient.mockResolvedValue({ ok: true });
+
+		await act(async () => {
+			fireEvent.click(screen.getAllByRole("button", { name: /^connect$/i })[0]);
+		});
+
+		const [toast] = useToastStore.getState().toasts;
+		expect(toast.message).toBe("Added Vayu to Claude Code.");
+		expect(toast.variant).toBe("success");
+	});
 });
 
 /**

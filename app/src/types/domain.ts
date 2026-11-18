@@ -4354,6 +4354,8 @@ export interface McpConnectResult {
 	 */
 	reason?: "cli-not-found" | "error" | "unsupported" | "not-running";
 	message?: string;
+	/** Set when the client already had this endpoint registered, so nothing was run. */
+	alreadyConnected?: boolean;
 }
 
 /**

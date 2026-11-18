@@ -8,7 +8,8 @@
 /**
  * @file connect.ts
  * @brief One-click "connect this agent to Vayu" by shelling out to a client's
- *        own CLI - `claude mcp add` (Claude Code) and `code --add-mcp` (VS Code).
+ *        own CLI - `claude mcp add` (Claude Code, after a `mcp get` so a second
+ *        click is a no-op) and `code --add-mcp` (VS Code).
  *        Both are designed for exactly this and handle merging into the user's
  *        config. Clients without an add-CLI (Cursor, Codex) are not handled here;
  *        the UI falls back to a copyable snippet for those.
@@ -49,6 +50,8 @@ export interface McpConnectResult {
 	reason?: "cli-not-found" | "error" | "unsupported" | "not-running";
 	/** Human-readable detail (command output on success, error text on failure). */
 	message?: string;
+	/** Set when the client already had this endpoint registered, so nothing was run. */
+	alreadyConnected?: boolean;
 }
 
 /**
@@ -225,6 +228,60 @@ function run(bin: string, args: string[], spawnImpl: SpawnFn): Promise<McpConnec
 	});
 }
 
+// Built from a code point rather than written as `\x1b` in a literal, which
+// no-control-regex rejects.
+const ANSI_SGR = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "g");
+
+/**
+ * Whether `claude mcp get` output names exactly `url`. Only the URL is read:
+ * the surrounding labels and scope wording are the CLI's to change. A longer
+ * port or path (`:98770/mcp`, `/mcp2`) is a different endpoint, so the URL must
+ * be delimited on both sides. Colour codes are stripped first: a coloured
+ * run puts `ESC[0m` right after the URL, which is not a delimiter.
+ */
+function mentionsUrl(output: string | undefined, url: string): boolean {
+	if (!output) return false;
+	const plain = output.replace(ANSI_SGR, "");
+	const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`(?<=^|[\\s"'<(])${escaped}(?=[\\s"'<>),;]|$)`).test(plain);
+}
+
+/**
+ * `claude mcp add` refuses a name that is already registered, so a second
+ * Connect would fail with a duplicate error. Ask first: the same URL needs
+ * nothing, a stale one (the engine moved ports) is replaced, and any failure of
+ * the lookup falls through to a plain add. "Already connected" is decided by
+ * the URL alone: `get` resolves a name across scopes, so a project- or
+ * local-scoped entry with the same URL counts. Replacing is remove then add,
+ * not atomic: if the add fails the old entry is already gone.
+ */
+async function connectClaude(
+	bin: string,
+	url: string,
+	spawnImpl: SpawnFn
+): Promise<McpConnectResult> {
+	const existing = await run(bin, ["mcp", "get", "vayu"], spawnImpl);
+	if (existing.ok && mentionsUrl(existing.message, url)) {
+		return { ok: true, alreadyConnected: true };
+	}
+	// A registration at another scope makes the remove fail; the add below
+	// still lands at user scope, so a failed remove is not an error here.
+	const removed = existing.ok
+		? await run(bin, ["mcp", "remove", "--scope", "user", "vayu"], spawnImpl)
+		: null;
+	// `--scope user` makes it available across all projects (not just cwd).
+	const added = await run(
+		bin,
+		["mcp", "add", "--transport", "http", "--scope", "user", "vayu", url],
+		spawnImpl
+	);
+	if (added.ok || !removed?.ok) return added;
+	return {
+		...added,
+		message: `${added.message ?? "Adding Vayu failed."} The earlier Vayu registration was removed.`,
+	};
+}
+
 /**
  * Register the Vayu MCP endpoint with a client via its own CLI. `url` is the
  * live endpoint (e.g. `http://127.0.0.1:9877/mcp`).
@@ -237,12 +294,7 @@ export async function connectClient(
 	if (client === "claude") {
 		const bin = await resolveBin("claude", spawnImpl);
 		if (!bin) return { ok: false, reason: "cli-not-found" };
-		// `--scope user` makes it available across all projects (not just cwd).
-		return run(
-			bin,
-			["mcp", "add", "--transport", "http", "--scope", "user", "vayu", url],
-			spawnImpl
-		);
+		return connectClaude(bin, url, spawnImpl);
 	}
 	if (client === "vscode") {
 		const bin = await resolveBin("code", spawnImpl);
