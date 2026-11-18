@@ -12,6 +12,7 @@ import {
 	BINARY_FILE_ACCESS_TOKEN,
 	DATA_FILE_LOCATION_TOKEN,
 	ENGINE_URL_ENV_VAR,
+	ENGINE_DOWN_TOKEN,
 	GUARDED_WRITE_SENTENCE,
 	NETWORK_SETTINGS_TOKEN,
 	PROXY_SETTINGS_TOKEN,
@@ -83,8 +84,22 @@ describe("settingRemedy", () => {
 });
 
 describe("engineDownRemedy", () => {
-	it("tells the app user to start the app", () => {
-		expect(engineDownRemedy("app")).toBe("Make sure the Vayu app is running");
+	it("tells the app user the app is open and its engine is not answering, never to start it", () => {
+		const sentence = engineDownRemedy("app");
+		expect(sentence).toBe(
+			"The Vayu app is open but its engine is not answering; wait a moment, or use Restart engine in Settings"
+		);
+		expect(sentence).not.toMatch(/make sure|\bstart\b|is running/i);
+	});
+
+	it("reads as one clause in the sentence the token sits in", () => {
+		const text = resolveRemedyTokens(
+			`Retry once the engine answers (${ENGINE_DOWN_TOKEN}); then go.`,
+			"app"
+		);
+		expect(text).toBe(
+			"Retry once the engine answers (The Vayu app is open but its engine is not answering; wait a moment, or use Restart engine in Settings); then go."
+		);
 	});
 
 	it("tells the CLI user to start the engine or point at one", () => {

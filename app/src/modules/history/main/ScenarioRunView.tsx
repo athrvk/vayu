@@ -145,6 +145,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const liveAppendEpoch = useScenarioRunStore((s) => (s.runId === run.id ? s.appendEpoch : 0));
 	const isStreaming = useScenarioRunStore((s) => s.runId === run.id && s.isStreaming);
 	const streamError = useScenarioRunStore((s) => (s.runId === run.id ? s.error : null));
+	const endedByEngineStop = useScenarioRunStore((s) => s.runId === run.id && s.endedByEngineStop);
 	const livePlan = useScenarioRunStore((s) => (s.runId === run.id ? s.plan : null));
 
 	const storedSteps = useMemo(() => stepRowsFromReport(report), [report]);
@@ -437,8 +438,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 			<div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
 				{streamError && (
 					<Callout severity="warning" title="Live updates stopped" className="enter-fade">
-						{streamError} The run itself is unaffected - reopen this tab once it
-						finishes to read its stored steps.
+						{/* An engine stop's message is the whole story: no run is left to finish. */}
+						{streamError}
+						{!endedByEngineStop &&
+							" The run itself is unaffected - reopen this tab once it finishes to read its stored steps."}
 					</Callout>
 				)}
 

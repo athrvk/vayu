@@ -15,8 +15,9 @@ server is TypeScript, hosted in the Electron main process, built on the official
 when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
-Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
+Once Vayu is running, any agent opts in with one command; with MCP switched off
+or Vayu closed, nothing listens, the connection is refused and the agent's
+client shows its own connection error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -25,11 +26,13 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
   sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
   continues without it, and `mcp:status` reports why so Settings can show it:
   another program holding the port is named, and no endpoint is offered while
-  nothing is listening). Only the port is bound at launch (`listener.ts`, which
-  imports no SDK); the SDK, the tool registry and the service are loaded by the
-  first `POST /mcp` that arrives, so a launch no agent connects to never
-  evaluates them - 5-7 MB of the main process at idle, measured on the packaged
-  Windows app.
+  nothing is listening). Until the first start has bound or failed, the status
+  carries `starting: true` and no error, and Settings says "Starting" with no
+  port and no Retry, re-reading the status until it settles (#3579). Only the
+  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the
+  tool registry and the service are loaded by the first `POST /mcp` that
+  arrives, so a launch no agent connects to never evaluates them - 5-7 MB of
+  the main process at idle, measured on the packaged Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
@@ -53,6 +56,17 @@ shim over the extensionless POSIX script VS Code also installs. A `.cmd`/`.bat`
 shim is run through `cmd.exe`, which Node has required since 20.12. If the CLI
 is not installed, or the run fails for any reason, Connect says so and the
 snippet below it is the manual path.
+
+Connect is safe to click again. For Claude Code it first runs `claude mcp get
+vayu` and reads only whether the exact endpoint URL appears in the output: if it
+does, nothing is run and the panel says Vayu is already connected. The URL alone
+decides this, not the scope: a project- or local-scoped entry with the same URL
+counts. If `vayu` is registered with a different URL (the engine moved ports),
+the old entry is removed at user scope and the new one added. That replace is
+remove then add, not atomic: should the add fail, the old entry is already gone
+and the error says the earlier registration was removed. If `get` fails,
+Connect adds as usual. VS Code has no lookup command, so its Connect always
+runs `--add-mcp`.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
@@ -2448,7 +2462,15 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
-IDs).
+IDs). With the engine unreachable the list callback answers no runs, so the
+static resources above still list (#3577); any other failure still fails the
+list. Every resource, prompt and completion callback words an unreachable
+engine the way a tool does (`server.ts`, `worded`): a read of
+`vayu://scripting/types` with the engine down fails with `Could not reach the
+Vayu engine ...` and the host's remedy, not a bare `fetch failed`. Other
+failures keep their own text: an engine refusal's body is unmasked engine text,
+and the interrupted-call advice describes a tool call that may have completed,
+which a read never was.
 
 ### The script sandbox surface
 
@@ -3170,12 +3192,12 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 
@@ -3337,7 +3359,7 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
 | A tool switched off                                  | `VAYU_MCP_DISABLED_TOOLS`               | Settings → MCP, Tools                |
-| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | make sure the Vayu app is running  |
+| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | the app is open but its engine is not answering: wait, or Settings → Restart engine |
 | `verifySSL: false` on a one-off send                 | add the authority to the engine's `customCaCertificates` through `update_engine_config`, which needs `VAYU_MCP_ALLOW_WRITES` and `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | Settings > Network & connectivity |
 | A `binary` body's file path                          | no setting: the stdio server has no request editor to pick a file in and nothing that allows a folder, so only a folder the engine already allows works | the request editor, or Settings > Files |
 | A collection's remembered data file (`dataFile`)     | never present: `dataFileLocation` is absent on stdio, so no path is remembered; ask the user for it | the app remembers the path |

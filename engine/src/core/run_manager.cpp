@@ -3316,11 +3316,11 @@ const GateReadings& gate) {
         return;
     }
 
-    size_t current_total = context->total_requests ();
-    // The same snapshot the live tick counted its errors from, so the stored
-    // row and the SSE frame for one tick cannot disagree.
-    const auto failures = vayu::count_status_failures (status_snapshot);
-    double error_rate   = failures.error_rate ();
+    // The same snapshot the live tick counted from, total included (#3572), so
+    // the stored row and the SSE frame for one tick cannot disagree.
+    const auto failures        = vayu::count_status_failures (status_snapshot);
+    const size_t current_total = failures.total;
+    double error_rate          = failures.error_rate ();
 
     // Cumulative means since load start, beside the window's rates.
     size_t requests_sent = context->requests_sent.load ();

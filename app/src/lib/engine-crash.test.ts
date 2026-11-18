@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { describeEngineCrash, engineCrashOutput } from "./engine-crash";
+import { describeCrashEndedRuns, describeEngineCrash, engineCrashOutput } from "./engine-crash";
 
 const base = { code: null, signal: null, stderrTail: [], error: null };
 
@@ -44,5 +44,26 @@ describe("engineCrashOutput", () => {
 
 	it("is empty when the engine printed nothing", () => {
 		expect(engineCrashOutput(base)).toBe("");
+	});
+});
+
+describe("describeCrashEndedRuns", () => {
+	it.each([
+		[["load"], "The load test that was running stopped with it."],
+		[["collection"], "The collection run that was running stopped with it."],
+		[
+			["load", "collection"],
+			"The load test and the collection run that were running stopped with it.",
+		],
+		[
+			["collection", "load"],
+			"The load test and the collection run that were running stopped with it.",
+		],
+	] as const)("says %j in a sentence", (ended, sentence) => {
+		expect(describeCrashEndedRuns(ended)).toBe(sentence);
+	});
+
+	it("says nothing when no run ended", () => {
+		expect(describeCrashEndedRuns([])).toBeNull();
 	});
 });

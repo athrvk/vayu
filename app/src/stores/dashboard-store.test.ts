@@ -591,7 +591,9 @@ describe("dashboard-store setFinalReport", () => {
  *
  * Mutation check: let `streamClosed` apply from `streamLost` and the "close
  * after a lost stream" row reddens; let `streamOpened` apply from a stopped run
- * and its row reddens.
+ * and its row reddens. Let `engineStopped` apply from every phase and the
+ * three rows that leave a settled run alone redden; route it through
+ * `awaitingReport` and the three that settle a live run do (#3605).
  */
 describe("dashboard-store phase transitions", () => {
 	const LOST: DashboardPhase = { phase: "streamLost", message: "The connection closed." };
@@ -613,6 +615,9 @@ describe("dashboard-store phase transitions", () => {
 	const fail: Write = (s) => s.reportFailed("r", "Couldn't reach Vayu's engine.");
 	const retry: Write = (s) => s.retryReport("r");
 	const land: Write = (s) => s.setFinalReport("r", done);
+	const engineGone: Write = (s) => s.engineStopped("r");
+	const ENGINE_STOPPED: DashboardPhase = { phase: "engineStopped" };
+	const failedPartly = reportWith("failed");
 
 	it.each<[string, DashboardPhase, Write, DashboardPhase]>([
 		["a stream error while streaming is a lost stream", { phase: "streaming" }, lose, LOST],
@@ -641,6 +646,31 @@ describe("dashboard-store phase transitions", () => {
 		["a finished run stays finished on a late close", FINISHED, close, FINISHED],
 		["a finished run is not stopped", FINISHED, stop, FINISHED],
 		["a finished run's stream is not lost", FINISHED, lose, FINISHED],
+		["an engine stop ends a streaming run", { phase: "streaming" }, engineGone, ENGINE_STOPPED],
+		["an engine stop ends a run whose stream was lost", LOST, engineGone, ENGINE_STOPPED],
+		["an engine stop ends a run awaiting its report", AWAITING, engineGone, ENGINE_STOPPED],
+		["an engine stop leaves a stopped run awaiting its report", STOPPED, engineGone, STOPPED],
+		["an engine stop leaves a report error standing", FAILED_FETCH, engineGone, FAILED_FETCH],
+		["an engine stop leaves a finished run finished", FINISHED, engineGone, FINISHED],
+		[
+			"a run its engine took down is not raised back to streaming",
+			ENGINE_STOPPED,
+			open,
+			ENGINE_STOPPED,
+		],
+		[
+			"a run its engine took down does not lose its stream",
+			ENGINE_STOPPED,
+			lose,
+			ENGINE_STOPPED,
+		],
+		["a run its engine took down is not stopped", ENGINE_STOPPED, stop, ENGINE_STOPPED],
+		[
+			"the stored report settles a run its engine took down",
+			ENGINE_STOPPED,
+			(s) => s.setFinalReport("r", failedPartly),
+			{ phase: "finished", kind: "failed", report: failedPartly },
+		],
 	])("%s", (_name, from, write, to) => {
 		useDashboardStore.getState().startRun("r");
 		useDashboardStore.setState({ phase: from });
@@ -716,7 +746,8 @@ describe("dashboard-store noteLateStop", () => {
  * header's pill and Stop, the keep-awake prompt, the URL bar and the builder's
  * guard. A lost stream is live, because the engine keeps executing the run.
  *
- * Mutation check: answer false for `streamLost` and its row reddens.
+ * Mutation check: answer false for `streamLost` and its row reddens; answer
+ * true for `engineStopped` and its row does (#3605).
  */
 describe("isDashboardRunLive", () => {
 	it.each<[DashboardPhase, boolean, ReturnType<typeof dashboardRunEnding>]>([
@@ -727,6 +758,7 @@ describe("isDashboardRunLive", () => {
 		[{ phase: "awaitingReport", stopped: true }, false, "stopped"],
 		[{ phase: "reportError", message: "x", stopped: false }, false, null],
 		[{ phase: "reportError", message: "x", stopped: true }, false, "stopped"],
+		[{ phase: "engineStopped" }, false, null],
 		[{ phase: "finished", kind: "failed", report: reportWith("failed") }, false, "failed"],
 	])("answers %o as live %s, ended %s", (p, live, ending) => {
 		expect(isDashboardRunLive(p)).toBe(live);
@@ -768,6 +800,7 @@ describe("dashboard-store writes addressed to a run", () => {
 		["setFinalReport", AWAITING, (s) => s.setFinalReport("old", reportWith("completed"))],
 		["reportFailed", AWAITING, (s) => s.reportFailed("old", "Couldn't reach Vayu's engine.")],
 		["retryReport", FAILED_FETCH, (s) => s.retryReport("old")],
+		["engineStopped", STREAMING, (s) => s.engineStopped("old")],
 	])("drops %s for a run the store no longer holds", (_name, from, write) => {
 		useDashboardStore.getState().startRun("old");
 		useDashboardStore.getState().startRun("new");

@@ -104,6 +104,7 @@ describe("buildMcpStatus", () => {
 			running: false,
 			url: MCP_ENDPOINT_URL,
 			enabled: true,
+			starting: false,
 			error: inUse,
 		});
 	});
@@ -116,8 +117,53 @@ describe("buildMcpStatus", () => {
 			error: null,
 			corruptCopy: null,
 		});
-		expect(status).toEqual({ running: true, url: "http://127.0.0.1:9877/mcp", enabled: true });
+		expect(status).toEqual({
+			running: true,
+			url: "http://127.0.0.1:9877/mcp",
+			enabled: true,
+			starting: false,
+		});
 		expect("error" in status).toBe(false);
+	});
+
+	// Before launch reaches the first start, and again while the bind is in
+	// flight, the lifecycle has no listener and no failure (#3579).
+	it("is starting while enabled with neither a listener nor a failure", () => {
+		const status = buildMcpStatus({
+			listener: null,
+			enabled: true,
+			error: null,
+			corruptCopy: null,
+		});
+		expect(status).toEqual({
+			running: false,
+			url: MCP_ENDPOINT_URL,
+			enabled: true,
+			starting: true,
+		});
+		expect("error" in status).toBe(false);
+	});
+
+	it("is not starting once the start failed, so the real reason shows (#2368)", () => {
+		const status = buildMcpStatus({
+			listener: null,
+			enabled: true,
+			error: inUse,
+			corruptCopy: null,
+		});
+		expect(status.starting).toBe(false);
+		expect(status.error).toEqual(inUse);
+	});
+
+	it("is not starting once listening, nor while the server is switched off", () => {
+		expect(
+			buildMcpStatus({ listener: listening(), enabled: true, error: null, corruptCopy: null })
+				.starting
+		).toBe(false);
+		expect(
+			buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy: null })
+				.starting
+		).toBe(false);
 	});
 
 	it("drops a stale error rather than report a running server as failed", () => {

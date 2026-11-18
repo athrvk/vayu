@@ -28,6 +28,7 @@ import type {
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 const STATUS_MATCHES: Exact<MainStatus, RendererStatus> = true;
+const STARTING_MATCHES: Exact<MainStatus["starting"], RendererStatus["starting"]> = true;
 const START_ERROR_MATCHES: Exact<MainStartError, RendererStartError> = true;
 const CONNECT_RESULT_MATCHES: Exact<MainConnectResult, RendererConnectResult> = true;
 const CONNECT_REASONS_MATCH: Exact<
@@ -38,6 +39,7 @@ const CONNECT_REASONS_MATCH: Exact<
 describe("mcp status mirror", () => {
 	test("the main process and the renderer describe the same shapes", () => {
 		expect(STATUS_MATCHES).toBe(true);
+		expect(STARTING_MATCHES).toBe(true);
 		expect(START_ERROR_MATCHES).toBe(true);
 		expect(CONNECT_RESULT_MATCHES).toBe(true);
 		expect(CONNECT_REASONS_MATCH).toBe(true);

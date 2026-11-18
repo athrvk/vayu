@@ -81,6 +81,16 @@ export interface RunningServiceSummary {
 }
 
 /**
+ * The run this window shows live, which the same close would stop (#3604).
+ * Mirrors `LiveRun` in `electron/service-stop-guard.ts`. `label` is what the
+ * run is aimed at ("GET https://..."), where the renderer knows it.
+ */
+export interface LiveRunSummary {
+	kind: "load" | "collection";
+	label: string | null;
+}
+
+/**
  * A collection as the OS icon's menu needs it. Mirrors `OsIconCollection` in
  * `electron/os-icon.ts`.
  */
@@ -290,6 +300,12 @@ interface ElectronAPI {
 	 */
 	enginePort: number | null;
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
+	/**
+	 * Whether Restart engine may go on. Asks first when the run the window
+	 * shows live would stop with it, and answers true at once when none is
+	 * (issue #3604). Never rejects: a question that could not be asked is false.
+	 */
+	confirmEngineRestart: () => Promise<boolean>;
 	/**
 	 * Why the launch (or the last restart) left the app without an engine, when
 	 * that is a reason the user can act on - another program holding the port.
@@ -623,6 +639,12 @@ interface ElectronAPI {
 	 * has no way to read the queries this side derives the list from.
 	 */
 	setRunningServices: (services: RunningServiceSummary[]) => void;
+
+	/**
+	 * The run this window shows live, or `null` once none is, so the same close
+	 * names it first (#3604). One-way and published on change, as above.
+	 */
+	setLiveRun: (run: LiveRunSummary | null) => void;
 
 	/**
 	 * System notifications for the events that finish while the user is in

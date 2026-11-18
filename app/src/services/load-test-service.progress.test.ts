@@ -31,6 +31,7 @@ vi.mock("@/stores", () => ({
 			setFinalReport: vi.fn(),
 			addMetricsBatch: vi.fn(),
 			addMonitorSamples: vi.fn(),
+			engineStopped: vi.fn(),
 		}),
 	},
 	useClientSettingsStore: { getState: () => ({ liveRefreshMs: 0, keepAwakeDuringRuns: false }) },
@@ -139,6 +140,21 @@ describe("LoadTestService - the OS progress indicator", () => {
 		loadTestService.startMonitoring("run_1");
 		failStream("engine went away");
 		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
+	});
+
+	/*
+	 * The engine's process ended under the run (#3605): the run ended with it,
+	 * so the bar flashes failed rather than vanishing as if it had finished.
+	 * Mutation check: drop `failProgress` from `handleEngineStopped` and the
+	 * release clears the bar instead.
+	 */
+	it("says failed, and clears nothing, when the engine stops under the run", () => {
+		loadTestService.startMonitoring("run_1");
+
+		loadTestService.handleEngineStopped();
+
+		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
+		expect(mockClear).not.toHaveBeenCalled();
 	});
 
 	/*
