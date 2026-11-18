@@ -39,7 +39,7 @@ std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
 /// The longest a token that states no lifetime is kept for (`fallbackExpiresIn`
 /// seconds, one year): a larger value is clamped to it, so the millisecond
 /// arithmetic every reader of `expires_in` does cannot overflow.
-constexpr int64_t MAX_FALLBACK_EXPIRES_IN_SECONDS = 365 * 24 * 3600;
+constexpr int64_t MAX_FALLBACK_EXPIRES_IN_SECONDS = int64_t{ 365 } * 24 * 3600;
 
 /// The config members naming a URL @ref acquire_token posts to: the grant's
 /// endpoint, and the refresh endpoint, which falls back to it when empty. A
