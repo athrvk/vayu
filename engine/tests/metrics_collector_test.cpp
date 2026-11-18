@@ -1351,9 +1351,8 @@ std::string frame_inconsistency (const FrameCounts& previous, const FrameCounts&
         " requests carries " + std::to_string (current.errors) +
         " errors and " + std::to_string (current.success) + " successes";
     }
-    const size_t new_requests = current.requests - previous.requests;
-    const size_t new_errors   = current.errors - previous.errors;
-    if (current.requests < previous.requests || new_errors > new_requests) {
+    if (current.requests < previous.requests || current.errors < previous.errors ||
+    current.errors - previous.errors > current.requests - previous.requests) {
         return "frames went from " + std::to_string (previous.requests) + "/" +
         std::to_string (previous.errors) + " to " + std::to_string (current.requests) +
         "/" + std::to_string (current.errors) + " (requests/errors)";
@@ -1365,8 +1364,9 @@ std::string frame_inconsistency (const FrameCounts& previous, const FrameCounts&
 
 // #3572: completions landing between a tick's snapshot and its frame must not
 // reach the frame's total before its error count. Read at two instants, the
-// first frame counted 5 requests and no errors and the second 5 errors and no
-// new requests, a 500% error burst. The frame's total is the snapshot's.
+// first frame counted 6 requests and no errors and the second 6 requests and 5
+// errors: 5 new errors over no new requests. The frame's total is the
+// snapshot's.
 TEST_F (MetricsCollectorTest, LiveFrameTotalIsTheSnapshotsOwnCount) {
     collector->record_success (200, 10.0, 0.0);
     const auto first_snapshot = collector->status_code_distribution ();
