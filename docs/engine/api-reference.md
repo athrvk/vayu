@@ -11024,6 +11024,8 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 954, "passed": 906, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "passDuration": { "count": 474, "mean": 83.4, "min": 61.0, "p50": 80.2,
+                    "p95": 104.7, "p99": 121.3, "max": 160.9 },
   "assertions": { "passed": 432, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
@@ -11074,6 +11076,23 @@ That term is 0 for a run that ended by its iteration count, as the example
 above did (480 = 474 + 6 + 0), and positive for one a deadline or Stop ended
 mid-iteration: 1,150 started, 1,140 completed and none abandoned is 10 cut.
 The app's Steps tab shows it as "Iterations cut short" beside the other two.
+
+**`passDuration`** (#3570) is how long the completed passes took, `{count,
+mean, min, p50, p95, p99, max}` in milliseconds: one pass is a virtual user's
+wall clock from the claim of its first step to the completion of its last
+(that step's `step.after` elements included). A timer wait between two steps
+of the pass is inside it (`timer.think`, a `timer.pacing` or `timer.throughput`
+hold on a later step), and so is everything the runner does between steps; the
+last step's own `step.between` wait and the next pass's start-of-pass pacing
+fall outside it, before the next pass's claim. A `control.loop` jump back to
+the first step continues the pass rather than starting another. Only completed
+passes are timed, so `count` is `iterationsCompleted`: an abandoned pass is
+`iterationsAbandoned` and no pass time, and a pass the deadline or a Stop cut
+is neither. `mean` is the exact sum over the count; the percentiles come from
+one histogram kept to three significant figures, as a step's are. **Absent** for a run in
+which no pass completed, for a design-mode run and for a run stored before the
+field existed. On a single-request run an iteration is one request, so its
+pass time is the request latency and the report carries none.
 
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
@@ -13909,6 +13928,13 @@ execution that failed three is one `failed` step and
 three `assertions.failed`. It is **absent** for a run that made no such assertion, a collection run in
 design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
 has the rest.
+
+`passDuration` (#3570) is a scenario load run's alone too: `{count, mean, min,
+p50, p95, p99, max}` in milliseconds over its completed passes, each from the
+claim of its first step to the completion of its last, timer waits between
+steps included and abandoned passes left out. **Absent** for a run in which no
+pass completed, a collection run in design mode and a run stored before it;
+[Scenario load runs](#scenario-load-runs) has the rest.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never

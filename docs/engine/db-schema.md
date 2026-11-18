@@ -2001,7 +2001,7 @@ of its first step to the completion of its last, timer waits between steps
 included. An abandoned pass is not in it, so `count` is
 `iterations_completed`. Absent for a run in which no pass completed; a
 sequential collection run never writes it and nothing backfills a run stored
-before it.
+before it. The report serves it as `scenario.passDuration`.
 
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full

@@ -1153,8 +1153,12 @@ history row reads it because a run whose work is a sequence has no `url` or
 A scenario load run's **report** carries the per-step breakdown the design-mode
 runner has no need for: `scenario.steps[]`
 (`{index, name, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`)
-plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
-rows, so that array is the only per-step record such a run keeps.
+plus `virtualUsers`, `iterationsAbandoned` and, once a pass completed,
+`passDuration` (`{count, mean, min, p50, p95, p99, max}` in ms, #3570: each
+completed pass from the claim of its first step to the completion of its last,
+timer waits between steps included, abandoned passes left out). It stores no
+per-step `results` rows, so that array is the only per-step record such a run
+keeps.
 
 It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run
 made at least one exact assertion: every `assert.*` outcome, required `extract.*`

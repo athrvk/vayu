@@ -4367,6 +4367,48 @@ TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
 // Pass duration (#3570)
 // ============================================================================
 
+// A pass is its wall clock, from the claim of its first step to the completion
+// of its last, so it holds every step's latency and the think wait between
+// steps 0 and 1. One user sends its passes one after another, so every request
+// is inside a completed pass and the mean pass is at least the think plus three
+// times the run's mean latency. Only that lower bound is asserted: the gaps the
+// runner adds between steps are its own. The slack is 1 ms for the think
+// timer's millisecond clock and 1 ms for the latency histogram's bucket
+// rounding. Mutation check: record the last step's latency instead of the span
+// in `end_iteration` (or stamp `iteration_started_us` on every claim) and the
+// mean reads about 20 ms.
+TEST_F (ScenarioLoadTest, APassDurationIsThePassesWallClockTimerWaitsIncluded) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/slow"), server.url ("/slow"), server.url ("/slow") });
+    constexpr int64_t THINK_MS       = 100;
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_think" }, { "kind", "timer.think" },
+    { "enabled", true }, { "config", { { "ms", THINK_MS } } } } });
+
+    constexpr size_t PASSES = 4;
+    const json report       = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", PASSES }, { "concurrency", 1 } }, execution);
+    const json& scenario = report.at ("scenario");
+    ASSERT_TRUE (scenario.contains ("passDuration")) << scenario.dump ();
+    const json& pass = scenario.at ("passDuration");
+    EXPECT_EQ (pass.at ("count").get<size_t> (), PASSES) << pass.dump ();
+
+    const double step_mean_ms = report.at ("latency").at ("avg").get<double> ();
+    const double floor_ms = (static_cast<double> (THINK_MS) - 2.0) + (3.0 * step_mean_ms);
+    EXPECT_GE (pass.at ("mean").get<double> (), floor_ms)
+    << "a pass was shorter than its three steps and its think wait: " << pass.dump ()
+    << " against a step mean of " << step_mean_ms << " ms";
+    EXPECT_LE (pass.at ("min").get<double> (), pass.at ("p50").get<double> ())
+    << pass.dump ();
+    EXPECT_LE (pass.at ("p50").get<double> (), pass.at ("p95").get<double> ())
+    << pass.dump ();
+    EXPECT_LE (pass.at ("p95").get<double> (), pass.at ("p99").get<double> ())
+    << pass.dump ();
+    EXPECT_LE (pass.at ("p99").get<double> (), pass.at ("max").get<double> ())
+    << pass.dump ();
+}
+
 // An abandoned pass is `iterationsAbandoned` and no pass time, so the count is
 // the completed passes. Rows alternate a reachable step 1 and a refused one, so
 // one user completes two passes of four and abandons two. The gate frame's mean
