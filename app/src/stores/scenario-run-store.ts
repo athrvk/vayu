@@ -84,7 +84,8 @@ interface ScenarioRunState {
 	 * The engine's process ended while this window watched the run (#3605), so
 	 * the run ended with it; {@link error} then says so. Stands until the next
 	 * `startRun`. Read by `ScenarioRunView`, whose callout must not promise a
-	 * run that keeps executing.
+	 * run that keeps executing, and by `RunAnnouncer` (#3621), which says the run
+	 * ended: {@link endedAs} stays null for it, so this flag is the only record.
 	 */
 	endedByEngineStop: boolean;
 	/**
