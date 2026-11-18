@@ -2228,7 +2228,10 @@ A `lifecycle.setup[]` / `teardown[]` row carries the same four keys (#3455), as 
 `ScriptLifecycleSummary` draws them under the row through `ElementMessages`, so a setup that
 refused the run shows its failing `pm.test` and console lines on the Overview and the
 scenario run view, even with no results to list. The row's own `message` is the reason beside
-its phase; an empty or blank one reads as absent and the row falls back to "Failed".
+its phase; an empty or blank one reads as absent and the row falls back to "Failed". A
+sequential run's row also carries its script's `scriptRequests` (#3633), listed under it as
+`ScriptRequestRow`s in call order: the `console` sample folds repeats, so no line indexes a
+record and the two are not interleaved as the Console tab interleaves them.
 
 ## Extractor Misses (`components/shared/ExtractorMisses.tsx`)
 
@@ -2918,7 +2921,7 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 - `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
 - `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered inside the sampled-exchange shell
-- `ScriptRequestRow.tsx` - one `pm.sendRequest` a script made (#3633): a summary row (`MethodBadge`, URL, `StatusCodeBadge` with `ERR` for a call that never connected, the error code, total time) that expands into the request's headers (the sent lines when recorded) and body, the redirect hops, the response's headers and body, and `TimingPhaseTiles`. Composed from `CompactHeadersViewer`, `ResponseBody` and the tiles rather than `UnifiedResponseViewer`, which shows a request body only without a response, lists no sent lines and pins its panels at 500px. The response node is read through `responseHeadFromTrace` (`restore-response.ts`), so a base64 body decodes as the main exchange's does. Drawn by the Console tab (`console/ScriptSection.tsx`). Values render as the engine masked them; the app adds no masking
+- `ScriptRequestRow.tsx` - one `pm.sendRequest` a script made (#3633): a summary row (`MethodBadge`, URL, `StatusCodeBadge` with `ERR` for a call that never connected, the error code, total time) that expands into the request's headers (the sent lines when recorded) and body, the redirect hops, the response's headers and body, and `TimingPhaseTiles`. Composed from `CompactHeadersViewer`, `ResponseBody` and the tiles rather than `UnifiedResponseViewer`, which shows a request body only without a response, lists no sent lines and pins its panels at 500px. The response node is read through `responseHeadFromTrace` (`restore-response.ts`), so a base64 body decodes as the main exchange's does. Drawn by the Console tab (`console/ScriptSection.tsx`) and under a lifecycle row in `ScriptLifecycleSummary`. Values render as the engine masked them; the app adds no masking
 - `SampledExchange.tsx` - the sampled-exchange shell: summary row, expansion, error block and timing tiles
 
 > **One shell for a sample row.** The dashboard's live sample list and the
