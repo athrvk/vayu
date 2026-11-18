@@ -278,9 +278,8 @@ void record_auth_provenance (nlohmann::json& node, const vayu::Request& request)
 std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
 
 /**
- * What an execution's two scripts produced, as the four keys every client
- * already reads: `testResults`, `consoleLogs`, `preScriptError` and
- * `postScriptError`.
+ * What an execution's two scripts produced: `testResults`, `consoleLogs`,
+ * `preScriptError`, `postScriptError` and `scriptRequests` (#3633).
  *
  * One object, several homes - and every design send uses both of its (issue
  * #725). A buffered send merges it into the `/execute` response body *and*
@@ -312,10 +311,17 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
  * request's own script threw and `script_failure_text` when an inherited
  * level did, so the level is named wherever the error is read.
  *
+ * `scriptRequests` is both phases' `pm.sendRequest` records, pre before test,
+ * each with its `source`; a console line's `scriptRequest` is its record's
+ * index in it. Every record's bodies share @p max_trace_body_bytes
+ * (`cap_trace_bodies_together`), applied here because the node is the live
+ * answer and the stored trace's at once.
+ *
  * Non-static: execution_trace_test.cpp drives it directly.
  */
 [[nodiscard]] nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result);
+const vayu::ScriptResult& post_script_result,
+size_t max_trace_body_bytes);
 
 /**
  * A thrown script phase as one line, naming the level that threw (#2522):

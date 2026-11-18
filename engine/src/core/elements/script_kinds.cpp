@@ -98,15 +98,24 @@ ElementMessage console_message (const vayu::ConsoleEntry& line) {
 
 namespace {
 
+/// A `pm.sendRequest` record's `scope`, spelled as a console line's is and,
+/// like it, absent where no level was stamped.
+void stamp_record_scope (nlohmann::json& record, const std::string& scope) {
+    if (!scope.empty ()) {
+        record["scope"] = scope;
+    }
+}
+
 /**
  * Folds one level's script result into the step's slot (#2522). A step runs
  * a script per level - collection, each folder, the request - into one slot
  * that `assert.*` / `extract.*` and the controllers also write, so each
- * result is added to what is there, never assigned over it: tests and
- * console lines appended in run order and stamped with @p scope, `success`
- * false once any level's is, the first level that threw kept as the error,
- * and `control` replaced only by an instruction (a script that asked for
- * nothing does not cancel a controller's skip).
+ * result is added to what is there, never assigned over it: tests, console
+ * lines and `pm.sendRequest` records appended in run order and stamped with
+ * @p scope, a line's record index moved past the records already there,
+ * `success` false once any level's is, the first level that threw kept as the
+ * error, and `control` replaced only by an instruction (a script that asked
+ * for nothing does not cancel a controller's skip).
  */
 void fold_script_result (vayu::ScriptResult& slot,
 vayu::ScriptResult next,
@@ -120,9 +129,17 @@ const std::string& scope) {
         test.scope = scope;
         slot.tests.push_back (std::move (test));
     }
+    const std::size_t records_before = slot.script_requests.size ();
     for (auto& entry : next.console_output) {
         entry.scope = scope;
+        if (auto& index = entry.script_request) {
+            *index += records_before;
+        }
         slot.console_output.push_back (std::move (entry));
+    }
+    for (auto& record : next.script_requests) {
+        stamp_record_scope (record, scope);
+        slot.script_requests.push_back (std::move (record));
     }
     if (next.control.kind != vayu::ScriptControl::Kind::None) {
         slot.control = std::move (next.control);

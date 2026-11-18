@@ -8486,10 +8486,11 @@ not a feature that was skipped but one the runtime cannot have. See
 Because the route has already answered `202`, a streaming run's script output
 has nowhere to be *returned*: the trace's `scripts` node is the only route it
 takes. That node is not a streaming feature - every design send stores it
-(issue #725), with the same four keys the buffered response body carries
-(`testResults`, `consoleLogs`, `preScriptError`, `postScriptError`). One engine
-object fills both, so a live pane and a restored one cannot disagree. A run
-whose scripts said nothing stores no node at all.
+(issue #725), with the same keys the buffered response body carries
+(`testResults`, `consoleLogs`, `preScriptError`, `postScriptError` and, since
+#3633, `scriptRequests`). One engine object fills both, so a live pane and a
+restored one cannot disagree. A run whose scripts said nothing stores no node
+at all.
 
 Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
 `sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see
@@ -8861,8 +8862,38 @@ run-shaped way of stating the same field, not a second store.
     }
   ],
   "consoleLogs": [
+    { "source": "pre", "scope": "collection", "level": "info",
+      "message": "pm.sendRequest POST https://auth.example.test/token -> 200 (41 ms)",
+      "scriptRequest": 0 },
     { "source": "pre", "scope": "collection", "level": "log", "message": "token refreshed" },
     { "source": "test", "scope": "request", "level": "error", "message": "unexpected shape" }
+  ],
+  "scriptRequests": [
+    {
+      "source": "pre",
+      "scope": "collection",
+      "startedAt": 1763452800123,
+      "status": 200,
+      "statusText": "OK",
+      "request": {
+        "method": "POST",
+        "url": "https://auth.example.test/token",
+        "headers": { "Authorization": "<redacted>", "Content-Type": "application/x-www-form-urlencoded" },
+        "sentHeaders": { "Authorization": "<redacted>", "Content-Type": "application/x-www-form-urlencoded" },
+        "sentHeaderLines": [ { "name": "Authorization", "value": "<redacted>" } ],
+        "body": "grant_type=client_credentials"
+      },
+      "response": {
+        "headers": { "content-type": "application/json", "set-cookie": "<redacted>" },
+        "headerLines": [ { "name": "Set-Cookie", "value": "<redacted>" } ],
+        "body": "{\"access_token\":\"tok_123\"}",
+        "bodyBytes": 26,
+        "httpVersion": "HTTP/1.1",
+        "httpVersionDowngraded": false
+      },
+      "totalMs": 41.2, "wireMs": 40.8, "queueWaitMs": 0.1, "dnsMs": 0,
+      "connectMs": 0.4, "tlsMs": 0, "firstByteMs": 38.9, "downloadMs": 1.1
+    }
   ],
   "validation": {
     "checked": true,
@@ -8980,8 +9011,58 @@ threw, they name it - "Collection pre-request script failed - <message>",
 "Folder test script failed - <message>". An `assert.*` or `extract.*`
 element's entry carries the `scope` of the level that declared it.
 
-**The four script keys are stored the same way** (issue #725). `testResults`,
-`consoleLogs`, `preScriptError` and `postScriptError` are returned in the body
+**`scriptRequests` is every `pm.sendRequest` the scripts made** (issue #3633),
+one record per call in execution order, pre before test, in the stored trace's
+own shape (see [`GET /runs/:runId`](#get-runsrunid)) so a reader of a trace
+reads a record too:
+
+- `request`, `response`, `error_type` / `error_message` and the eight `*Ms`
+  timings are the trace's members for the call. `request.url` is the URL the
+  transfer dialled, after `options.auth` and the Postman URL encoding; the
+  redirect hops are `response.redirects`. A record has no `rawRequest`, so a
+  reader synthesizes the raw view from `sentHeaderLines` as it does for a trace
+  without one. A urlencoded body is recorded as the encoded bytes that went
+  out; a `formdata` body is written by libcurl and has no `body`.
+- `source` and `scope` are spelled as `consoleLogs` spells them, `scope`
+  absent where no level was stamped. `startedAt` is when the call began, in
+  epoch milliseconds. `status` is `0` for a transport failure, with the code
+  in `error_type` and no `response` when nothing answered.
+- The call's summary line in `consoleLogs` (the `info` line
+  `pm.sendRequest <METHOD> <url> -> <status> (<n> ms)`) carries
+  **`scriptRequest`**, the index of its record in this array, so a client can
+  draw the two as one row in the line's position. A record with no line
+  pointing at it - the console was off, or the console cap had already
+  dropped the line - belongs after the last line of its script.
+- **Credentials are masked where the record is built**, so the live answer,
+  the stored trace and every reader of it hold the same masked record. In
+  every header map and line list of the record, the request's, the response's
+  and each redirect hop's, the value of a header the export blanks
+  (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
+  `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token` and the rest of the set the
+  logger redacts) or of one the call's `options.auth` wrote (named in
+  `request.authHeaders`) reads `"<redacted>"`, the marker `configSnapshot`
+  uses; a header sent with an empty value stays empty. Each `url`, the
+  request's and each hop's, has a `user:pass@` password and the value of a
+  credential-named query parameter, or of the one `options.auth` placed
+  (`request.authQueryParam`), blanked to `""` exactly as an export blanks a
+  URL and as the summary line already did. Bodies are not judged: a token
+  endpoint's answer keeps its token. This is deliberately not the main
+  exchange's rule, whose trace stays raw.
+- **Bodies are bounded by `maxTraceBodyBytes`, all of them together**: in
+  order, each request and response body of every record is cut to what the
+  bodies before it left of one `maxTraceBodyBytes`, so a send's script
+  requests store at most what its own response may. A cut body carries
+  `bodyTruncated: true` and its true `bodyBytes` (a request body gains the
+  pair too); once the budget is spent a body is stored as `""`. The script
+  itself still received the whole response.
+- Recorded on every design send, buffered and streaming, whatever
+  `scriptEnableConsole` says: a record is trace, not console output. A
+  sequential collection run records its steps' calls too (below); a **load run
+  records none** and keeps only the summary line. Absent when no script sent a
+  request.
+
+**The script keys are stored the same way** (issue #725). `testResults`,
+`consoleLogs`, `preScriptError`, `postScriptError` and `scriptRequests` are returned in the body
 above *and* written to the design run's `trace_data.scripts` as one object, so a
 response restored from History carries the assertions the live one showed. This
 used to hold for a streaming send only, which made a restored ordinary send's
@@ -9293,7 +9374,9 @@ itself; a client that may talk to an older engine should read a bare string as
 field is omitted entirely when neither script logged anything. Each script
 execution keeps at most 1000 lines and 1 MiB (64 KiB a line); a script that
 passes either ends its entries with one `warn` line saying output was dropped.
-See [scripting.md](scripting.md#console-output).
+A `pm.sendRequest` summary line also carries `scriptRequest`, the index of the
+call's record in `scriptRequests` (above, issue #3633). See
+[scripting.md](scripting.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated**
 (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -
@@ -10728,7 +10811,7 @@ capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
 A step whose scripts said anything additionally carries a **`scripts` node**
-(issue #724) - the same object and the same four keys
+(issue #724) - the same object and the same keys
 [`POST /execute`](#post-execute) returns and a design send stores, so a step's
 assertions read the same inside a run as they do on a single send. It is the
 only route those results take: a collection run answers `202` long before its
@@ -10747,6 +10830,10 @@ that threw is not the request's own, the step error names it - "Collection
 pre-request script failed - ...", "Folder test script failed - ..." - where
 the request's own throw keeps "Pre-request script failed - ..." / "Test script
 failed - ...". When more than one level throws, the first one is reported.
+A step's `pm.sendRequest` calls are recorded in that node's `scriptRequests`
+(#3633), every level's in run order, with the masking and the shared
+`maxTraceBodyBytes` budget `POST /execute` describes; a load run's steps record
+none.
 
 A step of a collection **bound to an OpenAPI document** additionally carries a
 `validation` node (issue #681) - the same object and the same shape

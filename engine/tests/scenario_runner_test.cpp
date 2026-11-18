@@ -578,6 +578,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         if (stop_on_error) {
             config["stopOnError"] = true;
         }
+        if (allow_script_requests_) {
+            config["allowScriptRequests"] = true;
+        }
 
         // A new id per start, so a test can run the same collection again.
         const std::string run_id = "run_scenario_" + std::to_string (++runs_started_);
@@ -716,6 +719,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     size_t runs_started_ = 0;
     /// Runs `col_1` with its sub-folders (`scenario.recursive`).
     bool recursive_ = false;
+    /// Lets the steps' scripts call `pm.sendRequest` (`allowScriptRequests`).
+    bool allow_script_requests_ = false;
     /// The caps a streaming step is bounded by, as `POST /runs` resolves them;
     /// unset keeps the plan's compiled-in default.
     std::optional<vayu::StreamBounds> stream_bounds_;
@@ -1334,6 +1339,39 @@ TEST_F (ScenarioRunnerTest, ACollectionLevelThrowErrorsTheStepNamingTheLevel) {
     << rows[0].error;
     EXPECT_NE (rows[0].error.find ("XB COLLECTION PRE THROWS"), std::string::npos);
     EXPECT_EQ (trace["scripts"].value ("preScriptError", ""), rows[0].error);
+}
+
+// A step's trace carries its scripts' `pm.sendRequest` records, each naming
+// its level and phase, and the summary lines index them (#3633). Mutation
+// check: leave `record_script_requests` out of `execute_scenario_run` and the
+// trace has no list.
+TEST_F (ScenarioRunnerTest, AStepsTraceCarriesItsScriptRequests) {
+    allow_script_requests_ = true;
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ script_element ("script.pre", "el_col",
+    "pm.sendRequest('" + server_->url ("/token") + "', function () {});") }));
+    seed_request ("req_a", 0, "/ok", "",
+    "pm.sendRequest('" + server_->url ("/token") + "?again=1', function () {});");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    const auto& scripts = traces[0]["scripts"];
+    ASSERT_TRUE (scripts.contains ("scriptRequests")) << scripts.dump ();
+    const auto& records = scripts["scriptRequests"];
+    ASSERT_EQ (records.size (), 2u) << records.dump ();
+    EXPECT_EQ (records[0]["source"], "pre");
+    EXPECT_EQ (records[0]["scope"], "collection");
+    EXPECT_EQ (records[0]["status"], 200);
+    EXPECT_EQ (records[1]["source"], "test");
+    EXPECT_EQ (records[1]["scope"], "request");
+    EXPECT_NE (
+    records[1]["request"]["url"].get<std::string> ().find ("again=1"), std::string::npos);
+    ASSERT_EQ (scripts["consoleLogs"].size (), 2u) << scripts.dump ();
+    EXPECT_EQ (scripts["consoleLogs"][0]["scriptRequest"], 0);
+    EXPECT_EQ (scripts["consoleLogs"][1]["scriptRequest"], 1);
 }
 
 // A folder sits between the collection and the request: its results carry

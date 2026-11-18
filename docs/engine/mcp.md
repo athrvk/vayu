@@ -710,6 +710,17 @@ Notes:
   payloads cannot come along. Bounded sizes for the fixtures above: 33 K
   characters for the single 1 MB row, 76 K for 100 steps x 1 MB, 120 K for
   200 rows with all three nodes populated (24.7 M unbounded).
+- **A trace can also carry `scripts.scriptRequests`** (issue #3633): one
+  record per `pm.sendRequest` a design send's or a collection-run step's
+  scripts made, each with its own `request` and `response` nodes. The engine
+  writes them masked (credential headers `<redacted>`, URL credentials
+  blanked) and holds all of one trace's record bodies to one
+  `maxTraceBodyBytes` together, so a row's records add at most what its own
+  response may (see [`POST /execute`](api-reference.md#post-execute)). That
+  engine bound is 5 MiB, far above the per-node 32 KB above, which reaches
+  `trace.request` and `trace.response` only; bounding the records' nodes here
+  is #3633's MCP half. The MCP server never sets `allowScriptRequests`, so
+  only a run the app made carries records.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the

@@ -2425,6 +2425,19 @@ when the node is built rather than when the trace is stored - which is why
 `eventsTruncated` is computed from the true total rather than derived from
 whatever the cap happened to be.
 
+A design send or a scenario step whose scripts called `pm.sendRequest` carries
+**`scripts.scriptRequests`** (issue #3633): one record per call in execution
+order, each in the design-mode trace shape above (`request`, `response`,
+`error_type` / `error_message`, the eight timing keys) plus `source`, `scope`,
+`startedAt`, `status` and `statusText`, and without `rawRequest`. Unlike the
+trace around them these records are **masked when written** - a credential
+header's value is `"<redacted>"`, a URL's credentials are blanked to `""` (see
+[POST /execute](api-reference.md#post-execute)) - and their bodies share one
+`maxTraceBodyBytes` between them, applied when the `scripts` node is built,
+because the live answer is the same object; `cap_trace_bodies` does not reach
+them here either. A load run stores none, and a row stored before the field
+has no key.
+
 The `request` node also carries **`rawRequest`** - the message the transfer actually put on the
 wire, the same string the live [`POST /execute`](api-reference.md#post-execute) response returns
 (issue #348). It is what a restored raw-request view reads, because it is the only copy that

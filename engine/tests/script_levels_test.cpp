@@ -42,6 +42,7 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -99,6 +100,20 @@ vayu::ScriptResult threw (const std::string& message) {
     vayu::ScriptResult result;
     result.success       = false;
     result.error_message = message;
+    return result;
+}
+
+/// A script that made a `pm.sendRequest` to each of @p urls, its summary lines
+/// indexing them as the runtime writes them (#3633).
+vayu::ScriptResult sent_requests (const std::vector<std::string>& urls) {
+    vayu::ScriptResult result;
+    for (const auto& url : urls) {
+        vayu::ConsoleEntry line{ vayu::ConsoleLevel::Info, "pm.sendRequest GET " + url };
+        line.script_request = result.script_requests.size ();
+        result.console_output.push_back (std::move (line));
+        result.script_requests.push_back (
+        { { "request", { { "url", url } } }, { "status", 200 } });
+    }
     return result;
 }
 
@@ -521,6 +536,33 @@ TEST_F (ScriptLevelFold, ACutShortLifecycleScriptIsSkippedWithNoMessages) {
     EXPECT_TRUE (outcomes[0].messages.empty ());
 }
 
+// Every level's `pm.sendRequest` records join the slot in run order, stamped
+// with their level, and each line's index moves past the records already
+// there, so it still names its own call (#3633). Mutation check: drop the
+// rebase in `fold_script_result` and the request's lines point at the
+// collection's call.
+TEST_F (ScriptLevelFold, EveryLevelsScriptRequestsAreKeptAndEachLineStillIndexesItsOwn) {
+    answers["collection_pre"] = sent_requests ({ "collection-0" });
+    answers["request_pre"]    = sent_requests ({ "request-0", "request-1" });
+
+    run (Phase::StepBefore,
+    json::array ({ script_element ("script.pre", "collection_pre", "collection"),
+    script_element ("script.pre", "request_pre", "request") }));
+
+    ASSERT_EQ (pre.script_requests.size (), 3u);
+    EXPECT_EQ (pre.script_requests[0]["scope"], "collection");
+    EXPECT_EQ (pre.script_requests[1]["scope"], "request");
+    EXPECT_EQ (pre.script_requests[2]["scope"], "request");
+    ASSERT_EQ (pre.console_output.size (), 3u);
+    for (const auto& line : pre.console_output) {
+        const auto& index = line.script_request;
+        ASSERT_HAS_VALUE (index) << line.message;
+        const auto& record = pre.script_requests.at (*index);
+        EXPECT_EQ ("pm.sendRequest GET " + record["request"]["url"].get<std::string> (),
+        line.message);
+    }
+}
+
 // #3371: a script whose `pm.sendRequest` the run's Stop cancelled is no verdict,
 // so its throw and its failed test reach neither its outcome nor the step's
 // slot, while an earlier level's result stays. Mutation check: drop the
@@ -612,10 +654,12 @@ class ScriptLevelSend : public ::testing::Test {
         db_->save_request (r);
     }
 
-    /// The request composed by id, as the app and MCP compose it, then sent.
-    json compose_and_send () const {
-        const auto [compose_status, payload] =
+    /// The request composed by id, as the app and MCP compose it, then sent
+    /// with @p extra merged into the payload.
+    json compose_and_send (const json& extra = json::object ()) const {
+        auto [compose_status, payload] =
         vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+        payload.update (extra);
         if (compose_status != 200) {
             ADD_FAILURE ()
             << "compose answered " << compose_status << ": " << payload.dump ();
@@ -674,6 +718,79 @@ TEST_F (ScriptLevelSend, ASendReportsTheCollectionsFailingTestBesideTheRequests)
     EXPECT_EQ (tests[1]["scope"], "folder");
     EXPECT_EQ (tests[2]["name"], "request passes");
     EXPECT_EQ (tests[2]["scope"], "request");
+}
+
+// The one stored send's trace; this fixture makes one send per test.
+json stored_trace_of (vayu::db::Database& db) {
+    const auto runs = db.get_all_runs ();
+    if (runs.size () != 1) {
+        ADD_FAILURE () << runs.size () << " runs stored, expected one";
+        return json::object ();
+    }
+    const auto results = db.get_results (runs[0].id);
+    if (results.size () != 1) {
+        ADD_FAILURE () << results.size () << " results stored, expected one";
+        return json::object ();
+    }
+    return json::parse (results[0].trace_data);
+}
+
+// A send's script requests reach the live answer and the stored trace as one
+// list, pre before test, each with the level and the phase that made it, and
+// each summary line naming its own (#3633). Mutation check: leave
+// `record_script_requests` out of `build_design_send` (execution.cpp) and
+// there is no list.
+TEST_F (ScriptLevelSend, ASendsScriptRequestsRideTheLiveAnswerAndTheStoredTrace) {
+    const vayu::tests::EchoServer echo;
+    seed_collection ("col_1", "",
+    json::array ({ script ("script.pre", "el_col",
+    "pm.sendRequest('" + echo.url () + "?from=collection', function () {});") }));
+    seed_request ("col_1", echo.url (),
+    json::array ({ script ("script.post", "el_req",
+    "pm.sendRequest('" + echo.url () + "?from=request', function () {});") }));
+
+    const json answer = compose_and_send ({ { "allowScriptRequests", true } });
+
+    ASSERT_TRUE (answer.contains ("scriptRequests")) << answer.dump ();
+    const auto& records = answer["scriptRequests"];
+    ASSERT_EQ (records.size (), 2u) << records.dump ();
+    EXPECT_EQ (records[0]["source"], "pre");
+    EXPECT_EQ (records[0]["scope"], "collection");
+    EXPECT_NE (
+    records[0]["request"]["url"].get<std::string> ().find ("from=collection"),
+    std::string::npos);
+    EXPECT_EQ (records[1]["source"], "test");
+    EXPECT_EQ (records[1]["scope"], "request");
+    EXPECT_EQ (records[1]["status"], 200);
+
+    const auto& lines = answer["consoleLogs"];
+    ASSERT_EQ (lines.size (), 2u) << lines.dump ();
+    EXPECT_EQ (lines[0]["scriptRequest"], 0);
+    EXPECT_EQ (lines[1]["scriptRequest"], 1);
+
+    const auto trace = stored_trace_of (*db_);
+    EXPECT_EQ (trace["scripts"]["scriptRequests"], records);
+    EXPECT_EQ (trace["scripts"]["consoleLogs"], lines);
+}
+
+// The records are trace, so a send with the console off still keeps them, and
+// writes no line.
+TEST_F (ScriptLevelSend, WithTheConsoleOffASendStillRecordsItsScriptRequests) {
+    const vayu::tests::EchoServer echo;
+    auto console = db_->get_config_entry ("scriptEnableConsole");
+    ASSERT_HAS_VALUE (console);
+    console->value = "false";
+    db_->save_config_entry (*console);
+    seed_collection ("col_1", "", json::array ());
+    seed_request ("col_1", echo.url (),
+    json::array ({ script ("script.pre", "el_req",
+    "pm.sendRequest('" + echo.url () + "', function () {});") }));
+
+    const json answer = compose_and_send ({ { "allowScriptRequests", true } });
+
+    EXPECT_FALSE (answer.contains ("consoleLogs")) << answer.dump ();
+    ASSERT_TRUE (answer.contains ("scriptRequests")) << answer.dump ();
+    EXPECT_EQ (answer["scriptRequests"].size (), 1u);
 }
 
 TEST_F (ScriptLevelSend, ASendNamesTheLevelWhoseScriptThrew) {

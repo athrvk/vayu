@@ -1987,6 +1987,27 @@ TEST_F (StreamExecuteTest, AStreamsTraceKeepsTheCollectionsFailingTestUnderItsSc
     EXPECT_EQ (tests[1]["scope"], "request");
 }
 
+// A stream's scripts' `pm.sendRequest` records reach its stored trace, the
+// only place they can land once the route has answered 202 (#3633). The call
+// is refused, so the record is the failure one and no second server is needed.
+// Mutation check: leave `record_script_requests` out of `build_design_send`
+// and the trace has no list, on this transport as on the buffered one.
+TEST_F (StreamExecuteTest, AStreamsTraceCarriesItsScriptRequests) {
+    serve (1);
+    const auto run_id = start (json{ { "allowScriptRequests", true },
+    { "elements", script_elements ("pm.sendRequest('http://127.0.0.1:1/', function () {});") } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    const auto records = trace["scripts"].value ("scriptRequests", json::array ());
+    ASSERT_EQ (records.size (), 1u) << trace["scripts"].dump (2);
+    EXPECT_EQ (records[0]["source"], "pre");
+    EXPECT_EQ (records[0]["status"], 0);
+    EXPECT_EQ (records[0]["error_type"], "CONNECTION_FAILED");
+    EXPECT_EQ (trace["scripts"]["consoleLogs"][0]["scriptRequest"], 0);
+}
+
 // A pre-request script on a stream is not a special case - it edits the request
 // that goes on the wire, exactly as it does on a buffered send. Proven off the
 // origin's own record of what arrived, not off the plan.

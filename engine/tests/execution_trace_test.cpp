@@ -31,14 +31,22 @@ namespace vayu::http::routes {
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
 nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
-const vayu::ScriptResult& post_script_result);
+const vayu::ScriptResult& post_script_result,
+size_t max_trace_body_bytes);
 std::string script_failure_text (const vayu::ScriptResult& result, std::string_view phase);
 } // namespace vayu::http::routes
 
 namespace {
 
 using vayu::http::routes::build_result_trace;
-using vayu::http::routes::build_script_result_node;
+
+// The scripts node at the default `maxTraceBodyBytes`, for the cases that
+// are not about the bound.
+nlohmann::json script_node (const vayu::ScriptResult& pre,
+const vayu::ScriptResult& post,
+size_t max_trace_body_bytes = vayu::core::constants::json::MAX_TRACE_BODY_BYTES) {
+    return vayu::http::routes::build_script_result_node (pre, post, max_trace_body_bytes);
+}
 
 vayu::ScriptResult script_with (std::vector<vayu::TestResult> tests) {
     vayu::ScriptResult result;
@@ -644,7 +652,7 @@ ExecutionTraceStoredEqualsLive,
 
 TEST (ScriptResultNode, ListsBothScriptsAssertionsInExecutionOrder) {
     const auto node =
-    build_script_result_node (script_with ({ passing ("token was issued") }),
+    script_node (script_with ({ passing ("token was issued") }),
     script_with ({ failing ("status is 200", "expected 500 to equal 200") }));
 
     ASSERT_TRUE (node.contains ("testResults")) << node.dump ();
@@ -671,7 +679,7 @@ TEST (ScriptResultNode, NamesTheScriptTheWayConsoleLinesDo) {
     pre.tests.push_back (passing ("fixture is present"));
     pre.console_output.push_back ({ vayu::ConsoleLevel::Log, "checking the fixture" });
 
-    const auto node = build_script_result_node (pre, script_with ({ passing ("ok") }));
+    const auto node = script_node (pre, script_with ({ passing ("ok") }));
 
     EXPECT_EQ (node["testResults"][0]["source"], node["consoleLogs"][0]["source"]);
     EXPECT_EQ (node["testResults"][1]["source"], "test");
@@ -681,8 +689,8 @@ TEST (ScriptResultNode, NamesTheScriptTheWayConsoleLinesDo) {
 // carries, so it keeps meaning exactly what it did - with the phase now said
 // rather than assumed.
 TEST (ScriptResultNode, APostRequestOnlyListIsUnchangedApartFromTheSource) {
-    const auto node = build_script_result_node (
-    vayu::ScriptResult{}, script_with ({ passing ("status is 200") }));
+    const auto node =
+    script_node (vayu::ScriptResult{}, script_with ({ passing ("status is 200") }));
 
     ASSERT_EQ (node["testResults"].size (), 1u);
     EXPECT_EQ (node["testResults"][0]["name"], "status is 200");
@@ -692,8 +700,7 @@ TEST (ScriptResultNode, APostRequestOnlyListIsUnchangedApartFromTheSource) {
 // Absent, not empty: the pane reads an absent list as "no results", and an
 // empty one would put a Tests tab's worth of nothing on every scriptless send.
 TEST (ScriptResultNode, OmitsTheListWhenNeitherScriptAsserted) {
-    const auto node =
-    build_script_result_node (vayu::ScriptResult{}, vayu::ScriptResult{});
+    const auto node = script_node (vayu::ScriptResult{}, vayu::ScriptResult{});
 
     EXPECT_FALSE (node.contains ("testResults")) << node.dump ();
 }
@@ -710,7 +717,7 @@ TEST (ScriptResultNode, NamesTheLevelOfEachTestAndConsoleLine) {
     vayu::ScriptResult post = script_with ({ collection_test, request_test });
     post.console_output.push_back ({ vayu::ConsoleLevel::Warn, "from the folder", "folder" });
 
-    const auto node = build_script_result_node (vayu::ScriptResult{}, post);
+    const auto node = script_node (vayu::ScriptResult{}, post);
 
     EXPECT_EQ (node["testResults"][0]["scope"], "collection");
     EXPECT_EQ (node["testResults"][1]["scope"], "request");
@@ -725,7 +732,7 @@ TEST (ScriptResultNode, OmitsTheScopeWhereNoneWasStamped) {
     vayu::ScriptResult pre = script_with ({ passing ("unstamped") });
     pre.console_output.push_back ({ vayu::ConsoleLevel::Log, "unstamped" });
 
-    const auto node = build_script_result_node (pre, vayu::ScriptResult{});
+    const auto node = script_node (pre, vayu::ScriptResult{});
 
     EXPECT_FALSE (node["testResults"][0].contains ("scope")) << node.dump ();
     EXPECT_FALSE (node["consoleLogs"][0].contains ("scope")) << node.dump ();
@@ -741,10 +748,96 @@ TEST (ScriptResultNode, AnInheritedLevelsErrorNamesTheLevel) {
     post.error_message = "boom";
     post.error_scope   = "folder";
 
-    const auto node = build_script_result_node (pre, post);
+    const auto node = script_node (pre, post);
 
     EXPECT_EQ (node["preScriptError"], "Collection pre-request script failed - ReferenceError: postman is not defined");
     EXPECT_EQ (node["postScriptError"], "Folder test script failed - boom");
+}
+
+// ============================================================================
+// The scripts' `pm.sendRequest` records (issue #3633)
+// ============================================================================
+
+/// A record naming @p url, with @p body as its response body.
+nlohmann::json record_of (const std::string& url, const std::string& body = "") {
+    nlohmann::json record{ { "request", { { "method", "GET" }, { "url", url } } },
+        { "status", 200 } };
+    if (!body.empty ()) {
+        record["response"] = { { "body", body }, { "bodyBytes", body.size () } };
+    }
+    return record;
+}
+
+/// The summary line of the call to @p url, linked to record @p index.
+vayu::ConsoleEntry line_for (const std::string& url, std::size_t index) {
+    vayu::ConsoleEntry line{ vayu::ConsoleLevel::Info, "pm.sendRequest GET " + url };
+    line.script_request = index;
+    return line;
+}
+
+// One ordered list, pre before test, each record naming its phase, and every
+// line's index pointing at its own call. Mutation check: drop the test phase's
+// rebase in `build_script_result_node` and the post line points at a pre call.
+TEST (ScriptResultNode, ListsBothPhasesScriptRequestsAndEachLineIndexesItsOwn) {
+    vayu::ScriptResult pre;
+    pre.script_requests = { record_of ("pre-0"), record_of ("pre-1") };
+    pre.console_output  = { line_for ("pre-0", 0),
+        { vayu::ConsoleLevel::Log, "between" }, line_for ("pre-1", 1) };
+    vayu::ScriptResult post;
+    post.script_requests = { record_of ("test-0") };
+    post.console_output  = { line_for ("test-0", 0) };
+
+    const auto node = script_node (pre, post);
+
+    ASSERT_TRUE (node.contains ("scriptRequests")) << node.dump ();
+    const auto& records = node["scriptRequests"];
+    ASSERT_EQ (records.size (), 3u) << records.dump ();
+    EXPECT_EQ (records[0]["source"], "pre");
+    EXPECT_EQ (records[1]["source"], "pre");
+    EXPECT_EQ (records[2]["source"], "test");
+    EXPECT_EQ (records[2]["request"]["url"], "test-0");
+
+    std::size_t linked = 0;
+    for (const auto& line : node["consoleLogs"]) {
+        if (!line.contains ("scriptRequest")) {
+            continue;
+        }
+        ++linked;
+        const auto& record = records.at (line["scriptRequest"].get<std::size_t> ());
+        EXPECT_EQ ("pm.sendRequest GET " + record["request"]["url"].get<std::string> (),
+        line["message"].get<std::string> ())
+        << line.dump ();
+        EXPECT_EQ (record["source"], line["source"]);
+    }
+    EXPECT_EQ (linked, 3u) << node["consoleLogs"].dump ();
+}
+
+// Absent, not empty, on the same rule as the other keys.
+TEST (ScriptResultNode, OmitsScriptRequestsWhenNoScriptSentOne) {
+    const auto node =
+    script_node (script_with ({ passing ("ok") }), vayu::ScriptResult{});
+
+    EXPECT_FALSE (node.contains ("scriptRequests")) << node.dump ();
+}
+
+// Both phases' bodies share one `maxTraceBodyBytes`, so a send's script
+// requests add at most what its own response may. Mutation check: cap each
+// phase's records alone and the test phase's body keeps all 80 bytes.
+TEST (ScriptResultNode, ScriptRequestBodiesShareOneBudgetAcrossBothPhases) {
+    vayu::ScriptResult pre;
+    pre.script_requests = { record_of ("pre-0", std::string (80, 'p')) };
+    vayu::ScriptResult post;
+    post.script_requests = { record_of ("test-0", std::string (80, 't')) };
+
+    const auto node = script_node (pre, post, /*max_trace_body_bytes=*/100);
+
+    const auto& records = node["scriptRequests"];
+    ASSERT_EQ (records.size (), 2u) << node.dump ();
+    EXPECT_EQ (records[0]["response"]["body"].get<std::string> ().size (), 80u);
+    EXPECT_FALSE (records[0]["response"].contains ("bodyTruncated"));
+    EXPECT_EQ (records[1]["response"]["body"], std::string (20, 't'));
+    EXPECT_TRUE (records[1]["response"].value ("bodyTruncated", false));
+    EXPECT_EQ (records[1]["response"].value ("bodyBytes", std::size_t{ 0 }), 80u);
 }
 
 // The request's own script's error is stored exactly as it always was.
@@ -754,7 +847,7 @@ TEST (ScriptResultNode, TheRequestsOwnErrorIsTheBareMessage) {
     pre.error_message = "x";
     pre.error_scope   = "request";
 
-    const auto node = build_script_result_node (pre, vayu::ScriptResult{});
+    const auto node = script_node (pre, vayu::ScriptResult{});
 
     EXPECT_EQ (node["preScriptError"], "x");
     EXPECT_EQ (vayu::http::routes::script_failure_text (pre, "pre-request"),
