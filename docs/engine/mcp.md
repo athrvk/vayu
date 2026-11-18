@@ -3133,11 +3133,16 @@ read, since the file is hand-editable: a stored value outside that loads as
 fallback when the configured port is taken; the status names the conflict, as
 it does for 9877. Every engine spawn reads the port afresh and passes it as
 `--mcp-port`, which is what the engine's own-port refusal compares against,
-and the listener binds the port the running engine was given rather than the
-saved one, so the two never disagree. A saved port therefore takes effect on
-the next engine restart: `mcp:setPort` only persists, the status reports
-`restartRequired` until then, and `restartEngine` moves the listener onto the
-new port once the restart settles (`followEndpoint` in `lifecycle.ts`).
+and the listener binds the port the engine was given rather than the saved
+one. A spawn that will guard another port than the listener holds stops the
+listener first (`releaseForSpawn` in `lifecycle.ts`, awaited by the sidecar
+before it spawns), so no engine the app started runs while the server holds a
+port that engine does not guard. A saved port therefore takes effect on the
+next engine restart: `mcp:setPort` only persists, the status reports
+`restartRequired` until then, and once the restart settles, either way,
+`restartEngine` binds the listener on the port the last spawn guards
+(`followEndpoint`). The server is down for the length of that restart; a
+server switched off stays off.
 
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
@@ -3187,7 +3192,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
-| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it, and after an engine restart moves the listener to the port that engine guards (`followEndpoint`). |
+| `lifecycle.ts`     | The server's one state (`off`, `released`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. Before an engine spawn that guards another port the listener is released (`releaseForSpawn`), and after the spawn it is bound on the port that engine guards (`followEndpoint`). |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC

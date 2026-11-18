@@ -87,6 +87,9 @@ import {
 	ENGINE_RESTART_BASE_DELAY_MS,
 	MCP_PORT,
 } from "./constants";
+import { freePort } from "./mcp/free-port.testkit.js";
+import { createMcpLifecycle, type McpLifecycleService } from "./mcp/lifecycle.js";
+import { McpListener } from "./mcp/listener.js";
 
 const TEST_PORT = 39876;
 const ADOPTED_PID = 4242;
@@ -617,12 +620,265 @@ describe("EngineSidecar - the MCP port", () => {
 		expect(sidecar.getMcpPort()).toBe(19_877);
 	});
 
+	it("awaits beforeSpawn with the port it then spawns with, and spawns only after it", async () => {
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => 19_877) });
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		let entered!: (port: number) => void;
+		const hookEntered = new Promise<number>((resolve) => (entered = resolve));
+		const sidecar = new EngineSidecar(
+			[TEST_PORT],
+			system,
+			() => {},
+			() => {},
+			async (port) => {
+				entered(port);
+				await held;
+			}
+		);
+
+		const starting = sidecar.start();
+		// Raced, so a start that skips the hook fails here rather than hanging.
+		expect(await Promise.race([hookEntered, starting.then(() => "spawned without it")])).toBe(
+			19_877
+		);
+		// The listener binds this while the hook runs, so it names the incoming port.
+		expect(sidecar.getMcpPort()).toBe(19_877);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		release();
+		await starting;
+
+		expect(spawnedMcpPorts(system)).toEqual(["19877"]);
+	});
+
 	it("reads the real system's port from mcp-config.json", async () => {
 		writeFileSync(join(fake.userData, "mcp-config.json"), JSON.stringify({ port: 19_877 }));
 		vi.resetModules();
 		const fresh = await import("./sidecar");
 
 		expect(fresh.defaultSidecarSystem.mcpPort()).toBe(19_877);
+	});
+});
+
+/*
+ * #3580: no engine this app started runs while the MCP server holds a port that
+ * engine does not guard. The real lifecycle and a real listener, wired the way
+ * main.ts wires them: the sidecar's pre-spawn hook releases, and whoever
+ * awaited the spawn calls `followEndpoint` after it (`restartEngine`'s
+ * `finally`). Mutation check: drop the `beforeSpawn` call from `launch()`, or
+ * move it after `spawnChild`, and the first case reds with the listener still
+ * up at the spawn.
+ */
+describe("EngineSidecar - the MCP listener across a spawn", () => {
+	const mcpUrl = (port: number) => `http://127.0.0.1:${port}/mcp`;
+
+	async function twoFreePorts(): Promise<[number, number]> {
+		const first = await freePort();
+		let second = await freePort();
+		while (second === first) second = await freePort();
+		return [first, second];
+	}
+
+	async function canBind(port: number): Promise<boolean> {
+		const probe = createServer();
+		return new Promise((resolve) => {
+			probe.once("error", () => resolve(false));
+			probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+		});
+	}
+
+	function wiredToMcp(system: SidecarSystem, enabled: () => boolean = () => true) {
+		const service: McpLifecycleService = {
+			handleRequest: async () => {},
+			stop: async () => {},
+		};
+		let sidecar: EngineSidecar | null = null;
+		const lifecycle = createMcpLifecycle({
+			isEnabled: enabled,
+			endpoint: () => ({
+				host: "127.0.0.1",
+				port: sidecar?.getMcpPort() ?? system.mcpPort(),
+			}),
+			makeListener: (endpoint, loadHandler) => new McpListener({ ...endpoint, loadHandler }),
+			loadServiceFactory: async () => () => service,
+			log: () => {},
+		});
+		sidecar = new EngineSidecar(
+			[TEST_PORT],
+			system,
+			() => {},
+			() => {},
+			(port) => lifecycle.releaseForSpawn(port)
+		);
+		return { sidecar, lifecycle };
+	}
+
+	/** `restartEngine` in main.ts: the restart, then the follow whichever way it went. */
+	async function restartEngine(
+		sidecar: EngineSidecar,
+		lifecycle: ReturnType<typeof wiredToMcp>["lifecycle"]
+	): Promise<unknown> {
+		try {
+			await sidecar.restart(0);
+			return null;
+		} catch (error) {
+			return error;
+		} finally {
+			await lifecycle.followEndpoint();
+		}
+	}
+
+	it("releases the listener before spawning an engine that guards another port, and binds that port after", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		const listeningAtSpawn: boolean[] = [];
+		const spawn = system.spawnEngine;
+		system.spawnEngine = vi.fn((...args: Parameters<SidecarSystem["spawnEngine"]>) => {
+			listeningAtSpawn.push(lifecycle.listener() !== null);
+			return spawn(...args);
+		});
+		try {
+			await sidecar.start();
+			await lifecycle.start();
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(first));
+
+			vi.mocked(system.mcpPort).mockReturnValue(second);
+			expect(await restartEngine(sidecar, lifecycle)).toBeNull();
+
+			expect(listeningAtSpawn).toEqual([false, false]);
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(second));
+			expect(lifecycle.listener()?.isRunning()).toBe(true);
+			expect(await canBind(first)).toBe(true);
+		} finally {
+			await lifecycle.stop();
+		}
+	});
+
+	// The launch's own case: Settings is open before the first spawn, the server
+	// is switched on there (binding the configured port, since nothing has been
+	// spawned) and the port is then changed; `whenReady` follows `engineStartup`.
+	it("moves a server switched on before the first spawn onto the port saved meanwhile", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		const listeningAtSpawn: boolean[] = [];
+		const spawn = system.spawnEngine;
+		system.spawnEngine = vi.fn((...args: Parameters<SidecarSystem["spawnEngine"]>) => {
+			listeningAtSpawn.push(lifecycle.listener() !== null);
+			return spawn(...args);
+		});
+		try {
+			await lifecycle.start();
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(first));
+			vi.mocked(system.mcpPort).mockReturnValue(second);
+
+			await sidecar.start();
+			await lifecycle.followEndpoint();
+			await lifecycle.start();
+
+			expect(listeningAtSpawn).toEqual([false]);
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(second));
+			expect(await canBind(first)).toBe(true);
+		} finally {
+			await lifecycle.stop();
+		}
+	});
+
+	it("leaves a listener already on the port the spawn guards in place", async () => {
+		const [first] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		try {
+			await sidecar.start();
+			await lifecycle.start();
+			const listener = lifecycle.listener();
+
+			expect(await restartEngine(sidecar, lifecycle)).toBeNull();
+
+			expect(lifecycle.listener()).toBe(listener);
+		} finally {
+			await lifecycle.stop();
+		}
+	});
+
+	it("keeps a switched-off server off through a restart onto another port", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system, () => false);
+		await sidecar.start();
+		await lifecycle.start();
+
+		vi.mocked(system.mcpPort).mockReturnValue(second);
+		expect(await restartEngine(sidecar, lifecycle)).toBeNull();
+
+		expect(lifecycle.isActive()).toBe(false);
+		expect(await canBind(first)).toBe(true);
+		expect(await canBind(second)).toBe(true);
+	});
+
+	it("leaves the last word to a switch-off that lands during the restart", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		await sidecar.start();
+		await lifecycle.start();
+		const spawn = system.spawnEngine;
+		system.spawnEngine = vi.fn((...args: Parameters<SidecarSystem["spawnEngine"]>) => {
+			void lifecycle.stop();
+			return spawn(...args);
+		});
+
+		vi.mocked(system.mcpPort).mockReturnValue(second);
+		expect(await restartEngine(sidecar, lifecycle)).toBeNull();
+
+		expect(lifecycle.isActive()).toBe(false);
+		expect(await canBind(second)).toBe(true);
+	});
+
+	it("ends a restart that fails before its spawn with the listener on the port the last spawn guards", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		try {
+			await sidecar.start();
+			await lifecycle.start();
+
+			vi.mocked(system.mcpPort).mockReturnValue(second);
+			// Another program took the engine's port while it was down.
+			vi.mocked(system.isPortFree).mockResolvedValue(false);
+			expect(await restartEngine(sidecar, lifecycle)).toBeInstanceOf(EnginePortInUseError);
+
+			expect(sidecar.getMcpPort()).toBe(first);
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(first));
+		} finally {
+			await lifecycle.stop();
+		}
+	});
+
+	it("ends a restart whose engine dies after the spawn with the listener on the port it was spawned with", async () => {
+		const [first, second] = await twoFreePorts();
+		const { system, state } = fakeSystem({ mcpPort: vi.fn(() => first) });
+		const { sidecar, lifecycle } = wiredToMcp(system);
+		try {
+			await sidecar.start();
+			await lifecycle.start();
+
+			vi.mocked(system.mcpPort).mockReturnValue(second);
+			vi.mocked(system.spawnEngine).mockImplementation(() => {
+				const child = new FakeChild();
+				state.spawned.push(child);
+				child.exit(3, null);
+				return child as unknown as ChildProcess;
+			});
+			expect(await restartEngine(sidecar, lifecycle)).toBeInstanceOf(Error);
+
+			expect(sidecar.getMcpPort()).toBe(second);
+			expect(lifecycle.listener()?.url).toBe(mcpUrl(second));
+			expect(await canBind(first)).toBe(true);
+		} finally {
+			await lifecycle.stop();
+		}
 	});
 });
 

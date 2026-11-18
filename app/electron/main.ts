@@ -1014,7 +1014,10 @@ async function startEngine() {
 			ENGINE_PORT_CANDIDATES,
 			defaultSidecarSystem,
 			publishEnginePort,
-			receiveGrantSecret
+			receiveGrantSecret,
+			// No engine runs while the MCP server holds a port it does not guard
+			// (#3580); whoever awaits the spawn calls `followEndpoint` after it.
+			(mcpPort) => mcpLifecycle.releaseForSpawn(mcpPort)
 		);
 		// Before the start, whose first transitions happen inside it.
 		bridgeEngineLifecycle(engineSidecar, {
@@ -1107,8 +1110,8 @@ function loadMcp(): Promise<McpModule> {
 }
 
 /**
- * The MCP port the running engine refuses to reach: the one the sidecar last
- * spawned it with, or the configured one before any engine was spawned. The
+ * The MCP port the engine refuses to reach: the one the sidecar is spawning it
+ * with or last spawned it with, or the configured one before any spawn. The
  * listener binds this rather than the configured port, so a port saved in
  * Settings moves the server only once the engine has been restarted onto it
  * (#3580).
@@ -1224,8 +1227,8 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		);
 		return { success: false, error: errorMessage };
 	} finally {
-		// Whichever way it went, the engine that may be running now was spawned
-		// with the configured MCP port, so the listener moves onto that one.
+		// Whichever way it went, the listener goes to the port the last spawn
+		// guards: the sidecar released it before that spawn if it was elsewhere.
 		await mcpLifecycle.followEndpoint();
 	}
 }
@@ -1906,6 +1909,9 @@ app.whenReady().then(async () => {
 	// reaches the arming below, so it releases the checks waiting on it here.
 	void engineStartup?.catch(markUpdaterArmed);
 	await engineStartup;
+	// A server switched on before the first spawn bound the configured port, and
+	// the spawn released it if Settings moved the port meanwhile (#3580).
+	await mcpLifecycle.followEndpoint();
 
 	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
 	// throws and never blocks on the network - the resolution is local to

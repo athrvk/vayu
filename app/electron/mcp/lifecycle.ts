@@ -17,6 +17,12 @@
  *        mid-start waits for the start and closes what it bound, and a service
  *        whose load outlives its listener is never built (#3337).
  *
+ *        The listener only ever holds the port the engine guards (#3580): a
+ *        spawn that will guard another port first takes it down
+ *        (`releaseForSpawn`), and `followEndpoint` binds it again once the
+ *        engine is up. A released server is off, not disabled: it is the one
+ *        state `followEndpoint` starts from.
+ *
  *        Electron-free and SDK-free on purpose: `main.ts` imports it eagerly
  *        (`startup-import-graph.test.ts`), and the SDK arrives through
  *        `loadServiceFactory` on the first request.
@@ -47,9 +53,9 @@ export interface McpLifecycleDeps<S extends McpLifecycleService> {
 	/** The persisted preference; a throw is recorded as a failed start. */
 	isEnabled(): boolean;
 	/**
-	 * Where the next bind goes, read by each start: the port the running engine
-	 * refuses to reach, so the listener never holds one the engine does not
-	 * guard (#3580). A throw is recorded as a failed start.
+	 * Where the next bind goes, read by each start: the port the engine being
+	 * spawned, or last spawned, refuses to reach (#3580). A throw is recorded as
+	 * a failed start.
 	 */
 	endpoint(): McpEndpoint;
 	/** A listener on `endpoint` that asks `loadHandler` for the handler on its first request. */
@@ -84,15 +90,26 @@ export interface McpLifecycle<S extends McpLifecycleService> {
 	/** The port the listener holds, or the one the last start failed to bind; else null. */
 	heldPort(): number | null;
 	/**
-	 * Stop and start again if `endpoint()` now names another port than the one
-	 * held (or failed on), so the listener follows an engine restart onto the
-	 * port it now guards. Nothing to do when off. Never rejects.
+	 * Called before each engine spawn with the MCP port that engine will guard.
+	 * A listener on any other port is taken down and left released, so no
+	 * engine runs while the server holds a port it does not guard; a stop or a
+	 * start that lands before `followEndpoint` has the last word. A server on
+	 * `guardedPort`, off, or failed is left as it is. Never rejects.
+	 */
+	releaseForSpawn(guardedPort: number): Promise<void>;
+	/**
+	 * Once a spawn has settled: start a server `releaseForSpawn` released, or
+	 * stop and start again one that holds (or failed on) another port than
+	 * `endpoint()` now names, so the listener follows the engine onto the port
+	 * it guards. Nothing to do when off. Never rejects.
 	 */
 	followEndpoint(): Promise<void>;
 }
 
 type State<S> =
 	| { kind: "off" }
+	/** Off for an engine spawn, until `followEndpoint` starts it again. */
+	| { kind: "released" }
 	| { kind: "starting"; done: Promise<void> }
 	| {
 			kind: "listening";
@@ -105,6 +122,7 @@ type State<S> =
 	| { kind: "failed"; error: McpStartError; port: number | null };
 
 const OFF = { kind: "off" } as const;
+const RELEASED = { kind: "released" } as const;
 
 export function createMcpLifecycle<S extends McpLifecycleService>(
 	deps: McpLifecycleDeps<S>
@@ -202,12 +220,17 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 		return done;
 	}
 
-	function stop(): Promise<void> {
+	/** Moves past every async step in flight and closes what is up; `next` is what remains. */
+	function takeDown(next: typeof OFF | typeof RELEASED): Promise<void> {
 		generation++;
 		const previous = state;
-		state = OFF;
+		state = next;
 		stopping = Promise.all([stopping, release(previous)]).then(() => undefined);
 		return stopping;
+	}
+
+	function stop(): Promise<void> {
+		return takeDown(OFF);
 	}
 
 	function heldPort(): number | null {
@@ -225,8 +248,16 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 		}
 	}
 
+	async function releaseForSpawn(guardedPort: number): Promise<void> {
+		while (state.kind === "starting") await state.done;
+		if (state.kind !== "listening" || state.endpoint.port === guardedPort) return;
+		await takeDown(RELEASED);
+	}
+
 	async function followEndpoint(): Promise<void> {
 		if (state.kind === "starting") await state.done;
+		// A stop or start since the release replaced this state, and has the last word.
+		if (state.kind === "released") return start();
 		const held = heldPort();
 		if (held === null || !endpointMovedFrom(held)) return;
 		const stopped = stop();
@@ -240,6 +271,7 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 	return {
 		start,
 		stop,
+		releaseForSpawn,
 		followEndpoint,
 		heldPort,
 		listener: () => (state.kind === "listening" ? state.listener : null),

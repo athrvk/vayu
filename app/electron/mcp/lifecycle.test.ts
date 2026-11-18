@@ -586,3 +586,159 @@ describe("createMcpLifecycle and the endpoint", () => {
 		}
 	});
 });
+
+/*
+ * #3580: an engine spawn that will guard another port takes the listener down
+ * first, so no engine runs beside a server on a port it does not guard, and
+ * `followEndpoint` brings it back on the new port. Mutation checks: let
+ * `releaseForSpawn` resolve without taking the listener down, and the release
+ * cases red with it still bound; drop `followEndpoint`'s `released` branch, and
+ * the follow cases red; let it start from `off` as it does from `released`,
+ * and the stop case reds.
+ */
+describe("createMcpLifecycle across an engine spawn", () => {
+	const at = (port: number): McpEndpoint => ({ host: "127.0.0.1", port });
+
+	it("takes down a listener on another port than the spawn guards, and binds that port on follow", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+		const previous = h.listeners[0];
+
+		await lifecycle.releaseForSpawn(19_878);
+
+		expect(previous.bound).toBe(false);
+		expect(lifecycle.listener()).toBeNull();
+		expect(lifecycle.heldPort()).toBeNull();
+		expect(lifecycle.isActive()).toBe(false);
+
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(2);
+		expect(lifecycle.listener()).toBe(h.listeners[1]);
+		expect(h.listeners[1].endpoint).toEqual(at(19_878));
+	});
+
+	it("leaves a listener on the guarded port in place", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+
+		await lifecycle.releaseForSpawn(19_877);
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(1);
+		expect(lifecycle.listener()).toBe(h.listeners[0]);
+	});
+
+	it("waits out a start in flight, then takes down what it bound", async () => {
+		const { h, lifecycle, nextBind } = harness();
+		h.endpoint = () => at(19_877);
+		const held = gate();
+		h.configure = (l) => (l.startGate = held);
+		const binding = nextBind();
+		const starting = lifecycle.start();
+		const listener = await binding;
+
+		const releasing = lifecycle.releaseForSpawn(19_878);
+		held.open();
+		await Promise.all([starting, releasing]);
+
+		expect(listener.bound).toBe(false);
+		expect(lifecycle.listener()).toBeNull();
+	});
+
+	it("does not resolve until the listener it took down is closed", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+		const closing = gate();
+		h.listeners[0].stopGate = closing;
+
+		let released = false;
+		const releasing = lifecycle.releaseForSpawn(19_878).then(() => (released = true));
+		await drain();
+		expect(released).toBe(false);
+		closing.open();
+		await releasing;
+
+		expect(h.listeners[0].bound).toBe(false);
+	});
+
+	it("binds nothing for a server that is off, through the release and the follow", async () => {
+		const { h, lifecycle } = harness();
+		h.enabled = () => false;
+		await lifecycle.start();
+
+		await lifecycle.releaseForSpawn(19_878);
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(0);
+		expect(lifecycle.isActive()).toBe(false);
+	});
+
+	it("leaves the last word to a stop that lands between the release and the follow", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+
+		await lifecycle.releaseForSpawn(19_878);
+		await lifecycle.stop();
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(1);
+		expect(lifecycle.isActive()).toBe(false);
+	});
+
+	it("starts a released server only if it is still enabled", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+
+		await lifecycle.releaseForSpawn(19_878);
+		h.enabled = () => false;
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(1);
+		expect(lifecycle.isActive()).toBe(false);
+	});
+
+	it("gives the real port back before it resolves, and binds the new one on follow", async () => {
+		const first = await freePort();
+		let second = await freePort();
+		while (second === first) second = await freePort();
+		let port = first;
+		const lifecycle = createMcpLifecycle<FakeService>({
+			isEnabled: () => true,
+			endpoint: () => at(port),
+			makeListener: (endpoint, loadHandler) => new McpListener({ ...endpoint, loadHandler }),
+			loadServiceFactory: async () => (endpoint) =>
+				new FakeService(DEFAULT_MCP_SAFETY_CONFIG, endpoint),
+			log: () => {},
+		});
+		try {
+			await lifecycle.start();
+			expect(lifecycle.listener()?.url).toBe(`http://127.0.0.1:${first}/mcp`);
+
+			// The sidecar names the incoming port before the hook, as `port` does here.
+			port = second;
+			await lifecycle.releaseForSpawn(second);
+			const probe = http.createServer();
+			await new Promise<void>((resolve, reject) => {
+				probe.once("error", reject);
+				probe.listen(first, "127.0.0.1", resolve);
+			});
+			await new Promise((resolve) => probe.close(resolve));
+
+			await lifecycle.followEndpoint();
+			expect(lifecycle.listener()?.url).toBe(`http://127.0.0.1:${second}/mcp`);
+			expect(lifecycle.listener()?.isRunning()).toBe(true);
+		} finally {
+			await lifecycle.stop();
+		}
+	});
+});

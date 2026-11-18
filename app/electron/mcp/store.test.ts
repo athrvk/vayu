@@ -367,29 +367,61 @@ describe("main.ts startup ordering", () => {
 		expect(body).not.toContain("DEFAULT_MCP_SAFETY_CONFIG");
 	});
 
+	/** The body of the top-level function declared as `signature`, asserted non-empty. */
+	function functionBody(signature: string): string {
+		const start = main.indexOf(signature);
+		const end = main.indexOf("\n}\n", start);
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		return main.slice(start, end);
+	}
+
 	/*
-	 * #3580. The listener binds the port the running engine guards, never the
-	 * constant, and a restart moves it there. Mutation check: drop the
-	 * `followEndpoint` call from `restartEngine`, or bind `MCP_PORT` again, and
-	 * this reds.
+	 * #3580. The listener binds the port the engine guards, never the constant.
+	 * Every spawn releases it first when it is elsewhere (the sidecar's
+	 * `beforeSpawn`, sidecar.test.ts), and each caller that awaits a spawn
+	 * follows it afterwards: `restartEngine` in its `finally`, so a failed
+	 * restart follows too. Mutation check: drop the hook from the
+	 * `EngineSidecar` construction, or the `followEndpoint` call from
+	 * `restartEngine`, or bind `MCP_PORT` again, and this reds.
 	 */
-	it("binds the engine's MCP port and moves onto it after an engine restart", () => {
+	it("releases the listener before every spawn and follows the engine after a restart", () => {
 		const wiring = lifecycleWiring();
 		expect(wiring).toContain("endpoint: () => ({ host: MCP_HOST, port: mcpEnginePort() }),");
 		expect(wiring).toContain("new McpListener({ ...endpoint,");
 		expect(main).not.toMatch(/\bMCP_PORT\b/);
 
-		const start = main.indexOf("async function restartEngine()");
-		const end = main.indexOf("\n}\n", start);
-		expect(start).toBeGreaterThan(-1);
-		const body = main.slice(start, end);
-		const restartAt = body.indexOf("await engineSidecar.restart();");
-		const followAt = body.indexOf("await mcpLifecycle.followEndpoint();");
-		expect(restartAt).toBeGreaterThan(-1);
-		expect(followAt).toBeGreaterThan(restartAt);
-		expect(body.slice(body.indexOf("} finally {"))).toContain(
-			"await mcpLifecycle.followEndpoint();"
+		const startEngine = functionBody("async function startEngine()");
+		const construction = startEngine.slice(
+			startEngine.indexOf("new EngineSidecar("),
+			startEngine.indexOf("await engineSidecar.start();")
 		);
+		expect(construction).toContain("(mcpPort) => mcpLifecycle.releaseForSpawn(mcpPort)");
+
+		const restart = functionBody("async function restartEngine()");
+		const restartAt = restart.indexOf("await engineSidecar.restart();");
+		const finallyAt = restart.indexOf("} finally {");
+		expect(restartAt).toBeGreaterThan(-1);
+		expect(finallyAt).toBeGreaterThan(restartAt);
+		expect(restart.slice(finallyAt)).toContain("await mcpLifecycle.followEndpoint();");
+	});
+
+	/*
+	 * A server switched on before the first spawn bound the configured port; a
+	 * port saved before that spawn moves the engine, and the launch has to move
+	 * the listener after it, since `start()` does nothing while listening.
+	 * Mutation check: drop the call after `await engineStartup`, or move it
+	 * above, and this reds.
+	 */
+	it("follows the engine's first spawn once the launch has awaited it", () => {
+		const body = whenReadyBody();
+		const startupAt = body.indexOf("await engineStartup;");
+		const followAt = body.indexOf("await mcpLifecycle.followEndpoint();");
+		const startAt = body.indexOf("await mcpLifecycle.start();");
+
+		expect(startupAt).toBeGreaterThan(-1);
+		expect(followAt).toBeGreaterThan(startupAt);
+		expect(startAt).toBeGreaterThan(followAt);
 	});
 
 	it("saves mcp:setPort through the validating store and answers with the status", () => {
