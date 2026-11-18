@@ -261,6 +261,13 @@
  * 225,160 B; the four caps went to 154,400 / 151,800 / 229,500 / 225,200. The
  * same change's compact result text (no indent) shrinks what a call returns,
  * not `tools/list`, so it buys none of this back.
+ *
+ * #3559's `list_element_kinds` and `get_script_api` (two read tools, each with
+ * a description, one optional argument and a loose output schema), and the
+ * element and script fields that now name them beside their resources, added
+ * 2,838 B to the writes-off rows and 3,026 B to the writes-on rows, taking them
+ * to 157,152 / 154,556 / 232,453 / 228,186 B; the four caps went to 157,400 /
+ * 154,800 / 232,700 / 228,400. #3558's later measurement counts these tools.
  */
 
 import { describe, it, expect } from "vitest";
@@ -280,10 +287,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 154_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 151_800 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 229_500 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 225_200 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 54, maxBytes: 157_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 54, maxBytes: 154_800 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 82, maxBytes: 232_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 82, maxBytes: 228_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

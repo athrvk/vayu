@@ -2321,7 +2321,8 @@ engine and has no per-client gate. What gates it is the user's reveal setting: w
 secrets to agents off, those two tools refuse a script the agent supplies (#1834).
 
 So the MCP server re-serves this endpoint as the `vayu://scripting/completions` resource
-(`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation` - see
+(`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation`, and as
+the `get_script_api` tool (#3559) for a client that reads no resources - see
 [`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface). The reason it reads
 the endpoint rather than describing the surface in its own prose is the one this page
 already demonstrates: a hand-written copy drifts, and the app's own pre-request quick

@@ -356,6 +356,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_requests`        | read     | `GET /requests?collectionId=&q=&limit=&offset=` | - (`collectionId` is optional: omitted, the page spans every live collection and each row's `collectionId` says where it lives, an empty one is an input error; `fields: "full"` without it reads the whole workspace on the engine; paged as `list_collections`; each row a summary - `id`, `collectionId`, `name`, `method`, `url`, `order`, `updatedAt` - unless `fields: "full"` asks for the whole stored row; auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed, on the whole row *before* the summary is cut, so a summary's `url` is masked by the row's API-key auth too) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the whole row, withheld as `list_requests` withholds a full row; an unknown id is a 404 error) |
 | `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host, and held by the engine to the URL it sends (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
+| `list_element_kinds`   | read     | `GET /elements/kinds`                        | - (#3559: without `kind`, `kinds`, one `{kind, category, phases, label}` row per registered kind; with `kind`, that kind's whole catalogue entry, `configSchema` included; an unknown `kind` is an `input` error that names every registered kind; read through the projection `vayu://elements/kinds` serves, see [The element catalogue](#the-element-catalogue)) |
+| `get_script_api`       | read     | `GET /scripting/completions`                 | - (#3559: without `q`, every name's `label` and `detail`; with `q`, the entries whose label, detail or documentation contains it, case-insensitive, `documentation` included, since the documented surface is about 100 KB; a blank `q` is an `input` error; read through the projection `vayu://scripting/completions` serves, see [The script sandbox surface](#the-script-sandbox-surface)) |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, `endTime` is null until the run is completed, failed or stopped, and a row includes a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}`, plus, on a load run that asserted or errored, `assertions` `{exact, sampled, errored, teardownFailed}` and `assertionsPassed` / `assertionsFailed` over its two populations (#2820, #3537: `exact` is `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, `sampled` the deferred replay, never folded into `errorRate`), plus `capacity` `{stopReason, maxHealthyConcurrency?, kneeConcurrency?}` on a capacity run (#2930: the report's `capacity` headline, each level absent when the search did not find it) (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) a design run's `{statusCode, latencyMs}` and a terminal collection run's `{passed, failed, skipped, errored, stopped, verdict}` (#2954: its step outcomes, disjoint, `errored` apart from `failed`, `stopped` a step a Stop cut short and absent from a run stored before #3397; each key absent when not recorded, `verdict` absent when the run declared no budgets) (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and so for a completed run whose drain a Stop cut, which carries `drainCut` `{cancelled}` (#3538: the requests left unanswered, absent otherwise); on a load row `errorRate` uses the same failure definition as the report's `summary.errorRate`, over the stored status-code distribution, and is omitted when none is stored); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `unknownStatus` (`true` only for a status outside the engine's five, else absent), `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
@@ -2214,7 +2216,11 @@ purpose (see [The size of `tools/list` is
 budgeted](#the-size-of-toolslist-is-budgeted)): it is the one rule restated in
 every one of those tools. A table-driven scan in `tools.test.ts` runs over every variable tool's
 description and fails on one that omits the sentence, so a new variable tool
-cannot ship silent about where its tier sits.
+cannot ship silent about where its tier sits. A client that cannot read
+resources still gets the rules: the server instructions carry the sentence and
+the model's `rules`, read from `VARIABLE_RESOLUTION_MODEL` rather than copied,
+so the pointer in each description is not the only way to them (#3559). No
+tool serves the model; it is a fixed rule set, not engine data.
 
 **`resolve_variables`** answers what the per-tier reads cannot: which
 definition of a name actually wins in a given collection/environment context,
@@ -2453,11 +2459,11 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. Masked as `list_runs` is. |
 | `vayu://collections`        | All request collections as a bare array, unpaged, each shaped as a `list_collections` full row (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`; secrets withheld the same way). |
 | `vayu://environments`       | All environments, secret values withheld as `list_environments` withholds them. |
-| `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
+| `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). No tool serves it, since it is a fixed rule set rather than engine data: the server instructions state the tier order and the rules for a client that cannot read resources (#3559). |
 | `vayu://config`             | Engine configuration entries, a URL entry's credentials withheld as `get_engine_config` withholds them. |
-| `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
+| `vayu://scripting/completions` | The script sandbox's full API surface (see below); `get_script_api` reads the same projection by tool. |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
-| `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
+| `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema; `list_element_kinds` reads the same projection by tool. |
 | `vayu://run/{runId}/report` | A run's full report (templated), masked, bounded (the 32 KB body cap and the trace budget) and marked `partial` while the run is unfinished, all as `get_run_report` is (`readRunReportForAgent`, #3557). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
@@ -2496,6 +2502,16 @@ a truncated API list concludes the sandbox cannot do what it can - and neither
 holds a copy of the surface here, which is the whole point: the app's own
 quick-reference panel had gone stale before #233 and this is what replaced it.
 
+`get_script_api` reads the completions by tool (#3559), for a client whose
+model reads tools and not resources (Zed's documentation says it supports
+MCP's tools and prompts). It runs the same `projectScriptingSurface` the
+resource does, so the two cannot disagree. Unfiltered it answers each entry's
+`label` and `detail`, the name and its signature, because the documented
+surface is about 100 KB; `q` narrows to the entries whose label, detail or
+documentation contains it and adds their `documentation`. The `.d.ts` stays a
+resource only: it is for editors, and the signatures a tools-only agent needs
+are the `detail` lines.
+
 ### The element catalogue
 
 `vayu://elements/kinds` re-serves `GET /elements/kinds`, the element
@@ -2505,12 +2521,19 @@ generated element forms read (issue #1516). `create_request` / `update_request`
 / `create_collection` / `update_collection`'s `elements` argument and
 `run_request`'s ad-hoc `elements` argument both name a `kind` as a bare
 string rather than an enumerated one, precisely so a kind the engine adds
-later needs no MCP change - read this resource rather than guessing a kind or
-its config shape. A property with a `default` in that schema is run with
+later needs no MCP change - read the catalogue rather than guessing a kind or
+its config shape. `list_element_kinds` reads it by tool (#3559), through the
+resource's own `projectElementKinds`: a summary row per kind (`kind`,
+`category`, `phases`, `label`) by default, since the whole catalogue is about
+21 KB and most of it is config schemas, and with `kind` that one kind's entry,
+`configSchema` included. An unknown `kind` is an `input` error naming every
+registered kind, as the engine's own refusal of one in an `elements` list now
+does. The `elements` argument's `kind` and `config` descriptions name the tool
+first and the resource second. A property with a `default` in that schema is run with
 that value when its key is left out, so an agent omits the key rather than
 restating it (`assert.size` with no `op` compares `lte`, an `extract.*` with
 no `scope` writes the collection scope; issue #3045).
-`element-kinds.conformance.test.ts` pins the resource, the
+`element-kinds.conformance.test.ts` pins the resource, the tool's rows, the
 schema's own examples and every kind literal a tool description names to the
 engine's own fixture, so a kind renamed engine-side without a matching update
 here fails the build rather than telling an agent to write a kind that no
@@ -2574,8 +2597,9 @@ since snippet placeholders and a `CompletionItemKind` enum mean nothing outside
 an editor. The trim is the only transformation - **no list of `pm.*` names is
 maintained app-side**, which is the point: a name the engine adds reaches agents
 with no second edit, and `resources.test.ts` fails if the resource ever answers
-from a local literal instead of the engine. The tool descriptions carry one
-sentence pointing here, for an agent that never lists resources.
+from a local literal instead of the engine. The script fields' descriptions
+name `get_script_api` first and this resource second, for an agent that never
+lists resources.
 
 ## Prompts
 
@@ -3151,7 +3175,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
-| `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
+| `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `safety`, `graphql-schema`, `catalogue`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: the strict arguments object (`argumentsSchema`), result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `redacted-input.ts` (the refusal of a credential slot written as `<redacted>`), `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
@@ -3179,7 +3203,7 @@ persisted for the service the next first request builds.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 80 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 82 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside the
 lifecycle's service factory (reached only by a listener's first request, after
 the enabled check) and inside the two IPC handlers that need the tool catalog. The main process is unbundled, so a static import here is

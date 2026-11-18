@@ -180,6 +180,18 @@ export const engineConfigSchema = z.looseObject({
 	entries: rowsOf(z.looseObject({ key: optStr })),
 });
 
+/** `list_element_kinds`: `kinds` without a `kind` argument, that one kind's entry with it. */
+export const elementKindsSchema = z.looseObject({
+	kinds: rowsOf(z.looseObject({ kind: optStr, category: optStr, label: optStr })),
+	kind: optStr,
+	configSchema: anyRecord.optional(),
+});
+
+/** `get_script_api`: `documentation` rides only on the entries a `q` matched. */
+export const scriptApiSchema = z.looseObject({
+	completions: rowsOf(z.looseObject({ label: optStr, detail: optStr, documentation: optStr })),
+});
+
 export const graphqlSdlSchema = z.looseObject({
 	endpoint: nullStr,
 	fetchedAt: optNum,
