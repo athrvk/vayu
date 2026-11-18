@@ -313,7 +313,8 @@ tool result, resource and prompt that embeds JSON, because the reader is a
 model's context window and indentation is cost with no reader (about 50% more
 bytes on a nested answer). A result with `structuredContent` sends the same
 document in both places. `tools.test.ts` ("result text is compact JSON") fails
-when a pretty printer returns.
+when a pretty printer returns to `jsonResult`, `structuredResult` or a tool
+built on them; the resource and prompt sites are not pinned by a test.
 
 **Argument names are uniform** (#2446), held by
 `schema-naming.conformance.test.ts` over every tool's top-level inputs: an id
