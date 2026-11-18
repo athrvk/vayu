@@ -184,7 +184,8 @@ export type RequestBody =
  * `inherit` resolves by walking the parent collection chain at execution time.
  * Collections never use `inherit` - they are always the auth source.
  */
-export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
+export type OAuth2GrantType =
+	"authorization_code" | "client_credentials" | "password" | "jwt_bearer";
 
 /** Where a token or refresh request carries an {@link OAuth2ParamRow}. */
 export type OAuth2ParamSendAs = "body" | "url" | "header";
@@ -202,6 +203,17 @@ export interface OAuth2ParamRow {
 	value: string;
 	enabled?: boolean;
 	sendAs?: OAuth2ParamSendAs;
+}
+
+/**
+ * One extra claim of a `jwt_bearer` assertion (RFC 7523, #3632). The engine
+ * writes `iss`, `sub`, `aud`, `exp` and `iat` itself, so a row of one of those
+ * names is never sent. Absent `enabled` means enabled.
+ */
+export interface OAuth2ClaimRow {
+	key: string;
+	value: string;
+	enabled?: boolean;
 }
 
 /**
@@ -237,6 +249,24 @@ export interface OAuth2Config {
 	tokenParams?: OAuth2ParamRow[];
 	/** Appended to a refresh request. Absent when empty. */
 	refreshParams?: OAuth2ParamRow[];
+	/** `jwt_bearer`: the assertion's `sub`; `clientId` is its `iss`. */
+	subject?: string;
+	/** `jwt_bearer`: the assertion's `aud`, which is not the `audience` form parameter. */
+	assertionAudience?: string;
+	/** `jwt_bearer`: extra claims beside the five the engine writes. */
+	assertionClaims?: OAuth2ClaimRow[];
+	/** `jwt_bearer`: `exp - iat`, 1 to 3600, default 180. */
+	assertionLifetimeSeconds?: number;
+	/** `jwt_bearer`: default RS256. */
+	signingAlgorithm?: "RS256" | "ES256";
+	/** `jwt_bearer`: the JWT header's `kid`, omitted when empty. */
+	keyId?: string;
+	/** `jwt_bearer`: the signing key's PEM or a reference to it; exactly one of this and `privateKeyFile`. */
+	privateKey?: string;
+	/** `jwt_bearer`: a key file the engine reads at token time. */
+	privateKeyFile?: string;
+	/** Seconds a token that states no `expires_in` is kept for; absent or 0 keeps it until replaced. */
+	fallbackExpiresIn?: number;
 }
 
 /**

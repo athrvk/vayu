@@ -12,7 +12,9 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <expected>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -111,7 +113,8 @@ struct InteractiveExchange {
  * Hash-free ("\x1f"-joined) so the app can compute the identical key in
  * TypeScript (computeOAuth2CacheKey) for the GET/DELETE status endpoints:
  *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
- *   \x1f (grantType == "password" ? username : "")
+ *   \x1f (grantType == "password" ? username :
+ *          grantType == "jwt_bearer" ? subject : "")
  * then, for each of `EXTRA_PARAM_LISTS` in order with at least one
  * `extra_params` row (issue #2536):
  *   \x1f listName ":" key "=" value ( \x1e key "=" value )*
@@ -123,6 +126,31 @@ struct InteractiveExchange {
  * keys exactly as it did before the lists existed.
  */
 std::string cache_key (const nlohmann::json& config);
+
+/**
+ * @brief The signed assertion of a `jwt_bearer` grant (RFC 7523, #3632).
+ *
+ * The claims are `iss` (`clientId`), `sub` (`subject`), `aud`
+ * (`assertionAudience`), `iat` (@p now, in whole seconds) and `exp` (`iat` plus
+ * `assertionLifetimeSeconds`, 180 when absent, held to 1..3600), then each
+ * enabled `assertionClaims` row (`{key, value}`) whose name is not one the
+ * engine wrote. The header carries `signingAlgorithm` (`RS256` by default, or
+ * `ES256`) and `keyId` as `kid` when it is not empty.
+ *
+ * The key is `privateKey`, the PEM itself, or `privateKeyFile`, a path read
+ * through the file-trust rule (`FileAccessPolicy::approved_path`); exactly one
+ * is set. A `privateKey` is the *resolved* PEM: one still holding a
+ * `{{reference}}` is refused, so whoever holds the saved request resolves it
+ * before asking for a token.
+ *
+ * @param now the clock reading `iat` and `exp` are written from; a parameter so
+ *        a test asserts `exp - iat` without reading the wall clock.
+ * @return the compact JWS, or a 400 `oauth2_invalid_config` naming the member
+ *         at fault. No message holds any part of the key.
+ */
+std::expected<std::string, TokenError> build_jwt_assertion (vayu::db::Database& db,
+const nlohmann::json& config,
+std::chrono::system_clock::time_point now);
 
 /**
  * @brief Expiry check with skew: expired iff expires_in > 0 and
@@ -140,7 +168,11 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * an expired token when a refresh_token is available (rotating it if the
  * provider issues a new one); otherwise performs a fresh grant.
  * `authorization_code` requires `interactive` and fails with 409
- * oauth2_interactive_required without it.
+ * oauth2_interactive_required without it. `jwt_bearer` signs an assertion
+ * (`build_jwt_assertion`) and, with no `clientSecret`, sends nothing else of
+ * the client: no `client_id`. A token whose response states no `expires_in`
+ * is kept for `fallbackExpiresIn` seconds when the config sets it (any grant),
+ * and otherwise never expires.
  *
  * One refresh is in flight per cache key (#3344): a call that needs one while
  * another is posting waits for it, under its own deadline and cancel, and

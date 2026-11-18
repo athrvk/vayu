@@ -8,17 +8,26 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <future>
+#include <map>
 #include <string>
+#include <string_view>
 #include <variant>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "jwt_keys.hpp"
+#include "log_capture.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "wait_until.hpp"
 
 using nlohmann::json;
@@ -251,6 +260,46 @@ TEST (OAuthCacheKey, SharedVectors) {
     "tokenParams:X-Api-Key=\x1e"
     "audience=api\x1e"
     "client_assertion=");
+    // Vector 7: jwt_bearer holds its subject in the slot password holds its
+    // username in, and ignores a username. Two subjects are two keys.
+    const json jwt_alice          = { { "grantType", "jwt_bearer" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+        { "subject", "alice" }, { "assertionAudience", "https://idp" } };
+    json jwt_bob                  = jwt_alice;
+    jwt_bob["subject"]            = "bob";
+    json jwt_with_username        = jwt_alice;
+    jwt_with_username["username"] = "u1";
+    EXPECT_EQ (oauth::cache_key (jwt_alice),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "alice");
+    EXPECT_EQ (oauth::cache_key (jwt_bob),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "bob");
+    EXPECT_EQ (oauth::cache_key (jwt_with_username), oauth::cache_key (jwt_alice));
+    json jwt_no_subject = jwt_alice;
+    jwt_no_subject.erase ("subject");
+    EXPECT_EQ (oauth::cache_key (jwt_no_subject),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f");
+    // Vector 8: subject ignored outside jwt_bearer
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
+               { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+               { "subject", "alice" } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f");
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "password" },
+               { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+               { "username", "u1" }, { "subject", "alice" } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "u1");
 }
 
 // The cache key is handed to clients (`cacheKey`) and stored as the token
@@ -1203,6 +1252,505 @@ TEST_F (OAuthClientTest, SerializeTokenShape) {
 
     t.expires_in = 0;
     EXPECT_TRUE (oauth::serialize_token (t)["expiresAt"].is_null ());
+}
+
+// ---------------------------------------------------------------------------
+// jwt_bearer (RFC 7523, #3632)
+// ---------------------------------------------------------------------------
+
+namespace jwt = vayu::tests::jwt;
+
+constexpr std::string_view JWT_BEARER_URN =
+"urn:ietf:params:oauth:grant-type:jwt-bearer";
+constexpr const char* ASSERTION_AUDIENCE = "https://idp.example/token";
+
+/// The form a token endpoint received, percent-decoded.
+std::map<std::string, std::string> decoded_form (const std::string& body) {
+    std::map<std::string, std::string> out;
+    for (const auto& [name, value] : parse_form (body)) {
+        out[name] = vayu::utils::url_decode (value);
+    }
+    return out;
+}
+
+/// The names a form carries, in the order a map keeps them.
+std::vector<std::string> names_of (const std::map<std::string, std::string>& form) {
+    std::vector<std::string> names;
+    names.reserve (form.size ());
+    for (const auto& entry : form) {
+        names.push_back (entry.first);
+    }
+    return names;
+}
+
+/// A slice of the key's body long enough that it cannot occur by chance.
+std::string key_fragment (const std::string& pem) {
+    const auto first_line = pem.find ('\n') + 1;
+    return pem.substr (first_line, 32);
+}
+
+class OAuthJwtBearerTest : public OAuthClientTest {
+    protected:
+    static json config (const MockTokenServer& idp,
+    const std::string& pem,
+    const std::string& path = "/token") {
+        return json{ { "grantType", "jwt_bearer" }, { "accessTokenUrl", idp.url (path) },
+            { "clientId", "svc-client" }, { "subject", "alice@example.com" },
+            { "assertionAudience", ASSERTION_AUDIENCE }, { "privateKey", pem } };
+    }
+
+    static std::string rsa_pem () {
+        return jwt::pkcs8 (jwt::keys ().rsa);
+    }
+
+    TokenResult acquire (const json& config) {
+        return oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    }
+
+    /// The refusal @p config gets, checking that nothing was posted and that
+    /// neither the key nor its text is in the message.
+    oauth::TokenError
+    refusal (const MockTokenServer& idp, const json& config, const std::string& pem) {
+        const TokenResult result = acquire (config);
+        const auto* err          = std::get_if<oauth::TokenError> (&result);
+        if (err == nullptr) {
+            ADD_FAILURE ()
+            << "a token was granted where a refusal was expected";
+            return {};
+        }
+        EXPECT_EQ (err->http_status, 400);
+        EXPECT_EQ (err->code, "oauth2_invalid_config");
+        EXPECT_EQ (idp.hits (), 0)
+        << "a refused assertion must never be posted";
+        EXPECT_EQ (err->message.find (key_fragment (pem)), std::string::npos)
+        << err->message;
+        EXPECT_EQ (err->message.find ("PRIVATE KEY"), std::string::npos) << err->message;
+        return *err;
+    }
+
+    /// Grants @p pem as a file under a scratch directory and returns its path.
+    std::string granted_key_file (const std::string& pem, const std::string& name) {
+        const std::string path = key_file (pem, name);
+        const auto canonical   = vayu::http::grantable_file_path (path);
+        if (!canonical) {
+            ADD_FAILURE () << "not grantable: " << path;
+            return path;
+        }
+        vayu::FileGrant grant;
+        grant.id         = "fgrant_" + name;
+        grant.path       = *canonical;
+        grant.created_at = 1;
+        db_->save_file_grant (grant);
+        return path;
+    }
+
+    /// A file holding @p pem that no grant or allowed folder covers.
+    std::string key_file (const std::string& pem, const std::string& name) {
+        if (scratch_.empty ()) {
+            // Per test, so concurrent ctest processes never share a directory.
+            scratch_ = std::filesystem::temp_directory_path () /
+            (std::string ("vayu-oauth-jwt-") +
+            ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
+            std::filesystem::create_directories (scratch_);
+        }
+        const auto path = scratch_ / name;
+        std::ofstream (path, std::ios::binary) << pem;
+        return path.string ();
+    }
+
+    void TearDown () override {
+        std::error_code ignored;
+        if (!scratch_.empty ()) {
+            std::filesystem::remove_all (scratch_, ignored);
+        }
+        OAuthClientTest::TearDown ();
+    }
+
+    std::filesystem::path scratch_;
+};
+
+/// A token whose signature verifies under @p pub, with its decoded parts.
+jwt::Parts expect_signed (const std::string& token, const jwt::KeyPtr& pub, std::string_view alg) {
+    EXPECT_TRUE (jwt::verifies (token, pub, alg));
+    return jwt::split (token);
+}
+
+// The grant posts the URN and one signed assertion, and nothing else of the
+// client: a secretless client authenticates by the assertion alone.
+// Mutation check: delete the `jwt_bearer` branch of `build_grant_request` and
+// both algorithms fail on the grant type.
+TEST_F (OAuthJwtBearerTest, PostsTheGrantTypeAndASignedAssertionAndNothingElse) {
+    struct Case {
+        const char* alg;
+        const jwt::KeyPtr& key;
+    };
+    for (const Case& scenario :
+    { Case{ "RS256", jwt::keys ().rsa }, Case{ "ES256", jwt::keys ().p256 } }) {
+        SCOPED_TRACE (scenario.alg);
+        MockTokenServer idp;
+        json cfg                = config (idp, jwt::pkcs8 (scenario.key));
+        cfg["signingAlgorithm"] = scenario.alg;
+        cfg["keyId"]            = "key-7";
+
+        const auto result = acquire (cfg);
+
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        const auto form = decoded_form (idp.last_body ());
+        EXPECT_EQ (names_of (form), (std::vector<std::string>{ "assertion", "grant_type" }))
+        << "no client_id, no client_secret, no Authorization";
+        EXPECT_EQ (form.at ("grant_type"), JWT_BEARER_URN);
+        EXPECT_EQ (idp.last_auth (), "");
+
+        const auto parts = expect_signed (
+        form.at ("assertion"), jwt::public_half (scenario.key), scenario.alg);
+        EXPECT_EQ (json::parse (parts.header),
+        (json{ { "alg", scenario.alg }, { "typ", "JWT" }, { "kid", "key-7" } }));
+        const json claims = json::parse (parts.payload);
+        EXPECT_EQ (claims.at ("iss"), "svc-client");
+        EXPECT_EQ (claims.at ("sub"), "alice@example.com");
+        EXPECT_EQ (claims.at ("aud"), ASSERTION_AUDIENCE);
+        EXPECT_EQ (
+        claims.at ("exp").get<int64_t> () - claims.at ("iat").get<int64_t> (), 180);
+    }
+}
+
+TEST_F (OAuthJwtBearerTest, AlgorithmDefaultsToRs256AndKeyIdIsOmittedWhenEmpty) {
+    MockTokenServer idp;
+    json cfg     = config (idp, rsa_pem ());
+    cfg["keyId"] = "";
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (acquire (cfg)));
+    const auto form  = decoded_form (idp.last_body ());
+    const auto parts = expect_signed (
+    form.at ("assertion"), jwt::public_half (jwt::keys ().rsa), "RS256");
+    EXPECT_EQ (json::parse (parts.header), (json{ { "alg", "RS256" }, { "typ", "JWT" } }));
+}
+
+TEST_F (OAuthJwtBearerTest, ScopeAndAudienceAreFormParametersBesideTheAssertion) {
+    MockTokenServer idp;
+    json cfg        = config (idp, rsa_pem ());
+    cfg["scope"]    = "read write";
+    cfg["audience"] = "https://api.example";
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (acquire (cfg)));
+    const auto form = decoded_form (idp.last_body ());
+    EXPECT_EQ (names_of (form),
+    (std::vector<std::string>{ "assertion", "audience", "grant_type", "scope" }));
+    EXPECT_EQ (form.at ("scope"), "read write");
+    EXPECT_EQ (form.at ("audience"), "https://api.example");
+    const json claims = json::parse (jwt::split (form.at ("assertion")).payload);
+    EXPECT_EQ (claims.at ("aud"), ASSERTION_AUDIENCE)
+    << "the form's audience is not the claim's";
+}
+
+// With a secret the client authenticates as it does for every other grant.
+TEST_F (OAuthJwtBearerTest, ASecretSendsClientAuthenticationPerPlacement) {
+    MockTokenServer idp;
+    json cfg            = config (idp, rsa_pem ());
+    cfg["clientSecret"] = "s3cret";
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (acquire (cfg)));
+    EXPECT_EQ (idp.last_auth (), "Basic " + vayu::utils::base64_encode ("svc-client:s3cret"));
+    EXPECT_EQ (names_of (decoded_form (idp.last_body ())),
+    (std::vector<std::string>{ "assertion", "grant_type" }));
+
+    MockTokenServer body_idp;
+    json in_body                    = config (body_idp, rsa_pem ());
+    in_body["clientSecret"]         = "s3cret";
+    in_body["credentialsPlacement"] = "body";
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (acquire (in_body)));
+    const auto form = decoded_form (body_idp.last_body ());
+    EXPECT_EQ (names_of (form),
+    (std::vector<std::string>{ "assertion", "client_id", "client_secret", "grant_type" }));
+    EXPECT_EQ (form.at ("client_id"), "svc-client");
+    EXPECT_EQ (body_idp.last_auth (), "");
+}
+
+// `exp - iat` is what the assertion's lifetime says, read from one clock
+// reading the test supplies.
+// Mutation check: write `exp` from `iat` alone and the first expectation fails.
+TEST_F (OAuthJwtBearerTest, LifetimeIsExpMinusIatDefaultedAndClamped) {
+    MockTokenServer idp;
+    const auto now =
+    std::chrono::system_clock::time_point (std::chrono::seconds (1'900'000'000));
+    const auto lifetime_of = [&] (const json& lifetime) {
+        json cfg = config (idp, rsa_pem ());
+        if (!lifetime.is_null ()) {
+            cfg["assertionLifetimeSeconds"] = lifetime;
+        }
+        const auto assertion = oauth::build_jwt_assertion (*db_, cfg, now);
+        if (!assertion) {
+            ADD_FAILURE () << assertion.error ().message;
+            return int64_t{ -1 };
+        }
+        const json claims = json::parse (jwt::split (*assertion).payload);
+        EXPECT_EQ (claims.at ("iat").get<int64_t> (), 1'900'000'000);
+        return claims.at ("exp").get<int64_t> () - claims.at ("iat").get<int64_t> ();
+    };
+    EXPECT_EQ (lifetime_of (nullptr), 180);
+    EXPECT_EQ (lifetime_of (600), 600);
+    EXPECT_EQ (lifetime_of (1), 1);
+    EXPECT_EQ (lifetime_of (3600), 3600);
+    EXPECT_EQ (lifetime_of (0), 1);
+    EXPECT_EQ (lifetime_of (-30), 1);
+    EXPECT_EQ (lifetime_of (3601), 3600);
+    EXPECT_EQ (lifetime_of (86'400), 3600);
+}
+
+TEST_F (OAuthJwtBearerTest, ALifetimeThatIsNotANumberIsRefused) {
+    MockTokenServer idp;
+    json cfg                        = config (idp, rsa_pem ());
+    cfg["assertionLifetimeSeconds"] = "soon";
+    const auto err                  = refusal (idp, cfg, rsa_pem ());
+    EXPECT_NE (err.message.find ("assertionLifetimeSeconds"), std::string::npos)
+    << err.message;
+}
+
+// A row naming a claim the engine writes is skipped, so the engine's value is
+// the one signed; a disabled row is skipped; the rest ride the payload.
+// Mutation check: drop the `contains` test in `assertion_claims` and the
+// reserved-name expectations fail.
+TEST_F (OAuthJwtBearerTest, ExtraClaimsAreSignedAndReservedOnesNeverReplaceTheEnginesOwn) {
+    MockTokenServer idp;
+    json cfg = config (idp, rsa_pem ());
+    cfg["assertionClaims"] =
+    json::array ({ { { "key", "tenant" }, { "value", "t-1" }, { "enabled", true } },
+    { { "key", "off" }, { "value", "x" }, { "enabled", false } },
+    { { "key", "iss" }, { "value", "attacker" } }, { { "key", "sub" }, { "value", "attacker" } },
+    { { "key", "aud" }, { "value", "attacker" } }, { { "key", "exp" }, { "value", "1" } },
+    { { "key", "iat" }, { "value", "1" } }, { { "key", "" }, { "value", "nameless" } },
+    { { "key", "env" }, { "value", "prod" } }, "not-a-row" });
+    const auto now =
+    std::chrono::system_clock::time_point (std::chrono::seconds (1'900'000'000));
+
+    const auto assertion = oauth::build_jwt_assertion (*db_, cfg, now);
+
+    ASSERT_HAS_VALUE (assertion);
+    EXPECT_EQ (json::parse (jwt::split (*assertion).payload),
+    (json{ { "iss", "svc-client" }, { "sub", "alice@example.com" },
+    { "aud", ASSERTION_AUDIENCE }, { "exp", 1'900'000'180 },
+    { "iat", 1'900'000'000 }, { "tenant", "t-1" }, { "env", "prod" } }));
+}
+
+TEST_F (OAuthJwtBearerTest, RefusesAnAssertionItCannotSignNamingTheMembers) {
+    MockTokenServer idp;
+    const auto expect_names = [&] (const json& cfg, const std::string& pem,
+                              std::initializer_list<const char*> members) {
+        const auto err = refusal (idp, cfg, pem);
+        for (const char* member : members) {
+            EXPECT_NE (err.message.find (member), std::string::npos)
+            << member << ": " << err.message;
+        }
+    };
+
+    json unsupported                = config (idp, rsa_pem ());
+    unsupported["signingAlgorithm"] = "HS256";
+    expect_names (unsupported, rsa_pem (), { "signingAlgorithm", "privateKey" });
+
+    json wrong_key                = config (idp, rsa_pem ());
+    wrong_key["signingAlgorithm"] = "ES256";
+    expect_names (wrong_key, rsa_pem (), { "signingAlgorithm", "privateKey" });
+
+    const std::string small = jwt::pkcs8 (jwt::keys ().rsa_small);
+    expect_names (config (idp, small), small, { "privateKey" });
+
+    json not_a_key = config (idp, "this is not a PEM");
+    expect_names (not_a_key, "this is not a PEM", { "privateKey" });
+}
+
+TEST_F (OAuthJwtBearerTest, RefusesMissingMembersNamingEach) {
+    MockTokenServer idp;
+    const std::string pem   = rsa_pem ();
+    const auto expect_names = [&] (const json& cfg,
+                              std::initializer_list<const char*> members) {
+        const auto err = refusal (idp, cfg, pem);
+        for (const char* member : members) {
+            EXPECT_NE (err.message.find (member), std::string::npos)
+            << member << ": " << err.message;
+        }
+    };
+
+    json no_subject = config (idp, pem);
+    no_subject.erase ("subject");
+    expect_names (no_subject, { "subject" });
+    no_subject["subject"] = "";
+    expect_names (no_subject, { "subject" });
+
+    json no_audience = config (idp, pem);
+    no_audience.erase ("assertionAudience");
+    expect_names (no_audience, { "assertionAudience" });
+
+    json no_key = config (idp, pem);
+    no_key.erase ("privateKey");
+    expect_names (no_key, { "privateKey", "privateKeyFile" });
+
+    json both_keys              = config (idp, pem);
+    both_keys["privateKeyFile"] = "/some/key.pem";
+    expect_names (both_keys, { "privateKey", "privateKeyFile" });
+}
+
+TEST_F (OAuthJwtBearerTest, AReferenceThatWasNeverResolvedIsRefused) {
+    MockTokenServer idp;
+    const auto err = refusal (idp, config (idp, "{{signing_key}}"), "{{signing_key}}x");
+    EXPECT_NE (err.message.find ("privateKey"), std::string::npos) << err.message;
+    EXPECT_NE (err.message.find ("privateKeyFile"), std::string::npos) << err.message;
+}
+
+// A key file is read only when the file-trust rule approves it. Mutation check:
+// read `privateKeyFile` without `approved_path` and the first case sends.
+TEST_F (OAuthJwtBearerTest, AKeyFileOutsideFileTrustIsRefusedUnread) {
+    MockTokenServer idp;
+    const std::string pem = rsa_pem ();
+    json cfg              = config (idp, pem);
+    cfg.erase ("privateKey");
+    cfg["privateKeyFile"] = key_file (pem, "untrusted.pem");
+
+    const auto err = refusal (idp, cfg, pem);
+
+    EXPECT_NE (err.message.find ("privateKeyFile"), std::string::npos) << err.message;
+}
+
+TEST_F (OAuthJwtBearerTest, AGrantedKeyFileSignsTheAssertion) {
+    MockTokenServer idp;
+    const std::string pem = jwt::pkcs8 (jwt::keys ().p256);
+    json cfg              = config (idp, "");
+    cfg.erase ("privateKey");
+    cfg["privateKeyFile"]   = granted_key_file (pem, "granted.pem");
+    cfg["signingAlgorithm"] = "ES256";
+
+    const auto result = acquire (cfg);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    expect_signed (decoded_form (idp.last_body ()).at ("assertion"),
+    jwt::public_half (jwt::keys ().p256), "ES256");
+}
+
+TEST_F (OAuthJwtBearerTest, AKeyFileThatIsTooLargeToBeAKeyIsRefused) {
+    MockTokenServer idp;
+    const std::string big (std::size_t{ 70 } * 1024, 'A');
+    json cfg = config (idp, "");
+    cfg.erase ("privateKey");
+    cfg["privateKeyFile"] = granted_key_file (big, "big.pem");
+
+    const auto err = refusal (idp, cfg, rsa_pem ());
+
+    EXPECT_NE (err.message.find ("privateKeyFile"), std::string::npos) << err.message;
+}
+
+TEST_F (OAuthJwtBearerTest, AKeyFileThatIsMissingIsRefused) {
+    MockTokenServer idp;
+    json cfg = config (idp, "");
+    cfg.erase ("privateKey");
+    cfg["privateKeyFile"] =
+    (std::filesystem::temp_directory_path () / "vayu-no-such-key.pem").string ();
+
+    const auto err = refusal (idp, cfg, rsa_pem ());
+
+    EXPECT_NE (err.message.find ("privateKeyFile"), std::string::npos) << err.message;
+}
+
+TEST_F (OAuthJwtBearerTest, TheCachedTokenIsReusedAndTwoSubjectsHoldTwoTokens) {
+    MockTokenServer idp;
+    const std::string pem = rsa_pem ();
+    json alice            = config (idp, pem);
+    json bob              = config (idp, pem);
+    bob["subject"]        = "bob@example.com";
+
+    const auto first  = acquire (alice);
+    const auto again  = acquire (alice);
+    const auto second = acquire (bob);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (first));
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (again));
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (second));
+    const auto& alice_token = std::get<vayu::db::OAuthToken> (first);
+    EXPECT_EQ (alice_token.access_token, std::get<vayu::db::OAuthToken> (again).access_token);
+    EXPECT_EQ (idp.hits (), 2)
+    << "alice's second call is a cache hit, bob's is an exchange";
+    EXPECT_NE (alice_token.cache_key, std::get<vayu::db::OAuthToken> (second).cache_key);
+    EXPECT_EQ (alice_token.cache_key, oauth::cache_key (alice));
+    EXPECT_NE (alice_token.access_token, std::get<vayu::db::OAuthToken> (second).access_token);
+}
+
+// Neither the assertion nor the key is logged, stored or put in an error: the
+// log line keeps the grant and the URL. The scan asserts it read the line.
+TEST_F (OAuthJwtBearerTest, NeitherTheAssertionNorTheKeyReachesTheLogOrTheStoredRow) {
+    const vayu::tests::LogCapture capture;
+    MockTokenServer idp;
+    const std::string pem   = jwt::pkcs8 (jwt::keys ().p256);
+    json cfg                = config (idp, pem);
+    cfg["signingAlgorithm"] = "ES256";
+
+    const auto result = acquire (cfg);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    const std::string assertion = decoded_form (idp.last_body ()).at ("assertion");
+    const auto records   = capture.records ();
+    const auto requested = capture.with_msg_prefix ("OAuth2: requesting token");
+    ASSERT_EQ (requested.size (), 1U);
+    EXPECT_EQ (requested.front ().at ("grant"), "jwt_bearer");
+    for (const auto& record : records) {
+        const std::string text = record.dump ();
+        EXPECT_EQ (text.find (assertion), std::string::npos) << text;
+        EXPECT_EQ (text.find (assertion.substr (0, assertion.find ('.'))), std::string::npos)
+        << text;
+        EXPECT_EQ (text.find (key_fragment (pem)), std::string::npos) << text;
+    }
+    const auto stored = db_->get_oauth_token (oauth::cache_key (cfg));
+    ASSERT_HAS_VALUE (stored);
+    const std::string row =
+    stored->access_token + stored->refresh_token + stored->scope + stored->cache_key;
+    EXPECT_EQ (row.find (assertion), std::string::npos);
+    EXPECT_EQ (row.find (key_fragment (pem)), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// fallbackExpiresIn
+// ---------------------------------------------------------------------------
+
+// A token whose response states no lifetime is kept for the configured
+// seconds, whichever grant asked for it. Mutation check: drop the fallback
+// assignment in `post_token_request` and the first expectation fails.
+TEST_F (OAuthClientTest, FallbackExpiresInStandsInForAMissingExpiresIn) {
+    MockTokenServer idp;
+    json config                 = cc_config (idp, "/token-plain");
+    config["fallbackExpiresIn"] = 600;
+
+    const auto result =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    const auto& token = std::get<vayu::db::OAuthToken> (result);
+    EXPECT_EQ (token.expires_in, 600);
+    const auto stored = db_->get_oauth_token (oauth::cache_key (config));
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->expires_in, 600);
+    EXPECT_FALSE (oauth::is_expired (token, token.created_at + 500'000));
+    EXPECT_TRUE (oauth::is_expired (token, token.created_at + 600'001));
+}
+
+TEST_F (OAuthClientTest, AStatedExpiresInIsNotReplacedByTheFallback) {
+    MockTokenServer idp;
+    json config                 = cc_config (idp, "/token");
+    config["fallbackExpiresIn"] = 600;
+
+    const auto result =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).expires_in, 3600);
+}
+
+TEST_F (OAuthClientTest, AFallbackThatIsNotAPositiveNumberKeepsTheTokenNonExpiring) {
+    for (const json& fallback :
+    { json (0), json (-5), json ("600"), json (nullptr), json (true) }) {
+        SCOPED_TRACE (fallback.dump ());
+        MockTokenServer idp;
+        json config                 = cc_config (idp, "/token-plain");
+        config["fallbackExpiresIn"] = fallback;
+        const auto result =
+        oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).expires_in, 0);
+        db_->delete_oauth_token (oauth::cache_key (config));
+    }
 }
 
 } // namespace
