@@ -136,6 +136,79 @@ void record_drain_cut (const nlohmann::json& summary, nlohmann::json& outcome) {
     }
 }
 
+// --- the row's verdict ------------------------------------------------------
+//
+// Each helper below is one function of `run-outcome.ts`, under the renderer's
+// truthiness: a member that is absent, or not a number, counts as none.
+
+const nlohmann::json& member (const nlohmann::json& parent, const char* key) {
+    static const nlohmann::json absent;
+    if (!parent.is_object ()) {
+        return absent;
+    }
+    const auto found = parent.find (key);
+    return found == parent.end () ? absent : *found;
+}
+
+bool above_zero (const nlohmann::json& value) {
+    return value.is_number () && value.get<double> () > 0;
+}
+
+bool verdict_is (const nlohmann::json& result_summary, const char* verdict) {
+    const auto& stored = member (result_summary, "verdict");
+    return stored.is_string () && stored.get_ref<const std::string&> () == verdict;
+}
+
+// `drainCutCancelledOf`: a positive integer, or no cut.
+bool drain_was_cut (const nlohmann::json& result_summary) {
+    const auto& cancelled = member (member (result_summary, "drainCut"), "cancelled");
+    return cancelled.is_number_integer () && above_zero (cancelled);
+}
+
+// `failedCheckPhrases` over `failedChecksOf (rowAssertionsOf (...))` is
+// non-empty.
+bool a_check_failed (const nlohmann::json& result_summary) {
+    const auto& assertions = member (result_summary, "assertions");
+    return above_zero (member (member (assertions, "exact"), "failed")) ||
+    above_zero (member (member (assertions, "sampled"), "failed")) ||
+    above_zero (member (assertions, "errored")) ||
+    above_zero (member (assertions, "teardownFailed"));
+}
+
+// `judgeRun`, its reasons dropped.
+std::optional<RunOutcome> judge_load_row (RunStatus status, const nlohmann::json& result_summary) {
+    if (status == RunStatus::Stopped) {
+        return RunOutcome::NotJudged;
+    }
+    if (status != RunStatus::Completed && status != RunStatus::Failed) {
+        return std::nullopt;
+    }
+    if (status == RunStatus::Failed || verdict_is (result_summary, "failed")) {
+        return RunOutcome::Failed;
+    }
+    if (drain_was_cut (result_summary)) {
+        return RunOutcome::NotJudged;
+    }
+    if (!verdict_is (result_summary, "passed")) {
+        return RunOutcome::NotJudged;
+    }
+    const bool undercut = above_zero (member (result_summary, "errorRate")) ||
+    a_check_failed (result_summary);
+    return undercut ? RunOutcome::NotJudged : RunOutcome::Passed;
+}
+
+// `judgeCollection` over the row's counts and its unnamed budget verdict.
+std::optional<RunOutcome>
+judge_collection_row (RunStatus status, const nlohmann::json& result_summary) {
+    if (status != RunStatus::Completed) {
+        return std::nullopt;
+    }
+    const bool unclean = verdict_is (result_summary, "failed") ||
+    above_zero (member (result_summary, "failed")) ||
+    above_zero (member (result_summary, "errored"));
+    return unclean ? std::optional<RunOutcome> (RunOutcome::Failed) : std::nullopt;
+}
+
 } // namespace
 
 void copy_optional_number (const nlohmann::json& from,
@@ -297,6 +370,27 @@ nlohmann::json terminal_result_summary (const vayu::db::Run& run) {
     return run.type == vayu::RunType::Scenario ?
     scenario_result_summary (run.summary) :
     load_result_summary (run.summary);
+}
+
+std::optional<RunOutcome>
+judge_run_row (RunType type, RunStatus status, const nlohmann::json& result_summary) {
+    if (!result_summary.is_object () || result_summary.empty ()) {
+        return std::nullopt;
+    }
+    switch (type) {
+    case RunType::Load: return judge_load_row (status, result_summary);
+    case RunType::Scenario:
+        return judge_collection_row (status, result_summary);
+    case RunType::Design: return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::optional<RunOutcome> stored_run_outcome (const vayu::db::Run& run) {
+    if (!carries_result_summary (run)) {
+        return std::nullopt;
+    }
+    return judge_run_row (run.type, run.status, terminal_result_summary (run));
 }
 
 } // namespace vayu::core

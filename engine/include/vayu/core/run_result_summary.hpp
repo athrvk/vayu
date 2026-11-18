@@ -10,14 +10,18 @@
 /**
  * @file core/run_result_summary.hpp
  * @brief What a terminal run's stored `summary` says on its `GET /runs` row:
- *        the `resultSummary` (#2130, #2954).
+ *        the `resultSummary` (#2130, #2954), and the verdict the renderer
+ *        draws from it, which `runs.outcome` stores (#3547).
  *
  * The readers here are the one reading of the stored summary's `thresholds`,
  * `assertions` (and what stood for it before #3537), `drainCut` and
  * `capacity` blocks, shared with the report route (`routes/runs.cpp`), so a
  * row and a report cannot read one stored run two ways.
  *
- * Everything here is pure: no database, no clock.
+ * @ref judge_run_row is the renderer's `rowOutcome`
+ * (`app/src/components/shared/run-outcome.ts`) over the same `resultSummary`
+ * the row carries; `tests/fixtures/run-row-outcome-conformance.json` pins the
+ * two. Everything here is pure: no database, no clock.
  */
 
 #include <cstddef>
@@ -153,5 +157,34 @@ const nlohmann::json& stored);
 
 /// @ref scenario_result_summary or @ref load_result_summary by the run's type.
 [[nodiscard]] nlohmann::json terminal_result_summary (const vayu::db::Run& run);
+
+/**
+ * @brief The verdict a `GET /runs` row draws from its own `resultSummary`: the
+ * renderer's `rowOutcome`, rule for rule.
+ *
+ * Nothing (the row keeps its status glyph) for a row with no or an empty
+ * `resultSummary`, a design run, and every row below that answers no verdict.
+ *
+ * A load row is judged in this order: `stopped` is not judged; any other
+ * status but `completed` or `failed` is nothing; a `failed` status or a
+ * missed budget (`verdict: "failed"`) is failed; a Stop that cut the drain
+ * (`drainCut.cancelled` a positive integer) is not judged; no budget
+ * (`verdict` absent) is not judged; met budgets are passed unless the error
+ * rate is above zero or a check failed (`assertions` `exact.failed`,
+ * `sampled.failed`, `errored`, `teardownFailed`), which is not judged. The
+ * renderer also reads a flat `assertionsFailed` on a row without the block,
+ * from an engine before #3537; this engine writes the two together, so the
+ * block is the whole input here.
+ *
+ * A collection row is failed when it `completed` with a missed budget or a
+ * step that failed or errored, and nothing otherwise: a collection run is
+ * never judged passed, and a stopped or failed one says nothing.
+ */
+[[nodiscard]] std::optional<RunOutcome>
+judge_run_row (RunType type, RunStatus status, const nlohmann::json& result_summary);
+
+/// What `runs.outcome` stores for @p run: @ref judge_run_row over the
+/// `resultSummary` its row carries, or nothing when it carries none.
+[[nodiscard]] std::optional<RunOutcome> stored_run_outcome (const vayu::db::Run& run);
 
 } // namespace vayu::core

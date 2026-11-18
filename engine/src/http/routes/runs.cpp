@@ -978,7 +978,11 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
     nlohmann::json (nullptr);
     row["baseline"]      = run.baseline;
     row["origin"]        = vayu::json::serialize_run_origin (run);
-    row["summary"]       = std::move (summary);
+    // Absent, never null, on a row with no verdict (#3547).
+    if (run.outcome) {
+        row["outcome"] = *run.outcome;
+    }
+    row["summary"] = std::move (summary);
     return row;
 }
 
@@ -2276,7 +2280,7 @@ vayu::core::RunManager* live_runs) {
 
 /**
  * The `GET /runs` filters off the query string. An invalid value for an
- * enumerated filter (`type`, `status`, `baseline`, `origin`) leaves that filter
+ * enumerated filter (`type`, `status`, `baseline`, `origin`, `outcome`) leaves that filter
  * unset rather than answering 400, so a client on a newer vocabulary than the
  * engine gets a wider list, never an error.
  *
@@ -2306,6 +2310,9 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
         if (is_run_origin_kind (value))
             filter.origin = std::move (value);
     }
+    if (req.has_param ("outcome"))
+        filter.outcome =
+        vayu::parse_run_outcome (req.get_param_value ("outcome"));
     return filter;
 }
 

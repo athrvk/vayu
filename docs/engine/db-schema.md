@@ -324,7 +324,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `10`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `11`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
@@ -477,6 +477,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
 | `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
 | `10` | [`spec_declined_operations`](#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them, so a sync does not re-create them. An engine at `9` does not know the table, so it would re-create every declined operation on its next sync | none: `sync_schema ()` creates the table, the migration only stamps |
+| `11` | [`runs.outcome`](#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column | none: `sync_schema ()` adds the nullable column, the migration only stamps; rows stored before it stay NULL |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -551,6 +552,11 @@ Version `10` is a bump of its own: `0.46.0` released `9`. **Merge gate:** the
 `git grep` against the last tag must show `9`; a change that joins `10` later
 must check the tag the same way. The release that carries `10` says so under
 Changed, naming #3031.
+
+Version `11` is a bump of its own: `0.51.0`, the last release, stamps `10`.
+**Merge gate:** the `git grep` against the last tag must show `10`; a change
+that joins `11` later must check the tag the same way. The release that carries
+`11` says so under Changed, naming #3547.
 
 ---
 
@@ -1583,6 +1589,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `has_warnings`    | INTEGER | `1` when `summary.warnings` is non-empty. NOT NULL DEFAULT `0`               |
 | `origin`          | TEXT    | Who started the run: `"app"` / `"mcp"` / `"other"`. NOT NULL DEFAULT `'other'` |
 | `origin_client`   | TEXT    | The MCP client's name, `mcp` runs only (nullable)                            |
+| `outcome`         | TEXT    | The verdict the run's list row draws: `"passed"` / `"failed"` / `"not_judged"`; NULL = none (nullable, no default) |
 
 **`status`** moves through `Database::transition_run_status` (#3340), which takes
 an edge only when the row's current status is one the caller names: there is no
@@ -1680,6 +1687,26 @@ bounded by retention and ordered by `idx_runs_start_time`. The column sits past
 `config_snapshot` in the stored row, so reading it walks the snapshot's overflow
 pages; like every filter there, the term is a `CASE` that reads its column only
 when the filter is set (#2548).
+
+**`outcome`** (#3547, schema version 11) is the verdict a run's
+[`GET /runs`](api-reference.md#get-runs) row draws from its own
+`resultSummary`, stored so the list can filter on it
+(`?outcome=<verdict>`, the same `CASE` term and no index, for the same
+reasons as `origin`). Derived like `has_warnings`, never written by a caller:
+`vayu::core::stored_run_outcome` (`core/run_result_summary.hpp`) builds the
+row's `resultSummary` from `type`, `status` and `summary` and judges it by the
+app's row rule (`rowOutcome`; the rules are in
+[GET /runs](api-reference.md#get-runs)). `Database` re-derives it in every
+write of either column, inside the same retried callback as the write
+(`stamp_run_outcome`, `db/db_runs.cpp`): `transition_run_status`, because a
+worker stores `summary` while the row is still `running` and the terminal
+move comes after; `update_run_summary`, because a Stop's `stopped` can land
+before the worker's summary; and `reconcile_orphaned_runs`, which writes
+`failed` directly. NULL is no verdict: a run in flight, a design run, a clean
+collection run, a terminal row with no summary that yields a `resultSummary`,
+and every row stored before the column. Nullable with no default because a
+default would claim a verdict nothing judged; `sync_schema` adds it and
+backfills nothing, and the migration only stamps.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,

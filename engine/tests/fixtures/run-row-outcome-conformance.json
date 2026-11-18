@@ -1,0 +1,185 @@
+{
+  "description": "Cross-language conformance fixture for the verdict a GET /runs row draws (issue #3547). Read by the engine gtest suite (engine/tests/run_result_summary_test.cpp, through `vayu::core::judge_run_row`, the rule `runs.outcome` is stamped by and `GET /runs?outcome=` filters on); the app's `rowOutcome` (app/src/components/shared/run-outcome.ts) is the rule it is written from, and its app-side reader is #3547's app slice. Each case is a row cut to what a verdict reads - `type`, `status` and `resultSummary`, absent when the row carries none - and `expected` is the stored outcome: `passed`, `failed`, `not_judged` (the app's `not-judged`), or null for a row the renderer draws with no verdict, which stores no outcome and matches no `outcome` filter.",
+  "cases": [
+    {
+      "name": "load run stopped with its budgets met",
+      "type": "load", "status": "stopped",
+      "resultSummary": {"rps": 40, "errorRate": 0, "verdict": "passed"},
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run stopped with a budget missed: stopped ranks first",
+      "type": "load", "status": "stopped",
+      "resultSummary": {"rps": 40, "verdict": "failed"},
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run still pending, whatever its row says",
+      "type": "load", "status": "pending",
+      "resultSummary": {"rps": 40, "verdict": "failed"},
+      "expected": null
+    },
+    {
+      "name": "load run failed with no budget",
+      "type": "load", "status": "failed",
+      "resultSummary": {"rps": 40, "errorRate": 0},
+      "expected": "failed"
+    },
+    {
+      "name": "load run completed with a budget missed",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "p95Ms": 900, "errorRate": 0, "verdict": "failed"},
+      "expected": "failed"
+    },
+    {
+      "name": "load run whose drain was cut and a budget missed: the miss ranks above the cut",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "verdict": "failed", "drainCut": {"cancelled": 3}},
+      "expected": "failed"
+    },
+    {
+      "name": "load run whose drain a Stop cut, budgets met",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "errorRate": 0, "verdict": "passed", "drainCut": {"cancelled": 3}},
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run with a cut of zero: no cut",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "errorRate": 0, "verdict": "passed", "drainCut": {"cancelled": 0}},
+      "expected": "passed"
+    },
+    {
+      "name": "load run completed with no budget",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "p95Ms": 12, "errorRate": 0},
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run completed clean with its budgets met",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "p95Ms": 12, "errorRate": 0, "verdict": "passed"},
+      "expected": "passed"
+    },
+    {
+      "name": "load run that recorded no request has no error rate to undercut its budgets",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 0, "verdict": "passed"},
+      "expected": "passed"
+    },
+    {
+      "name": "load run whose budgets were met by erroring responses",
+      "type": "load", "status": "completed",
+      "resultSummary": {"rps": 40, "errorRate": 1.5, "verdict": "passed"},
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run with a failed exact assertion",
+      "type": "load", "status": "completed",
+      "resultSummary": {
+        "rps": 40, "errorRate": 0, "verdict": "passed",
+        "assertions": {"exact": {"passed": 8, "failed": 2}},
+        "assertionsPassed": 8, "assertionsFailed": 2
+      },
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run whose sampled replay failed",
+      "type": "load", "status": "completed",
+      "resultSummary": {
+        "rps": 40, "errorRate": 0, "verdict": "passed",
+        "assertions": {"exact": {"passed": 0, "failed": 0}, "sampled": {"passed": 0, "failed": 91}},
+        "assertionsPassed": 0, "assertionsFailed": 91
+      },
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run with an element that errored",
+      "type": "load", "status": "completed",
+      "resultSummary": {
+        "rps": 40, "errorRate": 0, "verdict": "passed",
+        "assertions": {"exact": {"passed": 4, "failed": 0}, "errored": 1},
+        "assertionsPassed": 4, "assertionsFailed": 0
+      },
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run whose teardown script failed",
+      "type": "load", "status": "completed",
+      "resultSummary": {
+        "rps": 40, "errorRate": 0, "verdict": "passed",
+        "assertions": {"teardownFailed": 1},
+        "assertionsPassed": 0, "assertionsFailed": 0
+      },
+      "expected": "not_judged"
+    },
+    {
+      "name": "load run whose every check held",
+      "type": "load", "status": "completed",
+      "resultSummary": {
+        "rps": 40, "errorRate": 0, "verdict": "passed",
+        "assertions": {"exact": {"passed": 10, "failed": 0}, "sampled": {"passed": 5, "failed": 0}, "errored": 0, "teardownFailed": 0},
+        "assertionsPassed": 15, "assertionsFailed": 0
+      },
+      "expected": "passed"
+    },
+    {
+      "name": "load run completed with no row summary",
+      "type": "load", "status": "completed",
+      "expected": null
+    },
+    {
+      "name": "load run failed with no row summary: the engine died before it wrote one",
+      "type": "load", "status": "failed",
+      "expected": null
+    },
+    {
+      "name": "collection run completed clean",
+      "type": "scenario", "status": "completed",
+      "resultSummary": {"passed": 3},
+      "expected": null
+    },
+    {
+      "name": "collection run completed with its budgets met: never passed",
+      "type": "scenario", "status": "completed",
+      "resultSummary": {"passed": 3, "verdict": "passed"},
+      "expected": null
+    },
+    {
+      "name": "collection run with a failed step",
+      "type": "scenario", "status": "completed",
+      "resultSummary": {"passed": 2, "failed": 1},
+      "expected": "failed"
+    },
+    {
+      "name": "collection run whose only bad step errored",
+      "type": "scenario", "status": "completed",
+      "resultSummary": {"passed": 2, "errored": 1},
+      "expected": "failed"
+    },
+    {
+      "name": "collection run with a budget missed and clean steps",
+      "type": "scenario", "status": "completed",
+      "resultSummary": {"passed": 3, "verdict": "failed"},
+      "expected": "failed"
+    },
+    {
+      "name": "collection run stopped with a failed step",
+      "type": "scenario", "status": "stopped",
+      "resultSummary": {"passed": 1, "failed": 1, "stopped": 1},
+      "expected": null
+    },
+    {
+      "name": "collection run failed with a failed step",
+      "type": "scenario", "status": "failed",
+      "resultSummary": {"failed": 1},
+      "expected": null
+    },
+    {
+      "name": "design run that answered a 500",
+      "type": "design", "status": "completed",
+      "resultSummary": {"statusCode": 500, "latencyMs": 3.2},
+      "expected": null
+    }
+  ]
+}
