@@ -256,7 +256,7 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 
 	async function followEndpoint(): Promise<void> {
 		if (state.kind === "starting") await state.done;
-		// A stop or start since the release replaced this state, and has the last word.
+		// Only a release sets this state; a stop or start since then has the last word.
 		if (state.kind === "released") return start();
 		const held = heldPort();
 		if (held === null || !endpointMovedFrom(held)) return;
