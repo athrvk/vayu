@@ -717,10 +717,26 @@ Notes:
   blanked) and holds all of one trace's record bodies to one
   `maxTraceBodyBytes` together, so a row's records add at most what its own
   response may (see [`POST /execute`](api-reference.md#post-execute)). That
-  engine bound is 5 MiB, far above the per-node 32 KB above, which reaches
-  `trace.request` and `trace.response` only; bounding the records' nodes here
-  is #3633's MCP half. The MCP server never sets `allowScriptRequests`, so
-  only a run the app made carries records.
+  engine bound is 5 MiB, so `get_run_report` bounds the records as it bounds
+  the main exchange: **each record's `request` and `response` body is cut to
+  the same 32 KB**, with the same `bodyTruncated` / `bodyBytes` pair, and the
+  records count toward the row's share of the 96 KB budget. **A trace over
+  what is left of the budget gives up its records' bodies first**: each one
+  is stored `""` with `bodyTruncated: true` and its true `bodyBytes`, the
+  engine's own spelling for a record body past its shared budget, and the
+  `scripts` node gains `scriptRequestBodiesOmitted: true`. The records stay
+  (method, URL, status, headers, timing), and the main exchange is never cut
+  for them; only a trace still over after the shed is omitted, as above. The
+  first trace sheds the same way before it is embedded, so a design run's
+  single row is bounded too. A sequential collection run's `lifecycle` rows
+  (`script.setup` / `script.teardown`) carry records as `scriptRequests` too:
+  their nodes are cut per node the same way, and their records together are
+  held to a 96 KB budget of their own in run order, setup before teardown, a
+  row past what is left shedding its bodies under the same flag. A secret
+  variable's value in any string of a record, a body included, is masked like
+  the rest of the run's output, since a record uses the trace's own member
+  names. The MCP server never sets `allowScriptRequests`, so only a run the
+  app made carries records.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the
