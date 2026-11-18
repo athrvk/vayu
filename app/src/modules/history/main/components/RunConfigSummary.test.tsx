@@ -13,7 +13,8 @@
  * of run it is (#3570).
  *
  * Mutation check: drop the kind from the `loadTestTypeToLabel` call and the
- * collection mode case reads "Fixed request count".
+ * collection mode case reads "Fixed request count"; drop the `iterations` entry
+ * from `headlineEntries` and the count cases fail.
  */
 
 import { describe, it, expect } from "vitest";
@@ -23,11 +24,11 @@ import RunConfigSummary from "./RunConfigSummary";
 
 const CONFIG = { mode: "iterations", concurrency: 10, iterations: 400 };
 
-function lineOf(isCollectionRun: boolean) {
+function lineOf(isCollectionRun: boolean, config: object = CONFIG) {
 	return render(
 		<TooltipProvider>
 			<RunConfigSummary
-				config={CONFIG}
+				config={config}
 				downgradedRequests={0}
 				isCollectionRun={isCollectionRun}
 			/>
@@ -46,5 +47,30 @@ describe("RunConfigSummary mode", () => {
 		const text = lineOf(false);
 		expect(text).toContain("Mode:Fixed request count");
 		expect(text).not.toContain("Fixed passes");
+	});
+});
+
+describe("RunConfigSummary configured count (#3570)", () => {
+	it("says Passes for a collection run", () => {
+		expect(lineOf(true)).toContain("Passes:400");
+	});
+
+	it("says Requests for a single-request run", () => {
+		const text = lineOf(false);
+		expect(text).toContain("Requests:400");
+		expect(text).not.toContain("Passes");
+	});
+
+	it("groups a large count", () => {
+		expect(lineOf(false, { ...CONFIG, iterations: 12000 })).toContain("Requests:12,000");
+	});
+
+	it.each([
+		["absent", { mode: "constant_rps", duration: "30s" }],
+		["zero", { mode: "constant_rps", duration: "30s", iterations: 0 }],
+	])("draws no count where the run has %s", (_name, config) => {
+		const text = lineOf(false, config);
+		expect(text).not.toContain("Requests:");
+		expect(text).not.toContain("Passes:");
 	});
 });

@@ -3251,6 +3251,11 @@ export interface RunReport {
 			duration?: string;
 			targetRps?: number;
 			concurrency?: number;
+			/**
+			 * What an `iterations` run was asked for: requests for a single request,
+			 * passes over the sequence for a collection run (#3570).
+			 */
+			iterations?: number;
 			startConcurrency?: number;
 			rampUpDuration?: string;
 			timeout?: number;

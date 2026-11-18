@@ -9,7 +9,7 @@
  * RunConfigSummary Component
  *
  * The "Test config" box of a stored load run: one line with the settings that
- * define the experiment (mode, virtual users, duration, protocol) and a
+ * define the experiment (mode, virtual users, passes or requests, duration, protocol) and a
  * "Details" disclosure for the rest (target rate, data set, timeout). The
  * second tier is closed by default because it is reference, not the answer; the
  * protocol's "not negotiated" correction is the one detail that stays on the
@@ -74,7 +74,7 @@ function ConfigFields({ entries }: { entries: ConfigEntry[] }) {
 	));
 }
 
-/** The mode and the two numbers that size it; protocol is drawn beside them. */
+/** The mode and the numbers that size it; protocol is drawn beside them. */
 function headlineEntries(config: RunConfiguration, isCollectionRun: boolean): ConfigEntry[] {
 	const entries: ConfigEntry[] = [];
 	if (config.mode) {
@@ -91,6 +91,15 @@ function headlineEntries(config: RunConfiguration, isCollectionRun: boolean): Co
 		entries.push({
 			label: CONCURRENCY_LABEL,
 			value: formatNumber(config.concurrency),
+			mono: true,
+		});
+	}
+	// What a Fixed passes / Fixed request count run was asked for (#3570): the
+	// count counts passes over a collection's sequence, requests otherwise.
+	if (config.iterations != null && config.iterations > 0) {
+		entries.push({
+			label: isCollectionRun ? "Passes" : "Requests",
+			value: formatNumber(config.iterations),
 			mono: true,
 		});
 	}
