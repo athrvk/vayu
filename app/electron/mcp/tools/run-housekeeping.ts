@@ -34,8 +34,9 @@ import {
 } from "./kit.js";
 
 /**
- * Run types and statuses `list_runs` filters on, spelled as the engine parses
- * them (`parse_run_type` / `parse_run_status`, engine `types.hpp`) and matching
+ * Run types, statuses and outcomes `list_runs` filters on, spelled as the engine
+ * parses them (`parse_run_type` / `parse_run_status`, engine `types.hpp`; the
+ * outcome is the verdict stored on the row, #3547) and matching
  * the renderer's own `Run` union in `app/src/types/domain.ts`.
  *
  * Restated here rather than imported because `electron/` shares no module graph
@@ -46,6 +47,7 @@ import {
  */
 export const RUN_TYPES = ["design", "load", "scenario"] as const;
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "stopped"] as const;
+export const RUN_OUTCOMES = ["passed", "failed", "not_judged"] as const;
 
 /**
  * Default page for `get_run_samples` - small, because a sample carries a real
@@ -201,7 +203,7 @@ export function runListQuery(args: Record<string, unknown>): RunListQuery {
 		limit: optionalPageLimit(args, "limit", DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT),
 		offset: optionalOffset(args, "offset"),
 	};
-	for (const key of ["type", "status", "requestId", "collectionId", "q"] as const) {
+	for (const key of ["type", "status", "outcome", "requestId", "collectionId", "q"] as const) {
 		const value = str(args, key);
 		if (value !== undefined) query[key] = value;
 	}

@@ -13007,6 +13007,7 @@ describe("run housekeeping tools", () => {
 					offset: 20,
 					type: "scenario",
 					status: "failed",
+					outcome: "not_judged",
 					requestId: "req_1",
 					collectionId: "col_1",
 					q: "checkout",
@@ -13020,12 +13021,29 @@ describe("run housekeeping tools", () => {
 				offset: 20,
 				type: "scenario",
 				status: "failed",
+				outcome: "not_judged",
 				requestId: "req_1",
 				collectionId: "col_1",
 				q: "checkout",
 				baseline: true,
 			});
 		});
+
+		// #3547: "failed" here is the verdict the app draws, which a `completed`
+		// run that missed a budget wears and `status` cannot ask for.
+		test.each(["passed", "failed", "not_judged"] as const)(
+			"outcome %s is forwarded to the engine as stated",
+			async (outcome) => {
+				const client = fakeClient();
+				const res = await dispatchTool("list_runs", { outcome }, ctxWith(client));
+				expect(res.isError).toBeFalsy();
+				expect(forwarded(client, "listRuns")[0]).toEqual({
+					limit: DEFAULT_RUN_PAGE_LIMIT,
+					offset: 0,
+					outcome,
+				});
+			}
+		);
 
 		test("baseline: false is forwarded, not dropped as falsy", async () => {
 			// "only unpinned runs" is a filter the engine offers; reading `false`
@@ -13040,6 +13058,7 @@ describe("run housekeeping tools", () => {
 			await dispatchTool("list_runs", { type: "design" }, ctxWith(client));
 			const query = forwarded(client, "listRuns")[0] as Record<string, unknown>;
 			expect("status" in query).toBe(false);
+			expect("outcome" in query).toBe(false);
 			expect("q" in query).toBe(false);
 		});
 
