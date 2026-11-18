@@ -462,7 +462,7 @@ export async function startScenarioLoadRun(
 			`${summary}\n\n` +
 			"This is a preview. To start the load test, call start_load_run again with " +
 			"confirmed: true and the same arguments.\n\n" +
-			`Planned run (${plannedSteps} step(s) per iteration):\n${JSON.stringify(payload, null, 2)}`,
+			`Planned run (${plannedSteps} step(s) per iteration):\n${JSON.stringify(payload)}`,
 	});
 	if (unconfirmed) return unconfirmed;
 

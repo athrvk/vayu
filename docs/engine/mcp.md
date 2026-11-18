@@ -308,6 +308,13 @@ rejected result as a broken tool and hides the body.
 `output-schema.conformance.test.ts` fails a read tool that is on neither side
 of that line, and an exception that stops being true.
 
+**Result text is compact JSON** (#3560): `JSON.stringify` with no indent in every
+tool result, resource and prompt that embeds JSON, because the reader is a
+model's context window and indentation is cost with no reader (about 50% more
+bytes on a nested answer). A result with `structuredContent` sends the same
+document in both places. `tools.test.ts` ("result text is compact JSON") fails
+when a pretty printer returns.
+
 **Argument names are uniform** (#2446), held by
 `schema-naming.conformance.test.ts` over every tool's top-level inputs: an id
 is named for what it identifies (`requestId`, `runId`, `entryId`, `itemId`),

@@ -44,7 +44,7 @@ import {
 import type { McpHost } from "./tools/contract.js";
 import { engineCode } from "./tools/failure.js";
 import { composeLoadRunRequest } from "./tools/compose.js";
-import { argumentsSchema, INPUT_REQUIRED } from "./tools/kit.js";
+import { argumentsSchema, INPUT_REQUIRED, jsonResult, structuredResult } from "./tools/kit.js";
 import { RUN_STATUSES } from "./tools/run-housekeeping.js";
 import { classifyRunStatus, PARTIAL_REPORT_NOTE } from "./tools/run-status.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
@@ -11306,8 +11306,8 @@ describe("start_load_run resolves and states the load shape", () => {
 			)
 		);
 		expect(preview).toContain("(constant_concurrency, 100 virtual users, closed loop, 60 s)?");
-		expect(preview).toContain('"concurrency": 100');
-		expect(preview).toContain('"duration": "60s"');
+		expect(preview).toContain('"concurrency":100');
+		expect(preview).toContain('"duration":"60s"');
 		expect(client.startRun).not.toHaveBeenCalled();
 
 		const paced = firstText(
@@ -15090,8 +15090,8 @@ describe("start_load_run recording knobs", () => {
 		);
 
 		expect(client.startRun).not.toHaveBeenCalled();
-		expect(firstText(res)).toMatch(/"response_sample_rate": 10/);
-		expect(firstText(res)).toMatch(/"max_response_samples": 50/);
+		expect(firstText(res)).toMatch(/"response_sample_rate":10/);
+		expect(firstText(res)).toMatch(/"max_response_samples":50/);
 	});
 
 	test("a scenario load run carries the response-sample knobs", async () => {
@@ -15427,8 +15427,8 @@ describe("OAuth 2.0 token tools", () => {
 			undefined
 		);
 		const text = firstText(res);
-		expect(text).toContain('"found": true');
-		expect(text).toContain('"expired": false');
+		expect(text).toContain('"found":true');
+		expect(text).toContain('"expired":false');
 		expect(text).not.toContain(OAUTH2_TOKEN_RECORD.accessToken);
 	});
 
@@ -15443,7 +15443,7 @@ describe("OAuth 2.0 token tools", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		expect(firstText(res)).toContain('"found": false');
+		expect(firstText(res)).toContain('"found":false');
 	});
 
 	test("clearing is refused while writes are off, and reports what it removed when on", async () => {
@@ -15468,7 +15468,7 @@ describe("OAuth 2.0 token tools", () => {
 			OAUTH2_TOKEN_RECORD.cacheKey,
 			undefined
 		);
-		expect(firstText(res)).toContain('"deleted": true');
+		expect(firstText(res)).toContain('"deleted":true');
 	});
 
 	test("the cache families the renderer must refetch are declared", () => {
@@ -18357,7 +18357,7 @@ describe("secret withholding", () => {
 	test.each(WRITE_ECHOES)("$tool withholds the echoed row's secrets by default", async (echo) => {
 		const { text } = await echoOf(echo, { allowWrites: true });
 		for (const secret of echo.secrets) expect(text).not.toContain(secret);
-		expect(text).toMatch(/Withheld": true/);
+		expect(text).toMatch(/Withheld":true/);
 	});
 
 	test.each(WRITE_ECHOES)("$tool echoes the stored row whole with reveal on", async (echo) => {
@@ -19499,7 +19499,7 @@ describe("secret withholding", () => {
 		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
 		const preview = firstText(await planLoadRun(client, REVEAL));
 		expect(preview).toContain(QUERY_FORM);
-		expect(preview).toContain('"token": "typed-bearer-token"');
+		expect(preview).toContain('"token":"typed-bearer-token"');
 		expect(client.getGlobals).not.toHaveBeenCalled();
 		expect(client.listAllRequests).not.toHaveBeenCalled();
 	});
@@ -21033,5 +21033,32 @@ describe("every structured read answers structuredContent its outputSchema accep
 		expect(res.structuredContent).toMatchObject({ id: "run_1", terminal: true });
 		const parsed = outputSchemaOf("get_run").parse({ id: "run_1", novel: 1 });
 		expect(parsed).toMatchObject({ novel: 1 });
+	});
+});
+
+/*
+ * The reader of a result is a model's context window, so indentation is cost
+ * with no reader (#3560). A newline in a JSON result's text means a pretty
+ * printer is back.
+ */
+describe("result text is compact JSON", () => {
+	const NESTED = { allowlist: ["a.test"], caps: { duration: { max: 60 }, rows: [{ a: 1 }] } };
+
+	test("jsonResult and structuredResult carry no newline or indent", () => {
+		for (const result of [jsonResult(NESTED), structuredResult(NESTED)]) {
+			expect(firstText(result as { content: Array<{ text: string }> })).toBe(
+				JSON.stringify(NESTED)
+			);
+		}
+	});
+
+	test("a structured read tool's text has no newline and equals its structuredContent", async () => {
+		const res = await dispatchTool(
+			"get_safety_config",
+			{},
+			ctxWith(fakeClient(), { allowlist: ["a.test"], allowAll: true })
+		);
+		expect(firstText(res)).not.toContain("\n");
+		expect(JSON.parse(firstText(res))).toEqual(res.structuredContent);
 	});
 });

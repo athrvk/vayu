@@ -100,7 +100,7 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 					restartRequired,
 					updated: secretsShape(ctx, withholdConfigCredentials)(updated),
 				};
-				const json = JSON.stringify(result, null, 2);
+				const json = JSON.stringify(result);
 				const note =
 					restartRequired.length > 0
 						? `Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
