@@ -206,6 +206,15 @@ export const DOC_READING_GUARDS = {
 		reader: "app/electron/log-record.conformance.test.ts",
 		paths: ["docs/engine/log-record.schema.json"],
 	},
+	/*
+	 * The Logs tab's reader (#3635) parses what both loggers write; its engine
+	 * fixture is validated against the schema so the lines it reads back are
+	 * ones the engine could have written.
+	 */
+	logReader: {
+		reader: "app/electron/log-reader.test.ts",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**
