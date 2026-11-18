@@ -11455,7 +11455,7 @@ describe("engine transport failures are told apart", () => {
 		expect(firstText(res)).toMatch(/130s budget/);
 		expect(firstText(res)).toMatch(/may still have completed/i);
 		expect(firstText(res)).toMatch(/list_runs/);
-		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
+		expect(firstText(res)).not.toMatch(/its engine is not answering/);
 	});
 
 	test("a cancelled call is not reported as an unreachable engine either", async () => {
@@ -11465,7 +11465,7 @@ describe("engine transport failures are told apart", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/cancelled/i);
 		expect(firstText(res)).toMatch(/list_runs/);
-		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
+		expect(firstText(res)).not.toMatch(/its engine is not answering/);
 	});
 
 	test("a genuinely unreachable engine says so, naming the app for the app host", async () => {
@@ -11474,7 +11474,8 @@ describe("engine transport failures are told apart", () => {
 			"app"
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/Make sure the Vayu app is running/);
+		expect(firstText(res)).toMatch(/Vayu app is open but its engine is not answering/);
+		expect(firstText(res)).not.toMatch(/make sure|start the/i);
 	});
 
 	test("a genuinely unreachable engine says so, naming the process for the CLI host", async () => {
