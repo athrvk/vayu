@@ -47,7 +47,7 @@ class PassDurationRecorder {
 
     /// The mean so far in milliseconds, or nothing before the first pass.
     /// Safe while workers record; the sum and the count are read apart, so
-    /// a frame can be one pass behind on either.
+    /// a frame can be up to one pass per worker behind on either.
     [[nodiscard]] std::optional<double> mean_ms () const;
 
     /// `{count, mean, min, p50, p95, p99, max}` in milliseconds, or an empty
