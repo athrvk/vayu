@@ -268,6 +268,12 @@
  * 2,838 B to the writes-off rows and 3,026 B to the writes-on rows, taking them
  * to 157,152 / 154,556 / 232,453 / 228,186 B; the four caps went to 157,400 /
  * 154,800 / 232,700 / 228,400. #3558's later measurement counts these tools.
+ *
+ * #3547's `outcome` filter on `list_runs`, #3632's `jwt_bearer` config on
+ * `fetch_oauth2_token` and #3633's script request records in `get_run_report`
+ * (the three land in the same window, and no row was measured apart from the
+ * others) took the rows to 157,510 / 154,914 / 232,811 / 228,544 B, 110 to 144 B
+ * over the caps; the four caps went to 157,600 / 155,000 / 232,900 / 228,600.
  */
 
 import { describe, it, expect } from "vitest";
@@ -287,10 +293,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 54, maxBytes: 157_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 54, maxBytes: 154_800 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 82, maxBytes: 232_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 82, maxBytes: 228_400 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 54, maxBytes: 157_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 54, maxBytes: 155_000 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 82, maxBytes: 232_900 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 82, maxBytes: 228_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
