@@ -596,6 +596,29 @@ TEST (DaemonStartup, ReturnsLargeFreesToTheOs) {
     << "daemon.cpp must call return_large_frees_to_os before any worker thread";
 }
 
+// The same reason (#3580): the loopback guard's tests register their own MCP
+// port (`mcp_port_stand_in.hpp`), so a daemon that parses `--mcp-port` and
+// never registers it passes all of them while guarding 9877 instead of the
+// port the app's MCP server is on. Mutation check: delete the `set_mcp_port`
+// call in daemon.cpp, or move it below the `Server`'s construction, and this
+// fails.
+TEST (DaemonStartup, RegistersTheMcpPortBeforeTheServerExists) {
+    const std::filesystem::path daemon =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src" / "daemon.cpp";
+    const std::string code = tests::strip_comments (tests::read_source (daemon));
+
+    ASSERT_GT (code.size (), 1000u) << "read " << daemon.string () << " as empty";
+    ASSERT_TRUE (tests::names_call (code, "set_mcp_port"))
+    << "daemon.cpp must register --mcp-port with the loopback guard";
+    const auto registered = code.find ("set_mcp_port (*parsed.mcp_port)");
+    const auto server     = code.find ("vayu::http::Server server");
+    ASSERT_NE (registered, std::string::npos)
+    << "daemon.cpp must register the parsed --mcp-port, not another value";
+    ASSERT_NE (server, std::string::npos);
+    EXPECT_LT (registered, server)
+    << "the MCP port must be reserved before the server can take a request";
+}
+
 /// Whether, inside @p code's `run_daemon`, the instance lock is declared
 /// before the database and nothing there releases it by hand - so locals
 /// destroyed in reverse order close the database first (issue #2420).

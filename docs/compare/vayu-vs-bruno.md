@@ -67,7 +67,7 @@ limit.
 ## Both have MCP; they hand the agent different things
 
 Bruno ships an official MCP server that wraps its `bru` CLI, so an agent can run
-your collections. Vayu's MCP server runs inside the app on `127.0.0.1:9877` and
+your collections. Vayu's MCP server runs inside the app on `127.0.0.1:9877` by default and
 exposes **82 typed tools** covering inspection, execution, **load runs**, and
 writes over collections, requests and environments. The distinction worth caring
 about is the load engine: an agent can start a capped load run and read the

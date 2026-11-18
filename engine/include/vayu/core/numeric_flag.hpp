@@ -55,6 +55,10 @@ struct NumericFlag {
 /// fixed-port contract does not offer (see docs/architecture.md).
 inline constexpr NumericFlag PORT_FLAG{ .name = "--port", .min = 1, .max = 65535 };
 
+/// `--mcp-port`, the port the app's MCP server listens on, which the engine
+/// refuses to send to (#3580). Same range as `--port`, for the same reasons.
+inline constexpr NumericFlag MCP_PORT_FLAG{ .name = "--mcp-port", .min = 1, .max = 65535 };
+
 /// `-v` / `--verbose <LEVEL>`. The three levels the logger has: 0 warn/error,
 /// 1 info, 2 debug.
 inline constexpr NumericFlag VERBOSITY_FLAG{ .name = "--verbose", .min = 0, .max = 2 };

@@ -33,6 +33,7 @@
 
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
+#include "mcp_port_stand_in.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "timed_out_after.hpp"
@@ -272,13 +273,15 @@ TEST_F (SendRequestTest, TheEnginePortIsRefusedInEverySpellingAndNothingArrives)
     }
 }
 
+// The registered port, as the daemon's `--mcp-port` makes it (#3580).
 TEST_F (SendRequestTest, TheMcpPortIsRefusedByName) {
-    auto result =
-    run ("pm.sendRequest({ url: 'http://localhost:9877/mcp', method: 'POST' }, "
-         "function () { pm.test('unreachable', function () {}); });");
+    const std::string port = std::to_string (vayu::tests::mcp_port_stand_in ());
+    auto result = run ("pm.sendRequest({ url: 'http://localhost:" + port +
+    "/mcp', method: 'POST' }, "
+    "function () { pm.test('unreachable', function () {}); });");
 
     EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("own MCP port 9877"), std::string::npos)
+    EXPECT_NE (result.error_message.find ("own MCP port " + port), std::string::npos)
     << result.error_message;
     EXPECT_TRUE (result.tests.empty ());
 }

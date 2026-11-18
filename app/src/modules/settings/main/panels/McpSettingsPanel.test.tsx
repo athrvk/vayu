@@ -24,24 +24,38 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { render } from "@/test/render-with-tooltips";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 
 import McpSettingsPanel from "./McpSettingsPanel";
-import { useToastStore } from "@/stores";
+import { useEngineStore, useToastStore } from "@/stores";
 import type { McpSafetyConfig, McpStatus, McpToolInfo } from "@/types";
+
+// The restart a port change asks for waits this long before it re-reads
+// anything; the wait is not what these cases are about.
+vi.mock("@/config/timing", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/config/timing")>();
+	return { ...actual, TIMING: { ...actual.TIMING, ENGINE_RESTART_WAIT_MS: 0 } };
+});
 
 const getMcpStatus = vi.fn();
 const getMcpSafety = vi.fn();
 const getMcpTools = vi.fn();
 const updateMcpSafety = vi.fn();
 const setMcpEnabled = vi.fn();
+const setMcpPort = vi.fn();
+const restartEngine = vi.fn();
 const connectMcpClient = vi.fn();
 
 const STATUS: McpStatus = {
 	running: true,
 	url: "http://127.0.0.1:9877/mcp",
 	enabled: true,
+	port: 9877,
+	restartRequired: false,
 	starting: false,
 };
 
@@ -81,6 +95,8 @@ beforeEach(() => {
 		getMcpTools,
 		updateMcpSafety,
 		setMcpEnabled,
+		setMcpPort,
+		restartEngine,
 		connectMcpClient,
 	]) {
 		fn.mockReset();
@@ -90,12 +106,16 @@ beforeEach(() => {
 	getMcpTools.mockResolvedValue(TOOLS);
 	updateMcpSafety.mockResolvedValue(SAVED);
 	setMcpEnabled.mockResolvedValue(STATUS);
+	restartEngine.mockResolvedValue({ success: true });
+	useEngineStore.setState({ engineRestarting: false });
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		getMcpStatus,
 		getMcpSafety,
 		getMcpTools,
 		updateMcpSafety,
 		setMcpEnabled,
+		setMcpPort,
+		restartEngine,
 		connectMcpClient,
 	};
 });
@@ -104,10 +124,20 @@ afterEach(() => {
 	delete (window as unknown as { electronAPI?: unknown }).electronAPI;
 });
 
+// The engine restart a port change offers reads the query client.
+function withQueryClient({ children }: { children: ReactNode }) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return (
+		<QueryClientProvider client={client}>
+			<TooltipProvider>{children}</TooltipProvider>
+		</QueryClientProvider>
+	);
+}
+
 /** Render and let the mount-time IPC settle before asserting. */
 async function renderPanel() {
 	await act(async () => {
-		render(<McpSettingsPanel />);
+		render(<McpSettingsPanel />, { wrapper: withQueryClient });
 	});
 }
 
@@ -210,10 +240,11 @@ describe("McpSettingsPanel unreadable settings file", () => {
 
 /**
  * The endpoint is the main process's to know: it is built there from
- * `MCP_HOST` / `MCP_PORT` / `MCP_PATH` and reported over `mcp:status`. This
- * panel used to keep its own `http://127.0.0.1:9877/mcp` literal as a fallback -
- * a third copy of the URL, shown as fact whenever the status could not be read,
- * and one port change away from telling the user to point an agent at nothing.
+ * `MCP_HOST`, the configured port and `MCP_PATH`, and reported over
+ * `mcp:status`. This panel used to keep its own `http://127.0.0.1:9877/mcp`
+ * literal as a fallback - a third copy of the URL, shown as fact whenever the
+ * status could not be read, and one port change away from telling the user to
+ * point an agent at nothing.
  */
 describe("McpSettingsPanel endpoint", () => {
 	it("shows the URL the main process reports, whatever it is", async () => {
@@ -267,6 +298,8 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		running: false,
 		url: "http://127.0.0.1:9877/mcp",
 		enabled: true,
+		port: 9877,
+		restartRequired: false,
 		starting: false,
 		error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
 	};
@@ -412,6 +445,8 @@ describe("McpSettingsPanel while the server is starting", () => {
 		running: false,
 		url: "http://127.0.0.1:9877/mcp",
 		enabled: true,
+		port: 9877,
+		restartRequired: false,
 		starting: true,
 	};
 
@@ -433,7 +468,10 @@ describe("McpSettingsPanel while the server is starting", () => {
 		const card = connectionCard();
 		expect(card.getByText("Starting")).toBeInTheDocument();
 		expect(card.getByText("Starting the MCP server…")).toBeInTheDocument();
-		expect(card.queryByText(/\bport\b/i)).toBeNull();
+		// The Port field lives in this card now; what must not appear is a claim
+		// about the port while nothing has gone wrong.
+		expect(card.queryByText(/\bport\b.*\b(in use|taken|held)\b/i)).toBeNull();
+		expect(card.getByText("Starting the MCP server…")).not.toHaveTextContent(/\bport\b/i);
 		expect(card.queryByText(/enabled but not listening/i)).toBeNull();
 		expect(card.queryByText(/another program/i)).toBeNull();
 		expect(card.queryByRole("button", { name: /retry/i })).toBeNull();
@@ -842,5 +880,273 @@ describe("McpSettingsPanel tool list", () => {
 		});
 
 		expect(updateMcpSafety).toHaveBeenCalledWith({ disabledTools: ["analyze_run"] });
+	});
+});
+
+/**
+ * The port is the main process's to judge (`validateMcpPort`): the field sends
+ * what was typed and shows the refusal it gets back, so the cases here stub
+ * `setMcpPort` with the three messages main gives and assert none is judged
+ * in the renderer first (#3580).
+ */
+describe("McpSettingsPanel port", () => {
+	const portField = () => screen.getByRole("spinbutton", { name: "Port" });
+
+	/** Type a port and leave the field, which is what commits it. */
+	function typePort(value: string) {
+		fireEvent.change(portField(), { target: { value } });
+		fireEvent.blur(portField());
+	}
+
+	it("shows the configured port, not the one in force", async () => {
+		getMcpStatus.mockResolvedValue({
+			...STATUS,
+			port: 9900,
+			restartRequired: true,
+		});
+
+		await renderPanel();
+
+		expect(portField()).toHaveValue(9900);
+	});
+
+	it("saves the typed port through the main process and adopts the status it answers", async () => {
+		setMcpPort.mockResolvedValue({
+			ok: true,
+			status: { ...STATUS, port: 9900, restartRequired: true },
+		});
+		await renderPanel();
+
+		await act(async () => {
+			typePort("9900");
+		});
+
+		expect(setMcpPort).toHaveBeenCalledTimes(1);
+		expect(setMcpPort).toHaveBeenCalledWith(9900);
+		await waitFor(() => expect(portField()).toHaveValue(9900));
+		expect(screen.getByText(/restart needed/i)).toBeInTheDocument();
+	});
+
+	it("does not save a port that was not changed", async () => {
+		await renderPanel();
+
+		await act(async () => {
+			typePort("9877");
+		});
+
+		expect(setMcpPort).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["a port the engine may hold", "9880", "Port 9880 is reserved for Vayu's engine."],
+		["a port above the range", "70000", "The MCP port has to be between 1024 and 65535."],
+		["a privileged port", "80", "The MCP port has to be between 1024 and 65535."],
+		["a fraction", "9900.5", "The MCP port has to be a whole number."],
+	])("sends %s as typed and shows main's refusal", async (_name, typed, message) => {
+		setMcpPort.mockResolvedValue({ ok: false, message });
+		await renderPanel();
+
+		await act(async () => {
+			typePort(typed);
+		});
+
+		expect(setMcpPort).toHaveBeenCalledWith(Number(typed));
+		expect(await screen.findByText(message)).toBeInTheDocument();
+		expect(portField()).toHaveAttribute("aria-invalid", "true");
+		// Nothing was saved, so the field goes back to the port that is.
+		expect(portField()).toHaveValue(9877);
+		expect(screen.queryByText(/restart needed/i)).not.toBeInTheDocument();
+	});
+
+	it("drops a refusal once the field is edited again", async () => {
+		setMcpPort.mockResolvedValue({
+			ok: false,
+			message: "Port 9880 is reserved for Vayu's engine.",
+		});
+		await renderPanel();
+		await act(async () => {
+			typePort("9880");
+		});
+		expect(await screen.findByText(/reserved for vayu's engine/i)).toBeInTheDocument();
+
+		fireEvent.change(portField(), { target: { value: "9900" } });
+
+		expect(screen.queryByText(/reserved for vayu's engine/i)).not.toBeInTheDocument();
+	});
+
+	it("says so when the main process could not be reached", async () => {
+		setMcpPort.mockRejectedValue(new Error("ipc down"));
+		await renderPanel();
+
+		await act(async () => {
+			typePort("9900");
+		});
+
+		await waitFor(() =>
+			expect(toastMessages().join(" ")).toMatch(/couldn't save the mcp port: ipc down/i)
+		);
+		expect(portField()).toHaveValue(9877);
+	});
+
+	it("offers the way back to the default once the port differs from it", async () => {
+		getMcpStatus.mockResolvedValue({ ...STATUS, port: 9900, restartRequired: true });
+		setMcpPort.mockResolvedValue({ ok: true, status: { ...STATUS, restartRequired: false } });
+		await renderPanel();
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+		});
+
+		expect(setMcpPort).toHaveBeenCalledWith(9877);
+	});
+
+	it("states the range, the reserved engine ports and what a change costs", async () => {
+		await renderPanel();
+
+		expect(screen.getByText(/1024 - 65535/)).toBeInTheDocument();
+		expect(screen.getByText(/9876, or one of 9880-9889/)).toBeInTheDocument();
+		expect(
+			screen.getByText(/every agent registered with the old URL has to be connected again/i)
+		).toBeInTheDocument();
+	});
+
+	it("shows why a stored port was set aside, word for word", async () => {
+		const sentence =
+			"mcp-config.json sets the MCP port to 80, which isn't usable. The MCP port has to be between 1024 and 65535. Vayu is using the default, 9877.";
+		getMcpStatus.mockResolvedValue({ ...STATUS, storedPortError: sentence });
+
+		await renderPanel();
+
+		// The callout puts its title ahead of the sentence in the same element.
+		expect(screen.getByText(sentence, { exact: false })).toBeInTheDocument();
+	});
+
+	it("shows no stored-port notice when the stored port was usable", async () => {
+		await renderPanel();
+
+		expect(screen.queryByText(/saved port not used/i)).not.toBeInTheDocument();
+	});
+});
+
+/**
+ * The engine learns the port only at spawn, so a saved port is in force after
+ * a restart. `restartRequired` is the main process's answer, not state the
+ * renderer remembers: it is true on a fresh load of the panel too.
+ */
+describe("McpSettingsPanel port restart", () => {
+	const PENDING: McpStatus = { ...STATUS, port: 9900, restartRequired: true };
+	const AFTER: McpStatus = {
+		...STATUS,
+		port: 9900,
+		url: "http://127.0.0.1:9900/mcp",
+		restartRequired: false,
+	};
+
+	it("names the port in force and the port it moves to, and offers the restart", async () => {
+		getMcpStatus.mockResolvedValue(PENDING);
+
+		await renderPanel();
+
+		expect(screen.getByText(/restart needed/i)).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				/stays on 127\.0\.0\.1:9877 until vayu's engine restarts, then it moves to port 9900/i
+			)
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /restart engine/i })).toBeEnabled();
+	});
+
+	// The status's URL names the port the server would take, which it does not
+	// hold while it is off or another program holds that port. Mutation check:
+	// drop the `running` branch of `restartNoticeText` and both cases red.
+	it.each([
+		[
+			"another program holds its port",
+			{
+				running: false,
+				error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
+			},
+		],
+		["it is switched off", { running: false, enabled: false }],
+	] as const)("names no port the server stays on when %s", async (_name, state) => {
+		getMcpStatus.mockResolvedValue({ ...PENDING, ...state });
+
+		await renderPanel();
+
+		expect(screen.getByText(/restart needed/i)).toBeInTheDocument();
+		expect(
+			screen.getByText("The new port takes effect when Vayu's engine restarts.", {
+				exact: false,
+			})
+		).toBeInTheDocument();
+		expect(screen.queryByText(/stays on/i)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /restart engine/i })).toBeEnabled();
+	});
+
+	it("offers no restart when the configured port is the one in force", async () => {
+		await renderPanel();
+
+		expect(screen.queryByText(/restart needed/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /restart engine/i })).not.toBeInTheDocument();
+	});
+
+	it("keeps the endpoint and snippets on the port in force until then", async () => {
+		getMcpStatus.mockResolvedValue(PENDING);
+
+		await renderPanel();
+
+		expect(
+			screen.getByText(
+				"claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp"
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/127\.0\.0\.1:9900/)).toBeNull();
+	});
+
+	it("restarts the engine and then shows the new endpoint", async () => {
+		getMcpStatus.mockResolvedValue(PENDING);
+		await renderPanel();
+		// What the main process reports once the listener has followed the engine.
+		getMcpStatus.mockResolvedValue(AFTER);
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /restart engine/i }));
+		});
+
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		expect(
+			await screen.findByText(
+				"claude mcp add --transport http --scope user vayu http://127.0.0.1:9900/mcp"
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/restart needed/i)).not.toBeInTheDocument();
+	});
+
+	it("reads the status again when a restart started elsewhere finishes", async () => {
+		getMcpStatus.mockResolvedValue(PENDING);
+		await renderPanel();
+		getMcpStatus.mockResolvedValue(AFTER);
+
+		// The Dock and the Settings banner share this store flag with the button.
+		act(() => useEngineStore.getState().setEngineRestarting(true));
+		act(() => useEngineStore.getState().setEngineRestarting(false));
+
+		expect(await screen.findByText(/9900\/mcp/, { selector: "code" })).toBeInTheDocument();
+	});
+
+	it("leaves the notice standing when the restart failed", async () => {
+		getMcpStatus.mockResolvedValue(PENDING);
+		restartEngine.mockResolvedValue({ success: false, error: "port 9876 still in use" });
+		await renderPanel();
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /restart engine/i }));
+		});
+
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: /restart engine/i })).toBeEnabled()
+		);
+		expect(screen.getByText(/restart needed/i)).toBeInTheDocument();
 	});
 });

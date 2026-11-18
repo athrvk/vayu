@@ -1154,14 +1154,21 @@ logged as a warning: it means a client skipped composition.
 - **No transfer reaches Vayu's own ports** (#2355): `include/vayu/http/loopback_guard.hpp`
   is the one predicate (loopback in any spelling, on the engine port the
   daemon registers with the set-once `set_engine_port` before it listens, or on
-  `MCP_PORT`). It runs twice per transfer: `validate_transferable` refuses a URL
+  the MCP port: the daemon's `--mcp-port`, registered beside it with the
+  set-once `set_mcp_port`, else `defaults::MCP_PORT`; a registered one replaces
+  the default rather than joining it, #3580, and the parse refuses it equal to
+  `--port`). It runs twice per transfer: `validate_transferable` refuses a URL
   that names such a target, proxy or not, and `apply_transport_policy`'s
   `CURLOPT_PREREQFUNCTION` (its one set site) refuses the address a connection
   reached, which is what catches a redirect or a name resolving to loopback;
   `curl_to_error` reports that abort as the same `InvalidUrl` sentence. A new
   driver gets both by going through those two functions, never a check of
   its own. Tests share one registered stand-in (`tests/engine_port_stand_in.hpp`)
-  because the registry is set once per process. A `$ref` fetch
+  because the registry is set once per process; the MCP registry's likewise
+  (`tests/mcp_port_stand_in.hpp`, a fixed port that is not the default, so a
+  public predicate that stopped reading the registry fails), and every other
+  MCP case goes through `detail::is_reserved_loopback_target`'s explicit ports.
+  `platform_test.cpp` scans `daemon.cpp` for the `set_mcp_port` call. A `$ref` fetch
   (`POST /import/fetch` with `reference`, #2364) adds `LocalPeerRule` from the
   same header on the same callback: `ClientConfig::local_peer_rule` reaches the
   applier as a `ConnectedPeerCheck`, which is `CURLOPT_PREREQDATA` (written on

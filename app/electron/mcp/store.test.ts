@@ -26,6 +26,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MCP_PORT } from "../constants.js";
 import { DEFAULT_MCP_SAFETY_CONFIG } from "./config.js";
 
 /** Mutable because the mock is hoisted above every test that retargets it. */
@@ -181,6 +182,80 @@ describe("a readable mcp-config.json", () => {
 });
 
 /*
+ * #3580: the MCP port is configurable, and the engine refuses to start on an
+ * `--mcp-port` equal to its own `--port`. So the store refuses the engine's
+ * candidates and anything that is not an unprivileged port, on write and again
+ * on read, since the file is hand-editable. Mutation check: drop the candidate
+ * check in `validateMcpPort` and 9885 is accepted.
+ */
+describe("the MCP port", () => {
+	const REFUSED: Array<[string, unknown, RegExp]> = [
+		["a privileged port", 80, /between 1024 and 65535/],
+		["the engine's default port", 9876, /reserved for Vayu's engine/],
+		["an engine fallback port", 9885, /reserved for Vayu's engine/],
+		["a port past the range", 70000, /between 1024 and 65535/],
+		["a fraction", 9877.5, /whole number/],
+		["a numeric string", "9877", /whole number/],
+		["null", null, /whole number/],
+	];
+
+	it("is the default on a fresh install, with nothing to report", async () => {
+		seedStore();
+		const { readMcpPort } = await importStore();
+
+		expect(readMcpPort()).toEqual({ port: MCP_PORT, storedError: null });
+	});
+
+	it.each([
+		["the default", MCP_PORT],
+		["another free port", 19_877],
+		["the bottom of the range", 1024],
+		["the top of the range", 65535],
+	])("persists %s", async (_label, port) => {
+		seedStore();
+		const { saveMcpPort, readMcpPort } = await importStore();
+
+		expect(saveMcpPort(port)).toEqual({ ok: true, port });
+
+		expect(JSON.parse(storeFile()).port).toBe(port);
+		expect(readMcpPort()).toEqual({ port, storedError: null });
+	});
+
+	it.each(REFUSED)("refuses %s on write, and keeps what was saved", async (_l, value, reason) => {
+		seedStore(JSON.stringify({ port: 19_877 }));
+		const { saveMcpPort, readMcpPort } = await importStore();
+
+		const verdict = saveMcpPort(value);
+
+		expect(verdict.ok).toBe(false);
+		expect(verdict.ok ? "" : verdict.message).toMatch(reason);
+		expect(JSON.parse(storeFile()).port).toBe(19_877);
+		expect(readMcpPort().port).toBe(19_877);
+	});
+
+	it.each(REFUSED)(
+		"reads %s stored by hand back as the default, and says so",
+		async (_l, value) => {
+			seedStore(JSON.stringify({ port: value }));
+			const { readMcpPort } = await importStore();
+
+			const reading = readMcpPort();
+
+			expect(reading.port).toBe(MCP_PORT);
+			expect(reading.storedError).toContain(JSON.stringify(value));
+			expect(reading.storedError).toContain(String(MCP_PORT));
+		}
+	);
+
+	it("reads an unreadable file as the default, leaving the report to corruptCopy", async () => {
+		seedStore('{"port": 198');
+		const { readMcpPort } = await importStore();
+
+		expect(readMcpPort()).toEqual({ port: MCP_PORT, storedError: null });
+	});
+});
+
+/*
  * What Settings is shown when the server is not running. Reverting the fallback
  * to DEFAULT_MCP_SAFETY_CONFIG turns the first two of these red, which is the
  * whole point: the panel commits whole fields computed from what it displays,
@@ -290,5 +365,82 @@ describe("main.ts startup ordering", () => {
 
 		expect(body).toContain("effectiveSafety(mcpLifecycle.service())");
 		expect(body).not.toContain("DEFAULT_MCP_SAFETY_CONFIG");
+	});
+
+	/** The body of the top-level function declared as `signature`, asserted non-empty. */
+	function functionBody(signature: string): string {
+		const start = main.indexOf(signature);
+		const end = main.indexOf("\n}\n", start);
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		return main.slice(start, end);
+	}
+
+	/*
+	 * #3580. The listener binds the port the engine guards, never the constant.
+	 * Every spawn releases it first when it is elsewhere (the sidecar's
+	 * `beforeSpawn`, sidecar.test.ts), and each caller that awaits a spawn
+	 * follows it afterwards: `restartEngine` in its `finally`, so a failed
+	 * restart follows too. Mutation check: drop the hook from the
+	 * `EngineSidecar` construction, or the `followEndpoint` call from
+	 * `restartEngine`, or bind `MCP_PORT` again, and this reds.
+	 */
+	it("releases the listener before every spawn and follows the engine after a restart", () => {
+		const wiring = lifecycleWiring();
+		expect(wiring).toContain("endpoint: () => ({ host: MCP_HOST, port: mcpEnginePort() }),");
+		expect(wiring).toContain("new McpListener({ ...endpoint,");
+		expect(main).not.toMatch(/\bMCP_PORT\b/);
+
+		const startEngine = functionBody("async function startEngine()");
+		const construction = startEngine.slice(
+			startEngine.indexOf("new EngineSidecar("),
+			startEngine.indexOf("await engineSidecar.start();")
+		);
+		expect(construction).toContain("(mcpPort) => mcpLifecycle.releaseForSpawn(mcpPort)");
+
+		const restart = functionBody("async function restartEngine()");
+		const restartAt = restart.indexOf("await engineSidecar.restart();");
+		const finallyAt = restart.indexOf("} finally {");
+		expect(restartAt).toBeGreaterThan(-1);
+		expect(finallyAt).toBeGreaterThan(restartAt);
+		expect(restart.slice(finallyAt)).toContain("await mcpLifecycle.followEndpoint();");
+	});
+
+	/*
+	 * A server switched on before the first spawn bound the configured port; a
+	 * port saved before that spawn moves the engine, and the launch has to move
+	 * the listener after it, since `start()` does nothing while listening.
+	 * Mutation check: drop the call after `await engineStartup`, or move it
+	 * above, and this reds.
+	 */
+	it("follows the engine's first spawn once the launch has awaited it", () => {
+		const body = whenReadyBody();
+		const startupAt = body.indexOf("await engineStartup;");
+		const followAt = body.indexOf("await mcpLifecycle.followEndpoint();");
+		const startAt = body.indexOf("await mcpLifecycle.start();");
+
+		expect(startupAt).toBeGreaterThan(-1);
+		expect(followAt).toBeGreaterThan(startupAt);
+		expect(startAt).toBeGreaterThan(followAt);
+	});
+
+	it("saves mcp:setPort through the validating store and answers with the status", () => {
+		const start = main.indexOf('ipcMain.handle("mcp:setPort"');
+		const end = main.indexOf("});", start);
+		expect(start).toBeGreaterThan(-1);
+		const body = main.slice(start, end);
+
+		expect(body).toContain("saveMcpPort(port)");
+		expect(body).toContain("currentMcpStatus(");
+		// Persist only: the listener moves with the engine, not with the save.
+		expect(body).not.toContain("mcpLifecycle.");
+
+		const preload = readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), "..", "preload.ts"),
+			"utf8"
+		);
+		expect(preload).toContain(
+			'setMcpPort: (port: number) => ipcRenderer.invoke("mcp:setPort", port),'
+		);
 	});
 });

@@ -14,8 +14,8 @@
  * persisted by the Electron main process (not the engine config store), so this
  * panel talks to `window.electronAPI` directly. Like the other app panels it
  * auto-persists (no Save bar): discrete edits (allowlist, toggle) commit
- * immediately; cap inputs commit on blur. The main process sanitizes every
- * change before applying it.
+ * immediately; cap inputs and the port commit on blur. The main process
+ * sanitizes every change before applying it.
  *
  * Because each edit commits a whole field computed from what is on screen
  * (adding a host commits the displayed allowlist plus the new one), the panel
@@ -79,6 +79,7 @@ import { LOAD_TEST_CEILING_BOUNDS, RESPONSE_SAMPLES_CEILING } from "@/constants/
 import { loadTestModeLabel } from "@/constants/load-test-modes";
 import { appSetting } from "../app-settings";
 import { CollapsibleText, NumberSettingRow, ToggleRow } from "./SettingControls";
+import { McpPortSection } from "./McpPortSection";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -93,9 +94,9 @@ const REVEAL = appSetting("mcp-reveal-secrets");
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
  *
- * The endpoint has one source of truth in the main process (`MCP_ENDPOINT_URL`,
- * built from `MCP_HOST`/`MCP_PORT`/`MCP_PATH`), which this file cannot import:
- * renderer and main share no module graph. A hardcoded copy here is a copy that
+ * The endpoint has one source of truth in the main process (`mcpEndpointUrl`,
+ * built from `MCP_HOST`, the configured port and `MCP_PATH`), which this file
+ * cannot import: renderer and main share no module graph. A hardcoded copy here is a copy that
  * drifts, and a plausible-looking URL is worse than no URL - it would be copied
  * into an agent's config and silently fail to connect.
  */
@@ -370,6 +371,8 @@ export default function McpSettingsPanel() {
 	const [isLoading, setIsLoading] = useState(hasElectron);
 	const [connecting, setConnecting] = useState<McpConnectClient | null>(null);
 	const [loadFailed, setLoadFailed] = useState(false);
+	// Main's refusal of the last port sent; cleared by the next edit or save.
+	const [portError, setPortError] = useState<string | undefined>(undefined);
 
 	// Guards the state writes below, since Retry can re-run `load` at any time
 	// and the fetch it awaits may land after the panel is gone.
@@ -536,6 +539,44 @@ export default function McpSettingsPanel() {
 		},
 		[showToast]
 	);
+
+	// Save the port. Main validates it and answers either with the status the new
+	// port leads to or with why it was refused; the field keeps showing the
+	// configured port either way, so a refusal snaps back on blur.
+	const commitPort = useCallback(
+		async (raw: string) => {
+			if (!window.electronAPI) return;
+			try {
+				const result = await window.electronAPI.setMcpPort(Number(raw));
+				if (!mounted.current) return;
+				if (result.ok) {
+					setStatus(result.status);
+					setPortError(undefined);
+				} else {
+					setPortError(result.message);
+				}
+			} catch (err) {
+				showToast(
+					err instanceof Error
+						? `Couldn't save the MCP port: ${err.message}`
+						: "Couldn't save the MCP port.",
+					"error"
+				);
+			}
+		},
+		[showToast]
+	);
+
+	const clearPortError = useCallback(() => setPortError(undefined), []);
+
+	// The engine restart moves the listener to the configured port, and nothing
+	// tells this panel it did: read the status again to show the new URL.
+	const refreshStatus = useCallback(() => {
+		window.electronAPI
+			?.getMcpStatus()
+			.then((s) => mounted.current && setStatus(s))
+			.catch(() => {});
+	}, []);
 
 	// One-click connect: shell out to the client's own CLI. Falls back to the
 	// copy snippet (already shown) when the CLI isn't installed.
@@ -770,6 +811,19 @@ export default function McpSettingsPanel() {
 						>
 							{notListeningDetail(status?.error)}
 						</Callout>
+					)}
+
+					{isLoading ? (
+						<Skeleton className="h-16 w-full" />
+					) : (
+						<McpPortSection
+							status={status}
+							error={portError}
+							onCommit={(raw) => void commitPort(raw)}
+							onDraftChange={clearPortError}
+							onRestartSettled={refreshStatus}
+							disabled={!hasElectron}
+						/>
 					)}
 
 					<div className="flex items-center gap-2">

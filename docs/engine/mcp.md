@@ -5,15 +5,17 @@ description: >-
 
 # Vayu MCP Server
 
-**Endpoint:** `http://127.0.0.1:9877/mcp` (Streamable HTTP) · **Also:** stdio CLI
+**Endpoint:** `http://127.0.0.1:9877/mcp` by default (Streamable HTTP) · **Also:** stdio CLI
 
 Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
 [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (v2:
 `@modelcontextprotocol/server`), and proxies the engine's REST API on `:9876` (or the fallback port the app chose
-when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
-the MCP layer is Apache-2.0 like the rest of the app.
+when 9876 was held; see `VAYU_ENGINE_URL` below). The MCP layer lives entirely
+in the app and is Apache-2.0 like the rest of it; the C++ engine's one part is
+refusing to send a request to the MCP port (its `--mcp-port`, 9877 by default;
+see [the daemon flags](cli.md#prerequisites)).
 
 Once Vayu is running, any agent opts in with one command; with MCP switched off
 or Vayu closed, nothing listens, the connection is refused and the agent's
@@ -38,9 +40,11 @@ client shows its own connection error. Threat model and posture: [`SECURITY.md`]
   cannot import the renderer's `@/services`, so this client is standalone.
 - **Local-only.** Binds `127.0.0.1`, with Host- and Origin-header
   (DNS-rebinding) validation on `/mcp`.
-- **Configurable from Settings.** Server on/off, the allowlist, caps, the write
-  toggle, and per-tool switches live in **Settings → MCP** and persist across
-  restarts.
+- **Configurable from Settings.** Server on/off, the port, the allowlist, caps, the
+  write toggle, and per-tool switches live in **Settings → MCP** and persist
+  across restarts. A new port takes effect after an engine restart, which the
+  panel offers, and changes the endpoint URL: an agent registered with the old
+  one has to be connected again.
 
 ## Connecting
 
@@ -67,6 +71,10 @@ remove then add, not atomic: should the add fail, the old entry is already gone
 and the error says the earlier registration was removed. If `get` fails,
 Connect adds as usual. VS Code has no lookup command, so its Connect always
 runs `--add-mcp`.
+
+The snippets below use the default port, 9877. If the port was changed, use
+the endpoint **Settings → MCP** shows; Connect and the panel's own snippets
+already do.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
@@ -98,7 +106,7 @@ url = "http://127.0.0.1:9877/mcp"
 ### Client compatibility
 
 MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
-**HTTP+SSE** (deprecated; not built for). The fixed-port Streamable HTTP endpoint
+**HTTP+SSE** (deprecated; not built for). The Streamable HTTP endpoint
 covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 | Client           | Streamable HTTP    | stdio | Config location                                 |
@@ -113,7 +121,7 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 ### Streamable HTTP (primary)
 
-`listener.ts` binds `127.0.0.1:9877` at launch and answers what needs no SDK
+`listener.ts` binds `127.0.0.1:9877` by default at launch and answers what needs no SDK
 (`gates.ts`: non-`/mcp` paths `404`, `GET`/`DELETE` `405`); `http.ts` serves
 each `POST /mcp` once the first one has loaded it, through the SDK's
 `createMcpHandler`. Every request gets a fresh server, in both protocol eras:
@@ -3141,6 +3149,25 @@ first write over it renames it to `mcp-config.json.corrupt-<epoch-ms>` in the
 same folder, so the allowlist and caps in it can be copied back by hand. One
 copy is kept: corrupting the file again replaces the earlier copy (issue #2433).
 
+The file also holds the server's `port` (#3580), 9877 when it has none. A port
+is a whole number from 1024 to 65535 that is not one of the engine's own ports
+(9876 and 9880 to 9889), checked when Settings saves it and again on every
+read, since the file is hand-editable: a stored value outside that loads as
+9877, and `mcp:status` carries `storedPortError` saying so. There is no
+fallback when the configured port is taken; the status names the conflict, as
+it does for 9877. Every engine spawn reads the port afresh and passes it as
+`--mcp-port`, which is what the engine's own-port refusal compares against,
+and the listener binds the port the engine was given rather than the saved
+one. A spawn that will guard another port than the listener holds stops the
+listener first (`releaseForSpawn` in `lifecycle.ts`, awaited by the sidecar
+before it spawns), so no engine the app started runs while the server holds a
+port that engine does not guard. A saved port therefore takes effect on the
+next engine restart: `mcp:setPort` only persists, the status reports
+`restartRequired` until then, and once the restart settles, either way,
+`restartEngine` binds the listener on the port the last spawn guards
+(`followEndpoint`). The server is down for the length of that restart; a
+server switched off stays off.
+
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
@@ -3188,8 +3215,8 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
-| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. |
+| `store.ts`         | Persist safety config + enabled preference + port (`../json-store.ts`); `validateMcpPort` and `readMcpPort` judge the port. |
+| `lifecycle.ts`     | The server's one state (`off`, `released`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. Before an engine spawn that guards another port the listener is released (`releaseForSpawn`), and after the spawn it is bound on the port that engine guards (`followEndpoint`). |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
@@ -3216,10 +3243,11 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, port, restartRequired, starting, error?, corruptCopy?, storedPortError? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. `port` is the configured port; `restartRequired` is true while it is not yet the one in force, and `url` names the port in force; `storedPortError` says why a hand-edited port was set aside for the default. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
+| `mcp:setPort`       | Validate and persist the port; returns `{ ok: true, status }` (with `restartRequired`) or `{ ok: false, message }` naming why it was refused. The server does not move until the engine restarts. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
 | `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
@@ -3347,6 +3375,24 @@ An unreadable `mcp-config.json` looks, on screen, like a config nobody ever set,
 so the panel says otherwise: once the first change has set the old file aside
 (`corruptCopy` in `mcp:status`, re-read by the panel after each change), a
 warning above the cards gives the copy's full path.
+
+The Connection card's **Port** field (`McpPortSection.tsx`) commits on blur
+through `mcp:setPort`. The renderer judges nothing: it sends what was typed and
+shows the refusal `validateMcpPort` answers with, stating the range and the
+reserved engine ports only as help text. Those, and the default its Reset
+sends, are the renderer's copies in `mcp-port-copies.ts`, which
+`port-copies.conformance.test.ts` holds to the main process's constants. The
+field shows the configured port from `mcp:status`, while the endpoint and every
+snippet keep the port in force until the engine restarts. A `restartRequired`
+status adds a notice with the engine restart (`useEngineRestart`, the action
+the Dock and the engine settings banner use), after which the panel re-reads
+the status to show the new URL. The notice names the address the server stays
+on only while it is running there; off, or with its port held by another
+program, it says the new port takes effect when the engine restarts.
+`storedPortError` is shown as written. The engine store's pending-restart flag
+is not set from here: `restartRequired` is derived in the main process and
+survives a reload, and that flag would add a second banner on the engine
+settings with no label for it.
 
 ## Configuration
 
