@@ -76,9 +76,10 @@ namespace vayu::db {
  *     folded into the same unreleased version; the partial index
  *     `idx_requests_deleted_at` (#3006) joins it too;
  * 10 - `spec_declined_operations`, the operations a person declined by
- *     deleting their request (#3031).
+ *     deleting their request (#3031);
+ * 11 - `runs.outcome` (#3547).
  */
-inline constexpr int SCHEMA_VERSION = 10;
+inline constexpr int SCHEMA_VERSION = 11;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
@@ -160,6 +161,9 @@ struct RunFilter {
     // Exact match on `runs.origin` (#1817). The route sets it only for a kind
     // `is_run_origin_kind` accepts, so an unknown value is never a filter here.
     std::optional<std::string> origin;
+    // Exact match on `runs.outcome` (#3547). A row with no outcome (NULL)
+    // matches no value.
+    std::optional<RunOutcome> outcome;
 };
 
 /**

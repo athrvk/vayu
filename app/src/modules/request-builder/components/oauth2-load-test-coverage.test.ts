@@ -129,6 +129,15 @@ describe("isMidRunRefreshable", () => {
 		expect(isMidRunRefreshable(authCode, token(3600, 600, true))).toBe(true);
 	});
 
+	it("renews a jwt_bearer token with no refresh token, by signing a new assertion (#3632)", () => {
+		// It never receives a refresh token; the engine re-signs and re-acquires.
+		const jwt = { grantType: "jwt_bearer" } as const;
+		expect(isMidRunRefreshable(jwt, token(3600, 600, false))).toBe(true);
+		expect(
+			isMidRunRefreshable({ ...jwt, autoRefreshToken: false }, token(3600, 600, false))
+		).toBe(false);
+	});
+
 	it("has nothing to renew without an expiring token", () => {
 		expect(isMidRunRefreshable(clientCredentials, undefined)).toBe(false);
 		expect(

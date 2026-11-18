@@ -35,6 +35,7 @@ import {
 } from "./constants.js";
 import { isDevelopmentBuild } from "./dev-mode.js";
 import { appLogger } from "./app-log.js";
+import { readMcpPort } from "./mcp/store.js";
 
 /**
  * The directory the engine keeps its state in - logs, database and lock file.
@@ -356,6 +357,11 @@ export interface SidecarSystem {
 	/** Can we bind this port, i.e. is nothing at all listening? */
 	isPortFree(port: number): Promise<boolean>;
 	sleep(ms: number): Promise<void>;
+	/**
+	 * The MCP port the engine is to refuse (`--mcp-port`), read at each spawn so
+	 * a restart takes up a port Settings changed (#3580).
+	 */
+	mcpPort(): number;
 }
 
 export const defaultSidecarSystem: SidecarSystem = {
@@ -371,6 +377,7 @@ export const defaultSidecarSystem: SidecarSystem = {
 	requestShutdown: requestEngineShutdown,
 	isPortFree: isPortAvailable,
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+	mcpPort: () => readMcpPort().port,
 };
 
 /**
@@ -547,8 +554,11 @@ export class EngineSidecar {
 	private candidates: readonly number[];
 	private port: number;
 	private portFixed = false;
+	/** What the spawn under way or the last one passes as `--mcp-port`; see `getMcpPort()`. */
+	private mcpPort: number | null = null;
 	private onPortFixed: (port: number) => void;
 	private onGrantSecret: (secret: string) => void;
+	private beforeSpawn: (mcpPort: number) => Promise<void>;
 	private dataDir: string;
 	private binaryPath: string;
 	private system: SidecarSystem;
@@ -578,12 +588,16 @@ export class EngineSidecar {
 	 *        names and a Retry tries again).
 	 * @param onGrantSecret called with each spawned engine's grant secret, at
 	 *        the spawn: the one way this process learns it (#2356).
+	 * @param beforeSpawn awaited before each spawn with the MCP port that
+	 *        engine will guard, while no engine of this sidecar's runs: the MCP
+	 *        listener lets go of any other port here (#3580). Must not reject.
 	 */
 	constructor(
 		candidates: readonly number[] = ENGINE_PORT_CANDIDATES,
 		system: SidecarSystem = defaultSidecarSystem,
 		onPortFixed: (port: number) => void = () => {},
-		onGrantSecret: (secret: string) => void = () => {}
+		onGrantSecret: (secret: string) => void = () => {},
+		beforeSpawn: (mcpPort: number) => Promise<void> = async () => {}
 	) {
 		if (candidates.length === 0) {
 			throw new Error("EngineSidecar needs at least one candidate port");
@@ -592,6 +606,7 @@ export class EngineSidecar {
 		this.port = candidates[0];
 		this.onPortFixed = onPortFixed;
 		this.onGrantSecret = onGrantSecret;
+		this.beforeSpawn = beforeSpawn;
 		this.system = system;
 		this.dataDir = engineDataDirectory();
 		this.binaryPath = this.getEngineBinaryPath();
@@ -604,6 +619,16 @@ export class EngineSidecar {
 
 	getLifecycle(): EngineLifecycle {
 		return this.lifecycle;
+	}
+
+	/**
+	 * The MCP port the engine being spawned, or else the last one spawned, is
+	 * told to refuse; null before the first spawn. Set before `beforeSpawn`
+	 * runs, so the MCP listener, which binds this rather than the configured
+	 * port, cannot start on the outgoing port while that hook waits (#3580).
+	 */
+	getMcpPort(): number | null {
+		return this.mcpPort;
 	}
 
 	/** Called with every lifecycle change. Returns the unsubscribe. */
@@ -994,6 +1019,12 @@ export class EngineSidecar {
 			port: this.port,
 		});
 
+		// Read once, so the hook and the spawn agree on it. Passed even at the
+		// default, so the engine and the app cannot disagree.
+		const mcpPort = this.system.mcpPort();
+		this.mcpPort = mcpPort;
+		await this.beforeSpawn(mcpPort);
+
 		// Last look before the spawn, with no `await` between the two: from here
 		// on the child is tracked, so the quit path can kill it. Every check
 		// earlier than this one has an await after it, which is a window a quit
@@ -1001,7 +1032,7 @@ export class EngineSidecar {
 		this.assertNotShuttingDown();
 
 		this.transition({ kind: "spawning" });
-		const { child, spawnFailure } = this.spawnChild();
+		const { child, spawnFailure } = this.spawnChild(mcpPort);
 		await this.waitForEngine(child, spawnFailure);
 	}
 
@@ -1009,7 +1040,10 @@ export class EngineSidecar {
 	 * Spawn the engine and attach to it. Returns the child and what it did
 	 * instead of coming up, if anything.
 	 */
-	private spawnChild(): { child: ChildProcess; spawnFailure: () => SpawnFailure | null } {
+	private spawnChild(mcpPort: number): {
+		child: ChildProcess;
+		spawnFailure: () => SpawnFailure | null;
+	} {
 		// Spawn the engine process. `--verbose 0` in production: the engine writes
 		// its own structured records to `engine_<stamp>.log` (#1557) regardless,
 		// so nothing here reads its console text any more (#1558) - dev keeps `2`
@@ -1022,6 +1056,8 @@ export class EngineSidecar {
 			[
 				"--port",
 				this.port.toString(),
+				"--mcp-port",
+				mcpPort.toString(),
 				"--data-dir",
 				this.dataDir,
 				"--verbose",

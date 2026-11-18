@@ -9,7 +9,8 @@
  * @file http/routes/oauth.cpp
  * @brief OAuth 2.0 token endpoints - acquisition, cache status, cache clear.
  *
- * POST   /oauth2/token          {config, force?, interactive?} → token | error
+ * POST   /oauth2/token          {config, force?, interactive?, environmentId?,
+ *                                collectionId?} → token | error
  * GET    /oauth2/token?key=K    → {found, expired?, token?}
  * DELETE /oauth2/token?key=K    → {deleted}
  *
@@ -19,12 +20,17 @@
 
 #include "vayu/http/routes.hpp"
 
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace vayu::http::routes {
@@ -53,6 +59,50 @@ int64_t now_ms_epoch () {
     .count ();
 }
 
+/**
+ * @p config's `privateKey` reference resolved against the scopes @p req names,
+ * `environmentId` and `collectionId`, the ones a Send of the request reads
+ * (#3632). The resolved config lives only for this acquisition.
+ *
+ * A body naming neither is refused for a reference: this route has no saved
+ * request to read scopes from, and asking the provider with the reference as
+ * the key is never what was meant.
+ *
+ * @return the 400, or nothing.
+ */
+std::optional<std::pair<int, nlohmann::json>> resolve_token_signing_key (
+vayu::db::Database& db,
+const nlohmann::json& req,
+nlohmann::json& config) {
+    const auto refuse = [] (const std::string& message) {
+        return std::pair{ 400, error_body (400, message, OAUTH2_INVALID_CONFIG) };
+    };
+    const auto environment_id = read_optional_string_field (req, "environmentId");
+    if (!environment_id) {
+        return refuse (environment_id.error ());
+    }
+    const auto collection_id = read_optional_string_field (req, "collectionId");
+    if (!collection_id) {
+        return refuse (collection_id.error ());
+    }
+    const auto key = config.find (OAUTH2_PRIVATE_KEY);
+    if (key == config.end () || !key->is_string () ||
+    !vayu::core::vayu_ext::is_variable_reference (key->get_ref<const std::string&> ())) {
+        return std::nullopt;
+    }
+    if (!environment_id->has_value () && !collection_id->has_value ()) {
+        return refuse ("privateKey names " + key->get<std::string> () +
+        ", and this call names no environmentId or collectionId to resolve it "
+        "from - send the saved request, or name a key file in privateKeyFile");
+    }
+    if (auto refusal = resolve_private_key_reference (config,
+        flatten_variable_scopes (load_script_variable_scopes (
+        db, *environment_id, collection_id->value_or (std::string ()))))) {
+        return refuse (*refusal);
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -70,8 +120,11 @@ const std::atomic<bool>* cancel) {
     }
     const nlohmann::json& req = *parsed;
 
-    const auto config = req.value ("config", nlohmann::json ());
-    const bool force  = req.value ("force", false);
+    auto config      = req.value ("config", nlohmann::json ());
+    const bool force = req.value ("force", false);
+    if (auto refusal = resolve_token_signing_key (db, req, config)) {
+        return *refusal;
+    }
 
     std::optional<oauth::InteractiveExchange> interactive;
     if (auto it = req.find ("interactive"); it != req.end () && it->is_object ()) {

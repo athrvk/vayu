@@ -1150,6 +1150,37 @@ TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
     EXPECT_TRUE (run (root).notes.not_carried.empty ());
 }
 
+// Postman has no RFC 7523 grant (#3632): a `grant_type` it does not know is
+// not one it runs, so the block is written without one, with what Postman can
+// state, and counted as a loss. Neither the key reference nor the key file's
+// path is written: the block has no attribute for them.
+// Mutation-check: drop `postman_grant.empty ()` from `oauth2_loses_settings`
+// and the note goes; return `grant` from `grant_type_of` and `jwt_bearer` is
+// written as a grant.
+TEST (PostmanExport, AJwtBearerGrantIsWrittenWithNoGrantTypeAndIsANote) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth = oauth2 ({ { "grantType", "jwt_bearer" }, { "clientId", "svc" },
+    { "accessTokenUrl", "https://a/token" }, { "scope", "read" }, { "subject", "ada@example.com" },
+    { "privateKey", "{{signingKey}}" }, { "privateKeyFile", "/etc/keys/svc.pem" },
+    { "assertionClaims", ordered::array ({ row ("tenant", "acme") }) } });
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto outcome = run (root, /*secrets=*/false);
+    const json written =
+    attributes (ordered::parse (outcome.text)["item"][0]["request"]["auth"]);
+    EXPECT_FALSE (written.contains ("grant_type"));
+    EXPECT_EQ (written.at ("accessTokenUrl"), "https://a/token");
+    EXPECT_EQ (written.at ("clientId"), "svc");
+    EXPECT_EQ (written.at ("scope"), "read");
+    for (const char* absent : { "jwt_bearer", "signingKey", "svc.pem", "tenant" }) {
+        EXPECT_EQ (outcome.text.find (absent), std::string::npos) << absent;
+    }
+    EXPECT_EQ (losses (outcome), (json{ { "oauth2_settings", 1 } }));
+    // The one thing withheld is the key file's path; the reference is no secret.
+    EXPECT_EQ (outcome.notes.secrets_omitted, 1);
+}
+
 // The extra request parameter lists are Postman's (issue #2536): each row in
 // its own list with Postman's `send_as`, an authorization row on the URL, and
 // the config's audience and resource opening the token request's list, where

@@ -338,6 +338,21 @@ void cap_node_raw_request (nlohmann::json& node, size_t max_body_bytes) {
     }
 }
 
+// What @p node's `body` holds in the unit `cap_node_body` caps it by: its
+// bytes, or for a base64 body the bytes it decodes to. Zero for no body.
+size_t held_body_bytes (const nlohmann::json& node) {
+    const auto body = node.is_object () ? node.find ("body") : node.end ();
+    if (body == node.end () || !body->is_string ()) {
+        return 0;
+    }
+    const auto& text = body->get_ref<const std::string&> ();
+    if (node.value ("bodyEncoding", "") != BODY_ENCODING_BASE64) {
+        return text.size ();
+    }
+    const size_t unpadded = text.find_last_not_of ('=') + 1; // npos + 1 is 0
+    return (unpadded * 3) / 4;
+}
+
 } // namespace
 
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
@@ -347,6 +362,20 @@ void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
     }
     if (trace.contains ("response")) {
         cap_node_body (trace["response"], max_body_bytes);
+    }
+}
+
+void cap_trace_bodies_together (std::span<nlohmann::json> traces, size_t budget_bytes) {
+    size_t left = budget_bytes;
+    for (auto& trace : traces) {
+        for (const char* side : { "request", "response" }) {
+            const auto node = trace.find (side);
+            if (node == trace.end ()) {
+                continue;
+            }
+            cap_node_body (*node, left);
+            left -= std::min (left, held_body_bytes (*node));
+        }
     }
 }
 
@@ -1910,6 +1939,8 @@ void mask_secret_values (Json& node, const std::vector<std::string>& forms) {
     }
 }
 
+} // namespace
+
 /**
  * Each header line's value in a payload's `headers`, in either shape (issue
  * #2466): an object's member values, or each `{"name", "value"}` line's
@@ -1935,6 +1966,8 @@ const std::function<void (const std::string& name, Json& value)>& visit) {
         }
     }
 }
+
+namespace {
 
 // The members of a composed payload a resolved `{{variable}}` can land in.
 void mask_snapshot_secrets (Json& parsed, const std::vector<std::string>& forms) {

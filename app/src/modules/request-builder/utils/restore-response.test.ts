@@ -835,4 +835,28 @@ describe("scriptsFromTrace", () => {
 		};
 		expect(scriptsFromTrace({ scripts: node })).toEqual(node);
 	});
+
+	it("restores the scripts' request records and the line that indexes one (#3633)", () => {
+		const record = {
+			source: "pre" as const,
+			scope: "collection" as const,
+			startedAt: 1_763_452_800_123,
+			status: 200,
+			statusText: "OK",
+			request: { method: "POST", url: "https://auth.example.test/token" },
+			response: { headers: { "content-type": "application/json" }, body: "{}" },
+			totalMs: 41.2,
+		};
+		const line = {
+			source: "pre" as const,
+			level: "info" as const,
+			message: "pm.sendRequest POST https://auth.example.test/token -> 200 (41 ms)",
+			scriptRequest: 0,
+		};
+		const restored = scriptsFromTrace({
+			scripts: { consoleLogs: [line], scriptRequests: [record] },
+		});
+		expect(restored.scriptRequests).toEqual([record]);
+		expect(restored.consoleLogs).toEqual([line]);
+	});
 });

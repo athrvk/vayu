@@ -54,6 +54,7 @@ import {
 	MAX_RUN_SERIES_LIMIT,
 	PAGE_CURSOR_SENTENCE,
 	pagedRead,
+	RUN_OUTCOMES,
 	RUN_STATUSES,
 	RUN_TYPES,
 	runListQuery,
@@ -399,6 +400,12 @@ export const READ_TOOLS: McpTool[] = [
 				.optional()
 				.describe(
 					`Only runs in this state: ${RUN_STATUSES.map((status) => `"${status}"`).join(", ")}.`
+				),
+			outcome: z
+				.enum(RUN_OUTCOMES)
+				.optional()
+				.describe(
+					"Only runs with this verdict, a row's `outcome`; a run with none never matches."
 				),
 			requestId: z.string().optional().describe("Only runs of this saved request."),
 			collectionId: z

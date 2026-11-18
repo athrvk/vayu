@@ -35,6 +35,7 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/status_seconds.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -1218,6 +1219,43 @@ inline RouteResult reject_unknown_auth_mode (const nlohmann::json& json) {
     }
     return route_error (400,
     std::format ("Invalid 'auth.mode': must be a string, one of: {}", known));
+}
+
+/**
+ * A stated `auth.config.privateKey` that is not one `{{variable}}` reference is
+ * a 400 naming it (#3632): the `jwt_bearer` grant's signing key is never stored,
+ * only the name of the secret variable holding it, so no stored row, export or
+ * client read carries key material. Absent, `null` and `""` pass (a key file in
+ * `privateKeyFile`, or no key yet). The refusal never quotes the value, which
+ * is most likely the key itself.
+ *
+ * Called by the collection and request create and update cores beside
+ * @ref reject_unknown_auth_mode and for the same reason not by the appliers:
+ * an importer's block must not fail an atomic import.
+ */
+inline RouteResult reject_inline_private_key (const nlohmann::json& json) {
+    const auto auth = json.find ("auth");
+    if (auth == json.end () || !auth->is_object ()) {
+        return {};
+    }
+    const auto config = auth->find ("config");
+    if (config == auth->end () || !config->is_object ()) {
+        return {};
+    }
+    const auto key = config->find ("privateKey");
+    if (key == config->end () || key->is_null ()) {
+        return {};
+    }
+    if (key->is_string () &&
+    (key->get_ref<const std::string&> ().empty () ||
+    vayu::core::vayu_ext::is_variable_reference (key->get_ref<const std::string&> ()))) {
+        return {};
+    }
+    return route_error (400,
+    "Invalid 'auth.config.privateKey': must be one {{variable}} reference "
+    "naming a secret variable that holds the key, or empty with "
+    "'privateKeyFile' naming a key file - a key is never stored in a request "
+    "or a collection");
 }
 
 /**

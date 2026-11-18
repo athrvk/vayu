@@ -49,6 +49,13 @@ export interface OAuth2FormProps {
 	 * host that knows the request can ask the engine; the collection editor omits it.
 	 */
 	deferredNames?: readonly string[];
+	/**
+	 * The collection a `jwt_bearer` token request names so the engine can resolve
+	 * the key's `{{variable}}` from the scopes a Send of this request reads (#3632).
+	 * The active environment is read from the session. Omitted, a key held as a
+	 * reference cannot be resolved for Get token, and the engine says so.
+	 */
+	collectionId?: string | null;
 	/** Variable-aware text input; falls back to a plain input when omitted. */
 	TextInput?: OAuth2TextInput;
 	/**

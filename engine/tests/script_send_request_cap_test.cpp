@@ -487,6 +487,23 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptUnderTheBoundReadsTheWholeB
     EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();
 }
 
+// The deferred replay keeps a fetch's summary line in its console sample
+// (#3633); that it builds no record is held by
+// `ScriptRequestRecording.OnlyADesignSendAndASequentialRunTurnItOn`, as the
+// replay keeps nothing a record could ride.
+TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchKeepsItsLine) {
+    const auto validation = vayu::core::validate_scripts (
+    run_with_script ("pm.sendRequest('" + server_->ok_url () + "', function () {});"), *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();
+    const auto& console = validation.run->console;
+    ASSERT_EQ (console.size (), 1u);
+    EXPECT_TRUE (console[0].message.text.starts_with (
+    "pm.sendRequest GET " + server_->ok_url () + " -> 200 ("))
+    << console[0].message.text;
+}
+
 // ============================================================================
 // The load path: the timeout a replayed script's fetch takes (issue #2833)
 // ============================================================================

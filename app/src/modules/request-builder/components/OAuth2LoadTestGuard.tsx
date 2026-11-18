@@ -38,7 +38,8 @@ import { RefreshCw, Loader2 } from "lucide-react";
 import { Button, Switch } from "@/components/ui";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/queries/oauth";
-import { useToastStore } from "@/stores";
+import { tokenScopeIds } from "@/services/oauth/signing-key";
+import { useSessionStore, useToastStore } from "@/stores";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import type { OAuth2Config } from "@/types";
 import {
@@ -61,6 +62,9 @@ interface OAuth2LoadTestGuardProps {
 	 *  names are not empty): the verdicts then name the token as fetched before
 	 *  scripts. */
 	scriptMayChangeSettings?: boolean;
+	/** The collection a refresh names to the engine, beside the active
+	 *  environment, to resolve a `jwt_bearer` key reference (#3632). */
+	collectionId?: string;
 	onGateChange: (gated: boolean) => void;
 }
 
@@ -68,9 +72,11 @@ export default function OAuth2LoadTestGuard({
 	config,
 	durationSeconds,
 	scriptMayChangeSettings = false,
+	collectionId,
 	onGateChange,
 }: OAuth2LoadTestGuardProps) {
 	const showToast = useToastStore((s) => s.showToast);
+	const environmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const [acknowledged, setAcknowledged] = useState(false);
 
 	const cacheKey = useMemo(() => {
@@ -136,7 +142,7 @@ export default function OAuth2LoadTestGuard({
 
 	const handleRefresh = () => {
 		fetchMutation.mutate(
-			{ config, force: true },
+			{ config, force: true, ...tokenScopeIds(environmentId, collectionId) },
 			{
 				onError: (err) =>
 					showToast(

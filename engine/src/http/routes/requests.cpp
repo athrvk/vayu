@@ -848,6 +848,9 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto outcome = reject_inline_private_key (json); !outcome) {
+        return as_response (outcome.error ());
+    }
     const std::string id = vayu::utils::generate_id ("req_");
 
     if (db.get_request (id).has_value ()) {
@@ -895,6 +898,9 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (auto outcome = reject_inline_private_key (json); !outcome) {
         return as_response (outcome.error ());
     }
     auto existing = db.get_request (id);

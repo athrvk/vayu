@@ -139,7 +139,7 @@ export type RunIdentity = { requestId: string } | { collectionId: string };
  * The filters `GET /runs` accepts, as the engine spells them.
  *
  * Order is fixed newest-first - the route takes no sort parameter - and the
- * engine *ignores* an unparseable `type`, `status` or `baseline` rather than
+ * engine *ignores* an unparseable `type`, `status`, `outcome` or `baseline` rather than
  * refusing it, which is why the tool over this validates them first.
  */
 export interface RunListQuery {
@@ -149,6 +149,8 @@ export interface RunListQuery {
 	type?: string;
 	/** "pending" | "running" | "completed" | "failed" | "stopped" (`parse_run_status`). */
 	status?: string;
+	/** "passed" | "failed" | "not_judged": the verdict stored on the row; a row with none matches no value. */
+	outcome?: string;
 	requestId?: string;
 	/**
 	 * Matches a run whose snapshot names this collection: a collection run, and
@@ -587,6 +589,7 @@ export class EngineClient {
 		});
 		if (query.type !== undefined) params.set("type", query.type);
 		if (query.status !== undefined) params.set("status", query.status);
+		if (query.outcome !== undefined) params.set("outcome", query.outcome);
 		if (query.requestId !== undefined) params.set("requestId", query.requestId);
 		if (query.collectionId !== undefined) params.set("collectionId", query.collectionId);
 		if (query.q !== undefined) params.set("q", query.q);

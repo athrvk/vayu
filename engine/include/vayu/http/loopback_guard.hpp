@@ -61,10 +61,28 @@ void set_engine_port (int port);
 std::optional<int> registered_engine_port () noexcept;
 
 /**
+ * @brief Record the port the app's MCP server listens on (`--mcp-port`,
+ *        #3580). Set once per process, by the same rules as
+ *        `set_engine_port`.
+ *
+ * Once set, that port is the reserved MCP port and `defaults::MCP_PORT` is an
+ * ordinary one, free to test a local server on.
+ *
+ * @throws std::invalid_argument for a port outside 1..65535.
+ * @throws std::logic_error when a different port is already registered.
+ */
+void set_mcp_port (int port);
+
+/// The port `set_mcp_port` recorded, or nullopt when the daemon was started
+/// without `--mcp-port` and the MCP port is `defaults::MCP_PORT`.
+std::optional<int> registered_mcp_port () noexcept;
+
+/**
  * @brief Whether a transfer to @p host_or_ip on @p port would reach Vayu
  *        itself.
  *
- * True when @p port is the registered engine port or `MCP_PORT` and the host
+ * True when @p port is the registered engine port or the MCP port (the
+ * registered one, else `defaults::MCP_PORT`) and the host
  * is this machine: all of `127.0.0.0/8`, `::1`, the IPv4-mapped
  * `::ffff:127.0.0.0/8`, the unspecified `0.0.0.0` and `::` (which connect to
  * the local host on Linux and macOS), and `localhost` in any case, with or
@@ -144,12 +162,14 @@ std::string local_peer_refusal ();
 
 namespace detail {
 
-/// `is_reserved_loopback_target` with the engine port passed in rather than
-/// read from the process-wide registry, so a test can state both the unset
-/// and the set case without sharing state with the rest of the suite.
+/// `is_reserved_loopback_target` with both ports passed in rather than read
+/// from the process-wide registries, so a test can state the unset and the
+/// set case of each without sharing state with the rest of the suite. A
+/// nullopt @p mcp_port means `defaults::MCP_PORT`.
 bool is_reserved_loopback_target (std::string_view host_or_ip,
 int port,
-std::optional<int> engine_port);
+std::optional<int> engine_port,
+std::optional<int> mcp_port);
 
 } // namespace detail
 

@@ -22,10 +22,12 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/core/url_encoding.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
@@ -897,6 +899,37 @@ const BoundColumnNames& bound_columns) {
     });
 }
 
+std::optional<std::string> resolve_private_key_reference (nlohmann::json& config,
+const VariableValues& vars) {
+    if (!config.is_object ()) {
+        return std::nullopt;
+    }
+    const auto key = config.find (OAUTH2_PRIVATE_KEY);
+    if (key == config.end () || !key->is_string () ||
+    !vayu::core::vayu_ext::is_variable_reference (key->get_ref<const std::string&> ())) {
+        return std::nullopt;
+    }
+    std::string resolved = resolve_template (key->get<std::string> (), vars);
+    if (vayu::core::vayu_ext::is_variable_reference (resolved)) {
+        return vayu::http::oauth::unresolved_private_key_message (resolved);
+    }
+    *key = std::move (resolved);
+    return std::nullopt;
+}
+
+nlohmann::json* config_naming_private_key (nlohmann::json& payload) {
+    const auto auth = payload.find ("auth");
+    if (auth == payload.end () || !auth->is_object ()) {
+        return nullptr;
+    }
+    const auto config = auth->find ("config");
+    if (config == auth->end () || !config->is_object () ||
+    !config->contains (OAUTH2_PRIVATE_KEY)) {
+        return nullptr;
+    }
+    return &*config;
+}
+
 std::vector<vayu::db::Collection>
 collection_chain (vayu::db::Database& db, const std::string& leaf_id) {
     std::vector<vayu::db::Collection> chain;
@@ -1733,6 +1766,27 @@ const std::map<std::string, std::string>& substituted) {
     return refusal;
 }
 
+/**
+ * An oauth2 @p auth's `privateKey`, taken out so composition leaves it as
+ * written (@ref OAUTH2_PRIVATE_KEY): nothing for any other block.
+ */
+std::optional<nlohmann::json> take_private_key (nlohmann::json& auth) {
+    if (auth_mode (auth) != "oauth2") {
+        return std::nullopt;
+    }
+    const auto config = auth.find ("config");
+    if (config == auth.end () || !config->is_object ()) {
+        return std::nullopt;
+    }
+    const auto key = config->find (OAUTH2_PRIVATE_KEY);
+    if (key == config->end ()) {
+        return std::nullopt;
+    }
+    std::optional<nlohmann::json> held (std::in_place, std::move (*key));
+    config->erase (key);
+    return held;
+}
+
 /** An explicit choice wins; otherwise a deferring composition resolves OAuth 2.0 at composition. */
 OAuth2Resolution oauth2_resolution_of (std::optional<OAuth2Resolution> chosen,
 DynamicResolution dynamic) {
@@ -1754,7 +1808,8 @@ DynamicResolution dynamic) {
  * token it finds. An OAuth 2.0 config defers the same way unless @p oauth2
  * says its token is acquired before any script (`AtComposition`), when it
  * resolves here. Deferred, it is resolved by `apply_late_auth` before
- * `apply_auth` acquires, so D10 holds on both paths.
+ * `apply_auth` acquires, so D10 holds on both paths. Its `privateKey` stays
+ * written either way (@ref OAUTH2_PRIVATE_KEY): the cache key never reads it.
  *
  * A credential `apply_auth` writes into a header line as it stands is held to
  * the header rule (`http/header_text.hpp`): a variable whose value would end
@@ -1782,6 +1837,7 @@ nlohmann::json& payload) {
     const bool resolves_now =
     auth_mode (auth) == "oauth2" && oauth2 == OAuth2Resolution::AtComposition;
     const ComposeLookup resolve = resolves_now ? lookup.now () : lookup;
+    auto private_key            = take_private_key (auth);
     std::map<std::string, std::string> substituted;
     nlohmann::json resolved = resolve_json_strings_through (
     auth, [&resolve, &substituted] (const std::string& name) {
@@ -1794,6 +1850,9 @@ nlohmann::json& payload) {
     if (auto refusal = unspellable_header_credential (auth, substituted)) {
         return compose_error (400, vayu::http::UNSENDABLE_HEADER_CODE,
         describe_header_text_refusal (*refusal));
+    }
+    if (private_key) {
+        resolved["config"][OAUTH2_PRIVATE_KEY] = std::move (*private_key);
     }
     *it = std::move (resolved);
     return std::nullopt;

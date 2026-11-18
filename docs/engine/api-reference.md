@@ -618,6 +618,21 @@ importer's unrecognised mode is stored as written, so one odd block cannot fail
 an atomic import. The MCP `create_` and `update_` tools for both resources refuse
 an unknown mode as an input error before calling the engine.
 
+An OAuth 2.0 `auth.config.privateKey` (the `jwt_bearer` grant's signing key) is
+stored only as one `{{variable}}` reference naming a secret variable that holds
+the PEM, never as the key (#3632). The same four writes answer `400`
+(`Invalid 'auth.config.privateKey': must be one {{variable}} reference ...`)
+for any other value, a string with text around the reference or a second
+reference included, and write nothing; the message never quotes the value.
+Absent, `null` and `""` pass (a key file in `privateKeyFile`, or no key yet).
+`POST /import/apply` and `POST /specs/sync` are not held to it, as above.
+`POST /compose` leaves the reference written in every mode, so no composed
+payload carries the key; it is resolved only where a token is acquired: after
+the pre-request script on a Send and a sequential collection run, once at the
+start of a load run from the run's own scopes (a reference none answers is
+the run's `400`, `invalid_run_config` or `invalid_scenario`, naming it), and by
+[`POST /oauth2/token`](#post-oauth2token) from the scopes it names.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -3853,7 +3868,11 @@ A folder becomes a `tag` named by its full path (`Users/Admin`), described by
 the folder's own description and declared once at the document root and on
 every operation under it. Auth becomes `components.securitySchemes` plus a
 `security` requirement - basic and bearer as `http`, an API key as `apiKey`,
-OAuth 2 as `oauth2` with the flow the request uses - at the document root for
+OAuth 2 as `oauth2` with the flow the request uses (`authorization_code` as
+`authorizationCode`, `password`, and every other grant as `clientCredentials`,
+`jwt_bearer` included: OpenAPI has no RFC 7523 flow, so the flow names the token
+endpoint and the real config travels in `x-vayu-request.auth`, Swagger 2.0's
+`application` is the same fallback) - at the document root for
 the collection's own auth and on the operation only where a request's differs
 from it. An `inherit` request is resolved the way `POST /compose` resolves it,
 through its folders (the nearest one with a credential, `noauth` ending the
@@ -3903,13 +3922,19 @@ nothing else, which names where the secret lives without being one. The auth
 modes kept as a `config` bag (AWS, digest, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT,
 OAuth 2.0's own config) are blanked by an allowlist of the members known to
 describe the auth, so a member no list has heard of (Insomnia's IAM
-`secretAccessKey`) leaves blank too. OAuth 2.0's extra request parameter lists
-(`tokenParams`, `authorizationParams`, `refreshParams`) are redacted per row: a
+`secretAccessKey`) leaves blank too. The `jwt_bearer` grant's `subject`,
+`assertionAudience`, `assertionLifetimeSeconds`, `signingAlgorithm`, `keyId`
+and `fallbackExpiresIn` are on that list; its `privateKey`, which is only ever
+one `{{variable}}` reference, stays as that reference (a key written any other
+way is blanked and counted), and its `privateKeyFile`, a path on one machine,
+is not on it and leaves blank, counted. OAuth 2.0's extra request parameter
+lists (`tokenParams`, `authorizationParams`, `refreshParams`) and the
+`jwt_bearer` grant's `assertionClaims` are redacted per row: a
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
 names a credential (`client_secret`, `client_assertion`, `password`,
 `Authorization`, `X-Api-Key`, the other names below), so an `audience` row
-leaves intact; a row with no non-empty string `key`, and any member of a row
-beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
+leaves intact, as a claim named `tenant` does; a row with no non-empty string
+`key`, and any member of a row beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
 it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
@@ -5012,7 +5037,11 @@ a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
 NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
 allowlist of the members known to describe the auth, not by credential name, so
 a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
-OAuth 2.0's extra request parameter rows, in its config and in a kept Postman
+The `jwt_bearer` grant's non-secret members are on it, its `privateKey`
+reference survives, and its `privateKeyFile` path is blanked and counted (the
+grant itself is not written as a Postman grant, see `oauth2_settings` below).
+OAuth 2.0's extra request parameter rows and the `jwt_bearer` grant's
+`assertionClaims`, in its config and in a kept Postman
 block alike, keep their keys; a row's value is blanked when its key names a
 credential (`client_secret`, `client_assertion`, `password`, `Authorization`,
 `X-Api-Key`, the other names a header or query parameter is blanked by).
@@ -5087,7 +5116,7 @@ was before these rules.
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
-| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
+| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, an empty header prefix, or the `jwt_bearer` grant (Postman has no RFC 7523 grant: the block is written with its endpoints, client id and scope and no `grant_type`, and the subject, claims and key are not written) (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
@@ -7159,7 +7188,7 @@ hits the wire:
 | `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467); a token empty once trimmed writes no header at all and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
 | `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467); a key empty once trimmed writes nothing and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
-| `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement`; a token placed in the header yields to an `Authorization` header the request carries, and is then not fetched at all (#3202, below) |
+| `oauth2` | Acquires/caches a token (below; the `client_credentials`, `password`, `authorization_code` and `jwt_bearer` grants) and injects it per `tokenPlacement`; a token placed in the header yields to an `Authorization` header the request carries, and is then not fetched at all (#3202, below) |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
 **When it is applied.** As the request is built, before any pre-request script
@@ -7186,7 +7215,10 @@ off, a waiting one is never applied (#3131, see
 sequential run, in any step of a plan that writes a variable), or holding a
 `{{name}}` that nothing defines, is left as written by
 [`POST /compose`](#post-compose), resolved in every string after the
-pre-request script, and only then is its token acquired; the [token cache](#oauth-20-token-cache) key is computed from
+pre-request script (a `jwt_bearer` `privateKey` excepted: compose leaves it a
+reference in both modes and it is resolved only into the config the token is
+acquired with, see [auth modes](#auth-modes)), and only then is its token
+acquired; the [token cache](#oauth-20-token-cache) key is computed from
 that resolved config, so a script that sets a `clientId` or an `accessTokenUrl`
 selects its own cached token, and a client secret or scope it sets reaches the
 token endpoint when a token is fetched (neither is part of the key, so a token
@@ -7283,7 +7315,9 @@ post-request script. A load run and a stream record no hops.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant`, then one segment per extra parameter list that has
+username-if-password-grant` (the `subject` for a `jwt_bearer` grant, so two
+subjects of one client hold two tokens; the key never reads `privateKey`,
+`privateKeyFile`, the claims or the algorithm), then one segment per extra parameter list that has
 a row the engine would send, in the order `authorizationParams`, `tokenParams`,
 `refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
 the pairs sorted by key, then value, byte-wise). A row whose key names a
@@ -7299,7 +7333,8 @@ differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
-means non-expiring. One refresh is in flight per cache key (#3344): however
+means non-expiring unless the config sets `fallbackExpiresIn` (seconds, any grant,
+held to one year), which is then how long such a token is kept. One refresh is in flight per cache key (#3344): however
 many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.
@@ -7331,8 +7366,35 @@ under a different `headerPrefix` than the first step sharing its cache key
 #### POST /oauth2/token
 
 Acquire (or return a cached) token for an `OAuth2Config`. Supports the
-`client_credentials`, `password`, and `authorization_code` grants; the
-`authorization_code` grant requires an `interactive` code exchange (see below).
+`client_credentials`, `password`, `authorization_code` and `jwt_bearer` grants;
+the `authorization_code` grant requires an `interactive` code exchange (see
+below).
+
+The `jwt_bearer` grant (RFC 7523, #3632) posts `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`
+and an `assertion` the engine signs with the client's key. The config members
+(all strings unless noted):
+
+| Member | Meaning |
+|--------|---------|
+| `subject` | The `sub` claim; required. Also the fourth slot of the [cache key](#oauth-20-token-cache) |
+| `assertionAudience` | The `aud` claim; required |
+| `clientId` | The `iss` claim. With no `clientSecret` it is sent in no other way: the assertion alone authenticates the client, so no `client_id` rides beside it |
+| `assertionLifetimeSeconds` | A number, `exp` minus `iat`; 180 when absent or `null`, held to 1..3600, a non-number a `400` |
+| `signingAlgorithm` | `RS256` (the default) or `ES256` |
+| `keyId` | Written as the header's `kid` when not empty |
+| `privateKey` | The signing key, as one `{{variable}}` reference to a secret variable holding the PEM (a literal key is refused on write, see [auth modes](#auth-modes)). Resolved only where the token is acquired |
+| `privateKeyFile` | A path to the PEM, read through the [file-trust rule](#allowed-folders-file-roots); exactly one of `privateKey` and `privateKeyFile` is set |
+| `assertionClaims` | `[{key, value, enabled}]`, further claims; a row naming a claim the engine wrote (`iss`, `sub`, `aud`, `exp`, `iat`) is skipped |
+| `scope`, `audience`, `resource`, `tokenParams` | Sent as for any fresh grant |
+
+A missing required member, both or neither key, an unresolved reference and a
+key that cannot sign are each a `400` `oauth2_invalid_config` naming the member;
+no message holds any part of the key.
+
+`fallbackExpiresIn` (a number of seconds, any grant) is how long a token whose
+response states no `expires_in` is kept; absent, it never expires, as before. A
+value above one year (31536000, `MAX_FALLBACK_EXPIRES_IN_SECONDS`) is kept for
+a year, and a value that is not a positive number leaves the token non-expiring.
 
 **Request:**
 ```json
@@ -7340,9 +7402,20 @@ Acquire (or return a cached) token for an `OAuth2Config`. Supports the
   "config": { "grantType": "client_credentials", "accessTokenUrl": "https://idp/token",
               "clientId": "...", "clientSecret": "...", "scope": "openid" },
   "force": false,
-  "interactive": { "code": "...", "codeVerifier": "...", "redirectUri": "..." }
+  "interactive": { "code": "...", "codeVerifier": "...", "redirectUri": "..." },
+  "environmentId": "env_...",
+  "collectionId": "col_..."
 }
 ```
+
+`environmentId` and `collectionId` (optional strings; another type is a `400`
+`oauth2_invalid_config` naming it) are the scopes a Send of the request reads:
+the route resolves the config's `privateKey` reference against that
+environment, that collection's chain and the globals, and nothing else in the
+config, which the caller sends resolved (#3632). A `privateKey` reference with
+neither id is a `400` `oauth2_invalid_config` saying to send the saved request
+or name a key file in `privateKeyFile`; one no named scope defines is the same
+`400` naming the reference. A `privateKeyFile` needs no id.
 
 `force: true` bypasses the cache (refreshes via the refresh token when present,
 else re-acquires). `interactive` is only used for the `authorization_code` grant,
@@ -7943,9 +8016,10 @@ would refuse it as "IDN support not present", which names the wrong cause.
 #### Reserved local ports
 
 No request the engine sends reaches Vayu itself: the engine's own port (the
-`--port` it bound, 9876 by default) and the MCP server's port (9877) are
-refused on this machine, on every send path - Send, a load or collection run, a
-streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
+`--port` it bound, 9876 by default) and the MCP server's port (the daemon's
+`--mcp-port`, 9877 when it is started without one) are refused on this
+machine, on every send path - Send, a load or collection run, a streaming
+request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
 request, `POST /import/fetch` and the server-vitals monitor. The API's
 [gate](#who-may-call-the-api) admits a loopback request with no `Origin`, which
 is exactly what the engine's own client sends, so without this a request in an
@@ -7962,7 +8036,9 @@ rule is applied twice:
   before anything is dialled: status `0`, error code
   `INVALID_URL`, and the message
   `Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine - not when the URL names it, a redirect leads there or a host name resolves there`
-  (`MCP port 9877` for the other). This holds with a proxy configured too.
+  (`MCP port 9877`, or the `--mcp-port` value, for the other). This holds with
+  a proxy configured too. Once a `--mcp-port` is given, 9877 is an ordinary
+  port like any other.
 - **The address libcurl connected to**, for every connection a transfer uses,
   before a byte of the request is written. This is what refuses a redirect to
   one of those ports and a name that resolves to loopback (`*.localhost`, a DNS
@@ -8486,10 +8562,11 @@ not a feature that was skipped but one the runtime cannot have. See
 Because the route has already answered `202`, a streaming run's script output
 has nowhere to be *returned*: the trace's `scripts` node is the only route it
 takes. That node is not a streaming feature - every design send stores it
-(issue #725), with the same four keys the buffered response body carries
-(`testResults`, `consoleLogs`, `preScriptError`, `postScriptError`). One engine
-object fills both, so a live pane and a restored one cannot disagree. A run
-whose scripts said nothing stores no node at all.
+(issue #725), with the same keys the buffered response body carries
+(`testResults`, `consoleLogs`, `preScriptError`, `postScriptError` and, since
+#3633, `scriptRequests`). One engine object fills both, so a live pane and a
+restored one cannot disagree. A run whose scripts said nothing stores no node
+at all.
 
 Tuning: `sseMaxRetainedEvents`, `sseMaxEventBytes`, `sseMaxStoredEvents`,
 `sseMaxStreamDurationMs`, `sseMaxStreamEvents` and `sseIdleTimeoutMs` (see
@@ -8862,8 +8939,38 @@ run-shaped way of stating the same field, not a second store.
     }
   ],
   "consoleLogs": [
+    { "source": "pre", "scope": "collection", "level": "info",
+      "message": "pm.sendRequest POST https://auth.example.test/token -> 200 (41 ms)",
+      "scriptRequest": 0 },
     { "source": "pre", "scope": "collection", "level": "log", "message": "token refreshed" },
     { "source": "test", "scope": "request", "level": "error", "message": "unexpected shape" }
+  ],
+  "scriptRequests": [
+    {
+      "source": "pre",
+      "scope": "collection",
+      "startedAt": 1763452800123,
+      "status": 200,
+      "statusText": "OK",
+      "request": {
+        "method": "POST",
+        "url": "https://auth.example.test/token",
+        "headers": { "Authorization": "<redacted>", "Content-Type": "application/x-www-form-urlencoded" },
+        "sentHeaders": { "Authorization": "<redacted>", "Content-Type": "application/x-www-form-urlencoded" },
+        "sentHeaderLines": [ { "name": "Authorization", "value": "<redacted>" } ],
+        "body": "grant_type=client_credentials"
+      },
+      "response": {
+        "headers": { "content-type": "application/json", "set-cookie": "<redacted>" },
+        "headerLines": [ { "name": "Set-Cookie", "value": "<redacted>" } ],
+        "body": "{\"access_token\":\"tok_123\"}",
+        "bodyBytes": 26,
+        "httpVersion": "HTTP/1.1",
+        "httpVersionDowngraded": false
+      },
+      "totalMs": 41.2, "wireMs": 40.8, "queueWaitMs": 0.1, "dnsMs": 0,
+      "connectMs": 0.4, "tlsMs": 0, "firstByteMs": 38.9, "downloadMs": 1.1
+    }
   ],
   "validation": {
     "checked": true,
@@ -8981,8 +9088,58 @@ threw, they name it - "Collection pre-request script failed - <message>",
 "Folder test script failed - <message>". An `assert.*` or `extract.*`
 element's entry carries the `scope` of the level that declared it.
 
-**The four script keys are stored the same way** (issue #725). `testResults`,
-`consoleLogs`, `preScriptError` and `postScriptError` are returned in the body
+**`scriptRequests` is every `pm.sendRequest` the scripts made** (issue #3633),
+one record per call in execution order, pre before test, in the stored trace's
+own shape (see [`GET /runs/:runId`](#get-runsrunid)) so a reader of a trace
+reads a record too:
+
+- `request`, `response`, `error_type` / `error_message` and the eight `*Ms`
+  timings are the trace's members for the call. `request.url` is the URL the
+  transfer dialled, after `options.auth` and the Postman URL encoding; the
+  redirect hops are `response.redirects`. A record has no `rawRequest`, so a
+  reader synthesizes the raw view from `sentHeaderLines` as it does for a trace
+  without one. A urlencoded body is recorded as the encoded bytes that went
+  out; a `formdata` body is written by libcurl and has no `body`.
+- `source` and `scope` are spelled as `consoleLogs` spells them, `scope`
+  absent where no level was stamped. `startedAt` is when the call began, in
+  epoch milliseconds. `status` is `0` for a transport failure, with the code
+  in `error_type` and no `response` when nothing answered.
+- The call's summary line in `consoleLogs` (the `info` line
+  `pm.sendRequest <METHOD> <url> -> <status> (<n> ms)`) carries
+  **`scriptRequest`**, the index of its record in this array, so a client can
+  draw the two as one row in the line's position. A record with no line
+  pointing at it - the console was off, or the console cap had already
+  dropped the line - belongs after the last line of its script.
+- **Credentials are masked where the record is built**, so the live answer,
+  the stored trace and every reader of it hold the same masked record. In
+  every header map and line list of the record, the request's, the response's
+  and each redirect hop's, the value of a header the export blanks
+  (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
+  `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token` and the rest of the set the
+  logger redacts) or of one the call's `options.auth` wrote (named in
+  `request.authHeaders`) reads `"<redacted>"`, the marker `configSnapshot`
+  uses; a header sent with an empty value stays empty. Each `url`, the
+  request's and each hop's, has a `user:pass@` password and the value of a
+  credential-named query parameter, or of the one `options.auth` placed
+  (`request.authQueryParam`), blanked to `""` exactly as an export blanks a
+  URL and as the summary line already did. Bodies are not judged: a token
+  endpoint's answer keeps its token. This is deliberately not the main
+  exchange's rule, whose trace stays raw.
+- **Bodies are bounded by `maxTraceBodyBytes`, all of them together**: in
+  order, each request and response body of every record is cut to what the
+  bodies before it left of one `maxTraceBodyBytes`, so a send's script
+  requests store at most what its own response may. A cut body carries
+  `bodyTruncated: true` and its true `bodyBytes` (a request body gains the
+  pair too); once the budget is spent a body is stored as `""`. The script
+  itself still received the whole response.
+- Recorded on every design send, buffered and streaming, whatever
+  `scriptEnableConsole` says: a record is trace, not console output. A
+  sequential collection run records its steps' and its setup and teardown
+  scripts' calls too (below); a **load run records none** and keeps only the
+  summary line. Absent when no script sent a request.
+
+**The script keys are stored the same way** (issue #725). `testResults`,
+`consoleLogs`, `preScriptError`, `postScriptError` and `scriptRequests` are returned in the body
 above *and* written to the design run's `trace_data.scripts` as one object, so a
 response restored from History carries the assertions the live one showed. This
 used to hold for a streaming send only, which made a restored ordinary send's
@@ -9294,7 +9451,9 @@ itself; a client that may talk to an older engine should read a bare string as
 field is omitted entirely when neither script logged anything. Each script
 execution keeps at most 1000 lines and 1 MiB (64 KiB a line); a script that
 passes either ends its entries with one `warn` line saying output was dropped.
-See [scripting.md](scripting.md#console-output).
+A `pm.sendRequest` summary line also carries `scriptRequest`, the index of the
+call's record in `scriptRequests` (above, issue #3633). See
+[scripting.md](scripting.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated**
 (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -
@@ -10729,7 +10888,7 @@ capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
 A step whose scripts said anything additionally carries a **`scripts` node**
-(issue #724) - the same object and the same four keys
+(issue #724) - the same object and the same keys
 [`POST /execute`](#post-execute) returns and a design send stores, so a step's
 assertions read the same inside a run as they do on a single send. It is the
 only route those results take: a collection run answers `202` long before its
@@ -10748,6 +10907,10 @@ that threw is not the request's own, the step error names it - "Collection
 pre-request script failed - ...", "Folder test script failed - ..." - where
 the request's own throw keeps "Pre-request script failed - ..." / "Test script
 failed - ...". When more than one level throws, the first one is reported.
+A step's `pm.sendRequest` calls are recorded in that node's `scriptRequests`
+(#3633), every level's in run order, with the masking and the shared
+`maxTraceBodyBytes` budget `POST /execute` describes; a load run's steps record
+none.
 
 A step of a collection **bound to an OpenAPI document** additionally carries a
 `validation` node (issue #681) - the same object and the same shape
@@ -12562,6 +12725,12 @@ seconds.
   error. A run recorded before the field existed matches `other`. There is no
   client filter: narrowing to one MCP client is done client-side over the
   rows this returns.
+- `outcome` - `passed` | `failed` | `not_judged`, exact match on the run's
+  stored `outcome` (#3547, below), the verdict its row draws rather
+  than how it ended: `outcome=failed` lists a `completed` run that missed a
+  budget, which `status` alone never shows. A row with no outcome matches no
+  value, so a run recorded before the field existed is in no `outcome` page.
+  An unrecognised value is ignored, like an unrecognised `type`.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
@@ -12667,6 +12836,34 @@ run and `null` otherwise, and on an `mcp` run whose client sent no name. A run
 recorded before the field existed reads `{"kind": "other", "client": null}`.
 Metadata, not identity: nothing authorises on it.
 
+**`outcome`** (#3547) is the verdict the row's own
+`resultSummary` (below) gives the run, stored when the run ends so the list can
+filter on it: `"passed"`, `"failed"` or `"not_judged"`, the rule the app's
+history row draws by (`rowOutcome`, `run-outcome.ts`;
+`engine/tests/fixtures/run-row-outcome-conformance.json`). The key is
+**omitted** on a row with no verdict, never `null`.
+
+- A **load run**: `stopped` is `not_judged`; a `failed` status or a missed budget
+  (`verdict: "failed"`) is `failed`; a drain a Stop cut (`drainCut`) is
+  `not_judged`; no budget (no `verdict`) is `not_judged`; met budgets are
+  `passed`, unless `errorRate` is above zero or a check failed (`assertions`:
+  `exact.failed`, `sampled.failed`, `errored` or `teardownFailed`), which is
+  `not_judged`. In that order: the first rule that applies decides.
+- A **collection run** is `failed` when it `completed` with a missed budget or a
+  step that `failed` or `errored`, and has no outcome otherwise: a clean one is
+  never `passed`, and a `stopped` or `failed` one says nothing.
+- A **design run**, a `pending` or `running` row, and a terminal load or
+  collection row with no `resultSummary` (no stored summary yet, or one that
+  records none of its keys) have no outcome. Neither has a run recorded before
+  the field existed: the column is not backfilled.
+
+It is derived from the row's own status, type and stored summary whenever the
+engine writes either - the final status, a summary that lands after a Stop's
+status, and the startup reconcile that marks an abandoned run `failed` - so it
+never describes a status or summary the row no longer holds. It is on the
+[PUT /runs/:runId/baseline](#put-runsrunidbaseline) row too, which is built by
+the same function; `GET /runs/:runId` does not carry it.
+
 **`resultSummary`** is what a **design run's** row says about the exchange:
 `statusCode` and `latencyMs`, and nothing else. A design run is one request and
 one response, so its outcome fits on the row and a page of them costs one extra
@@ -12763,6 +12960,7 @@ rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
       "endTime": 1234567891,
       "baseline": true,
       "origin": { "kind": "app", "client": null },
+      "outcome": "not_judged",
       "summary": {
         "url": "https://api.example.com/users",
         "method": "GET",
@@ -12800,6 +12998,9 @@ rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
   }
 }
 ```
+
+The load row's budgets passed, but `errorRate` is above zero, so its `outcome`
+is `not_judged`; the design row has none.
 
 `hasMore` is read off the rows: the engine fetches one row past `limit`, so it
 holds on a cursor page, which has no offset to add to `total`. `nextBefore` is
@@ -13149,7 +13350,9 @@ not measure for the whole run is absent rather than `0`: `avgInFlight`,
 `avgQueueWaitMs` (issue #2963), while `setupOverhead` and `httpVersionDowngraded` are `0`,
 `sampling` is absent, and the report has **no `latency` block** (issue #2938): the percentiles come from
 the stored `results` rows, of which such a run has none, so omitting the block says "not recorded"
-where a block of zeros would read as steps that answered instantly. A failed load run with no summary at all, because it wrote no
+where a block of zeros would read as steps that answered instantly. The same pass stamps the
+run's [`outcome`](#get-runs): `failed` for a load run whose summary, the partial one included,
+gives its row a `resultSummary`, and none for a run without one or for a collection run. A failed load run with no summary at all, because it wrote no
 tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
 counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist, and no `peakConcurrency` or `avgQueueWaitMs`. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
@@ -13443,7 +13646,9 @@ are HTTP-only, the same rule a failed assertion follows
     "failuresTotal": 6
   },
   "lifecycle": {
-    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
+    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok",
+                 "scriptRequests": [ { "scope": "collection", "status": 200, "request": { "...": "..." },
+                                       "response": { "...": "..." }, "totalMs": 41.2 } ] } ],
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
                     "messages": [ { "kind": "error", "text": "Error: boom" } ],
                     "console": [ { "level": "log", "text": "tearing down" } ] } ]
@@ -13750,6 +13955,14 @@ failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
 console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
 the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
 element row's lists (#3127), each key present only when the script said something.
+On a **sequential** collection run a row also carries **`scriptRequests`**
+(#3633): every `pm.sendRequest` the script made, in call order, each record in
+the shape, masking and shared body budget
+[`POST /execute`](#post-execute)'s `scriptRequests` describes, with `scope`
+but no `source` (the row says which phase it is). The `console` sample folds a
+repeated line into one entry, so its lines carry no `scriptRequest` index; the
+records are a flat list under the row. A load run's rows, a single-request
+run's included, carry none.
 A script the run's Stop cut short is
 `"skipped"`, with a `message` saying which way: its `pm.sendRequest` was
 cancelled (#3371), or the script itself was ended while it ran (#3460). The run

@@ -2483,6 +2483,164 @@ TEST_F (DatabaseTest, UpdateRunSummaryLeavesHasWarningsFalseWhenWarningsIsAbsent
     EXPECT_FALSE (after_malformed->has_warnings);
 }
 
+// ==================== runs.outcome (#3547) ====================
+
+namespace {
+
+constexpr const char* MISSED_BUDGET_SUMMARY = R"({"rps":5,"status_codes":{"200":10},
+"thresholds":{"checks":[{"metric":"latencyP99Ms","passed":false}],"passed":0,"failed":1}})";
+constexpr const char* MET_BUDGET_SUMMARY = R"({"rps":5,"status_codes":{"200":10},
+"thresholds":{"checks":[{"metric":"latencyP99Ms","passed":true}],"passed":1,"failed":0}})";
+constexpr const char* NO_BUDGET_SUMMARY = R"({"rps":5,"status_codes":{"200":10}})";
+
+/// A run of @p type left at Running, as both route inserts leave one.
+void seed_running_run (Database& db,
+const std::string& id,
+int64_t start_time,
+vayu::RunType type = vayu::RunType::Load) {
+    vayu::db::Run run;
+    run.id              = id;
+    run.type            = type;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = start_time;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+}
+
+/// A worker's ending: the summary while the row is still Running, then the
+/// final status (`run_manager.cpp`, `scenario_runner.cpp`).
+void finish_run (Database& db, const std::string& id, const char* summary, vayu::RunStatus to) {
+    db.update_run_summary (id, summary);
+    db.transition_run_status (id, { vayu::RunStatus::Running }, to);
+}
+
+std::optional<std::string> stored_outcome (Database& db, const std::string& id) {
+    const auto run = db.get_run (id);
+    if (!run) {
+        ADD_FAILURE () << "run vanished: " << id;
+        return std::nullopt;
+    }
+    return run->outcome;
+}
+
+} // namespace
+
+// The load path stores the summary before the final status, so the summary
+// write finds a Running row and stamps nothing, and the terminal move stamps
+// the verdict. Mutation check: drop `stamp_run_outcome` from
+// `transition_run_status` and every outcome below stays null.
+TEST_F (DatabaseTest, ATerminalTransitionStampsTheRowsOutcome) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    const int64_t recent = now_ms ();
+    seed_running_run (db, "missed", recent);
+    seed_running_run (db, "met", recent + 1);
+    seed_running_run (db, "unbudgeted", recent + 2);
+    seed_running_run (db, "clean_collection", recent + 3, vayu::RunType::Scenario);
+    seed_running_run (db, "failed_collection", recent + 4, vayu::RunType::Scenario);
+
+    db.update_run_summary ("missed", MISSED_BUDGET_SUMMARY);
+    EXPECT_EQ (stored_outcome (db, "missed"), std::nullopt)
+    << "a Running row's summary is not final";
+    db.transition_run_status (
+    "missed", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
+    finish_run (db, "met", MET_BUDGET_SUMMARY, vayu::RunStatus::Completed);
+    finish_run (db, "unbudgeted", NO_BUDGET_SUMMARY, vayu::RunStatus::Completed);
+    finish_run (db, "clean_collection",
+    R"({"scenario":{"passed":3,"failed":0,"errored":0}})", vayu::RunStatus::Completed);
+    finish_run (db, "failed_collection",
+    R"({"scenario":{"passed":2,"failed":1,"errored":0}})", vayu::RunStatus::Completed);
+
+    EXPECT_EQ (stored_outcome (db, "missed"), "failed");
+    EXPECT_EQ (stored_outcome (db, "met"), "passed");
+    EXPECT_EQ (stored_outcome (db, "unbudgeted"), "not_judged");
+    EXPECT_EQ (stored_outcome (db, "clean_collection"), std::nullopt)
+    << "a clean collection run is never judged passed";
+    EXPECT_EQ (stored_outcome (db, "failed_collection"), "failed");
+}
+
+// A Stop's status can land before the worker's summary (the inactive branch
+// of POST /runs/:id/stop), so the summary write stamps a row already terminal.
+// Mutation check: drop `stamp_run_outcome` from `update_run_summary` and the
+// stopped row keeps no outcome.
+TEST_F (DatabaseTest, ASummaryLandingOnATerminalRowStampsItsOutcome) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    seed_running_run (db, "stopped_first", now_ms ());
+    db.transition_run_status (
+    "stopped_first", { vayu::RunStatus::Running }, vayu::RunStatus::Stopped);
+    EXPECT_EQ (stored_outcome (db, "stopped_first"), std::nullopt)
+    << "a Stop with no summary yet has no row summary to judge";
+
+    db.update_run_summary ("stopped_first", MET_BUDGET_SUMMARY);
+    EXPECT_EQ (stored_outcome (db, "stopped_first"), "not_judged");
+}
+
+// A run the engine died under is moved to Failed by the startup reconcile,
+// which writes the row directly. Mutation check: drop `stamp_run_outcome`
+// from `reconcile_orphaned_runs` and both outcomes stay null.
+TEST_F (DatabaseTest, ReconcileStampsTheOutcomeOfTheRunsItFails) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        // Summarised before the engine died between the two writes.
+        seed_running_run (db, "summarised", now_ms ());
+        db.update_run_summary ("summarised", MET_BUDGET_SUMMARY);
+        seed_orphan (db, "ticked", vayu::RunStatus::Running);
+        add_tick (db, "ticked", 10, 1.0);
+        seed_orphan (db, "silent", vayu::RunStatus::Pending);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (stored_outcome (db, "summarised"), "failed");
+    EXPECT_EQ (stored_outcome (db, "ticked"), "failed")
+    << "the partial summary the reconcile builds is judged like any other";
+    EXPECT_EQ (stored_outcome (db, "silent"), std::nullopt)
+    << "a run with no summary has no row summary to judge";
+}
+
+// Mutation checks: drop the `outcome` term from `run_filter_condition` and the
+// failed filter returns every row; bind the value as `not_judged` regardless
+// and the failed filter returns the unbudgeted row.
+TEST_F (DatabaseTest, RunFilterMatchesTheStoredOutcomeAndNeverANullOne) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    const int64_t recent = now_ms ();
+    seed_running_run (db, "missed", recent);
+    seed_running_run (db, "met", recent + 1);
+    seed_running_run (db, "unbudgeted", recent + 2);
+    seed_running_run (db, "in_flight", recent + 3);
+    finish_run (db, "missed", MISSED_BUDGET_SUMMARY, vayu::RunStatus::Completed);
+    finish_run (db, "met", MET_BUDGET_SUMMARY, vayu::RunStatus::Completed);
+    finish_run (db, "unbudgeted", NO_BUDGET_SUMMARY, vayu::RunStatus::Stopped);
+
+    const auto ids_for = [&db] (const vayu::db::RunFilter& filter) {
+        std::set<std::string> ids;
+        for (const auto& run : db.get_runs_paginated (filter, 50, 0)) {
+            ids.insert (run.id);
+        }
+        EXPECT_EQ (db.count_runs (filter), static_cast<int64_t> (ids.size ()));
+        return ids;
+    };
+
+    vayu::db::RunFilter failed;
+    failed.outcome = vayu::RunOutcome::Failed;
+    EXPECT_EQ (ids_for (failed), (std::set<std::string>{ "missed" }));
+    vayu::db::RunFilter passed;
+    passed.outcome = vayu::RunOutcome::Passed;
+    EXPECT_EQ (ids_for (passed), (std::set<std::string>{ "met" }));
+    vayu::db::RunFilter not_judged;
+    not_judged.outcome = vayu::RunOutcome::NotJudged;
+    EXPECT_EQ (ids_for (not_judged), (std::set<std::string>{ "unbudgeted" }));
+
+    vayu::db::RunFilter failed_and_stopped = failed;
+    failed_and_stopped.status              = vayu::RunStatus::Stopped;
+    EXPECT_TRUE (ids_for (failed_and_stopped).empty ());
+
+    EXPECT_EQ (ids_for ({}).size (), 4u) << "unset stays a wildcard";
+}
+
 // ==================== Scratch-file cleanup ====================
 
 // `remove_database_files` is the single definition of what a scratch Database
@@ -3058,7 +3216,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 10);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 11);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
 
@@ -3264,7 +3422,7 @@ TEST_F (DatabaseTest, AVersionNineDatabaseIsStampedCurrentAndGainsTheDeclinedOpe
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    EXPECT_EQ (read_user_version (TEST_DB_PATH), 10);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "spec_declined_operations", "request_id"));
 }
 
@@ -3888,7 +4046,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 10);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 11);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));
@@ -3897,6 +4055,46 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
     << "a run stored before the columns did not survive";
     EXPECT_EQ (legacy->origin, "other");
     EXPECT_FALSE (legacy->origin_client.has_value ());
+}
+
+// Version 11 adds the nullable `runs.outcome` and backfills nothing: a run
+// stored before the column reads as having no verdict, a finished one
+// included. Mutation checks: leave `SCHEMA_VERSION` at 10 and the stamp
+// assertion fails; give the column a `default_value` and the stored run reads
+// one.
+TEST_F (DatabaseTest, AVersionTenDatabaseGainsTheRunOutcomeColumnAndReadsNoVerdict) {
+    const int64_t recent = now_ms ();
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_running_run (db, "legacy", recent);
+        finish_run (db, "legacy", MISSED_BUDGET_SUMMARY, vayu::RunStatus::Completed);
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE runs DROP COLUMN outcome",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "runs", "outcome"))
+    << "test setup did not remove the column";
+    set_user_version (TEST_DB_PATH, 10);
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 11);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "outcome"));
+    const auto legacy = db.get_run ("legacy");
+    ASSERT_HAS_VALUE (legacy)
+    << "a run stored before the column did not survive";
+    EXPECT_EQ (legacy->status, vayu::RunStatus::Completed);
+    EXPECT_FALSE (legacy->outcome.has_value ()) << "no backfill";
 }
 
 // Version 8 added `collections.spec_file` / `data_file` (#2765). A version-7

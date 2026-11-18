@@ -41,4 +41,12 @@ namespace vayu::core {
  */
 [[nodiscard]] vayu::runtime::ScriptConfig read_script_config (vayu::db::Database& db);
 
+/**
+ * Opts @p config into recording each `pm.sendRequest` (#3633), its bodies
+ * bounded by `maxTraceBodyBytes`. Called by the two callers that store a trace
+ * per send, a design send and a sequential collection run, and by no load
+ * path: `read_script_config` stays shared with them and leaves it off.
+ */
+void record_script_requests (vayu::runtime::ScriptConfig& config, vayu::db::Database& db);
+
 } // namespace vayu::core

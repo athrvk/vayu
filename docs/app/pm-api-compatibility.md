@@ -41,7 +41,7 @@ supported is listed [below](#not-yet-supported).
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`, with chai-postman's response assertions installed), `require('ajv')` (npm's `ajv` 6.12.5, vendored; draft-07) and `require('tv4')` (npm's `tv4` 1.3.0, minified; draft-04; also the `tv4` global) - any other module throws; see [The `require` shelf](#the-require-shelf) |
-| Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
+| Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; each call an expandable row in the Console; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a data-driven load run's scripts (inline or deferred), see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
@@ -345,13 +345,22 @@ and [the migration
 note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
 names the one pattern that degrades silently.
 
-**Every call is listed in the Console, as it is in Postman's** (#3462): one
-`info` line per request that was sent, naming the method, the URL, the status
-(or `failed:` and the error code when the transfer did not complete) and the
-duration, written before the callback runs. A callback that returns on `err`
-therefore leaves a trace, and the "Fetch a token before the send" snippet logs
-the failure itself. The URL has credentials blanked as an export blanks them
-and `scriptEnableConsole` off records nothing; the line is described under
+**Every call is listed in the Console, as it is in Postman's** (#3462,
+#3633). Each request that was sent writes one `info` line naming the method,
+the URL, the status (or `failed:` and the error code when the transfer did not
+complete) and the duration, before the callback runs, so a callback that
+returns on `err` still leaves a trace. On a Send and in a sequential collection
+run the engine also records the exchange itself: the Console draws the line as
+an expandable row, in its place among the script's lines, that opens onto the
+request's headers and body, the response's headers and body, the redirect hops
+and the timing phases. The record is kept with `scriptEnableConsole` off too,
+when there is no line (the row then follows the script's other lines), and it
+is stored on the send's trace, so History and a run's step show the same rows.
+A setup or teardown script's calls are listed under its row of the run's Setup
+/ teardown card. Credentials are masked where the engine records them (a
+credential header reads `<redacted>`, a URL's credentials are blanked as an
+export blanks them); bodies are kept as sent and received. A load run records
+no exchange and keeps only the line. Both are described under
 [`pm.sendRequest`](../engine/scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **It is bounded three ways, and two of them throw.** The request's timeout is
@@ -457,7 +466,9 @@ instead of silently UTF-8 encoding it. A signature over quietly-substituted
 bytes verifies nowhere.
 
 Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, and
-any asymmetric algorithm. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
+any asymmetric algorithm. Signing a request with a private key (RS256, ES256)
+is the OAuth 2.0 JWT bearer grant's job, which signs engine-side, not the
+sandbox's: `pm.crypto` does not gain it. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
 and the other SHA-2 hashers are the `crypto-js` shelf's, see
 [The `require` shelf](#the-require-shelf). The engine-side detail is in
 [scripting.md](../engine/scripting.md#what-a-script-can-compute).

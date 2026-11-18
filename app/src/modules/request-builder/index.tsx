@@ -62,6 +62,7 @@ import type {
 	StreamStartResult,
 	MergeableRequestField,
 } from "./types";
+import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import { effectiveOAuth2Config, resolveAuthForSend } from "./utils/auth-resolution";
 import { useOAuth2DeferredNames } from "./hooks/useOAuth2DeferredNames";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
@@ -356,7 +357,13 @@ export default function RequestBuilder() {
 	// Effective (variable-resolved) OAuth 2.0 config for the pending load-test
 	// request. Drives the token-expiry guard.
 	const pendingOAuth2Config = useMemo(
-		() => (pendingOAuth2Raw ? (resolveObject(pendingOAuth2Raw) as OAuth2Config) : null),
+		() =>
+			pendingOAuth2Raw
+				? keepSigningKeyReference(
+						resolveObject(pendingOAuth2Raw) as OAuth2Config,
+						pendingOAuth2Raw
+					)
+				: null,
 		[pendingOAuth2Raw, resolveObject]
 	);
 

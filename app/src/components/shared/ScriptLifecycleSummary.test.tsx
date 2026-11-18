@@ -18,10 +18,13 @@
  *
  * Issue #3455: a setup that fails now reaches the report with its reason, its
  * console lines and its failing tests, so the row says all three.
+ *
+ * Issue #3633: a setup or teardown script's `pm.sendRequest` records ride its
+ * row; drop the list from `LifecycleRow` and the records case fails.
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ScriptLifecycleSummary } from "./ScriptLifecycleSummary";
 import type { LifecycleElementOutcome } from "@/types/domain";
 
@@ -179,5 +182,41 @@ describe("ScriptLifecycleSummary", () => {
 		expect(setupRow?.textContent).toContain("from setup");
 		const teardownRow = rows.find((li) => li.textContent?.startsWith("Teardown"));
 		expect(teardownRow?.textContent).not.toContain("from setup");
+	});
+
+	it("lists a setup script's requests under its own row, and expands one (#3633)", () => {
+		render(
+			<ScriptLifecycleSummary
+				lifecycle={{
+					setup: [
+						outcome({
+							scriptRequests: [
+								{
+									scope: "collection",
+									status: 200,
+									statusText: "OK",
+									request: {
+										method: "POST",
+										url: "https://auth.example.test/token",
+										sentHeaders: { Authorization: "<redacted>" },
+									},
+									totalMs: 12,
+								},
+							],
+						}),
+					],
+					teardown: [outcome({ kind: "script.teardown" })],
+				}}
+			/>
+		);
+
+		const list = screen.getByRole("list", { name: "Setup script requests" });
+		const row = within(list).getByRole("button", { name: /POST.*auth\.example\.test/ });
+		expect(row).toHaveTextContent("200 OK");
+		expect(screen.queryByRole("list", { name: "Teardown script requests" })).toBeNull();
+
+		fireEvent.click(row);
+		expect(within(list).getByText("Request headers")).toBeTruthy();
+		expect(within(list).getByText("<redacted>")).toBeTruthy();
 	});
 });

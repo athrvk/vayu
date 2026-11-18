@@ -61,6 +61,15 @@ constexpr std::string_view COLLECTION_KEY = "x-vayu-collection";
 /// The tally kind a piece that fails its check is counted under.
 constexpr std::string_view INVALID_KIND = "vayu_extension_invalid";
 
+/**
+ * Whether @p text is one `{{variable}}` reference and nothing else, spaces
+ * around it aside. Such a value names where the secret lives without being it,
+ * so it is portable - and blanking it would lose the one thing the user
+ * configured. It is also the only value an OAuth 2.0 `privateKey` may be
+ * stored as (#3632, `reject_inline_private_key`).
+ */
+[[nodiscard]] bool is_variable_reference (std::string_view text);
+
 // --- Export ------------------------------------------------------------------
 
 /**
@@ -185,6 +194,23 @@ struct UrlOmitted {
 [[nodiscard]] std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
 UrlOmitted& omitted);
+
+/**
+ * A `pm.sendRequest` record (#3633, `ScriptResult::script_requests`) with its
+ * credentials masked in place by the export's rules, so the stored trace,
+ * History and MCP all read the masked record. In every header set of the
+ * record, a redirect hop's included, the value of a header
+ * `utils::is_secret_header_name` names, or one of @p auth_header_names (what
+ * the call's `options.auth` wrote, `Request::secret_header_names`), reads
+ * `utils::kRedactedMarker`; a value sent empty stays empty. Every `url`
+ * member, the request's and each hop's, goes through
+ * @ref redact_url_credentials with @p auth_query_param as an extra name, so
+ * those credentials are blanked to `""` as in an export. Bodies are not
+ * judged.
+ */
+void mask_script_request_record (nlohmann::json& record,
+const std::vector<std::string>& auth_header_names,
+const std::string& auth_query_param);
 
 /**
  * A stored body as another machine can use it: a file part, or a binary body's

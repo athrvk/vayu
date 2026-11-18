@@ -16,13 +16,14 @@
 import http from "node:http";
 import { describe, expect, it, vi } from "vitest";
 
-import { MCP_ENDPOINT_URL } from "../constants.js";
+import { MCP_PORT, mcpEndpointUrl } from "../constants.js";
 import { McpListener } from "./listener.js";
 import {
 	buildMcpStatus,
 	classifyStartError,
 	connectWhileRunning,
 	type McpListenerState,
+	type McpPortState,
 	type McpStartError,
 } from "./status.js";
 
@@ -36,6 +37,9 @@ const listening = (url = "http://127.0.0.1:9877/mcp"): McpListenerState => ({
 	url,
 	isRunning: () => true,
 });
+/** A fresh install: nothing configured, so the default is both saved and in force. */
+const AT_DEFAULT: McpPortState = { configured: MCP_PORT, inForce: MCP_PORT, storedError: null };
+
 const closed: McpListenerState = { url: "http://127.0.0.1:9877/mcp", isRunning: () => false };
 
 describe("classifyStartError", () => {
@@ -61,6 +65,10 @@ describe("classifyStartError", () => {
 		const result = classifyStartError(err, ENDPOINT);
 		expect(result.code).toBe("other");
 		expect(result.message).not.toMatch(/another program/i);
+	});
+
+	it("does not blame a port for a failure that came before there was one to bind", () => {
+		expect(classifyStartError(errno("EADDRINUSE"), null).code).toBe("other");
 	});
 
 	it("carries the underlying text for an unclassified failure", () => {
@@ -99,10 +107,18 @@ describe("buildMcpStatus", () => {
 
 	it("reports the failure while the server is enabled and not listening", () => {
 		expect(
-			buildMcpStatus({ listener: null, enabled: true, error: inUse, corruptCopy: null })
+			buildMcpStatus({
+				listener: null,
+				enabled: true,
+				error: inUse,
+				corruptCopy: null,
+				port: AT_DEFAULT,
+			})
 		).toEqual({
 			running: false,
-			url: MCP_ENDPOINT_URL,
+			url: mcpEndpointUrl(MCP_PORT),
+			port: MCP_PORT,
+			restartRequired: false,
 			enabled: true,
 			starting: false,
 			error: inUse,
@@ -116,11 +132,14 @@ describe("buildMcpStatus", () => {
 			enabled: true,
 			error: null,
 			corruptCopy: null,
+			port: AT_DEFAULT,
 		});
 		expect(status).toEqual({
 			running: true,
 			url: "http://127.0.0.1:9877/mcp",
 			enabled: true,
+			port: MCP_PORT,
+			restartRequired: false,
 			starting: false,
 		});
 		expect("error" in status).toBe(false);
@@ -134,10 +153,13 @@ describe("buildMcpStatus", () => {
 			enabled: true,
 			error: null,
 			corruptCopy: null,
+			port: AT_DEFAULT,
 		});
 		expect(status).toEqual({
 			running: false,
-			url: MCP_ENDPOINT_URL,
+			url: mcpEndpointUrl(MCP_PORT),
+			port: MCP_PORT,
+			restartRequired: false,
 			enabled: true,
 			starting: true,
 		});
@@ -150,6 +172,7 @@ describe("buildMcpStatus", () => {
 			enabled: true,
 			error: inUse,
 			corruptCopy: null,
+			port: AT_DEFAULT,
 		});
 		expect(status.starting).toBe(false);
 		expect(status.error).toEqual(inUse);
@@ -157,12 +180,22 @@ describe("buildMcpStatus", () => {
 
 	it("is not starting once listening, nor while the server is switched off", () => {
 		expect(
-			buildMcpStatus({ listener: listening(), enabled: true, error: null, corruptCopy: null })
-				.starting
+			buildMcpStatus({
+				listener: listening(),
+				enabled: true,
+				error: null,
+				corruptCopy: null,
+				port: AT_DEFAULT,
+			}).starting
 		).toBe(false);
 		expect(
-			buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy: null })
-				.starting
+			buildMcpStatus({
+				listener: null,
+				enabled: false,
+				error: null,
+				corruptCopy: null,
+				port: AT_DEFAULT,
+			}).starting
 		).toBe(false);
 	});
 
@@ -173,25 +206,38 @@ describe("buildMcpStatus", () => {
 				enabled: true,
 				error: inUse,
 				corruptCopy: null,
+				port: AT_DEFAULT,
 			}).error
 		).toBe(undefined);
 	});
 
 	it("reads running from the listener, not from its existence", () => {
 		expect(
-			buildMcpStatus({ listener: closed, enabled: true, error: null, corruptCopy: null })
-				.running
+			buildMcpStatus({
+				listener: closed,
+				enabled: true,
+				error: null,
+				corruptCopy: null,
+				port: AT_DEFAULT,
+			}).running
 		).toBe(false);
 	});
 
 	it("names the kept copy of an unreadable settings file, running or not (#2433)", () => {
 		const corruptCopy = "C:/data/mcp-config.json.corrupt-1700000000000";
-		const down = buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy });
+		const down = buildMcpStatus({
+			listener: null,
+			enabled: false,
+			error: null,
+			corruptCopy,
+			port: AT_DEFAULT,
+		});
 		const up = buildMcpStatus({
 			listener: listening(),
 			enabled: true,
 			error: null,
 			corruptCopy,
+			port: AT_DEFAULT,
 		});
 
 		expect(down.corruptCopy).toBe(corruptCopy);
@@ -204,14 +250,80 @@ describe("buildMcpStatus", () => {
 			enabled: true,
 			error: null,
 			corruptCopy: null,
+			port: AT_DEFAULT,
 		});
 		expect("corruptCopy" in status).toBe(false);
 	});
 
 	it("passes the enabled flag through untouched", () => {
 		expect(
-			buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy: null })
-				.enabled
+			buildMcpStatus({
+				listener: null,
+				enabled: false,
+				error: null,
+				corruptCopy: null,
+				port: AT_DEFAULT,
+			}).enabled
+		).toBe(false);
+	});
+});
+
+/*
+ * #3580: the port is configurable, and the engine learns it only at spawn. The
+ * status carries the configured value for the field, and says when it is not
+ * in force yet, so "restart needed" survives a renderer reload. Mutation check:
+ * build the fallback URL from the configured port, or derive restartRequired
+ * as false, and the cases below red.
+ */
+describe("buildMcpStatus and a configured port", () => {
+	const SAVED = 19_877;
+	const base = { enabled: true, error: null, corruptCopy: null } as const;
+
+	it("names the port in force, not the saved one, while nothing listens", () => {
+		const status = buildMcpStatus({
+			...base,
+			listener: null,
+			port: { configured: SAVED, inForce: MCP_PORT, storedError: null },
+		});
+
+		expect(status.url).toBe(mcpEndpointUrl(MCP_PORT));
+		expect(status.port).toBe(SAVED);
+		expect(status.restartRequired).toBe(true);
+	});
+
+	it("follows the saved port once it is the one in force", () => {
+		const status = buildMcpStatus({
+			...base,
+			listener: null,
+			port: { configured: SAVED, inForce: SAVED, storedError: null },
+		});
+
+		expect(status.url).toBe(mcpEndpointUrl(SAVED));
+		expect(status.restartRequired).toBe(false);
+	});
+
+	it("still asks for a restart while the server is switched off", () => {
+		const status = buildMcpStatus({
+			...base,
+			enabled: false,
+			listener: null,
+			port: { configured: SAVED, inForce: MCP_PORT, storedError: null },
+		});
+
+		expect(status.restartRequired).toBe(true);
+	});
+
+	it("reports a stored port set aside for the default, and carries no key otherwise", () => {
+		const storedError = "mcp-config.json sets the MCP port to 9885, which isn't usable.";
+		const noted = buildMcpStatus({
+			...base,
+			listener: listening(),
+			port: { configured: MCP_PORT, inForce: MCP_PORT, storedError },
+		});
+
+		expect(noted.storedPortError).toBe(storedError);
+		expect(
+			"storedPortError" in buildMcpStatus({ ...base, listener: null, port: AT_DEFAULT })
 		).toBe(false);
 	});
 });

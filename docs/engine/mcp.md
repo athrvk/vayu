@@ -5,15 +5,17 @@ description: >-
 
 # Vayu MCP Server
 
-**Endpoint:** `http://127.0.0.1:9877/mcp` (Streamable HTTP) · **Also:** stdio CLI
+**Endpoint:** `http://127.0.0.1:9877/mcp` by default (Streamable HTTP) · **Also:** stdio CLI
 
 Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
 [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (v2:
 `@modelcontextprotocol/server`), and proxies the engine's REST API on `:9876` (or the fallback port the app chose
-when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
-the MCP layer is Apache-2.0 like the rest of the app.
+when 9876 was held; see `VAYU_ENGINE_URL` below). The MCP layer lives entirely
+in the app and is Apache-2.0 like the rest of it; the C++ engine's one part is
+refusing to send a request to the MCP port (its `--mcp-port`, 9877 by default;
+see [the daemon flags](cli.md#prerequisites)).
 
 Once Vayu is running, any agent opts in with one command; with MCP switched off
 or Vayu closed, nothing listens, the connection is refused and the agent's
@@ -38,9 +40,11 @@ client shows its own connection error. Threat model and posture: [`SECURITY.md`]
   cannot import the renderer's `@/services`, so this client is standalone.
 - **Local-only.** Binds `127.0.0.1`, with Host- and Origin-header
   (DNS-rebinding) validation on `/mcp`.
-- **Configurable from Settings.** Server on/off, the allowlist, caps, the write
-  toggle, and per-tool switches live in **Settings → MCP** and persist across
-  restarts.
+- **Configurable from Settings.** Server on/off, the port, the allowlist, caps, the
+  write toggle, and per-tool switches live in **Settings → MCP** and persist
+  across restarts. A new port takes effect after an engine restart, which the
+  panel offers, and changes the endpoint URL: an agent registered with the old
+  one has to be connected again.
 
 ## Connecting
 
@@ -67,6 +71,10 @@ remove then add, not atomic: should the add fail, the old entry is already gone
 and the error says the earlier registration was removed. If `get` fails,
 Connect adds as usual. VS Code has no lookup command, so its Connect always
 runs `--add-mcp`.
+
+The snippets below use the default port, 9877. If the port was changed, use
+the endpoint **Settings → MCP** shows; Connect and the panel's own snippets
+already do.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
@@ -98,7 +106,7 @@ url = "http://127.0.0.1:9877/mcp"
 ### Client compatibility
 
 MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
-**HTTP+SSE** (deprecated; not built for). The fixed-port Streamable HTTP endpoint
+**HTTP+SSE** (deprecated; not built for). The Streamable HTTP endpoint
 covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 | Client           | Streamable HTTP    | stdio | Config location                                 |
@@ -113,7 +121,7 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 ### Streamable HTTP (primary)
 
-`listener.ts` binds `127.0.0.1:9877` at launch and answers what needs no SDK
+`listener.ts` binds `127.0.0.1:9877` by default at launch and answers what needs no SDK
 (`gates.ts`: non-`/mcp` paths `404`, `GET`/`DELETE` `405`); `http.ts` serves
 each `POST /mcp` once the first one has loaded it, through the SDK's
 `createMcpHandler`. Every request gets a fresh server, in both protocol eras:
@@ -364,7 +372,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_element_kinds`   | read     | `GET /elements/kinds`                        | - (#3559: without `kind`, `kinds`, one `{kind, category, phases, label}` row per registered kind; with `kind`, that kind's whole catalogue entry, `configSchema` included; an unknown `kind` is an `input` error that names every registered kind; read through the projection `vayu://elements/kinds` serves, see [The element catalogue](#the-element-catalogue)) |
 | `get_script_api`       | read     | `GET /scripting/completions`                 | - (#3559: without `q`, every name's `label` and `detail`; with `q`, the entries whose label, detail or documentation contains it, case-insensitive, `documentation` included, since the documented surface is about 100 KB; a blank `q` is an `input` error; read through the projection `vayu://scripting/completions` serves, see [The script sandbox surface](#the-script-sandbox-surface)) |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
-| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, `endTime` is null until the run is completed, failed or stopped, and a row includes a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}`, plus, on a load run that asserted or errored, `assertions` `{exact, sampled, errored, teardownFailed}` and `assertionsPassed` / `assertionsFailed` over its two populations (#2820, #3537: `exact` is `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, `sampled` the deferred replay, never folded into `errorRate`), plus `capacity` `{stopReason, maxHealthyConcurrency?, kneeConcurrency?}` on a capacity run (#2930: the report's `capacity` headline, each level absent when the search did not find it) (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) a design run's `{statusCode, latencyMs}` and a terminal collection run's `{passed, failed, skipped, errored, stopped, verdict}` (#2954: its step outcomes, disjoint, `errored` apart from `failed`, `stopped` a step a Stop cut short and absent from a run stored before #3397; each key absent when not recorded, `verdict` absent when the run declared no budgets) (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and so for a completed run whose drain a Stop cut, which carries `drainCut` `{cancelled}` (#3538: the requests left unanswered, absent otherwise); on a load row `errorRate` uses the same failure definition as the report's `summary.errorRate`, over the stored status-code distribution, and is omitted when none is stored); secret values and credential header values read `<redacted>` unless revealed |
+| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&outcome=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, `endTime` is null until the run is completed, failed or stopped, and a row includes a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}`, plus, on a load run that asserted or errored, `assertions` `{exact, sampled, errored, teardownFailed}` and `assertionsPassed` / `assertionsFailed` over its two populations (#2820, #3537: `exact` is `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, `sampled` the deferred replay, never folded into `errorRate`), plus `capacity` `{stopReason, maxHealthyConcurrency?, kneeConcurrency?}` on a capacity run (#2930: the report's `capacity` headline, each level absent when the search did not find it) (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) a design run's `{statusCode, latencyMs}` and a terminal collection run's `{passed, failed, skipped, errored, stopped, verdict}` (#2954: its step outcomes, disjoint, `errored` apart from `failed`, `stopped` a step a Stop cut short and absent from a run stored before #3397; each key absent when not recorded, `verdict` absent when the run declared no budgets) (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and so for a completed run whose drain a Stop cut, which carries `drainCut` `{cancelled}` (#3538: the requests left unanswered, absent otherwise); on a load row `errorRate` uses the same failure definition as the report's `summary.errorRate`, over the stored status-code distribution, and is omitted when none is stored); a row also carries `outcome` (`passed`, `failed` or `not_judged`, #3547) when the engine stored a verdict for it - the one the app draws, which `status` cannot say (a `completed` run that missed a budget is `failed`); it is absent for a design run, a clean collection run, a run still in flight and every run stored before the field, and `outcome=` matches none of those; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `unknownStatus` (`true` only for a status outside the engine's five, else absent), `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run; a status outside the engine's five is treated as unfinished and adds `unknownStatus: true`); a failed load run the engine could not fully record carries `summary.partial: true` (the last saved tick's counts, no `latency` block, `peakConcurrency` or `avgQueueWaitMs` - absent, not zero) or `summary.summaryMissing: true` (no summary: the counts are not whole-run totals, and again none of those three), both absent otherwise and unrelated to the top-level key (#2895); a completed run whose drain a Stop cut carries `summary.drainCut` `{cancelled}` (#3538: its figures cover only the answered requests, and the app shows it as "Not judged"), absent otherwise; on a collection run `summary.totalRequests` is requests sent and `scenario.stepsExecuted` is steps, so a skipped step is neither a request nor a failure, and the load-only figures (`sendRate`, `throughput`, the byte counts, `peakConcurrency`, `droppedRequests`, `avgQueueWaitMs`, the overheads) are absent rather than `0` (#2822); stored trace bodies capped at 32 KB per node, and 96 KB across the report; an inline script's element row (`elements`, a scenario step's or `summary.elements`) carries `messages` and `console` (the first 10 distinct each, an entry seen more than once with its `count`) with `messagesDropped` / `consoleDropped`, the sampled replay's failures are the `results` row whose `trace.failures` lists each distinct message once beside `failureCounts`, and its console lines are `testValidation.console` / `consoleDropped` (a scenario load run's per step, on `scenario.steps[].tests`) (#3127), all passed through as the engine sends them; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max, with `pagination.nextOffset` / `note` as `list_runs`; a load run captures every transport error, every completion at or above `slowRequestThresholdMs` and the first three of each status code, so a healthy 300-request run returns about three samples per status code (`responseSamplePeriod` / `maxResponseSamples` do not feed it); a body that is not UTF-8 text (or holds a zero byte) is base64 in `body` with `bodyEncoding: "base64"`; secret values and credential header values read `<redacted>` unless revealed |
@@ -417,7 +425,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_engine_config` | write    | `GET /config` (reveal off, a batch naming a key ending in `url`) + `POST /config` | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole; with reveal off a `proxyUrl` (or `proxySystemUrl`) equal to the read's credential-stripped value is written as the stored value, with a caveat line, so its `user:password` stays (#3549); any other value is written as given. `/config` has no `If-Match`, so that read and the write are not one conditioned step |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist (also held by the engine, `targetPolicy`) + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target; their column names, the union across every row, go to `POST /compose` as `dataColumns`, so a bare `{{email}}` is bound from the row rather than answered by a same-named environment variable, #2956) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets (the `maxAssertionFailureRatePct` check judges the worse of the exact inline and the sampled `pm.test` populations and names both, #2892; `streamTimeToFirstEventP95Ms` and `streamEventsPerSecondMin` judge a streaming run's `stream` section and are not evaluated, so failed, on any other run, #3234) and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | - (a load test, a collection run or a streaming send; a collection run's result has no `summary` when its worker has not stored one within the 5 s settle budget - read `get_run_report` then, #2822) |
-| `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
+| `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `client_credentials`, `password` and `jwt_bearer` only, `authorization_code` refused before the call; a `jwt_bearer` config names its key in `privateKeyFile`, a `{{variable}}` `privateKey` being the engine's `400` here; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
 | `clear_oauth2_token`   | write    | `DELETE /oauth2/token?key=`                  | write toggle; idempotent - `deleted: false` when nothing was cached |
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
@@ -717,6 +725,41 @@ Notes:
   payloads cannot come along. Bounded sizes for the fixtures above: 33 K
   characters for the single 1 MB row, 76 K for 100 steps x 1 MB, 120 K for
   200 rows with all three nodes populated (24.7 M unbounded).
+- **A trace can also carry `scripts.scriptRequests`** (issue #3633): one
+  record per `pm.sendRequest` a design send's or a collection-run step's
+  scripts made, each with its own `request` and `response` nodes. The engine
+  writes them masked (credential headers `<redacted>`, URL credentials
+  blanked) and holds all of one trace's record bodies to one
+  `maxTraceBodyBytes` together, so a row's records add at most what its own
+  response may (see [`POST /execute`](api-reference.md#post-execute)). That
+  engine bound is 5 MiB, so `get_run_report` bounds the records as it bounds
+  the main exchange: **each record's `request` and `response` body is cut to
+  the same 32 KB**, with the same `bodyTruncated` / `bodyBytes` pair, and the
+  records count toward the row's share of the 96 KB budget. **A trace over
+  what is left of the budget gives up its records before anything of its
+  own**, one step at a time, stopping at the first that fits. First the
+  bodies: each one is stored `""` with `bodyTruncated: true` and its true
+  `bodyBytes`, the engine's own spelling for a record body past its shared
+  budget, and the `scripts` node gains `scriptRequestBodiesOmitted: true`.
+  Then the detail: each record is cut to `source`, `scope`, `status`,
+  `error_type`, `totalMs` and `request.method` / `request.url` (header maps,
+  redirect hops, timing phases and the `response` node go), in the same
+  order so a console line's `scriptRequest` index still names its call, and
+  the node gains `scriptRequestDetailOmitted: true`. Last the records
+  themselves: `scriptRequests` and both flags are removed and
+  `scriptRequestsOmitted` holds how many there were. The main exchange is
+  never cut for them; only a trace still over with no records left is
+  omitted, as above. The first trace sheds the same way before it is
+  embedded, so a design run's single row is bounded too. A sequential
+  collection run's `lifecycle` rows (`script.setup` / `script.teardown`)
+  carry records as `scriptRequests` too: their nodes are cut per node the
+  same way, and their records together are held to a 96 KB budget of their
+  own in run order, setup before teardown, a row past what is left giving
+  them up by the same three steps under the same flags. A secret
+  variable's value in any string of a record, a body included, is masked like
+  the rest of the run's output, since a record uses the trace's own member
+  names. The MCP server never sets `allowScriptRequests`, so only a run the
+  app made carries records.
 - **`start_load_run`'s `stream` flag** consumes each response as a
   `text/event-stream` (issue #576), with `maxStreamDurationMs` and
   `maxStreamEvents` bounding one stream. Both caps are forwarded verbatim on the
@@ -808,15 +851,17 @@ Notes:
   computation (`src/lib/run-compare.ts`), so the two cannot disagree.
 - **Run housekeeping** (issue #755) is the History surface an agent could
   otherwise only page through: `list_runs` takes the engine's own filters
-  (`type`, `status`, `requestId`, `collectionId`, `q` over the stored config,
-  `baseline`) plus `limit`/`offset`, so finding one run is a query rather than a
+  (`type`, `status`, `outcome`, `requestId`, `collectionId`, `q` over the
+  stored config, `baseline`) plus `limit`/`offset`, so finding one run is a query rather than a
   scan of 100-row blobs. Order is fixed newest-first - `GET /runs` takes no sort
   parameter, and the app's oldest-first view sorts client-side. `collectionId`
   matches a **collection run** and a **load run over a collection** (both store
   `scenario.collectionId`), never a single-request design or load run. The
   filters are Zod enums rather than passthrough strings because the engine
-  *ignores* a `type` or `status` it cannot parse: forwarded raw, a typo would
-  answer the unfiltered page and read as "nothing matched anywhere".
+  *ignores* a `type`, `status` or `outcome` it cannot parse: forwarded raw, a typo
+  would answer the unfiltered page and read as "nothing matched anywhere" - the
+  app's own `not-judged` spelling is one, the engine's being `not_judged`
+  (#3547).
   `set_run_baseline` writes the pin `compare_runs` already resolved but nothing
   could set (the write half #472 never shipped), and `delete_run` deletes a run
   and everything recorded against it behind the same write toggle + confirmation
@@ -1291,6 +1336,26 @@ Notes:
   authorize, and the entry that lands there is the one these tools then read.
   The allowlist gate covers `refreshTokenUrl` as well as `accessTokenUrl` - a
   gate that read one of two URLs is a gate a config can walk around.
+  Three grants are fetchable: `client_credentials`, `password` and `jwt_bearer`
+  (RFC 7523, #3632), whose config the schema passes through whole like any
+  other, so nothing about the grant is enumerated here. A `jwt_bearer` config
+  carries `subject`, `assertionAudience`, `assertionClaims`, `signingAlgorithm`,
+  `keyId` and its key, and the **key is where a call differs from a send**. The
+  app writes it as one `{{variable}}` reference (`privateKey`), which the engine
+  resolves against the scopes a request names; this tool names no
+  `environmentId` or `collectionId`, so a config copied out of `get_request`
+  with a `privateKey` reference is the engine's `400` `oauth2_invalid_config`,
+  not a token. Two ways forward: name the key in `privateKeyFile` (a path read
+  through the engine's file-trust rule, so it must have been picked in Vayu or
+  lie under an allowed folder, and the config then carries a path rather than
+  a secret), or skip the tool and `run_request` the saved request, which
+  composes the reference against its own environment and collection and
+  acquires the token as part of the send. The cache key's fourth slot is the
+  grant's identity: the username for `password`, the `subject` for `jwt_bearer`.
+  A read of a saved `jwt_bearer` config shows a `privateKey` that is one
+  reference as written, since it names where the key lives without being it,
+  and withholds any other value as `privateKeyWithheld`; `privateKeyFile` is a
+  path and is shown.
 - **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
   own tokens: `start_mock_issuer` stands up a
   [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
@@ -3146,6 +3211,25 @@ first write over it renames it to `mcp-config.json.corrupt-<epoch-ms>` in the
 same folder, so the allowlist and caps in it can be copied back by hand. One
 copy is kept: corrupting the file again replaces the earlier copy (issue #2433).
 
+The file also holds the server's `port` (#3580), 9877 when it has none. A port
+is a whole number from 1024 to 65535 that is not one of the engine's own ports
+(9876 and 9880 to 9889), checked when Settings saves it and again on every
+read, since the file is hand-editable: a stored value outside that loads as
+9877, and `mcp:status` carries `storedPortError` saying so. There is no
+fallback when the configured port is taken; the status names the conflict, as
+it does for 9877. Every engine spawn reads the port afresh and passes it as
+`--mcp-port`, which is what the engine's own-port refusal compares against,
+and the listener binds the port the engine was given rather than the saved
+one. A spawn that will guard another port than the listener holds stops the
+listener first (`releaseForSpawn` in `lifecycle.ts`, awaited by the sidecar
+before it spawns), so no engine the app started runs while the server holds a
+port that engine does not guard. A saved port therefore takes effect on the
+next engine restart: `mcp:setPort` only persists, the status reports
+`restartRequired` until then, and once the restart settles, either way,
+`restartEngine` binds the listener on the port the last spawn guards
+(`followEndpoint`). The server is down for the length of that restart; a
+server switched off stays off.
+
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
@@ -3193,8 +3277,8 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
-| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. |
+| `store.ts`         | Persist safety config + enabled preference + port (`../json-store.ts`); `validateMcpPort` and `readMcpPort` judge the port. |
+| `lifecycle.ts`     | The server's one state (`off`, `released`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. Before an engine spawn that guards another port the listener is released (`releaseForSpawn`), and after the spawn it is bound on the port that engine guards (`followEndpoint`). |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
@@ -3221,10 +3305,11 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, port, restartRequired, starting, error?, corruptCopy?, storedPortError? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. `port` is the configured port; `restartRequired` is true while it is not yet the one in force, and `url` names the port in force; `storedPortError` says why a hand-edited port was set aside for the default. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
+| `mcp:setPort`       | Validate and persist the port; returns `{ ok: true, status }` (with `restartRequired`) or `{ ok: false, message }` naming why it was refused. The server does not move until the engine restarts. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
 | `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
@@ -3352,6 +3437,24 @@ An unreadable `mcp-config.json` looks, on screen, like a config nobody ever set,
 so the panel says otherwise: once the first change has set the old file aside
 (`corruptCopy` in `mcp:status`, re-read by the panel after each change), a
 warning above the cards gives the copy's full path.
+
+The Connection card's **Port** field (`McpPortSection.tsx`) commits on blur
+through `mcp:setPort`. The renderer judges nothing: it sends what was typed and
+shows the refusal `validateMcpPort` answers with, stating the range and the
+reserved engine ports only as help text. Those, and the default its Reset
+sends, are the renderer's copies in `mcp-port-copies.ts`, which
+`port-copies.conformance.test.ts` holds to the main process's constants. The
+field shows the configured port from `mcp:status`, while the endpoint and every
+snippet keep the port in force until the engine restarts. A `restartRequired`
+status adds a notice with the engine restart (`useEngineRestart`, the action
+the Dock and the engine settings banner use), after which the panel re-reads
+the status to show the new URL. The notice names the address the server stays
+on only while it is running there; off, or with its port held by another
+program, it says the new port takes effect when the engine restarts.
+`storedPortError` is shown as written. The engine store's pending-restart flag
+is not set from here: `restartRequired` is derived in the main process and
+survives a reload, and that flag would add a second banner on the engine
+settings with no label for it.
 
 ## Configuration
 

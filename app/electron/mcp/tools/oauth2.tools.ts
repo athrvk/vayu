@@ -40,7 +40,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		retry: "safe",
 		invalidates: ["oauth"],
 		description:
-			"Acquire an OAuth 2.0 token for a client_credentials or password config and cache it engine-side, so the next run_request / start_load_run carrying the same config authenticates without a round trip - and so a token problem surfaces here, named, instead of as a wall of 401s inside a run. Pass `force: true` to refresh a token that is cached but stale. The interactive authorization_code grant is refused: it needs a browser and a loopback redirect the app owns, so authorize it there once and the cache this tool reads is the same one. GUARDED: the token endpoint's host must be on Vayu's MCP allowlist. The access token itself is never returned - what comes back is the cache entry's shape (key, type, scope, expiry, whether a refresh token came with it), because the engine applies the token to requests and nothing an agent does with the bearer needs its bytes.",
+			"Acquire an OAuth 2.0 token for a client_credentials, password or jwt_bearer config and cache it engine-side, so the next run_request / start_load_run carrying the same config authenticates without a round trip - and so a token problem surfaces here, named, instead of as a wall of 401s inside a run. Pass `force: true` to refresh a token that is cached but stale. The interactive authorization_code grant is refused: it needs a browser and a loopback redirect the app owns, so authorize it there once and the cache this tool reads is the same one. GUARDED: the token endpoint's host must be on Vayu's MCP allowlist. The access token itself is never returned - what comes back is the cache entry's shape (key, type, scope, expiry, whether a refresh token came with it), because the engine applies the token to requests and nothing an agent does with the bearer needs its bytes.",
 		annotations: {
 			title: "Fetch OAuth 2.0 token",
 			readOnlyHint: false,
@@ -90,7 +90,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Ask whether a token is cached for a cache key, and whether it has expired - the read behind 'is this flow failing because the token went stale?'. The cache key is the `cacheKey` fetch_oauth2_token returned; the engine derives it from the token URL, client id, credentials id, (for password grants) the username and the config's extra request parameter rows, so configs differing only in scope share one entry. An absent entry is an answer (`found: false`), not an error. The access token is never returned, only the shape of the entry - see fetch_oauth2_token.",
+			"Ask whether a token is cached for a cache key, and whether it has expired - the read behind 'is this flow failing because the token went stale?'. The cache key is the `cacheKey` fetch_oauth2_token returned; the engine derives it from the token URL, client id, credentials id, the username or subject and the config's extra request parameter rows, so configs differing only in scope share one entry. An absent entry is an answer (`found: false`), not an error. The access token is never returned, only the shape of the entry - see fetch_oauth2_token.",
 		annotations: {
 			title: "OAuth 2.0 token status",
 			readOnlyHint: true,

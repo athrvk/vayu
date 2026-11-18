@@ -3612,7 +3612,7 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 // (#2820), so a row whose every assertion failed at 0% errors can say so; a
 // run that asserted nothing, or stored a malformed object, carries neither key.
 // Mutation check: drop the `assertionsFailed` write in
-// `build_load_result_summary` and the first row fails.
+// `load_result_summary` and the first row fails.
 TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
     auto with_assertions        = nlohmann::json::parse (judged_summary (true));
     with_assertions["scenario"] = { { "iterations", 4 },
@@ -3654,7 +3654,7 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
 // #3538: a load row carries the drain a Stop cut beside its budget verdict,
 // which stays as stored; a summary with no cut, or a malformed one, carries no
 // key. Mutation check: drop the `record_drain_cut` call in
-// `build_load_result_summary` and the first expectation fails.
+// `load_result_summary` and the first expectation fails.
 TEST_F (RunsRouteTest, LoadRowCarriesTheDrainCutOnlyWhenStored) {
     auto cut         = nlohmann::json::parse (judged_summary (true));
     cut["cancelled"] = 15;
@@ -3963,7 +3963,7 @@ const char* stop_reason) {
 // highest level it held and the level it broke at, the same three the report
 // headlines. A level the search never found is absent, never 0, which would
 // read as a service that held nothing or broke at nothing.
-// Mutation check: drop the `capacity` write in `build_load_result_summary` and
+// Mutation check: drop the `capacity` write in `load_result_summary` and
 // every capacity row fails.
 TEST_F (RunsRouteTest, CapacityRowCarriesTheHeldAndKneeLevels) {
     seed ({ .id = "run_capacity_knee", .start_time = 1 });
@@ -4124,7 +4124,7 @@ TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {
 // The design row keeps its own two numbers even when it stored a summary a load
 // row would read, and a collection row reads only the `scenario` block of its
 // summary: a load-shaped summary without one yields no `resultSummary`.
-// Mutation check: make `build_terminal_result_summary` build the load shape for
+// Mutation check: make `terminal_result_summary` build the load shape for
 // a Scenario run and the second half fails (rps, p95Ms and errorRate appear).
 TEST_F (RunsRouteTest, DesignRowKeepsItsOwnResultSummaryAndCollectionRowReadsOnlyItsScenarioBlock) {
     const auto stored =
@@ -4185,7 +4185,7 @@ size_t stopped         = 0) {
 // the run recorded it - and no budget declared means no `verdict`.
 // Mutation check: restore the Load-only gate (`carries_result_summary`) and
 // every row here loses its `resultSummary`; drop the `errored` copy in
-// `build_scenario_result_summary` and the second row fails; drop the
+// `scenario_result_summary` and the second row fails; drop the
 // `stopped` copy and every row fails.
 TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
     seed ({ .id = "run_clean", .type = vayu::RunType::Scenario, .start_time = 1 });
@@ -4224,7 +4224,7 @@ TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
 
 // The verdict is read exactly as a load row reads it: present only when the
 // summary recorded a judged budget, and as stored for a stopped run too.
-// Mutation check: drop `record_verdict` from `build_scenario_result_summary`
+// Mutation check: drop `record_verdict` from `scenario_result_summary`
 // and the first two rows lose their verdict.
 TEST_F (RunsRouteTest, CollectionRowCarriesTheBudgetVerdictOnlyWhenOneWasJudged) {
     seed ({ .id = "run_met", .type = vayu::RunType::Scenario, .start_time = 1 });
@@ -4264,7 +4264,7 @@ TEST_F (RunsRouteTest, CollectionRowCarriesTheBudgetVerdictOnlyWhenOneWasJudged)
 // an older engine), and a summary with no readable `scenario` object, an empty
 // one included, adds no `resultSummary` at all.
 // Mutation check: replace `copy_optional_number` in
-// `build_scenario_result_summary` with an unconditional write and the partial
+// `scenario_result_summary` with an unconditional write and the partial
 // row gains zeroed keys.
 TEST_F (RunsRouteTest, CollectionResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     seed ({ .id = "run_partial", .type = vayu::RunType::Scenario, .start_time = 1 });
@@ -5315,6 +5315,108 @@ TEST (RunFilterFromQuery, OriginIsReadOnlyForADeclaredKind) {
     }
     EXPECT_FALSE (
     vayu::http::routes::run_filter_from_query (httplib::Request{}).origin.has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// GET /runs?outcome= - the stored verdict a row draws (#3547)
+// ---------------------------------------------------------------------------
+
+// Same convention as `type`, `status` and `origin`: a value the route does not
+// know leaves the filter unset - a wider list, never a 400. Mutation check:
+// drop the `outcome` read in `run_filter_from_query` and the first loop fails.
+TEST (RunFilterFromQuery, OutcomeIsReadOnlyForAKnownVerdict) {
+    for (const auto outcome : { vayu::RunOutcome::Passed,
+         vayu::RunOutcome::Failed, vayu::RunOutcome::NotJudged }) {
+        httplib::Request req;
+        req.params.emplace ("outcome", vayu::to_string (outcome));
+        const auto filter = vayu::http::routes::run_filter_from_query (req);
+        ASSERT_HAS_VALUE (filter.outcome) << vayu::to_string (outcome);
+        EXPECT_EQ (*filter.outcome, outcome);
+    }
+    for (const char* unknown : { "not-judged", "FAILED", "passing", "" }) {
+        httplib::Request req;
+        req.params.emplace ("outcome", unknown);
+        EXPECT_FALSE (vayu::http::routes::run_filter_from_query (req).outcome.has_value ())
+        << "'" << unknown << "'";
+    }
+    EXPECT_FALSE (
+    vayu::http::routes::run_filter_from_query (httplib::Request{}).outcome.has_value ());
+}
+
+// `outcome=failed` answers what the renderer draws failed: a `completed` run
+// with a missed budget among them, which its status alone never shows, and
+// not the clean run beside it nor a row with no verdict. Each row carries its
+// `outcome`, and a row with none carries no key. Mutation checks: drop the
+// `outcome` member from `serialize_run_row` and the row assertions fail;
+// drop the `outcome` term from `run_filter_condition` and every row is listed.
+TEST_F (RunsRouteTest, OutcomeFilterListsTheRunsTheRendererDrawsFailed) {
+    seed ({ .id = "run_missed", .start_time = 4 });
+    db_->update_run_summary ("run_missed", judged_summary (false));
+    seed ({ .id = "run_clean", .start_time = 3 });
+    db_->update_run_summary ("run_clean",
+    R"({"rps":5,"status_codes":{"200":10},"thresholds":{"checks":[{"metric":"latencyP99Ms","passed":true}],"passed":1,"failed":0}})");
+    seed ({ .id = "run_halted", .status = vayu::RunStatus::Failed, .start_time = 2 });
+    db_->update_run_summary ("run_halted", R"({"rps":5,"status_codes":{"200":10}})");
+    seed ({ .id = "run_unsummarised", .status = vayu::RunStatus::Failed, .start_time = 1 });
+    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 0 });
+
+    httplib::Request req;
+    req.params.emplace ("outcome", "failed");
+    auto [status, body] = vayu::http::routes::get_runs_response (
+    *db_, vayu::http::routes::run_filter_from_query (req), 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 2u) << body.dump ();
+    EXPECT_EQ (body["data"][0]["id"], "run_missed");
+    EXPECT_EQ (body["data"][0]["status"], "completed");
+    EXPECT_EQ (body["data"][0]["outcome"], "failed");
+    EXPECT_EQ (body["data"][1]["id"], "run_halted");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
+
+    vayu::db::RunFilter passed;
+    passed.outcome = vayu::RunOutcome::Passed;
+    auto [_, passed_body] =
+    vayu::http::routes::get_runs_response (*db_, passed, 50, 0, summaries_);
+    ASSERT_EQ (passed_body["data"].size (), 1u);
+    EXPECT_EQ (passed_body["data"][0]["id"], "run_clean");
+
+    auto [all_status, all] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (all_status, 200);
+    EXPECT_EQ (row_of (all, "run_clean")["outcome"], "passed");
+    for (const char* id : { "run_unsummarised", "run_design" }) {
+        EXPECT_FALSE (row_of (all, id).contains ("outcome")) << id;
+    }
+}
+
+// The outcome filter composes with the others as one more `AND` term: each
+// of the two filters alone lists a row the pair leaves out.
+TEST_F (RunsRouteTest, OutcomeFilterCombinesWithStatus) {
+    seed ({ .id = "run_clean", .start_time = 2 });
+    db_->update_run_summary ("run_clean",
+    R"({"rps":5,"status_codes":{"200":10},"thresholds":{"checks":[{"metric":"latencyP99Ms","passed":true}],"passed":1,"failed":0}})");
+    seed ({ .id = "run_missed", .start_time = 1 });
+    db_->update_run_summary ("run_missed", judged_summary (false));
+    seed ({ .id = "run_halted", .status = vayu::RunStatus::Failed, .start_time = 0 });
+    db_->update_run_summary ("run_halted", R"({"rps":5,"status_codes":{"200":10}})");
+
+    httplib::Request req;
+    req.params.emplace ("outcome", "failed");
+    req.params.emplace ("status", "completed");
+    auto [status, body] = vayu::http::routes::get_runs_response (
+    *db_, vayu::http::routes::run_filter_from_query (req), 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["id"], "run_missed");
+}
+
+// PUT /runs/:id/baseline answers the same row, so it carries the outcome too.
+TEST_F (RunsRouteTest, BaselinePutAnswersTheRowWithItsOutcome) {
+    seed ({ .id = "run_missed" });
+    db_->update_run_summary ("run_missed", judged_summary (false));
+    auto [status, body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_missed", R"({"baseline":true})");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"], "failed");
 }
 
 } // namespace

@@ -1201,7 +1201,7 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
+renderer's derivation reads `failed`, `errored` and a `verdict` of `"failed"` (a completed
 run with any of them gets the failed glyph and a line naming the missed budgets
 and the step counts, #3458, #3539) and the MCP `list_runs` rows read the whole
 summary. A `"passed"` verdict changes nothing on the row. A load run's results are
@@ -1222,6 +1222,17 @@ drain a Stop cut with requests outstanding also carries `drainCut` (`{cancelled}
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
 when the search found no such level, #2930), which the row's result line reads
 in place of the run-average `rps`; an engine that predates it sends none.
+
+A list row also carries the engine's stored verdict, `outcome` (`"passed"`,
+`"failed"` or `"not_judged"`, #3547), only when the engine judged one: no design
+run, no clean collection run, no run still in flight and no row stored before the
+column has it, and `GET /runs/:id` carries none. `rowOutcome` reads it first as
+the authority for the row's category, which is what `GET /runs?outcome=` filters
+on, so a row cannot wear a verdict it is not listed under; the `resultSummary`
+derivation above is the fallback for a row without one and supplies the reason
+when it reaches the same category. The derivation is the rule the engine stores
+by, held equal to it by `engine/tests/fixtures/run-row-outcome-conformance.json`
+(a collection row is `failed` or has no outcome, never `passed`).
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
@@ -1380,11 +1391,30 @@ ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
 to the engine so the app and engine agree on cache slots without a round-trip. The key
 reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
-#2536) beside the token URL, client id, credentials id and password-grant username, so
+#2536) beside the token URL, client id, credentials id and the grant's identity (the
+password grant's username, the JWT bearer grant's subject), so
 two audiences sent as rows are two cached tokens; a row whose key names a credential
 (`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its
 key alone, so the key never carries the secret. `scope`, `audience` and `resource`
 themselves are still not in it.
+
+The JWT bearer grant (`grantType: "jwt_bearer"`, RFC 7523, #3632) adds `subject`,
+`assertionAudience`, `assertionClaims` (`{key, value, enabled}` rows, no `sendAs`),
+`assertionLifetimeSeconds` (1 to 3600, engine default 180), `signingAlgorithm`
+(`RS256` default or `ES256`), `keyId`, and the signing key as exactly one of
+`privateKey` and `privateKeyFile`. `fallbackExpiresIn` (seconds a token that states no
+`expires_in` is kept, up to a year, absent keeps it until replaced) is a member of every grant. The
+renderer sends everything but `privateKey` resolved: that member is one `{{variable}}`
+reference, left as written by every host that resolves a config
+(`keepSigningKeyReference`, `services/oauth/signing-key.ts`), and `OAuth2TokenRequest`
+carries `environmentId` and `collectionId` so the engine resolves it from the scopes a
+Send of the request reads. The token row sends the active environment and the
+request's collection (the collection itself, from its own auth editor); the load-test
+guards do the same for a refresh, with the collection of the request a run's token was
+first seen on. An id that is not known is omitted, and a key file needs neither. A
+typed PEM never reaches the config: the form refuses it, and a file is picked through
+`useFilePick`, which records the engine's grant for it.
+
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine). The engine
 owns the deadline and reports it as `expiresAt` (epoch ms) on the start answer; the
@@ -1930,8 +1960,18 @@ replay puts the run's recorded list back on its seeded rows.
     { name: "Status 200", passed: true, source: "test", scope: "request" }
   ],
   consoleLogs: [
+    { source: "pre", scope: "collection", level: "info",
+      message: "pm.sendRequest POST https://auth.example.test/token -> 200 (41 ms)",
+      scriptRequest: 0 },
     { source: "pre", scope: "collection", level: "log", message: "Pre-request" },
     { source: "test", scope: "request", level: "warn", message: "slow response" }
+  ],
+  scriptRequests: [
+    { source: "pre", scope: "collection", startedAt: 1763452800123,
+      status: 200, statusText: "OK",
+      request: { method: "POST", url: "https://auth.example.test/token", ... },
+      response: { headers: { ... }, headerLines: [...], body: "...", ... },
+      totalMs: 41.2, dnsMs: 0, connectMs: 0.4, ... }
   ]
 }
 ```
@@ -1960,6 +2000,19 @@ that was called. A bare `string` is the pre-structured shape an older engine
 sidecar sends; `console/parse-logs.ts` decodes both and is the only place that
 knows the difference (see
 [the engine API reference](../engine/api-reference.md#post-execute)).
+
+`scriptRequests` is every `pm.sendRequest` the scripts made (issue #3633), one
+record per call in execution order, in the stored trace's own shape
+(`ScriptRequestRecord` in `types/domain.ts`). The call's summary line carries
+`scriptRequest`, the record's index, and the Console draws the two as one
+expandable row in the line's position; a record no line points at (the console
+was off, or its cap dropped the line) is drawn after the last line of its
+script. The engine masks credentials where it builds the record, so the app
+renders it as written and adds no masking of its own. Both funnels carry it:
+`responseFromExecuteResult` from the live body and `scriptsFromTrace` from the
+stored `scripts` node, and `script-funnels.test.ts` holds them equal. A setup
+or teardown script's records ride its `lifecycle` row instead, with no line
+index, and the run's Setup / teardown card lists them under the row.
 
 `httpVersion` here is the **negotiated** protocol (`"HTTP/1.1"` / `"HTTP/2"` /
 `""` when nothing was negotiated) - an outcome, not an echo of the request's

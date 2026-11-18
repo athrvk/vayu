@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/run_result_summary.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
@@ -201,22 +202,20 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     return summary;
 }
 
-// The run's verdict against its declared budgets, as its stored summary's
-// `thresholds` object recorded it. Read by `read_threshold_outcome` for both
-// the report's `thresholdValidation` and a load row's `resultSummary.verdict`,
-// so the two surfaces cannot disagree about whether, or how, a run was judged.
-struct ThresholdOutcome {
-    // Per-budget rows verbatim from the summary, already in the report's
-    // camelCase shape - the evaluator writes the wire keys.
-    nlohmann::json checks = nlohmann::json::array ();
-    size_t passed         = 0;
-    size_t failed         = 0;
-
-    // Derived rather than stored so it cannot contradict the counts beside it.
-    [[nodiscard]] const char* verdict () const {
-        return failed == 0 ? "passed" : "failed";
-    }
-};
+// The stored-summary readers the report shares with the list row's
+// `resultSummary` (`core/run_result_summary.hpp`).
+using vayu::core::assertion_totals_json;
+using vayu::core::copy_optional_number;
+using vayu::core::drain_cut_json;
+using vayu::core::read_capacity_headline;
+using vayu::core::read_drain_cut;
+using vayu::core::read_number;
+using vayu::core::read_run_assertions;
+using vayu::core::read_status_codes;
+using vayu::core::read_threshold_outcome;
+using vayu::core::run_assertions_json;
+using vayu::core::RunAssertions;
+using vayu::core::StoredThresholds;
 
 // What a run submitted, what its mode set out to submit (0 for an open-ended
 // one), and the window it submitted in, off the stored summary (#2392).
@@ -228,27 +227,6 @@ struct SendingTotals {
     // before it, which leaves `summary.completedWhileSending` out rather than
     // reporting that nothing completed.
     std::optional<size_t> completed_while_sending;
-};
-
-// A load run's assertion block (#3537), what every verdict reads as a failed
-// check. A member is empty when the summary recorded no such figure: a summary
-// stored before the block yields only what `read_run_assertions` derives.
-struct RunAssertions {
-    std::optional<vayu::core::AssertionTotals> exact;
-    std::optional<vayu::core::AssertionTotals> sampled;
-    std::optional<size_t> errored;
-    std::optional<size_t> teardown_failed;
-
-    // Over both populations: the list row's flat `assertionsPassed` /
-    // `assertionsFailed`, kept for readers older than the block.
-    [[nodiscard]] size_t passed () const {
-        return exact.value_or (vayu::core::AssertionTotals{}).passed +
-        sampled.value_or (vayu::core::AssertionTotals{}).passed;
-    }
-    [[nodiscard]] size_t failed () const {
-        return exact.value_or (vayu::core::AssertionTotals{}).failed +
-        sampled.value_or (vayu::core::AssertionTotals{}).failed;
-    }
 };
 
 // Report fields that live outside the DetailedReport struct: whole-run counters
@@ -312,7 +290,7 @@ struct ReportExtras {
     // declared none (or one recorded before budgets existed), which leaves
     // thresholdValidation out entirely - a run that declared nothing did not
     // pass zero checks, it was never judged.
-    std::optional<ThresholdOutcome> thresholds;
+    std::optional<StoredThresholds> thresholds;
     // This run's `metric.record` / `pm.metrics` values (issue #1500).
     // `has_custom_metrics` false is a run that recorded none, which leaves
     // the report's `customMetrics` section out entirely rather than an
@@ -489,182 +467,6 @@ struct ReportExtras {
     std::optional<SendingTotals> sending;
 };
 
-// Read a number out of a JSON object, leaving @p out untouched when the key is
-// absent or not a number - so a summary written by an older engine (or a
-// partial one from a crashed run) falls back to the calculated value instead of
-// zeroing it.
-template <typename T>
-void read_number (const nlohmann::json& obj, const char* key, T& out) {
-    if (obj.contains (key) && obj[key].is_number ()) {
-        out = obj[key].get<T> ();
-    }
-}
-
-// Copy a stored number to @p to under the report's name, or leave the key
-// absent: a summary written before #2815 measured no error share, and reading
-// that as 0% would report a level as clean that nothing checked.
-void copy_optional_number (const nlohmann::json& from,
-const char* from_key,
-nlohmann::json& to,
-const char* to_key) {
-    if (from.contains (from_key) && from[from_key].is_number ()) {
-        to[to_key] = from[from_key];
-    }
-}
-
-// The stored summary's budget verdict, or nothing when the run was never
-// judged. The checks are the section: a stored object with no readable rows
-// says nothing a reader can act on, so it is treated as absent rather than
-// reported as a run that passed and failed nothing.
-std::optional<ThresholdOutcome> read_threshold_outcome (const nlohmann::json& summary) {
-    if (!summary.contains ("thresholds") || !summary["thresholds"].is_object ()) {
-        return std::nullopt;
-    }
-    const auto& thresholds = summary["thresholds"];
-    if (!thresholds.contains ("checks") || !thresholds["checks"].is_array () ||
-    thresholds["checks"].empty ()) {
-        return std::nullopt;
-    }
-    ThresholdOutcome outcome;
-    outcome.checks = thresholds["checks"];
-    read_number (thresholds, "passed", outcome.passed);
-    read_number (thresholds, "failed", outcome.failed);
-    return outcome;
-}
-
-// A stored `{passed, failed}` pair under @p key, or nothing unless both counts
-// are there.
-std::optional<vayu::core::AssertionTotals>
-read_assertion_totals (const nlohmann::json& parent, const char* key) {
-    const auto stored = parent.find (key);
-    if (stored == parent.end () || !stored->is_object ()) {
-        return std::nullopt;
-    }
-    const auto passed = stored->find ("passed");
-    const auto failed = stored->find ("failed");
-    if (passed == stored->end () || !passed->is_number_unsigned () ||
-    failed == stored->end () || !failed->is_number_unsigned ()) {
-        return std::nullopt;
-    }
-    return vayu::core::AssertionTotals{ .passed = passed->get<size_t> (),
-        .failed                                 = failed->get<size_t> () };
-}
-
-std::optional<size_t> read_count (const nlohmann::json& parent, const char* key) {
-    const auto stored = parent.find (key);
-    if (stored == parent.end () || !stored->is_number_unsigned ()) {
-        return std::nullopt;
-    }
-    return stored->get<size_t> ();
-}
-
-// An element row whose `failed` is a failed assertion: an `assert.*` outcome,
-// or a `script.*` run whose `pm.test` failed.
-bool is_assertion_row (const nlohmann::json& row) {
-    const auto kind = row.find ("kind");
-    if (kind == row.end () || !kind->is_string ()) {
-        return false;
-    }
-    const auto& name = kind->get_ref<const std::string&> ();
-    return name.starts_with ("assert.") || name.starts_with ("script.");
-}
-
-// A single-request summary stored before the block: its `elements` rows,
-// counted per execution as #3458's row read them. A required `extract.*` miss
-// is `missing` there and stays out; the stored block counts it.
-std::optional<vayu::core::AssertionTotals> legacy_element_assertions (
-const nlohmann::json& summary) {
-    const auto elements = summary.find ("elements");
-    if (elements == summary.end () || !elements->is_array ()) {
-        return std::nullopt;
-    }
-    vayu::core::AssertionTotals totals;
-    bool recorded = false;
-    for (const auto& row : *elements) {
-        const auto failed = read_count (row, "failed");
-        if (!failed || !is_assertion_row (row)) {
-            continue;
-        }
-        recorded = true;
-        totals.failed += *failed;
-        totals.passed += read_count (row, "passed").value_or (0);
-    }
-    if (!recorded) {
-        return std::nullopt;
-    }
-    return totals;
-}
-
-// What the readers before the block derived (#2820, #3458), and only that, so
-// a stored run keeps the reading it had: a scenario load run's exact pair, its
-// replay unread; a single-request run's element rows and replay. Neither
-// derives `errored` or `teardownFailed`, which no verdict read then.
-std::optional<RunAssertions> derive_legacy_assertions (const nlohmann::json& summary) {
-    RunAssertions derived;
-    if (const auto scenario = summary.find ("scenario"); scenario != summary.end ()) {
-        derived.exact = read_assertion_totals (*scenario, "assertions");
-    } else {
-        derived.exact   = legacy_element_assertions (summary);
-        derived.sampled = read_assertion_totals (summary, "tests");
-    }
-    if (!derived.exact && !derived.sampled) {
-        return std::nullopt;
-    }
-    return derived;
-}
-
-// The run's `assertions` block (#3537), or nothing when it recorded none. The
-// one reader of it, for the report, its `scenario.assertions` and the list
-// row, and the one place a summary stored before the block is read for it.
-std::optional<RunAssertions> read_run_assertions (const nlohmann::json& summary) {
-    const auto block = summary.find ("assertions");
-    if (block == summary.end () || !block->is_object ()) {
-        return derive_legacy_assertions (summary);
-    }
-    return RunAssertions{ .exact = read_assertion_totals (*block, "exact"),
-        .sampled                 = read_assertion_totals (*block, "sampled"),
-        .errored                 = read_count (*block, "errored"),
-        .teardown_failed         = read_count (*block, "teardownFailed") };
-}
-
-nlohmann::json assertion_totals_json (const vayu::core::AssertionTotals& totals) {
-    return { { "passed", totals.passed }, { "failed", totals.failed } };
-}
-
-// @p assertions in the stored block's shape, each member only when recorded.
-nlohmann::json run_assertions_json (const RunAssertions& assertions) {
-    nlohmann::json block = nlohmann::json::object ();
-    if (const auto& exact = assertions.exact) {
-        block["exact"] = assertion_totals_json (*exact);
-    }
-    if (const auto& sampled = assertions.sampled) {
-        block["sampled"] = assertion_totals_json (*sampled);
-    }
-    if (const auto& errored = assertions.errored) {
-        block["errored"] = *errored;
-    }
-    if (const auto& teardown_failed = assertions.teardown_failed) {
-        block["teardownFailed"] = *teardown_failed;
-    }
-    return block;
-}
-
-// The requests a Stop cut from the run's drain (#3538), or nothing when the
-// summary records no cut. The one reader of `drainCut`, for the report's
-// `summary` and the list row, which both answer it as `{cancelled}`.
-std::optional<size_t> read_drain_cut (const nlohmann::json& summary) {
-    const auto block = summary.find ("drainCut");
-    if (block == summary.end () || !block->is_object ()) {
-        return std::nullopt;
-    }
-    const auto cancelled = read_count (*block, "cancelled");
-    return cancelled.value_or (0) > 0 ? cancelled : std::nullopt;
-}
-
-nlohmann::json drain_cut_json (size_t cancelled) {
-    return { { "cancelled", cancelled } };
-}
-
 // Read a boolean out of a JSON object as an optional, so a key an older engine
 // never wrote stays *absent* rather than becoming `false`. A number reads as
 // nothing on purpose: the report says what the summary recorded, and a
@@ -673,25 +475,6 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
     if (obj.contains (key) && obj[key].is_boolean ()) {
         out = obj[key].get<bool> ();
     }
-}
-
-// A stored `capacity` section's headline in the report's names: why the search
-// stopped and, each only when stored, the highest level it held and the level
-// it broke at. The one reader of those keys, for the report's section and the
-// list row (#2930), so the two cannot disagree. Nothing when the section
-// carries no `levels`, the rule `read_capacity_section` documents.
-std::optional<nlohmann::json> read_capacity_headline (const nlohmann::json& stored) {
-    if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
-        return std::nullopt;
-    }
-    nlohmann::json headline;
-    headline["stopReason"] =
-    stored.contains ("stop_reason") && stored["stop_reason"].is_string () ?
-    stored["stop_reason"].get<std::string> () :
-    std::string{};
-    copy_optional_number (stored, "max_healthy_concurrency", headline, "maxHealthyConcurrency");
-    copy_optional_number (stored, "knee_concurrency", headline, "kneeConcurrency");
-    return std::optional<nlohmann::json> (std::in_place, std::move (headline));
 }
 
 // Translate a stored `capacity` section (snake_case, like every stored section)
@@ -934,20 +717,6 @@ void apply_summary_error_types (const nlohmann::json& summary, vayu::DetailedRep
     }
 }
 
-/** A stored summary's `status_codes` object as the distribution it records. */
-std::map<int, size_t> read_status_codes (const nlohmann::json& codes) {
-    std::map<int, size_t> distribution;
-    for (const auto& [code_str, count] : codes.items ()) {
-        try {
-            distribution[std::stoi (code_str)] = count.get<size_t> ();
-        } catch (...) {
-            // @deliberate: skip an unparseable code rather than losing the
-            // whole map - every other key is still an honest count.
-        }
-    }
-    return distribution;
-}
-
 /**
  * The status-code map, which replaces the sampled one wholesale when stored.
  * An empty map keeps the sampled one, except on a sequential collection run:
@@ -1188,152 +957,6 @@ ReportExtras& extras) {
     apply_summary_sections (summary, extras);
 }
 
-// The stored whole-run p95, unless the run timed no request: a stored 0 there
-// is no measurement, the marker `apply_summary_latency` reads too. A summary
-// written before `latency.count` existed has none, so its p95 stands as stored.
-std::optional<double> read_timed_p95 (const nlohmann::json& summary) {
-    const auto latency = summary.find ("latency");
-    if (latency == summary.end () || !latency->is_object ()) {
-        return std::nullopt;
-    }
-    const auto count = latency->find ("count");
-    if (count != latency->end () && count->is_number () && count->get<double> () <= 0) {
-        return std::nullopt;
-    }
-    const auto p95 = latency->find ("p95");
-    if (p95 == latency->end () || !p95->is_number ()) {
-        return std::nullopt;
-    }
-    return p95->get<double> ();
-}
-
-// The budget verdict the stored summary recorded, or no key when no budget
-// judged the run - as stored, so a stopped run keeps the verdict it was given.
-void record_verdict (const nlohmann::json& summary, nlohmann::json& outcome) {
-    if (const auto thresholds = read_threshold_outcome (summary)) {
-        outcome["verdict"] = thresholds->verdict ();
-    }
-}
-
-// The assertion block a load row carries (#3537), the report's own, beside
-// `assertionsPassed` / `assertionsFailed` over both populations for readers
-// older than it (#2820, #3458). All three or none.
-void record_assertions (const nlohmann::json& summary, nlohmann::json& outcome) {
-    if (const auto assertions = read_run_assertions (summary)) {
-        outcome["assertions"]       = run_assertions_json (*assertions);
-        outcome["assertionsPassed"] = assertions->passed ();
-        outcome["assertionsFailed"] = assertions->failed ();
-    }
-}
-
-// The drain a Stop cut (#3538), beside the stored `verdict` it leaves as it
-// is: a reader judges a cut run not judged once no budget failed it.
-void record_drain_cut (const nlohmann::json& summary, nlohmann::json& outcome) {
-    if (const auto drain_cut = read_drain_cut (summary)) {
-        outcome["drainCut"] = drain_cut_json (*drain_cut);
-    }
-}
-
-/**
- * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate, budget verdict, its assertion block (#3537), the drain a Stop
- * cut (#3538) or, for a capacity run, the search's headline (#2930), read
- * from the run's
- * stored `summary` - the load-run counterpart of a design row's
- * `{statusCode, latencyMs}`.
- *
- * Each key is omitted when the summary does not record it, never zeroed: no
- * `verdict` means no budget judged the run, and how to show that is the
- * reader's decision. `errorRate` is a percentage (0-100) by the one error
- * definition every surface shares (`vayu::count_status_failures`). An empty or
- * unreadable summary answers an empty object, which the caller leaves off the
- * row. Runs under `RunSummaryCache`'s lock, so it parses and nothing more.
- */
-nlohmann::json build_load_result_summary (const std::string& summary_json) {
-    nlohmann::json outcome = nlohmann::json::object ();
-    const auto summary =
-    nlohmann::json::parse (summary_json, nullptr, /*allow_exceptions=*/false);
-    if (!summary.is_object ()) {
-        return outcome;
-    }
-
-    if (summary.contains ("rps") && summary["rps"].is_number ()) {
-        outcome["rps"] = summary["rps"];
-    }
-    if (const auto p95 = read_timed_p95 (summary)) {
-        outcome["p95Ms"] = *p95;
-    }
-    if (summary.contains ("status_codes") && summary["status_codes"].is_object ()) {
-        const auto failures = vayu::count_status_failures (
-        read_status_codes (summary["status_codes"]));
-        // No request recorded is no rate at all, not a run with 0% errors.
-        if (failures.total > 0) {
-            outcome["errorRate"] = failures.error_rate ();
-        }
-    }
-    record_verdict (summary, outcome);
-    record_assertions (summary, outcome);
-    record_drain_cut (summary, outcome);
-    if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
-        if (auto headline = read_capacity_headline (summary["capacity"])) {
-            outcome["capacity"] = std::move (*headline);
-        }
-    }
-    return outcome;
-}
-
-/**
- * A terminal collection (sequential scenario) run's `resultSummary` (#2954):
- * how many steps passed, failed, were skipped, errored and were stopped
- * (#3397), and the budget verdict, read from the stored `summary.scenario`
- * block. The counts are disjoint (api-reference, "Outcomes"), and `errored` is
- * kept beside `failed` because a run whose steps only errored would otherwise
- * read clean.
- *
- * Each key is omitted when the summary does not record it, never zeroed. A
- * summary with no `scenario` object answers an empty object, which the caller
- * leaves off the row. Runs under `RunSummaryCache`'s lock, so it parses and
- * nothing more.
- */
-nlohmann::json build_scenario_result_summary (const std::string& summary_json) {
-    nlohmann::json outcome = nlohmann::json::object ();
-    const auto summary =
-    nlohmann::json::parse (summary_json, nullptr, /*allow_exceptions=*/false);
-    if (!summary.is_object () || !summary.contains ("scenario") ||
-    !summary["scenario"].is_object ()) {
-        return outcome;
-    }
-
-    const auto& scenario = summary["scenario"];
-    copy_optional_number (scenario, "passed", outcome, "passed");
-    copy_optional_number (scenario, "failed", outcome, "failed");
-    copy_optional_number (scenario, "skipped", outcome, "skipped");
-    copy_optional_number (scenario, "errored", outcome, "errored");
-    copy_optional_number (scenario, "stopped", outcome, "stopped");
-    record_verdict (summary, outcome);
-    return outcome;
-}
-
-// Whether a row of this run may carry a `resultSummary` built from its stored
-// summary: a load or collection run at a terminal status with a summary stored.
-// A Pending or Running row's summary is not final yet (see RunSummaryCache), so
-// it is neither read nor cached. Terminal status does not guarantee the summary
-// exists: the inactive branch of POST /runs/:id/stop writes Stopped with none
-// before the worker registers, and the worker writes its summary afterwards. An
-// empty summary is therefore not final either, and caching its empty outcome
-// would hide the real one for good.
-bool carries_result_summary (const vayu::db::Run& run) {
-    const bool summarised =
-    run.type == vayu::RunType::Load || run.type == vayu::RunType::Scenario;
-    return summarised && !run.summary.empty () && vayu::is_terminal (run.status);
-}
-
-nlohmann::json build_terminal_result_summary (const vayu::db::Run& run) {
-    return run.type == vayu::RunType::Scenario ?
-    build_scenario_result_summary (run.summary) :
-    build_load_result_summary (run.summary);
-}
-
 // Serialize one run into a list row: identity + status + the compact summary,
 // deliberately *without* the full config_snapshot (that is what makes the list
 // cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
@@ -1355,7 +978,11 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
     nlohmann::json (nullptr);
     row["baseline"]      = run.baseline;
     row["origin"]        = vayu::json::serialize_run_origin (run);
-    row["summary"]       = std::move (summary);
+    // Absent, never null, on a row with no verdict (#3547).
+    if (run.outcome) {
+        row["outcome"] = *run.outcome;
+    }
+    row["summary"] = std::move (summary);
     return row;
 }
 
@@ -1489,9 +1116,9 @@ const std::optional<std::string>& before) {
             row["resultSummary"]["statusCode"] = found->second.status_code;
             row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
         }
-        if (carries_result_summary (run)) {
-            auto outcome = summaries.outcome_for (
-            run.id, [&run] { return build_terminal_result_summary (run); });
+        if (vayu::core::carries_result_summary (run)) {
+            auto outcome = summaries.outcome_for (run.id,
+            [&run] { return vayu::core::terminal_result_summary (run); });
             if (!outcome.empty ()) {
                 row["resultSummary"] = std::move (outcome);
             }
@@ -2653,7 +2280,7 @@ vayu::core::RunManager* live_runs) {
 
 /**
  * The `GET /runs` filters off the query string. An invalid value for an
- * enumerated filter (`type`, `status`, `baseline`, `origin`) leaves that filter
+ * enumerated filter (`type`, `status`, `baseline`, `origin`, `outcome`) leaves that filter
  * unset rather than answering 400, so a client on a newer vocabulary than the
  * engine gets a wider list, never an error.
  *
@@ -2683,6 +2310,9 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
         if (is_run_origin_kind (value))
             filter.origin = std::move (value);
     }
+    if (req.has_param ("outcome"))
+        filter.outcome =
+        vayu::parse_run_outcome (req.get_param_value ("outcome"));
     return filter;
 }
 

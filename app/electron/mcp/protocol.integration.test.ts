@@ -32,7 +32,7 @@ import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
 import { InFlightCalls } from "./in-flight-calls.js";
 import { McpListener } from "./listener.js";
 import { createMcpLifecycle, type McpLifecycle } from "./lifecycle.js";
-import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
+import { MCP_HOST, MCP_PORT, mcpEndpointUrl } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, isListed, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
@@ -709,6 +709,13 @@ describe("undeclared arguments", () => {
 			await call("list_runs", { collection_id: "x" }),
 			'Unrecognized key: "collection_id"'
 		);
+	});
+
+	// `GET /runs` leaves a filter it cannot parse unset, so the app's own
+	// spelling "not-judged" would answer every run, read as "nothing matched".
+	// Mutation check: declare `outcome` as `z.string()` and this reaches the engine.
+	it("list_runs refuses an outcome the engine would ignore (#3547)", async () => {
+		expectRefusedNaming(await call("list_runs", { outcome: "not-judged" }), "outcome");
 	});
 
 	/*
@@ -1570,7 +1577,7 @@ describe("Streamable HTTP host", () => {
 	/**
 	 * The URL the host serves and the URL the app hands out have to be the same
 	 * string. They were assembled from three separate `/mcp` literals - the path
-	 * served here, `MCP_ENDPOINT_URL`, and a renderer default - with nothing
+	 * served here, the advertised URL, and a renderer default - with nothing
 	 * holding them together; the path now comes from `MCP_PATH` and the renderer
 	 * is told the live URL over `mcp:status`.
 	 */
@@ -1581,7 +1588,7 @@ describe("Streamable HTTP host", () => {
 			info: { name: "vayu", version: "test" },
 			contextProvider: contextProvider(),
 		});
-		expect(server.url).toBe(MCP_ENDPOINT_URL);
+		expect(server.url).toBe(mcpEndpointUrl(MCP_PORT));
 	});
 
 	it("rejects GET with 405 (POST-only endpoint)", async () => {
@@ -2340,12 +2347,11 @@ describe("stopping the MCP server through its lifecycle", () => {
 		const port = await freePort();
 		lifecycle = createMcpLifecycle({
 			isEnabled: () => true,
-			endpoint: { host: HOST, port },
-			makeListener: (loadHandler) => new McpListener({ host: HOST, port, loadHandler }),
-			loadServiceFactory: async () => () =>
+			endpoint: () => ({ host: HOST, port }),
+			makeListener: (endpoint, loadHandler) => new McpListener({ ...endpoint, loadHandler }),
+			loadServiceFactory: async () => (endpoint) =>
 				new McpHttpServer({
-					host: HOST,
-					port,
+					...endpoint,
 					info: { name: "vayu", version: "test" },
 					contextProvider: contextProvider(safety, engine),
 				}),

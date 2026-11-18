@@ -228,7 +228,7 @@ describe("startup ordering", () => {
 		);
 		// The sidecar's choice is what fixes it.
 		expect(main).toMatch(
-			/new EngineSidecar\(\s*ENGINE_PORT_CANDIDATES,\s*defaultSidecarSystem,\s*publishEnginePort,\s*receiveGrantSecret\s*\)/
+			/new EngineSidecar\(\s*ENGINE_PORT_CANDIDATES,\s*defaultSidecarSystem,\s*publishEnginePort,\s*receiveGrantSecret,/
 		);
 	});
 

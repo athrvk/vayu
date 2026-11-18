@@ -6,7 +6,8 @@
  */
 
 /**
- * Keeps the two copies of the `mcp:status` and `mcp:connectClient` shapes honest.
+ * Keeps the two copies of the `mcp:status`, `mcp:setPort` and `mcp:connectClient`
+ * shapes honest.
  *
  * The main process builds them (`status.ts`, `connect.ts`); the renderer types
  * what it receives in `src/types/domain.ts`. Production code under `electron/`
@@ -18,9 +19,14 @@
 
 import { describe, expect, test } from "vitest";
 import type { McpConnectResult as MainConnectResult } from "./connect.js";
-import type { McpStartError as MainStartError, McpStatus as MainStatus } from "./status.js";
+import type {
+	McpSetPortResult as MainSetPortResult,
+	McpStartError as MainStartError,
+	McpStatus as MainStatus,
+} from "./status.js";
 import type {
 	McpConnectResult as RendererConnectResult,
+	McpSetPortResult as RendererSetPortResult,
 	McpStartError as RendererStartError,
 	McpStatus as RendererStatus,
 } from "@/types/domain";
@@ -30,6 +36,7 @@ type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const STATUS_MATCHES: Exact<MainStatus, RendererStatus> = true;
 const STARTING_MATCHES: Exact<MainStatus["starting"], RendererStatus["starting"]> = true;
 const START_ERROR_MATCHES: Exact<MainStartError, RendererStartError> = true;
+const SET_PORT_RESULT_MATCHES: Exact<MainSetPortResult, RendererSetPortResult> = true;
 const CONNECT_RESULT_MATCHES: Exact<MainConnectResult, RendererConnectResult> = true;
 const CONNECT_REASONS_MATCH: Exact<
 	NonNullable<MainConnectResult["reason"]>,
@@ -41,6 +48,7 @@ describe("mcp status mirror", () => {
 		expect(STATUS_MATCHES).toBe(true);
 		expect(STARTING_MATCHES).toBe(true);
 		expect(START_ERROR_MATCHES).toBe(true);
+		expect(SET_PORT_RESULT_MATCHES).toBe(true);
 		expect(CONNECT_RESULT_MATCHES).toBe(true);
 		expect(CONNECT_REASONS_MATCH).toBe(true);
 	});

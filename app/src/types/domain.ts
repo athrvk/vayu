@@ -184,7 +184,8 @@ export type RequestBody =
  * `inherit` resolves by walking the parent collection chain at execution time.
  * Collections never use `inherit` - they are always the auth source.
  */
-export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
+export type OAuth2GrantType =
+	"authorization_code" | "client_credentials" | "password" | "jwt_bearer";
 
 /** Where a token or refresh request carries an {@link OAuth2ParamRow}. */
 export type OAuth2ParamSendAs = "body" | "url" | "header";
@@ -202,6 +203,17 @@ export interface OAuth2ParamRow {
 	value: string;
 	enabled?: boolean;
 	sendAs?: OAuth2ParamSendAs;
+}
+
+/**
+ * One extra claim of a `jwt_bearer` assertion (RFC 7523, #3632). The engine
+ * writes `iss`, `sub`, `aud`, `exp` and `iat` itself, so a row of one of those
+ * names is never sent. Absent `enabled` means enabled.
+ */
+export interface OAuth2ClaimRow {
+	key: string;
+	value: string;
+	enabled?: boolean;
 }
 
 /**
@@ -237,6 +249,24 @@ export interface OAuth2Config {
 	tokenParams?: OAuth2ParamRow[];
 	/** Appended to a refresh request. Absent when empty. */
 	refreshParams?: OAuth2ParamRow[];
+	/** `jwt_bearer`: the assertion's `sub`; `clientId` is its `iss`. */
+	subject?: string;
+	/** `jwt_bearer`: the assertion's `aud`, which is not the `audience` form parameter. */
+	assertionAudience?: string;
+	/** `jwt_bearer`: extra claims beside the five the engine writes. */
+	assertionClaims?: OAuth2ClaimRow[];
+	/** `jwt_bearer`: `exp - iat`, 1 to 3600, default 180. */
+	assertionLifetimeSeconds?: number;
+	/** `jwt_bearer`: default RS256. */
+	signingAlgorithm?: "RS256" | "ES256";
+	/** `jwt_bearer`: the JWT header's `kid`, omitted when empty. */
+	keyId?: string;
+	/** `jwt_bearer`: exactly one `{{variable}}` naming a secret holding the PEM, resolved only by the engine; exactly one of this and `privateKeyFile`. */
+	privateKey?: string;
+	/** `jwt_bearer`: a key file the engine reads at token time. */
+	privateKeyFile?: string;
+	/** Seconds a token that states no `expires_in` is kept for; absent or 0 keeps it until replaced. */
+	fallbackExpiresIn?: number;
 }
 
 /**
@@ -1522,6 +1552,41 @@ export interface RunResultScripts {
 	consoleLogs?: ConsoleLogEntry[];
 	preScriptError?: string;
 	postScriptError?: string;
+	scriptRequests?: ScriptRequestRecord[];
+}
+
+/**
+ * One `pm.sendRequest` exchange a script made (#3633), in the stored trace's
+ * own shape: `request`, `response`, the error pair and the eight `*Ms` timings
+ * are {@link RunResultTrace}'s members for the call. The engine masks
+ * credentials where it builds the record (`<redacted>` in a header value, a
+ * blanked URL credential), so a reader renders it as written.
+ *
+ * `status` is `0` for a transport failure, with the code in `error_type` and
+ * no `response` when nothing answered.
+ */
+export interface ScriptRequestRecord extends Pick<
+	RunResultTrace,
+	| "totalMs"
+	| "wireMs"
+	| "queueWaitMs"
+	| "dnsMs"
+	| "connectMs"
+	| "tlsMs"
+	| "firstByteMs"
+	| "downloadMs"
+	| "error_type"
+	| "error_message"
+> {
+	/** Absent on a setup or teardown row's record: the row names its phase. */
+	source?: ScriptSource;
+	scope?: ElementScope;
+	/** When the call began, in epoch milliseconds. */
+	startedAt?: number;
+	status: number;
+	statusText?: string;
+	request: NonNullable<RunResultTrace["request"]>;
+	response?: NonNullable<RunResultTrace["response"]>;
 }
 
 /**
@@ -1663,6 +1728,14 @@ export interface RunResultTrace {
 		 * is present on a failed exchange (no `response` node) too.
 		 */
 		authNotice?: string;
+		/**
+		 * The header names and the query parameter the auth block wrote
+		 * (`record_auth_provenance`, request_exchange.cpp), each present only
+		 * when there was one. A script request's record masks the values under
+		 * these names (#3633).
+		 */
+		authHeaders?: string[];
+		authQueryParam?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -1996,6 +2069,13 @@ export const RUN_PHASES: readonly RunPhase[] = [
 	"settled",
 ];
 
+/**
+ * The verdict the engine stores on a run row (#3547) and filters `GET /runs` on:
+ * the history row's outcome, with the renderer's `not-judged` spelled
+ * `not_judged` on the wire.
+ */
+export type StoredRunOutcome = "passed" | "failed" | "not_judged";
+
 /** What every run shares; {@link Run} adds the `type` and the `resultSummary` that goes with it. */
 interface RunFields {
 	id: string;
@@ -2034,6 +2114,14 @@ interface RunFields {
 	 * an engine older than the field has none; absent reads as `other`.
 	 */
 	origin?: RunOrigin;
+	/**
+	 * The row's verdict as the engine stored it (#3547), on list rows and the
+	 * pin's PUT answer; `GET /runs/:id` carries none. Absent when the engine
+	 * judged nothing (a design run, a clean collection run, a run still in
+	 * flight) and on every row stored before the column - absent is not
+	 * `passed`. `rowOutcome` reads it before it derives anything.
+	 */
+	outcome?: StoredRunOutcome;
 }
 
 /**
@@ -2211,6 +2299,12 @@ export interface RunListParams {
 	 * lists every origin. An engine older than the filter ignores it.
 	 */
 	origin?: RunOrigin["kind"];
+	/**
+	 * Only runs the engine stored this verdict on (`GET /runs?outcome=`). A row
+	 * with no stored outcome matches no value. Unset lists every run; an engine
+	 * older than the filter ignores it.
+	 */
+	outcome?: StoredRunOutcome;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
@@ -2660,6 +2754,11 @@ export interface ConsoleLogEntry {
 	scope?: ElementScope;
 	level: ConsoleLevel;
 	message: string;
+	/**
+	 * On a `pm.sendRequest` summary line only: the index of the call's record
+	 * in the same answer's `scriptRequests` (#3633).
+	 */
+	scriptRequest?: number;
 }
 
 export interface SanityResult extends HttpResponse {
@@ -2678,6 +2777,8 @@ export interface SanityResult extends HttpResponse {
 	consoleLogs?: Array<ConsoleLogEntry | string>;
 	preScriptError?: string;
 	postScriptError?: string;
+	/** Every `pm.sendRequest` the scripts made, pre before test (#3633). */
+	scriptRequests?: ScriptRequestRecord[];
 	error?: string;
 	/**
 	 * What checking this response against its declared schema found (issue
@@ -3029,6 +3130,10 @@ export interface RunScenarioStepElementTally {
  * inline element's tally row carries them. `message` is empty or absent for a
  * row that ran clean; a failed row's carries the reason, including a failing
  * `pm.test`.
+ *
+ * `scriptRequests` is a sequential run's only (#3633): every `pm.sendRequest`
+ * the script made, in call order. The `console` sample folds repeats, so no
+ * line indexes a record and the records are listed on their own.
  */
 export interface LifecycleElementOutcome
 	extends
@@ -3036,7 +3141,9 @@ export interface LifecycleElementOutcome
 		Pick<
 			RunScenarioStepElementTally,
 			"messages" | "messagesDropped" | "console" | "consoleDropped"
-		> {}
+		> {
+	scriptRequests?: ScriptRequestRecord[];
+}
 
 /** One thing an inline script element reported: the error it threw, or a failing test as `name: message`. */
 export interface ElementTallyMessage {
@@ -4351,10 +4458,17 @@ export interface McpStartError {
 
 export interface McpStatus {
 	running: boolean;
-	/** The configured endpoint while not running: it names the port, it is not usable. */
+	/** The endpoint of the port in force while not running: it names the port, it is not usable. */
 	url: string;
 	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
 	enabled: boolean;
+	/** The configured MCP port, the value for the port field (#3580). */
+	port: number;
+	/**
+	 * The configured port is not in force until the engine restarts; `url` still
+	 * names the port in force. Survives a reload, since the main process derives it.
+	 */
+	restartRequired: boolean;
 	/**
 	 * Enabled and still coming up: no listener and no failure yet. Not a problem
 	 * to report and nothing to retry - the endpoint is simply not ready (#3579).
@@ -4367,7 +4481,15 @@ export interface McpStatus {
 	 * Settings change set aside. Absent when the file was readable.
 	 */
 	corruptCopy?: string;
+	/** Why the port stored in `mcp-config.json` was unusable and the default is in use. */
+	storedPortError?: string;
 }
+
+/**
+ * The `mcp:setPort` answer. Mirrors `McpSetPortResult` in
+ * `electron/mcp/status.ts`; `message` says why a port was refused.
+ */
+export type McpSetPortResult = { ok: true; status: McpStatus } | { ok: false; message: string };
 
 /** Clients Vayu can register itself with via their own CLI (one-click connect). */
 export type McpConnectClient = "claude" | "vscode";

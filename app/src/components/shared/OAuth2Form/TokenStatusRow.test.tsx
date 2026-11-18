@@ -34,6 +34,7 @@ const fetchMutation = { mutate: vi.fn(), isPending: false };
 const clearMutation = { mutate: vi.fn(), isPending: false };
 const statusQuery = { data: undefined as unknown, isLoading: false, isError: false };
 const showToast = vi.fn();
+const { session } = vi.hoisted(() => ({ session: { activeEnvironmentId: null as string | null } }));
 
 vi.mock("@/queries/oauth", () => ({
 	useOAuth2TokenStatusQuery: () => statusQuery,
@@ -44,6 +45,7 @@ vi.mock("@/queries/oauth", () => ({
 vi.mock("@/stores", () => ({
 	useToastStore: (select: (state: { showToast: typeof showToast }) => unknown) =>
 		select({ showToast }),
+	useSessionStore: (select: (state: typeof session) => unknown) => select(session),
 	// Read by `services/notify`, which this row calls on a completed sign-in.
 	useClientSettingsStore: { getState: () => ({ systemNotifications: false }) },
 }));
@@ -69,12 +71,20 @@ function config(overrides: Partial<OAuth2Config> = {}): OAuth2Config {
 	};
 }
 
-function renderRow(cfg: OAuth2Config, deferredNames?: readonly string[]) {
+function renderRow(
+	cfg: OAuth2Config,
+	deferredNames?: readonly string[],
+	collectionId?: string | null
+) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<TokenStatusRow resolvedConfig={cfg} deferredNames={deferredNames} />
+				<TokenStatusRow
+					resolvedConfig={cfg}
+					deferredNames={deferredNames}
+					collectionId={collectionId}
+				/>
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -92,6 +102,7 @@ beforeEach(() => {
 	statusQuery.data = undefined;
 	statusQuery.isLoading = false;
 	statusQuery.isError = false;
+	session.activeEnvironmentId = null;
 });
 
 describe("TokenStatusRow with an incomplete config", () => {
@@ -748,5 +759,80 @@ describe("TokenStatusRow's interactive sign-in is the config's, not the row's (#
 
 		await waitFor(() => expect(showToast).toHaveBeenCalled());
 		expect(getTokenButton()).toBeEnabled();
+	});
+});
+
+describe("TokenStatusRow with a jwt_bearer grant (#3632)", () => {
+	const jwt = config({
+		grantType: "jwt_bearer",
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "svc@example.com",
+		subject: "user@example.com",
+		assertionAudience: "https://idp.example.com/token",
+		privateKey: "{{signing_key}}",
+	});
+
+	it("names the subject, the audience and the key as missing, not the authorization URL", () => {
+		renderRow(config({ grantType: "jwt_bearer" }));
+
+		expect(
+			screen.getByText(
+				"Enter the Access token URL, Client ID, Subject, Assertion audience and Private key to fetch a token"
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/Authorization URL/)).not.toBeInTheDocument();
+		expect(getTokenButton()).toBeDisabled();
+	});
+
+	it.each([
+		["a variable reference", { privateKey: "{{signing_key}}" }],
+		["a key file", { privateKeyFile: "/keys/signing.pem" }],
+	])("accepts %s as the key", (_name, key) => {
+		renderRow({ ...jwt, privateKey: undefined, ...key });
+
+		expect(getTokenButton()).toBeEnabled();
+	});
+
+	it("sends the key reference untouched, with the active environment and collection", () => {
+		session.activeEnvironmentId = "env-1";
+		renderRow(jwt, undefined, "col-1");
+
+		fireEvent.click(getTokenButton());
+
+		expect(fetchMutation.mutate.mock.lastCall?.[0]).toEqual({
+			config: jwt,
+			force: true,
+			environmentId: "env-1",
+			collectionId: "col-1",
+		});
+	});
+
+	it("names only the scopes it knows", () => {
+		renderRow(jwt, undefined, null);
+
+		fireEvent.click(getTokenButton());
+
+		expect(fetchMutation.mutate.mock.lastCall?.[0]).toEqual({ config: jwt, force: true });
+	});
+
+	it("fetches without a sign-in, whatever the grant's authorization URL", () => {
+		renderRow(jwt);
+
+		fireEvent.click(getTokenButton());
+
+		expect(authorize).not.toHaveBeenCalled();
+		expect(fetchMutation.mutate).toHaveBeenCalledTimes(1);
+	});
+
+	it("shows the cached token the engine holds for it", () => {
+		statusQuery.data = {
+			found: true,
+			expired: false,
+			token: { accessToken: "ya29.abcdefghijkl", expiresAt: Date.now() + 3_600_000 },
+		};
+		renderRow(jwt);
+
+		expect(screen.getByText("ya29…ijkl")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /renew|refresh/i })).toBeEnabled();
 	});
 });

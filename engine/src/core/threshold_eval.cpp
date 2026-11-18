@@ -70,7 +70,7 @@ double measured_error_rate (const RunSummaryInputs& inputs) {
 }
 
 /// A run that sent no request has no error rate to judge: the same 0/0 the run
-/// summary leaves `errorRate` out for (`build_load_result_summary`).
+/// summary leaves `errorRate` out for (`load_result_summary`).
 bool error_rate_data_present (const RunSummaryInputs& inputs) {
     return inputs.total_requests > 0;
 }

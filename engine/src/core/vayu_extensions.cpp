@@ -15,9 +15,11 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/log_redact.hpp"
 
 #include <algorithm>
@@ -30,6 +32,21 @@
 #include <vector>
 
 namespace vayu::core::vayu_ext {
+
+bool is_variable_reference (std::string_view text) {
+    while (!text.empty () && text.front () == ' ') {
+        text.remove_prefix (1);
+    }
+    while (!text.empty () && text.back () == ' ') {
+        text.remove_suffix (1);
+    }
+    if (text.size () < 5 || !text.starts_with ("{{") || !text.ends_with ("}}")) {
+        return false;
+    }
+    const std::string_view inner = text.substr (2, text.size () - 4);
+    return inner.find_first_of ("{}") == std::string_view::npos &&
+    inner.find_first_not_of (' ') != std::string_view::npos;
+}
 
 namespace {
 
@@ -78,6 +95,14 @@ constexpr auto NON_SECRET_CONFIG_KEYS = std::to_array<std::string_view> (
 "callbackUrl", "clientId", "credentialsPlacement", "username", "pkce", "scope",
 "audience", "resource", "tokenPlacement", "headerPrefix", "queryParamName",
 "autoFetchToken", "autoRefreshToken", "useEmbeddedBrowser", "credentialsId",
+// The `jwt_bearer` grant (#3632): who it acts for, what it is addressed to,
+// how its assertion is signed and how long a token with no `expires_in` lives.
+// `privateKey` is a credential and `privateKeyFile` a path on one machine:
+// neither is listed, so an export blanks both, except that `blank_secret` keeps
+// a `privateKey` that is one `{{variable}}` reference. `assertionClaims` is a
+// row list (`is_config_param_list`), not a scalar.
+"subject", "assertionAudience", "assertionLifetimeSeconds", "signingAlgorithm",
+"keyId", "fallbackExpiresIn",
 // AWS Signature.
 "region", "service", "addAuthDataToQuery",
 // Digest and NTLM.
@@ -122,26 +147,6 @@ constexpr auto PARAM_ROW_KEYS = std::to_array<std::string_view> ({ "in", "type" 
 template <size_t N>
 bool one_of (const std::array<std::string_view, N>& set, std::string_view value) {
     return std::find (set.begin (), set.end (), value) != set.end ();
-}
-
-/**
- * Whether @p text is one `{{variable}}` reference and nothing else. Such a
- * value names where the secret lives without being it, so it is portable -
- * and blanking it would lose the one thing the user configured.
- */
-bool is_variable_reference (std::string_view text) {
-    while (!text.empty () && text.front () == ' ') {
-        text.remove_prefix (1);
-    }
-    while (!text.empty () && text.back () == ' ') {
-        text.remove_suffix (1);
-    }
-    if (text.size () < 5 || !text.starts_with ("{{") || !text.ends_with ("}}")) {
-        return false;
-    }
-    const std::string_view inner = text.substr (2, text.size () - 4);
-    return inner.find_first_of ("{}") == std::string_view::npos &&
-    inner.find_first_not_of (' ') != std::string_view::npos;
 }
 
 /// Blanks @p value when it is a non-empty string that is not one
@@ -260,10 +265,13 @@ void redact_postman_detail (Json& detail, AttributeRule rule, int& omitted) {
     }
 }
 
-/// Whether @p name is an `OAuth2Config` list of extra request parameter rows
-/// (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536).
+/// Whether @p name is an `OAuth2Config` list of `{key, value, ...}` rows: the
+/// extra request parameters (`tokenParams`, `authorizationParams`,
+/// `refreshParams`, issue #2536) and the `jwt_bearer` grant's
+/// `assertionClaims` (#3632).
 bool is_config_param_list (std::string_view name) {
-    return std::any_of (postman::OAUTH2_PARAM_LISTS.begin (),
+    return name == http::oauth::ASSERTION_CLAIMS ||
+    std::any_of (postman::OAUTH2_PARAM_LISTS.begin (),
     postman::OAUTH2_PARAM_LISTS.end (),
     [name] (const postman::OAuth2ParamList& list) { return list.vayu == name; });
 }
@@ -604,6 +612,81 @@ UrlOmitted& omitted) {
     omitted.password += password;
     omitted.query += total - password;
     return out;
+}
+
+namespace {
+
+/// What a `pm.sendRequest` record withholds besides the static names: the
+/// header names and the query parameter the call's own auth wrote.
+struct RecordSecrets {
+    const std::vector<std::string>& header_names;
+    const std::vector<std::string>& param_names;
+};
+
+/// Whether @p member holds a header set: a folded map (`headers`,
+/// `sentHeaders`) or a `{name, value}` line list (`headerLines`,
+/// `sentHeaderLines`), matched by suffix as the MCP server's
+/// `HEADER_SET_MEMBER` is, so a header set the trace gains is masked rather
+/// than leaked. `authHeaders` matches too and is a list of names, which no
+/// branch below touches.
+bool names_header_set (std::string_view member) {
+    const auto ends_with = [member] (std::string_view suffix) {
+        return member.size () >= suffix.size () &&
+        utils::ascii_lower_equal (member.substr (member.size () - suffix.size ()), suffix);
+    };
+    return ends_with ("headers") || ends_with ("headerlines");
+}
+
+/// A recorded value in place of a credential: the run-record marker, because
+/// an empty value would read as "sent empty". A value sent empty stays empty.
+void redact_recorded (nlohmann::json& value) {
+    if (value.is_string () && !value.get_ref<const std::string&> ().empty ()) {
+        value = std::string (utils::kRedactedMarker);
+    }
+}
+
+void mask_header_set (nlohmann::json& set, const RecordSecrets& secrets) {
+    json::for_each_header_value (
+    set, [&secrets] (const std::string& name, nlohmann::json& value) {
+        if (utils::is_secret_header_name (name, secrets.header_names)) {
+            redact_recorded (value);
+        }
+    });
+}
+
+void mask_record_node (nlohmann::json& node, const RecordSecrets& secrets) {
+    if (node.is_array ()) {
+        for (auto& item : node) {
+            mask_record_node (item, secrets);
+        }
+        return;
+    }
+    if (!node.is_object ()) {
+        return;
+    }
+    for (auto& [member, value] : node.items ()) {
+        if (names_header_set (member)) {
+            mask_header_set (value, secrets);
+        } else if (member == "url" && value.is_string ()) {
+            int omitted = 0;
+            value       = redact_url_credentials (
+            value.get_ref<const std::string&> (), secrets.param_names, omitted);
+        } else {
+            mask_record_node (value, secrets);
+        }
+    }
+}
+
+} // namespace
+
+void mask_script_request_record (nlohmann::json& record,
+const std::vector<std::string>& auth_header_names,
+const std::string& auth_query_param) {
+    std::vector<std::string> param_names;
+    if (!auth_query_param.empty ()) {
+        param_names.push_back (auth_query_param);
+    }
+    mask_record_node (record, RecordSecrets{ auth_header_names, param_names });
 }
 
 Json portable_body (const Json& body) {

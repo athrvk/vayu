@@ -38,6 +38,11 @@
 // on nothing but the standard library, so it cannot cycle back here either.
 #include "vayu/utils/ascii_case.hpp"
 
+// For `ScriptResult::script_requests`, which are trace nodes (#3633). A
+// forward declaration is not enough: every file that copies or destroys a
+// `ScriptResult` instantiates the vector's members.
+#include <nlohmann/json.hpp>
+
 namespace vayu::http {
 class ApprovedFile; // vayu/http/file_ref.hpp
 }
@@ -1468,6 +1473,11 @@ struct ConsoleEntry {
     std::string message;
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string scope{};
+    /// On a `pm.sendRequest` summary line, the index of its record in the
+    /// same `ScriptResult::script_requests` (#3633). Whoever concatenates two
+    /// results' records rebases it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<std::size_t> script_request{};
 };
 
 /**
@@ -1510,6 +1520,10 @@ struct ScriptResult {
     bool success = true;
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
+    /// One trace-shaped, masked record per `pm.sendRequest`, in call order,
+    /// when `ScriptConfig::record_send_requests` asked for them (#3633);
+    /// `ConsoleEntry::script_request` indexes it.
+    std::vector<nlohmann::json> script_requests;
     std::string error_message;
     /// Flow control the script asked for - read by the scenario runner, and
     /// `Kind::None` for every other caller (see ScriptControl).
@@ -1750,6 +1764,34 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
         return RunStatus::Failed;
     if (str == "stopped")
         return RunStatus::Stopped;
+    return std::nullopt;
+}
+
+/**
+ * @brief The verdict a terminal run's list row draws (#3547): what
+ * `core::stored_run_outcome` derives and `runs.outcome` stores.
+ *
+ * A status says how a run ended, this says whether it held up; a run the
+ * renderer draws with no verdict has no outcome at all, never `NotJudged`.
+ */
+enum class RunOutcome : std::uint8_t { Passed, Failed, NotJudged };
+
+inline const char* to_string (RunOutcome outcome) {
+    switch (outcome) {
+    case RunOutcome::Passed: return "passed";
+    case RunOutcome::Failed: return "failed";
+    case RunOutcome::NotJudged: return "not_judged";
+    }
+    return "unknown";
+}
+
+inline std::optional<RunOutcome> parse_run_outcome (const std::string& str) {
+    if (str == "passed")
+        return RunOutcome::Passed;
+    if (str == "failed")
+        return RunOutcome::Failed;
+    if (str == "not_judged")
+        return RunOutcome::NotJudged;
     return std::nullopt;
 }
 
@@ -2273,6 +2315,14 @@ struct Run {
     // The MCP client's `clientInfo.name`, trimmed and capped; kept only when
     // `origin` is `"mcp"`, so it is null for every other kind.
     std::optional<std::string> origin_client;
+    // The verdict the run's list row draws (#3547), `to_string (RunOutcome)`,
+    // so `GET /runs?outcome=` can filter on it. Derived, like `has_warnings`,
+    // from this row's own status, type and summary by `core::stored_run_outcome`
+    // whenever `Database` writes either (`stamp_run_outcome`), and never set
+    // anywhere else. Null is no verdict: in flight, a design run, a clean
+    // collection run, a row with no summary, and every row stored before the
+    // column, which is not backfilled.
+    std::optional<std::string> outcome;
 };
 
 /**

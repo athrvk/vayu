@@ -79,7 +79,7 @@ plainly below: nothing syncs itself between machines either.
 ## Your agent can drive it
 
 Vayu hosts an [MCP server](../engine/mcp.md) inside the app on
-`127.0.0.1:9877`, so Claude Code, Cursor, VS Code or Codex (Zed through the
+`127.0.0.1:9877` by default, so Claude Code, Cursor, VS Code or Codex (Zed through the
 stdio CLI) can use the same engine the UI does - send a request, start a load
 run, read the report, compare two runs. Postman also exposes MCP, but against
 its cloud workspace; Vayu's runs locally and hands the agent the load engine

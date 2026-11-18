@@ -95,6 +95,7 @@ export default function AuthFields({
 	resolveKey,
 	variables,
 	deferredNames,
+	collectionId,
 }: AuthFieldsProps) {
 	// `noauth` is the collection-only terminal form of "none" (it stops the
 	// inheritance walk instead of being stepped over). Neither has fields; the
@@ -240,6 +241,7 @@ export default function AuthFields({
 				resolveKey={resolveKey}
 				variables={variables}
 				deferredNames={deferredNames}
+				collectionId={collectionId}
 				TextInput={TextInput}
 			/>
 		);

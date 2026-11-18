@@ -13,6 +13,8 @@
  *   engine/src/http/oauth_client.cpp:219-220    Unsupported grantType: <grant>
  *   engine/src/http/routes/oauth_authorize.cpp:176  authorizationUrl and clientId are required
  *   engine/src/http/routes/oauth_authorize.cpp:199  callbackUrl is required for embedded mode
+ *   engine/src/http/oauth_client.cpp:803        <member> is required for the jwt_bearer grant
+ *   engine/src/http/oauth_client.cpp:1021       privateKey names {{ref}}, which no variable ...
  *
  * This is a **snapshot, not a contract**. Nothing here fails if the C++ side
  * rewords a message - no cross-language guard is feasible, and the engine is
@@ -35,6 +37,18 @@ describe("humanizeOAuth2Error over the engine's own messages", () => {
 			"Authorization URL and Client ID are required",
 		],
 		["callbackUrl is required for embedded mode", "Callback URL is required for embedded mode"],
+		[
+			"subject is required for the jwt_bearer grant",
+			"Subject is required for the jwt_bearer grant",
+		],
+		[
+			"assertionAudience is required for the jwt_bearer grant",
+			"Assertion audience is required for the jwt_bearer grant",
+		],
+		[
+			"privateKey names {{signing_key}}, which no variable in scope defines",
+			"Private key names {{signing_key}}, which no variable in scope defines",
+		],
 	])("relabels %j", (engineMessage, expected) => {
 		expect(humanizeOAuth2Error(engineMessage)).toBe(expected);
 	});
@@ -66,10 +80,13 @@ describe("the registry", () => {
 		// read" defect. Adding one means an engine message started naming it.
 		expect(Object.keys(OAUTH2_FIELD_LABELS).sort()).toEqual([
 			"accessTokenUrl",
+			"assertionAudience",
 			"authorizationUrl",
 			"callbackUrl",
 			"clientId",
 			"grantType",
+			"privateKey",
+			"subject",
 		]);
 	});
 });

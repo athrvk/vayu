@@ -20,7 +20,7 @@
  *        (`startup-import-graph.test.ts`).
  */
 
-import { MCP_ENDPOINT_URL } from "../constants.js";
+import { mcpEndpointUrl } from "../constants.js";
 import { connectClient } from "./connect.js";
 import type { McpConnectClient, McpConnectResult } from "./connect.js";
 
@@ -37,8 +37,17 @@ export interface McpStartError {
 
 export interface McpStatus {
 	running: boolean;
+	/** The listener's endpoint, or while none is up the one the port in force names. */
 	url: string;
 	enabled: boolean;
+	/** The configured port: what Settings shows and `mcp:setPort` saved (#3580). */
+	port: number;
+	/**
+	 * The configured port is not in force yet. The engine learns the port only at
+	 * spawn, so the server keeps (or would bind) the one the running engine was
+	 * started with until the engine restarts. Mirrored in `src/types/domain.ts`.
+	 */
+	restartRequired: boolean;
 	/**
 	 * Enabled, with no listener and no failure to report: the start has not
 	 * finished (or, before launch reaches it, has not begun), so there is nothing
@@ -52,6 +61,21 @@ export interface McpStatus {
 	 * (#2433). Independent of `running`: a disabled server still lost its config.
 	 */
 	corruptCopy?: string;
+	/** Why the port stored in `mcp-config.json` was set aside for the default. */
+	storedPortError?: string;
+}
+
+/** The `mcp:setPort` answer: the status the saved port leads to, or why it was refused. */
+export type McpSetPortResult = { ok: true; status: McpStatus } | { ok: false; message: string };
+
+/** What the status says about the port. */
+export interface McpPortState {
+	/** The configured port (`readMcpPort`). */
+	configured: number;
+	/** The port the server holds or last tried, else the one the running engine guards. */
+	inForce: number;
+	/** `readMcpPort`'s note about an unusable stored value, or null. */
+	storedError: string | null;
 }
 
 /** The slice of `McpListener` these answers read. */
@@ -69,13 +93,14 @@ function errnoCode(err: unknown): string | undefined {
  * Sort a failed start into what the user can act on. The lifecycle's start
  * also sees a store failure, so only a bind error carrying the errno gets the
  * port wording; everything else is `"other"` with the error's own text.
+ * `endpoint` is null when the start failed before it had one to bind.
  */
 export function classifyStartError(
 	err: unknown,
-	endpoint: { host: string; port: number }
+	endpoint: { host: string; port: number } | null
 ): McpStartError {
-	const where = `${endpoint.host}:${endpoint.port}`;
-	switch (errnoCode(err)) {
+	const where = endpoint ? `${endpoint.host}:${endpoint.port}` : "";
+	switch (endpoint ? errnoCode(err) : undefined) {
 		case "EADDRINUSE":
 			return { code: "EADDRINUSE", message: `Another program holds ${where}.` };
 		case "EACCES":
@@ -90,8 +115,8 @@ export function classifyStartError(
 
 /**
  * The `mcp:status` answer. A listener that is up has no error to report even if
- * a stale one is passed; `url` falls back to the configured endpoint so Settings
- * can still name which port is affected.
+ * a stale one is passed; `url` falls back to the endpoint of the port in force so
+ * Settings can still name which port is affected.
  *
  * `starting` is derived rather than stored: the lifecycle publishes a listener
  * only once it is bound and a failure only once the bind has thrown, so an
@@ -102,16 +127,20 @@ export function buildMcpStatus(state: {
 	enabled: boolean;
 	error: McpStartError | null;
 	corruptCopy: string | null;
+	port: McpPortState;
 }): McpStatus {
 	const running = state.listener?.isRunning() ?? false;
 	const status: McpStatus = {
 		running,
-		url: state.listener?.url ?? MCP_ENDPOINT_URL,
+		url: state.listener?.url ?? mcpEndpointUrl(state.port.inForce),
 		enabled: state.enabled,
+		port: state.port.configured,
+		restartRequired: state.port.configured !== state.port.inForce,
 		starting: state.enabled && !state.listener && !state.error,
 	};
 	if (state.error && !running) status.error = state.error;
 	if (state.corruptCopy) status.corruptCopy = state.corruptCopy;
+	if (state.port.storedError) status.storedPortError = state.port.storedError;
 	return status;
 }
 

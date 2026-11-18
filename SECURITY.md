@@ -10,7 +10,7 @@ days.
 
 Vayu runs a local C++ engine daemon and an Electron UI on `127.0.0.1`. It is a
 desktop tool, not a multi-tenant service: a host shared with other logged-in
-users is out of scope. The loopback ports (`9876` for the engine, `9877` for MCP)
+users is out of scope. The loopback ports (`9876` for the engine, `9877` by default for MCP)
 and any mock server or inbox you start belong to the machine, not to one user,
 and the owner-only file modes under "Data at rest" protect files, not ports.
 
@@ -32,7 +32,8 @@ anything. The one `GET` that holds a resource, the change feed's stream
 read the feed nor fill its fixed number of stream slots to stop the app hearing
 about outside edits. A request the engine itself sends - a Send, a run, a script's
 `pm.sendRequest`, a redirect it follows - never reaches the engine's own port
-or the MCP port, whatever spelling, redirect or DNS name leads there.
+or the MCP port (whichever one is configured: the engine refuses the
+`--mcp-port` it was started with), whatever spelling, redirect or DNS name leads there.
 
 Which files a request body may send from disk (the folders you allow and the
 files you pick) changes only through the app: those writes need a secret the
@@ -201,7 +202,8 @@ wire, and your own screens show it. Only the agent's view of them is masked.
 
 Vayu can expose its capabilities to AI agents (Claude Code, Codex, Cursor, …)
 via a Model Context Protocol (MCP) server hosted in the Electron main process
-over Streamable HTTP at `http://127.0.0.1:9877/mcp`. Because an agent driving a
+over Streamable HTTP at `http://127.0.0.1:9877/mcp` (9877 is the default port;
+Settings can change it). Because an agent driving a
 load-test tool can generate real traffic against real targets, the MCP layer
 ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 
@@ -286,7 +288,7 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   offers no endpoint to copy, and one-click connect refuses.
 
 **Why there is no auth token on the endpoint.** Any local process could already
-reach the engine's REST API on `127.0.0.1:9876`; the MCP endpoint on `:9877`
+reach the engine's REST API on `127.0.0.1:9876`; the MCP endpoint (`:9877` by default)
 proxies the same capability behind *more* guards (allowlist, caps, confirmation,
 per-tool control) and adds DNS-rebinding protection so a browser tab cannot reach
 it. It grants no capability a local process did not already have. On a host

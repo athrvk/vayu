@@ -2261,7 +2261,8 @@ the scheme, and nothing is read - the same refusal a Send of that URL gets
 ([URL schemes](api-reference.md#url-schemes)).
 
 **Vayu's own ports are never a target.** A URL naming the engine's own port or
-the MCP port (9877) on this machine - `127.0.0.1`, any other `127.x.y.z`,
+the MCP port (9877, or the daemon's `--mcp-port`) on this machine -
+`127.0.0.1`, any other `127.x.y.z`,
 `localhost`, `[::1]` - throws `pm.sendRequest refused: Vayu does not send
 requests to its own engine port ...`, before anything is dialled, because the
 engine's API would take the script's request for the app's. A redirect that
@@ -2296,7 +2297,30 @@ the query stays, and a key that `auth` appends is never shown. Only a request
 that was sent has a line: a call refused before it goes out (the cap, a bad
 option, the capability being off) throws and writes none. The line counts
 against the [console caps](#console-output) like any other, and with
-`scriptEnableConsole` off it is not recorded.
+`scriptEnableConsole` off it is not written; the record below still is.
+
+**The exchange itself is recorded beside the line** (#3633). On a Send and in
+a sequential collection run, its setup and teardown scripts included, every
+request a script sent leaves a record of what went out and what came back: the
+method, the URL the transfer dialled (after `auth` and the Postman encoding),
+the request headers and body, the response status, headers and body, the
+redirect hops, the timing phases and, for a transfer that failed, the error
+code at status `0`. The records ride the send's `scriptRequests`, in call
+order, on the live answer and on the stored trace alike, so History shows them
+later; a setup or teardown script's ride its `lifecycle` row. The summary line
+names its record by index (`scriptRequest`), so the Console draws the two as
+one expandable row; a record whose line the console cap dropped, or that ran
+with the console off, has no line. The record is masked where it is built, by
+the rules an export uses plus what `auth` wrote: a credential header's value
+(`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, the header an `apikey`
+auth named, ...) reads `<redacted>` in every header list, request and response
+and each hop, and a URL's `user:pass@` password and credential query values are
+blanked to empty as on the line. Bodies are kept as sent and received, and all
+of one send's records share one `maxTraceBodyBytes` for their bodies: a body
+past what is left is cut and says so (`bodyTruncated`, `bodyBytes`). The script
+itself still receives the whole response. A load run records nothing and keeps
+only the line. The shape is [`scriptRequests` in the API
+reference](api-reference.md#post-execute).
 
 **Three bounds, all hard.**
 
@@ -3063,7 +3087,9 @@ another prints `{}`.
 
 **The level travels with the line.** Each entry on the wire is
 `{ "source": "pre" | "test", "scope"?: "collection" | "folder" | "request",
-"level": "log" | "info" | "warn" | "error", "message": "..." }` - see
+"level": "log" | "info" | "warn" | "error", "message": "...",
+"scriptRequest"?: <index> }` - `scriptRequest` only on a `pm.sendRequest`
+summary line, naming the call's record (#3633) - see
 [`consoleLogs` in the API reference](api-reference.md#post-execute). The four
 methods are bound to one C function distinguished by QuickJS's `magic`
 argument (`setup_console`), so the level is captured at the call; it cannot be
@@ -3457,6 +3483,9 @@ algorithm and no cipher (the digests are `pm.crypto.sha256` and the
 `Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
 and the timers run, on queues drained before the script ends, but nothing
 settles a promise after it has.
+Signing a request with a private key is the OAuth 2.0 JWT bearer grant's job,
+which the engine does itself, not the sandbox's; `pm.crypto` does not gain
+RS256.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded; without a callback it returns a promise that is

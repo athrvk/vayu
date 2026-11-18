@@ -551,6 +551,7 @@ export default function LoadTestConfigDialog({
 									usesDuration(profile.mode) ? profile.duration : null
 								}
 								scriptMayChangeSettings={oauth2DeferredNames.length > 0}
+								collectionId={collectionId}
 								onGateChange={setOauthGated}
 							/>
 						</>

@@ -169,6 +169,7 @@ add_executable(vayu_tests
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
+    jwt_test.cpp
     debug_redact_test.cpp
     managed_listener_test.cpp
     listener_registry_test.cpp
@@ -223,6 +224,7 @@ add_executable(vayu_tests
     postman_export_test.cpp
     postman_export_route_test.cpp
     run_export_test.cpp
+    run_result_summary_test.cpp
     run_export_formats_test.cpp
     run_export_html_test.cpp
     run_export_markdown_test.cpp

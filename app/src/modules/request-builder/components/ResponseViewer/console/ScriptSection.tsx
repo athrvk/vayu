@@ -22,6 +22,9 @@
  * A *line* carries the other axis - which `console.*` method wrote it - and that
  * one is state, so it takes the status tokens for real. See `LEVEL_TONE` in
  * `components/shared/console-level.ts`.
+ *
+ * A row may also be a script request (#3633, `console-rows.ts`), drawn as the
+ * expandable `ScriptRequestRow` inside the same window as the lines.
  */
 
 import { useState } from "react";
@@ -33,7 +36,8 @@ import { LogGutter } from "@/components/shared/LogGutter";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Heading } from "@/components/ui/heading";
-import type { ParsedLog } from "./parse-logs";
+import { ScriptRequestRow } from "@/components/shared/response-viewer/ScriptRequestRow";
+import { isScriptRequestRow, type ConsoleRow, type ScriptRequestConsoleRow } from "./console-rows";
 import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
 import ScopeTag from "../ScopeTag";
 
@@ -54,7 +58,18 @@ export function ScriptError({ which, message }: { which: ScriptKey; message: str
 	);
 }
 
-export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[] }) {
+/** A request row, where the line it stands in for (if any) would have been. */
+function ScriptRequestLine({ row }: { row: ScriptRequestConsoleRow }) {
+	return (
+		<div className="skip-offscreen flex gap-2 py-px">
+			<LogGutter label="" labelClassName={LEVEL_TONE.info.label} />
+			<ScopeTag scope={row.scope} className="leading-5" />
+			<ScriptRequestRow record={row.record} className="flex-1" />
+		</div>
+	);
+}
+
+export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ConsoleRow[] }) {
 	const [open, setOpen] = useState(true);
 	const { label, tone } = SCRIPT_SECTIONS[which];
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(logs.length);
@@ -131,6 +146,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 					 * pane.
 					 */}
 					{logs.slice(0, visible).map((log, i) => {
+						if (isScriptRequestRow(log)) return <ScriptRequestLine key={i} row={log} />;
 						const tone = LEVEL_TONE[log.level];
 						return (
 							<div key={i} className="skip-offscreen flex gap-2 py-px">

@@ -16,12 +16,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "./OAuth2LoadTestGuard";
 
 const statusQuery = { data: undefined as unknown, isLoading: false, isError: false };
 const fetchMutation = { mutate: vi.fn(), isPending: false };
+const { session } = vi.hoisted(() => ({ session: { activeEnvironmentId: null as string | null } }));
 
 vi.mock("@/queries/oauth", () => ({
 	useOAuth2TokenStatusQuery: () => statusQuery,
@@ -31,6 +32,7 @@ vi.mock("@/queries/oauth", () => ({
 vi.mock("@/stores", () => ({
 	useToastStore: (select: (state: { showToast: () => void }) => unknown) =>
 		select({ showToast: vi.fn() }),
+	useSessionStore: (select: (state: typeof session) => unknown) => select(session),
 }));
 
 const config: OAuth2Config = {
@@ -53,6 +55,7 @@ function cacheToken(lifetimeS: number, remainingS: number, expired = false) {
 }
 
 function renderGuard(props: {
+	collectionId?: string;
 	scriptMayChangeSettings?: boolean;
 	durationSeconds?: number;
 	config?: OAuth2Config;
@@ -62,6 +65,7 @@ function renderGuard(props: {
 			config={props.config ?? config}
 			durationSeconds={props.durationSeconds ?? 600}
 			scriptMayChangeSettings={props.scriptMayChangeSettings}
+			collectionId={props.collectionId}
 			onGateChange={vi.fn()}
 		/>
 	);
@@ -119,6 +123,42 @@ const VERDICTS: Verdict[] = [
 beforeEach(() => {
 	statusQuery.isLoading = false;
 	statusQuery.isError = false;
+});
+
+describe("OAuth2LoadTestGuard's token request for a jwt_bearer grant (#3632)", () => {
+	const jwt: OAuth2Config = {
+		...config,
+		grantType: "jwt_bearer",
+		privateKey: "{{signing_key}}",
+	};
+
+	beforeEach(() => {
+		statusQuery.data = { found: false };
+		fetchMutation.mutate.mockReset();
+		session.activeEnvironmentId = null;
+	});
+
+	it("names the active environment and the collection beside the key reference", () => {
+		session.activeEnvironmentId = "env-1";
+		renderGuard({ config: jwt, collectionId: "col-1" });
+
+		fireEvent.click(screen.getByRole("button", { name: /Fetch & check/ }));
+
+		expect(fetchMutation.mutate.mock.lastCall?.[0]).toEqual({
+			config: jwt,
+			force: true,
+			environmentId: "env-1",
+			collectionId: "col-1",
+		});
+	});
+
+	it("says the engine renews the token mid-run, as it does for a client credentials one", () => {
+		renderGuard({ config: jwt });
+
+		expect(screen.getByText(/One is fetched when the run starts/)).toHaveTextContent(
+			"Vayu's engine refreshes it mid-run"
+		);
+	});
 });
 
 describe("OAuth2LoadTestGuard's no-token body", () => {

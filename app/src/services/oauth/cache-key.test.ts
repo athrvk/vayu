@@ -96,6 +96,30 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 				"\x1ftokenParams:X-Api-Key=\x1eaudience=api\x1eclient_assertion="
 		);
 	});
+
+	it("vector 7: jwt_bearer keys by subject, ignores username", () => {
+		const jwt = (over: Partial<OAuth2Config>) =>
+			base({ grantType: "jwt_bearer", assertionAudience: "https://idp", ...over });
+		expect(computeOAuth2CacheKey(jwt({ subject: "alice" }))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1falice"
+		);
+		expect(computeOAuth2CacheKey(jwt({ subject: "bob" }))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fbob"
+		);
+		expect(computeOAuth2CacheKey(jwt({ subject: "alice", username: "u1" }))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1falice"
+		);
+		expect(computeOAuth2CacheKey(jwt({}))).toBe("https://idp/token\x1fcid\x1fdefault\x1f");
+	});
+
+	it("vector 8: subject is ignored outside jwt_bearer", () => {
+		expect(computeOAuth2CacheKey(base({ subject: "alice" }))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1f"
+		);
+		expect(
+			computeOAuth2CacheKey(base({ grantType: "password", username: "u1", subject: "alice" }))
+		).toBe("https://idp/token\x1fcid\x1fdefault\x1fu1");
+	});
 });
 
 describe("computeOAuth2CacheKey - extra parameter rows", () => {

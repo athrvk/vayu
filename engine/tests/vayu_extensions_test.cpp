@@ -79,6 +79,66 @@ TEST (VayuExtensions, BlanksTheCredentialRowsOfAnOAuth2ConfigsParamLists) {
     EXPECT_EQ (omitted, 6);
 }
 
+// The `jwt_bearer` grant (#3632) exports what describes it and withholds what
+// is a credential or a path on one machine: the key is a `{{variable}}`
+// reference (kept) or never stored, and the key file's path is not on the
+// allowlist, so it is blanked and counted. The claims are a row list read like
+// `tokenParams`, so a claim keeps its name and a credential-named one loses
+// its value.
+// Mutation-check: put `privateKeyFile` on `NON_SECRET_CONFIG_KEYS` and the
+// path survives; take `assertionClaims` out of `is_config_param_list` and every
+// claim is blanked; drop a member from the allowlist and its assertion fails.
+TEST (VayuExtensions, KeepsWhatDescribesAJwtBearerGrantAndBlanksItsKeyFile) {
+    int omitted         = 0;
+    const Json redacted = ext::redact_auth (Json::parse (R"({"mode":"oauth2",
+        "config":{"grantType":"jwt_bearer","clientId":"svc","subject":"ada@example.com",
+          "assertionAudience":"https://idp.example.com","assertionLifetimeSeconds":300,
+          "signingAlgorithm":"RS256","keyId":"key-1","fallbackExpiresIn":3600,
+          "privateKey":"{{signingKey}}","privateKeyFile":"/etc/keys/svc.pem",
+          "assertionClaims":[
+            {"key":"tenant","value":"acme","enabled":true},
+            {"key":"client_secret","value":"shh","enabled":false}]}})"),
+    omitted);
+    const Json& config  = redacted["config"];
+    EXPECT_EQ (config["subject"], "ada@example.com");
+    EXPECT_EQ (config["assertionAudience"], "https://idp.example.com");
+    EXPECT_EQ (config["assertionLifetimeSeconds"], 300);
+    EXPECT_EQ (config["signingAlgorithm"], "RS256");
+    EXPECT_EQ (config["keyId"], "key-1");
+    EXPECT_EQ (config["fallbackExpiresIn"], 3600);
+    EXPECT_EQ (config["privateKey"], "{{signingKey}}");
+    EXPECT_EQ (config["privateKeyFile"], "");
+    EXPECT_EQ (config["assertionClaims"][0],
+    Json::parse (R"({"key":"tenant","value":"acme","enabled":true})"));
+    EXPECT_EQ (config["assertionClaims"][1],
+    Json::parse (R"({"key":"client_secret","value":"","enabled":false})"));
+    // The key file's path and the one credential-named claim, nothing else.
+    EXPECT_EQ (omitted, 2);
+}
+
+// A pasted PEM is never kept: only a whole `{{variable}}` is a reference. The
+// routes refuse one on write (`reject_literal_private_key`), so this is the
+// export's own line for a document that did not come through them.
+// Mutation-check: put `privateKey` on `NON_SECRET_CONFIG_KEYS` and it survives.
+TEST (VayuExtensions, NeverKeepsABarePrivateKeyAndKeepsAReferenceToOne) {
+    int omitted                  = 0;
+    const auto private_key_after = [&omitted] (const char* key) {
+        Json auth = Json{ { "mode", "oauth2" },
+            { "config", { { "grantType", "jwt_bearer" }, { "privateKey", key } } } };
+        return ext::redact_auth (auth, omitted)["config"]["privateKey"];
+    };
+    EXPECT_EQ (private_key_after (
+               "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"),
+    "");
+    EXPECT_EQ (omitted, 1);
+    EXPECT_EQ (private_key_after ("{{signingKey}}"), "{{signingKey}}");
+    EXPECT_EQ (private_key_after (" {{ signingKey }} "), " {{ signingKey }} ");
+    EXPECT_EQ (omitted, 1);
+    // A reference with text around it carries a literal part.
+    EXPECT_EQ (private_key_after ("{{head}}-----BEGIN"), "");
+    EXPECT_EQ (omitted, 2);
+}
+
 TEST (VayuExtensions, BlanksTheCredentialsOfAPostmanImportsAuthSource) {
     int omitted = 0;
     const Json redacted = ext::redact_auth (Json::parse (R"({"mode":"bearer","token":"t",

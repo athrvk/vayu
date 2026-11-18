@@ -1556,7 +1556,9 @@ Json security_scheme_of (const ExportAuth& auth) {
     // oauth2. `clientCredentials` is the fallback for a stored grant type this
     // file does not recognize - the same default `default_oauth2_config`
     // gives a fresh config, so an unrecognized value reads as though the
-    // request had never set one.
+    // request had never set one. `jwt_bearer` (#3632) is one: OpenAPI has no
+    // RFC 7523 flow, and the real config travels in `x-vayu-collection` /
+    // `x-vayu-request`, so the flow here only names the token endpoint.
     std::string flow = "clientCredentials";
     if (auth.oauth2_grant_type == "authorization_code") {
         flow = "authorizationCode";
@@ -1592,6 +1594,8 @@ std::optional<Json> security_definition_of (const ExportAuth& auth) {
     if (auth.mode != "oauth2") {
         return std::nullopt;
     }
+    // `application` is the same fallback (`jwt_bearer` included, see
+    // `security_scheme_of`).
     std::string flow = "application";
     if (auth.oauth2_grant_type == "authorization_code") {
         flow = "accessCode";
