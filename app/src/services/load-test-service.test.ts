@@ -426,6 +426,29 @@ describe("LoadTestService", () => {
 			expect(loadTestService.getActiveRunId()).toBeNull();
 		});
 
+		it("reports a stop the report settles on as a stop, and raises the cue (issue #3606)", async () => {
+			dashboard.currentRunId = "run_settle_stop";
+			getRunReport
+				.mockResolvedValueOnce(reportWith("running"))
+				.mockResolvedValueOnce(reportWith("stopped"));
+			loadTestService.startMonitoring("run_settle_stop");
+			mockNotifyPost.mockClear();
+			mockOsIconRunFinished.mockClear();
+
+			const closed = closeStream(null, { frame: true });
+			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+			await closed;
+
+			expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.loadRunStopped,
+					title: "Load test stopped",
+				})
+			);
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
 		it("reports a failure the report settles on as a failure", async () => {
 			dashboard.currentRunId = "run_settle_2";
 			getRunReport
@@ -946,7 +969,7 @@ describe("LoadTestService", () => {
 				);
 			});
 
-			it("leaves a stopped run's body as its numbers, with no verdict", async () => {
+			it("announces a stopped run as stopped, with its numbers and no verdict (issue #3606)", async () => {
 				dashboard.currentRunId = "run_v7";
 				vi.mocked(apiService.getRunReport).mockResolvedValueOnce(
 					completed({ metadata: { status: "stopped" } })
@@ -956,7 +979,46 @@ describe("LoadTestService", () => {
 				await closeStream("stopped");
 
 				expect(mockNotifyPost).toHaveBeenCalledWith(
-					expect.objectContaining({ body: "12,400 requests, p95 210ms, 0.0% errors" })
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunStopped,
+						title: "Load test stopped",
+						body: "12,400 requests, p95 210ms, 0.0% errors",
+					})
+				);
+			});
+
+			it("announces a stop the stored report records, when the frame carried no status", async () => {
+				dashboard.currentRunId = "run_v7b";
+				vi.mocked(apiService.getRunReport).mockResolvedValueOnce(
+					completed({ metadata: { status: "stopped" } })
+				);
+				loadTestService.startMonitoring("run_v7b");
+
+				await closeStream(null);
+
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunStopped,
+						title: "Load test stopped",
+					})
+				);
+			});
+
+			it("announces a stop found on mount as stopped, with its numbers (settleOnStoredReport)", () => {
+				loadTestService.startMonitoring("run_v7c");
+
+				loadTestService.settleOnStoredReport(
+					"run_v7c",
+					completed({ metadata: { status: "stopped" } })
+				);
+
+				expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+				expect(mockNotifyPost).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: NOTIFY_KINDS.loadRunStopped,
+						title: "Load test stopped",
+						body: "12,400 requests, p95 210ms, 0.0% errors",
+					})
 				);
 			});
 
@@ -1228,11 +1290,6 @@ describe("LoadTestService", () => {
 		});
 
 		/*
-		 * Mutation check: send it for every kind and this reddens. A stopped run
-		 * is one the user pressed Stop on, so they were at the window and need
-		 * no cue that it ended.
-		 */
-		/*
 		 * #1415: until the completion frame's status was read, every terminal
 		 * close reported `loadRunFinished` - so a failed run notified "finished",
 		 * left the taskbar bar unmarked and never reached this icon mark at all.
@@ -1308,6 +1365,30 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
 			);
+		});
+
+		/*
+		 * Mutation check: skip the cue by kind (`kind !== loadRunStopped`) instead
+		 * of by who stopped it and these two redden - a stop from MCP or History
+		 * is the user elsewhere, which is the case the cue exists for (#3606).
+		 */
+		it("raises the cue for a stop learned from the stream", async () => {
+			dashboard.currentRunId = "run_15h";
+			loadTestService.startMonitoring("run_15h");
+
+			await closeStream("stopped");
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
+		it("raises the cue for a stop learned from the stored report", () => {
+			loadTestService.startMonitoring("run_15i");
+
+			loadTestService.settleOnStoredReport("run_15i", {
+				metadata: { status: "stopped" },
+			} as never);
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
 		});
 
 		it("raises no cue for a run the user stopped themselves", () => {

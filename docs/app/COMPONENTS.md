@@ -568,7 +568,13 @@ of 3 budgets missed: p99. 12,400 requests, p95 210ms, 0.3% errors". The kind
 follows the verdict, so a run that completed but missed a budget posts as
 "Load test failed" (and marks the Dock or taskbar failed); a pass, or a run not
 judged, posts as finished with the reason in the body (issue #3546). A stopped
-run says its numbers alone.
+run posts "Load test stopped" with its numbers alone, whoever stopped it and
+however this window learns of it (a frame, the stored report, the settle wait);
+a collection run posts "Collection run stopped" with its step counts (issue
+#3606). The end-of-run cue (the taskbar flash) follows who stopped the run:
+a load test's own Stop from this window is silent, a stop from MCP, History or
+another client raises it, and every collection-run stop raises it (that service
+has no `stopMonitoring`, so its Stop arrives as a stream frame).
 
 The run's progress is also mirrored onto the OS chrome: the Windows taskbar
 button and the macOS Dock icon fill as it advances and clear when it ends, and

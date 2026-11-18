@@ -99,7 +99,8 @@ function reasonStatesErrorRate(reason: string): boolean {
  * no verdict, or none that can be read, keeps the numbers or the plain line.
  *
  * The kind is `failed` for a run the engine ended as failed and for a run that
- * completed and missed a budget; a run judged passed or not judged is
+ * completed and missed a budget; `stopped` for a run stopped from anywhere else
+ * (MCP, History, another client; #3606); a run judged passed or not judged is
  * `finished`, its reason in the body. The frame's status is preferred over the
  * report's, which is the fallback for a stream that ended without one (#1415):
  * the fetch can fail, and a failure that could not be read must still report a
@@ -118,13 +119,18 @@ function terminalNotification(
 		runSummaryLine(report, {
 			withErrors: !judgement || !reasonStatesErrorRate(judgement.reason),
 		});
-	const failed = endedAs === "failed" || judgement?.outcome === "failed";
 	return {
-		kind: failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
+		kind: terminalKind(endedAs, judgement?.outcome),
 		// The summary stands in only when the report carries all three numbers: a
 		// run that ended is worth saying even when what it did cannot be read.
 		body: [verdict, summary].filter(Boolean).join(". ") || "Couldn't read this run's report.",
 	};
+}
+
+function terminalKind(endedAs: string | undefined, outcome: string | undefined): LoadRunNotifyKind {
+	if (endedAs === "failed" || outcome === "failed") return NOTIFY_KINDS.loadRunFailed;
+	if (endedAs === "stopped") return NOTIFY_KINDS.loadRunStopped;
+	return NOTIFY_KINDS.loadRunFinished;
 }
 
 /**
@@ -268,7 +274,8 @@ class LoadTestService {
 		this.notifyTerminal(
 			runId,
 			NOTIFY_KINDS.loadRunStopped,
-			"The run was stopped before it finished."
+			"The run was stopped before it finished.",
+			{ stoppedHere: true }
 		);
 		sseClient.disconnect();
 	}
@@ -286,11 +293,8 @@ class LoadTestService {
 		this.releaseRun(runId);
 		sseClient.disconnect();
 		if (report.metadata?.status === "stopped") {
-			this.notifyTerminal(
-				runId,
-				NOTIFY_KINDS.loadRunStopped,
-				"The run was stopped before it finished."
-			);
+			const { kind, body } = terminalNotification(null, report);
+			this.notifyTerminal(runId, kind, body);
 			return;
 		}
 		this.finishRun(runId, null, report);
@@ -417,8 +421,12 @@ class LoadTestService {
 	 *
 	 * `options.title` overrides `NOTIFY_TITLES` - `handleError` uses it because
 	 * the *stream* dropped there, not the load test, and the default failed
-	 * title would misreport what happened. The taskbar mark is unchanged: a
-	 * stream error still reddens it (#1364, pinned by the Dock/taskbar test
+	 * title would misreport what happened. `options.stoppedHere` says this
+	 * window's own Stop ended the run: the user was here and already knows, so
+	 * the end-of-run cue is skipped. A stop learned from the stream or the
+	 * stored report was somebody else's and raises it (#3606).
+	 *
+	 * The taskbar mark is unchanged: a stream error still reddens it (#1364, pinned by the Dock/taskbar test
 	 * below), because the user has no live view into whether the run itself is
 	 * still healthy once its updates stop arriving.
 	 */
@@ -426,7 +434,7 @@ class LoadTestService {
 		runId: string | null,
 		kind: LoadRunNotifyKind,
 		body: string,
-		options?: { title?: string }
+		options?: { title?: string; stoppedHere?: boolean }
 	): void {
 		if (!runId || this.notifiedRunId === runId) return;
 		this.notifiedRunId = runId;
@@ -441,10 +449,9 @@ class LoadTestService {
 		// once per run, and every terminal path reaches it - the SSE error
 		// handler and a clean close alike - not only the failure one.
 		if (kind === NOTIFY_KINDS.loadRunFailed) osIcon.runFailed();
-		// Not for a stopped run: the user pressed Stop, so they were here and
-		// already know. The service itself sends nothing when the notifications
-		// this substitutes for are on (#1364).
-		if (kind !== NOTIFY_KINDS.loadRunStopped) osIcon.runFinished();
+		// The service itself sends nothing when the notifications this
+		// substitutes for are on (#1364).
+		if (!options?.stoppedHere) osIcon.runFinished();
 	}
 
 	private handleMetrics(metrics: LoadTestMetrics): void {
