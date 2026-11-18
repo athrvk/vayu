@@ -12295,7 +12295,8 @@ no frame.
 | `scenario` | **Gate frames only** (issue #2823), the final frame included, and only on a scenario load run: the sequence so far, `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, one `steps` entry per plan step in plan order. The same counters as the stored summary's `scenario` block (`iterations`, `iterations_completed`, `iterations_abandoned`, `steps_executed`, and each step's `executed` and `errors`), read while the workers still write, so a mid-run reading's figures can differ from each other by the completions that landed between the reads; the final frame is read after the drain and equals the summary. No latency: a step's percentiles are in the [report](#get-runsrunidreport) alone. Absent from every other frame and from every frame of any other run
 
 **Read order within one tick.** The metrics thread snapshots the status-code
-distribution once, and every count on the frame is that one sample:
+distribution once, and the request, error and status counts on the frame are
+that one sample:
 `totalRequests` is the snapshot's own total, and `totalSuccess`, `totalErrors`,
 `httpErrors`, `noResponse`, `errorRate`, `throughput` and the `status*` keys
 all derive from the same copy (issue #3572). A gate tick's stored row reads the

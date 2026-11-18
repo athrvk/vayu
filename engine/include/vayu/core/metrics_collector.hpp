@@ -1374,8 +1374,8 @@ class MetricsCollector {
      *        `totalSuccess`, `throughput`), the error counts, the `statusCodes`
      *        field and the derived class breakdown, avoiding a redundant scan when the caller
      *        already snapshotted the distribution this tick. When null the
-     *        distribution is computed internally. Either way every count on
-     *        the frame is that one sample (#3572).
+     *        distribution is computed internally. Either way the request, error
+     *        and status counts on the frame are that one sample (#3572).
      * @param window_percentiles Optional windowed (rolling) percentiles for the
      *        `latencySamples` and `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms`
      *        fields (see put_interval_percentiles). When null they are read from
