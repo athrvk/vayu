@@ -8,15 +8,15 @@
 /**
  * Moving focus *between* the shell's regions, rather than within one (#1219).
  *
- * The window is seven bands - the title bar, the activity rail, the drawer, the
- * main pane, the context bar, the context rail and the Dock - and until now the
- * only way from one to another was Tab, which walks every request in an
- * expanded collection tree on the way. F6 cycles them; ⌘L jumps to the one
- * field people ask for by name. The activity rail joined the cycle with #1615,
- * so a keyboard user can reach the app's primary navigation even with the
- * drawer collapsed; the context rail and the Dock with #3498, the Dock being
- * the only band whose controls no other key reaches without walking the whole
- * window.
+ * The window is eight bands - the title bar, the activity rail, the drawer, the
+ * main pane, the context bar, the context rail, the bottom panel and the Dock -
+ * and until now the only way from one to another was Tab, which walks every
+ * request in an expanded collection tree on the way. F6 cycles them; ⌘L jumps
+ * to the one field people ask for by name. The activity rail joined the cycle
+ * with #1615, so a keyboard user can reach the app's primary navigation even
+ * with the drawer collapsed; the context rail and the Dock with #3498, the Dock
+ * being the only band whose controls no other key reaches without walking the
+ * whole window; the bottom panel with #3635.
  *
  * **The tab strip is deliberately not a band.** It is the main pane's own
  * header: it sits directly above `main` in document order and is one tab stop
@@ -58,7 +58,8 @@ export const REGION_ATTRIBUTE = "data-app-region";
  * is document order, not this list, so a band moving in the layout moves in the
  * cycle without an edit here.
  */
-export type AppRegion = "banner" | "rail" | "drawer" | "main" | "context" | "context-rail" | "dock";
+export type AppRegion =
+	"banner" | "rail" | "drawer" | "main" | "context" | "context-rail" | "bottom-panel" | "dock";
 
 /**
  * The props that mark a band, spread onto it: `<aside {...regionProps("drawer")}>`.

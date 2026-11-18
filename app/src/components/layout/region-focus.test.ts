@@ -50,6 +50,7 @@ function fullShell(): void {
 	region("main", "main-first");
 	region("context", "context-first");
 	region("context-rail", "context-rail-first");
+	region("bottom-panel", "bottom-panel-first");
 	region("dock", "dock-first");
 }
 
@@ -70,6 +71,7 @@ describe("the regions on screen", () => {
 			"main",
 			"context",
 			"context-rail",
+			"bottom-panel",
 			"dock",
 		]);
 	});
@@ -111,12 +113,23 @@ describe("cycling forward", () => {
 		expect(activeId()).toBe("main-first");
 	});
 
-	it("reaches the context rail and then the Dock after the context bar (#3498)", () => {
+	it("reaches the context rail, the bottom panel and the Dock after the context bar (#3498, #3635)", () => {
 		fullShell();
 		document.getElementById("context-first")?.focus();
 
 		expect(cycleRegionFocus(1)).toBe(true);
 		expect(activeId()).toBe("context-rail-first");
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("bottom-panel-first");
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("dock-first");
+	});
+
+	it("steps over the bottom panel when it is closed, which leaves it out of the DOM", () => {
+		region("context-rail", "context-rail-first");
+		region("dock", "dock-first");
+		document.getElementById("context-rail-first")?.focus();
+
 		expect(cycleRegionFocus(1)).toBe(true);
 		expect(activeId()).toBe("dock-first");
 	});
@@ -139,6 +152,14 @@ describe("cycling forward", () => {
 });
 
 describe("cycling backward", () => {
+	it("moves back from the Dock into the bottom panel", () => {
+		fullShell();
+		document.getElementById("dock-first")?.focus();
+
+		expect(cycleRegionFocus(-1)).toBe(true);
+		expect(activeId()).toBe("bottom-panel-first");
+	});
+
 	it("moves to the previous band", () => {
 		fullShell();
 		document.getElementById("main-first")?.focus();

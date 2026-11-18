@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useWindowWidth } from "./useWindowWidth";
+import { useWindowHeight, useWindowWidth } from "./useWindowWidth";
 
 function resizeTo(width: number) {
 	vi.stubGlobal("innerWidth", width);
@@ -41,5 +41,19 @@ describe("useWindowWidth", () => {
 		unmount();
 		expect(remove).toHaveBeenCalledWith("resize", expect.any(Function));
 		remove.mockRestore();
+	});
+});
+
+describe("useWindowHeight", () => {
+	it("reads the window's height on mount and follows a resize", () => {
+		vi.stubGlobal("innerHeight", 900);
+		const { result } = renderHook(() => useWindowHeight());
+		expect(result.current).toBe(900);
+
+		vi.stubGlobal("innerHeight", 768);
+		act(() => {
+			window.dispatchEvent(new Event("resize"));
+		});
+		expect(result.current).toBe(768);
 	});
 });

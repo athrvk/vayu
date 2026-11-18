@@ -9,7 +9,11 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	BOTTOM_PANEL_MAX_HEIGHT,
+	BOTTOM_PANEL_MIN_HEIGHT,
 	CONTEXT_BAR_DEFAULT_COLLAPSED,
+	DEFAULT_BOTTOM_PANEL_HEIGHT,
+	DEFAULT_BOTTOM_PANEL_TAB,
 	DEFAULT_CONTEXT_BAR_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
 	DEFAULT_GRAPHQL_VARIABLES_SIZE,
@@ -24,6 +28,7 @@ import {
 	RETIRED_CONTEXT_BAR_SECTIONS,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 	SCRIPT_EDITOR_MIN_HEIGHT,
+	type BottomPanelTab,
 } from "@/constants/layout";
 
 export type DrawerView =
@@ -171,6 +176,20 @@ interface LayoutState {
 	recentElementKinds: string[];
 
 	/**
+	 * The bottom panel (#3635): whether it is open, how tall the user made it, and
+	 * which of its tabs is showing. Closed by default - the panel is something a
+	 * user reaches for, not a band every window should give up height to.
+	 *
+	 * `bottomPanelHeight` is the user's choice, held to the absolute bounds here;
+	 * the half-the-window cap depends on a window the store does not know, so the
+	 * panel applies it when it draws (`clampBottomPanelHeight`) and the stored
+	 * value survives a window that is briefly small.
+	 */
+	bottomPanelOpen: boolean;
+	bottomPanelHeight: number;
+	bottomPanelTab: BottomPanelTab;
+
+	/**
 	 * Whether the ⌘K command palette is showing.
 	 *
 	 * Here rather than as local state in the palette because the two things that
@@ -232,6 +251,12 @@ interface LayoutState {
 
 	/** Moves `kind` to the front of `recentElementKinds`, capped at five. */
 	addRecentElementKind: (kind: string) => void;
+
+	setBottomPanelOpen: (open: boolean) => void;
+	/** The one write the Dock button, the chord and the palette row all make. */
+	toggleBottomPanel: () => void;
+	setBottomPanelHeight: (height: number) => void;
+	setBottomPanelTab: (tab: BottomPanelTab) => void;
 
 	setPaletteOpen: (open: boolean) => void;
 }
@@ -300,6 +325,9 @@ export const useLayoutStore = create<LayoutState>()(
 			scriptEditorHeights: {},
 			scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
 			recentElementKinds: [],
+			bottomPanelOpen: false,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+			bottomPanelTab: DEFAULT_BOTTOM_PANEL_TAB,
 			paletteOpen: false,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -391,11 +419,22 @@ export const useLayoutStore = create<LayoutState>()(
 					].slice(0, 5),
 				})),
 
+			setBottomPanelOpen: (open) => set({ bottomPanelOpen: open }),
+			toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
+			setBottomPanelHeight: (height) =>
+				set({
+					bottomPanelHeight: Math.max(
+						BOTTOM_PANEL_MIN_HEIGHT,
+						Math.min(BOTTOM_PANEL_MAX_HEIGHT, height)
+					),
+				}),
+			setBottomPanelTab: (tab) => set({ bottomPanelTab: tab }),
+
 			setPaletteOpen: (open) => set({ paletteOpen: open }),
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 6,
+			version: 7,
 			migrate: (persisted, version) => {
 				const state = persisted as LayoutState & {
 					drawerWidths?: Record<string, number>;
@@ -461,6 +500,14 @@ export const useLayoutStore = create<LayoutState>()(
 					state.responsePosition = "beside";
 					delete state.requestSplitRatio;
 				}
+				// v6 had no bottom panel (#3635). `persist` would fill the missing
+				// keys from the initial state on its own; writing them here keeps
+				// every version step stating what it adds.
+				if (version < 7) {
+					state.bottomPanelOpen = false;
+					state.bottomPanelHeight = DEFAULT_BOTTOM_PANEL_HEIGHT;
+					state.bottomPanelTab = DEFAULT_BOTTOM_PANEL_TAB;
+				}
 				return state;
 			},
 			partialize: (state) => ({
@@ -479,6 +526,9 @@ export const useLayoutStore = create<LayoutState>()(
 				scriptEditorHeights: state.scriptEditorHeights,
 				scriptEditorHeightDefault: state.scriptEditorHeightDefault,
 				recentElementKinds: state.recentElementKinds,
+				bottomPanelOpen: state.bottomPanelOpen,
+				bottomPanelHeight: state.bottomPanelHeight,
+				bottomPanelTab: state.bottomPanelTab,
 			}),
 		}
 	)

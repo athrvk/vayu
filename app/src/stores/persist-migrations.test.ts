@@ -28,6 +28,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTabsStore } from "./tabs-store";
 import { useSessionStore } from "./session-store";
+import { useLayoutStore } from "./layout-store";
+import { DEFAULT_BOTTOM_PANEL_HEIGHT } from "@/constants/layout";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 const seed = (key: string, payload: unknown) => localStorage.setItem(key, JSON.stringify(payload));
@@ -99,5 +101,48 @@ describe("session-store rehydration", () => {
 		const s = useSessionStore.getState();
 		expect(s.activeEnvironmentId).toBeNull();
 		expect(s.lastCollectionId).toBeNull();
+	});
+});
+
+describe("layout-store rehydration", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({
+			drawerWidth: 260,
+			bottomPanelOpen: false,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+		});
+	});
+
+	it("opens a v6 blob, which has no bottom panel, with the panel closed and the rest kept", async () => {
+		// The seam: a stamped v6 payload crossing into v7 keeps the user's layout
+		// instead of being discarded for defaults (what zustand does when no
+		// `migrate` accepts the version), and invents no open panel.
+		// `layout-store.test.ts` holds the `version < 7` branch itself.
+		seed(STORAGE_KEYS.LAYOUT_STORE, {
+			version: 6,
+			state: { drawerWidth: 333, responsePosition: "below" },
+		});
+
+		await useLayoutStore.persist.rehydrate();
+
+		const s = useLayoutStore.getState();
+		expect(s.drawerWidth).toBe(333);
+		expect(s.responsePosition).toBe("below");
+		expect(s.bottomPanelOpen).toBe(false);
+		expect(s.bottomPanelHeight).toBe(DEFAULT_BOTTOM_PANEL_HEIGHT);
+		expect(s.bottomPanelTab).toBe("logs");
+	});
+
+	it("carries a v7 blob's open panel and height across", async () => {
+		seed(STORAGE_KEYS.LAYOUT_STORE, {
+			version: 7,
+			state: { bottomPanelOpen: true, bottomPanelHeight: 410, bottomPanelTab: "logs" },
+		});
+
+		await useLayoutStore.persist.rehydrate();
+
+		const s = useLayoutStore.getState();
+		expect(s.bottomPanelOpen).toBe(true);
+		expect(s.bottomPanelHeight).toBe(410);
 	});
 });

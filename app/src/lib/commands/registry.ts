@@ -37,6 +37,7 @@ import {
 	MoveLeft,
 	MoveRight,
 	PanelBottom,
+	PanelBottomOpen,
 	PanelLeft,
 	PanelRight,
 	Play,
@@ -61,11 +62,13 @@ import {
 	SAVE_CHORD,
 	SEND_CHORD,
 	SETTINGS_CHORD,
+	TOGGLE_BOTTOM_PANEL_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
 	TOGGLE_DRAWER_CHORD,
 	TOGGLE_RESPONSE_POSITION_CHORD,
 } from "@/constants/shortcuts";
 import { DRAWER_VIEWS } from "@/constants/drawer-views";
+import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import {
 	canGoBack,
 	canGoForward,
@@ -354,6 +357,15 @@ const ACTION_COMMANDS: readonly Command[] = [
 		icon: PanelRight,
 		shortcut: TOGGLE_CONTEXT_BAR_CHORD,
 		perform: () => useLayoutStore.getState().toggleContextBar(),
+	},
+	{
+		id: "toggle-bottom-panel",
+		title: `Show or hide the ${BOTTOM_PANEL_LABEL.toLowerCase()}`,
+		keywords: ["panel", "bottom", "footer", "logs", "collapse", "expand"],
+		group: "action",
+		icon: PanelBottomOpen,
+		shortcut: TOGGLE_BOTTOM_PANEL_CHORD,
+		perform: () => useLayoutStore.getState().toggleBottomPanel(),
 	},
 	{
 		id: "toggle-response-position",

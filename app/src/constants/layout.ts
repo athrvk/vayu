@@ -23,6 +23,60 @@ export const DEFAULT_DRAWER_WIDTH = 260;
 /** Default width of the right context bar (px). */
 export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
 
+/* ── Bottom panel ────────────────────────────────────────────────────────── */
+
+/**
+ * The bottom panel's tabs, in strip order (#3635). One today; the session
+ * Console (#3634) joins as a second, and the persisted `bottomPanelTab` is one
+ * of these ids.
+ */
+export const BOTTOM_PANEL_TABS = [{ id: "logs", label: "Logs" }] as const;
+
+export type BottomPanelTab = (typeof BOTTOM_PANEL_TABS)[number]["id"];
+
+/**
+ * What the panel is called: the Dock's button, the palette row, the chord's
+ * label and the panel's own region all read this one constant, so renaming the
+ * panel (#3634 will call it Console) is one edit.
+ */
+export const BOTTOM_PANEL_LABEL = "Logs";
+
+/** The tab a fresh install opens on. */
+export const DEFAULT_BOTTOM_PANEL_TAB: BottomPanelTab = BOTTOM_PANEL_TABS[0].id;
+
+/** A persisted tab id may name a tab a later release removed; the default stands in. */
+export function resolveBottomPanelTab(id: string): BottomPanelTab {
+	return BOTTOM_PANEL_TABS.find((tab) => tab.id === id)?.id ?? DEFAULT_BOTTOM_PANEL_TAB;
+}
+
+/**
+ * Height bounds (px) of the bottom panel. The floor shows a header, a toolbar
+ * and a few rows; the ceiling is what the store will ever write, taller than
+ * any window needs (half of a 1600px-high one).
+ */
+export const BOTTOM_PANEL_MIN_HEIGHT = 120;
+export const BOTTOM_PANEL_MAX_HEIGHT = 800;
+export const DEFAULT_BOTTOM_PANEL_HEIGHT = 240;
+
+/**
+ * The most of the window the panel may take. The window's minimum height is
+ * 768px (`WINDOW_MIN_HEIGHT`): half is 384, which leaves 384 for the title
+ * bar, the tab strip, the Dock and a main pane of about 290px, a pane the
+ * request builder is still usable in (#3494).
+ */
+export const BOTTOM_PANEL_MAX_WINDOW_SHARE = 0.5;
+
+/** The tallest the panel may be in a window `windowHeight` CSS px high. */
+export function bottomPanelMaxHeight(windowHeight: number): number {
+	const share = Math.floor(windowHeight * BOTTOM_PANEL_MAX_WINDOW_SHARE);
+	return Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.min(BOTTOM_PANEL_MAX_HEIGHT, share));
+}
+
+/** `height` held to the panel's bounds in a window `windowHeight` high. */
+export function clampBottomPanelHeight(height: number, windowHeight: number): number {
+	return Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.min(bottomPanelMaxHeight(windowHeight), height));
+}
+
 /* ── Side panels: push or overlay ────────────────────────────────────────── */
 
 /**

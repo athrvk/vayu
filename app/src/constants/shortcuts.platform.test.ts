@@ -146,3 +146,34 @@ describe("the lenient modifier is unaffected on both", () => {
 		expect(matchesChord(press("s", { ctrl: true }), SAVE_CHORD)).toBe(true);
 	});
 });
+
+/**
+ * The bottom panel's chord (#3635) is lenient like Save: ⌘J on macOS, Ctrl+J
+ * elsewhere, and the display follows the platform the registry was loaded on.
+ * Both platforms are stubbed - the host's own is never what is asserted.
+ */
+describe("the bottom panel chord", () => {
+	it.each([
+		["darwin", "⌘J"],
+		["linux", "Ctrl+J"],
+	] as const)("is displayed as %s spells it", async (platform, shown) => {
+		vi.resetModules();
+		vi.stubGlobal("window", { electronAPI: { platform } });
+		const { TOGGLE_BOTTOM_PANEL_CHORD } = await import("./shortcuts");
+		const { formatChord } = await import("@/lib/platform");
+		expect(formatChord(TOGGLE_BOTTOM_PANEL_CHORD)).toBe(shown);
+	});
+
+	it.each(["darwin", "linux"] as const)(
+		"takes ⌘ and Ctrl on %s, and not Alt",
+		async (platform) => {
+			const { TOGGLE_BOTTOM_PANEL_CHORD: chord, matchesChord } = await loadOn(platform);
+			expect(matchesChord(press("j", { meta: true }), chord)).toBe(true);
+			expect(matchesChord(press("j", { ctrl: true }), chord)).toBe(true);
+			expect(matchesChord(press("j"), chord)).toBe(false);
+			expect(matchesChord({ ...press("j", { ctrl: true }), altKey: true }, chord)).toBe(
+				false
+			);
+		}
+	);
+});

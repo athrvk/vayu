@@ -193,9 +193,9 @@ canGoBack(useTabsStore.getState());
 canGoForward(useTabsStore.getState());
 ```
 
-#### `layout-store.ts` - Drawer, Context Bar, & Response Position
+#### `layout-store.ts` - Drawer, Context Bar, Bottom Panel, & Response Position
 
-Manages the left drawer (collections/history/variables/settings), the right context bar, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
+Manages the left drawer (collections/history/variables/settings), the right context bar, the bottom panel, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
 
 **State:**
 ```typescript
@@ -214,6 +214,9 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   scriptEditorHeights: Record<string, number>  // Height (px) of a script.pre/script.post element's editor box, keyed by the element's own id - capped at 200 entries, oldest set evicted first
   scriptEditorHeightDefault: number      // Height a script row with no entry above starts at - the last height set on any row
   recentElementKinds: string[]           // Last 5 kinds added through the Add-element picker, most recent first
+  bottomPanelOpen: boolean               // Is the bottom panel showing? Closed by default (#3635)
+  bottomPanelHeight: number              // px; clamped to [BOTTOM_PANEL_MIN_HEIGHT, BOTTOM_PANEL_MAX_HEIGHT] here, and to half the window as it is drawn
+  bottomPanelTab: BottomPanelTab         // "logs" today; the id of one of BOTTOM_PANEL_TABS (constants/layout.ts)
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```
@@ -227,6 +230,9 @@ const {
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
   contextBarCollapsedSections, toggleContextBarSection,
+  bottomPanelOpen, setBottomPanelOpen, toggleBottomPanel,
+  bottomPanelHeight, setBottomPanelHeight,
+  bottomPanelTab, setBottomPanelTab,
   responsePosition, setResponsePosition, toggleResponsePosition,
   setRequestSplitRatio
 } = useLayoutStore();
@@ -245,10 +251,21 @@ Collections (the default view) had. Re-introducing a per-view width re-introduce
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
 
-**`setDrawerWidth` / `setContextBarWidth` are not called per `pointermove`.**
+**The bottom panel's three fields persist and the panel starts closed** (#3635,
+the **v7** migration). `toggleBottomPanel` is the one write the Dock button, the
+`Chord` in `constants/shortcuts.ts` (⌘J / Ctrl+J) and the palette row make, so no
+route has an opinion of its own. `setBottomPanelHeight` clamps to the absolute
+bounds only; the half-the-window cap needs a window the store does not know, so
+`BottomPanel` applies `clampBottomPanelHeight` when it draws and a window that is
+briefly small does not overwrite the user's choice. A persisted `bottomPanelTab`
+that names a tab a later release removed resolves to the first one
+(`resolveBottomPanelTab`). The panel renders nothing while closed, so a tab's
+content is mounted only while it is on screen.
+
+**`setDrawerWidth` / `setContextBarWidth` / `setBottomPanelHeight` are not called per `pointermove`.**
 `PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`) holds a
-drag's live width outside the store, painting it onto the panel's own inline
-`style.width` once per animation frame, and calls the setter - the one write
+drag's live size outside the store, painting it onto the panel's own inline
+`style.width` (`style.height` for the bottom panel's top-edge handle) once per animation frame, and calls the setter - the one write
 `partialize` persists - exactly once, on `pointerup`. A store write on every
 `pointermove` was a synchronous `JSON.stringify` + `localStorage.setItem` of the
 whole persisted slice 120-240 times a second (#1715).

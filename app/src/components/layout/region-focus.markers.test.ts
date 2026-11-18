@@ -8,7 +8,7 @@
 /**
  * Every region the cycle names is a region something renders (#1219).
  *
- * `AppRegion` is a union of seven names and `cycleRegionFocus` walks whatever
+ * `AppRegion` is a union of eight names and `cycleRegionFocus` walks whatever
  * carries the attribute, so the two halves cannot disagree at compile time: a
  * band that lost its marker in a refactor would simply drop out of the cycle,
  * silently, and F6 would move focus somewhere plausible. That is this
@@ -69,6 +69,7 @@ const EXPECTED = [
 	"main",
 	"context",
 	"context-rail",
+	"bottom-panel",
 	"dock",
 ] satisfies AppRegion[];
 

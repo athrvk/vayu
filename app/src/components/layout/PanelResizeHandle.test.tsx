@@ -51,9 +51,9 @@ function setup(side: "left" | "right", width = 300) {
 	render(
 		<PanelResizeHandle
 			side={side}
-			width={width}
-			setWidth={setWidth}
-			defaultWidth={260}
+			size={width}
+			setSize={setWidth}
+			defaultSize={260}
 			label={side === "right" ? "Resize sidebar" : "Resize context bar"}
 		/>
 	);
@@ -170,9 +170,9 @@ describe("PanelResizeHandle - drag", () => {
 			<div style={{ width: startWidth }}>
 				<PanelResizeHandle
 					side={side}
-					width={startWidth}
-					setWidth={setWidth}
-					defaultWidth={260}
+					size={startWidth}
+					setSize={setWidth}
+					defaultSize={260}
 					label="Resize sidebar"
 				/>
 			</div>
@@ -317,5 +317,157 @@ describe("PanelResizeHandle - keyboard repeat", () => {
 		expect(setWidth).toHaveBeenCalledWith(316);
 		vi.advanceTimersByTime(1000);
 		expect(setWidth).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * The bottom panel's handle sits on the panel's top edge (#3635), so it is a
+ * horizontal separator on the vertical axis, with bounds of its own. Pointer
+ * up and ArrowUp grow the panel - the mirror of the left-edge handle, turned a
+ * quarter - and what it resizes is the panel's height, painted onto
+ * `style.height`, never `style.width`.
+ */
+describe("PanelResizeHandle - top edge", () => {
+	const MIN = 120;
+	const MAX = 400;
+
+	function setupTop(size = 240) {
+		const setSize = vi.fn();
+		const { container } = render(
+			<div style={{ height: size }}>
+				<PanelResizeHandle
+					side="top"
+					size={size}
+					setSize={setSize}
+					defaultSize={200}
+					label="Resize bottom panel"
+					min={MIN}
+					max={MAX}
+				/>
+			</div>
+		);
+		return {
+			setSize,
+			handle: screen.getByRole("separator"),
+			panel: container.firstElementChild as HTMLElement,
+		};
+	}
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("is a horizontal separator announcing the bounds it was given", () => {
+		const { handle } = setupTop();
+		expect(handle).toHaveAttribute("aria-orientation", "horizontal");
+		expect(handle).toHaveAttribute("aria-valuenow", "240");
+		expect(handle).toHaveAttribute("aria-valuemin", String(MIN));
+		expect(handle).toHaveAttribute("aria-valuemax", String(MAX));
+	});
+
+	it("keeps the side handles vertical separators with the panel-width bounds", () => {
+		expect(setup("right").handle).toHaveAttribute("aria-orientation", "vertical");
+	});
+
+	it("grows on ArrowUp and shrinks on ArrowDown - the edge follows the key", () => {
+		const { setSize, handle } = setupTop();
+		fireEvent.keyDown(handle, { key: "ArrowUp" });
+		expect(setSize).toHaveBeenCalledWith(256);
+		fireEvent.keyUp(handle, { key: "ArrowUp" });
+		fireEvent.keyDown(handle, { key: "ArrowDown" });
+		expect(setSize).toHaveBeenLastCalledWith(224);
+	});
+
+	it("jumps with Page keys, PageUp growing", () => {
+		const { setSize, handle } = setupTop();
+		fireEvent.keyDown(handle, { key: "PageUp" });
+		expect(setSize).toHaveBeenCalledWith(304);
+		fireEvent.keyUp(handle, { key: "PageUp" });
+		fireEvent.keyDown(handle, { key: "PageDown" });
+		expect(setSize).toHaveBeenLastCalledWith(176);
+	});
+
+	it("sends Home and End to the bounds it announces, and Enter to the reset", () => {
+		const { setSize, handle } = setupTop();
+		fireEvent.keyDown(handle, { key: "Home" });
+		expect(setSize).toHaveBeenLastCalledWith(MIN);
+		fireEvent.keyDown(handle, { key: "End" });
+		expect(setSize).toHaveBeenLastCalledWith(MAX);
+		fireEvent.keyDown(handle, { key: "Enter" });
+		expect(setSize).toHaveBeenLastCalledWith(200);
+	});
+
+	it("clamps a nudge at the bounds it was given", () => {
+		const { setSize, handle } = setupTop(MAX - 4);
+		fireEvent.keyDown(handle, { key: "ArrowUp" });
+		expect(setSize).toHaveBeenLastCalledWith(MAX);
+	});
+
+	it("ignores the horizontal arrows, which belong to the side handles", () => {
+		const { setSize, handle } = setupTop();
+		fireEvent.keyDown(handle, { key: "ArrowLeft" });
+		fireEvent.keyDown(handle, { key: "ArrowRight" });
+		expect(setSize).not.toHaveBeenCalled();
+	});
+
+	it("ignores the vertical arrows on a side handle", () => {
+		const { setWidth, handle } = setup("right");
+		fireEvent.keyDown(handle, { key: "ArrowUp" });
+		fireEvent.keyDown(handle, { key: "ArrowDown" });
+		expect(setWidth).not.toHaveBeenCalled();
+	});
+
+	describe("by pointer", () => {
+		beforeEach(() => {
+			stubAnimationFrame();
+		});
+
+		it("widens upward: dragging the pointer up paints a taller panel and commits once", async () => {
+			const { setSize, handle, panel } = setupTop(240);
+
+			fireEvent.pointerDown(handle, { clientY: 500, pointerId: 1 });
+			fireEvent.pointerMove(window, { clientY: 450 });
+			await flushAnimationFrame();
+
+			expect(panel.style.height).toBe("290px");
+			expect(panel.style.width).toBe("");
+			expect(handle).toHaveAttribute("aria-valuenow", "290");
+			expect(setSize).not.toHaveBeenCalled();
+
+			fireEvent.pointerUp(window);
+			expect(setSize).toHaveBeenCalledTimes(1);
+			expect(setSize).toHaveBeenCalledWith(290);
+		});
+
+		it("shrinks when the pointer moves down, and clamps at the given bounds", async () => {
+			const { setSize, handle, panel } = setupTop(240);
+
+			fireEvent.pointerDown(handle, { clientY: 500, pointerId: 1 });
+			fireEvent.pointerMove(window, { clientY: 560 });
+			await flushAnimationFrame();
+			expect(panel.style.height).toBe("180px");
+
+			fireEvent.pointerMove(window, { clientY: 5000 });
+			await flushAnimationFrame();
+			expect(panel.style.height).toBe(`${MIN}px`);
+
+			fireEvent.pointerMove(window, { clientY: -5000 });
+			await flushAnimationFrame();
+			expect(panel.style.height).toBe(`${MAX}px`);
+
+			fireEvent.pointerUp(window);
+			expect(setSize).toHaveBeenCalledWith(MAX);
+		});
+
+		it("ignores horizontal movement, the axis it does not drag on", async () => {
+			const { handle, panel } = setupTop(240);
+
+			fireEvent.pointerDown(handle, { clientX: 100, clientY: 500, pointerId: 1 });
+			fireEvent.pointerMove(window, { clientX: 400, clientY: 500 });
+			await flushAnimationFrame();
+
+			expect(panel.style.height).toBe("240px");
+			fireEvent.pointerUp(window);
+		});
 	});
 });

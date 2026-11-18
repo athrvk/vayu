@@ -21,6 +21,7 @@ import {
 	CLOSE_TAB_CHORD,
 	TOGGLE_DRAWER_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
+	TOGGLE_BOTTOM_PANEL_CHORD,
 	TOGGLE_RESPONSE_POSITION_CHORD,
 	SETTINGS_CHORD,
 	NEW_REQUEST_CHORD,
@@ -47,6 +48,7 @@ import {
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { Drawer } from "./Drawer";
+import { BottomPanel } from "./BottomPanel";
 import { Dock } from "./Dock";
 import { ActivityRail } from "./ActivityRail";
 import { ContextBar } from "./ContextBar";
@@ -195,6 +197,7 @@ export default function Shell() {
 	const toggleDrawer = useLayoutStore((s) => s.toggleDrawer);
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const toggleContextBar = useLayoutStore((s) => s.toggleContextBar);
+	const toggleBottomPanel = useLayoutStore((s) => s.toggleBottomPanel);
 	const toggleResponsePosition = useLayoutStore((s) => s.toggleResponsePosition);
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const triggerSave = useSaveStore((s) => s.triggerSave);
@@ -336,6 +339,11 @@ export default function Shell() {
 				toggleContextBar();
 				return;
 			}
+			if (matchesChord(e, TOGGLE_BOTTOM_PANEL_CHORD)) {
+				e.preventDefault();
+				toggleBottomPanel();
+				return;
+			}
 			if (matchesChord(e, TOGGLE_RESPONSE_POSITION_CHORD)) {
 				e.preventDefault();
 				// Only a request tab has a response pane to move; the Dock's
@@ -379,6 +387,7 @@ export default function Shell() {
 		triggerSave,
 		toggleDrawer,
 		toggleContextBar,
+		toggleBottomPanel,
 		toggleResponsePosition,
 		activateDrawerView,
 		openTab,
@@ -528,6 +537,9 @@ export default function Shell() {
 					</div>
 				</div>
 			</div>
+			{/* Under the whole main row, sidebar and content alike, so no tab type
+			    takes it over; closed, it renders nothing. */}
+			<BottomPanel />
 			<Dock />
 		</div>
 	);
