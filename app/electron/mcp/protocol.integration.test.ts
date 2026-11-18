@@ -1185,7 +1185,27 @@ describe("resources", () => {
 						.mockRejectedValue(new EngineRequestError("GET /runs failed", 500, "boom")),
 				}),
 			});
-			await expect(client.listResources()).rejects.toThrow(/Engine error \(500\)/);
+			const err = await client.listResources().catch((e: Error) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).not.toMatch(/Could not reach the Vayu engine/);
+			await server.close();
+		});
+
+		it("still fails the list for a cancelled call, and words no read as an interrupted tool call", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					listRuns: vi.fn().mockRejectedValue(new Error("engine request aborted")),
+					getScriptTypeDefinitions: vi
+						.fn()
+						.mockRejectedValue(new Error("engine request aborted")),
+				}),
+			});
+			const list = await client.listResources().catch((e: Error) => e);
+			expect(list).toBeInstanceOf(Error);
+			const read = await client
+				.readResource({ uri: "vayu://scripting/types" })
+				.catch((e: Error) => e);
+			expect((read as Error).message).not.toMatch(/may still have completed/);
 			await server.close();
 		});
 

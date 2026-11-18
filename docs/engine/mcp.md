@@ -2442,10 +2442,13 @@ The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
 IDs). With the engine unreachable the list callback answers no runs, so the
 static resources above still list (#3577); any other failure still fails the
-list. Every resource, prompt and completion callback words an engine failure
-the way a tool does (`server.ts`, `worded`): a read of `vayu://scripting/types`
-with the engine down fails with `Could not reach the Vayu engine ...` and the
-host's remedy, not a bare `fetch failed`.
+list. Every resource, prompt and completion callback words an unreachable
+engine the way a tool does (`server.ts`, `worded`): a read of
+`vayu://scripting/types` with the engine down fails with `Could not reach the
+Vayu engine ...` and the host's remedy, not a bare `fetch failed`. Other
+failures keep their own text: an engine refusal's body is unmasked engine text,
+and the interrupted-call advice describes a tool call that may have completed,
+which a read never was.
 
 ### The script sandbox surface
 

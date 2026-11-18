@@ -523,7 +523,10 @@ function worded<Args extends unknown[], Result>(
 				err instanceof MaskingIncompleteError ||
 				(err instanceof Error && err.cause instanceof MaskingIncompleteError);
 			const failure = maskingError ? undefined : recognisedEngineFailure(err, ctx);
-			if (!failure) throw err;
+			// Only the outage is reworded. An engine refusal's body is unmasked
+			// engine text, and an interrupted failure's advice is about a tool
+			// call that may have completed, which a read never was.
+			if (failure?.failureClass !== "unreachable") throw err;
 			throw new Error(failure.message, { cause: err });
 		}
 	};
