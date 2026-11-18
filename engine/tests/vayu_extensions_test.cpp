@@ -125,8 +125,7 @@ TEST (VayuExtensions, NeverKeepsABarePrivateKeyAndKeepsAReferenceToOne) {
     const auto private_key_after = [&omitted] (const char* key) {
         Json auth = Json{ { "mode", "oauth2" },
             { "config", { { "grantType", "jwt_bearer" }, { "privateKey", key } } } };
-        return ext::redact_auth (
-        std::move (auth), omitted)["config"]["privateKey"];
+        return ext::redact_auth (auth, omitted)["config"]["privateKey"];
     };
     EXPECT_EQ (private_key_after (
                "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"),
