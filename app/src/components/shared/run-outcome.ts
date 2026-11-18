@@ -313,7 +313,7 @@ export function collectionReportOutcome(report: RunReport | null | undefined): R
 }
 
 /** What a stored outcome says when the row's own numbers do not reach the same verdict. */
-const STORED_OUTCOME_REASON = "Judged by the engine";
+const STORED_OUTCOME_REASON = "Judged by Vayu's engine";
 
 const OUTCOME_OF_STORED: Record<StoredRunOutcome, RunOutcome> = {
 	passed: "passed",

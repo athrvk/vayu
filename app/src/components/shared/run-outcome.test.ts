@@ -1120,7 +1120,7 @@ describe("rowOutcome with a stored outcome", () => {
 	it("lets the stored outcome win over a derivation that says otherwise", () => {
 		const judged = rowOutcome(row({ outcome: "not_judged", resultSummary: MISSED }));
 		expect(judged?.outcome).toBe("not-judged");
-		expect(judged?.reason).toBe("Judged by the engine");
+		expect(judged?.reason).toBe("Judged by Vayu's engine");
 	});
 
 	it("reads a stored not_judged as the renderer's not-judged", () => {
@@ -1132,7 +1132,7 @@ describe("rowOutcome with a stored outcome", () => {
 	it("judges a row its summary cannot, when the engine stored a verdict", () => {
 		expect(rowOutcome(row({ outcome: "passed" }))).toEqual({
 			outcome: "passed",
-			reason: "Judged by the engine",
+			reason: "Judged by Vayu's engine",
 		});
 	});
 
