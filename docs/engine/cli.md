@@ -244,8 +244,10 @@ on is refused on stderr with exit code **1** rather than dropped:
 sends a request to it on this machine, as it never sends one to its own port
 ([Reserved local ports](api-reference.md#reserved-local-ports)): given the
 flag, that port is the reserved one and 9877 is an ordinary port; without it,
-9877 is reserved. A value equal to the engine's port, the default 9876 included, is
-refused:
+9877 is reserved. The app passes the flag to the engine it starts; a daemon
+you start yourself beside an app whose MCP port was changed in Settings needs
+the same `--mcp-port`, or it guards 9877 and not the port the server is on. A
+value equal to the engine's port, the default 9876 included, is refused:
 
 ```
 $ vayu-engine --mcp-port 9876

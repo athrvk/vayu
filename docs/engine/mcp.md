@@ -3191,7 +3191,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `in-flight-calls.ts` | The bounded (`Mcp-Session-Id`, request id) → `AbortController` record of the 2025-era requests the HTTP host is serving, so the client's `notifications/cancelled` reaches the call it names. |
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
+| `store.ts`         | Persist safety config + enabled preference + port (`../json-store.ts`); `validateMcpPort` and `readMcpPort` judge the port. |
 | `lifecycle.ts`     | The server's one state (`off`, `released`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. Before an engine spawn that guards another port the listener is released (`releaseForSpawn`), and after the spawn it is bound on the port that engine guards (`followEndpoint`). |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
