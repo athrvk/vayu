@@ -398,6 +398,10 @@ struct ReportExtras {
     // (`scenario_runner.cpp`, `scenario_load.cpp`). Empty for a run with no
     // `control.transaction` element, or one whose folder never closed.
     nlohmann::json transactions = nlohmann::json::array ();
+    // A scenario load run's completed passes (#3570), `{count, mean, min, p50,
+    // p95, p99, max}` in ms, verbatim from the summary. Empty for a design-mode
+    // run, a load run with no completed pass, and one stored before #3570.
+    nlohmann::json pass_duration = nlohmann::json::object ();
     // The load run's assertion block (#3537), the report's top-level
     // `assertions`; its `exact` is also a scenario load run's
     // `scenario.assertions` (#2820). Empty for a run that asserted nothing and
@@ -1013,6 +1017,9 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         }
         if (scenario.contains ("transactions") && scenario["transactions"].is_array ()) {
             extras.transactions = scenario["transactions"];
+        }
+        if (scenario.contains ("pass_duration") && scenario["pass_duration"].is_object ()) {
+            extras.pass_duration = scenario["pass_duration"];
         }
     }
 }
@@ -2118,6 +2125,9 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     if (extras.virtual_users > 0) {
         section["virtualUsers"]        = extras.virtual_users;
         section["iterationsAbandoned"] = extras.iterations_abandoned;
+        if (!extras.pass_duration.empty ()) {
+            section["passDuration"] = extras.pass_duration;
+        }
     }
     if (!extras.step_breakdown.empty ()) {
         section["steps"] = extras.step_breakdown;

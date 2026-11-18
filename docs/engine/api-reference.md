@@ -11024,6 +11024,8 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 954, "passed": 906, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "passDuration": { "count": 474, "mean": 83.4, "min": 61.0, "p50": 80.2,
+                    "p95": 104.7, "p99": 121.3, "max": 160.9 },
   "assertions": { "passed": 432, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
@@ -11074,6 +11076,26 @@ That term is 0 for a run that ended by its iteration count, as the example
 above did (480 = 474 + 6 + 0), and positive for one a deadline or Stop ended
 mid-iteration: 1,150 started, 1,140 completed and none abandoned is 10 cut.
 The app's Steps tab shows it as "Iterations cut short" beside the other two.
+
+**`passDuration`** (#3570) is how long the completed passes took, `{count,
+mean, min, p50, p95, p99, max}` in milliseconds: one pass is a virtual user's
+wall clock from the claim of its first step to the completion of its last
+(that step's `step.after` elements included). A timer wait between two steps
+of the pass is inside it (`timer.think`, a `timer.pacing` or `timer.throughput`
+hold on a later step), and so is everything the runner does between steps; the
+last step's own `step.between` wait and the next pass's start-of-pass pacing
+fall outside it, before the next pass's claim. A `control.loop` jump back to
+the first step continues the pass rather than starting another. Only completed
+passes are timed, so `count` is `iterationsCompleted`: an abandoned pass is
+`iterationsAbandoned` and no pass time, and a pass the deadline or a Stop cut
+is neither. `mean` is the exact sum over the count; the percentiles come from
+one histogram kept to three significant figures, as a step's are. A pass is
+held at the histogram's ceiling of one hour (`HISTOGRAM_MAX_LATENCY_US`) before
+it is recorded, and `mean` sums that held value too, so it never exceeds `max`.
+**Absent** for a run in
+which no pass completed, for a design-mode run and for a run stored before the
+field existed. On a single-request run an iteration is one request, so its
+pass time is the request latency and the report carries none.
 
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
@@ -12294,7 +12316,7 @@ no frame.
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
-| `scenario` | **Gate frames only** (issue #2823), the final frame included, and only on a scenario load run: the sequence so far, `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, one `steps` entry per plan step in plan order. The same counters as the stored summary's `scenario` block (`iterations`, `iterations_completed`, `iterations_abandoned`, `steps_executed`, and each step's `executed` and `errors`), read while the workers still write, so a mid-run reading's figures can differ from each other by the completions that landed between the reads; the final frame is read after the drain and equals the summary. No latency: a step's percentiles are in the [report](#get-runsrunidreport) alone. Absent from every other frame and from every frame of any other run
+| `scenario` | **Gate frames only** (issue #2823), the final frame included, and only on a scenario load run: the sequence so far, `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, meanIterationMs?, steps: [{index, name, executed, errors}]}`, one `steps` entry per plan step in plan order. The same counters as the stored summary's `scenario` block (`iterations`, `iterations_completed`, `iterations_abandoned`, `steps_executed`, and each step's `executed` and `errors`), read while the workers still write, so a mid-run reading's figures can differ from each other by the completions that landed between the reads; the final frame is read after the drain and equals the summary. `meanIterationMs` (#3570) is the mean of the completed passes so far, the report's `scenario.passDuration.mean`, from a sum and a count kept beside its histogram; absent until a pass completes. No other latency: a step's percentiles and the pass percentiles are in the [report](#get-runsrunidreport) alone. Absent from every other frame and from every frame of any other run
 
 **Read order within one tick.** The metrics thread snapshots the status-code
 distribution once, and the request, error and status counts on the frame are
@@ -13913,6 +13935,13 @@ execution that failed three is one `failed` step and
 three `assertions.failed`. It is **absent** for a run that made no such assertion, a collection run in
 design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
 has the rest.
+
+`passDuration` (#3570) is a scenario load run's alone too: `{count, mean, min,
+p50, p95, p99, max}` in milliseconds over its completed passes, each from the
+claim of its first step to the completion of its last, timer waits between
+steps included and abandoned passes left out. **Absent** for a run in which no
+pass completed, a collection run in design mode and a run stored before it;
+[Scenario load runs](#scenario-load-runs) has the rest.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never

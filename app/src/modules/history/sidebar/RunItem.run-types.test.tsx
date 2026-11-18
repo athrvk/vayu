@@ -87,6 +87,50 @@ describe("RunItem run types", () => {
 		expect(screen.getByText("2 iterations")).toBeInTheDocument();
 	});
 
+	// Mutation check: drop the kind from the `loadTestTypeToLabel` call and the first case reddens.
+	describe("the mode of a load run (#3570)", () => {
+		const loadRun = (summary: Record<string, unknown>): Run =>
+			({
+				id: "run_3",
+				type: "load",
+				status: "completed",
+				startTime: 1_750_000_000_000,
+				endTime: 1_750_000_003_000,
+				requestId: null,
+				environmentId: null,
+				summary: { mode: "iterations", ...summary },
+			}) as Run;
+
+		it("reads Fixed passes on a collection load run", () => {
+			render(
+				<RunItem
+					run={loadRun({ scenario: { collectionId: "col_1", stepCount: 3 } })}
+					onSelect={noop}
+					onDelete={vi.fn()}
+					isDeleting={false}
+					collectionName="Checkout flow"
+				/>
+			);
+
+			expect(screen.getByText("Fixed passes")).toBeInTheDocument();
+			expect(screen.queryByText("Fixed request count")).not.toBeInTheDocument();
+		});
+
+		it("keeps Fixed request count on a single-request load run", () => {
+			render(
+				<RunItem
+					run={loadRun({ url: "https://api.example.test/ping", method: "GET" })}
+					onSelect={noop}
+					onDelete={vi.fn()}
+					isDeleting={false}
+				/>
+			);
+
+			expect(screen.getByText("Fixed request count")).toBeInTheDocument();
+			expect(screen.queryByText("Fixed passes")).not.toBeInTheDocument();
+		});
+	});
+
 	it("draws a folder, not a method badge, on a collection run", () => {
 		// `summary.method` is absent, and a "GET" default there made the folder
 		// branch unreachable.

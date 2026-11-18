@@ -24,10 +24,12 @@ import { dirname, join, relative } from "node:path";
 import {
 	CONCURRENCY_LABEL,
 	CONCURRENCY_UNIT,
+	COLLECTION_ITERATIONS_LABEL,
 	LOAD_TEST_MODES,
 	formatConcurrency,
 	isConcurrencySweepMode,
 	loadTestModeLabel,
+	loadTestTypeToLabel,
 } from "./load-test-modes";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,6 +61,22 @@ describe("load test mode vocabulary", () => {
 		expect(loadTestModeLabel("iterations")).toBe("Fixed request count");
 	});
 
+	// Mutation check: drop the kind branch in `loadTestModeLabel` and the first case fails.
+	it("calls a collection run's iterations mode 'Fixed passes' and no other mode (#3570)", () => {
+		expect(COLLECTION_ITERATIONS_LABEL).toBe("Fixed passes");
+		expect(loadTestModeLabel("iterations", "collection")).toBe("Fixed passes");
+		expect(loadTestModeLabel("iterations")).toBe("Fixed request count");
+		expect(loadTestModeLabel("iterations", undefined)).toBe("Fixed request count");
+		for (const mode of LOAD_TEST_MODES.filter((m) => m.value !== "iterations")) {
+			expect(loadTestModeLabel(mode.value, "collection"), mode.value).toBe(mode.label);
+		}
+	});
+
+	it("forwards the kind through the deprecated alias", () => {
+		expect(loadTestTypeToLabel("iterations", "collection")).toBe("Fixed passes");
+		expect(loadTestTypeToLabel("iterations")).toBe("Fixed request count");
+	});
+
 	it("humanises a mode it does not know, rather than showing the raw token", () => {
 		// Runs come back from storage and from the engine; a newer engine sending
 		// a mode this build has never heard of should still read as a name.
@@ -67,7 +85,7 @@ describe("load test mode vocabulary", () => {
 	});
 
 	it("is the only place the labels are written", () => {
-		const labels = LOAD_TEST_MODES.map((m) => m.label);
+		const labels = [...LOAD_TEST_MODES.map((m) => m.label), COLLECTION_ITERATIONS_LABEL];
 		const offences: string[] = [];
 
 		const files = globSync("**/*.{ts,tsx}", { cwd: srcRoot }).filter(

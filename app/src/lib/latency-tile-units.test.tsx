@@ -47,6 +47,7 @@ import type { DashboardDerived } from "@/modules/dashboard/types";
 function derived(ms: number): DashboardDerived {
 	return {
 		meanLatency: ms,
+		meanIterationTime: ms,
 		p99Latency: ms,
 		breakpoint: {
 			crossed: false,

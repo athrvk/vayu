@@ -91,6 +91,7 @@ function MetricsView({
 	mode,
 	runDurationSeconds,
 	rampConfig,
+	isCollectionRun = false,
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
 
@@ -203,7 +204,10 @@ function MetricsView({
 	// block keeps its identity between gates, which keeps the panel from
 	// re-rendering at the tick rate.
 	const sequence = useMemo(() => latestScenarioProgress(historicalMetrics), [historicalMetrics]);
-	const isSequence = sequence !== undefined;
+	// The run row names a collection run from the start; the first gate frame is
+	// about a second away, and until it lands `sequence` alone would read that
+	// run as a single request (#3570).
+	const isSequence = isCollectionRun || sequence !== undefined;
 
 	// A streaming run's frames all carry `stream_events`, so the newest one gates
 	// the panel; the first-event block rides gate frames alone, hence the scan.
@@ -268,6 +272,7 @@ function MetricsView({
 			backpressure: metrics.backpressure ?? 0,
 			p99Latency: cumulative.p99,
 			meanLatency: metrics.avg_latency_ms ?? 0,
+			meanIterationTime: isSequence ? sequence?.meanIterationMs : metrics.avg_latency_ms,
 			medianLatency: cumulative.p50,
 			p95Latency: cumulative.p95,
 			// Live steps carry no latency, so the card can say "pooled" but not which step.
@@ -290,6 +295,7 @@ function MetricsView({
 		lastElapsedSeconds,
 		loadMode,
 		isSequence,
+		sequence,
 		targetRps,
 		concurrency,
 		runDurationSeconds,

@@ -9,7 +9,7 @@
  * RunConfigSummary Component
  *
  * The "Test config" box of a stored load run: one line with the settings that
- * define the experiment (mode, virtual users, duration, protocol) and a
+ * define the experiment (mode, virtual users, passes or requests, duration, protocol) and a
  * "Details" disclosure for the rest (target rate, data set, timeout). The
  * second tier is closed by default because it is reference, not the answer; the
  * protocol's "not negotiated" correction is the one detail that stays on the
@@ -32,6 +32,8 @@ interface RunConfigSummaryProps {
 	config: RunConfiguration | undefined;
 	/** `report.summary.httpVersionDowngraded`; 0 and absent both draw nothing. */
 	downgradedRequests: number;
+	/** A collection run: its mode reads "Fixed passes" and its count is passes. */
+	isCollectionRun: boolean;
 }
 
 interface ConfigEntry {
@@ -72,13 +74,16 @@ function ConfigFields({ entries }: { entries: ConfigEntry[] }) {
 	));
 }
 
-/** The mode and the two numbers that size it; protocol is drawn beside them. */
-function headlineEntries(config: RunConfiguration): ConfigEntry[] {
+/** The mode and the numbers that size it; protocol is drawn beside them. */
+function headlineEntries(config: RunConfiguration, isCollectionRun: boolean): ConfigEntry[] {
 	const entries: ConfigEntry[] = [];
 	if (config.mode) {
 		entries.push({
 			label: "Mode",
-			value: loadTestTypeToLabel(config.mode as LoadTestConfig["mode"]),
+			value: loadTestTypeToLabel(
+				config.mode as LoadTestConfig["mode"],
+				isCollectionRun ? "collection" : undefined
+			),
 			mono: false,
 		});
 	}
@@ -86,6 +91,15 @@ function headlineEntries(config: RunConfiguration): ConfigEntry[] {
 		entries.push({
 			label: CONCURRENCY_LABEL,
 			value: formatNumber(config.concurrency),
+			mono: true,
+		});
+	}
+	// What a Fixed passes / Fixed request count run was asked for (#3570): the
+	// count counts passes over a collection's sequence, requests otherwise.
+	if (config.iterations != null && config.iterations > 0) {
+		entries.push({
+			label: isCollectionRun ? "Passes" : "Requests",
+			value: formatNumber(config.iterations),
 			mono: true,
 		});
 	}
@@ -157,7 +171,11 @@ export function NotNegotiated({
 	);
 }
 
-export default function RunConfigSummary({ config, downgradedRequests }: RunConfigSummaryProps) {
+export default function RunConfigSummary({
+	config,
+	downgradedRequests,
+	isCollectionRun,
+}: RunConfigSummaryProps) {
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	if (!config) return null;
 
@@ -169,7 +187,7 @@ export default function RunConfigSummary({ config, downgradedRequests }: RunConf
 	const protocolLabel = requestedProtocolLabel(config);
 	if (!config.mode && !protocolLabel) return null;
 
-	const headline = headlineEntries(config);
+	const headline = headlineEntries(config, isCollectionRun);
 	const details = detailEntries(config);
 
 	return (

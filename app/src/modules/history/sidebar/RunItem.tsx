@@ -566,7 +566,10 @@ function RunItem({
 						{run.type === "load" && loadTestType && (
 							<span className="flex shrink-0 items-center gap-1">
 								<Zap className="size-icon-sm" />
-								{loadTestTypeToLabel(loadTestType)}
+								{loadTestTypeToLabel(
+									loadTestType,
+									isScenarioRun ? "collection" : undefined
+								)}
 							</span>
 						)}
 						{run.type === "load" && protocolLabel && (

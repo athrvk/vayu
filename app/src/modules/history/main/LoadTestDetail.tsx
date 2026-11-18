@@ -321,6 +321,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			<RunConfigSummary
 				config={report.metadata?.configuration}
 				downgradedRequests={downgradedRequests}
+				isCollectionRun={isCollectionRun}
 			/>
 
 			{/* How this run compares with the one pinned as its baseline.

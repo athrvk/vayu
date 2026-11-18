@@ -71,6 +71,9 @@ json healthy_summary () {
         { "skipped", 0 }, { "errored", 0 }, { "steps_stored", 0 },
         { "steps_dropped", 0 }, { "virtual_users", 5 }, { "iterations_abandoned", 0 },
         { "assertions", { { "passed", 18 }, { "failed", 2 } } },
+        { "pass_duration",
+        { { "count", 10 }, { "mean", 83.0 }, { "min", 80.0 }, { "p50", 82.0 },
+        { "p95", 90.0 }, { "p99", 95.0 }, { "max", 96.0 }, { "unlisted", "dropped" } } },
         { "steps",
         json::array ({ { { "index", 0 }, { "name", "login" }, { "requestId", "req_1" },
         { "method", "POST" }, { "executed", 10 }, { "errors", 0 },
@@ -369,6 +372,27 @@ TEST_F (RunExportSchemaTest, AStreamsTimeToFirstEventIsExported) {
     EXPECT_EQ (document["report"]["stream"].value ("timeToFirstEvent", json ()),
     (json{ { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
     { "max", 910.0 }, { "count", 9 } }));
+}
+
+// #3570: a scenario load run's pass durations go from the stored summary
+// through the report into the document, member by member, and a run with no
+// completed pass (or one stored before #3570) carries none. Mutation check:
+// drop the `pass_duration` read in `apply_summary_scenario` (runs.cpp), or the
+// `passDuration` pick in `scenario_section`, and the first expectation fails;
+// drop the property from the schema and the validation does.
+TEST_F (RunExportSchemaTest, AScenarioLoadRunsPassDurationIsExported) {
+    seed ("run_passes", vayu::RunStatus::Completed, healthy_summary ());
+    const json document = expect_valid (json{ { "runId", "run_passes" } });
+    EXPECT_EQ (document["report"]["scenario"].value ("passDuration", json ()),
+    (json{ { "count", 10 }, { "mean", 83.0 }, { "min", 80.0 }, { "p50", 82.0 },
+    { "p95", 90.0 }, { "p99", 95.0 }, { "max", 96.0 } }));
+
+    json summary = healthy_summary ();
+    summary["scenario"].erase ("pass_duration");
+    seed ("run_no_passes", vayu::RunStatus::Completed, summary);
+    const json without = expect_valid (json{ { "runId", "run_no_passes" } });
+    EXPECT_FALSE (without["report"]["scenario"].contains ("passDuration"))
+    << without["report"]["scenario"].dump ();
 }
 
 // #2911: a document written before the skip counters has neither key and

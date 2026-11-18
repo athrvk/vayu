@@ -63,6 +63,16 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 const BY_VALUE = new Map<string, LoadTestModeInfo>(LOAD_TEST_MODES.map((m) => [m.value, m]));
 
 /**
+ * What a collection run's `iterations` count counts: passes over the sequence,
+ * not requests (#3570). The Run collection dialog's field and every surface
+ * that names the run's mode read this one string.
+ */
+export const COLLECTION_ITERATIONS_LABEL = "Fixed passes";
+
+/** The run a mode names: a collection run reads `iterations` as passes. */
+export type LoadRunKind = "collection";
+
+/**
  * Words for a mode.
  *
  * Takes `string`, not `LoadTestMode`: modes arrive from stored runs and from
@@ -70,9 +80,14 @@ const BY_VALUE = new Map<string, LoadTestModeInfo>(LOAD_TEST_MODES.map((m) => [m
  * error. Unknown values are humanised (`some_new_mode` → `Some new mode`)
  * instead of being dropped or shown raw - a run from a newer engine should
  * still read as a name, not as a snake_case token.
+ *
+ * `kind: "collection"` is for a run whose work is a sequence: its
+ * `iterations` mode is a count of passes, so it reads {@link COLLECTION_ITERATIONS_LABEL}.
+ * Every other mode, and every single-request run, keeps the plain name.
  */
-export function loadTestModeLabel(mode: string | undefined | null): string {
+export function loadTestModeLabel(mode: string | undefined | null, kind?: LoadRunKind): string {
 	if (!mode) return "";
+	if (mode === "iterations" && kind === "collection") return COLLECTION_ITERATIONS_LABEL;
 	const known = BY_VALUE.get(mode);
 	if (known) return known.label;
 	const words = mode.replace(/_/g, " ").trim();
@@ -151,6 +166,6 @@ export function concurrencyMeasureLabel(mode: string | undefined | null): string
  * own copy of the names, which is how "Iterations" and "Fixed Iterations" ended
  * up on screen for the same run.
  */
-export function loadTestTypeToLabel(type: LoadTestMode | string): string {
-	return loadTestModeLabel(type);
+export function loadTestTypeToLabel(type: LoadTestMode | string, kind?: LoadRunKind): string {
+	return loadTestModeLabel(type, kind);
 }

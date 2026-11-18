@@ -18,7 +18,8 @@
  * `LoadTestDetail` no longer does.
  *
  * Mutation check: stop passing `collectionName` / `stepCount`, or the report
- * phase's `comment`, in `index.tsx` and the matching case reddens.
+ * phase's `comment`, in `index.tsx` and the matching case reddens; stop passing
+ * `isCollectionRun` to `MetricsView` and the collection case reddens.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -26,10 +27,11 @@ import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
 import { useDashboardStore } from "@/stores";
 import type { RunReport } from "@/types";
-import type { DashboardHeaderProps } from "./types";
+import type { DashboardHeaderProps, MetricsViewProps } from "./types";
 import LoadTestDashboard from "./index";
 
 const headerProps = vi.hoisted(() => ({ latest: null as unknown }));
+const metricsProps = vi.hoisted(() => ({ latest: null as unknown }));
 const target = vi.hoisted(() => ({ value: {} as { collectionName?: string; stepCount?: number } }));
 
 vi.mock("./components", () => ({
@@ -37,7 +39,10 @@ vi.mock("./components", () => ({
 		headerProps.latest = props;
 		return null;
 	},
-	MetricsView: () => null,
+	MetricsView: (props: unknown) => {
+		metricsProps.latest = props;
+		return null;
+	},
 }));
 vi.mock("./hooks/useCollectionRunTarget", () => ({ useCollectionRunTarget: () => target.value }));
 vi.mock("@/modules/history/main/LoadTestDetail", () => ({ default: () => null }));
@@ -52,6 +57,7 @@ vi.mock("@/services", () => ({
 }));
 
 const header = () => headerProps.latest as DashboardHeaderProps;
+const metricsView = () => metricsProps.latest as MetricsViewProps;
 
 function report(comment: string | undefined): RunReport {
 	return {
@@ -90,6 +96,7 @@ function report(comment: string | undefined): RunReport {
 
 beforeEach(() => {
 	headerProps.latest = null;
+	metricsProps.latest = null;
 	target.value = {};
 	useDashboardStore.setState({
 		currentRunId: "run_1",
@@ -113,6 +120,23 @@ describe("the live header's target and comment", () => {
 
 		expect(header().collectionName).toBeUndefined();
 		expect(header().stepCount).toBeUndefined();
+	});
+
+	// The cards read the run's kind from the same row the header names it by, so
+	// they agree before the first gate frame lands (#3570).
+	it("tells the cards the run is a collection run when the header names a collection", () => {
+		target.value = { collectionName: "Checkout", stepCount: 4 };
+		render(withQueryClient(<LoadTestDashboard />));
+
+		expect(header().collectionName).toBe("Checkout");
+		expect(metricsView().isCollectionRun).toBe(true);
+	});
+
+	it("tells the cards it is not for a request-level run", () => {
+		render(withQueryClient(<LoadTestDashboard />));
+
+		expect(header().collectionName).toBeUndefined();
+		expect(metricsView().isCollectionRun).toBe(false);
 	});
 
 	it("passes the launch config's comment", () => {

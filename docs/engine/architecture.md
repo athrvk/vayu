@@ -632,9 +632,11 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   pattern), and the gate frame copies the pointer under that lock and builds its `scenario`
   block (`build_scenario_live_progress`) from the state's relaxed atomics and its step labels,
   which are copied off the plan at construction because retention releases the plan. It never
-  reads a step's histogram: those are plain hdr reads racing the workers' atomic records, so
-  per-step latency stays a report figure. Retention drops the published pointer with the event
-  loop; the metrics thread has been joined by then
+  reads a histogram: those are plain hdr reads racing the workers' atomic records, so per-step
+  latency and the pass-duration percentiles stay report figures. The one timing it carries,
+  `meanIterationMs` (#3570), is the mean pass from `PassDurationRecorder`'s sum and count,
+  two relaxed atomics kept beside its histogram for this read. Retention drops the published
+  pointer with the event loop; the metrics thread has been joined by then
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
   persists one wide `metric_ticks` row per second during the run (the complete tick object,
   built once at write time), and the whole-run `runs.summary` is written once at completion.

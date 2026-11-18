@@ -2691,10 +2691,10 @@ export interface SanityResult extends HttpResponse {
 
 /**
  * A scenario load run's sequence so far, as a gate frame carries it (issue
- * #2823): the counters the stored summary's `scenario` block reads, without any
- * latency (a step's percentiles are in the finished report alone). Read while
- * the workers still write, so the figures may differ by the completions that
- * landed between the reads.
+ * #2823): the counters the stored summary's `scenario` block reads, with one
+ * timing, {@link meanIterationMs} (a step's percentiles are in the finished
+ * report alone). Read while the workers still write, so the figures may differ
+ * by the completions that landed between the reads.
  */
 export interface LiveScenarioProgress {
 	/** Iterations started. */
@@ -2702,6 +2702,12 @@ export interface LiveScenarioProgress {
 	iterationsCompleted: number;
 	iterationsAbandoned: number;
 	stepsExecuted: number;
+	/**
+	 * The mean wall clock of the passes completed so far, ms, timer waits
+	 * included (#3570): the report's `scenario.passDuration.mean` so far. Absent
+	 * until a pass completes and on an engine from before it - never `0`.
+	 */
+	meanIterationMs?: number;
 	/** One entry per plan step, in plan order. */
 	steps: LiveScenarioStep[];
 }
@@ -3245,6 +3251,11 @@ export interface RunReport {
 			duration?: string;
 			targetRps?: number;
 			concurrency?: number;
+			/**
+			 * What an `iterations` run was asked for: requests for a single request,
+			 * passes over the sequence for a collection run (#3570).
+			 */
+			iterations?: number;
 			startConcurrency?: number;
 			rampUpDuration?: string;
 			timeout?: number;
@@ -3988,6 +3999,21 @@ export interface RunReport {
 		 * says what each step did.
 		 */
 		steps?: RunScenarioStepStat[];
+		/**
+		 * How long the completed passes took, ms (#3570): a virtual user's wall
+		 * clock from its first step to its last, timer waits between steps
+		 * included. Abandoned passes are not timed. Absent for a run in which no
+		 * pass completed, a design-mode run and a report from an engine before it.
+		 */
+		passDuration?: {
+			count: number;
+			mean: number;
+			min: number;
+			p50: number;
+			p95: number;
+			p99: number;
+			max: number;
+		};
 		/**
 		 * Every `control.transaction` name that closed at least once this run
 		 * (issue #1515), a sibling of `steps` rather than a member of it - a
