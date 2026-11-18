@@ -7334,7 +7334,11 @@ differ only in those. The recipe is `oauth::cache_key`
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
 means non-expiring unless the config sets `fallbackExpiresIn` (seconds, any grant,
-held to one year), which is then how long such a token is kept. One refresh is in flight per cache key (#3344): however
+held to one year), which is then how long such a token is kept. A response's own
+`expires_in` is held to one year too (31536000, `MAX_EXPIRES_IN_SECONDS`, #3645),
+whether it is an integer, a float or a numeric string: a provider stating more
+is stored as a year, and a value that is zero, negative or unreadable states no
+lifetime, as before. One refresh is in flight per cache key (#3344): however
 many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.

@@ -1807,4 +1807,76 @@ TEST_F (OAuthClientTest, AFallbackPastTheBoundIsClampedToIt) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A token response's expires_in is bounded (#3645)
+// ---------------------------------------------------------------------------
+
+// Stored as the bound, and read as expired only past it: the probes sit one
+// second either side, with the skew set to 0 so the bound itself is what is
+// read. Mutation check: drop the clamp in `parse_expires_in` and every row fails.
+TEST_F (OAuthClientTest, AnExpiresInPastTheBoundIsStoredAsTheBound) {
+    const int64_t bound = oauth::MAX_EXPIRES_IN_SECONDS;
+    const std::string number = std::string (MockTokenServer::EXPIRES_IN_NUMBER_PREFIX);
+    const std::string text = std::string (MockTokenServer::EXPIRES_IN_STRING_PREFIX);
+    const std::string digits_past_int64 = "99999999999999999999999999";
+    struct Case {
+        std::string path;
+        int64_t expected;
+    };
+    // An integer far past the bound, past int64 (read as a float), a float no
+    // int64 holds, an integer one past the bound, the bound itself, and a
+    // numeric string past int64 (stoll throws out_of_range on it).
+    const std::vector<Case> cases = { { number + "1000000000000000000", bound },
+        { number + digits_past_int64, bound }, { number + "1e30", bound },
+        { number + std::to_string (bound + 1), bound },
+        { number + std::to_string (bound), bound },
+        { text + digits_past_int64, bound }, { text + "1000000000000000000", bound },
+        { text + std::to_string (bound + 1), bound } };
+    for (const Case& scenario : cases) {
+        SCOPED_TRACE (scenario.path);
+        MockTokenServer idp;
+        json config = cc_config (idp, scenario.path);
+        const auto result =
+        oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        const auto& token = std::get<vayu::db::OAuthToken> (result);
+        EXPECT_EQ (token.expires_in, scenario.expected);
+        const auto stored = db_->get_oauth_token (oauth::cache_key (config));
+        ASSERT_HAS_VALUE (stored);
+        EXPECT_EQ (stored->expires_in, scenario.expected);
+        EXPECT_FALSE (
+        oauth::is_expired (token, token.created_at + bound * 1000 - 1'000, 0));
+        EXPECT_TRUE (oauth::is_expired (token, token.created_at + bound * 1000 + 1'000, 0));
+        db_->delete_oauth_token (oauth::cache_key (config));
+    }
+}
+
+// A value inside the bound is read as it always was: a number or a numeric
+// string, a float truncated, and a lifetime that is zero, negative, absent or
+// unreadable stated nothing (so no fallback here means non-expiring). A string
+// past int64 in the negative direction is a negative lifetime, not the bound.
+TEST_F (OAuthClientTest, AnExpiresInWithinTheBoundIsUnchanged) {
+    const std::string number = std::string (MockTokenServer::EXPIRES_IN_NUMBER_PREFIX);
+    const std::string text = std::string (MockTokenServer::EXPIRES_IN_STRING_PREFIX);
+    struct Case {
+        std::string path;
+        int64_t expected;
+    };
+    const std::vector<Case> cases = { { number + "3600", 3600 },
+        { number + "3600.9", 3600 }, { number + "0", 0 }, { number + "-5", 0 },
+        { number + "-1e30", 0 }, { text + "3600", 3600 }, { text + "0", 0 },
+        { text + "-5", 0 }, { text + "-99999999999999999999999999", 0 },
+        { text + "soon", 0 }, { "/token-plain", 0 } };
+    for (const Case& scenario : cases) {
+        SCOPED_TRACE (scenario.path);
+        MockTokenServer idp;
+        json config = cc_config (idp, scenario.path);
+        const auto result =
+        oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).expires_in, scenario.expected);
+        db_->delete_oauth_token (oauth::cache_key (config));
+    }
+}
+
 } // namespace

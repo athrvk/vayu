@@ -32,6 +32,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -123,43 +124,63 @@ nlohmann::json parse_token_body (const std::string& body, const vayu::Headers& h
     return out;
 }
 
-// expires_in arrives as a number or a numeric string depending on provider.
+// A lifetime in seconds held to [0, bound]: anything that is not a positive
+// number (NaN included, which no ordered comparison accepts) is 0, and the
+// cast sees only a value in range. A double compare, because a JSON float of
+// 1e30 is undefined behaviour at the int64 cast.
+int64_t seconds_within (double seconds, int64_t bound) {
+    if (!(seconds > 0)) {
+        return 0;
+    }
+    if (seconds >= static_cast<double> (bound)) {
+        return bound;
+    }
+    return static_cast<int64_t> (seconds);
+}
+
+// `std::stoll` throws out_of_range on a digit string past int64, which is a
+// provider stating an enormous lifetime, not an unreadable one: a positive one
+// is the bound, a negative one is 0 like any other lifetime below zero.
+int64_t parse_expires_in_text (const std::string& text) {
+    try {
+        return seconds_within (static_cast<double> (std::stoll (text)), MAX_EXPIRES_IN_SECONDS);
+    } catch (const std::out_of_range&) {
+        const auto first = text.find_first_not_of (" \t\n\v\f\r");
+        return first != std::string::npos && text[first] == '-' ? 0 : MAX_EXPIRES_IN_SECONDS;
+    } catch (const std::exception&) {
+        // @deliberate: a lifetime we cannot read is reported as the same 0 an
+        // absent one is - "this token states no expiry" - and the refresh
+        // watchdog already treats that as a token it cannot schedule around.
+        return 0;
+    }
+}
+
+// expires_in arrives as a number or a numeric string depending on provider,
+// held to MAX_EXPIRES_IN_SECONDS so the millisecond arithmetic its readers do
+// cannot overflow; absent, unreadable and non-positive are 0 (#3645).
 int64_t parse_expires_in (const nlohmann::json& body) {
-    if (auto it = body.find ("expires_in"); it != body.end ()) {
-        if (it->is_number ()) {
-            return it->get<int64_t> ();
-        }
-        if (it->is_string ()) {
-            try {
-                return std::stoll (it->get<std::string> ());
-            } catch (const std::exception&) {
-                // @deliberate: a lifetime we cannot read is reported as the
-                // same 0 an absent one is - "this token states no expiry" -
-                // and the refresh watchdog already treats that as a token it
-                // cannot schedule around.
-            }
-        }
+    const auto it = body.find ("expires_in");
+    if (it == body.end ()) {
+        return 0;
+    }
+    if (it->is_number ()) {
+        return seconds_within (it->get<double> (), MAX_EXPIRES_IN_SECONDS);
+    }
+    if (it->is_string ()) {
+        return parse_expires_in_text (it->get<std::string> ());
     }
     return 0;
 }
 
 // What `fallbackExpiresIn` asks a token that states no lifetime to be kept for,
 // in seconds, held to MAX_FALLBACK_EXPIRES_IN_SECONDS, or 0 (non-expiring, as
-// before) when it is absent or not a positive number. The comparison is written
-// so NaN falls to 0 and the cast sees only a value in range.
+// before) when it is absent or not a positive number.
 int64_t fallback_expires_in (const nlohmann::json& config) {
     const auto it = config.find ("fallbackExpiresIn");
     if (it == config.end () || !it->is_number ()) {
         return 0;
     }
-    const double seconds = it->get<double> ();
-    if (!(seconds > 0)) {
-        return 0;
-    }
-    if (seconds >= static_cast<double> (MAX_FALLBACK_EXPIRES_IN_SECONDS)) {
-        return MAX_FALLBACK_EXPIRES_IN_SECONDS;
-    }
-    return static_cast<int64_t> (seconds);
+    return seconds_within (it->get<double> (), MAX_FALLBACK_EXPIRES_IN_SECONDS);
 }
 
 struct TokenRequest {
