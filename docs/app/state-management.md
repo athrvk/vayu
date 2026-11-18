@@ -2177,6 +2177,42 @@ UI-only: Which settings category (e.g., "ui") is selected in the sidebar.
 const { selectedCategory, setSelectedCategory } = useSettingsStore();
 ```
 
+#### `modules/logs/logs-store.ts` - The Logs Tab's Lines
+
+UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the controls that choose them, and the paged read and tail that fill them. The tab's mount is the store's lifetime: `start()` on mount, `stop()` on unmount, which ends the tail, drops the lines and ignores anything main pushes afterwards.
+
+**State:**
+```typescript
+{
+  controls: { minLevel, source, category, search },
+  records: LogEntry[],            // oldest first
+  bytes: number,                  // entryBytes' estimate of `records`
+  follow: boolean,
+  cursor: LogCursor | null,       // where "Search older" continues
+  more: boolean,
+  scannedTo: string | null,       // "Searched back to <time>"
+  dropped: number,                // lines the tail left out of a batch
+  detached: boolean,              // the newest lines are not all held
+  status: "idle" | "loading" | "ready" | "error",
+  loadingOlder: boolean,
+  error: string | null,
+  knownCategories: string[],      // the component filter's options
+  generation: number              // bumps when the list is replaced
+}
+```
+
+**Key Methods:**
+```typescript
+const { records, follow, controls, start, stop, setControls, setFollow, loadOlder, jumpTo, reload } =
+  useLogsStore();
+```
+
+**Filters are evaluated in main, never here.** `setControls` rebuilds the filter (`buildLogFilter`, with the search box read by `parseSearchInput` in `modules/logs/parse-search.ts`, a renderer copy of the reader's own that `electron/log-search.conformance.test.ts` holds equal) and, when it differs, restarts the tail with it and replaces the held lines with a fresh read. The tail starts before the read, so a line written while the read answers waits in a buffer and is merged in once, never lost or doubled.
+
+**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB, two bytes per UTF-16 unit of the line as `estimateResponseBytes` counts a body), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
+
+**Every async step checks `loadId` before it writes**, and `stop()` bumps it, so a read that answers after a filter change or after the tab closed lands nowhere. `loadId`, the tail's buffer and the unsubscribe are module variables, not state: nothing renders from them.
+
 #### `lib/graphql/explorer-store.ts` - GraphQL Schema Explorer View
 
 UI-only, in memory: whether the schema explorer pane is open, and per schema
