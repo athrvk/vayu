@@ -38,4 +38,6 @@ export interface AuthFieldsProps {
 	variables?: VariableSupport;
 	/** Forwarded to `OAuth2Form` - see `deferredNames` on `OAuth2FormProps`. */
 	deferredNames?: readonly string[];
+	/** Forwarded to `OAuth2Form` - see `collectionId` on `OAuth2FormProps`. */
+	collectionId?: string | null;
 }

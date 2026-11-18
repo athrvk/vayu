@@ -8,9 +8,9 @@
 /**
  * OAuth2Form - shared editor for an {@link OAuth2Config}. Rendered by the
  * request builder's Auth tab and (via an injected TextInput) the collection
- * auth editor. Non-interactive grants (client credentials, password) post
- * straight to the token endpoint; the Authorization Code grant runs the
- * interactive flow (engine-hosted loopback + PKCE) from the same action.
+ * auth editor. Non-interactive grants (client credentials, password, JWT
+ * bearer) post straight to the token endpoint; the Authorization Code grant runs
+ * the interactive flow (engine-hosted loopback + PKCE) from the same action.
  */
 
 import { useMemo, useState } from "react";
@@ -32,7 +32,9 @@ import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import type { OAuth2Config, OAuth2GrantType, OAuth2ParamRow } from "@/types";
 import { LabelledField, type LabelledControlProps } from "../LabelledField";
+import JwtBearerFields from "./JwtBearerFields";
 import ParamRowsEditor from "./ParamRowsEditor";
+import SecondsInput from "./SecondsInput";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
@@ -40,6 +42,7 @@ const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 	{ value: "client_credentials", label: "Client credentials" },
 	{ value: "password", label: "Password credentials" },
 	{ value: "authorization_code", label: "Authorization code (PKCE)" },
+	{ value: "jwt_bearer", label: "JWT bearer" },
 ];
 
 // A plain-input fallback when the host does not inject a variable-aware input.
@@ -113,6 +116,7 @@ export default function OAuth2Form({
 	resolveString,
 	resolveKey,
 	deferredNames,
+	collectionId,
 	TextInput = PlainTextInput,
 	variables,
 }: OAuth2FormProps) {
@@ -134,6 +138,19 @@ export default function OAuth2Form({
 	const grant = value.grantType;
 	const isAuthCode = grant === "authorization_code";
 	const isPassword = grant === "password";
+	const isJwtBearer = grant === "jwt_bearer";
+
+	// The grant has no client secret, so a stored one is dropped with the field:
+	// hidden, it would still be sent as client authentication beside the assertion.
+	const selectGrant = (next: OAuth2GrantType) => {
+		if (next !== "jwt_bearer") return set("grantType", next);
+		const { clientSecret: _secret, ...rest } = value;
+		onChange({ ...rest, grantType: next });
+	};
+	const setFallbackExpiry = (seconds: number | undefined) => {
+		const { fallbackExpiresIn: _previous, ...rest } = value;
+		onChange(seconds === undefined ? rest : { ...rest, fallbackExpiresIn: seconds });
+	};
 
 	// Config with variables resolved, for the token status/actions. Each field
 	// keeps its own cache entry (see `stableConfigField` above), so the memo is
@@ -146,6 +163,8 @@ export default function OAuth2Form({
 		// An absent optional field stays absent: resolving it would turn every
 		// `undefined` into `""`, and the cache key tells those two apart.
 		const rz = (field: string, s?: string) => (s ? r(field, s) : s);
+		// `privateKey` is not resolved: it is one reference the engine resolves
+		// where the token is acquired, and the spread carries it through as written.
 		return {
 			...value,
 			accessTokenUrl: r("accessTokenUrl", value.accessTokenUrl ?? ""),
@@ -154,6 +173,10 @@ export default function OAuth2Form({
 			username: rz("username", value.username),
 			password: rz("password", value.password),
 			scope: rz("scope", value.scope),
+			subject: rz("subject", value.subject),
+			assertionAudience: rz("assertionAudience", value.assertionAudience),
+			keyId: rz("keyId", value.keyId),
+			assertionClaims: resolveParamRows("assertionClaims", value.assertionClaims, r),
 			audience: rz("audience", value.audience),
 			resource: rz("resource", value.resource),
 			authorizationUrl: rz("authorizationUrl", value.authorizationUrl),
@@ -181,7 +204,7 @@ export default function OAuth2Form({
 	return (
 		<div className="space-y-4">
 			{field(OAUTH2_FIELD_LABELS.grantType, (c) => (
-				<Select value={grant} onValueChange={(g: OAuth2GrantType) => set("grantType", g)}>
+				<Select value={grant} onValueChange={selectGrant}>
 					{/* `w-3xs`, not `w-64`: the trigger holds a fixed grant-type
 					    label ("Authorization Code"), a text measure, and `w-64`
 					    rides `--spacing` - narrower at the Default density than the
@@ -233,24 +256,38 @@ export default function OAuth2Form({
 				)}
 
 			<div className="grid grid-cols-2 gap-4">
-				{field(OAUTH2_FIELD_LABELS.clientId, (c) => (
-					<TextInput
-						{...c}
-						value={value.clientId}
-						onChange={(v) => set("clientId", v)}
-						placeholder="client id or {{var}}"
-					/>
-				))}
-				{field("Client secret", (c) => (
-					<TextInput
-						{...c}
-						value={value.clientSecret ?? ""}
-						onChange={(v) => set("clientSecret", v)}
-						placeholder="client secret or {{var}}"
-						type="password"
-					/>
-				))}
+				{field(
+					OAUTH2_FIELD_LABELS.clientId,
+					(c) => (
+						<TextInput
+							{...c}
+							value={value.clientId}
+							onChange={(v) => set("clientId", v)}
+							placeholder="client id or {{var}}"
+						/>
+					),
+					isJwtBearer ? "The assertion's iss claim." : undefined
+				)}
+				{!isJwtBearer &&
+					field("Client secret", (c) => (
+						<TextInput
+							{...c}
+							value={value.clientSecret ?? ""}
+							onChange={(v) => set("clientSecret", v)}
+							placeholder="client secret or {{var}}"
+							type="password"
+						/>
+					))}
 			</div>
+
+			{isJwtBearer && (
+				<JwtBearerFields
+					value={value}
+					onChange={onChange}
+					TextInput={TextInput}
+					variables={variables}
+				/>
+			)}
 
 			{isPassword && (
 				<div className="grid grid-cols-2 gap-4">
@@ -306,24 +343,25 @@ export default function OAuth2Form({
 				</CollapsibleTrigger>
 				<CollapsibleContent className="pt-4 px-1 pb-1 space-y-4">
 					<div className="grid grid-cols-2 gap-4">
-						{field("Client authentication", (c) => (
-							<Select
-								value={value.credentialsPlacement ?? "basic_auth_header"}
-								onValueChange={(v: "basic_auth_header" | "body") =>
-									set("credentialsPlacement", v)
-								}
-							>
-								<SelectTrigger id={c.id}>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="basic_auth_header">
-										Send as Basic auth header
-									</SelectItem>
-									<SelectItem value="body">Send in body</SelectItem>
-								</SelectContent>
-							</Select>
-						))}
+						{!isJwtBearer &&
+							field("Client authentication", (c) => (
+								<Select
+									value={value.credentialsPlacement ?? "basic_auth_header"}
+									onValueChange={(v: "basic_auth_header" | "body") =>
+										set("credentialsPlacement", v)
+									}
+								>
+									<SelectTrigger id={c.id}>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="basic_auth_header">
+											Send as Basic auth header
+										</SelectItem>
+										<SelectItem value="body">Send in body</SelectItem>
+									</SelectContent>
+								</Select>
+							))}
 						{field("Token placement", (c) => (
 							<Select
 								value={value.tokenPlacement ?? "header"}
@@ -428,6 +466,20 @@ export default function OAuth2Form({
 						sendAs
 					/>
 
+					{field(
+						"Token lifetime if none is stated (seconds)",
+						(c) => (
+							<SecondsInput
+								id={c.id}
+								value={value.fallbackExpiresIn}
+								onChange={setFallbackExpiry}
+								placeholder="never expires"
+								min={1}
+							/>
+						),
+						"How long to keep a token whose response has no expires_in. Empty keeps it until it is replaced."
+					)}
+
 					<div className="flex items-center gap-6">
 						<label className="flex items-center gap-2 text-xs text-muted-foreground">
 							<Switch
@@ -448,7 +500,11 @@ export default function OAuth2Form({
 			</Collapsible>
 
 			<div className="pt-1">
-				<TokenStatusRow resolvedConfig={resolvedConfig} deferredNames={deferredNames} />
+				<TokenStatusRow
+					resolvedConfig={resolvedConfig}
+					deferredNames={deferredNames}
+					collectionId={collectionId}
+				/>
 			</div>
 		</div>
 	);

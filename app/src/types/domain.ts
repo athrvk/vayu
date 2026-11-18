@@ -261,7 +261,7 @@ export interface OAuth2Config {
 	signingAlgorithm?: "RS256" | "ES256";
 	/** `jwt_bearer`: the JWT header's `kid`, omitted when empty. */
 	keyId?: string;
-	/** `jwt_bearer`: the signing key's PEM or a reference to it; exactly one of this and `privateKeyFile`. */
+	/** `jwt_bearer`: exactly one `{{variable}}` naming a secret holding the PEM, resolved only by the engine; exactly one of this and `privateKeyFile`. */
 	privateKey?: string;
 	/** `jwt_bearer`: a key file the engine reads at token time. */
 	privateKeyFile?: string;

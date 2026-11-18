@@ -165,6 +165,7 @@ export default function AuthPanel() {
 					resolveString={resolveString}
 					variables={variables}
 					deferredNames={deferredNames}
+					collectionId={request.collectionId}
 					/*
 					 * Names the fields whose resolved values have to hold still
 					 * across this panel's unmount - Auth is not force-mounted, so

@@ -17,12 +17,17 @@
  * `AUTH_FAILED` path in the request builder and `DesignRunView`. So the renderer
  * relabels on the way out, in one place, rather than each toast site paraphrasing.
  *
- * Only the five fields that actually appear in an engine message are listed.
- * `OAuth2Form` has ~18 fields; registering the other thirteen would add a dozen
- * entries no code path ever reads, which is this codebase's most repeated defect.
+ * Only the eight fields that actually appear in an engine message are listed.
+ * `OAuth2Form` has ~25 fields; registering the rest would add entries no code
+ * path ever reads, which is this codebase's most repeated defect.
  * Each key here has two real readers - the form's own field label and
- * {@link humanizeOAuth2Error} - and three of them also name a missing field in
+ * {@link humanizeOAuth2Error} - and six of them also name a missing field in
  * the token status row.
+ *
+ * `subject` is an ordinary English word, so a provider's own prose that says
+ * "subject" comes out capitalised. That is the price of naming the member the
+ * engine's `subject is required` refusal points at; the provider's sentence is
+ * otherwise untouched.
  */
 
 /**
@@ -35,6 +40,9 @@ export const OAUTH2_FIELD_LABELS = {
 	accessTokenUrl: "Access token URL",
 	callbackUrl: "Callback URL",
 	clientId: "Client ID",
+	subject: "Subject",
+	assertionAudience: "Assertion audience",
+	privateKey: "Private key",
 } as const;
 
 export type OAuth2LabelledField = keyof typeof OAUTH2_FIELD_LABELS;

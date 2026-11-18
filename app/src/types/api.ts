@@ -58,6 +58,14 @@ export interface OAuth2TokenRequest {
 	config: OAuth2Config;
 	force?: boolean;
 	interactive?: OAuth2InteractiveExchange;
+	/**
+	 * The scopes the engine resolves a `jwt_bearer` `privateKey` reference
+	 * against - the active environment and the request's collection. The rest of
+	 * `config` is sent resolved; a request naming neither id carries a key file or
+	 * no `jwt_bearer` grant (#3632).
+	 */
+	environmentId?: string;
+	collectionId?: string;
 }
 
 export interface OAuth2TokenResponse {
