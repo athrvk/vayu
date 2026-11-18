@@ -196,9 +196,20 @@ export function estimateConsoleRowBytes(row: ConsoleRowInput): number {
 		case "step":
 			return textBytes(row.name) + textBytes(row.url);
 		case "send":
-			return textBytes(row.url) + exchangeBytes(row.exchange);
+			return (
+				textBytes(row.url) +
+				textBytes(row.statusText) +
+				textBytes(row.errorMessage) +
+				exchangeBytes(row.exchange)
+			);
 		case "scriptRequest":
-			return textBytes(row.url) + textBytes(row.line) + exchangeBytes(row.exchange);
+			return (
+				textBytes(row.url) +
+				textBytes(row.line) +
+				textBytes(row.statusText) +
+				textBytes(row.errorMessage) +
+				exchangeBytes(row.exchange)
+			);
 	}
 }
 

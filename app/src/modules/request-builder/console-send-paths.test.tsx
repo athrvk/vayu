@@ -220,6 +220,21 @@ describe("the session Console's two send paths", () => {
 		expect(rows[0]).not.toHaveProperty("runId");
 	});
 
+	it("a Send that gets no answer is still listed, with its error", async () => {
+		executeRequest.mockReset().mockRejectedValue(new Error("engine is down"));
+
+		await sendBuffered();
+
+		const rows = useConsoleStore.getState().rows;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			kind: "send",
+			status: 0,
+			errorCode: "ENGINE_ERROR",
+			errorMessage: "engine is down",
+		});
+	});
+
 	it("a finished stream appends its rows, under its run", async () => {
 		streamEnded("run_1");
 		await finalizeStreamRun("run_1", vi.fn());

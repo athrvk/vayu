@@ -636,22 +636,28 @@ export default function RequestBuilder() {
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
-				return withLeftOut(
-					{
-						status: 0,
-						statusText: "Error",
-						headers: {},
-						body: errorMsg,
-						time: 0,
-						size: 0,
-						// Compose runs first, so an engine that is down throws here
-						// before any send - a plain Error from the fetch, not an
-						// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
-						errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
-						errorMessage: errorMsg,
-					},
-					leftOut
-				);
+				const failed: ResponseState = {
+					status: 0,
+					statusText: "Error",
+					headers: {},
+					body: errorMsg,
+					time: 0,
+					size: 0,
+					// Compose runs first, so an engine that is down throws here
+					// before any send - a plain Error from the fetch, not an
+					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
+					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
+					errorMessage: errorMsg,
+				};
+				// A Send that never got an answer is still a Send the Console
+				// lists (#3634), with the request as written: nothing composed.
+				appendSendToConsole({
+					method: request.method,
+					url: request.url,
+					response: failed,
+					requestId: fetchedRequest.id,
+				});
+				return withLeftOut(failed, leftOut);
 			}
 		},
 		[
