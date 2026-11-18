@@ -81,6 +81,13 @@ interface ScenarioRunState {
 	/** A transport failure on the stream; cleared by the next `startRun`. */
 	error: string | null;
 	/**
+	 * The engine's process ended while this window watched the run (#3605), so
+	 * the run ended with it; {@link error} then says so. Stands until the next
+	 * `startRun`. Read by `ScenarioRunView`, whose callout must not promise a
+	 * run that keeps executing.
+	 */
+	endedByEngineStop: boolean;
+	/**
 	 * How the run ended, once this window knows: the engine's completion frame,
 	 * or for a stream that closed without one, the stored report's status.
 	 * Null while it runs and for a stream that dropped mid-run, whose run has
@@ -114,6 +121,12 @@ interface ScenarioRunState {
 	 */
 	streamLost: (runId: string, message: string) => void;
 	/**
+	 * The engine's process ended under the run: {@link streamLost}'s write,
+	 * with {@link endedByEngineStop} raised beside it, since this run does not
+	 * keep executing.
+	 */
+	engineStopped: (runId: string, message: string) => void;
+	/**
 	 * The run ended as `status`, judged against `thresholdValidation`: records
 	 * both and lowers {@link isStreaming} in one write.
 	 */
@@ -132,6 +145,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	plan: null,
 	isStreaming: false,
 	error: null,
+	endedByEngineStop: false,
 	endedAs: null,
 	thresholdValidation: null,
 
@@ -147,6 +161,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 			plan: null,
 			isStreaming: true,
 			error: null,
+			endedByEngineStop: false,
 			endedAs: null,
 			thresholdValidation: null,
 		})),
@@ -177,6 +192,11 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 
 	streamLost: (runId, error) =>
 		set((state) => (state.runId === runId ? { error, isStreaming: false } : state)),
+
+	engineStopped: (runId, error) =>
+		set((state) =>
+			state.runId === runId ? { error, isStreaming: false, endedByEngineStop: true } : state
+		),
 
 	runEnded: (runId, endedAs, thresholdValidation = null) =>
 		set((state) =>

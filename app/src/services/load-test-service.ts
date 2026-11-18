@@ -18,7 +18,12 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";
 import { queryKeys } from "@/queries/keys";
-import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
+import {
+	useDashboardStore,
+	useClientSettingsStore,
+	deriveRunProgress,
+	isDashboardRunLive,
+} from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
@@ -296,16 +301,52 @@ class LoadTestService {
 	}
 
 	/**
+	 * The engine's process ended (the sidecar's `crashed` push, #3605), and
+	 * every run it was executing ended with it. Called by `useEngineLifecycle`.
+	 *
+	 * The watched run is let go of the way a user's Stop lets go of it, plus
+	 * two things only a dead engine needs: the stream is closed, because the
+	 * `EventSource` would otherwise retry the dead port every few seconds for
+	 * the rest of the session, and the run is marked as notified, because the
+	 * engine-lost notification is the one the user gets. Without the latch, a
+	 * `handleClose` already awaiting the report would still post this run's
+	 * own ending when its fetch fails.
+	 *
+	 * The dashboard's run is settled whether or not it is watched: a lost or
+	 * superseded stream left it live with nothing here attached, and its
+	 * engine is gone all the same. Its stored report, once an engine is back,
+	 * is what says how it ended (`setFinalReport`).
+	 *
+	 * Returns whether the dashboard's run was live, so the engine-lost
+	 * notification can say a run ended with the engine.
+	 */
+	handleEngineStopped(): boolean {
+		const runId = this.activeRunId;
+		if (runId) {
+			this.notifiedRunId = runId;
+			this.failProgress(runId);
+			this.releaseRun(runId);
+			sseClient.disconnect();
+		}
+		const { currentRunId, phase, engineStopped } = useDashboardStore.getState();
+		if (!currentRunId) return false;
+		const wasLive = isDashboardRunLive(phase);
+		engineStopped(currentRunId);
+		return wasLive;
+	}
+
+	/**
 	 * Let go of everything this service holds on `runId`'s behalf, and say
 	 * nothing about how the run ended.
 	 *
-	 * The one place that does it, because three paths need it - the user
-	 * stopping the run, another run taking the shared client away (#1417), and
-	 * `startMonitoring` moving on to another load run - and a second copy is a
-	 * release that drifts out of step with the first. What ended the run is the
-	 * caller's to say: `stopMonitoring` has a notification for it and a
-	 * superseded or displaced run has nothing to report, because it has not
-	 * ended at all.
+	 * The one place that does it, because four paths need it - the user
+	 * stopping the run, another run taking the shared client away (#1417),
+	 * `startMonitoring` moving on to another load run, and the engine stopping
+	 * (#3605) - and a second copy is a release that drifts out of step with the
+	 * first. What ended the run is the caller's to say: `stopMonitoring` has a
+	 * notification for it, a superseded or displaced run has nothing to report,
+	 * because it has not ended at all, and an engine stop leaves the telling to
+	 * the engine-lost notification.
 	 *
 	 * `handleClose` keeps a sequence of its own rather than calling this, and
 	 * the differences are the reason: it flushes where this discards, and it

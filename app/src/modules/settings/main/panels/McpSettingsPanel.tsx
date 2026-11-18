@@ -108,6 +108,20 @@ const ENDPOINT_UNKNOWN = "(unavailable - MCP status not loaded)";
  */
 const ENDPOINT_NOT_RUNNING = "(unavailable - the MCP server is not running)";
 
+/**
+ * Shown while the server is still coming up. Withheld for the same reason as
+ * `ENDPOINT_NOT_RUNNING`, but it names no port: nothing has gone wrong, so
+ * there is nothing to say about one (#3579).
+ */
+const ENDPOINT_STARTING = "(unavailable - the MCP server is starting)";
+
+/**
+ * How often the status is re-read while the server is starting. There is no
+ * push channel from main, and the focus re-read is no help to a user who is
+ * already looking at the panel. The poll stops as soon as the status settles.
+ */
+const STARTING_POLL_MS = 500;
+
 /** `host:port` of the endpoint, for naming what is affected. Falls back to the raw text. */
 function endpointHostPort(url: string): string {
 	try {
@@ -117,16 +131,25 @@ function endpointHostPort(url: string): string {
 	}
 }
 
-/** What follows the callout's title; the port conflict has its own title and wording. */
-function notListeningDetail(error: McpStartError | undefined): string {
-	if (!error) return "the port may be in use.";
+/**
+ * What follows the callout's title; the port conflict has its own title and
+ * wording. A listener that went away with no recorded failure has no reason to
+ * give, and guessing one would be the claim this used to make about the port.
+ */
+function notListeningDetail(error: McpStartError | undefined): string | undefined {
+	if (!error) return undefined;
 	if (error.code === "EADDRINUSE") return "Do not connect an agent until it is free, then retry.";
 	return error.message;
 }
 
 /** The tooltip on a disabled Connect button; undefined while it is usable. */
-function connectDisabledReason(enabled: boolean, notListening: boolean): string | undefined {
+function connectDisabledReason(
+	enabled: boolean,
+	starting: boolean,
+	notListening: boolean
+): string | undefined {
 	if (!enabled) return "Enable the MCP server first";
+	if (starting) return "The MCP server is still starting";
 	if (notListening) return "The MCP server isn't running";
 	return undefined;
 }
@@ -422,15 +445,33 @@ export default function McpSettingsPanel() {
 	// Until the status arrives, or while an enabled server is not listening, there
 	// is no endpoint to copy - a placeholder is displayed and every Copy and
 	// Connect is disabled so the URL cannot be pasted or registered anywhere.
+	// `starting` is the quiet half of that: main has no listener and no failure
+	// yet, so nothing is wrong and there is nothing to retry (#3579).
 	const running = status?.running ?? false;
 	const enabled = status?.enabled ?? false;
-	const notListening = enabled && !running;
-	const hasEndpoint = status?.url !== undefined && !notListening;
+	const starting = enabled && !running && (status?.starting ?? false);
+	const notListening = enabled && !running && !starting;
+	const hasEndpoint = status?.url !== undefined && !starting && !notListening;
 	const endpoint = hasEndpoint
 		? status.url
-		: notListening
-			? ENDPOINT_NOT_RUNNING
-			: ENDPOINT_UNKNOWN;
+		: starting
+			? ENDPOINT_STARTING
+			: notListening
+				? ENDPOINT_NOT_RUNNING
+				: ENDPOINT_UNKNOWN;
+
+	// The endpoint comes up on its own, with no event to say so: read the status
+	// again until it settles, either listening or with the reason it failed.
+	useEffect(() => {
+		if (!starting) return;
+		const timer = setInterval(() => {
+			window.electronAPI
+				?.getMcpStatus()
+				.then((s) => mounted.current && setStatus(s))
+				.catch(() => {});
+		}, STARTING_POLL_MS);
+		return () => clearInterval(timer);
+	}, [starting]);
 
 	const hasCorruptCopy = status?.corruptCopy !== undefined;
 
@@ -504,7 +545,11 @@ export default function McpSettingsPanel() {
 			setConnecting(client);
 			try {
 				const res = await window.electronAPI.connectMcpClient(client);
-				if (res.ok) {
+				if (res.ok && res.alreadyConnected) {
+					// "success", not "info": the toast store drops anything below the
+					// user's minimum severity, and a click must always answer.
+					showToast(`Vayu is already connected to ${CLIENT_LABEL[client]}.`, "success");
+				} else if (res.ok) {
 					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
 				} else if (res.reason === "cli-not-found") {
 					showToast(
@@ -645,6 +690,11 @@ export default function McpSettingsPanel() {
 								<CircleSlash className="size-icon-sm mr-1" />
 								Disabled
 							</Badge>
+						) : starting ? (
+							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
+								<Loader2 className="size-icon-sm mr-1 animate-spin" />
+								Starting
+							</Badge>
 						) : running ? (
 							// The `--status-*` family, not the general semantic one: this
 							// says whether a server process is up, which is the same
@@ -685,6 +735,17 @@ export default function McpSettingsPanel() {
 						onChange={(checked) => void toggleEnabled(checked)}
 						disabled={isLoading || !hasElectron || !status}
 					/>
+
+					{/* Still coming up: nothing failed, so no port, no reason and no retry. */}
+					{!isLoading && starting && (
+						<p
+							role="status"
+							className="flex items-center gap-2 text-xs text-muted-foreground"
+						>
+							<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
+							Starting the MCP server…
+						</p>
+					)}
 
 					{/* Enabled but not listening - say why when main knows, and offer a retry. */}
 					{!isLoading && notListening && (
@@ -730,7 +791,11 @@ export default function McpSettingsPanel() {
 								<div className="flex items-center gap-1">
 									{snippet.client && (
 										<DisabledHint
-											reason={connectDisabledReason(enabled, notListening)}
+											reason={connectDisabledReason(
+												enabled,
+												starting,
+												notListening
+											)}
 										>
 											<Button
 												variant="outline"
@@ -739,6 +804,7 @@ export default function McpSettingsPanel() {
 												disabled={
 													!hasElectron ||
 													!enabled ||
+													starting ||
 													notListening ||
 													connecting !== null
 												}

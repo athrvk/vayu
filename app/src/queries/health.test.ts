@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { useHealthQuery, healthPollIntervalMs } from "./health";
 import { engineStatusAfterFailedPoll } from "@/lib/engine-start-window";
-import { useEngineStore, useSaveStore } from "@/stores";
+import { useDashboardStore, useEngineStore, useSaveStore } from "@/stores";
 import { NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
 import type { EngineRecovery } from "@/types/domain";
@@ -69,6 +69,9 @@ beforeEach(() => {
 		engineStatus: "starting",
 		engineError: null,
 		engineStartFailure: null,
+		engineCrash: null,
+		engineCrashAheadOfPoll: false,
+		crashEndedRuns: [],
 		recovery: null,
 		workers: null,
 		engineStartWindow: null,
@@ -636,5 +639,145 @@ describe("useHealthQuery - a start failure the main process reports", () => {
 
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
 		expect(useEngineStore.getState().engineStartFailure).toBeNull();
+	});
+});
+
+/**
+ * The engine-lost notification says when the crash ended a run (#3605), once
+ * and only for the crash that did. The fact is `crashEndedRuns`, written with
+ * the crash by `useEngineLifecycle`: the dashboard's `engineStopped` phase
+ * outlives the crash (it lasts until the report lands, whether or not the
+ * dashboard is mounted to fetch it), so reading it here would repeat the
+ * sentence on a later, unrelated loss.
+ *
+ * Mutation checks: drop the sentence from `engineLostBody` and the two
+ * sentence cases redden; skip `consumeCrashEndedRuns` and the "not twice" case
+ * reddens; read the dashboard's phase instead of the crash's record and the
+ * "later loss" case reddens.
+ */
+describe("useHealthQuery - the engine-lost notification after a crash that ended a run", () => {
+	const CRASH = { code: 139, signal: null, stderrTail: [], error: null };
+	const LOAD_SENTENCE = "The load test that was running stopped with it.";
+
+	function clientWithFastRetries() {
+		return new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+	}
+
+	function wrapperFor(client: QueryClient) {
+		return function Wrapper({ children }: { children: ReactNode }) {
+			return createElement(QueryClientProvider, { client }, children);
+		};
+	}
+
+	async function connected() {
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+		const { result } = renderHook(() => useHealthQuery(), {
+			wrapper: wrapperFor(clientWithFastRetries()),
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
+		return result;
+	}
+
+	async function loseEngine(result: { current: { refetch: () => Promise<unknown> } }) {
+		getHealth.mockImplementation(() => Promise.reject(new Error("socket hang up")));
+		await act(async () => {
+			await result.current.refetch();
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+	}
+
+	const lostBody = () => mockNotifyPost.mock.calls[0]?.[0].body;
+
+	it.each([
+		[["load"], LOAD_SENTENCE],
+		[["collection"], "The collection run that was running stopped with it."],
+	] as const)("adds one sentence for %j", async (ended, sentence) => {
+		const result = await connected();
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, ended));
+
+		await loseEngine(result);
+
+		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+		expect(lostBody()).toBe(`socket hang up. ${sentence}`);
+	});
+
+	it("adds the sentence when the crash lands while the poll that fails is in flight", async () => {
+		const result = await connected();
+		// The poll's answer is held, so the push provably lands between its
+		// question and its verdict.
+		let fail: (error: Error) => void = () => {};
+		getHealth
+			.mockImplementationOnce(
+				() => new Promise((_, reject) => (fail = reject as (error: Error) => void))
+			)
+			.mockImplementation(() => Promise.reject(new Error("socket hang up")));
+		let refetched: Promise<unknown> = Promise.resolve();
+		act(() => {
+			refetched = result.current.refetch();
+		});
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, ["load"]));
+
+		await act(async () => {
+			fail(new Error("socket hang up"));
+			await refetched;
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+
+		expect(lostBody()).toBe(`socket hang up. ${LOAD_SENTENCE}`);
+	});
+
+	it("posts the reason alone when no crash is recorded, and nothing more after a late push", async () => {
+		const result = await connected();
+		await loseEngine(result);
+		expect(lostBody()).toBe("socket hang up");
+
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, ["load"]));
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		// One notification per loss: the sentence does not earn a second.
+		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+	});
+
+	it("posts the reason alone when the crash ended no run", async () => {
+		const result = await connected();
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, []));
+
+		await loseEngine(result);
+
+		expect(lostBody()).toBe("socket hang up");
+	});
+
+	it("does not claim a run a second time for the same crash", async () => {
+		const result = await connected();
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, ["load"]));
+		await loseEngine(result);
+		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+		expect(useEngineStore.getState().crashEndedRuns).toEqual([]);
+
+		// A restart that fails: the engine is lost again from `starting`.
+		mockNotifyPost.mockClear();
+		act(() => useEngineStore.setState({ engineStatus: "starting" }));
+		await act(async () => {
+			await result.current.refetch();
+		});
+		await waitFor(() => expect(mockNotifyPost).toHaveBeenCalledTimes(1));
+
+		expect(lostBody()).toBe("socket hang up");
+	});
+
+	it("does not repeat it for a later loss, with the run's phase still raised", async () => {
+		// The first crash ended a run whose report never landed: the dashboard
+		// still reads `engineStopped`, and an engine came and went since.
+		useDashboardStore.getState().startRun("run_1");
+		useDashboardStore.getState().engineStopped("run_1");
+		const result = await connected();
+		act(() => useEngineStore.getState().setEngineCrash(CRASH, []));
+
+		await loseEngine(result);
+
+		expect(useDashboardStore.getState().phase.phase).toBe("engineStopped");
+		expect(lostBody()).toBe("socket hang up");
 	});
 });

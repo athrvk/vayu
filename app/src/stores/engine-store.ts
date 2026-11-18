@@ -46,6 +46,9 @@ export interface EngineCrash {
 	error: string | null;
 }
 
+/** The kind of run a crash ended: the dashboard's load test, or a streamed collection run. */
+export type CrashEndedRun = "load" | "collection";
+
 interface EngineState {
 	// Engine Connection
 	engineStatus: EngineStatus;
@@ -96,6 +99,21 @@ interface EngineState {
 	 * cannot be what decides.
 	 */
 	engineCrashAheadOfPoll: boolean;
+
+	/**
+	 * The runs the crash in `engineCrash` ended (#3605), for the one sentence of
+	 * the engine-lost notification that says so.
+	 *
+	 * Written with the crash, in the one `setEngineCrash` call, because it is a
+	 * fact about that crash: the dashboard's `engineStopped` phase and the
+	 * scenario store's `endedByEngineStop` outlive it (they last until the run's
+	 * report lands or the next run starts, and the dashboard is not even mounted
+	 * to settle it from another tab), so a later engine loss would find them
+	 * still raised. Replaced by the next crash, emptied by `setEngineCrash(null)`
+	 * and by `consumeCrashEndedRuns`, which the notification calls so the same
+	 * crash is not narrated twice.
+	 */
+	crashEndedRuns: readonly CrashEndedRun[];
 
 	/**
 	 * A restart is in flight. One flag for every surface that offers the action
@@ -162,7 +180,8 @@ interface EngineState {
 	setEngineStatus: (status: EngineStatus) => void;
 	setEngineError: (error: string | null) => void;
 	setEngineStartFailure: (failure: string | null) => void;
-	setEngineCrash: (crash: EngineCrash | null) => void;
+	setEngineCrash: (crash: EngineCrash | null, endedRuns?: readonly CrashEndedRun[]) => void;
+	consumeCrashEndedRuns: () => void;
 	setEngineRestarting: (restarting: boolean) => void;
 	setEngineRecovery: (recovery: EngineRecovery | null) => void;
 	setWorkers: (workers: number | null) => void;
@@ -224,6 +243,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	engineStartFailure: null,
 	engineCrash: null,
 	engineCrashAheadOfPoll: false,
+	crashEndedRuns: [],
 	engineRestarting: false,
 	recovery: null,
 	workers: null,
@@ -237,7 +257,13 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	setEngineStatus: (status) => set({ engineStatus: status, engineCrashAheadOfPoll: false }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineStartFailure: (failure) => set({ engineStartFailure: failure }),
-	setEngineCrash: (crash) => set({ engineCrash: crash, engineCrashAheadOfPoll: crash !== null }),
+	setEngineCrash: (crash, endedRuns = []) =>
+		set({
+			engineCrash: crash,
+			engineCrashAheadOfPoll: crash !== null,
+			crashEndedRuns: crash === null ? [] : endedRuns,
+		}),
+	consumeCrashEndedRuns: () => set({ crashEndedRuns: [] }),
 	setEngineRestarting: (restarting) => set({ engineRestarting: restarting }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 	setWorkers: (workers) => set({ workers }),

@@ -31,7 +31,21 @@ ways; until then the live view stays, with the report fetch's Retry.
   cancelled requests during the drain: it did something, and the verdict line already says not
   judged, #3538), and `running` changes nothing. A report
   fetch that keeps finding the run still running gives up to that same callout rather than
-  to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
+  to the report's Retry, so the pill and Stop stay while the engine generates load. A run whose
+  engine's process ended under it (the sidecar's `crashed` push, #3605) is neither: the store moves
+  it to `engineStopped`, which is not live and has no ending until its stored report lands from
+  the restarted engine, and `LoadTestService.handleEngineStopped` has already let go of the stream,
+  the wake lock and the OS bar without a notification of its own. The notice slot says so ("Vayu's
+  engine stopped while this load test was running, and the test stopped with it", the
+  `EngineStoppedNotice` component) with a **Restart** that is `useEngineRestart`, the Dock's and the
+  Settings banner's one restart, offered only while no engine serves (`useEngineServing`). The
+  header reads the run as neither Running nor ended, with no Stop. **The way out is the stored
+  report:** once an engine serves again, the report-fetch effect that serves `awaitingReport` runs
+  for this phase too (same delay, same capped retry, `setFinalReport` as the exit - the orphaned run
+  settles as failed, with the partial-run banner). It is never routed through `awaitingReport`,
+  which is live and would bring the pill and Stop back. A fetch that spends its cap leaves the
+  notice standing (there is no phase to give up into) and stops asking until an engine comes up
+  again. The report's arrival posts no notification. Reconnect
   and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
   run streams they leave its stream alone, Reconnect opening that run with a toast instead.
   **A run draining its in-flight requests is the engine's word, never the app's** (#3568): every live

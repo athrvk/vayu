@@ -14,7 +14,9 @@
  * while the run does: a polite region re-announces on every change, and a
  * load test's ticks arrive several times a second. A lost stream and the wait
  * for the report are not transitions either; the run is still going, or its
- * ending is about to be said.
+ * ending is about to be said. The engine's process ending under a load test
+ * is one (#3605): the run ended, and nothing says how until a restarted engine
+ * serves its report, so that is said then, as the run's ending.
  *
  * The verdict is the banner's (`reportOutcome`), so the spoken line and the one
  * on screen cannot disagree.
@@ -42,14 +44,16 @@ export interface ScenarioSnapshot {
 /**
  * The dashboard's phase, coarsened to what is said aloud. `unreported` is a run
  * whose stream closed and whose report could not be read: it has ended, and
- * nothing can say how.
+ * nothing can say how. `engineStopped` is a run that ended with its engine's
+ * process, and is not `running`: it must never be heard as one.
  */
-type DashboardStage = "running" | "unreported" | TerminalRunStatus;
+type DashboardStage = "running" | "unreported" | "engineStopped" | TerminalRunStatus;
 
 function dashboardStage(phase: DashboardPhase): DashboardStage | null {
 	if (phase.phase === "idle") return null;
 	const ending = dashboardRunEnding(phase);
 	if (ending) return ending;
+	if (phase.phase === "engineStopped") return "engineStopped";
 	return phase.phase === "reportError" ? "unreported" : "running";
 }
 
@@ -77,6 +81,7 @@ export function dashboardAnnouncement(
 	if (sameRun && stage === dashboardStage(prev.phase)) return null;
 	// Back to running on the same run is a report Retry, not a start.
 	if (stage === "running") return sameRun ? null : `${RUN_TYPE_NAME.load} started`;
+	if (stage === "engineStopped") return `${RUN_TYPE_NAME.load} ended. Vayu's engine stopped`;
 	if (stage === "unreported") {
 		return `${RUN_TYPE_NAME.load} finished. Couldn't load the run report`;
 	}

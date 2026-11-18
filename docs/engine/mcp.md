@@ -25,11 +25,13 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
   sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
   continues without it, and `mcp:status` reports why so Settings can show it:
   another program holding the port is named, and no endpoint is offered while
-  nothing is listening). Only the port is bound at launch (`listener.ts`, which
-  imports no SDK); the SDK, the tool registry and the service are loaded by the
-  first `POST /mcp` that arrives, so a launch no agent connects to never
-  evaluates them - 5-7 MB of the main process at idle, measured on the packaged
-  Windows app.
+  nothing is listening). Until the first start has bound or failed, the status
+  carries `starting: true` and no error, and Settings says "Starting" with no
+  port and no Retry, re-reading the status until it settles (#3579). Only the
+  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the
+  tool registry and the service are loaded by the first `POST /mcp` that
+  arrives, so a launch no agent connects to never evaluates them - 5-7 MB of
+  the main process at idle, measured on the packaged Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
@@ -53,6 +55,17 @@ shim over the extensionless POSIX script VS Code also installs. A `.cmd`/`.bat`
 shim is run through `cmd.exe`, which Node has required since 20.12. If the CLI
 is not installed, or the run fails for any reason, Connect says so and the
 snippet below it is the manual path.
+
+Connect is safe to click again. For Claude Code it first runs `claude mcp get
+vayu` and reads only whether the exact endpoint URL appears in the output: if it
+does, nothing is run and the panel says Vayu is already connected. The URL alone
+decides this, not the scope: a project- or local-scoped entry with the same URL
+counts. If `vayu` is registered with a different URL (the engine moved ports),
+the old entry is removed at user scope and the new one added. That replace is
+remove then add, not atomic: should the add fail, the old entry is already gone
+and the error says the earlier registration was removed. If `get` fails,
+Connect adds as usual. VS Code has no lookup command, so its Connect always
+runs `--add-mcp`.
 
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
@@ -3161,12 +3174,12 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 

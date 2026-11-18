@@ -124,6 +124,10 @@ export type FinishedKind = TerminalRunStatus;
  *   still decides how the run ends (a Stop that raced the run's own verdict
  *   leaves it failed or completed, as History shows it).
  * - `reportError`: the report fetch gave up; Retry returns to `awaitingReport`.
+ * - `engineStopped`: the engine's process ended while the run was live
+ *   (#3605), so the run ended with it. Nothing on this side can say how until
+ *   an engine is back: its stored report, which `setFinalReport` settles as
+ *   `finished` like any other.
  * - `finished`: the report landed, and `kind` is how the run ended.
  */
 export type DashboardPhase =
@@ -132,6 +136,7 @@ export type DashboardPhase =
 	| { phase: "streamLost"; message: string }
 	| { phase: "awaitingReport"; stopped: boolean }
 	| { phase: "reportError"; message: string; stopped: boolean }
+	| { phase: "engineStopped" }
 	| { phase: "finished"; kind: FinishedKind; report: RunReport };
 
 /**
@@ -144,7 +149,8 @@ export type DashboardPhase =
  * live until the report says otherwise, unless the engine confirmed the
  * user's Stop. A failed report fetch is not: the stream had already closed, and
  * holding the builder on a read that cannot answer would lock out every new
- * run until the engine did.
+ * run until the engine did. Nor is a run whose engine stopped: no process is
+ * left to execute it, and a Stop has nobody to reach.
  */
 export function isDashboardRunLive(phase: DashboardPhase): boolean {
 	switch (phase.phase) {
@@ -162,6 +168,8 @@ export function isDashboardRunLive(phase: DashboardPhase): boolean {
  * How the run ended as far as the dashboard knows: the report's kind once it
  * landed, "stopped" from the engine's confirmed Stop before it, and null while
  * neither has happened. Never set while {@link isDashboardRunLive} is true.
+ * Null for `engineStopped` too: the run is over, but only its stored report
+ * can say as what.
  */
 export function dashboardRunEnding(phase: DashboardPhase): FinishedKind | null {
 	if (phase.phase === "finished") return phase.kind;
@@ -325,6 +333,12 @@ interface DashboardState {
 	streamLost: (runId: string, message: string) => void;
 	/** The stream closed; the stored report decides how the run ended. */
 	streamClosed: (runId: string) => void;
+	/**
+	 * The engine's process ended under a live run (#3605). From a live phase
+	 * only: a run already stopped, settled or unreported was not running when
+	 * the engine went.
+	 */
+	engineStopped: (runId: string) => void;
 	setLiveWindowSeconds: (seconds: number | null) => void;
 	setMaxRetainedTicks: (ticks: number) => void;
 	addMetricsBatch: (runId: string, batch: LoadTestMetrics[]) => void;
@@ -340,6 +354,7 @@ interface DashboardState {
 const IDLE: DashboardPhase = { phase: "idle" };
 const STREAMING: DashboardPhase = { phase: "streaming" };
 const AWAITING_LIVE: DashboardPhase = { phase: "awaitingReport", stopped: false };
+const ENGINE_STOPPED: DashboardPhase = { phase: "engineStopped" };
 
 /**
  * Apply `next` to the state when it holds `runId`; otherwise return the state
@@ -465,6 +480,15 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		set((state) =>
 			forRun(state, runId, (s) =>
 				s.phase.phase === "streaming" ? { phase: AWAITING_LIVE } : s
+			)
+		),
+
+	// Not through `awaitingReport`, which is live: the report it waits for is
+	// on an engine that no longer exists.
+	engineStopped: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				isDashboardRunLive(s.phase) ? { phase: ENGINE_STOPPED } : s
 			)
 		),
 

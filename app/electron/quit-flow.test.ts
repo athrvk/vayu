@@ -27,6 +27,7 @@ import {
 	FLUSH_REQUEST_CHANNEL,
 	registerFlushAckIpc,
 	type QuitFlow,
+	type ServicesQuestion,
 } from "./quit-flow";
 import {
 	buildFlushFailurePrompt,
@@ -34,7 +35,12 @@ import {
 	type FlushFailurePrompt,
 	type FlushResult,
 } from "./save-flush";
-import type { IpcLike, StopGesture } from "./service-stop-guard";
+import {
+	createServiceStopGuard,
+	type IpcLike,
+	type ServiceStopPrompt,
+	type StopGesture,
+} from "./service-stop-guard";
 
 const CLEAN: FlushResult = { saved: 1, failed: 0, pending: 0 };
 const FAILED: FlushResult = { saved: 0, failed: 1, pending: 0 };
@@ -63,6 +69,8 @@ function harness(
 	options: {
 		/** What each gesture would stop right now. Default: nothing. */
 		wouldStop?: Partial<Record<StopGesture, boolean>>;
+		/** A real question in place of the `wouldStop` stub; `services` then goes unasked. */
+		question?: ServicesQuestion;
 		hasRenderer?: boolean;
 	} = {}
 ) {
@@ -77,7 +85,7 @@ function harness(
 	const log = vi.fn();
 
 	const flow: QuitFlow = createQuitFlow({
-		services: { wouldStop: (g) => wouldStop[g], confirm: services.ask },
+		services: options.question ?? { wouldStop: (g) => wouldStop[g], confirm: services.ask },
 		requestFlush: (flushId) => {
 			if (!hasRenderer) return false;
 			requests.push(flushId);
@@ -371,6 +379,53 @@ describe("the running-services question", () => {
 		expect(h.flow.phase()).toBe("idle");
 		h.quit();
 		expect(h.services.ask).toHaveBeenCalledTimes(2);
+	});
+});
+
+/*
+ * The flow knows nothing of runs: the guard's `wouldStop` is what says one is
+ * live. These drive the real guard so a run alone is what holds the gesture.
+ */
+describe("a live run and nothing else (#3604)", () => {
+	function withLiveRun() {
+		const dialog = fakeDialog<ServiceStopPrompt>();
+		const guard = createServiceStopGuard({ ask: dialog.ask, platform: "linux" });
+		guard.publishRun({ kind: "load", label: "GET https://api.example.com/orders" });
+		return { dialog, h: harness({ question: guard }) };
+	}
+
+	it("holds the gesture and asks, naming the run", () => {
+		const { dialog, h } = withLiveRun();
+
+		expect(h.quit().through).toBe(false);
+		expect(h.close().through).toBe(false);
+
+		expect(h.flow.phase()).toBe("confirmingServices");
+		expect(dialog.asked).toHaveLength(1);
+		expect(dialog.asked[0].message).toBe("Quit Vayu and stop the load test it is running?");
+	});
+
+	it("Cancel returns to idle with no flush requested", async () => {
+		const { dialog, h } = withLiveRun();
+
+		h.close();
+		dialog.answer(false);
+		await settle();
+
+		expect(h.flow.phase()).toBe("idle");
+		expect(h.requests).toHaveLength(0);
+		h.runDeferred();
+		expect(h.closeAgain).not.toHaveBeenCalled();
+	});
+
+	it("asks nothing of a quit nobody is behind", () => {
+		const { dialog, h } = withLiveRun();
+		h.flow.markQuitUnattended();
+
+		h.quit();
+
+		expect(dialog.ask).not.toHaveBeenCalled();
+		expect(h.flow.phase()).toBe("flushing");
 	});
 });
 

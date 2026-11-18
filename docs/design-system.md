@@ -2134,8 +2134,10 @@ Passed. All 3 budgets met", "Load test stopped", "Load test failed. <reason>",
 that missed a budget says so after its counts ("Collection run failed. 12
 passed, 0 failed. 1 of 2 budgets missed: p99", #3539), so its ending waits for
 the stored report, the only place the budgets are; one that cannot be read is
-still announced, with the counts alone. A lost stream and the wait for the
-report are not announced. The run's progress bar is the
+still announced, with the counts alone. A load test the engine's process ended
+under is announced once, as "Load test ended. Vayu's engine stopped" (#3605),
+and its ending is announced again when the restarted engine's stored report
+lands. A lost stream and the wait for the report are not announced. The run's progress bar is the
 `Progress` primitive ("Run progress"), read on demand; the hero row's fidelity
 gauges (`MiniBar`) are `aria-hidden`, since the percentage above each states
 the same value in words.

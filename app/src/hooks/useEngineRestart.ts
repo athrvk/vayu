@@ -21,6 +21,10 @@
  * click, or the other surface's button, finds it running and does nothing
  * rather than asking the main process again (#3336).
  *
+ * A restart with a run live asks first, before any of the preparation below,
+ * and Cancel leaves everything as it was (#3604). Services alone do not ask: a
+ * toast names what stopped once the engine is back.
+ *
  * Failure is a toast, not a `window.alert`. The alert this replaced blocked the
  * whole renderer on a modal the user could only dismiss, and from the Dock it
  * would interrupt whatever they were doing elsewhere; every other failure in
@@ -37,6 +41,17 @@ import {
 	recordServicesBeforeOutage,
 	reportServicesStoppedByOutage,
 } from "@/lib/services-stopped-by-restart";
+
+/** The restart question on screen, which a second click joins rather than repeats. */
+let pendingConfirmation: Promise<boolean> | null = null;
+
+function confirmRestart(api: NonNullable<Window["electronAPI"]>): Promise<boolean> {
+	if (!api.confirmEngineRestart) return Promise.resolve(true);
+	pendingConfirmation ??= api.confirmEngineRestart().finally(() => {
+		pendingConfirmation = null;
+	});
+	return pendingConfirmation;
+}
 
 export function useEngineRestart(): { restart: () => Promise<void>; isRestarting: boolean } {
 	const isRestarting = useEngineStore((s) => s.engineRestarting);
@@ -60,7 +75,10 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		}
 
 		// Read from the store, not from the render's `isRestarting`: two clicks in
-		// the same frame both see the stale `false` there.
+		// the same frame both see the stale `false` there. Read again after the
+		// question, which both of them waited on.
+		if (useEngineStore.getState().engineRestarting) return;
+		if (!(await confirmRestart(window.electronAPI))) return;
 		if (useEngineStore.getState().engineRestarting) return;
 		useEngineStore.getState().setEngineRestarting(true);
 		try {

@@ -57,6 +57,9 @@ describe("loadRunGateOf", () => {
 		["idle", { phase: "idle" }],
 		["stopped and awaiting its report", { phase: "awaitingReport", stopped: true }],
 		["past a failed report fetch", { phase: "reportError", message: "x", stopped: false }],
+		// #3605. Mutation check: answer true for `engineStopped` in
+		// `isDashboardRunLive` and this row refuses every run until a report lands.
+		["ended by its engine stopping", { phase: "engineStopped" }],
 	])("opens while the dashboard's run is %s", (_name, phase) => {
 		expect(loadRunGateOf(dashboardIn(phase), NO_SCENARIO)).toEqual({ ok: true });
 	});
