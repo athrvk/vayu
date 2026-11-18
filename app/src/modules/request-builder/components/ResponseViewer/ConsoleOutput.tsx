@@ -42,20 +42,23 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
-import type { ConsoleLogEntry } from "@/types";
+import type { ConsoleLogEntry, ScriptRequestRecord } from "@/types";
+import { consoleRows, rowMatches } from "./console/console-rows";
 import { parseConsoleLogs, splitBySource } from "./console/parse-logs";
 import { ScriptError, ScriptLogs } from "./console/ScriptSection";
 
 export interface ConsoleOutputProps {
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
 	logs: Array<ConsoleLogEntry | string>;
+	/** The scripts' `pm.sendRequest` records (#3633), drawn among the lines. */
+	scriptRequests?: ScriptRequestRecord[];
 	errors: {
 		pre?: string;
 		post?: string;
 	};
 }
 
-export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
+export default function ConsoleOutput({ logs, scriptRequests, errors }: ConsoleOutputProps) {
 	const [filter, setFilter] = useState("");
 
 	/*
@@ -66,14 +69,16 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 	 * already scrolled past - which is the same trap as searching a virtualised
 	 * list's DOM. Matching happens on the parsed lines, before the window is
 	 * taken, so a match ten thousand lines down is found without being visited.
+	 * A script request is a row like a line, so the same holds for it.
 	 */
+	const rows = useMemo(
+		() => consoleRows(parseConsoleLogs(logs), scriptRequests),
+		[logs, scriptRequests]
+	);
 	const bySource = useMemo(() => {
-		const parsed = parseConsoleLogs(logs);
 		const needle = filter.trim().toLowerCase();
-		return splitBySource(
-			needle ? parsed.filter((l) => l.message.toLowerCase().includes(needle)) : parsed
-		);
-	}, [logs, filter]);
+		return splitBySource(needle ? rows.filter((row) => rowMatches(row, needle)) : rows);
+	}, [rows, filter]);
 
 	const matched = bySource.pre.length + bySource.test.length;
 	const filtering = filter.trim().length > 0;
@@ -87,7 +92,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 				</div>
 			)}
 
-			{logs.length === 0 ? (
+			{rows.length === 0 ? (
 				<EmptyState variant="inline" title="No console output" />
 			) : (
 				<div className="space-y-3">

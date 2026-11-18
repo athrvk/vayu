@@ -296,7 +296,7 @@ function failureFromTrace(
  * string, which an older row can. Its original text is gone, so compact is
  * the closest honest reconstruction, and `paneBody` indents it for the pane.
  */
-function responseHeadFromTrace(node: NonNullable<StoredTrace["response"]>) {
+export function responseHeadFromTrace(node: NonNullable<StoredTrace["response"]>) {
 	const raw = node.body;
 	const headers = node.headers || {};
 	const decoded =

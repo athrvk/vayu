@@ -160,9 +160,13 @@ function ScenarioStepCard({
 	// What the step's scripts printed and the errors that stopped them, from the
 	// same restored response. Absent on a live row, like the list above.
 	const consoleLogs = response?.consoleLogs ?? [];
+	// The scripts' `pm.sendRequest` records (#3633) are console rows too, and
+	// with the console off they are the only ones.
+	const scriptRequests = response?.scriptRequests;
 	const preScriptError = response?.preScriptError;
 	const postScriptError = response?.postScriptError;
-	const hasConsole = consoleLogs.length > 0 || !!preScriptError || !!postScriptError;
+	const hasConsole =
+		consoleLogs.length > 0 || !!scriptRequests?.length || !!preScriptError || !!postScriptError;
 
 	// The step's own failure text: a test assertion that did not hold, or the
 	// error that stopped the step. A live row has none until its stored row
@@ -357,6 +361,7 @@ function ScenarioStepCard({
 				<div className="max-h-[400px] overflow-auto">
 					<ConsoleOutput
 						logs={consoleLogs}
+						scriptRequests={scriptRequests}
 						errors={{ pre: preScriptError, post: postScriptError }}
 					/>
 				</div>

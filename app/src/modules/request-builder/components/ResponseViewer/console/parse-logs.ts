@@ -9,11 +9,11 @@
  * Normalising the engine's console output into what the panel renders.
  *
  * The engine sends one entry per line carrying the script that wrote it and the
- * `console.*` method that was called - `{source, scope?, level, message}`. Both used to
- * be missing: the source was a `"[pre] "` text prefix, indistinguishable from a
- * script logging that string itself, and the level was discarded at the QuickJS
- * binding, so every line reached this panel looking identical whether the
- * script called `log` or `error`.
+ * `console.*` method that was called - `{source, scope?, level, message,
+ * scriptRequest?}`. Both used to be missing: the source was a `"[pre] "` text
+ * prefix, indistinguishable from a script logging that string itself, and the
+ * level was discarded at the QuickJS binding, so every line reached this panel
+ * looking identical whether the script called `log` or `error`.
  *
  * A bare string is still accepted, because a renderer can be talking to an
  * older engine sidecar. It is decoded the way that engine meant it - the prefix
@@ -31,6 +31,8 @@ export interface ParsedLog {
 	scope?: ElementScope;
 	level: ConsoleLevel;
 	message: string;
+	/** A `pm.sendRequest` summary line's record index (#3633); see `console-rows.ts`. */
+	scriptRequest?: number;
 }
 
 /** What a pre-structured engine prefixed a pre-request line with. */
@@ -55,7 +57,7 @@ function fromLegacyString(log: string): ParsedLog {
 		: { source: "test", level: "log", message: log };
 }
 
-export function parseConsoleLogs(logs: Array<ConsoleLogEntry | string>): ParsedLog[] {
+export function parseConsoleLogs(logs: ReadonlyArray<ConsoleLogEntry | string>): ParsedLog[] {
 	return logs.map((log) =>
 		typeof log === "string"
 			? fromLegacyString(log)
@@ -66,6 +68,9 @@ export function parseConsoleLogs(logs: Array<ConsoleLogEntry | string>): ParsedL
 					// `console.log()` with no argument is a real thing a script does,
 					// and a vanished line is worse than a blank one.
 					message: typeof log.message === "string" ? log.message : "",
+					...(typeof log.scriptRequest === "number" && {
+						scriptRequest: log.scriptRequest,
+					}),
 				}
 	);
 }
@@ -77,7 +82,9 @@ export function parseConsoleLogs(logs: Array<ConsoleLogEntry | string>): ParsedL
  * two filters and the two sections drifting apart is exactly the shape this
  * file exists to prevent.
  */
-export function splitBySource(parsed: ParsedLog[]): Record<LogSource, ParsedLog[]> {
+export function splitBySource<Row extends { source: LogSource }>(
+	parsed: readonly Row[]
+): Record<LogSource, Row[]> {
 	return {
 		pre: parsed.filter((l) => l.source === "pre"),
 		test: parsed.filter((l) => l.source === "test"),

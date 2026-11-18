@@ -262,6 +262,20 @@ describe("a tab count of zero", () => {
 		const trigger = screen.getByRole("tab", { name: /console/i });
 		expect(trigger.querySelector("sup")?.textContent).toBe("2");
 	});
+
+	it("counts a script request once, by its line or on its own (#3633)", () => {
+		// One summary line naming record 0, and record 1 with no line: two rows.
+		const record = { status: 200, request: { method: "GET", url: "https://a.test" } };
+		state.response = {
+			...fullResponse(),
+			consoleLogs: [{ source: "pre", level: "info", message: "summary", scriptRequest: 0 }],
+			scriptRequests: [record, record],
+		};
+		renderViewer();
+
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.querySelector("sup")?.textContent).toBe("2");
+	});
 });
 
 /*

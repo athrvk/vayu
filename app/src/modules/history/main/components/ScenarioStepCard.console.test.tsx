@@ -15,13 +15,15 @@
  * response and the card never drew them, so a `console.warn` that explained a
  * failed step was visible after a single Send and nowhere inside a run. What is
  * pinned is that the response pane's own `ConsoleOutput` renders them, and that
- * a step with nothing to say gains no block.
+ * a step with nothing to say gains no block. A step whose scripts sent requests
+ * (#3633) has something to say even with the console off; drop the records
+ * from `hasConsole` and that case fails.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import ScenarioStepCard from "./ScenarioStepCard";
-import type { ConsoleLogEntry } from "@/types";
+import type { ConsoleLogEntry, ScriptRequestRecord } from "@/types";
 import type { ScenarioStepRow } from "../scenario-steps";
 
 afterEach(cleanup);
@@ -40,6 +42,7 @@ const step = (over: Partial<ScenarioStepRow> = {}): ScenarioStepRow => ({
 const storedWith = (scripts?: {
 	consoleLogs?: ConsoleLogEntry[];
 	postScriptError?: string;
+	scriptRequests?: ScriptRequestRecord[];
 }): ScenarioStepRow["result"] => ({
 	timestamp: 1_700_000_000_000,
 	statusCode: 200,
@@ -87,6 +90,28 @@ describe("ScenarioStepCard console output", () => {
 		);
 
 		expect(screen.getByText("ReferenceError: pet is not defined")).toBeTruthy();
+	});
+
+	it("shows the step's script requests, with the console off too (#3633)", () => {
+		renderExpanded(
+			step({
+				result: storedWith({
+					scriptRequests: [
+						{
+							source: "pre",
+							scope: "collection",
+							status: 201,
+							statusText: "Created",
+							request: { method: "POST", url: "https://auth.example.test/token" },
+						},
+					],
+				}),
+			})
+		);
+
+		const row = screen.getByRole("button", { name: /POST.*auth\.example\.test\/token/ });
+		expect(row).toHaveTextContent("201 Created");
+		expect(screen.queryByText("No console output")).toBeNull();
 	});
 
 	it("draws no console block for a step with no logs and no script error", () => {
