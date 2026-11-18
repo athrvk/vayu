@@ -15,7 +15,7 @@
  */
 
 import { appLogger } from "../app-log.js";
-import { ENGINE_PORT_CANDIDATES, MCP_PORT } from "../constants.js";
+import { ENGINE_PORT_CANDIDATES, MCP_PORT, MCP_PORT_MAX, MCP_PORT_MIN } from "../constants.js";
 import { createJsonStore, type JsonStore } from "../json-store.js";
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./config.js";
 
@@ -98,10 +98,6 @@ export function loadMcpEnabled(): boolean {
 export function saveMcpEnabled(enabled: boolean): void {
 	getStore().set("enabled", enabled);
 }
-
-/** Unprivileged, so binding it never needs elevated rights on Linux or macOS. */
-const MCP_PORT_MIN = 1024;
-const MCP_PORT_MAX = 65535;
 
 /** A value accepted as the MCP port, or why it was refused, in a sentence Settings shows. */
 export type McpPortVerdict = { ok: true; port: number } | { ok: false; message: string };

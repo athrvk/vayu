@@ -116,6 +116,9 @@ export const MCP_HOST = "127.0.0.1";
  * reaches the engine as its `--mcp-port`.
  */
 export const MCP_PORT = 9877;
+/** The range `validateMcpPort` accepts: unprivileged, so binding needs no elevated rights on Linux or macOS. */
+export const MCP_PORT_MIN = 1024;
+export const MCP_PORT_MAX = 65535;
 /**
  * The path the MCP server answers on. Lives here, not in `mcp/http.ts`, because
  * the endpoint URL was previously assembled from a literal `/mcp` in three

@@ -11,9 +11,10 @@
  * The configured port is the main process's: it validates and stores it
  * (`validateMcpPort`) and reports it, with whether it is in force yet, in
  * `mcp:status`. This renders those answers and sends the user's number; it holds
- * no second copy of the verdict. The range and the reserved engine ports are
- * stated below as help text only - a number outside them is still sent, and the
- * refusal that comes back is what the field shows.
+ * no second copy of the verdict. The range and the reserved engine ports
+ * (`mcp-port-copies.ts`) are help text and the input's native bounds only - a
+ * number outside them is still sent, and the refusal that comes back is what
+ * the field shows.
  *
  * The engine learns the port only when it is spawned, so a saved change takes
  * effect after an engine restart. `status.restartRequired` is derived in main
@@ -28,22 +29,8 @@ import { Button, LabelSwap } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import type { McpStatus } from "@/types";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
+import { DEFAULT_MCP_PORT, ENGINE_PORTS_HELP, MCP_PORT_MAX, MCP_PORT_MIN } from "./mcp-port-copies";
 import { NumberSettingRow } from "./SettingControls";
-
-/**
- * Where the port may be set. Help text and the input's native bounds only:
- * `validateMcpPort` in `electron/mcp/store.ts` decides, and renderer and main
- * share no module graph, so a number it would refuse is sent and answered
- * rather than judged here.
- */
-const PORT_MIN = "1024";
-const PORT_MAX = "65535";
-
-/** `MCP_PORT` in `electron/constants.ts`, for the Default line and its Reset. */
-const DEFAULT_PORT = 9877;
-
-const PORT_HELP =
-	"Vayu's engine uses 9876, or one of 9880-9889 if that is taken, so none of those can be used here.";
 
 const RECONNECT_NOTE =
 	"Changing the port changes the endpoint URL, so every agent registered with the old URL has to be connected again.";
@@ -55,6 +42,16 @@ function hostPort(url: string): string {
 	} catch {
 		return url;
 	}
+}
+
+/**
+ * Names the port the server holds only while it holds one: off, or failed to
+ * bind (another program on the port), it is on none, and the URL in the status
+ * is only the port it would take.
+ */
+function restartNoticeText(status: McpStatus): string {
+	if (!status.running) return "The new port takes effect when Vayu's engine restarts.";
+	return `The MCP server stays on ${hostPort(status.url)} until Vayu's engine restarts, then it moves to port ${status.port}.`;
 }
 
 interface RestartNoticeProps {
@@ -105,8 +102,7 @@ function RestartNotice({ status, onRestartSettled }: RestartNoticeProps) {
 				</Button>
 			}
 		>
-			The MCP server stays on {hostPort(status.url)} until Vayu&apos;s engine restarts, then
-			it moves to port {status.port}.
+			{restartNoticeText(status)}
 		</Callout>
 	);
 }
@@ -135,16 +131,16 @@ export function McpPortSection({
 		<div className="space-y-3">
 			<NumberSettingRow
 				label="Port"
-				description={`${PORT_HELP} ${RECONNECT_NOTE}`}
+				description={`${ENGINE_PORTS_HELP} ${RECONNECT_NOTE}`}
 				value={status ? String(status.port) : ""}
 				commit="blur"
 				onCommit={onCommit}
 				onDraftChange={onDraftChange}
-				min={PORT_MIN}
-				max={PORT_MAX}
+				min={String(MCP_PORT_MIN)}
+				max={String(MCP_PORT_MAX)}
 				error={error}
-				defaultValue={String(DEFAULT_PORT)}
-				onResetToDefault={() => onCommit(String(DEFAULT_PORT))}
+				defaultValue={String(DEFAULT_MCP_PORT)}
+				onResetToDefault={() => onCommit(String(DEFAULT_MCP_PORT))}
 				disabled={disabled || !status}
 			/>
 

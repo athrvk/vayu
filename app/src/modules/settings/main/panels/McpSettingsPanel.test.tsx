@@ -1056,6 +1056,33 @@ describe("McpSettingsPanel port restart", () => {
 		expect(screen.getByRole("button", { name: /restart engine/i })).toBeEnabled();
 	});
 
+	// The status's URL names the port the server would take, which it does not
+	// hold while it is off or another program holds that port. Mutation check:
+	// drop the `running` branch of `restartNoticeText` and both cases red.
+	it.each([
+		[
+			"another program holds its port",
+			{
+				running: false,
+				error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
+			},
+		],
+		["it is switched off", { running: false, enabled: false }],
+	] as const)("names no port the server stays on when %s", async (_name, state) => {
+		getMcpStatus.mockResolvedValue({ ...PENDING, ...state });
+
+		await renderPanel();
+
+		expect(screen.getByText(/restart needed/i)).toBeInTheDocument();
+		expect(
+			screen.getByText("The new port takes effect when Vayu's engine restarts.", {
+				exact: false,
+			})
+		).toBeInTheDocument();
+		expect(screen.queryByText(/stays on/i)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /restart engine/i })).toBeEnabled();
+	});
+
 	it("offers no restart when the configured port is the one in force", async () => {
 		await renderPanel();
 

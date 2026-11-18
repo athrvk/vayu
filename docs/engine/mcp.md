@@ -3355,11 +3355,16 @@ warning above the cards gives the copy's full path.
 The Connection card's **Port** field (`McpPortSection.tsx`) commits on blur
 through `mcp:setPort`. The renderer judges nothing: it sends what was typed and
 shows the refusal `validateMcpPort` answers with, stating the range and the
-reserved engine ports only as help text. The field shows the configured port
-from `mcp:status`, while the endpoint and every snippet keep the port in force
-until the engine restarts. A `restartRequired` status adds a notice with the
-engine restart (`useEngineRestart`, the action the Dock and the engine settings
-banner use), after which the panel re-reads the status to show the new URL, and
+reserved engine ports only as help text. Those, and the default its Reset
+sends, are the renderer's copies in `mcp-port-copies.ts`, which
+`port-copies.conformance.test.ts` holds to the main process's constants. The
+field shows the configured port from `mcp:status`, while the endpoint and every
+snippet keep the port in force until the engine restarts. A `restartRequired`
+status adds a notice with the engine restart (`useEngineRestart`, the action
+the Dock and the engine settings banner use), after which the panel re-reads
+the status to show the new URL. The notice names the address the server stays
+on only while it is running there; off, or with its port held by another
+program, it says the new port takes effect when the engine restarts.
 `storedPortError` is shown as written. The engine store's pending-restart flag
 is not set from here: `restartRequired` is derived in the main process and
 survives a reload, and that flag would add a second banner on the engine
