@@ -15,8 +15,8 @@ everything.
   rule that genuinely cannot be met is suppressed on the one line, with the
   reason in a comment.
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`.
-- Feature-organized: `app/src/modules/<feature>/` (collections, dashboard,
-  history, inbox, logs, mock-server, palette, request-builder, services, settings, trash,
+- Feature-organized: `app/src/modules/<feature>/` (collections, console,
+  dashboard, history, inbox, logs, mock-server, palette, request-builder, services, settings, trash,
   variables, welcome); shared shell and primitives in `app/src/components/`
   (layout, shared, ui). See `docs/app/COMPONENTS.md`.
 - **Import holds no parser** (#877). `app/src/services/importers/` is the batch

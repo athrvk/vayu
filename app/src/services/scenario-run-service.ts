@@ -42,6 +42,8 @@ import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
 import { isRunTerminal } from "@/lib/run-status";
 import { stepOutcomeLine } from "@/modules/history/main/scenario-steps";
+import { stepConsoleRow } from "@/modules/console/step-row";
+import { useConsoleStore } from "@/stores/console-store";
 import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 
 /** The three ways a collection run ends, as the user hears about them (#1358, #3606). */
@@ -102,6 +104,9 @@ class ScenarioRunService {
 	private createStepBatcher(runId: string): ThrottledBatcher<ScenarioStepEvent> {
 		return createThrottledBatcher<ScenarioStepEvent>((batch) => {
 			useScenarioRunStore.getState().addSteps(runId, batch);
+			// One Console row per step frame (#3634), on the same commit: the
+			// ring skips a frame it already holds, so a replayed batch adds none.
+			useConsoleStore.getState().append(batch.map((step) => stepConsoleRow(runId, step)));
 			// The OS indicator rides the commit rather than the event, the way
 			// `LoadTestService` rides its flush: this is already the cadence the
 			// run tab repaints at, and a taskbar has no use for a finer one.

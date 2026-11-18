@@ -1237,6 +1237,15 @@ The bottom panel's Logs tab (#3635): the files under `<data-dir>/logs/` read thr
 
 → `LogsTab.test.tsx`, `logs-store.test.ts`, `parse-search.test.ts`, `electron/log-search.conformance.test.ts`.
 
+## Console (`modules/console/`)
+
+The session Console (#3634): everything this window sent, newest last. Today the module holds the data layer; the bottom panel's tab is still to come.
+
+- `console-rows.ts` - what the ring is handed. `sendConsoleRows` (through `appendSendToConsole`) is the one builder both Send completions call, the buffered `handleExecute` and the streamed `finalizeStreamRun`; it orders a Send's rows (pre-request lines and script requests, the Send, post-response) with the response pane's own `consoleRows` and masks the Send row before it is stored (`maskSensitiveHeaders`, `maskUrlCredentials`, the response's `authHeaders` / `authQueryParam`). `step-row.ts`'s `stepConsoleRow` is a collection-run `step` frame's row, appended by `scenario-run-service.ts`; it is a file of its own so the service, which `@/queries` reaches through `@/services`, does not import the response viewer.
+- The rows, their bounds and the cut live in `stores/console-store.ts`; see [state-management](state-management.md#console-storets---the-session-consoles-rows).
+
+→ `console-rows.test.ts`, `request-builder/console-send-paths.test.tsx`, `stores/console-store.test.ts`.
+
 ## Welcome (`modules/welcome/`)
 
 Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.

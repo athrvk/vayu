@@ -82,6 +82,7 @@ import {
 } from "./utils/elements-parts";
 import { scenarioOnlyElements } from "./components/LoadTestConfigDialog/scenario-only";
 import { buildComposeBody, withLeftOut } from "./utils/compose-body";
+import { appendSendToConsole } from "@/modules/console";
 import {
 	disabledDefaults,
 	responseFromExecuteResult,
@@ -621,7 +622,17 @@ export default function RequestBuilder() {
 				}
 
 				// Shared with the History run view's send path - see execute-mapping.ts
-				return withLeftOut(responseFromExecuteResult(result), leftOut);
+				const response = responseFromExecuteResult(result);
+				// A session send, so the Console lists it (#3634); a History
+				// replay maps its answer without this. The composed method and
+				// URL are what was sent: the answer does not restate them.
+				appendSendToConsole({
+					method: composed.method,
+					url: composed.url,
+					response,
+					requestId: fetchedRequest.id,
+				});
+				return withLeftOut(response, leftOut);
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);

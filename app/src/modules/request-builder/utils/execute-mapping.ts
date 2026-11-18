@@ -278,6 +278,22 @@ export function paneBody(bodyRaw: string): string {
 }
 
 /**
+ * What a send's auth wrote, as `ResponseState` carries it: the live body's
+ * top-level keys or the stored trace's `request` node, which one engine
+ * function writes. Each key stays absent when there is no name, so the two
+ * funnels build the same state; an empty list or string is no name.
+ */
+export function authProvenance(
+	source: Pick<SanityResult, "authHeaders" | "authQueryParam">
+): Pick<ResponseState, "authHeaders" | "authQueryParam"> {
+	return {
+		...(Array.isArray(source.authHeaders) &&
+			source.authHeaders.length > 0 && { authHeaders: source.authHeaders }),
+		...(source.authQueryParam && { authQueryParam: source.authQueryParam }),
+	};
+}
+
+/**
  * Map an engine execute result onto the response pane's state.
  *
  * Two subtleties worth keeping:
@@ -346,6 +362,8 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// keeps a producer's `""` from drawing an empty banner, so this funnel and
 		// the restored one agree whatever they are handed (issue #2474).
 		authNotice: result.authNotice || undefined,
+		// Absent when auth wrote none, on both funnels (`sentSide` reads the trace's).
+		...authProvenance(result),
 		// Always present on a live body, `[]` when empty (issue #3307); the stored
 		// trace writes the key only when non-empty, so both funnels read it through
 		// `receivedWarnings`.

@@ -40,6 +40,7 @@ import { useExecutionEventsStore, type FinalizationClaim } from "@/stores/execut
 import type { Run } from "@/types";
 import type { ResponseState } from "../types";
 import { responseFromRunResult } from "../utils/restore-response";
+import { appendSendToConsole } from "@/modules/console";
 
 /** Where a finalized run's response goes: the response store, and the pane if it is showing. */
 export type LandStreamResponse = (requestId: string, response: ResponseState) => void;
@@ -64,7 +65,19 @@ export async function finalizeStreamRun(runId: string, land: LandStreamResponse)
 	if (!claim) return;
 	try {
 		const report = await apiService.getRunReport(runId);
-		const stored = responseFromRunResult(report?.results?.[0], runId);
+		const result = report?.results?.[0];
+		const stored = responseFromRunResult(result, runId);
+		// Before the overtaken skip: a newer Send owns the pane, but this one was
+		// still sent, and the claim above keeps it to one append per run.
+		if (stored) {
+			appendSendToConsole({
+				method: result?.trace?.request?.method ?? "",
+				url: result?.trace?.request?.url ?? "",
+				response: stored,
+				requestId: claim.requestId,
+				runId,
+			});
+		}
 		// A newer send of this request owns its response now.
 		const { sendCounts } = useExecutionEventsStore.getState();
 		const overtaken = (sendCounts[claim.requestId] ?? 0) !== claim.sends;

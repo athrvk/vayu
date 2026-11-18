@@ -24,7 +24,7 @@ import { buildRawRequest } from "@/components/shared/response-viewer";
 import { receivedWarnings } from "@/lib/exchange-warnings";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
-import { paneBody } from "./execute-mapping";
+import { authProvenance, paneBody } from "./execute-mapping";
 import { decodeResponseBody, heldBodySize } from "./response-bytes";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
@@ -213,6 +213,7 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>, answered: boolea
 		// A property of what was sent, so it lives here and reaches the failed
 		// exchange too (issue #2474).
 		authNotice: request.authNotice || undefined,
+		...authProvenance(request),
 		// Only the engine's own frame is parsed, and only for an exchange that was
 		// answered: the fallback below is fabricated, and a failed send's frame may
 		// be too, one that kept the server's headers included - the live funnel

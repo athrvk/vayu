@@ -1303,6 +1303,75 @@ bodies holds fewer.
 
 **Non-persisted** (responses are reloadable from backend).
 
+#### `console-store.ts` - The Session Console's Rows
+
+Everything this window sent, newest last (#3634): each Send from a request tab,
+the console lines and `pm.sendRequest` calls its scripts made around it, and
+each collection-run step. A row is a discriminated union on `kind`: `send`,
+`scriptRequest`, `line` and `step`.
+
+**State:**
+```typescript
+{
+  rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and its append time `at`
+  retainedBytes: number,     // estimateConsoleRowBytes summed over rows
+  evictedCount: number,      // rows the bounds dropped since the last clear
+  runKeys: Set<string>,      // run identity of each step row and streamed Send row held
+  nextId: number
+}
+```
+
+**Key Methods:**
+```typescript
+useConsoleStore.getState().append(rows); // in order, then evicts past the bounds
+useConsoleStore.getState().clear();      // empties the ring; History is untouched
+const rows = useConsoleStore(selectConsoleRows);
+const dropped = useConsoleStore(selectConsoleEvictedCount);
+```
+
+**Who appends.** `modules/console/console-rows.ts` builds every row the ring is
+handed. `sendConsoleRows` is the one builder both Send completions call: the
+buffered Send in `request-builder/index.tsx` (`handleExecute`, after
+`responseFromExecuteResult`) and the streamed Send in
+`context/stream-finalization.ts` (`finalizeStreamRun`, before its overtaken
+skip, so a stream a newer Send overtook is still listed). A Send's rows run in
+execution order: the pre-request script's lines and requests, the Send, then
+the post-response script's, placed by the response pane's own `consoleRows`. A
+History replay maps its answer through the same funnel but appends nothing: it
+is not a session send. `scenario-run-service.ts` appends one `step` row per
+`step` frame on the batcher's commit; the frame is constant-size by rule, so a
+step's exchange, lines and script requests are read from its stored row by
+`runId`, `iteration` and `stepIndex` when it is expanded.
+
+**Masked before it is stored.** A Send row is built from the live response, so
+`console-rows.ts` masks it on the way in: header values by
+`maskSensitiveHeaders` (`lib/sensitive-headers.ts`, the shared list plus the
+response's `authHeaders`), the URL by `maskUrlCredentials`
+(`lib/url-credentials.ts`: the userinfo password dropped, a credential query or
+fragment value read `<redacted>`, with `authQueryParam` as an extra name; the
+engine's names, pinned by `url-credentials.conformance.test.ts`). Script
+requests arrive masked by the engine (#3633) and a step's URL is the engine's
+masked one, so both are kept as written. Bodies are not judged.
+
+**Bounded twice, newest kept.** `CONSOLE_MAX_ROWS` (5,000) and
+`CONSOLE_MAX_BYTES` (32 MiB) of retained text, whichever is reached first,
+oldest out first; the row just appended is never the victim, even when it alone
+is over the budget. Text is measured as `estimateResponseBytes` measures a
+response, two bytes per UTF-16 code unit, over every string a row holds (URL,
+message, header names and values, bodies). A body kept on a row is cut at
+`CONSOLE_BODY_MAX_CHARS` (256 Ki code units, 256 KiB of ASCII text), never
+inside a surrogate pair, and flagged `cut`; the store applies the cut, so no
+writer can store more. `evictedCount` is what lets the list say once that
+older rows were dropped.
+
+**Once per run.** A row with a run identity (a step's run, iteration and
+position; a streamed Send's run) is appended once: a replayed frame or a second
+finalisation of the same run adds nothing while the first is still held. The
+finalisation claim in `execution-events-store` already keeps a stream to one
+append; the key is the ring's own guarantee.
+
+**Non-persisted.** A reload or a quit empties it; History is what persists.
+
 #### `tab-selection-store.ts` - Active Sub-Tab And Open Element Rows Per Entity
 
 Four independent maps remembering per entity id which sub-tab is showing (the

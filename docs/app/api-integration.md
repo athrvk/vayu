@@ -1951,6 +1951,7 @@ replay puts the run's recorded list back on its seeded rows.
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
   // authNotice: "auth mode 'ntlm' is not executed by Vayu; ..."  (absent here)
+  // authHeaders: ["X-Api-Key"], authQueryParam: "access_token"  (absent here)
   warnings: [],  // [{ code: "cookie_not_sent", message: "..." }, ...]
   clientCertificate: "",
   bodyCapped: false,
@@ -2070,6 +2071,17 @@ both set `ResponseState.authNotice` (an empty string reads as absent), held
 together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
 warning `Callout` between the status band and the tabs, so it shows on every
 tab and on a 401 from the target, which is the response it explains.
+
+`authHeaders` and `authQueryParam` name what the request's auth wrote (#1845):
+the header names an API-key block filled, and the raw name of the query
+parameter an API key or OAuth 2.0 token was placed in. Each is **absent** when
+auth wrote none of that kind, at the top level of the live body and on
+`trace.request` in the stored trace, and their values stay raw beside them.
+Both funnels set `ResponseState.authHeaders` / `authQueryParam` through
+`authProvenance` (an empty list or string reads as absent), held together by
+`auth-provenance-funnels.test.ts`. Their one reader is the session Console's row
+builder (`modules/console/console-rows.ts`, #3634), which masks the values under
+these names before a Send's row is stored.
 
 `warnings` lists what the engine did to a design send that the response does not
 show ([#3307](https://github.com/athrvk/vayu/issues/3307)), each as

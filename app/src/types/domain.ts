@@ -2789,6 +2789,14 @@ export interface SanityResult extends HttpResponse {
 	postScriptError?: string;
 	/** Every `pm.sendRequest` the scripts made, pre before test (#3633). */
 	scriptRequests?: ScriptRequestRecord[];
+	/**
+	 * The header names and the query parameter the auth block wrote, each
+	 * absent when it wrote none (`record_auth_provenance`, #1845), the live
+	 * spelling of `RunResultTrace.request.authHeaders`. The session Console
+	 * masks the values under these names (#3634).
+	 */
+	authHeaders?: string[];
+	authQueryParam?: string;
 	error?: string;
 	/**
 	 * What checking this response against its declared schema found (issue
