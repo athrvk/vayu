@@ -15584,6 +15584,61 @@ describe("OAuth 2.0 token tools", () => {
 		expect(client.fetchOAuth2Token).not.toHaveBeenCalled();
 	});
 
+	// The tool names no scope, so a `{{variable}}` privateKey is the engine's 400;
+	// a jwt_bearer config here names its key in `privateKeyFile`. This layer
+	// forwards the whole block untouched and keeps the same two gates.
+	describe("a jwt_bearer config", () => {
+		const jwtConfig = {
+			grantType: "jwt_bearer",
+			accessTokenUrl: "https://id.example.com/oauth/token",
+			clientId: "client_a",
+			subject: "svc@example.com",
+			assertionAudience: "https://id.example.com/",
+			assertionClaims: [{ key: "tenant", value: "t1" }],
+			signingAlgorithm: "ES256",
+			keyId: "k1",
+			privateKeyFile: "/keys/sign.pem",
+			fallbackExpiresIn: 300,
+		};
+
+		test("reaches the engine whole, privateKeyFile included", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"fetch_oauth2_token",
+				{ config: jwtConfig },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			expect((client.fetchOAuth2Token as ReturnType<typeof vi.fn>).mock.calls[0][0]).toEqual({
+				config: jwtConfig,
+			});
+			expect(firstText(res)).not.toContain(OAUTH2_TOKEN_RECORD.accessToken);
+		});
+
+		test("is still held to the allowlist on its token endpoint", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"fetch_oauth2_token",
+				{ config: jwtConfig },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/accessTokenUrl/);
+			expect(client.fetchOAuth2Token).not.toHaveBeenCalled();
+		});
+
+		test("does not let authorization_code through on the same shape", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"fetch_oauth2_token",
+				{ config: { ...jwtConfig, grantType: "authorization_code" } },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBe(true);
+			expect(client.fetchOAuth2Token).not.toHaveBeenCalled();
+		});
+	});
+
 	test("the token endpoint is gated by the allowlist, and so is a different refresh host", async () => {
 		const blocked = fakeClient();
 		const off = await dispatchTool("fetch_oauth2_token", { config }, ctxWith(blocked));
@@ -17572,6 +17627,62 @@ describe("secret withholding", () => {
 		const client = fakeClient({ getRequest: vi.fn().mockResolvedValue(REQUESTS[0]) });
 		const { body } = await read("get_request", client, REVEAL, { requestId: "req_1" });
 		expect(body).toEqual(REQUESTS[0]);
+	});
+
+	// A jwt_bearer key is a credential like `clientSecret`: only a lone
+	// `{{variable}}` is shown (it names where the key lives without being it), a
+	// PEM typed into the config is withheld, and the file's path is not a secret.
+	describe("a jwt_bearer config read", () => {
+		const PEM = "-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----";
+		const jwtRow = (key: Record<string, unknown>) => ({
+			id: "req_jwt",
+			name: "Assertion",
+			auth: {
+				mode: "oauth2",
+				config: {
+					grantType: "jwt_bearer",
+					accessTokenUrl: "https://auth.test/token",
+					clientId: "app",
+					subject: "svc@example.com",
+					assertionAudience: "https://auth.test/",
+					signingAlgorithm: "RS256",
+					...key,
+				},
+			},
+		});
+		const readJwt = (key: Record<string, unknown>) =>
+			read(
+				"get_request",
+				fakeClient({ getRequest: vi.fn().mockResolvedValue(jwtRow(key)) }),
+				undefined,
+				{ requestId: "req_jwt" }
+			);
+
+		test("shows a privateKey that is one variable reference", async () => {
+			const { body } = await readJwt({ privateKey: "{{signingKey}}" });
+			expect(body.auth.config.privateKey).toBe("{{signingKey}}");
+			expect(body.auth.config).not.toHaveProperty("privateKeyWithheld");
+		});
+
+		test("withholds a privateKey that holds the key itself", async () => {
+			const { text, body } = await readJwt({ privateKey: PEM });
+			expect(text).not.toContain("MIIEvQ");
+			expect(body.auth.config.privateKeyWithheld).toBe(true);
+			expect(body.auth.config).not.toHaveProperty("privateKey");
+		});
+
+		test("withholds a reference with text around it, which is not one", async () => {
+			const { text, body } = await readJwt({ privateKey: "{{signingKey}}\n" + PEM });
+			expect(text).not.toContain("MIIEvQ");
+			expect(body.auth.config.privateKeyWithheld).toBe(true);
+		});
+
+		test("shows a privateKeyFile path and the claims beside it", async () => {
+			const { body } = await readJwt({ privateKeyFile: "/keys/sign.pem" });
+			expect(body.auth.config.privateKeyFile).toBe("/keys/sign.pem");
+			expect(body.auth.config.subject).toBe("svc@example.com");
+			expect(body.auth.config.signingAlgorithm).toBe("RS256");
+		});
 	});
 
 	test("get_request answers an unknown id as an error naming the id", async () => {

@@ -412,7 +412,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_engine_config` | write    | `GET /config` (reveal off, a batch naming a key ending in `url`) + `POST /config` | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole; with reveal off a `proxyUrl` (or `proxySystemUrl`) equal to the read's credential-stripped value is written as the stored value, with a caveat line, so its `user:password` stays (#3549); any other value is written as given. `/config` has no `If-Match`, so that read and the write are not one conditioned step |
 | `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist (also held by the engine, `targetPolicy`) + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target; their column names, the union across every row, go to `POST /compose` as `dataColumns`, so a bare `{{email}}` is bound from the row rather than answered by a same-named environment variable, #2956) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets (the `maxAssertionFailureRatePct` check judges the worse of the exact inline and the sampled `pm.test` populations and names both, #2892; `streamTimeToFirstEventP95Ms` and `streamEventsPerSecondMin` judge a streaming run's `stream` section and are not evaluated, so failed, on any other run, #3234) and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | - (a load test, a collection run or a streaming send; a collection run's result has no `summary` when its worker has not stored one within the 5 s settle budget - read `get_run_report` then, #2822) |
-| `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
+| `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `client_credentials`, `password` and `jwt_bearer` only, `authorization_code` refused before the call; a `jwt_bearer` config names its key in `privateKeyFile`, a `{{variable}}` `privateKey` being the engine's `400` here; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
 | `clear_oauth2_token`   | write    | `DELETE /oauth2/token?key=`                  | write toggle; idempotent - `deleted: false` when nothing was cached |
 | `start_mock_issuer`    | execute  | `POST /mock-issuer/start`                    | - (loopback-only listener, so no allowlist entry applies); limits are the engine's - 31-day expiry, 60s `slowMs`, 32 clients, 8 concurrent issuers |
@@ -1286,6 +1286,26 @@ Notes:
   authorize, and the entry that lands there is the one these tools then read.
   The allowlist gate covers `refreshTokenUrl` as well as `accessTokenUrl` - a
   gate that read one of two URLs is a gate a config can walk around.
+  Three grants are fetchable: `client_credentials`, `password` and `jwt_bearer`
+  (RFC 7523, #3632), whose config the schema passes through whole like any
+  other, so nothing about the grant is enumerated here. A `jwt_bearer` config
+  carries `subject`, `assertionAudience`, `assertionClaims`, `signingAlgorithm`,
+  `keyId` and its key, and the **key is where a call differs from a send**. The
+  app writes it as one `{{variable}}` reference (`privateKey`), which the engine
+  resolves against the scopes a request names; this tool names no
+  `environmentId` or `collectionId`, so a config copied out of `get_request`
+  with a `privateKey` reference is the engine's `400` `oauth2_invalid_config`,
+  not a token. Two ways forward: name the key in `privateKeyFile` (a path read
+  through the engine's file-trust rule, so it must have been picked in Vayu or
+  lie under an allowed folder, and the config then carries a path rather than
+  a secret), or skip the tool and `run_request` the saved request, which
+  composes the reference against its own environment and collection and
+  acquires the token as part of the send. The cache key's fourth slot is the
+  grant's identity: the username for `password`, the `subject` for `jwt_bearer`.
+  A read of a saved `jwt_bearer` config shows a `privateKey` that is one
+  reference as written, since it names where the key lives without being it,
+  and withholds any other value as `privateKeyWithheld`; `privateKeyFile` is a
+  path and is shown.
 - **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
   own tokens: `start_mock_issuer` stands up a
   [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
