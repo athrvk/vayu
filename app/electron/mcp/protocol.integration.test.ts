@@ -1160,6 +1160,88 @@ describe("resources", () => {
 		await server.close();
 	});
 
+	describe("with the engine unreachable (#3577)", () => {
+		const down = () => new TypeError("fetch failed");
+
+		it("lists the static resources and no run reports, and does not fail the list", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					listRuns: vi.fn().mockRejectedValue(down()),
+				}),
+			});
+			const { resources } = await client.listResources();
+			const uris = resources.map((r) => r.uri);
+			expect(uris).toContain("vayu://runs");
+			expect(uris).toContain("vayu://scripting/types");
+			expect(uris.filter((uri) => uri.startsWith("vayu://run/"))).toEqual([]);
+			await server.close();
+		});
+
+		it("still fails the list for an engine failure that is not an outage", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					listRuns: vi
+						.fn()
+						.mockRejectedValue(new EngineRequestError("GET /runs failed", 500, "boom")),
+				}),
+			});
+			await expect(client.listResources()).rejects.toThrow(/Engine error \(500\)/);
+			await server.close();
+		});
+
+		it("leads a read with the engine-unreachable sentence, not a bare fetch failure", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					getScriptTypeDefinitions: vi.fn().mockRejectedValue(down()),
+				}),
+			});
+			const read = client.readResource({ uri: "vayu://scripting/types" });
+			await expect(read).rejects.toThrow(
+				/^.*Could not reach the Vayu engine\. The Vayu app is open/
+			);
+			await server.close();
+		});
+
+		it("leads a templated read and a prompt the same way", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({
+					getRunReport: vi.fn().mockRejectedValue(down()),
+				}),
+			});
+			await expect(client.readResource({ uri: "vayu://run/run_1/report" })).rejects.toThrow(
+				/Could not reach the Vayu engine\./
+			);
+			await expect(
+				client.getPrompt({ name: "summarize_run", arguments: { runId: "run_1" } })
+			).rejects.toThrow(/Could not reach the Vayu engine\./);
+			await server.close();
+		});
+
+		it("words a failed run-id completion the same way", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({ listRuns: vi.fn().mockRejectedValue(down()) }),
+			});
+			await expect(
+				client.complete({
+					ref: { type: "ref/resource", uri: RUN_REPORT_RESOURCE.uriTemplate },
+					argument: { name: "runId", value: "run" },
+				})
+			).rejects.toThrow(/Could not reach the Vayu engine\./);
+			await server.close();
+		});
+
+		it("does not wrap the outage-led masking failure a second time", async () => {
+			const { client, server } = await connectClient({
+				client: fakeClient({ getGlobals: vi.fn().mockRejectedValue(down()) }),
+			});
+			const err = await client.readResource({ uri: "vayu://runs" }).catch((e: Error) => e);
+			const message = (err as Error).message;
+			expect(message.match(/Could not reach the Vayu engine/g)).toHaveLength(1);
+			expect(message).toMatch(/withheld whole/);
+			await server.close();
+		});
+	});
+
 	it("reads a templated run report", async () => {
 		const { client, server } = await connectClient();
 		const res = await client.readResource({ uri: "vayu://run/run_1/report" });

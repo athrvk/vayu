@@ -36,12 +36,13 @@ import {
 	withheldWriteRefusal,
 	type ToolContext,
 } from "./tools.js";
-import { argumentsSchema, INPUT_REQUIRED } from "./tools/kit.js";
+import { argumentsSchema, INPUT_REQUIRED, recognisedEngineFailure } from "./tools/kit.js";
 import type { McpHost } from "./tools/contract.js";
 import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
 import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
+import { MaskingIncompleteError } from "./withhold.js";
 
 /** Provides the per-request tool context (client + current safety config). */
 export type ToolContextProvider = () => ToolContext;
@@ -502,6 +503,32 @@ function answerToolCalls(
 	});
 }
 
+/**
+ * @p answer, with a rejection the engine caused worded as the tools word it
+ * (#3577). A resource, a prompt and a completion answer a failed request, so
+ * what reaches the client is the thrown message, and a bare `fetch failed`
+ * names neither the engine nor what to do. An error that is not an engine
+ * failure (a projection's own sentence, a prompt's "pin one baseline" fix)
+ * and one already led by the outage (`withheldRunOutput`) keep their text.
+ */
+function worded<Args extends unknown[], Result>(
+	ctx: ToolContext,
+	answer: (...args: Args) => Promise<Result>
+): (...args: Args) => Promise<Result> {
+	return async (...args) => {
+		try {
+			return await answer(...args);
+		} catch (err) {
+			const maskingError =
+				err instanceof MaskingIncompleteError ||
+				(err instanceof Error && err.cause instanceof MaskingIncompleteError);
+			const failure = maskingError ? undefined : recognisedEngineFailure(err, ctx);
+			if (!failure) throw err;
+			throw new Error(failure.message, { cause: err });
+		}
+	};
+}
+
 /** Register the read-only Vayu data resources (static lists + run-report template). */
 function registerResources(mcp: McpServer, ctx: ToolContext): void {
 	const meta = (title: string, description: string) => ({
@@ -514,45 +541,59 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 	// client cancels the request, and the engine client turns that into an
 	// aborted fetch instead of a detached request running to its own timeout.
 	for (const r of STATIC_RESOURCES) {
-		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri, sdkCtx) => ({
-			contents: [
-				{
-					uri: uri.href,
-					mimeType: "application/json",
-					text: JSON.stringify(await r.read(ctx, sdkCtx.mcpReq.signal), null, 2),
-				},
-			],
-		}));
+		mcp.registerResource(
+			r.name,
+			r.uri,
+			meta(r.title, r.description),
+			worded(ctx, async (uri, sdkCtx) => ({
+				contents: [
+					{
+						uri: uri.href,
+						mimeType: "application/json",
+						text: JSON.stringify(await r.read(ctx, sdkCtx.mcpReq.signal), null, 2),
+					},
+				],
+			}))
+		);
 	}
+
+	// With the engine unreachable the template lists no runs rather than failing
+	// the whole `resources/list`, which would take the static resources, that
+	// need no engine to be named, down with it (#3577).
+	const listedRunIds = async (signal: AbortSignal): Promise<string[]> => {
+		try {
+			return extractRunIds(await RUN_REPORT_RESOURCE.listRuns(ctx, signal));
+		} catch (err) {
+			if (recognisedEngineFailure(err, ctx)?.failureClass === "unreachable") return [];
+			throw err;
+		}
+	};
 
 	mcp.registerResource(
 		RUN_REPORT_RESOURCE.name,
 		new ResourceTemplate(RUN_REPORT_RESOURCE.uriTemplate, {
-			list: async (sdkCtx) => {
-				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx, sdkCtx.mcpReq.signal);
-				return {
-					resources: extractRunIds(runs).map((id) => ({
-						uri: `vayu://run/${id}/report`,
-						name: `Run ${id} report`,
-						mimeType: "application/json",
-					})),
-				};
-			},
+			list: worded(ctx, async (sdkCtx) => ({
+				resources: (await listedRunIds(sdkCtx.mcpReq.signal)).map((id) => ({
+					uri: `vayu://run/${id}/report`,
+					name: `Run ${id} report`,
+					mimeType: "application/json",
+				})),
+			})),
 			complete: {
 				// Unsignalled by necessity: the SDK's completion callback is
 				// `(value, context?)` with no handler context, so there is
 				// no signal to forward here. Autocomplete is a single cheap
 				// `/runs` read, so an uncancelled one costs little.
-				runId: async (value: string) => {
+				runId: worded(ctx, async (value: string) => {
 					const runs = await RUN_REPORT_RESOURCE.listRuns(ctx);
 					return extractRunIds(runs)
 						.filter((id) => id.startsWith(value))
 						.slice(0, 20);
-				},
+				}),
 			},
 		}),
 		meta(RUN_REPORT_RESOURCE.title, RUN_REPORT_RESOURCE.description),
-		async (uri, variables, sdkCtx) => {
+		worded(ctx, async (uri, variables, sdkCtx) => {
 			const raw = variables.runId;
 			const runId = Array.isArray(raw) ? (raw[0] ?? "") : String(raw ?? "");
 			const report = await RUN_REPORT_RESOURCE.read(ctx, runId, sdkCtx.mcpReq.signal);
@@ -565,7 +606,7 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 					},
 				],
 			};
-		}
+		})
 	);
 }
 
@@ -579,10 +620,10 @@ function registerPrompts(mcp: McpServer, ctx: ToolContext): void {
 				description: p.description,
 				argsSchema: argumentsSchema(p.argsSchema),
 			},
-			async (args, sdkCtx) => {
+			worded(ctx, async (args, sdkCtx) => {
 				const result = await p.build(args, ctx, sdkCtx.mcpReq.signal);
 				return result as typeof result & Record<string, unknown>;
-			}
+			})
 		);
 	}
 }

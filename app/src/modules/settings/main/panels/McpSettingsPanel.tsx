@@ -679,7 +679,7 @@ export default function McpSettingsPanel() {
 						className="rounded-md border border-rule bg-muted/30 px-3 py-2.5"
 						label="Enable MCP server"
 						description={
-							<CollapsibleText text="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, the endpoint stops accepting connections and connected agents get a clean “start Vayu” error. Your choice persists across restarts." />
+							<CollapsibleText text="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, or when Vayu is closed, the endpoint refuses connections and the agent’s client shows its own connection error. Your choice persists across restarts." />
 						}
 						checked={enabled}
 						onChange={(checked) => void toggleEnabled(checked)}

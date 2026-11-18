@@ -529,6 +529,17 @@ describe("McpSettingsPanel copy that described only half its mechanism", () => {
 		expect(screen.getByText(/on by default/i)).toBeInTheDocument();
 	});
 
+	it("says a switched-off or closed server refuses the connection, not that the agent is told to start Vayu (#3577)", async () => {
+		await renderPanel();
+
+		const row = screen.getByText(/on by default/i).parentElement as HTMLElement;
+		fireEvent.click(within(row).getByRole("button", { name: /show more/i }));
+		const description = screen.getByText(/on by default/i);
+		expect(description).toHaveTextContent(/refuses connections/i);
+		expect(description).toHaveTextContent(/client shows its own connection error/i);
+		expect(description).not.toHaveTextContent(/start vayu/i);
+	});
+
 	it("says what an allowed host's remove button does on keyboard focus (#3498)", async () => {
 		await renderPanel();
 

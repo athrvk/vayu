@@ -15,8 +15,9 @@ server is TypeScript, hosted in the Electron main process, built on the official
 when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
-Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
+Once Vayu is running, any agent opts in with one command; with MCP switched off
+or Vayu closed, nothing listens, the connection is refused and the agent's
+client shows its own connection error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -2439,7 +2440,12 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 The templated report resource has a **list** callback (enumerates recent runs so
 each shows in `resources/list`) and a **completion** callback (autocompletes run
-IDs).
+IDs). With the engine unreachable the list callback answers no runs, so the
+static resources above still list (#3577); any other failure still fails the
+list. Every resource, prompt and completion callback words an engine failure
+the way a tool does (`server.ts`, `worded`): a read of `vayu://scripting/types`
+with the engine down fails with `Could not reach the Vayu engine ...` and the
+host's remedy, not a bare `fetch failed`.
 
 ### The script sandbox surface
 
@@ -3328,7 +3334,7 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
 | A tool switched off                                  | `VAYU_MCP_DISABLED_TOOLS`               | Settings → MCP, Tools                |
-| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | make sure the Vayu app is running  |
+| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | the app is open but its engine is not answering: wait, or Settings → Restart engine |
 | `verifySSL: false` on a one-off send                 | add the authority to the engine's `customCaCertificates` through `update_engine_config`, which needs `VAYU_MCP_ALLOW_WRITES` and `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | Settings > Network & connectivity |
 | A `binary` body's file path                          | no setting: the stdio server has no request editor to pick a file in and nothing that allows a folder, so only a folder the engine already allows works | the request editor, or Settings > Files |
 | A collection's remembered data file (`dataFile`)     | never present: `dataFileLocation` is absent on stdio, so no path is remembered; ask the user for it | the app remembers the path |

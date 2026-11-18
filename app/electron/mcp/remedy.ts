@@ -72,11 +72,17 @@ export function settingRemedy(key: keyof McpSafetyConfig, host: McpHost): string
 	return host === "cli" ? CLI_REMEDY[key] : APP_REMEDY[key];
 }
 
-/** The sentence that gets an unreachable engine reachable, without its closing punctuation. */
+/**
+ * The sentence that gets an unreachable engine reachable, without its closing
+ * punctuation. One clause with no full stop in it: it opens a sentence in
+ * `engineFailure` and is read inside parentheses in a `withhold.ts` sentence.
+ * The app host only ever answers while the app is running, so it never says to
+ * start it.
+ */
 export function engineDownRemedy(host: McpHost): string {
 	return host === "cli"
 		? `Start vayu-engine, or point ${ENGINE_URL_ENV_VAR} at a running engine`
-		: "Make sure the Vayu app is running";
+		: "The Vayu app is open but its engine is not answering; wait a moment, or use Restart engine in Settings";
 }
 
 /** How the user restarts the engine so a saved restart-required key takes effect. */
