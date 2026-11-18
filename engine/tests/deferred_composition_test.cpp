@@ -41,8 +41,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -58,6 +61,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -124,6 +128,8 @@ class DeferredCompositionTest : public ::testing::Test {
         cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_, *manager_,
         run_summary_cache_, vayu::http::no_grant_secret (), server_stopping_ });
         vayu::http::routes::register_execution_routes (*ctx_);
+        vayu::http::routes::register_postman_export_routes (*ctx_);
+        vayu::http::routes::register_spec_export_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -897,6 +903,22 @@ std::string signing_pem () {
     return jwt::pkcs8 (jwt::keys ().rsa);
 }
 
+/// `jwt_bearer (tokens)` signing with ES256 instead of the default RS256.
+json es256_jwt_bearer (const MockTokenServer& tokens) {
+    json auth                          = jwt_bearer (tokens);
+    auth["config"]["signingAlgorithm"] = "ES256";
+    return auth;
+}
+
+/// `jwt_bearer (tokens)` with its key read from the file at @p path rather
+/// than the `signing_key` variable.
+json key_file_jwt_bearer (const MockTokenServer& tokens, const std::string& path) {
+    json auth = jwt_bearer (tokens);
+    auth["config"].erase ("privateKey");
+    auth["config"]["privateKeyFile"] = path;
+    return auth;
+}
+
 /// A slice of the key's body long enough that it cannot occur by chance.
 std::string key_fragment () {
     const std::string pem = signing_pem ();
@@ -908,11 +930,14 @@ std::string posted_assertion (const MockTokenServer& tokens) {
     return vayu::utils::url_decode (token_form_field (tokens, "assertion"));
 }
 
-/// Whether the endpoint's last request was the grant, signed by the key.
-bool signed_by_the_key (const MockTokenServer& tokens) {
+/// Whether the endpoint's last request was the grant, signed with @p alg by
+/// the key whose public half is of @p key (the RSA key and RS256 by default).
+bool signed_by_the_key (const MockTokenServer& tokens,
+const jwt::KeyPtr& key = jwt::keys ().rsa,
+std::string_view alg   = "RS256") {
     return vayu::utils::url_decode (token_form_field (tokens, "grant_type")) ==
     "urn:ietf:params:oauth:grant-type:jwt-bearer" &&
-    jwt::verifies (posted_assertion (tokens), jwt::public_half (jwt::keys ().rsa), "RS256");
+    jwt::verifies (posted_assertion (tokens), jwt::public_half (key), alg);
 }
 
 /// A run of `col_1` as a sequence (no `mode`) or under load, in `env_1`.
@@ -933,14 +958,66 @@ json collection_run (bool under_load) {
 
 class JwtBearerSecretKeyTest : public DeferredCompositionTest {
     protected:
-    /// `env_1` holding the subject and, unless @p with_key is false, the key.
-    void seed_jwt_environment (bool with_key = true) const {
+    /// `env_1` holding the subject and, unless @p with_key is false, @p pem as
+    /// the key.
+    void seed_jwt_environment (bool with_key = true,
+    const std::string& pem                   = signing_pem ()) const {
         json variables = { { "subject", "alice@example.com" } };
         if (with_key) {
-            variables["signing_key"] = signing_pem ();
+            variables["signing_key"] = pem;
         }
         seed_environment (variables);
     }
+
+    void TearDown () override {
+        std::error_code ignored;
+        if (!scratch_.empty ()) {
+            std::filesystem::remove_all (scratch_, ignored);
+        }
+        DeferredCompositionTest::TearDown ();
+    }
+
+    /// A file holding @p pem under a directory only this test uses, with the
+    /// grant that lets the engine read it.
+    std::string granted_key_file (const std::string& pem) {
+        scratch_ = std::filesystem::temp_directory_path () /
+        (std::string ("vayu-jwt-deferred-") +
+        ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
+        std::filesystem::create_directories (scratch_);
+        const std::string path = (scratch_ / "key.pem").string ();
+        std::ofstream (path, std::ios::binary) << pem;
+        const auto canonical = vayu::http::grantable_file_path (path);
+        if (!canonical) {
+            ADD_FAILURE () << "not grantable: " << path;
+            return path;
+        }
+        vayu::FileGrant grant;
+        grant.id         = "fgrant_deferred_key";
+        grant.path       = *canonical;
+        grant.created_at = 1;
+        db_->save_file_grant (grant);
+        return path;
+    }
+
+    /// Every document the workspace exports for `col_1`: the Postman export
+    /// with and without secrets and the OpenAPI export, one after another.
+    std::string exported_documents () const {
+        std::string out;
+        const json by_id               = { { "collectionId", "col_1" } };
+        json with_secrets              = by_id;
+        with_secrets["includeSecrets"] = true;
+        for (const auto& [path, payload] :
+        { std::pair<const char*, json>{ "/export/postman", by_id },
+        std::pair<const char*, json>{ "/export/postman", with_secrets },
+        std::pair<const char*, json>{ "/specs/export", by_id } }) {
+            const auto [status, body] = post (path, payload);
+            EXPECT_EQ (status, 200) << path << ": " << body.dump ();
+            out += body.dump () + "\n";
+        }
+        return out;
+    }
+
+    std::filesystem::path scratch_;
 
     /// Every text a send or a run stored: each run's snapshot and summary, each
     /// result's trace and error, the request and collection rows' auth.
@@ -1014,6 +1091,52 @@ TEST_F (JwtBearerSecretKeyTest, ASendSignsWithTheSecretVariableKey) {
     EXPECT_EQ (tokens.hits (), 1);
     EXPECT_TRUE (signed_by_the_key (tokens)) << tokens.last_body ();
     EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// ES256 reaches the endpoint signed by the P-256 key the variable holds.
+// Mutation check: read `signingAlgorithm` as empty in `build_jwt_assertion` and
+// the assertion is RS256-signed with an EC key, which is refused.
+TEST_F (JwtBearerSecretKeyTest, ASendSignsWithAnEs256SecretVariableKey) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_jwt_environment (true, jwt::pkcs8 (jwt::keys ().p256));
+    seed_request (echo.url (), json::object (), "", es256_jwt_bearer (tokens));
+
+    const json answer = compose_and_execute ();
+
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_TRUE (signed_by_the_key (tokens, jwt::keys ().p256, "ES256"))
+    << tokens.last_body ();
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// A granted key file needs no variable and no scope for it: a Send and a
+// sequential run each sign with it and send the token. Mutation check: make
+// `signing_key_pem` refuse a `privateKeyFile` and both are refused with no token.
+TEST_F (JwtBearerSecretKeyTest, AGrantedKeyFileSignsASendAndASequentialRun) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_jwt_environment (false);
+    const std::string path = granted_key_file (signing_pem ());
+    seed_request (echo.url (), json::object (), "", key_file_jwt_bearer (tokens, path));
+
+    const json answer = compose_and_execute ();
+
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_TRUE (signed_by_the_key (tokens)) << tokens.last_body ();
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+
+    // The run signs again rather than reading the Send's token.
+    json config       = key_file_jwt_bearer (tokens, path)["config"];
+    config["subject"] = "alice@example.com";
+    db_->delete_oauth_token (vayu::http::oauth::cache_key (config));
+    finished_run (post ("/runs", collection_run (false)));
+
+    EXPECT_EQ (tokens.hits (), 2);
+    EXPECT_TRUE (signed_by_the_key (tokens)) << tokens.last_body ();
+    EXPECT_EQ (echo.requests_seen (), 2);
 }
 
 TEST_F (JwtBearerSecretKeyTest, ASendWhoseKeyNoScopeDefinesIsRefusedNamingIt) {
@@ -1106,8 +1229,9 @@ TEST_F (JwtBearerSecretKeyTest, ALoadRunSignsAtItsStartAndItsWatchdogReSigns) {
 }
 
 // Nothing a send or a run records holds the key or an assertion: every stored
-// run's snapshot, summary and traces, the request row, each composed payload
-// and every log record at debug level. Every assertion opens with the same
+// run's snapshot, summary and traces (a scenario load run's included), the
+// request row, each composed payload, every document the workspace exports and
+// every log record at debug level. Every assertion opens with the same
 // header segment, so its absence covers each one the endpoint received.
 TEST_F (JwtBearerSecretKeyTest, NoStoredRowPayloadTraceSnapshotOrLogHoldsTheKeyOrTheAssertion) {
     const vayu::tests::LogCapture capture;
@@ -1128,10 +1252,16 @@ TEST_F (JwtBearerSecretKeyTest, NoStoredRowPayloadTraceSnapshotOrLogHoldsTheKeyO
     db_->delete_oauth_token (vayu::http::oauth::cache_key (config));
     finished_run (post ("/runs", as_single_iteration_run (composed_a_run)));
     finished_run (post ("/runs", collection_run (false)));
-    ASSERT_EQ (db_->get_all_runs ().size (), 3U);
+    db_->delete_oauth_token (vayu::http::oauth::cache_key (config));
+    finished_run (post ("/runs", collection_run (true)));
+    ASSERT_EQ (db_->get_all_runs ().size (), 4U);
 
+    // The OpenAPI export is the one that carries an auth block's settings: it
+    // keeps the reference, which is all it ever held.
+    const std::string exported = exported_documents ();
+    EXPECT_NE (exported.find ("{{signing_key}}"), std::string::npos);
     std::string recorded =
-    everything_stored () + composed.dump () + composed_a_run.dump ();
+    everything_stored () + composed.dump () + composed_a_run.dump () + exported;
     for (const auto& record : capture.records ()) {
         recorded += record.dump () + "\n";
     }
