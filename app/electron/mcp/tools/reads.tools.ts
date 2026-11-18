@@ -57,6 +57,7 @@ import {
 	RUN_STATUSES,
 	RUN_TYPES,
 	runListQuery,
+	runSeriesRead,
 } from "./run-housekeeping.js";
 import {
 	boundAndMarkRunReport,
@@ -67,6 +68,7 @@ import {
 } from "./run-status.js";
 import {
 	fieldsInput,
+	fullByDefaultFieldsInput,
 	listPageInputs,
 	listPageQuery,
 	listPageSentence,
@@ -102,6 +104,32 @@ const REQUEST_SUMMARY_KEYS = [
 
 /** What a `list_collections` summary row keeps: no variables, auth or data contract. */
 const COLLECTION_SUMMARY_KEYS = ["id", "name", "parentId", "order"] as const;
+
+/**
+ * What a `get_run_timeseries` `fields: "summary"` tick keeps: enough for a
+ * trend. `error_rate` is the run-so-far percentage (0-100) the engine stores
+ * on each tick, and a key a tick lacks (a percentile in a second with no
+ * completion) is left out rather than nulled.
+ */
+const RUN_TICK_SUMMARY_KEYS = [
+	"elapsed_seconds",
+	"requests_completed",
+	"requests_failed",
+	"current_rps",
+	"latency_p95_ms",
+	"error_rate",
+] as const;
+
+/** The `maxPoints` argument of the two series reads, worded for @p noun. */
+function maxPointsInput(noun: string) {
+	return z
+		.number()
+		.int()
+		.positive()
+		.max(MAX_RUN_SERIES_LIMIT)
+		.optional()
+		.describe(`Fold the whole run to at most this many ${noun}; not with limit or offset.`);
+}
 
 /** A paged list of stored rows, each withheld as {@link withholdRowSecrets} withholds one. */
 function withholdRowPage(page: unknown): unknown {
@@ -529,6 +557,8 @@ export const READ_TOOLS: McpTool[] = [
 			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. A tick's latency_p50_ms / latency_p95_ms / latency_p99_ms cover its second, and are absent from a second in which nothing completed: a stall, not a 0 ms answer. A run stored by an older engine has 0 there instead. A tick's status_seconds, [{second, span, counts: [2xx, 3xx, 4xx, 5xx, error]}], is the responses that completed in the seconds that tick closed, second counted from load start; counts / span is responses per second, and [] means it closed none. A tick stored before the field existed has none. " +
 			`${RUN_ERROR_DEFINITION_POINTER} ` +
 			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. ` +
+			`WHOLE RUN: \`maxPoints\` (not with \`limit\` / \`offset\`) folds the run to at most that many points; \`bucketed\` / \`ticksPerBucket\` say how many ticks each covers. A folded p50 / p95 / p99 is the MAX over its ticks, current_rps the mean, the rest the last tick's. ` +
+			`\`fields: "summary"\` keeps ${RUN_TICK_SUMMARY_KEYS.join(", ")} (error_rate is the run-so-far %), default "full". ` +
 			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "Get run time series",
@@ -553,21 +583,19 @@ export const READ_TOOLS: McpTool[] = [
 				.nonnegative()
 				.optional()
 				.describe("How many ticks to skip, for paging (default 0)."),
+			maxPoints: maxPointsInput("ticks"),
+			fields: fullByDefaultFieldsInput,
 		},
 		outputSchema: runSeriesPageSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
-			const limit = optionalPageLimit(
-				args,
-				"limit",
-				DEFAULT_RUN_SERIES_LIMIT,
-				MAX_RUN_SERIES_LIMIT
-			);
-			const offset = optionalOffset(args, "offset");
+			const read = runSeriesRead(args);
+			const full = wantsFullRows(args, true);
 			return pagedRead(
 				ctx,
-				() => ctx.client.getRunTimeSeries(runId, limit, offset, signal),
-				"ticks"
+				() => ctx.client.getRunTimeSeries(runId, read, signal),
+				"ticks",
+				full ? undefined : (page) => projectPageRows(page, RUN_TICK_SUMMARY_KEYS)
 			);
 		},
 	},
@@ -579,6 +607,7 @@ export const READ_TOOLS: McpTool[] = [
 		description:
 			"Get the server vitals scraped during a run - the target's own CPU, memory and load, sampled on the monitor's cadence rather than the tick cadence, so these rows do not line up with get_run_timeseries row for row. Answers 'was the target saturated?' beside the client-side latency the report shows. Only a run started with a `monitor` block has any; any other run returns an empty page, not an error. " +
 			`BOUNDED the same way as get_run_timeseries: ${DEFAULT_RUN_SERIES_LIMIT} samples by default, ${MAX_RUN_SERIES_LIMIT} at most, refused above that. ` +
+			`WHOLE RUN: \`maxPoints\` (not with \`limit\` / \`offset\`) folds the run to at most that many samples, \`bucketed\` / \`ticksPerBucket\` saying how many each covers; a folded series value is the MAX over them. ` +
 			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "Get run monitor series",
@@ -603,20 +632,15 @@ export const READ_TOOLS: McpTool[] = [
 				.nonnegative()
 				.optional()
 				.describe("How many samples to skip, for paging (default 0)."),
+			maxPoints: maxPointsInput("samples"),
 		},
 		outputSchema: runSeriesPageSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
-			const limit = optionalPageLimit(
-				args,
-				"limit",
-				DEFAULT_RUN_SERIES_LIMIT,
-				MAX_RUN_SERIES_LIMIT
-			);
-			const offset = optionalOffset(args, "offset");
+			const read = runSeriesRead(args);
 			return pagedRead(
 				ctx,
-				() => ctx.client.getRunMonitorSeries(runId, limit, offset, signal),
+				() => ctx.client.getRunMonitorSeries(runId, read, signal),
 				"monitor samples"
 			);
 		},

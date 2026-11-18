@@ -75,10 +75,24 @@ export function listPageQuery(args: Record<string, unknown>): ListPageQuery {
 	return query;
 }
 
-/** Whether the call asked for whole rows; anything but the two spellings is refused. */
-export function wantsFullRows(args: Record<string, unknown>): boolean {
+/**
+ * The same two spellings for a read whose whole row is what it returned before
+ * `fields` existed (`get_run_timeseries`, #3560), so `"full"` stays its
+ * default. Pair with `wantsFullRows(args, true)`.
+ */
+export const fullByDefaultFieldsInput = z
+	.enum(ROW_FIELDS)
+	.optional()
+	.describe('"summary" for the short row; default "full".');
+
+/**
+ * Whether the call asked for whole rows; anything but the two spellings is
+ * refused. @p fullByDefault is what an omitted `fields` means.
+ */
+export function wantsFullRows(args: Record<string, unknown>, fullByDefault = false): boolean {
 	const fields = args.fields;
-	if (fields === undefined || fields === null || fields === "summary") return false;
+	if (fields === undefined || fields === null) return fullByDefault;
+	if (fields === "summary") return false;
 	if (fields === "full") return true;
 	throw new ToolArgError('"fields" must be "summary" or "full".');
 }

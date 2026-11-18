@@ -17,6 +17,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type RunIdentity,
 	type RunListQuery,
+	type RunSeriesRead,
 } from "../engine-client.js";
 import type { RunComparison } from "../compare.js";
 import type { ToolContext, ToolResult } from "./contract.js";
@@ -25,6 +26,7 @@ import {
 	isRecord,
 	optionalOffset,
 	optionalPageLimit,
+	optionalPositiveInt,
 	str,
 	structuredResult,
 	structuredRoot,
@@ -64,6 +66,33 @@ export const DEFAULT_RUN_SAMPLE_LIMIT = 25;
  */
 export const DEFAULT_RUN_SERIES_LIMIT = 100;
 export const MAX_RUN_SERIES_LIMIT = 1_000;
+
+/**
+ * The read a `get_run_timeseries` / `get_run_monitor` call asks for: a page of
+ * raw rows, or with `maxPoints` the whole run folded to at most that many
+ * (#3560). `maxPoints` shares the page ceiling, because a fold of 50000 points
+ * is the context-window overrun that ceiling exists to stop, and it is refused
+ * beside `limit` or `offset`, which the engine would silently ignore.
+ */
+export function runSeriesRead(args: Record<string, unknown>): RunSeriesRead {
+	if (args.maxPoints === undefined || args.maxPoints === null) {
+		return {
+			limit: optionalPageLimit(args, "limit", DEFAULT_RUN_SERIES_LIMIT, MAX_RUN_SERIES_LIMIT),
+			offset: optionalOffset(args, "offset"),
+		};
+	}
+	for (const key of ["limit", "offset"]) {
+		if (args[key] === undefined || args[key] === null) continue;
+		throw new ToolArgError(
+			`"maxPoints" reads the whole run folded, so it cannot be combined with "${key}". Drop "${key}", or drop "maxPoints" to page raw rows.`
+		);
+	}
+	const maxPoints = optionalPositiveInt(args, "maxPoints", 0);
+	if (maxPoints > MAX_RUN_SERIES_LIMIT) {
+		throw new ToolArgError(`"maxPoints" must be ${MAX_RUN_SERIES_LIMIT} or less.`);
+	}
+	return { maxPoints };
+}
 
 /** How a paged read's description tells an agent to reach the next page. */
 export const PAGE_CURSOR_SENTENCE =
