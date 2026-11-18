@@ -1081,6 +1081,51 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	// Mutation check: have withholdRunOutput hand `scriptRequests` back unread
+	// and every value below leaks.
+	test("masks a secret variable's value inside a script request record, body and headers included (#3633)", () => {
+		const trace = {
+			scripts: {
+				scriptRequests: [
+					{
+						source: "pre",
+						status: 200,
+						request: {
+							url: "http://127.0.0.1:7000/token?ref=s3cret-value",
+							sentHeaders: { "X-Client": "s3cret-value" },
+							body: '{"assertion":"s3cret-value"}',
+						},
+						response: {
+							headerLines: [{ name: "X-Echo", value: "s3cret-value" }],
+							body: '{"access_token":"s3cret-value","expires_in":300}',
+							bodyBytes: 48,
+						},
+					},
+				],
+			},
+		};
+		expect(withholdRunOutput(trace, rule)).toEqual({
+			scripts: {
+				scriptRequests: [
+					{
+						source: "pre",
+						status: 200,
+						request: {
+							url: "http://127.0.0.1:7000/token?ref=<redacted>",
+							sentHeaders: { "X-Client": "<redacted>" },
+							body: '{"assertion":"<redacted>"}',
+						},
+						response: {
+							headerLines: [{ name: "X-Echo", value: "<redacted>" }],
+							body: '{"access_token":"<redacted>","expires_in":300}',
+							bodyBytes: 48,
+						},
+					},
+				],
+			},
+		});
+	});
+
 	test("masks credential header rows and a sent-header map, by the shared list and the API-key name", () => {
 		const node = {
 			headers: [
