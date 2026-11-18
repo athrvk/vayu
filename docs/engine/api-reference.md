@@ -11089,7 +11089,10 @@ the first step continues the pass rather than starting another. Only completed
 passes are timed, so `count` is `iterationsCompleted`: an abandoned pass is
 `iterationsAbandoned` and no pass time, and a pass the deadline or a Stop cut
 is neither. `mean` is the exact sum over the count; the percentiles come from
-one histogram kept to three significant figures, as a step's are. **Absent** for a run in
+one histogram kept to three significant figures, as a step's are. A pass is
+held at the histogram's ceiling of one hour (`HISTOGRAM_MAX_LATENCY_US`) before
+it is recorded, and `mean` sums that held value too, so it never exceeds `max`.
+**Absent** for a run in
 which no pass completed, for a design-mode run and for a run stored before the
 field existed. On a single-request run an iteration is one request, so its
 pass time is the request latency and the report carries none.
