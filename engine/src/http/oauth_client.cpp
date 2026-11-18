@@ -831,7 +831,7 @@ std::chrono::seconds lifetime) {
     nlohmann::ordered_json claims = { { "iss", field (config, "clientId") },
         { "sub", subject }, { "aud", audience },
         { "exp", (issued_at + lifetime).count () }, { "iat", issued_at.count () } };
-    const auto rows               = config.find ("assertionClaims");
+    const auto rows = config.find (std::string (ASSERTION_CLAIMS));
     if (rows == config.end () || !rows->is_array ()) {
         return claims;
     }

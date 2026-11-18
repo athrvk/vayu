@@ -3868,7 +3868,11 @@ A folder becomes a `tag` named by its full path (`Users/Admin`), described by
 the folder's own description and declared once at the document root and on
 every operation under it. Auth becomes `components.securitySchemes` plus a
 `security` requirement - basic and bearer as `http`, an API key as `apiKey`,
-OAuth 2 as `oauth2` with the flow the request uses - at the document root for
+OAuth 2 as `oauth2` with the flow the request uses (`authorization_code` as
+`authorizationCode`, `password`, and every other grant as `clientCredentials`,
+`jwt_bearer` included: OpenAPI has no RFC 7523 flow, so the flow names the token
+endpoint and the real config travels in `x-vayu-request.auth`, Swagger 2.0's
+`application` is the same fallback) - at the document root for
 the collection's own auth and on the operation only where a request's differs
 from it. An `inherit` request is resolved the way `POST /compose` resolves it,
 through its folders (the nearest one with a credential, `noauth` ending the
@@ -3918,13 +3922,19 @@ nothing else, which names where the secret lives without being one. The auth
 modes kept as a `config` bag (AWS, digest, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT,
 OAuth 2.0's own config) are blanked by an allowlist of the members known to
 describe the auth, so a member no list has heard of (Insomnia's IAM
-`secretAccessKey`) leaves blank too. OAuth 2.0's extra request parameter lists
-(`tokenParams`, `authorizationParams`, `refreshParams`) are redacted per row: a
+`secretAccessKey`) leaves blank too. The `jwt_bearer` grant's `subject`,
+`assertionAudience`, `assertionLifetimeSeconds`, `signingAlgorithm`, `keyId`
+and `fallbackExpiresIn` are on that list; its `privateKey`, which is only ever
+one `{{variable}}` reference, stays as that reference (a key written any other
+way is blanked and counted), and its `privateKeyFile`, a path on one machine,
+is not on it and leaves blank, counted. OAuth 2.0's extra request parameter
+lists (`tokenParams`, `authorizationParams`, `refreshParams`) and the
+`jwt_bearer` grant's `assertionClaims` are redacted per row: a
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
 names a credential (`client_secret`, `client_assertion`, `password`,
 `Authorization`, `X-Api-Key`, the other names below), so an `audience` row
-leaves intact; a row with no non-empty string `key`, and any member of a row
-beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
+leaves intact, as a claim named `tenant` does; a row with no non-empty string
+`key`, and any member of a row beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
 it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
@@ -5027,7 +5037,11 @@ a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
 NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
 allowlist of the members known to describe the auth, not by credential name, so
 a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
-OAuth 2.0's extra request parameter rows, in its config and in a kept Postman
+The `jwt_bearer` grant's non-secret members are on it, its `privateKey`
+reference survives, and its `privateKeyFile` path is blanked and counted (the
+grant itself is not written as a Postman grant, see `oauth2_settings` below).
+OAuth 2.0's extra request parameter rows and the `jwt_bearer` grant's
+`assertionClaims`, in its config and in a kept Postman
 block alike, keep their keys; a row's value is blanked when its key names a
 credential (`client_secret`, `client_assertion`, `password`, `Authorization`,
 `X-Api-Key`, the other names a header or query parameter is blanked by).
@@ -5102,7 +5116,7 @@ was before these rules.
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
-| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
+| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, an empty header prefix, or the `jwt_bearer` grant (Postman has no RFC 7523 grant: the block is written with its endpoints, client id and scope and no `grant_type`, and the subject, claims and key are not written) (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
@@ -7174,7 +7188,7 @@ hits the wire:
 | `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467); a token empty once trimmed writes no header at all and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
 | `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467); a key empty once trimmed writes nothing and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
-| `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement`; a token placed in the header yields to an `Authorization` header the request carries, and is then not fetched at all (#3202, below) |
+| `oauth2` | Acquires/caches a token (below; the `client_credentials`, `password`, `authorization_code` and `jwt_bearer` grants) and injects it per `tokenPlacement`; a token placed in the header yields to an `Authorization` header the request carries, and is then not fetched at all (#3202, below) |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
 **When it is applied.** As the request is built, before any pre-request script
@@ -7201,7 +7215,10 @@ off, a waiting one is never applied (#3131, see
 sequential run, in any step of a plan that writes a variable), or holding a
 `{{name}}` that nothing defines, is left as written by
 [`POST /compose`](#post-compose), resolved in every string after the
-pre-request script, and only then is its token acquired; the [token cache](#oauth-20-token-cache) key is computed from
+pre-request script (a `jwt_bearer` `privateKey` excepted: compose leaves it a
+reference in both modes and it is resolved only into the config the token is
+acquired with, see [auth modes](#auth-modes)), and only then is its token
+acquired; the [token cache](#oauth-20-token-cache) key is computed from
 that resolved config, so a script that sets a `clientId` or an `accessTokenUrl`
 selects its own cached token, and a client secret or scope it sets reaches the
 token endpoint when a token is fetched (neither is part of the key, so a token
@@ -7298,7 +7315,9 @@ post-request script. A load run and a stream record no hops.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant`, then one segment per extra parameter list that has
+username-if-password-grant` (the `subject` for a `jwt_bearer` grant, so two
+subjects of one client hold two tokens; the key never reads `privateKey`,
+`privateKeyFile`, the claims or the algorithm), then one segment per extra parameter list that has
 a row the engine would send, in the order `authorizationParams`, `tokenParams`,
 `refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
 the pairs sorted by key, then value, byte-wise). A row whose key names a
@@ -7314,7 +7333,8 @@ differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
-means non-expiring. One refresh is in flight per cache key (#3344): however
+means non-expiring unless the config sets `fallbackExpiresIn` (seconds, any grant),
+which is then how long such a token is kept. One refresh is in flight per cache key (#3344): however
 many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.
@@ -7346,8 +7366,33 @@ under a different `headerPrefix` than the first step sharing its cache key
 #### POST /oauth2/token
 
 Acquire (or return a cached) token for an `OAuth2Config`. Supports the
-`client_credentials`, `password`, and `authorization_code` grants; the
-`authorization_code` grant requires an `interactive` code exchange (see below).
+`client_credentials`, `password`, `authorization_code` and `jwt_bearer` grants;
+the `authorization_code` grant requires an `interactive` code exchange (see
+below).
+
+The `jwt_bearer` grant (RFC 7523, #3632) posts `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`
+and an `assertion` the engine signs with the client's key. The config members
+(all strings unless noted):
+
+| Member | Meaning |
+|--------|---------|
+| `subject` | The `sub` claim; required. Also the fourth slot of the [cache key](#oauth-20-token-cache) |
+| `assertionAudience` | The `aud` claim; required |
+| `clientId` | The `iss` claim. With no `clientSecret` it is sent in no other way: the assertion alone authenticates the client, so no `client_id` rides beside it |
+| `assertionLifetimeSeconds` | A number, `exp` minus `iat`; 180 when absent or `null`, held to 1..3600, a non-number a `400` |
+| `signingAlgorithm` | `RS256` (the default) or `ES256` |
+| `keyId` | Written as the header's `kid` when not empty |
+| `privateKey` | The signing key, as one `{{variable}}` reference to a secret variable holding the PEM (a literal key is refused on write, see [auth modes](#auth-modes)). Resolved only where the token is acquired |
+| `privateKeyFile` | A path to the PEM, read through the [file-trust rule](#allowed-folders-file-roots); exactly one of `privateKey` and `privateKeyFile` is set |
+| `assertionClaims` | `[{key, value, enabled}]`, further claims; a row naming a claim the engine wrote (`iss`, `sub`, `aud`, `exp`, `iat`) is skipped |
+| `scope`, `audience`, `resource`, `tokenParams` | Sent as for any fresh grant |
+
+A missing required member, both or neither key, an unresolved reference and a
+key that cannot sign are each a `400` `oauth2_invalid_config` naming the member;
+no message holds any part of the key.
+
+`fallbackExpiresIn` (a number of seconds, any grant) is how long a token whose
+response states no `expires_in` is kept; absent, it never expires, as before.
 
 **Request:**
 ```json

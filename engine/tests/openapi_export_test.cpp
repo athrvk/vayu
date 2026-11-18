@@ -1097,6 +1097,35 @@ TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanName) {
     EXPECT_FALSE (operation_of (exported.document, "/e", "get").contains ("security"));
 }
 
+// OpenAPI has no RFC 7523 flow (#3632): a `jwt_bearer` request is written as the
+// `clientCredentials` flow against the same token URL, the fallback for any
+// grant this file does not name, so the document stays valid. The real config
+// is in `x-vayu-request`, minus its key file's path.
+// Mutation-check: write the stored grant type as the flow name and the first
+// expectation fails.
+TEST (SkeletonExport, WritesAJwtBearerRequestAsTheFallbackFlowAndCarriesItsConfig) {
+    ExportRequest entry = request ("POST", "{{baseUrl}}/pets");
+    entry.auth          = auth ("oauth2", "", "", "jwt_bearer", "",
+    "https://auth.example.com/token", "", "read");
+    entry.stored_auth   = json::parse (R"({"mode":"oauth2","config":{
+        "grantType":"jwt_bearer","accessTokenUrl":"https://auth.example.com/token",
+        "subject":"ada@example.com","privateKey":"{{signingKey}}",
+        "privateKeyFile":"/etc/keys/svc.pem"}})");
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (exported.document["components"]["securitySchemes"]["oauth2Auth"],
+    json::parse (R"({"type":"oauth2","flows":{"clientCredentials":{
+        "tokenUrl":"https://auth.example.com/token","scopes":{"read":""}}}})"));
+    const json& carried = operation_of (
+    exported.document, "/pets", "post")["x-vayu-request"]["auth"]["config"];
+    EXPECT_EQ (carried["grantType"], "jwt_bearer");
+    EXPECT_EQ (carried["subject"], "ada@example.com");
+    EXPECT_EQ (carried["privateKey"], "{{signingKey}}");
+    EXPECT_EQ (carried["privateKeyFile"], "");
+    EXPECT_EQ (exported.text.find ("svc.pem"), std::string::npos) << exported.text;
+    EXPECT_EQ (exported.notes.secrets_omitted, 1);
+}
+
 TEST (SkeletonExport, WritesNoAuthAsAnEmptySecurityRequirement) {
     // Against a collection with no auth of its own, an explicit `noauth`
     // request is indistinguishable from the document's own default and gets

@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -93,6 +94,14 @@ constexpr auto NON_SECRET_CONFIG_KEYS = std::to_array<std::string_view> (
 "callbackUrl", "clientId", "credentialsPlacement", "username", "pkce", "scope",
 "audience", "resource", "tokenPlacement", "headerPrefix", "queryParamName",
 "autoFetchToken", "autoRefreshToken", "useEmbeddedBrowser", "credentialsId",
+// The `jwt_bearer` grant (#3632): who it acts for, what it is addressed to,
+// how its assertion is signed and how long a token with no `expires_in` lives.
+// `privateKey` is a credential and `privateKeyFile` a path on one machine:
+// neither is listed, so an export blanks both, except that `blank_secret` keeps
+// a `privateKey` that is one `{{variable}}` reference. `assertionClaims` is a
+// row list (`is_config_param_list`), not a scalar.
+"subject", "assertionAudience", "assertionLifetimeSeconds", "signingAlgorithm",
+"keyId", "fallbackExpiresIn",
 // AWS Signature.
 "region", "service", "addAuthDataToQuery",
 // Digest and NTLM.
@@ -255,10 +264,13 @@ void redact_postman_detail (Json& detail, AttributeRule rule, int& omitted) {
     }
 }
 
-/// Whether @p name is an `OAuth2Config` list of extra request parameter rows
-/// (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536).
+/// Whether @p name is an `OAuth2Config` list of `{key, value, ...}` rows: the
+/// extra request parameters (`tokenParams`, `authorizationParams`,
+/// `refreshParams`, issue #2536) and the `jwt_bearer` grant's
+/// `assertionClaims` (#3632).
 bool is_config_param_list (std::string_view name) {
-    return std::any_of (postman::OAUTH2_PARAM_LISTS.begin (),
+    return name == http::oauth::ASSERTION_CLAIMS ||
+    std::any_of (postman::OAUTH2_PARAM_LISTS.begin (),
     postman::OAUTH2_PARAM_LISTS.end (),
     [name] (const postman::OAuth2ParamList& list) { return list.vayu == name; });
 }

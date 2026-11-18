@@ -50,6 +50,10 @@ constexpr std::string_view REFRESH_PARAMS       = "refreshParams";
 constexpr auto EXTRA_PARAM_LISTS = std::to_array<std::string_view> (
 { AUTHORIZATION_PARAMS, TOKEN_PARAMS, REFRESH_PARAMS });
 
+/// The `jwt_bearer` grant's list of extra assertion claims (`{key, value,
+/// enabled}` rows, #3632).
+constexpr std::string_view ASSERTION_CLAIMS = "assertionClaims";
+
 /// Where an extra parameter row is sent (its `sendAs`). The authorize URL
 /// reads none of this: every row of `authorizationParams` rides its query.
 enum class ParamTarget : std::uint8_t { Body, Url, Header };

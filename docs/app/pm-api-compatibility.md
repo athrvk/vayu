@@ -457,7 +457,9 @@ instead of silently UTF-8 encoding it. A signature over quietly-substituted
 bytes verifies nowhere.
 
 Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, and
-any asymmetric algorithm. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
+any asymmetric algorithm. Signing a request with a private key (RS256, ES256)
+is the OAuth 2.0 JWT bearer grant's job, which signs engine-side, not the
+sandbox's: `pm.crypto` does not gain it. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
 and the other SHA-2 hashers are the `crypto-js` shelf's, see
 [The `require` shelf](#the-require-shelf). The engine-side detail is in
 [scripting.md](../engine/scripting.md#what-a-script-can-compute).

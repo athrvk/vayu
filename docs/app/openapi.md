@@ -657,7 +657,9 @@ Everything in it is something the collection actually holds:
   the tree as it was.
 - **Auth becomes `securitySchemes` and `security`, for the modes OpenAPI can
   name.** Basic, bearer, an API key in a header or query parameter, and OAuth 2
-  with the flow the request actually uses each get a scheme in
+  with the flow the request actually uses (a JWT bearer grant, which OpenAPI
+  has no flow for, is written as client credentials against its token URL, and
+  its real configuration travels as an extension) each get a scheme in
   `components.securitySchemes` and a `security` requirement naming it - at the
   document root for the collection's own auth, on the operation only where a
   request's auth differs from it. A request left to inherit is resolved the way

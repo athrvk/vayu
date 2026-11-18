@@ -1420,8 +1420,11 @@ applies it after that pass, so a basic pair is not base64-encoded around a
 token. An OAuth 2.0 config defers the same way on a Send and on a sequential
 collection run (`OAuth2Resolution::AfterTheScript`, what
 `compose_request_core` picks unless the body says `deferDynamicVariables`):
-every string of it is resolved after the script and only then is the token
-acquired, so `oauth::cache_key` is computed from the resolved config, and the
+every string of it but a `jwt_bearer` `privateKey` is resolved after the
+script and only then is the token acquired, so `oauth::cache_key` is computed
+from the resolved config (`privateKey` stays one `{{variable}}` reference
+through compose in both modes, `OAUTH2_PRIVATE_KEY`, and is resolved only into
+the config a token is acquired with, #3632), and the
 late acquisition's wait is `auth_fetch_ms`, left out of `engineMs`. A name
 nothing defines defers there too. A load run still acquires once, before any
 script: its composition (`deferDynamicVariables`) and a scenario load plan

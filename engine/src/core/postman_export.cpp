@@ -616,7 +616,13 @@ json typed_auth (const std::string& type, json attributes) {
     return out;
 }
 
-/// The Postman `grant_type` for a stored config.
+/**
+ * The Postman `grant_type` for a stored config, or empty for a grant Postman
+ * has no name for (`jwt_bearer`, #3632): writing the Vayu name would make
+ * Postman read an unknown grant, so the attribute is left out and the block is
+ * a loss (`oauth2_loses_settings`). Its own members (`subject`, the claims, the
+ * key reference) have no attribute either.
+ */
 std::string grant_type_of (const json& config) {
     const std::string grant = text_of (config, "grantType");
     const bool pkce = grant == "authorization_code" && flag_of (config, "pkce", false);
@@ -625,7 +631,7 @@ std::string grant_type_of (const json& config) {
             return std::string (row.postman);
         }
     }
-    return grant.empty () ? std::string ("client_credentials") : grant;
+    return grant.empty () ? std::string ("client_credentials") : std::string ();
 }
 
 /// The Postman name of a Vayu `OAuth2Config` string field.
@@ -638,13 +644,14 @@ std::optional<std::string_view> oauth2_vayu_field (std::string_view postman_key)
     return std::nullopt;
 }
 
-/// Whether @p config holds a setting the Postman attributes cannot state.
-bool oauth2_loses_settings (const json& config) {
+/// Whether @p config holds a setting the Postman attributes cannot state;
+/// @p postman_grant is `grant_type_of (config)`.
+bool oauth2_loses_settings (const json& config, const std::string& postman_grant) {
     const std::string query_name = text_of (config, "queryParamName");
     const auto prefix            = config.find ("headerPrefix");
     const bool empty_prefix = prefix != config.end () && prefix->is_string () &&
     prefix->get_ref<const std::string&> ().empty ();
-    return !flag_of (config, "autoFetchToken", true) ||
+    return postman_grant.empty () || !flag_of (config, "autoFetchToken", true) ||
     !flag_of (config, "autoRefreshToken", true) ||
     (!query_name.empty () && query_name != "access_token") || empty_prefix;
 }
@@ -662,7 +669,7 @@ std::string import_derived_credentials_id (const json& config) {
 std::optional<json>
 oauth2_derived (std::string_view key, const json& config, const std::string& grant) {
     if (key == "grant_type") {
-        return std::make_optional (json (grant));
+        return grant.empty () ? std::nullopt : std::make_optional (json (grant));
     }
     if (key == "tokenName") {
         const std::string token = text_of (config, "credentialsId");
@@ -783,7 +790,7 @@ json oauth2_attributes (const json& config, const json& original, Walk& walk) {
             out.push_back (attribute (std::string (list.postman), rows));
         }
     }
-    if (oauth2_loses_settings (config)) {
+    if (oauth2_loses_settings (config, grant)) {
         walk.lose (Loss::OAuth2Settings);
     }
     return out;
