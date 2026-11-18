@@ -2299,13 +2299,14 @@ against the [console caps](#console-output) like any other, and with
 `scriptEnableConsole` off it is not written; the record below still is.
 
 **The exchange itself is recorded beside the line** (#3633). On a Send and in
-a sequential collection run's steps, every request a script sent leaves a record of what went out and what came back: the
+a sequential collection run, its setup and teardown scripts included, every
+request a script sent leaves a record of what went out and what came back: the
 method, the URL the transfer dialled (after `auth` and the Postman encoding),
 the request headers and body, the response status, headers and body, the
 redirect hops, the timing phases and, for a transfer that failed, the error
 code at status `0`. The records ride the send's `scriptRequests`, in call
 order, on the live answer and on the stored trace alike, so History shows them
-later. The summary line
+later; a setup or teardown script's ride its `lifecycle` row. The summary line
 names its record by index (`scriptRequest`), so the Console draws the two as
 one expandable row; a record whose line the console cap dropped, or that ran
 with the console off, has no line. The record is masked where it is built, by

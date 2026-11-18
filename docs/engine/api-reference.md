@@ -9057,9 +9057,9 @@ reads a record too:
   itself still received the whole response.
 - Recorded on every design send, buffered and streaming, whatever
   `scriptEnableConsole` says: a record is trace, not console output. A
-  sequential collection run records its steps' calls too (below); a **load run
-  records none** and keeps only the summary line. Absent when no script sent a
-  request.
+  sequential collection run records its steps' and its setup and teardown
+  scripts' calls too (below); a **load run records none** and keeps only the
+  summary line. Absent when no script sent a request.
 
 **The script keys are stored the same way** (issue #725). `testResults`,
 `consoleLogs`, `preScriptError`, `postScriptError` and `scriptRequests` are returned in the body
@@ -13507,7 +13507,9 @@ are HTTP-only, the same rule a failed assertion follows
     "failuresTotal": 6
   },
   "lifecycle": {
-    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
+    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok",
+                 "scriptRequests": [ { "scope": "collection", "status": 200, "request": { "...": "..." },
+                                       "response": { "...": "..." }, "totalMs": 41.2 } ] } ],
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
                     "messages": [ { "kind": "error", "text": "Error: boom" } ],
                     "console": [ { "level": "log", "text": "tearing down" } ] } ]
@@ -13814,6 +13816,14 @@ failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
 console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
 the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
 element row's lists (#3127), each key present only when the script said something.
+On a **sequential** collection run a row also carries **`scriptRequests`**
+(#3633): every `pm.sendRequest` the script made, in call order, each record in
+the shape, masking and shared body budget
+[`POST /execute`](#post-execute)'s `scriptRequests` describes, with `scope`
+but no `source` (the row says which phase it is). The `console` sample folds a
+repeated line into one entry, so its lines carry no `scriptRequest` index; the
+records are a flat list under the row. A load run's rows, a single-request
+run's included, carry none.
 A script the run's Stop cut short is
 `"skipped"`, with a `message` saying which way: its `pm.sendRequest` was
 cancelled (#3371), or the script itself was ended while it ran (#3460). The run

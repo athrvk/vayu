@@ -563,6 +563,24 @@ TEST_F (ScriptLevelFold, EveryLevelsScriptRequestsAreKeptAndEachLineStillIndexes
     }
 }
 
+// A setup or teardown script's records ride its own lifecycle row, stamped
+// with the level that declared it (#3633). Mutation check: drop the
+// `scriptRequests` write in `lifecycle_row` (pipeline.cpp).
+TEST_F (ScriptLevelFold, ALifecycleScriptsRequestsRideItsRow) {
+    answers["fetch"] = sent_requests ({ "token-endpoint" });
+
+    const auto outcomes = run_lifecycle (Phase::RunStart,
+    json::array ({ script_element ("script.setup", "fetch", "collection") }));
+    const auto node     = vayu::core::build_lifecycle_node (outcomes, {});
+
+    ASSERT_EQ (node["setup"].size (), 1u) << node.dump ();
+    const auto& row = node["setup"][0];
+    ASSERT_TRUE (row.contains ("scriptRequests")) << row.dump ();
+    ASSERT_EQ (row["scriptRequests"].size (), 1u);
+    EXPECT_EQ (row["scriptRequests"][0]["request"]["url"], "token-endpoint");
+    EXPECT_EQ (row["scriptRequests"][0]["scope"], "collection");
+}
+
 // #3371: a script whose `pm.sendRequest` the run's Stop cancelled is no verdict,
 // so its throw and its failed test reach neither its outcome nor the step's
 // slot, while an earlier level's result stays. Mutation check: drop the

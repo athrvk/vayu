@@ -2284,6 +2284,9 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
  * `ScriptConfig` recipe with every other script the run executes - reading it
  * twice (once for each dispatch site) rather than once and threading it
  * through would be the same config keys read at two call sites instead of one.
+ * No `record_script_requests`: a load run's scripts are excluded from the
+ * `pm.sendRequest` records (#3633) whole, its setup and teardown with them,
+ * though their `lifecycle` row could carry them. Opting in is that one call.
  */
 vayu::runtime::ScriptConfig read_lifecycle_script_config (vayu::db::Database& db,
 const nlohmann::json& config) {

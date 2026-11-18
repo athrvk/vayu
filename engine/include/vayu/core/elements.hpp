@@ -503,6 +503,10 @@ struct ElementContext {
     /// Set only by the four `script.*` kinds: what this one script said.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::vector<ElementMessage> outcome_messages{};
+    /// Set only by `script.setup` / `script.teardown`: the script's
+    /// `pm.sendRequest` records (#3633). A step script's ride its slot instead.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::vector<nlohmann::json> outcome_script_requests{};
 };
 
 /**
@@ -733,6 +737,9 @@ struct ElementOutcome {
     /// trace already carries the step's tests and console lines whole, so a
     /// load run's tallies and `build_lifecycle_node` are its readers.
     std::vector<ElementMessage> messages;
+    /// `ElementContext::outcome_script_requests`. Not serialised by
+    /// `to_json`: `build_lifecycle_node` is its one reader.
+    std::vector<nlohmann::json> script_requests;
 
     [[nodiscard]] nlohmann::json to_json () const;
 };

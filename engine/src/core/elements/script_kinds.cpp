@@ -271,7 +271,8 @@ class ScriptPostElement final : public Element {
 /// about the script (#3371, #3460). Any other result is
 /// read as a step script's is (`record_script_outcome`), so a setup whose only
 /// problem is a failing `pm.test` is `failed` with that test as its message,
-/// and its console lines and tests are kept for the report (#3455).
+/// and its console lines and tests are kept for the report (#3455), its
+/// `pm.sendRequest` records (#3633) beside them.
 void run_lifecycle_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 const std::string& script,
@@ -281,11 +282,15 @@ const char* unbound_message) {
         ctx.outcome_message = unbound_message;
         return;
     }
-    const auto result = runner (script);
+    auto result = runner (script);
     if (skip_if_ended_by_stop (ctx, result)) {
         return;
     }
     record_script_outcome (ctx, result);
+    for (auto& record : result.script_requests) {
+        stamp_record_scope (record, ctx.element_scope);
+    }
+    ctx.outcome_script_requests = std::move (result.script_requests);
 }
 
 class ScriptSetupElement final : public Element {

@@ -614,6 +614,35 @@ TEST_F (ScriptLifecycleTest, SequentialSetupFetchesATokenWithSendRequestAndSetsI
     << hits[0].target;
 }
 
+// A sequential run's setup and teardown keep their `pm.sendRequest` records
+// on their own lifecycle rows, as their console lines are (#3633). Mutation
+// check: leave `record_script_requests` out of `execute_scenario_run` and
+// neither row has a list.
+TEST_F (ScriptLifecycleTest, SequentialSetupAndTeardownRowsCarryTheirScriptRequests) {
+    seed_collection (setup_and_teardown_elements (
+    "pm.sendRequest('" + server_->url ("/token") + "?for=setup', function () {});",
+    "pm.sendRequest('" + server_->url ("/token") + "?for=teardown', function () {});"));
+    seed_request (json::array (), "plain=1");
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_sequential (execution, /*allow_script_requests=*/true),
+    vayu::RunStatus::Completed);
+
+    const auto lifecycle = report_lifecycle_of ("run_seq");
+    for (const auto& [phase, marker] :
+    { std::pair{ "setup", "for=setup" }, std::pair{ "teardown", "for=teardown" } }) {
+        const auto rows = lifecycle.value (phase, json::array ());
+        ASSERT_EQ (rows.size (), 1u) << lifecycle.dump ();
+        const auto records = rows[0].value ("scriptRequests", json::array ());
+        ASSERT_EQ (records.size (), 1u) << rows[0].dump ();
+        EXPECT_EQ (records[0]["status"], 200) << phase;
+        EXPECT_EQ (records[0]["scope"], "collection") << phase;
+        EXPECT_NE (records[0]["request"]["url"].get<std::string> ().find (marker),
+        std::string::npos)
+        << records[0].dump ();
+    }
+}
+
 // Mutation check: change the throw-on-error loop in `execute_scenario_run` to
 // merely log the outcome and this reddens to Completed with one request sent.
 // Drop the `catch`'s `summary.lifecycle` assignment (#3455) and the report
@@ -791,6 +820,29 @@ TEST_F (ScriptLifecycleTest, LoadSetupFetchesATokenWithSendRequestAndEveryVUSees
         EXPECT_NE (hit.target.find ("tok=fetched-by-setup"), std::string::npos)
         << hit.target;
     }
+}
+
+// A load run's scripts are excluded from the records whole, its setup with
+// them: the row keeps the summary line in its console sample and carries no
+// list (#3633). Mutation check: call `record_script_requests` in
+// `read_lifecycle_script_config` (run_manager.cpp) and the row has one.
+TEST_F (ScriptLifecycleTest, ALoadRunsSetupRowCarriesNoScriptRequests) {
+    seed_collection (script_setup_element (
+    "pm.sendRequest('" + server_->url ("/token") + "', function () {});"));
+    seed_request (json::array (), "plain=1");
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/1,
+               /*allow_script_requests=*/true),
+    vayu::RunStatus::Completed);
+
+    const auto setup = report_lifecycle_of ("run_load").value ("setup", json::array ());
+    ASSERT_EQ (setup.size (), 1u);
+    EXPECT_FALSE (setup[0].contains ("scriptRequests")) << setup[0].dump ();
+    const auto console = setup[0].value ("console", json::array ());
+    ASSERT_EQ (console.size (), 1u) << setup[0].dump ();
+    EXPECT_EQ (console[0].value ("text", "").rfind ("pm.sendRequest GET ", 0), 0u)
+    << console[0].dump ();
 }
 
 // Mutation check: let a throwing `script.setup` outcome pass unnoticed in

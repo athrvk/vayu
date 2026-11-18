@@ -1560,8 +1560,8 @@ RunManager& manager) {
         // may send is a property of who asked for this run.
         script_config.allow_send_request =
         vayu::http::read_allow_script_requests (context->config);
-        // Every step stores its trace, so its scripts' requests ride it
-        // (#3633).
+        // Every step stores its trace, and the setup and teardown rows their
+        // lifecycle node, so their scripts' requests ride them (#3633).
         vayu::core::record_script_requests (script_config, db);
 
         // One engine for the whole run: QuickJS contexts are pooled and reset

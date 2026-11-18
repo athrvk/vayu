@@ -2435,8 +2435,9 @@ header's value is `"<redacted>"`, a URL's credentials are blanked to `""` (see
 [POST /execute](api-reference.md#post-execute)) - and their bodies share one
 `maxTraceBodyBytes` between them, applied when the `scripts` node is built,
 because the live answer is the same object; `cap_trace_bodies` does not reach
-them here either. A load run stores none, and a row stored before the field
-has no key.
+them here either. A sequential scenario run's `runs.summary.lifecycle` rows
+carry the same records for its setup and teardown scripts. A load run stores
+none, and a row stored before the field has no key.
 
 The `request` node also carries **`rawRequest`** - the message the transfer actually put on the
 wire, the same string the live [`POST /execute`](api-reference.md#post-execute) response returns
