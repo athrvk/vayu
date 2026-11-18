@@ -1548,8 +1548,8 @@ TEST_F (OAuthJwtBearerTest, RefusesAnAssertionItCannotSignNamingTheMembers) {
     wrong_key["signingAlgorithm"] = "ES256";
     expect_names (wrong_key, rsa_pem (), { "signingAlgorithm", "privateKey" });
 
-    const std::string small = jwt::pkcs8 (jwt::keys ().rsa_small);
-    expect_names (config (idp, small), small, { "privateKey" });
+    const std::string small_rsa = jwt::pkcs8 (jwt::keys ().rsa_small);
+    expect_names (config (idp, small_rsa), small_rsa, { "privateKey" });
 
     json not_a_key = config (idp, "this is not a PEM");
     expect_names (not_a_key, "this is not a PEM", { "privateKey" });
