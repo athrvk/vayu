@@ -1363,17 +1363,19 @@ class MetricsCollector {
 
     /**
      * @brief Get current statistics as JSON (for live streaming)
-     * Lock-free read from atomic counters, no database access
+     * No database access
      * @param current_active Active connection count from event loop
      * @param elapsed_seconds Elapsed time since test start
      * @param requests_sent Total requests submitted to event loop (for send rate)
      * @param requests_expected Total expected requests for the run (0 for open-ended
      *        modes like constant_rps; feeds the dashboard ETA stat)
      * @param status_snapshot Optional precomputed status-code distribution. When
-     *        non-null it is used verbatim for the error counts, the `statusCodes`
+     *        non-null it is used verbatim for the request total (`totalRequests`,
+     *        `totalSuccess`, `throughput`), the error counts, the `statusCodes`
      *        field and the derived class breakdown, avoiding a redundant scan when the caller
      *        already snapshotted the distribution this tick. When null the
-     *        distribution is computed internally.
+     *        distribution is computed internally. Either way every count on
+     *        the frame is that one sample (#3572).
      * @param window_percentiles Optional windowed (rolling) percentiles for the
      *        `latencySamples` and `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms`
      *        fields (see put_interval_percentiles). When null they are read from

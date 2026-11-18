@@ -12261,7 +12261,7 @@ no frame.
 
 | Field | Meaning |
 |-------|---------|
-| `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts; `totalErrors` by the [one error definition](#what-counts-as-an-error) |
+| `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts; `totalErrors` by the [one error definition](#what-counts-as-an-error). All three are counted from the tick's one status-code snapshot (issue #3572), so `totalSuccess + totalErrors` is `totalRequests` on every frame and one frame's `totalErrors` never exceeds its `totalRequests` |
 | `httpErrors` / `noResponse` | `totalErrors` split: an error status came back, or no response did |
 | `cancelled` | Requests a Stop cancelled before they answered; in none of the counts above ([issue #2136](#what-counts-as-an-error)) |
 | `errorRate` | `totalErrors` as a percentage of the status-code distribution's total |
@@ -12295,16 +12295,17 @@ no frame.
 | `scenario` | **Gate frames only** (issue #2823), the final frame included, and only on a scenario load run: the sequence so far, `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, one `steps` entry per plan step in plan order. The same counters as the stored summary's `scenario` block (`iterations`, `iterations_completed`, `iterations_abandoned`, `steps_executed`, and each step's `executed` and `errors`), read while the workers still write, so a mid-run reading's figures can differ from each other by the completions that landed between the reads; the final frame is read after the drain and equals the summary. No latency: a step's percentiles are in the [report](#get-runsrunidreport) alone. Absent from every other frame and from every frame of any other run
 
 **Read order within one tick.** The metrics thread snapshots the status-code
-distribution first, then `get_current_stats()` reads the completed count
-(`totalRequests`) afterwards, and the stored row's `requests_completed` is read
-after the same snapshot. So `totalErrors`, `errorRate` and the `status*` keys
-all come from the earlier snapshot and `totalRequests`, `totalSuccess` and
-`throughput` from the later read. A completion landing between the two makes
-`status2xx + status3xx` up to one tick of completions lower than `totalSuccess`,
-and a client's `totalErrors / totalRequests` marginally lower than the frame's
-`errorRate`. The skew is invisible at the default 1 Hz cadence, and the order is
-the safe one: `errorRate` divides by the snapshot's own total, so no rate
-exceeds 100 percent.
+distribution once, and every count on the frame is that one sample:
+`totalRequests` is the snapshot's own total, and `totalSuccess`, `totalErrors`,
+`httpErrors`, `noResponse`, `errorRate`, `throughput` and the `status*` keys
+all derive from the same copy (issue #3572). A gate tick's stored row reads the
+same snapshot, so its `requests_completed` and `requests_failed` are the
+frame's `totalRequests` and `totalErrors`. A completion landing after the
+snapshot is in the next frame's counts, never half in this one, so between two
+frames the error delta never exceeds the request delta and no per-tick error
+rate a client derives from them can exceed 100 percent. An engine before
+#3572 read `totalRequests` after the snapshot, which could put a completion in
+one frame's total and only the next frame's errors.
 
 Each `metrics` event carries an `id:` equal to its zero-based offset. The
 browser's built-in `EventSource` retry automatically replays this id as

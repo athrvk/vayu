@@ -1569,11 +1569,14 @@ const Percentiles* window_percentiles) const {
     *status_snapshot :
     (local_dist = status_code_distribution ());
 
-    // Lock-free reads from atomic counters
-    size_t total        = total_requests ();
-    const auto failures = vayu::count_status_failures (dist);
-    size_t success      = total > failures.failed ? total - failures.failed : 0;
-    double avg_lat      = average_latency ();
+    // The total is the snapshot's own count, never total_requests () read
+    // later: completions landing in between would reach the total and not the
+    // errors, and the next frame's errors could outgrow its requests (#3572).
+    // Every completion is in the distribution, so this is the request count.
+    const auto failures  = vayu::count_status_failures (dist);
+    const size_t total   = failures.total;
+    const size_t success = total - failures.failed; // failed is a part of total
+    double avg_lat       = average_latency ();
 
     // Calculate rate metrics (Open Model)
     // Send Rate: How fast Vayu is dispatching requests to the server
