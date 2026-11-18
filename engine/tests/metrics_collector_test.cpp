@@ -1321,6 +1321,111 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsCountsErrorsFromTheCallersSnapshot)
     EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 25.0);
 }
 
+namespace {
+
+/// The counters a live frame carries that the error-burst rule divides.
+struct FrameCounts {
+    size_t requests = 0;
+    size_t errors   = 0;
+    size_t success  = 0;
+};
+
+FrameCounts frame_counts (const nlohmann::json& stats) {
+    return { stats.at ("totalRequests").get<size_t> (),
+        stats.at ("totalErrors").get<size_t> (),
+        stats.at ("totalSuccess").get<size_t> () };
+}
+
+/// A live tick's read order: the snapshot first, then the frame built on it.
+FrameCounts snapshot_then_frame (const MetricsCollector& collector) {
+    const auto snapshot = collector.status_code_distribution ();
+    return frame_counts (collector.get_current_stats (0, 1.0, 0, 0, &snapshot));
+}
+
+/// Empty when @p current is one consistent sample after @p previous: no more
+/// errors than requests, and no more new errors than new requests.
+std::string frame_inconsistency (const FrameCounts& previous, const FrameCounts& current) {
+    if (current.errors > current.requests ||
+    current.success + current.errors != current.requests) {
+        return "frame of " + std::to_string (current.requests) +
+        " requests carries " + std::to_string (current.errors) +
+        " errors and " + std::to_string (current.success) + " successes";
+    }
+    if (current.requests < previous.requests || current.errors < previous.errors ||
+    current.errors - previous.errors > current.requests - previous.requests) {
+        return "frames went from " + std::to_string (previous.requests) + "/" +
+        std::to_string (previous.errors) + " to " + std::to_string (current.requests) +
+        "/" + std::to_string (current.errors) + " (requests/errors)";
+    }
+    return {};
+}
+
+} // namespace
+
+// #3572: completions landing between a tick's snapshot and its frame must not
+// reach the frame's total before its error count. Read at two instants, the
+// first frame counted 6 requests and no errors and the second 6 requests and 5
+// errors: 5 new errors over no new requests. The frame's total is the
+// snapshot's.
+TEST_F (MetricsCollectorTest, LiveFrameTotalIsTheSnapshotsOwnCount) {
+    collector->record_success (200, 10.0, 0.0);
+    const auto first_snapshot = collector->status_code_distribution ();
+    for (int i = 0; i < 5; ++i) {
+        collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+    }
+    const auto first =
+    frame_counts (collector->get_current_stats (0, 1.0, 0, 0, &first_snapshot));
+    EXPECT_EQ (first.requests, 1u);
+    EXPECT_EQ (first.errors, 0u);
+
+    const auto second_snapshot = collector->status_code_distribution ();
+    const auto second_stats = collector->get_current_stats (0, 2.0, 0, 0, &second_snapshot);
+    const auto second = frame_counts (second_stats);
+    EXPECT_EQ (second.requests, 6u);
+    EXPECT_EQ (second.errors, 5u);
+    EXPECT_DOUBLE_EQ (second_stats.at ("throughput").get<double> (), 3.0);
+
+    EXPECT_EQ (frame_inconsistency (FrameCounts{}, first), "");
+    EXPECT_EQ (frame_inconsistency (first, second), "");
+}
+
+// The same invariant under a racing recorder, every frame against the one
+// before it. A frame is taken before the writer starts and after it is joined,
+// so the check runs whatever the scheduler does with the threads.
+TEST_F (MetricsCollectorTest, LiveFramesStayConsistentWhileErrorsLand) {
+    constexpr int kIterations = 100000;
+    std::atomic<bool> writer_done{ false };
+    FrameCounts previous = snapshot_then_frame (*collector);
+    std::thread writer ([this, &writer_done] () {
+        for (int i = 0; i < kIterations; ++i) {
+            collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+        }
+        writer_done.store (true);
+    });
+
+    // Non-fatal, so a violation joins the writer before reporting (see
+    // SuccessCountNeverExceedsTotalRequests).
+    std::string broken;
+    size_t frames = 0;
+    while (!writer_done.load () && broken.empty ()) {
+        const FrameCounts current = snapshot_then_frame (*collector);
+        broken                    = frame_inconsistency (previous, current);
+        previous                  = current;
+        ++frames;
+    }
+    writer.join ();
+    if (broken.empty ()) {
+        broken = frame_inconsistency (previous, snapshot_then_frame (*collector));
+        ++frames;
+    }
+
+    EXPECT_EQ (broken, "") << "after " << frames << " frames";
+    EXPECT_GE (frames, 1u);
+    const auto settled = snapshot_then_frame (*collector);
+    EXPECT_EQ (settled.requests, static_cast<size_t> (kIterations));
+    EXPECT_EQ (settled.errors, static_cast<size_t> (kIterations));
+}
+
 // #2136: a Stop-cancelled request is counted on its own and moves nothing
 // else - so 10 cancelled beside 70,000 answered reads as 0% errors, every
 // answered request is still a success, and the average divides by the

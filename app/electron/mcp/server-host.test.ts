@@ -236,7 +236,10 @@ const GUARDS: readonly Guard[] = [
 	{
 		name: "engine unreachable",
 		cliNames: ["vayu-engine", "VAYU_ENGINE_URL"],
-		appNames: ["Vayu app"],
+		appNames: [
+			"The Vayu app is open but its engine is not answering",
+			"Restart engine in Settings",
+		],
 		trigger: (host) =>
 			refusal(
 				host,
@@ -267,6 +270,24 @@ describe("guard and outage messages, per host", () => {
 			const text = await guard.trigger("app");
 			for (const name of guard.appNames) expect(text).toContain(name);
 		});
+	});
+
+	it("never tells an app user to start the app, and leaves the CLI's text as it was", async () => {
+		const down = (host: McpHost) =>
+			refusal(
+				host,
+				"run_request",
+				{ url: "https://api.example.com/x" },
+				ALLOWED,
+				fakeClient({
+					executeRequest: vi.fn().mockRejectedValue(new TypeError("fetch failed")),
+				})
+			);
+		const app = await down("app");
+		expect(app).not.toMatch(/make sure|start the|is running/i);
+		expect(await down("cli")).toBe(
+			"Could not reach the Vayu engine. Start vayu-engine, or point VAYU_ENGINE_URL at a running engine, then retry. (fetch failed)"
+		);
 	});
 
 	it("names how each host restarts the engine for a restart-required key", async () => {
