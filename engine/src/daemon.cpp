@@ -117,6 +117,8 @@ void print_help () {
     std::cout << "Options:\n";
     std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876, "
                  "1-65535)\n";
+    std::cout << "      --mcp-port <PORT>    MCP server port the engine never "
+                 "sends to (default: 9877, 1-65535)\n";
     std::cout << "  -d, --data-dir <DIR>     Data directory for DB, "
                  "logs, and lock file "
                  "(default: ../data)\n";
@@ -253,7 +255,12 @@ int run_daemon (std::span<char* const> args) {
     // Before the listener starts, so no request is served while an outbound
     // transfer could still reach this port (#2355). A port that cannot be
     // bound ends the process below, so the requested port is the bound one.
+    // Without `--mcp-port` the MCP registry stays empty and the guard reserves
+    // the default MCP port instead (#3580).
     vayu::http::set_engine_port (port);
+    if (parsed.mcp_port) {
+        vayu::http::set_mcp_port (*parsed.mcp_port);
+    }
 
     // Create and start HTTP server
     vayu::http::Server server (db, run_manager, port, grant_secret, reported_data_dir);

@@ -65,35 +65,64 @@ constexpr auto ELSEWHERE = std::to_array<const char*> ({ "10.0.0.1",
 
 TEST (LoopbackGuardPredicate, RefusesEveryLoopbackSpellingOnTheEnginePort) {
     for (const char* host : LOOPBACK_SPELLINGS) {
-        EXPECT_TRUE (is_reserved_loopback_target (host, ENGINE_PORT, ENGINE_PORT)) << host;
+        EXPECT_TRUE (is_reserved_loopback_target (host, ENGINE_PORT, ENGINE_PORT, std::nullopt))
+        << host;
     }
 }
 
 TEST (LoopbackGuardPredicate, RefusesEveryLoopbackSpellingOnTheMcpPort) {
     for (const char* host : LOOPBACK_SPELLINGS) {
-        EXPECT_TRUE (is_reserved_loopback_target (host, MCP_PORT, ENGINE_PORT)) << host;
+        EXPECT_TRUE (is_reserved_loopback_target (host, MCP_PORT, ENGINE_PORT, std::nullopt))
+        << host;
     }
 }
 
 // Users test local servers all the time; only Vayu's own ports are refused.
 TEST (LoopbackGuardPredicate, AllowsLoopbackOnAnyOtherPort) {
     for (const char* host : LOOPBACK_SPELLINGS) {
-        EXPECT_FALSE (is_reserved_loopback_target (host, OTHER_PORT, ENGINE_PORT)) << host;
+        EXPECT_FALSE (is_reserved_loopback_target (host, OTHER_PORT, ENGINE_PORT, std::nullopt))
+        << host;
     }
 }
 
 TEST (LoopbackGuardPredicate, AllowsAnotherHostOnAReservedPort) {
     for (const char* host : ELSEWHERE) {
-        EXPECT_FALSE (is_reserved_loopback_target (host, ENGINE_PORT, ENGINE_PORT)) << host;
-        EXPECT_FALSE (is_reserved_loopback_target (host, MCP_PORT, ENGINE_PORT)) << host;
+        EXPECT_FALSE (
+        is_reserved_loopback_target (host, ENGINE_PORT, ENGINE_PORT, std::nullopt))
+        << host;
+        EXPECT_FALSE (is_reserved_loopback_target (host, MCP_PORT, ENGINE_PORT, std::nullopt))
+        << host;
     }
 }
 
 // Before the daemon registers its port (a test's in-process Server, the CLI),
 // the MCP port is still reserved and nothing else is.
 TEST (LoopbackGuardPredicate, WithNoRegisteredEnginePortOnlyTheMcpPortIsReserved) {
-    EXPECT_FALSE (is_reserved_loopback_target ("127.0.0.1", ENGINE_PORT, std::nullopt));
-    EXPECT_TRUE (is_reserved_loopback_target ("127.0.0.1", MCP_PORT, std::nullopt));
+    EXPECT_FALSE (is_reserved_loopback_target (
+    "127.0.0.1", ENGINE_PORT, std::nullopt, std::nullopt));
+    EXPECT_TRUE (
+    is_reserved_loopback_target ("127.0.0.1", MCP_PORT, std::nullopt, std::nullopt));
+}
+
+// `--mcp-port` moves the reservation rather than adding one (#3580): the
+// default is then a port like any other, free to test a local server on.
+// Mutation-check: compare against `defaults::MCP_PORT` again and both halves
+// fail.
+TEST (LoopbackGuardPredicate, ARegisteredMcpPortReplacesTheDefault) {
+    constexpr int CHOSEN_MCP_PORT = 19877;
+    for (const char* host : LOOPBACK_SPELLINGS) {
+        EXPECT_TRUE (is_reserved_loopback_target (host, CHOSEN_MCP_PORT, ENGINE_PORT, CHOSEN_MCP_PORT))
+        << host;
+        EXPECT_FALSE (is_reserved_loopback_target (host, MCP_PORT, ENGINE_PORT, CHOSEN_MCP_PORT))
+        << host;
+        EXPECT_TRUE (is_reserved_loopback_target (host, ENGINE_PORT, ENGINE_PORT, CHOSEN_MCP_PORT))
+        << host << ": the engine port stays reserved";
+    }
+    for (const char* host : ELSEWHERE) {
+        EXPECT_FALSE (is_reserved_loopback_target (
+        host, CHOSEN_MCP_PORT, ENGINE_PORT, CHOSEN_MCP_PORT))
+        << host;
+    }
 }
 
 // ============================================================================
@@ -274,6 +303,24 @@ TEST (LoopbackGuardRegistry, IsSetOnceAndRefusesASecondPort) {
     << "a refused registration must leave the first one in force";
 }
 
+// The registry is per process and the suite shares one (sharded runs), so this
+// registers the default MCP port: every other test's reading of 9877 as
+// reserved holds whether it runs before or after this one. Which port a
+// registered value reserves is the predicate's case above.
+TEST (LoopbackGuardRegistry, TheMcpPortIsSetOnceAndRefusesASecondPort) {
+    EXPECT_NO_THROW (vayu::http::set_mcp_port (MCP_PORT));
+    ASSERT_EQ (vayu::http::registered_mcp_port (), MCP_PORT);
+
+    EXPECT_NO_THROW (vayu::http::set_mcp_port (MCP_PORT))
+    << "repeating the registered port is a no-op";
+    EXPECT_THROW (vayu::http::set_mcp_port (MCP_PORT + 1), std::logic_error);
+    EXPECT_THROW (vayu::http::set_mcp_port (0), std::invalid_argument);
+    EXPECT_THROW (vayu::http::set_mcp_port (65536), std::invalid_argument);
+    EXPECT_EQ (vayu::http::registered_mcp_port (), MCP_PORT)
+    << "a refused registration must leave the first one in force";
+    EXPECT_TRUE (vayu::http::is_reserved_loopback_target ("127.0.0.1", MCP_PORT));
+}
+
 TEST (LoopbackGuardRegistry, ReadsTheReservedPortOffAUrl) {
     const int port         = vayu::tests::engine_port_stand_in ().port ();
     const std::string tail = ":" + std::to_string (port) + "/health";
@@ -315,6 +362,10 @@ TEST (LoopbackGuardRegistry, TheRefusalNamesWhichPortItIs) {
     std::string::npos);
     EXPECT_NE (
     vayu::http::reserved_target_refusal (MCP_PORT).find ("own MCP port 9877"),
+    std::string::npos);
+    // A `--mcp-port` value is named as itself, not as the default.
+    EXPECT_NE (
+    vayu::http::reserved_target_refusal (19877).find ("own MCP port 19877"),
     std::string::npos);
 }
 

@@ -31,9 +31,10 @@ namespace defaults {
 constexpr const char* DAEMON_URL = "http://127.0.0.1:9876";
 /// Default port for the daemon server
 constexpr int PORT = 9876;
-/// The MCP server's port, which the engine never sends a request to
+/// The MCP server's port when the daemon is started without `--mcp-port`
+/// (#3580); the engine never sends a request to whichever one is in force
 /// (`http/loopback_guard.hpp`, #2355). The server lives in the app, so
-/// `MCP_PORT` in `app/electron/constants.ts` owns the number; this is a copy.
+/// `MCP_PORT` in `app/electron/constants.ts` owns the default; this is a copy.
 constexpr int MCP_PORT = 9877;
 /// Default verbosity level
 constexpr bool VERBOSE = false;
@@ -48,6 +49,8 @@ namespace cli {
 constexpr const char* ARG_PORT_SHORT = "-p";
 /// Long flag for port argument
 constexpr const char* ARG_PORT_LONG = "--port";
+/// Long flag for the MCP server's port, which the engine reserves (#3580)
+constexpr const char* ARG_MCP_PORT_LONG = "--mcp-port";
 } // namespace cli
 
 /**

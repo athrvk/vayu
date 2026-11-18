@@ -7943,9 +7943,10 @@ would refuse it as "IDN support not present", which names the wrong cause.
 #### Reserved local ports
 
 No request the engine sends reaches Vayu itself: the engine's own port (the
-`--port` it bound, 9876 by default) and the MCP server's port (9877) are
-refused on this machine, on every send path - Send, a load or collection run, a
-streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
+`--port` it bound, 9876 by default) and the MCP server's port (the daemon's
+`--mcp-port`, 9877 when it is started without one) are refused on this
+machine, on every send path - Send, a load or collection run, a streaming
+request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
 request, `POST /import/fetch` and the server-vitals monitor. The API's
 [gate](#who-may-call-the-api) admits a loopback request with no `Origin`, which
 is exactly what the engine's own client sends, so without this a request in an
@@ -7962,7 +7963,9 @@ rule is applied twice:
   before anything is dialled: status `0`, error code
   `INVALID_URL`, and the message
   `Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine - not when the URL names it, a redirect leads there or a host name resolves there`
-  (`MCP port 9877` for the other). This holds with a proxy configured too.
+  (`MCP port 9877`, or the `--mcp-port` value, for the other). This holds with
+  a proxy configured too. Once a `--mcp-port` is given, 9877 is an ordinary
+  port like any other.
 - **The address libcurl connected to**, for every connection a transfer uses,
   before a byte of the request is written. This is what refuses a redirect to
   one of those ports and a name that resolves to loopback (`*.localhost`, a DNS

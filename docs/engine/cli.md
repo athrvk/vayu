@@ -236,8 +236,21 @@ on is refused on stderr with exit code **1** rather than dropped:
 | Daemon flag | Accepts |
 |-------------|---------|
 | `-p, --port <PORT>` | A whole number from 1 to 65535 |
+| `--mcp-port <PORT>` | A whole number from 1 to 65535, other than the engine's own port; default 9877 |
 | `-d, --data-dir <DIR>` | A directory path |
 | `-v, --verbose [LEVEL]` | 0 (warn/error), 1 (info) or 2 (debug); `-v` on its own means 1 |
+
+`--mcp-port` names the port the app's MCP server listens on. The engine never
+sends a request to it on this machine, as it never sends one to its own port
+([Reserved local ports](api-reference.md#reserved-local-ports)): given the
+flag, that port is the reserved one and 9877 is an ordinary port; without it,
+9877 is reserved. A value equal to the engine's port, the default 9876 included, is
+refused:
+
+```
+$ vayu-engine --mcp-port 9876
+vayu-engine: --mcp-port 9876 is the port the engine listens on (--port); give the MCP server a port of its own
+```
 
 `--data-dir` is made owner-only (`0700` on Linux and macOS) whatever it names,
 and the engine's own files under it are tightened to `0600` on every start

@@ -12,8 +12,10 @@ through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
 [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (v2:
 `@modelcontextprotocol/server`), and proxies the engine's REST API on `:9876` (or the fallback port the app chose
-when 9876 was held; see `VAYU_ENGINE_URL` below). The **C++ engine is not modified** -
-the MCP layer is Apache-2.0 like the rest of the app.
+when 9876 was held; see `VAYU_ENGINE_URL` below). The MCP layer lives entirely
+in the app and is Apache-2.0 like the rest of it; the C++ engine's one part is
+refusing to send a request to the MCP port (its `--mcp-port`, 9877 by default;
+see [the daemon flags](cli.md#prerequisites)).
 
 Once Vayu is running, any agent opts in with one command; with MCP switched off
 or Vayu closed, nothing listens, the connection is refused and the agent's

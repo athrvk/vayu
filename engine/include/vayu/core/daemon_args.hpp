@@ -37,6 +37,8 @@ namespace vayu::core {
 /// knowing.
 struct DaemonArgs {
     int port = vayu::core::constants::defaults::PORT;
+    /// `--mcp-port`; absent means the MCP server is on `defaults::MCP_PORT`.
+    std::optional<int> mcp_port;
     /// 0=warn/error, 1=info+, 2=debug+
     int verbosity = 0;
     std::string data_dir;
@@ -52,21 +54,53 @@ enum class DaemonRequest : std::uint8_t {
 
 namespace detail {
 
-/// `-p` / `--port <PORT>`. Rule 1 only: a flag-shaped value is refused by the
-/// parse, which says the same thing and can name the range while doing it.
-inline std::expected<void, std::string>
-read_port_flag (std::span<char* const> args, size_t& i, DaemonArgs& out) {
+/// The port after @p flag at `args[i]`, consuming it. Rule 1 only: a
+/// flag-shaped value is refused by the parse, which says the same thing and
+/// can name the range while doing it.
+inline std::expected<int, std::string>
+read_port_value (std::span<char* const> args, size_t& i, const NumericFlag& flag) {
     const auto next = argument_after (args, i);
     if (!next) {
-        return std::unexpected (missing_value_error (PORT_FLAG.name, "a port number"));
+        return std::unexpected (missing_value_error (flag.name, "a port number"));
     }
-    const auto port = parse_numeric_flag (PORT_FLAG, *next);
+    const auto port = parse_numeric_flag (flag, *next);
+    if (port) {
+        ++i;
+    }
+    return port;
+}
+
+/// `-p` / `--port <PORT>`.
+inline std::expected<void, std::string>
+read_port_flag (std::span<char* const> args, size_t& i, DaemonArgs& out) {
+    const auto port = read_port_value (args, i, PORT_FLAG);
     if (!port) {
         return std::unexpected (port.error ());
     }
     out.port = *port;
-    ++i;
     return {};
+}
+
+/// `--mcp-port <PORT>`.
+inline std::expected<void, std::string>
+read_mcp_port_flag (std::span<char* const> args, size_t& i, DaemonArgs& out) {
+    const auto port = read_port_value (args, i, MCP_PORT_FLAG);
+    if (!port) {
+        return std::unexpected (port.error ());
+    }
+    out.mcp_port = *port;
+    return {};
+}
+
+/// The engine and the MCP server cannot share a port: one of them would fail
+/// to bind, and the engine would refuse its own port as the MCP one.
+inline std::expected<void, std::string> check_ports_differ (const DaemonArgs& args) {
+    if (args.mcp_port != args.port) {
+        return {};
+    }
+    return std::unexpected (std::string (MCP_PORT_FLAG.name) + " " +
+    std::to_string (args.port) + " is the port the engine listens on (" +
+    std::string (PORT_FLAG.name) + "); give the MCP server a port of its own");
 }
 
 /// `-d` / `--data-dir <DIR>`.
@@ -116,6 +150,8 @@ read_daemon_args (std::span<char* const> args, DaemonArgs& out) {
         if (arg == vayu::core::constants::cli::ARG_PORT_SHORT ||
         arg == vayu::core::constants::cli::ARG_PORT_LONG) {
             outcome = detail::read_port_flag (args, i, out);
+        } else if (arg == vayu::core::constants::cli::ARG_MCP_PORT_LONG) {
+            outcome = detail::read_mcp_port_flag (args, i, out);
         } else if (arg == "-d" || arg == "--data-dir") {
             outcome = detail::read_data_dir_flag (args, i, out);
         } else if (arg == "-v" || arg == "--verbose") {
@@ -129,6 +165,9 @@ read_daemon_args (std::span<char* const> args, DaemonArgs& out) {
         if (!outcome) {
             return std::unexpected (outcome.error ());
         }
+    }
+    if (const auto ports = detail::check_ports_differ (out); !ports) {
+        return std::unexpected (ports.error ());
     }
     return DaemonRequest::Continue;
 }

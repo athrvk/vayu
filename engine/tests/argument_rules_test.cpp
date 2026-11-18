@@ -32,6 +32,7 @@
  * spelling a `char*` array.
  */
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -82,7 +83,7 @@ core::DaemonArgs seeded_daemon_args () {
 // ---------------------------------------------------------------------------
 
 TEST (ArgumentRulesTest, DaemonRefusesAValueFlagWithNothingAfterIt) {
-    for (const auto* flag : { "--port", "-p", "--data-dir", "-d" }) {
+    for (const auto* flag : { "--port", "-p", "--mcp-port", "--data-dir", "-d" }) {
         auto parsed = seeded_daemon_args ();
         const ArgumentVector args ({ flag });
         const auto request = core::read_daemon_args (args.span (), parsed);
@@ -93,6 +94,7 @@ TEST (ArgumentRulesTest, DaemonRefusesAValueFlagWithNothingAfterIt) {
         // The default must not quietly stand: that is what made the missing
         // value invisible.
         EXPECT_EQ (parsed.data_dir, "seeded");
+        EXPECT_EQ (parsed.mcp_port, std::nullopt);
     }
 }
 
@@ -245,14 +247,78 @@ TEST (ArgumentRulesTest, ACommandBeforeItsFlagsIsNotMissing) {
 
 TEST (ArgumentRulesTest, TheDaemonStillReadsAWholeCommandLine) {
     auto parsed = seeded_daemon_args ();
-    const ArgumentVector args ({ "--port", "8080", "-d", "/tmp/vayu", "-v", "2" });
+    const ArgumentVector args (
+    { "--port", "8080", "--mcp-port", "8081", "-d", "/tmp/vayu", "-v", "2" });
     const auto request = core::read_daemon_args (args.span (), parsed);
 
     ASSERT_HAS_VALUE (request) << request.error ();
     EXPECT_EQ (*request, core::DaemonRequest::Continue);
     EXPECT_EQ (parsed.port, 8080);
+    EXPECT_EQ (parsed.mcp_port, 8081);
     EXPECT_EQ (parsed.data_dir, "/tmp/vayu");
     EXPECT_EQ (parsed.verbosity, 2);
+}
+
+// ---------------------------------------------------------------------------
+// `--mcp-port` (#3580)
+// ---------------------------------------------------------------------------
+
+TEST (ArgumentRulesTest, TheMcpPortIsAbsentUntilTheFlagNamesOne) {
+    auto parsed = seeded_daemon_args ();
+    const ArgumentVector bare ({ "-d", "/tmp/vayu" });
+    ASSERT_HAS_VALUE (core::read_daemon_args (bare.span (), parsed));
+    EXPECT_EQ (parsed.mcp_port, std::nullopt)
+    << "absent must stay absent, so the guard keeps the default reserved";
+
+    const ArgumentVector named ({ "--mcp-port", "19877" });
+    ASSERT_HAS_VALUE (core::read_daemon_args (named.span (), parsed));
+    EXPECT_EQ (parsed.mcp_port, 19877);
+}
+
+TEST (ArgumentRulesTest, ARepeatedMcpPortTakesTheLastAsPortDoes) {
+    auto parsed = seeded_daemon_args ();
+    const ArgumentVector args ({ "--mcp-port", "19001", "--mcp-port", "19002" });
+    ASSERT_HAS_VALUE (core::read_daemon_args (args.span (), parsed));
+    EXPECT_EQ (parsed.mcp_port, 19002);
+}
+
+TEST (ArgumentRulesTest, DaemonRefusesAnMcpPortOutsideItsRange) {
+    for (const auto* value : { "0", "65536", "notaport", "9877x", "--data-dir" }) {
+        auto parsed = seeded_daemon_args ();
+        const ArgumentVector args ({ "--mcp-port", value });
+        const auto request = core::read_daemon_args (args.span (), parsed);
+
+        ASSERT_FALSE (request.has_value ()) << value << " was accepted";
+        EXPECT_EQ (request.error (),
+        "--mcp-port expects a number between 1 and 65535, got \"" + std::string (value) + "\"");
+        EXPECT_EQ (parsed.mcp_port, std::nullopt) << value;
+    }
+}
+
+// One of the two would fail to bind, and the engine would refuse its own port
+// as the MCP one, so the line is refused before anything starts. The default
+// `--port` counts: `--mcp-port 9876` alone is the same clash.
+TEST (ArgumentRulesTest, DaemonRefusesAnMcpPortThatIsTheEnginePort) {
+    const auto read = [] (std::initializer_list<std::string_view> line) {
+        auto parsed = seeded_daemon_args ();
+        const ArgumentVector args (line);
+        return core::read_daemon_args (args.span (), parsed);
+    };
+
+    for (const auto& request : { read ({ "--mcp-port", "9876" }),
+         read ({ "--port", "9000", "--mcp-port", "9000" }),
+         read ({ "--mcp-port", "9000", "-p", "9000" }) }) {
+        ASSERT_FALSE (request.has_value ()) << "a shared port was accepted";
+        EXPECT_NE (request.error ().find ("--mcp-port"), std::string::npos)
+        << request.error ();
+        EXPECT_NE (request.error ().find ("--port"), std::string::npos)
+        << request.error ();
+    }
+    EXPECT_EQ (read ({ "--mcp-port", "9876" }).error (),
+    "--mcp-port 9876 is the port the engine listens on (--port); give the MCP "
+    "server a port of its own");
+
+    ASSERT_HAS_VALUE (read ({ "--port", "9000", "--mcp-port", "9001" }));
 }
 
 TEST (ArgumentRulesTest, TheCliStillReadsAWholeCommandLine) {
@@ -290,6 +356,14 @@ TEST (ArgumentRulesTest, HelpAndVersionAreRequestsRatherThanOutput) {
     const auto daemon_request = core::read_daemon_args (help.span (), parsed);
     ASSERT_HAS_VALUE (daemon_request) << daemon_request.error ();
     EXPECT_EQ (*daemon_request, core::DaemonRequest::Help);
+
+    // Help is answered before the ports are compared, so a line that would be
+    // refused still gets its usage.
+    auto clashing = seeded_daemon_args ();
+    const ArgumentVector clashing_help ({ "--mcp-port", "9876", "--help" });
+    const auto clashing_request = core::read_daemon_args (clashing_help.span (), clashing);
+    ASSERT_HAS_VALUE (clashing_request) << clashing_request.error ();
+    EXPECT_EQ (*clashing_request, core::DaemonRequest::Help);
 
     core::CliOptions options;
     const ArgumentVector version ({ "--version" });

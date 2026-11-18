@@ -36,6 +36,34 @@ std::atomic<int>& engine_port_slot () noexcept {
     return slot;
 }
 
+/// 0 until `set_mcp_port` runs, as above.
+std::atomic<int>& mcp_port_slot () noexcept {
+    static std::atomic<int> slot{ 0 };
+    return slot;
+}
+
+/// The set-once rule both registries keep; @p role names the port in a
+/// refusal.
+void register_port_once (std::atomic<int>& slot, int port, std::string_view role) {
+    if (port < MIN_PORT || port > MAX_PORT) {
+        throw std::invalid_argument (std::string (role) + " port " +
+        std::to_string (port) + " is outside " + std::to_string (MIN_PORT) +
+        ".." + std::to_string (MAX_PORT));
+    }
+    int registered = 0;
+    if (slot.compare_exchange_strong (registered, port) || registered == port) {
+        return;
+    }
+    throw std::logic_error ("the " + std::string (role) +
+    " port is already registered as " + std::to_string (registered) +
+    "; refusing to replace it with " + std::to_string (port));
+}
+
+std::optional<int> read_slot (const std::atomic<int>& slot) noexcept {
+    const int port = slot.load ();
+    return port == 0 ? std::nullopt : std::optional<int> (port);
+}
+
 /// A canonical dotted quad: four runs of digits. A domain such as
 /// `127.example` is not one, whatever its first label says.
 bool is_dotted_quad (std::string_view host) {
@@ -136,29 +164,27 @@ bool is_source_host (std::string_view host, int port, const LocalPeerRule& rule)
 } // namespace
 
 void set_engine_port (int port) {
-    if (port < MIN_PORT || port > MAX_PORT) {
-        throw std::invalid_argument ("engine port " + std::to_string (port) +
-        " is outside " + std::to_string (MIN_PORT) + ".." + std::to_string (MAX_PORT));
-    }
-    int registered = 0;
-    if (engine_port_slot ().compare_exchange_strong (registered, port) || registered == port) {
-        return;
-    }
-    throw std::logic_error ("the engine port is already registered as " +
-    std::to_string (registered) + "; refusing to replace it with " + std::to_string (port));
+    register_port_once (engine_port_slot (), port, "engine");
 }
 
 std::optional<int> registered_engine_port () noexcept {
-    const int port = engine_port_slot ().load ();
-    return port == 0 ? std::nullopt : std::optional<int> (port);
+    return read_slot (engine_port_slot ());
+}
+
+void set_mcp_port (int port) {
+    register_port_once (mcp_port_slot (), port, "MCP");
+}
+
+std::optional<int> registered_mcp_port () noexcept {
+    return read_slot (mcp_port_slot ());
 }
 
 bool detail::is_reserved_loopback_target (std::string_view host_or_ip,
 int port,
-std::optional<int> engine_port) {
-    const bool reserved_port =
-    port == vayu::core::constants::defaults::MCP_PORT || engine_port == port;
-    if (!reserved_port) {
+std::optional<int> engine_port,
+std::optional<int> mcp_port) {
+    const int mcp = mcp_port.value_or (vayu::core::constants::defaults::MCP_PORT);
+    if (port != mcp && engine_port != port) {
         return false;
     }
     const auto canonical = canonical_host (host_or_ip);
@@ -166,7 +192,8 @@ std::optional<int> engine_port) {
 }
 
 bool is_reserved_loopback_target (std::string_view host_or_ip, int port) {
-    return detail::is_reserved_loopback_target (host_or_ip, port, registered_engine_port ());
+    return detail::is_reserved_loopback_target (
+    host_or_ip, port, registered_engine_port (), registered_mcp_port ());
 }
 
 std::optional<int> reserved_target_port (const std::string& url) {
