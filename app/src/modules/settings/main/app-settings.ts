@@ -351,8 +351,8 @@ export const APP_SETTINGS = [
 		panel: "mcp",
 		label: "Connection",
 		searchText:
-			"Whether agents can reach Vayu, the endpoint they connect to, and the one-command setup.",
-		keywords: ["mcp server", "claude code", "cursor", "codex", "agent", "endpoint"],
+			"Whether agents can reach Vayu, the port and endpoint they connect to, and the one-command setup.",
+		keywords: ["mcp server", "claude code", "cursor", "codex", "agent", "endpoint", "port"],
 	},
 	{
 		anchor: "mcp-tools",
