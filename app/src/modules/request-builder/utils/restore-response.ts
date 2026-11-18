@@ -102,8 +102,8 @@ export function eventsFromTrace(
 }
 
 /**
- * The stored `scripts` node, as the response pane's four script fields
- * (issue #575, extended to every design send by #725).
+ * The stored `scripts` node, as the response pane's script fields (issue
+ * #575, extended to every design send by #725, and `scriptRequests` by #3633).
  *
  * Both transports write it. A streaming send has no choice - it was answered
  * `202` before its post-request script had run, so the trace is the only route
@@ -121,7 +121,10 @@ export function eventsFromTrace(
  */
 export function scriptsFromTrace(
 	trace: NonNullable<RunResultSample["trace"]>
-): Pick<ResponseState, "testResults" | "consoleLogs" | "preScriptError" | "postScriptError"> {
+): Pick<
+	ResponseState,
+	"testResults" | "consoleLogs" | "preScriptError" | "postScriptError" | "scriptRequests"
+> {
 	const node = trace.scripts;
 	if (!node) return {};
 
@@ -130,6 +133,7 @@ export function scriptsFromTrace(
 		...(Array.isArray(node.consoleLogs) && { consoleLogs: node.consoleLogs }),
 		...(node.preScriptError && { preScriptError: node.preScriptError }),
 		...(node.postScriptError && { postScriptError: node.postScriptError }),
+		...(Array.isArray(node.scriptRequests) && { scriptRequests: node.scriptRequests }),
 	};
 }
 

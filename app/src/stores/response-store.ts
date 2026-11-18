@@ -32,7 +32,7 @@
  */
 
 import { create } from "zustand";
-import type { ConsoleLogEntry, TestResult } from "@/types";
+import type { ConsoleLogEntry, ScriptRequestRecord, TestResult } from "@/types";
 
 /**
  * A structural *subset* of the request builder's `ResponseState`, not a copy of
@@ -65,6 +65,8 @@ export interface StoredResponse {
 	testResults?: TestResult[];
 	preScriptError?: string;
 	postScriptError?: string;
+	/** The scripts' `pm.sendRequest` records - see `ResponseState.scriptRequests`. */
+	scriptRequests?: ScriptRequestRecord[];
 	// Metadata
 	runId?: string;
 	executedAt?: number;
