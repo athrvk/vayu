@@ -4329,6 +4329,11 @@ export interface McpStatus {
 	url: string;
 	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
 	enabled: boolean;
+	/**
+	 * Enabled and still coming up: no listener and no failure yet. Not a problem
+	 * to report and nothing to retry - the endpoint is simply not ready (#3579).
+	 */
+	starting: boolean;
 	/** Set while the server is enabled and its last start failed. */
 	error?: McpStartError;
 	/**

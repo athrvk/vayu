@@ -183,6 +183,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		running: boolean;
 		url: string;
 		enabled: boolean;
+		starting: boolean;
 		error?: { code: "EADDRINUSE" | "EACCES" | "other"; message: string };
 		corruptCopy?: string;
 	}> => ipcRenderer.invoke("mcp:status"),

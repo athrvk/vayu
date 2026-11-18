@@ -25,11 +25,13 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
   sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
   continues without it, and `mcp:status` reports why so Settings can show it:
   another program holding the port is named, and no endpoint is offered while
-  nothing is listening). Only the port is bound at launch (`listener.ts`, which
-  imports no SDK); the SDK, the tool registry and the service are loaded by the
-  first `POST /mcp` that arrives, so a launch no agent connects to never
-  evaluates them - 5-7 MB of the main process at idle, measured on the packaged
-  Windows app.
+  nothing is listening). Until the first start has bound or failed, the status
+  carries `starting: true` and no error, and Settings says "Starting" with no
+  port and no Retry, re-reading the status until it settles (#3579). Only the
+  port is bound at launch (`listener.ts`, which imports no SDK); the SDK, the
+  tool registry and the service are loaded by the first `POST /mcp` that
+  arrives, so a launch no agent connects to never evaluates them - 5-7 MB of
+  the main process at idle, measured on the packaged Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
@@ -3161,7 +3163,7 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
