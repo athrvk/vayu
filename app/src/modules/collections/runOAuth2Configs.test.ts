@@ -62,7 +62,7 @@ describe("distinctRunOAuth2Configs", () => {
 			NO_SCOPES
 		);
 
-		expect(found).toEqual([{ key: computeOAuth2CacheKey(config), config }]);
+		expect(found).toEqual([{ key: computeOAuth2CacheKey(config), config, collectionId: "c" }]);
 	});
 
 	it("finds the config a request inherits from its collection chain", () => {
@@ -229,5 +229,48 @@ describe("distinctRunOAuth2Configs", () => {
 		);
 
 		expect(found.map((entry) => entry.config)).toEqual([config]);
+	});
+});
+
+describe("distinctRunOAuth2Configs and a jwt_bearer signing key (#3632)", () => {
+	const jwt = oauth2({
+		grantType: "jwt_bearer",
+		subject: "{{who}}",
+		privateKey: "{{signing_key}}",
+	});
+	const scopes = {
+		environment: {
+			who: { value: "svc-user" },
+			signing_key: {
+				value: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+			},
+		},
+	};
+
+	it("resolves the subject but leaves the key as the reference it was written as", () => {
+		const [entry] = distinctRunOAuth2Configs(
+			[group("c", { mode: "oauth2", config: jwt })],
+			[collection("c", null, { mode: "none" })],
+			scopes
+		);
+
+		expect(entry.config.subject).toBe("svc-user");
+		expect(entry.config.privateKey).toBe("{{signing_key}}");
+	});
+
+	it("keeps the collection the config was first seen under, to resolve the key from", () => {
+		const [entry] = distinctRunOAuth2Configs(
+			[
+				group("first", { mode: "oauth2", config: jwt }),
+				group("second", { mode: "oauth2", config: jwt }),
+			],
+			[
+				collection("first", null, { mode: "none" }),
+				collection("second", null, { mode: "none" }),
+			],
+			scopes
+		);
+
+		expect(entry.collectionId).toBe("first");
 	});
 });

@@ -1380,11 +1380,30 @@ ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
 to the engine so the app and engine agree on cache slots without a round-trip. The key
 reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
-#2536) beside the token URL, client id, credentials id and password-grant username, so
+#2536) beside the token URL, client id, credentials id and the grant's identity (the
+password grant's username, the JWT bearer grant's subject), so
 two audiences sent as rows are two cached tokens; a row whose key names a credential
 (`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its
 key alone, so the key never carries the secret. `scope`, `audience` and `resource`
 themselves are still not in it.
+
+The JWT bearer grant (`grantType: "jwt_bearer"`, RFC 7523, #3632) adds `subject`,
+`assertionAudience`, `assertionClaims` (`{key, value, enabled}` rows, no `sendAs`),
+`assertionLifetimeSeconds` (1 to 3600, engine default 180), `signingAlgorithm`
+(`RS256` default or `ES256`), `keyId`, and the signing key as exactly one of
+`privateKey` and `privateKeyFile`. `fallbackExpiresIn` (seconds a token that states no
+`expires_in` is kept, absent keeps it until replaced) is a member of every grant. The
+renderer sends everything but `privateKey` resolved: that member is one `{{variable}}`
+reference, left as written by every host that resolves a config
+(`keepSigningKeyReference`, `services/oauth/signing-key.ts`), and `OAuth2TokenRequest`
+carries `environmentId` and `collectionId` so the engine resolves it from the scopes a
+Send of the request reads. The token row sends the active environment and the
+request's collection (the collection itself, from its own auth editor); the load-test
+guards do the same for a refresh, with the collection of the request a run's token was
+first seen on. An id that is not known is omitted, and a key file needs neither. A
+typed PEM never reaches the config: the form refuses it, and a file is picked through
+`useFilePick`, which records the engine's grant for it.
+
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine). The engine
 owns the deadline and reports it as `expiresAt` (epoch ms) on the start answer; the

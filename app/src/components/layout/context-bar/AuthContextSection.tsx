@@ -28,6 +28,7 @@ import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resoluti
 import { useOAuth2DeferredNames } from "@/modules/request-builder/hooks/useOAuth2DeferredNames";
 import { AUTH_MODE_LABELS, isEngineExecutableAuthMode } from "@/constants/auth-modes";
 import { TokenStatusRow } from "@/components/shared/OAuth2Form";
+import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 import type { OAuth2Config, RequestAuth } from "@/types";
@@ -119,13 +120,12 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	 */
 	const configText =
 		effective.auth?.mode === "oauth2" ? JSON.stringify(effective.auth.config) : null;
-	const oauthConfig: OAuth2Config | null = useMemo(
-		() =>
-			configText === null
-				? null
-				: resolveObject<OAuth2Config>(JSON.parse(configText) as OAuth2Config),
-		[configText, resolveObject]
-	);
+	const oauthConfig: OAuth2Config | null = useMemo(() => {
+		if (configText === null) return null;
+		const raw = JSON.parse(configText) as OAuth2Config;
+		// The signing key stays the reference as written: the engine resolves it.
+		return keepSigningKeyReference(resolveObject<OAuth2Config>(raw), raw);
+	}, [configText, resolveObject]);
 
 	const deferredNames = useOAuth2DeferredNames(
 		tab.entityId ?? "",
@@ -160,7 +160,11 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 			</p>
 			<p className="text-label text-muted-foreground m-0">{effective.origin}</p>
 			{oauthConfig && (
-				<TokenStatusRow resolvedConfig={oauthConfig} deferredNames={deferredNames} />
+				<TokenStatusRow
+					resolvedConfig={oauthConfig}
+					deferredNames={deferredNames}
+					collectionId={request.collectionId}
+				/>
 			)}
 		</div>
 	);
