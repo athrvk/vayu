@@ -845,6 +845,30 @@ TEST_F (ScriptLifecycleTest, ALoadRunsSetupRowCarriesNoScriptRequests) {
     << console[0].dump ();
 }
 
+// The teardown half of the case above: a load run's teardown runs once, builds
+// the same `lifecycle` row, and still carries no list (#3633). Mutation check:
+// as above.
+TEST_F (ScriptLifecycleTest, ALoadRunsTeardownRowCarriesNoScriptRequests) {
+    seed_collection (json::array (
+    { json{ { "id", "el_teardown" }, { "kind", "script.teardown" }, { "enabled", true },
+    { "config", { { "script", "pm.sendRequest('" + server_->url ("/token") + "', function () {});" } } } } }));
+    seed_request (json::array (), "plain=1");
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/1,
+               /*allow_script_requests=*/true),
+    vayu::RunStatus::Completed);
+
+    const auto teardown =
+    report_lifecycle_of ("run_load").value ("teardown", json::array ());
+    ASSERT_EQ (teardown.size (), 1u);
+    EXPECT_FALSE (teardown[0].contains ("scriptRequests")) << teardown[0].dump ();
+    const auto console = teardown[0].value ("console", json::array ());
+    ASSERT_EQ (console.size (), 1u) << teardown[0].dump ();
+    EXPECT_EQ (console[0].value ("text", "").rfind ("pm.sendRequest GET ", 0), 0u)
+    << console[0].dump ();
+}
+
 // Mutation check: let a throwing `script.setup` outcome pass unnoticed in
 // `execute_load_test` (drop the `for (const auto& outcome : ...)` refusal
 // loop) and this reddens to Completed with three requests sent. Drop the

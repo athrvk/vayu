@@ -3765,6 +3765,33 @@ TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
     EXPECT_EQ (messages[0].at ("count").get<size_t> (), ITERATIONS) << post.dump ();
 }
 
+// A load run's inline script keeps its `pm.sendRequest` summary line on its
+// element row; that it builds no record is held by
+// `ScriptRequestRecording.OnlyADesignSendAndASequentialRunTurnItOn`, as
+// nothing in a load report could show one (#3633).
+TEST_F (LoadStrategyTest, AnInlineScriptsSendRequestKeepsItsLineOnItsElementRow) {
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config = request_elements_payload (mock_server->fast_url (), 2, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config",
+    { { "script", "pm.sendRequest('" + mock_server->fast_url () + "', function () {});" },
+    { "inline", true } } } } }));
+    config["allowScriptRequests"] = true;
+    const auto summary = run_single_request_summary (db, "run-elements-send-line", config);
+
+    const auto pre = element_entry (summary, "el_pre");
+    ASSERT_FALSE (pre.is_null ()) << summary.dump ();
+    EXPECT_FALSE (pre.contains ("messages")) << pre.dump ();
+    const auto console = pre.value ("console", nlohmann::json::array ());
+    ASSERT_FALSE (console.empty ()) << pre.dump ();
+    for (const auto& line : console) {
+        EXPECT_TRUE (
+        line.value ("text", "").starts_with ("pm.sendRequest GET " + mock_server->fast_url () + " -> 200 ("))
+        << pre.dump ();
+    }
+}
+
 // `timer.think` holds a completed submission's concurrency slot for its wait
 // without blocking the event-loop worker that completed it
 // (`RunContext::reserve_think_wait`, counted back by `in_flight`). With N

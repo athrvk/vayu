@@ -22,7 +22,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <regex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -35,6 +37,7 @@
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
 #include "optional_assert.hpp"
+#include "source_scan.hpp"
 #include "task_queue.hpp"
 #include "timed_out_after.hpp"
 #include "vayu/core/constants.hpp"
@@ -1882,6 +1885,56 @@ TEST_F (SendRequestTest, WithRecordingOffNoRecordIsBuiltAndTheLineStays) {
     const auto lines = send_lines (result);
     ASSERT_EQ (lines.size (), 1u);
     EXPECT_FALSE (lines[0].script_request.has_value ());
+}
+
+// The case above is a load run's only if no load path turns recording on, and
+// nothing a load run reports could show a record it built and dropped. So the
+// opt-in is scanned for: outside the runtime, which only carries the flag from
+// a `ScriptConfig` to the call, `record_send_requests` is set by
+// `record_script_requests` alone, and that is called by the design send and
+// the sequential runner alone (#3633). Each expected file has to be found, so
+// a matcher that saw nothing fails too. Mutation check: call
+// `record_script_requests` in `read_lifecycle_script_config` (run_manager.cpp)
+// or on `execute_scenario_load`'s `script_config` (scenario_load.cpp), or set
+// the flag in `validate_scripts`, and this reddens naming the file.
+TEST (ScriptRequestRecording, OnlyADesignSendAndASequentialRunTurnItOn) {
+    const std::filesystem::path src_dir =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
+    ASSERT_TRUE (std::filesystem::is_directory (src_dir))
+    << src_dir.string () << " is not where the guard looks";
+
+    size_t scanned_files = 0;
+    std::set<std::string> setters;
+    std::set<std::string> callers;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (src_dir)) {
+        const std::string extension = entry.path ().extension ().string ();
+        if (!entry.is_regular_file () || (extension != ".cpp" && extension != ".hpp")) {
+            continue;
+        }
+        const std::string relative =
+        std::filesystem::relative (entry.path (), src_dir).generic_string ();
+        if (relative.starts_with ("runtime/")) {
+            continue;
+        }
+        const std::string code =
+        vayu::tests::strip_comments (vayu::tests::read_source (entry.path ()));
+        ASSERT_FALSE (code.empty ()) << relative << " read as empty";
+        ++scanned_files;
+        if (vayu::tests::names_identifier (code, "record_send_requests")) {
+            setters.insert (relative);
+        }
+        if (vayu::tests::names_call (code, "record_script_requests")) {
+            callers.insert (relative);
+        }
+    }
+
+    ASSERT_GT (scanned_files, 100u) << "the guard found almost no sources";
+    EXPECT_EQ (setters, (std::set<std::string>{ "core/script_config.cpp" }))
+    << "only record_script_requests may turn recording on";
+    EXPECT_EQ (callers,
+    (std::set<std::string>{ "core/script_config.cpp",
+    "core/scenario_runner.cpp", "http/routes/execution.cpp" }))
+    << "a load run's scripts record no pm.sendRequest exchange (#3633)";
 }
 
 // Recording is trace, not console output: with the console off the record is
