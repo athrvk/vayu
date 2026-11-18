@@ -15,6 +15,7 @@ import type {
 	McpDataChangedEvent,
 	McpSafetyConfig,
 	McpStatus,
+	McpSetPortResult,
 	McpConnectClient,
 	McpConnectResult,
 	McpToolInfo,
@@ -323,6 +324,8 @@ interface ElectronAPI {
 	getMcpTools: () => Promise<McpToolInfo[]>;
 	updateMcpSafety: (partial: Partial<McpSafetyConfig>) => Promise<McpSafetyConfig>;
 	setMcpEnabled: (enabled: boolean) => Promise<McpStatus>;
+	/** Validate and persist the MCP port; it takes effect when the engine restarts (#3580). */
+	setMcpPort: (port: number) => Promise<McpSetPortResult>;
 	connectMcpClient: (client: McpConnectClient) => Promise<McpConnectResult>;
 	/** An agent's write landed engine-side; invalidate the named family. */
 	onMcpDataChanged: (callback: (event: McpDataChangedEvent) => void) => () => void;

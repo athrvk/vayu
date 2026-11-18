@@ -4325,10 +4325,17 @@ export interface McpStartError {
 
 export interface McpStatus {
 	running: boolean;
-	/** The configured endpoint while not running: it names the port, it is not usable. */
+	/** The endpoint of the port in force while not running: it names the port, it is not usable. */
 	url: string;
 	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
 	enabled: boolean;
+	/** The configured MCP port, the value for the port field (#3580). */
+	port: number;
+	/**
+	 * The configured port is not in force until the engine restarts; `url` still
+	 * names the port in force. Survives a reload, since the main process derives it.
+	 */
+	restartRequired: boolean;
 	/**
 	 * Enabled and still coming up: no listener and no failure yet. Not a problem
 	 * to report and nothing to retry - the endpoint is simply not ready (#3579).
@@ -4341,7 +4348,15 @@ export interface McpStatus {
 	 * Settings change set aside. Absent when the file was readable.
 	 */
 	corruptCopy?: string;
+	/** Why the port stored in `mcp-config.json` was unusable and the default is in use. */
+	storedPortError?: string;
 }
+
+/**
+ * The `mcp:setPort` answer. Mirrors `McpSetPortResult` in
+ * `electron/mcp/status.ts`; `message` says why a port was refused.
+ */
+export type McpSetPortResult = { ok: true; status: McpStatus } | { ok: false; message: string };
 
 /** Clients Vayu can register itself with via their own CLI (one-click connect). */
 export type McpConnectClient = "claude" | "vscode";

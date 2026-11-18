@@ -35,6 +35,7 @@ import {
 } from "./constants.js";
 import { isDevelopmentBuild } from "./dev-mode.js";
 import { appLogger } from "./app-log.js";
+import { readMcpPort } from "./mcp/store.js";
 
 /**
  * The directory the engine keeps its state in - logs, database and lock file.
@@ -356,6 +357,11 @@ export interface SidecarSystem {
 	/** Can we bind this port, i.e. is nothing at all listening? */
 	isPortFree(port: number): Promise<boolean>;
 	sleep(ms: number): Promise<void>;
+	/**
+	 * The MCP port the engine is to refuse (`--mcp-port`), read at each spawn so
+	 * a restart takes up a port Settings changed (#3580).
+	 */
+	mcpPort(): number;
 }
 
 export const defaultSidecarSystem: SidecarSystem = {
@@ -371,6 +377,7 @@ export const defaultSidecarSystem: SidecarSystem = {
 	requestShutdown: requestEngineShutdown,
 	isPortFree: isPortAvailable,
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+	mcpPort: () => readMcpPort().port,
 };
 
 /**
@@ -547,6 +554,8 @@ export class EngineSidecar {
 	private candidates: readonly number[];
 	private port: number;
 	private portFixed = false;
+	/** What the last spawn passed as `--mcp-port`; see `getMcpPort()`. */
+	private mcpPort: number | null = null;
 	private onPortFixed: (port: number) => void;
 	private onGrantSecret: (secret: string) => void;
 	private dataDir: string;
@@ -604,6 +613,15 @@ export class EngineSidecar {
 
 	getLifecycle(): EngineLifecycle {
 		return this.lifecycle;
+	}
+
+	/**
+	 * The MCP port the last spawned engine was told to refuse, or null before the
+	 * first spawn. The MCP listener binds this one rather than the configured
+	 * port, so it never holds a port the running engine would reach (#3580).
+	 */
+	getMcpPort(): number | null {
+		return this.mcpPort;
 	}
 
 	/** Called with every lifecycle change. Returns the unsubscribe. */
@@ -1017,11 +1035,15 @@ export class EngineSidecar {
 		// engine takes it out of its own environment at start, so a restart
 		// cannot reuse the last one and does not need to.
 		const grantSecret = newGrantSecret();
+		// Passed even at the default, so the engine and the app cannot disagree.
+		const mcpPort = this.system.mcpPort();
 		const child = this.system.spawnEngine(
 			this.binaryPath,
 			[
 				"--port",
 				this.port.toString(),
+				"--mcp-port",
+				mcpPort.toString(),
 				"--data-dir",
 				this.dataDir,
 				"--verbose",
@@ -1031,6 +1053,7 @@ export class EngineSidecar {
 		);
 		this.process = child;
 		this.ownership = { kind: "spawned" };
+		this.mcpPort = mcpPort;
 		this.onGrantSecret(grantSecret);
 
 		// Drain stdout without re-printing it - the engine's own file is the

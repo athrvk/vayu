@@ -183,14 +183,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		running: boolean;
 		url: string;
 		enabled: boolean;
+		port: number;
+		restartRequired: boolean;
 		starting: boolean;
 		error?: { code: "EADDRINUSE" | "EACCES" | "other"; message: string };
 		corruptCopy?: string;
+		storedPortError?: string;
 	}> => ipcRenderer.invoke("mcp:status"),
 	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
 	getMcpTools: () => ipcRenderer.invoke("mcp:getTools"),
 	updateMcpSafety: (partial: unknown) => ipcRenderer.invoke("mcp:updateSafety", partial),
 	setMcpEnabled: (enabled: boolean) => ipcRenderer.invoke("mcp:setEnabled", enabled),
+	setMcpPort: (port: number) => ipcRenderer.invoke("mcp:setPort", port),
 	connectMcpClient: (client: "claude" | "vscode") =>
 		ipcRenderer.invoke("mcp:connectClient", client),
 	// An agent's write reached the engine from the main process, so the renderer

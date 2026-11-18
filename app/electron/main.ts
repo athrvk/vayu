@@ -143,10 +143,12 @@ import {
 	loadMcpEnabled,
 	saveMcpEnabled,
 	mcpConfigCorruptCopy,
+	readMcpPort,
+	saveMcpPort,
 } from "./mcp/store.js";
 import type { McpConnectClient } from "./mcp/connect.js";
 import { McpListener } from "./mcp/listener.js";
-import { buildMcpStatus, connectWhileRunning } from "./mcp/status.js";
+import { buildMcpStatus, connectWhileRunning, type McpSetPortResult } from "./mcp/status.js";
 import { createMcpLifecycle } from "./mcp/lifecycle.js";
 import type { McpDataChangedEvent } from "./mcp/tools.js";
 import type { VayuMcpService } from "./mcp/index.js";
@@ -172,7 +174,6 @@ import {
 	WINDOW_BG_DARK,
 	ENGINE_PORT_CANDIDATES,
 	MCP_HOST,
-	MCP_PORT,
 	APP_USER_MODEL_ID,
 	APP_NAME,
 	USER_DATA_DIR_NAME,
@@ -1106,6 +1107,17 @@ function loadMcp(): Promise<McpModule> {
 }
 
 /**
+ * The MCP port the running engine refuses to reach: the one the sidecar last
+ * spawned it with, or the configured one before any engine was spawned. The
+ * listener binds this rather than the configured port, so a port saved in
+ * Settings moves the server only once the engine has been restarted onto it
+ * (#3580).
+ */
+function mcpEnginePort(): number {
+	return engineSidecar?.getMcpPort() ?? readMcpPort().port;
+}
+
+/**
  * The MCP server: the port, the service behind it, and why the last start
  * failed, owned by one state machine (#3337). A start or stop never throws; a
  * bind failure is a non-critical convenience lost, kept for `mcp:status` so
@@ -1117,16 +1129,15 @@ function loadMcp(): Promise<McpModule> {
  */
 const mcpLifecycle = createMcpLifecycle<VayuMcpService>({
 	isEnabled: loadMcpEnabled,
-	endpoint: { host: MCP_HOST, port: MCP_PORT },
-	makeListener: (loadHandler) =>
-		new McpListener({ host: MCP_HOST, port: MCP_PORT, log: mcpLogger(), loadHandler }),
+	endpoint: () => ({ host: MCP_HOST, port: mcpEnginePort() }),
+	makeListener: (endpoint, loadHandler) =>
+		new McpListener({ ...endpoint, log: mcpLogger(), loadHandler }),
 	loadServiceFactory: async () => {
 		const { VayuMcpService } = await loadMcp();
-		return () =>
+		return (endpoint) =>
 			new VayuMcpService({
 				engineBaseUrl: engineOrigin(),
-				host: MCP_HOST,
-				port: MCP_PORT,
+				...endpoint,
 				version: app.getVersion(),
 				safety: loadPersistedSafety(),
 				onDataChanged: sendMcpDataChanged,
@@ -1144,11 +1155,17 @@ const mcpLifecycle = createMcpLifecycle<VayuMcpService>({
 });
 
 function currentMcpStatus(enabled: boolean) {
+	const configured = readMcpPort();
 	return buildMcpStatus({
 		listener: mcpLifecycle.listener(),
 		enabled,
 		error: mcpLifecycle.startError(),
 		corruptCopy: mcpConfigCorruptCopy(),
+		port: {
+			configured: configured.port,
+			inForce: mcpLifecycle.heldPort() ?? mcpEnginePort(),
+			storedError: configured.storedError,
+		},
 	});
 }
 
@@ -1206,6 +1223,10 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 			classifyEngineStartFailure(error, engineSidecar)
 		);
 		return { success: false, error: errorMessage };
+	} finally {
+		// Whichever way it went, the engine that may be running now was spawned
+		// with the configured MCP port, so the listener moves onto that one.
+		await mcpLifecycle.followEndpoint();
 	}
 }
 
@@ -1329,6 +1350,16 @@ function setupIpcHandlers() {
 		saveMcpEnabled(on);
 		await (on ? mcpLifecycle.start() : mcpLifecycle.stop());
 		return currentMcpStatus(on);
+	});
+
+	// Save the MCP port from Settings (#3580). Validated here, never trusted from
+	// the renderer, and persisted only. The engine learns the port at spawn, so
+	// the server stays where it is until the engine restarts (`restartEngine`
+	// moves it); the status that comes back says `restartRequired`.
+	ipcMain.handle("mcp:setPort", (_event, port: unknown): McpSetPortResult => {
+		const saved = saveMcpPort(port);
+		if (!saved.ok) return saved;
+		return { ok: true, status: currentMcpStatus(loadMcpEnabled()) };
 	});
 
 	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.

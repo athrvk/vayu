@@ -12,13 +12,15 @@
  * it, through a promise of its own.
  */
 
-import type http from "node:http";
+import http from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_MCP_SAFETY_CONFIG, type McpSafetyConfig } from "./config.js";
-import type { McpRequestHandler } from "./listener.js";
+import { freePort } from "./free-port.testkit.js";
+import { McpListener, type McpRequestHandler } from "./listener.js";
 import { buildMcpStatus } from "./status.js";
 import {
 	createMcpLifecycle,
+	type McpEndpoint,
 	type McpLifecycle,
 	type McpLifecycleListener,
 	type McpLifecycleService,
@@ -36,7 +38,6 @@ function gate(): Gate {
 }
 
 class FakeListener implements McpLifecycleListener {
-	readonly url = "http://127.0.0.1:0/mcp";
 	bound = false;
 	/** Held closed to keep the bind (or the close) in flight. */
 	startGate: Gate | null = null;
@@ -44,9 +45,14 @@ class FakeListener implements McpLifecycleListener {
 	startFailure: Error | null = null;
 
 	constructor(
+		readonly endpoint: McpEndpoint,
 		readonly loadHandler: () => Promise<McpRequestHandler>,
 		private readonly onStart: (listener: FakeListener) => void
 	) {}
+
+	get url(): string {
+		return `http://${this.endpoint.host}:${this.endpoint.port}/mcp`;
+	}
 
 	isRunning(): boolean {
 		return this.bound;
@@ -68,7 +74,10 @@ class FakeListener implements McpLifecycleListener {
 class FakeService implements McpLifecycleService {
 	readonly handleRequest = vi.fn<McpRequestHandler>(async () => {});
 	readonly stop = vi.fn(async () => {});
-	constructor(public safety: McpSafetyConfig) {}
+	constructor(
+		public safety: McpSafetyConfig,
+		readonly endpoint: McpEndpoint
+	) {}
 }
 
 const request = {} as http.IncomingMessage;
@@ -77,6 +86,8 @@ const response = {} as http.ServerResponse;
 function harness() {
 	const h = {
 		enabled: (): boolean => true,
+		/** What `endpoint()` answers: the port the engine guards, in main.ts. */
+		endpoint: (): McpEndpoint => ({ host: "127.0.0.1", port: 0 }),
 		/** What the service is constructed from, as `loadPersistedSafety()` is. */
 		persisted: { ...DEFAULT_MCP_SAFETY_CONFIG },
 		/** Held closed to keep the lazy service load in flight. */
@@ -92,17 +103,17 @@ function harness() {
 	};
 	const lifecycle = createMcpLifecycle<FakeService>({
 		isEnabled: () => h.enabled(),
-		endpoint: { host: "127.0.0.1", port: 0 },
-		makeListener: (loadHandler) => {
-			const listener = new FakeListener(loadHandler, (l) => h.started.shift()?.(l));
+		endpoint: () => h.endpoint(),
+		makeListener: (endpoint, loadHandler) => {
+			const listener = new FakeListener(endpoint, loadHandler, (l) => h.started.shift()?.(l));
 			h.configure(listener);
 			h.listeners.push(listener);
 			return listener;
 		},
 		loadServiceFactory: async () => {
 			await h.loadGate?.promise;
-			return () => {
-				const service = new FakeService(h.persisted);
+			return (endpoint) => {
+				const service = new FakeService(h.persisted, endpoint);
 				h.services.push(service);
 				queueMicrotask(h.afterConstruct);
 				return service;
@@ -295,6 +306,7 @@ describe("createMcpLifecycle", () => {
 				enabled: true,
 				error: lifecycle.startError(),
 				corruptCopy: null,
+				port: { configured: 0, inForce: 0, storedError: null },
 			});
 
 		const bound = harness();
@@ -406,5 +418,171 @@ describe("createMcpLifecycle", () => {
 		await applied.promise;
 
 		expect(lifecycle.service()?.safety.allowWrites).toBe(true);
+	});
+});
+
+/*
+ * #3580: the port is read at each start, and a restarted engine that now
+ * guards another port takes the listener with it through `followEndpoint`.
+ * Mutation check: make `followEndpoint` resolve without stopping, and the
+ * "moves" cases red with the listener still on the old port.
+ */
+describe("createMcpLifecycle and the endpoint", () => {
+	const at = (port: number): McpEndpoint => ({ host: "127.0.0.1", port });
+
+	it("binds, and builds the service on, the port endpoint() names at the start", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+
+		await lifecycle.start();
+		await h.listeners[0].loadHandler();
+
+		expect(h.listeners[0].endpoint).toEqual(at(19_877));
+		expect(h.services[0].endpoint).toEqual(at(19_877));
+		expect(lifecycle.heldPort()).toBe(19_877);
+	});
+
+	it("names the configured port when its bind fails, and holds it as the failed one", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		h.configure = (l) =>
+			(l.startFailure = Object.assign(new Error("listen EADDRINUSE"), {
+				code: "EADDRINUSE",
+			}));
+
+		await lifecycle.start();
+
+		expect(lifecycle.startError()?.message).toBe("Another program holds 127.0.0.1:19877.");
+		expect(lifecycle.heldPort()).toBe(19_877);
+	});
+
+	it("records an endpoint read that throws as a failed start on no port", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => {
+			throw new Error("store unreadable");
+		};
+
+		await expect(lifecycle.start()).resolves.toBeUndefined();
+
+		expect(lifecycle.startError()?.code).toBe("other");
+		expect(lifecycle.heldPort()).toBeNull();
+	});
+
+	it("leaves a listener alone while endpoint() still names its port", async () => {
+		const { h, lifecycle } = harness();
+		await lifecycle.start();
+
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(1);
+		expect(lifecycle.listener()).toBe(h.listeners[0]);
+	});
+
+	it("moves a listening server to the port endpoint() now names", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+		const previous = h.listeners[0];
+
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(previous.bound).toBe(false);
+		expect(h.listeners).toHaveLength(2);
+		expect(lifecycle.listener()).toBe(h.listeners[1]);
+		expect(h.listeners[1].endpoint).toEqual(at(19_878));
+	});
+
+	it("tries a start that failed on the old port again on the new one", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		h.configure = (l) => (l.startFailure = new Error("listen EACCES"));
+		await lifecycle.start();
+		h.configure = () => {};
+
+		h.endpoint = () => at(19_878);
+		await lifecycle.followEndpoint();
+
+		expect(lifecycle.startError()).toBeNull();
+		expect(lifecycle.heldPort()).toBe(19_878);
+	});
+
+	it("waits out a start in flight before deciding", async () => {
+		const { h, lifecycle, nextBind } = harness();
+		h.endpoint = () => at(19_877);
+		const held = gate();
+		h.configure = (l) => (l.startGate = held);
+		const binding = nextBind();
+		const starting = lifecycle.start();
+		await binding;
+
+		h.endpoint = () => at(19_878);
+		const following = lifecycle.followEndpoint();
+		h.configure = () => {};
+		held.open();
+		await Promise.all([starting, following]);
+
+		expect(lifecycle.heldPort()).toBe(19_878);
+		expect(h.listeners[0].bound).toBe(false);
+	});
+
+	it("binds nothing for a server that is off", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_878);
+
+		await lifecycle.followEndpoint();
+
+		expect(h.listeners).toHaveLength(0);
+		expect(lifecycle.isActive()).toBe(false);
+	});
+
+	it("leaves the last word to a stop that lands while it closes the old listener", async () => {
+		const { h, lifecycle } = harness();
+		h.endpoint = () => at(19_877);
+		await lifecycle.start();
+		const closing = gate();
+		h.listeners[0].stopGate = closing;
+
+		h.endpoint = () => at(19_878);
+		const following = lifecycle.followEndpoint();
+		const quit = lifecycle.stop();
+		closing.open();
+		await Promise.all([following, quit]);
+
+		expect(h.listeners).toHaveLength(1);
+		expect(lifecycle.isActive()).toBe(false);
+	});
+
+	it("moves a real listener between two free ports", async () => {
+		const first = await freePort();
+		const second = await freePort();
+		let port = first;
+		const lifecycle = createMcpLifecycle<FakeService>({
+			isEnabled: () => true,
+			endpoint: () => at(port),
+			makeListener: (endpoint, loadHandler) => new McpListener({ ...endpoint, loadHandler }),
+			loadServiceFactory: async () => (endpoint) =>
+				new FakeService(DEFAULT_MCP_SAFETY_CONFIG, endpoint),
+			log: () => {},
+		});
+		try {
+			await lifecycle.start();
+			expect(lifecycle.listener()?.url).toBe(`http://127.0.0.1:${first}/mcp`);
+
+			port = second;
+			await lifecycle.followEndpoint();
+
+			expect(lifecycle.listener()?.url).toBe(`http://127.0.0.1:${second}/mcp`);
+			expect(lifecycle.listener()?.isRunning()).toBe(true);
+			// The old port was given back: something else can listen on it now.
+			const probe = http.createServer();
+			await new Promise<void>((resolve, reject) => {
+				probe.once("error", reject);
+				probe.listen(first, "127.0.0.1", resolve);
+			});
+			await new Promise((resolve) => probe.close(resolve));
+		} finally {
+			await lifecycle.stop();
+		}
 	});
 });

@@ -15,6 +15,7 @@
  */
 
 import { appLogger } from "../app-log.js";
+import { ENGINE_PORT_CANDIDATES, MCP_PORT } from "../constants.js";
 import { createJsonStore, type JsonStore } from "../json-store.js";
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./config.js";
 
@@ -22,6 +23,8 @@ interface McpStoreShape {
 	safety: Partial<McpSafetyConfig>;
 	/** Whether the MCP server should run. Defaults to true when unset. */
 	enabled: boolean;
+	/** The port the server binds and the engine refuses to reach (#3580). `MCP_PORT` when unset. */
+	port: number;
 }
 
 let store: JsonStore<McpStoreShape> | null = null;
@@ -94,4 +97,62 @@ export function loadMcpEnabled(): boolean {
 /** Persist the MCP server enabled/disabled preference. */
 export function saveMcpEnabled(enabled: boolean): void {
 	getStore().set("enabled", enabled);
+}
+
+/** Unprivileged, so binding it never needs elevated rights on Linux or macOS. */
+const MCP_PORT_MIN = 1024;
+const MCP_PORT_MAX = 65535;
+
+/** A value accepted as the MCP port, or why it was refused, in a sentence Settings shows. */
+export type McpPortVerdict = { ok: true; port: number } | { ok: false; message: string };
+
+/**
+ * Whether `value` can be the MCP port. The engine's candidates are refused
+ * because the engine refuses an `--mcp-port` equal to its own `--port`, and the
+ * sidecar may land on any of them (#2118).
+ */
+export function validateMcpPort(value: unknown): McpPortVerdict {
+	if (typeof value !== "number" || !Number.isInteger(value)) {
+		return { ok: false, message: "The MCP port has to be a whole number." };
+	}
+	if (value < MCP_PORT_MIN || value > MCP_PORT_MAX) {
+		return {
+			ok: false,
+			message: `The MCP port has to be between ${MCP_PORT_MIN} and ${MCP_PORT_MAX}.`,
+		};
+	}
+	if (ENGINE_PORT_CANDIDATES.includes(value)) {
+		return { ok: false, message: `Port ${value} is reserved for Vayu's engine.` };
+	}
+	return { ok: true, port: value };
+}
+
+export interface McpPortReading {
+	/** The configured port, or `MCP_PORT` when none is stored or the stored one is unusable. */
+	port: number;
+	/**
+	 * Why a stored value was set aside for the default, for Settings to show; null
+	 * when nothing was. Validated on read as well as on write because the file is
+	 * hand-editable, and an unusable port would otherwise fail the engine's spawn.
+	 */
+	storedError: string | null;
+}
+
+/** The configured MCP port. Read at every engine spawn and every status. */
+export function readMcpPort(): McpPortReading {
+	const stored: unknown = getStore().get("port");
+	if (stored === undefined) return { port: MCP_PORT, storedError: null };
+	const verdict = validateMcpPort(stored);
+	if (verdict.ok) return { port: verdict.port, storedError: null };
+	return {
+		port: MCP_PORT,
+		storedError: `mcp-config.json sets the MCP port to ${JSON.stringify(stored)}, which isn't usable. ${verdict.message} Vayu is using the default, ${MCP_PORT}.`,
+	};
+}
+
+/** Persist the MCP port if it is one Vayu can use; the verdict says which. */
+export function saveMcpPort(value: unknown): McpPortVerdict {
+	const verdict = validateMcpPort(value);
+	if (verdict.ok) getStore().set("port", verdict.port);
+	return verdict;
 }

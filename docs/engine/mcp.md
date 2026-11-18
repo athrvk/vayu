@@ -70,6 +70,10 @@ and the error says the earlier registration was removed. If `get` fails,
 Connect adds as usual. VS Code has no lookup command, so its Connect always
 runs `--add-mcp`.
 
+The snippets below use the default port, 9877. If the port was changed, use
+the endpoint **Settings → MCP** shows; Connect and the panel's own snippets
+already do.
+
 ```bash
 # Claude Code (or click Connect in Settings → MCP)
 claude mcp add --transport http --scope user vayu http://127.0.0.1:9877/mcp
@@ -3119,6 +3123,20 @@ first write over it renames it to `mcp-config.json.corrupt-<epoch-ms>` in the
 same folder, so the allowlist and caps in it can be copied back by hand. One
 copy is kept: corrupting the file again replaces the earlier copy (issue #2433).
 
+The file also holds the server's `port` (#3580), 9877 when it has none. A port
+is a whole number from 1024 to 65535 that is not one of the engine's own ports
+(9876 and 9880 to 9889), checked when Settings saves it and again on every
+read, since the file is hand-editable: a stored value outside that loads as
+9877, and `mcp:status` carries `storedPortError` saying so. There is no
+fallback when the configured port is taken; the status names the conflict, as
+it does for 9877. Every engine spawn reads the port afresh and passes it as
+`--mcp-port`, which is what the engine's own-port refusal compares against,
+and the listener binds the port the running engine was given rather than the
+saved one, so the two never disagree. A saved port therefore takes effect on
+the next engine restart: `mcp:setPort` only persists, the status reports
+`restartRequired` until then, and `restartEngine` moves the listener onto the
+new port once the restart settles (`followEndpoint` in `lifecycle.ts`).
+
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
@@ -3167,7 +3185,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
-| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. |
+| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it, and after an engine restart moves the listener to the port that engine guards (`followEndpoint`). |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
@@ -3194,10 +3212,11 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, starting, error?, corruptCopy? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
+| `mcp:status`        | `{ running, url, enabled, port, restartRequired, starting, error?, corruptCopy?, storedPortError? }`; `starting` is true while enabled with no listener and no `error` (the start has not finished), and Settings polls until it clears; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. `port` is the configured port; `restartRequired` is true while it is not yet the one in force, and `url` names the port in force; `storedPortError` says why a hand-edited port was set aside for the default. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
+| `mcp:setPort`       | Validate and persist the port; returns `{ ok: true, status }` (with `restartRequired`) or `{ ok: false, message }` naming why it was refused. The server does not move until the engine restarts. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
 | `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); for `claude`, a prior `mcp get vayu` makes it idempotent (`alreadyConnected: true`, or remove then add when the URL differs). Refuses with `reason: "not-running"` while no listener is up. |
 

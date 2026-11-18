@@ -93,9 +93,9 @@ const REVEAL = appSetting("mcp-reveal-secrets");
 /**
  * Shown until `mcp:status` reports the live URL - deliberately not a URL.
  *
- * The endpoint has one source of truth in the main process (`MCP_ENDPOINT_URL`,
- * built from `MCP_HOST`/`MCP_PORT`/`MCP_PATH`), which this file cannot import:
- * renderer and main share no module graph. A hardcoded copy here is a copy that
+ * The endpoint has one source of truth in the main process (`mcpEndpointUrl`,
+ * built from `MCP_HOST`, the configured port and `MCP_PATH`), which this file
+ * cannot import: renderer and main share no module graph. A hardcoded copy here is a copy that
  * drifts, and a plausible-looking URL is worse than no URL - it would be copied
  * into an agent's config and silently fail to connect.
  */

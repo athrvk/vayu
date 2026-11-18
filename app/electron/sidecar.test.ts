@@ -85,6 +85,7 @@ import {
 	ENGINE_LOCK_FILE,
 	ENGINE_PORT_RELEASE_DELAY_MS,
 	ENGINE_RESTART_BASE_DELAY_MS,
+	MCP_PORT,
 } from "./constants";
 
 const TEST_PORT = 39876;
@@ -196,6 +197,7 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 					if (!state.retired) setImmediate(resolve);
 				})
 		),
+		mcpPort: vi.fn(() => MCP_PORT),
 		...overrides,
 	};
 
@@ -580,6 +582,47 @@ describe("EngineSidecar - the grant secret", () => {
 		await new EngineSidecar([TEST_PORT], system).start();
 
 		expect(process.env[ENGINE_GRANT_SECRET_ENV]).toBeUndefined();
+	});
+});
+
+/*
+ * #3580: the engine refuses to reach the MCP port, and learns it only from its
+ * arguments. Mutation check: drop `--mcp-port` from the spawn, or read the port
+ * once in the constructor, and these red.
+ */
+describe("EngineSidecar - the MCP port", () => {
+	const mcpPortArg = (args: string[]) => args[args.indexOf("--mcp-port") + 1];
+	const spawnedMcpPorts = (system: SidecarSystem) =>
+		vi.mocked(system.spawnEngine).mock.calls.map(([, args]) => mcpPortArg(args));
+
+	it("passes the configured MCP port, the default included, to the engine", async () => {
+		const { system } = fakeSystem();
+
+		await new EngineSidecar([TEST_PORT], system).start();
+
+		expect(spawnedMcpPorts(system)).toEqual([String(MCP_PORT)]);
+	});
+
+	it("reads it again for a restart, and reports the one the running engine was given", async () => {
+		const { system } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		expect(sidecar.getMcpPort()).toBeNull();
+
+		await sidecar.start();
+		vi.mocked(system.mcpPort).mockReturnValue(19_877);
+		expect(sidecar.getMcpPort()).toBe(MCP_PORT);
+		await sidecar.restart(0);
+
+		expect(spawnedMcpPorts(system)).toEqual([String(MCP_PORT), "19877"]);
+		expect(sidecar.getMcpPort()).toBe(19_877);
+	});
+
+	it("reads the real system's port from mcp-config.json", async () => {
+		writeFileSync(join(fake.userData, "mcp-config.json"), JSON.stringify({ port: 19_877 }));
+		vi.resetModules();
+		const fresh = await import("./sidecar");
+
+		expect(fresh.defaultSidecarSystem.mcpPort()).toBe(19_877);
 	});
 });
 

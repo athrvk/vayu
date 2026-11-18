@@ -42,6 +42,8 @@ const STATUS: McpStatus = {
 	running: true,
 	url: "http://127.0.0.1:9877/mcp",
 	enabled: true,
+	port: 9877,
+	restartRequired: false,
 	starting: false,
 };
 
@@ -210,10 +212,11 @@ describe("McpSettingsPanel unreadable settings file", () => {
 
 /**
  * The endpoint is the main process's to know: it is built there from
- * `MCP_HOST` / `MCP_PORT` / `MCP_PATH` and reported over `mcp:status`. This
- * panel used to keep its own `http://127.0.0.1:9877/mcp` literal as a fallback -
- * a third copy of the URL, shown as fact whenever the status could not be read,
- * and one port change away from telling the user to point an agent at nothing.
+ * `MCP_HOST`, the configured port and `MCP_PATH`, and reported over
+ * `mcp:status`. This panel used to keep its own `http://127.0.0.1:9877/mcp`
+ * literal as a fallback - a third copy of the URL, shown as fact whenever the
+ * status could not be read, and one port change away from telling the user to
+ * point an agent at nothing.
  */
 describe("McpSettingsPanel endpoint", () => {
 	it("shows the URL the main process reports, whatever it is", async () => {
@@ -267,6 +270,8 @@ describe("McpSettingsPanel when the server is not listening", () => {
 		running: false,
 		url: "http://127.0.0.1:9877/mcp",
 		enabled: true,
+		port: 9877,
+		restartRequired: false,
 		starting: false,
 		error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
 	};
@@ -412,6 +417,8 @@ describe("McpSettingsPanel while the server is starting", () => {
 		running: false,
 		url: "http://127.0.0.1:9877/mcp",
 		enabled: true,
+		port: 9877,
+		restartRequired: false,
 		starting: true,
 	};
 

@@ -67,7 +67,9 @@ export const ENGINE_PORT = 9876;
  *
  * A fixed list rather than an OS-assigned port because the renderer's CSP is a
  * build-time `<meta>` (`renderer-csp.ts`) and can only name ports known at
- * build time. The fallbacks skip `MCP_PORT` (9877) and its neighbours.
+ * build time. The fallbacks skip the default `MCP_PORT` (9877) and its
+ * neighbours, and a configured MCP port may not be one of them
+ * (`validateMcpPort` in `mcp/store.ts`), so the two never collide.
  */
 export const ENGINE_PORT_CANDIDATES: readonly number[] = [
 	ENGINE_PORT,
@@ -108,6 +110,11 @@ export const APP_LOG_RETENTION_COUNT = 10;
 // Codex, Cursor, …) over Streamable HTTP. Bound to loopback only. See
 // docs/engine/mcp.md.
 export const MCP_HOST = "127.0.0.1";
+/**
+ * The MCP port when Settings has not set one, and only that (#3580). The port in
+ * force is the configured one, `readMcpPort()` in `mcp/store.ts`, which also
+ * reaches the engine as its `--mcp-port`.
+ */
 export const MCP_PORT = 9877;
 /**
  * The path the MCP server answers on. Lives here, not in `mcp/http.ts`, because
@@ -118,7 +125,9 @@ export const MCP_PORT = 9877;
  */
 export const MCP_PATH = "/mcp";
 /** URL agents connect to, e.g. `claude mcp add --transport http --scope user vayu <url>`. */
-export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}${MCP_PATH}`;
+export function mcpEndpointUrl(port: number): string {
+	return `http://${MCP_HOST}:${port}${MCP_PATH}`;
+}
 
 // Engine lifecycle
 /**
