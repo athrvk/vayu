@@ -30,6 +30,7 @@ const RESERVED_PARAM_NAMES: ReadonlySet<string> = new Set([
 	"code_challenge",
 	"code_challenge_method",
 	"response_type",
+	"assertion",
 ]);
 
 const SEND_AS_VALUES: ReadonlySet<unknown> = new Set(["body", "url", "header"]);

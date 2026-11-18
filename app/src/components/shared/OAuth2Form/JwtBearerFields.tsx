@@ -17,9 +17,15 @@
  * refused before it reaches the config, because a key typed into a field would
  * be saved with the request, exported and sent in the clear. A file is picked
  * through `useFilePick`, which is what records the engine's grant for it.
+ *
+ * **What is being typed is a draft, not the config.** Every config change
+ * autosaves and the engine refuses a `privateKey` that is not exactly one
+ * reference, so `{{sig` pushed per keystroke would be a failed save for each
+ * one. The field commits only when the draft is empty or one reference, shows
+ * a hint for anything else, and drops an unfinished draft on blur.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type FocusEvent } from "react";
 import { FileUp, X } from "lucide-react";
 import {
 	Button,
@@ -44,6 +50,7 @@ import type { OAuth2TextInput } from "./types";
 const DEFAULT_LIFETIME_SECONDS = 180;
 const MAX_LIFETIME_SECONDS = 3600;
 
+const DRAFT_HINT = "Enter the secret variable as {{name}}.";
 const PEM_REFUSAL =
 	"A private key can't be typed into a field. Put it in a secret variable and enter that variable's name here, or choose a key file.";
 const NO_PATH_REFUSAL =
@@ -70,8 +77,15 @@ function keyHint(referenced: string | null, notSecret: boolean): string {
 	return "One variable that holds the PEM and is marked secret, written {{name}}, or a key file.";
 }
 
+/** Whether @p draft is what the config may hold: nothing, or one named reference. */
+function isCommittable(draft: string): boolean {
+	return draft.trim() === "" || Boolean(singleReferenceName(draft));
+}
+
 function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFieldsProps) {
 	const [problem, setProblem] = useState<string | null>(null);
+	// Null while the field is not being edited, so it shows what is stored.
+	const [draft, setDraft] = useState<string | null>(null);
 
 	const typeReference = (text: string) => {
 		if (holdsPem(text)) {
@@ -79,8 +93,20 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 			return;
 		}
 		setProblem(null);
+		setDraft(text);
+		if (!isCommittable(text)) return;
 		const rest = without(value, "privateKeyFile");
-		onChange(text === "" ? without(rest, "privateKey") : { ...rest, privateKey: text });
+		const reference = text.trim();
+		onChange(
+			reference === "" ? without(rest, "privateKey") : { ...rest, privateKey: reference }
+		);
+	};
+
+	// An unfinished draft is dropped, so the field reads what is stored again.
+	const dropDraft = (e: FocusEvent<HTMLDivElement>) => {
+		if (e.currentTarget.contains(e.relatedTarget)) return;
+		setDraft(null);
+		setProblem(null);
 	};
 
 	const pickFile = useCallback(
@@ -92,6 +118,7 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 				return;
 			}
 			setProblem(null);
+			setDraft(null);
 			onChange({ ...without(value, "privateKey"), privateKeyFile: file.src });
 		},
 		[onChange, value]
@@ -105,6 +132,8 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 	}, [referenced, variables]);
 
 	const file = value.privateKeyFile;
+	const shown = draft ?? value.privateKey ?? "";
+	const complaint = problem ?? (draft !== null && !isCommittable(draft) ? DRAFT_HINT : null);
 	return (
 		<LabelledField
 			label={OAUTH2_FIELD_LABELS.privateKey}
@@ -115,7 +144,7 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 				<>
 					<div className="flex items-center gap-2">
 						<input {...inputProps} />
-						<div className="min-w-0 flex-1">
+						<div className="min-w-0 flex-1" onBlur={dropDraft}>
 							{file ? (
 								<Input
 									id={c.id}
@@ -127,7 +156,7 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 							) : (
 								<TextInput
 									{...c}
-									value={value.privateKey ?? ""}
+									value={shown}
 									onChange={typeReference}
 									placeholder="{{private_key}}"
 								/>
@@ -146,7 +175,7 @@ function SigningKeyField({ value, onChange, TextInput, variables }: JwtBearerFie
 							/>
 						)}
 					</div>
-					<FieldError>{problem}</FieldError>
+					<FieldError>{complaint}</FieldError>
 				</>
 			)}
 		</LabelledField>

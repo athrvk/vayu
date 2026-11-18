@@ -1059,7 +1059,8 @@ PEM, and only the engine resolves it, where the token is acquired, so the PEM ne
 passes through a config the renderer builds, logs or caches. `OAuth2Form`'s
 `resolvedConfig` carries it as written, and the hosts that resolve a whole config
 (`AuthContextSection`, the builder's load dialog, `runOAuth2Configs.ts`) put it back
-with `keepSigningKeyReference`. `POST /oauth2/token` resolves it from the
+with `keepSigningKeyReference`, and the request builder's `resolvedAuth` preview,
+which is the GraphQL schema cache's identity, with `keepSigningKeyReferenceInAuth`. `POST /oauth2/token` resolves it from the
 `environmentId` and `collectionId` the request names (the active environment and the
 request's collection), and the token cache key never reads it. The preview resolver
 therefore never shows the key, and a hint under the field warns when the variable it

@@ -38,6 +38,9 @@ import SecondsInput from "./SecondsInput";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
+/** What the engine holds `fallbackExpiresIn` to (`MAX_FALLBACK_EXPIRES_IN_SECONDS`): one year. */
+const MAX_FALLBACK_EXPIRES_IN_SECONDS = 365 * 24 * 3600;
+
 const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 	{ value: "client_credentials", label: "Client credentials" },
 	{ value: "password", label: "Password credentials" },
@@ -475,9 +478,10 @@ export default function OAuth2Form({
 								onChange={setFallbackExpiry}
 								placeholder="never expires"
 								min={1}
+								max={MAX_FALLBACK_EXPIRES_IN_SECONDS}
 							/>
 						),
-						"How long to keep a token whose response has no expires_in. Empty keeps it until it is replaced."
+						"How long to keep a token whose response has no expires_in, up to a year (31536000). Empty keeps it until it is replaced."
 					)}
 
 					<div className="flex items-center gap-6">

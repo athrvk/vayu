@@ -1392,7 +1392,7 @@ The JWT bearer grant (`grantType: "jwt_bearer"`, RFC 7523, #3632) adds `subject`
 `assertionLifetimeSeconds` (1 to 3600, engine default 180), `signingAlgorithm`
 (`RS256` default or `ES256`), `keyId`, and the signing key as exactly one of
 `privateKey` and `privateKeyFile`. `fallbackExpiresIn` (seconds a token that states no
-`expires_in` is kept, absent keeps it until replaced) is a member of every grant. The
+`expires_in` is kept, up to a year, absent keeps it until replaced) is a member of every grant. The
 renderer sends everything but `privateKey` resolved: that member is one `{{variable}}`
 reference, left as written by every host that resolves a config
 (`keepSigningKeyReference`, `services/oauth/signing-key.ts`), and `OAuth2TokenRequest`

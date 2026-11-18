@@ -46,6 +46,24 @@ export function keepSigningKeyReference(resolved: OAuth2Config, raw: OAuth2Confi
 }
 
 /**
+ * `keepSigningKeyReference` for an auth record (`{ mode, config }`, what
+ * `resolveAuthForSend` flattens to): another mode passes through untouched.
+ */
+export function keepSigningKeyReferenceInAuth(
+	resolved: Record<string, unknown>,
+	raw: Record<string, unknown>
+): Record<string, unknown> {
+	if (raw.mode !== "oauth2" || !raw.config || !resolved.config) return resolved;
+	return {
+		...resolved,
+		config: keepSigningKeyReference(
+			resolved.config as OAuth2Config,
+			raw.config as OAuth2Config
+		),
+	};
+}
+
+/**
  * The scopes the engine resolves a `privateKey` reference against, for the
  * ones that are known: the active environment and the request's collection.
  */

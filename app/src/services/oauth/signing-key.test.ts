@@ -10,6 +10,7 @@ import type { OAuth2Config } from "@/types";
 import {
 	holdsPem,
 	keepSigningKeyReference,
+	keepSigningKeyReferenceInAuth,
 	singleReferenceName,
 	tokenScopeIds,
 } from "./signing-key";
@@ -58,6 +59,37 @@ describe("keepSigningKeyReference", () => {
 
 		expect("privateKey" in kept).toBe(false);
 		expect(kept.privateKeyFile).toBe("/k.pem");
+	});
+});
+
+describe("keepSigningKeyReferenceInAuth", () => {
+	const PEM = "-----BEGIN PRIVATE KEY-----";
+	const raw = {
+		mode: "oauth2",
+		config: { ...jwt, privateKey: "{{signing_key}}", subject: "{{s}}" },
+	};
+	const resolved = {
+		mode: "oauth2",
+		config: { ...raw.config, privateKey: PEM, subject: "alice" },
+	};
+
+	it("keeps the key a reference and the rest of the config resolved", () => {
+		const kept = keepSigningKeyReferenceInAuth(resolved, raw);
+
+		expect(kept).toEqual({
+			mode: "oauth2",
+			config: { ...jwt, privateKey: "{{signing_key}}", subject: "alice" },
+		});
+		expect(JSON.stringify(kept)).not.toContain("BEGIN");
+	});
+
+	it("leaves another mode as resolved", () => {
+		const basic = { mode: "basic", username: "{{u}}" };
+
+		expect(keepSigningKeyReferenceInAuth({ mode: "basic", username: "bob" }, basic)).toEqual({
+			mode: "basic",
+			username: "bob",
+		});
 	});
 });
 

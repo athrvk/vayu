@@ -47,6 +47,8 @@ function renderForm(
 	resolveString?: (text: string) => string
 ) {
 	const latest: { value: OAuth2Config } = { value: initial };
+	// Every config the form asked its host to keep, which is what autosaves.
+	const emitted: OAuth2Config[] = [];
 	function Harness() {
 		const [value, setValue] = useState(initial);
 		latest.value = value;
@@ -54,7 +56,10 @@ function renderForm(
 			<TooltipProvider>
 				<OAuth2Form
 					value={value}
-					onChange={setValue}
+					onChange={(next) => {
+						emitted.push(next);
+						setValue(next);
+					}}
 					variables={variables}
 					resolveString={resolveString}
 					collectionId="col-1"
@@ -63,7 +68,7 @@ function renderForm(
 		);
 	}
 	const view = render(<Harness />);
-	return { ...view, latest };
+	return { ...view, latest, emitted };
 }
 
 const keyField = () => screen.getByLabelText("Private key");
@@ -247,6 +252,69 @@ describe("the signing key control", () => {
 		expect(screen.queryByRole("alert")).toBeNull();
 	});
 
+	it("emits nothing while a reference is half typed and commits it once, when it completes", () => {
+		const { latest, emitted } = renderForm(JWT);
+
+		for (const typed of ["{", "{{", "{{sig", "{{signing_key}", "{{signing_key}}"]) {
+			fireEvent.change(keyField(), { target: { value: typed } });
+		}
+
+		const written = emitted.map((config) => config.privateKey);
+		expect(written).toEqual(["{{signing_key}}"]);
+		expect(latest.value.privateKey).toBe("{{signing_key}}");
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("never hands half-typed text to the config and says what to enter instead", () => {
+		const { emitted } = renderForm(JWT);
+
+		fireEvent.change(keyField(), { target: { value: "-----BEGI" } });
+		fireEvent.change(keyField(), { target: { value: "{{sig" } });
+
+		expect(emitted).toEqual([]);
+		expect(keyField()).toHaveValue("{{sig");
+		expect(screen.getByRole("alert")).toHaveTextContent(
+			"Enter the secret variable as {{name}}"
+		);
+	});
+
+	it("does not commit a reference with no name in it", () => {
+		const { emitted } = renderForm(JWT);
+
+		fireEvent.change(keyField(), { target: { value: "{{ }}" } });
+
+		expect(emitted).toEqual([]);
+	});
+
+	it("drops an unfinished draft on blur and shows what is stored again", () => {
+		const { emitted } = renderForm({ ...JWT, privateKey: "{{signing_key}}" });
+
+		fireEvent.change(keyField(), { target: { value: "{{signing_key}}x" } });
+		expect(keyField()).toHaveValue("{{signing_key}}x");
+		fireEvent.blur(keyField());
+
+		expect(emitted).toEqual([]);
+		expect(keyField()).toHaveValue("{{signing_key}}");
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("commits an emptied field as the member removed, once", () => {
+		const { latest, emitted } = renderForm({ ...JWT, privateKey: "{{signing_key}}" });
+
+		fireEvent.change(keyField(), { target: { value: "" } });
+
+		expect(emitted).toHaveLength(1);
+		expect("privateKey" in latest.value).toBe(false);
+	});
+
+	it("commits nothing for a refused PEM and keeps what was stored", () => {
+		const { emitted } = renderForm({ ...JWT, privateKey: "{{signing_key}}" });
+
+		fireEvent.change(keyField(), { target: { value: PEM } });
+
+		expect(emitted).toEqual([]);
+	});
+
 	it("removes the member when the field is emptied", () => {
 		const { latest } = renderForm({ ...JWT, privateKey: "{{signing_key}}" });
 
@@ -349,4 +417,14 @@ describe("the fallback token lifetime", () => {
 			expect(latest.value.fallbackExpiresIn).toBe(900);
 		}
 	);
+
+	it("states the longest lifetime the engine keeps, as the field's own maximum", () => {
+		renderForm(JWT);
+		fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+
+		expect(screen.getByLabelText("Token lifetime if none is stated (seconds)")).toHaveAttribute(
+			"max",
+			"31536000"
+		);
+	});
 });

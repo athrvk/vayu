@@ -120,6 +120,25 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			computeOAuth2CacheKey(base({ grantType: "password", username: "u1", subject: "alice" }))
 		).toBe("https://idp/token\x1fcid\x1fdefault\x1fu1");
 	});
+
+	// `assertion` is a member the jwt_bearer grant writes itself, so a row of it
+	// is never sent and adds nothing (OAuthCacheKey.ARowNamedAssertionAddsNothing).
+	// Mutation check: remove "assertion" from RESERVED_PARAM_NAMES and the key
+	// gains `tokenParams:assertion=`.
+	it("vector 9: a row named assertion adds nothing", () => {
+		const jwt = base({
+			grantType: "jwt_bearer",
+			assertionAudience: "https://idp",
+			subject: "alice",
+		});
+		expect(
+			computeOAuth2CacheKey({
+				...jwt,
+				tokenParams: [{ key: "assertion", value: "forged.jwt.value" }],
+			})
+		).toBe(computeOAuth2CacheKey(jwt));
+		expect(computeOAuth2CacheKey(jwt)).toBe("https://idp/token\x1fcid\x1fdefault\x1falice");
+	});
 });
 
 describe("computeOAuth2CacheKey - extra parameter rows", () => {

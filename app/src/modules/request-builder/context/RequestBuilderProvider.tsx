@@ -56,6 +56,7 @@ import type {
 	MergeableRequestField,
 	RequestFieldConflicts,
 } from "../types";
+import { keepSigningKeyReferenceInAuth } from "@/services/oauth/signing-key";
 import { resolveAuthForSend } from "../utils/auth-resolution";
 import { requestHasTokens } from "../utils/request-tokens";
 import { leaveDeferredField } from "../utils/sends-url";
@@ -712,7 +713,9 @@ export default function RequestBuilderProvider({
 	const collectionAncestors = useCollectionAncestors(collectionId);
 	const resolvedAuth = useMemo<Record<string, unknown> | null>(() => {
 		const forSend = resolveAuthForSend(request.auth, collectionAncestors);
-		return forSend ? resolveObject(forSend) : null;
+		// A jwt_bearer `privateKey` names a secret variable; resolving it would
+		// put the PEM in this memo and in the schema cache's identity digest.
+		return forSend ? keepSigningKeyReferenceInAuth(resolveObject(forSend), forSend) : null;
 	}, [request.auth, collectionAncestors, resolveObject]);
 
 	/*
