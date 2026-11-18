@@ -12,7 +12,10 @@ import { stripComments } from "@/lib/strip-comments.testkit";
 import { useLayoutStore, resolveResponseArrangement } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	BOTTOM_PANEL_MAX_HEIGHT,
+	BOTTOM_PANEL_MIN_HEIGHT,
 	CONTEXT_BAR_DEFAULT_COLLAPSED,
+	DEFAULT_BOTTOM_PANEL_HEIGHT,
 	DEFAULT_REQUEST_SPLIT_RATIO,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
@@ -626,6 +629,111 @@ describe("layout-store response position", () => {
 			expect(migrated.responsePosition).toBe("below");
 			expect(migrated.requestSplitRatioBeside).toBe(0.4);
 			expect(migrated.requestSplitRatioBelow).toBe(0.6);
+		});
+	});
+});
+
+/**
+ * The bottom panel's three fields (#3635). Open state, height and the active tab
+ * are layout preferences: they survive a relaunch, and the panel is closed on a
+ * fresh install.
+ */
+describe("layout-store bottom panel", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		useLayoutStore.setState({
+			bottomPanelOpen: false,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+			bottomPanelTab: "logs",
+		});
+	});
+
+	it("starts closed, at the default height, on the first tab", () => {
+		expect(useLayoutStore.getInitialState()).toMatchObject({
+			bottomPanelOpen: false,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+			bottomPanelTab: "logs",
+		});
+	});
+
+	it("toggles open and closed, and sets either way directly", () => {
+		const { toggleBottomPanel, setBottomPanelOpen } = useLayoutStore.getState();
+		toggleBottomPanel();
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+		toggleBottomPanel();
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
+		setBottomPanelOpen(true);
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+	});
+
+	it("clamps the height to the store's own bounds", () => {
+		const { setBottomPanelHeight } = useLayoutStore.getState();
+		setBottomPanelHeight(10);
+		expect(useLayoutStore.getState().bottomPanelHeight).toBe(BOTTOM_PANEL_MIN_HEIGHT);
+		// An unclamped Infinity would come back from localStorage as `null`.
+		setBottomPanelHeight(Infinity);
+		expect(useLayoutStore.getState().bottomPanelHeight).toBe(BOTTOM_PANEL_MAX_HEIGHT);
+		setBottomPanelHeight(333);
+		expect(useLayoutStore.getState().bottomPanelHeight).toBe(333);
+	});
+
+	it("survives a rehydrate: open state, height and tab", async () => {
+		const { setBottomPanelOpen, setBottomPanelHeight, setBottomPanelTab } =
+			useLayoutStore.getState();
+		setBottomPanelOpen(true);
+		setBottomPanelHeight(333);
+		setBottomPanelTab("logs");
+
+		// What a relaunch does: the in-memory state is gone and the blob is read.
+		// `persist` writes on every `set`, so the blob is held aside while the
+		// state is reset and put back before the read.
+		const blob = localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "";
+		useLayoutStore.setState({
+			bottomPanelOpen: false,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+		});
+		localStorage.setItem(STORAGE_KEYS.LAYOUT_STORE, blob);
+		await useLayoutStore.persist.rehydrate();
+
+		expect(useLayoutStore.getState()).toMatchObject({
+			bottomPanelOpen: true,
+			bottomPanelHeight: 333,
+			bottomPanelTab: "logs",
+		});
+	});
+
+	it("writes all three to the persisted blob", () => {
+		useLayoutStore.getState().setBottomPanelOpen(true);
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		expect(stored.state).toMatchObject({
+			bottomPanelOpen: true,
+			bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+			bottomPanelTab: "logs",
+		});
+	});
+
+	describe("v6 -> v7 migration", () => {
+		const migrate = (
+			useLayoutStore.persist.getOptions() as unknown as {
+				migrate: (s: unknown, v: number) => Record<string, unknown>;
+			}
+		).migrate;
+
+		it("adds the closed panel to a blob that predates it, leaving the rest alone", () => {
+			const migrated = migrate({ drawerWidth: 300, responsePosition: "below" }, 6);
+			expect(migrated).toMatchObject({
+				bottomPanelOpen: false,
+				bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+				bottomPanelTab: "logs",
+				drawerWidth: 300,
+				responsePosition: "below",
+			});
+		});
+
+		it("leaves a v7 blob alone, so an open panel is not closed on launch", () => {
+			const migrated = migrate({ bottomPanelOpen: true, bottomPanelHeight: 400 }, 7);
+			expect(migrated.bottomPanelOpen).toBe(true);
+			expect(migrated.bottomPanelHeight).toBe(400);
 		});
 	});
 });

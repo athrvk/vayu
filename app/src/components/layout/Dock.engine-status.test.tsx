@@ -328,6 +328,8 @@ describe("an engine that left on its own", () => {
 		useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 		renderDock();
 
-		expect(screen.queryByRole("button")).toBeNull();
+		// Not `queryByRole("button")` alone: the Dock's bottom panel button is
+		// always there (#3635).
+		expect(screen.queryByRole("button", { name: /Retry|Restart/ })).toBeNull();
 	});
 });

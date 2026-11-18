@@ -31,6 +31,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
 import { useTabsStore, useLayoutStore, useSaveStore } from "@/stores";
 import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
+import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import { REGION_ATTRIBUTE } from "./region-focus";
 
 vi.mock("./Drawer", () => ({ Drawer: () => <div data-testid="drawer" /> }));
@@ -63,6 +64,7 @@ vi.mock("@/modules/variables/main/VariablesMain", () => ({
 	default: () => <div data-testid="variables-main" />,
 }));
 vi.mock("@/modules/inbox", () => ({ default: () => <div data-testid="inbox" /> }));
+vi.mock("@/modules/logs", () => ({ LogsTab: () => <div data-testid="logs-tab" /> }));
 
 /*
  * The new-request flow itself is `useNewRequest`'s, and it is covered where it
@@ -96,13 +98,16 @@ interface Press {
 	alt?: boolean;
 	/** The primary modifier. F6 is the one chord here that carries none. */
 	mod?: boolean;
+	/** The macOS primary modifier, for a press that is ⌘ rather than Ctrl. */
+	meta?: boolean;
 }
 
-const press = ({ key, code = "", shift = false, alt = false, mod = true }: Press) =>
+const press = ({ key, code = "", shift = false, alt = false, mod = true, meta = false }: Press) =>
 	fireEvent.keyDown(document.body, {
 		key,
 		code,
-		ctrlKey: mod,
+		ctrlKey: mod && !meta,
+		metaKey: meta,
 		shiftKey: shift,
 		altKey: alt,
 		bubbles: true,
@@ -133,6 +138,7 @@ describe("the Shell's chord map", () => {
 			contextBarOpen: false,
 			contextBarWidth: 400,
 			responsePosition: "beside",
+			bottomPanelOpen: false,
 		});
 	});
 
@@ -158,6 +164,57 @@ describe("the Shell's chord map", () => {
 		renderShell();
 		press({ key: "i" });
 		expect(useLayoutStore.getState().contextBarOpen).toBe(true);
+	});
+
+	/*
+	 * `mod` is lenient (`matchesChord`): ⌘ is what a Mac user presses and Ctrl
+	 * what everyone else does, and either reaches the one store field the Dock
+	 * button and the palette row flip. Each press is asserted, so neither
+	 * platform's chord is the host's by accident.
+	 */
+	it.each([
+		["Ctrl+J", false],
+		["⌘J", true],
+	])("toggles the bottom panel on %s, and the panel follows", (_name, meta) => {
+		useLayoutStore.setState({ bottomPanelOpen: false });
+		const { queryByRole } = renderShell();
+		expect(queryByRole("region", { name: BOTTOM_PANEL_LABEL })).toBeNull();
+
+		press({ key: "j", meta });
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+		expect(queryByRole("region", { name: BOTTOM_PANEL_LABEL })).not.toBeNull();
+
+		press({ key: "j", meta });
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
+		expect(queryByRole("region", { name: BOTTOM_PANEL_LABEL })).toBeNull();
+	});
+
+	it("toggles the bottom panel on any tab type and with no tab open", () => {
+		useLayoutStore.setState({ bottomPanelOpen: false });
+		renderShell();
+		act(() => {
+			useTabsStore.setState({
+				openTabs: [{ id: FIRST, type: "settings", entityId: null }],
+				activeTabId: FIRST,
+			});
+		});
+		press({ key: "j" });
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+
+		act(() => {
+			useTabsStore.setState({ openTabs: [], activeTabId: null });
+		});
+		press({ key: "j" });
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
+	});
+
+	it("leaves the bottom panel alone on AltGr+J, a shifted J and a bare J", () => {
+		useLayoutStore.setState({ bottomPanelOpen: false });
+		renderShell();
+		press({ key: "j", alt: true });
+		press({ key: "J", shift: true });
+		press({ key: "j", mod: false });
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
 	});
 
 	it("toggles the response position on mod+shift+B, from a request tab only", () => {

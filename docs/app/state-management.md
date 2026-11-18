@@ -193,9 +193,9 @@ canGoBack(useTabsStore.getState());
 canGoForward(useTabsStore.getState());
 ```
 
-#### `layout-store.ts` - Drawer, Context Bar, & Response Position
+#### `layout-store.ts` - Drawer, Context Bar, Bottom Panel, & Response Position
 
-Manages the left drawer (collections/history/variables/settings), the right context bar, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
+Manages the left drawer (collections/history/variables/settings), the right context bar, the bottom panel, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
 
 **State:**
 ```typescript
@@ -214,6 +214,9 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   scriptEditorHeights: Record<string, number>  // Height (px) of a script.pre/script.post element's editor box, keyed by the element's own id - capped at 200 entries, oldest set evicted first
   scriptEditorHeightDefault: number      // Height a script row with no entry above starts at - the last height set on any row
   recentElementKinds: string[]           // Last 5 kinds added through the Add-element picker, most recent first
+  bottomPanelOpen: boolean               // Is the bottom panel showing? Closed by default (#3635)
+  bottomPanelHeight: number              // px; clamped to [BOTTOM_PANEL_MIN_HEIGHT, BOTTOM_PANEL_MAX_HEIGHT] here, and to half the window as it is drawn
+  bottomPanelTab: BottomPanelTab         // "logs" today; the id of one of BOTTOM_PANEL_TABS (constants/layout.ts)
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```
@@ -227,6 +230,9 @@ const {
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
   contextBarCollapsedSections, toggleContextBarSection,
+  bottomPanelOpen, setBottomPanelOpen, toggleBottomPanel,
+  bottomPanelHeight, setBottomPanelHeight,
+  bottomPanelTab, setBottomPanelTab,
   responsePosition, setResponsePosition, toggleResponsePosition,
   setRequestSplitRatio
 } = useLayoutStore();
@@ -245,10 +251,21 @@ Collections (the default view) had. Re-introducing a per-view width re-introduce
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
 
-**`setDrawerWidth` / `setContextBarWidth` are not called per `pointermove`.**
+**The bottom panel's three fields persist and the panel starts closed** (#3635,
+the **v7** migration). `toggleBottomPanel` is the one write the Dock button, the
+`Chord` in `constants/shortcuts.ts` (⌘J / Ctrl+J) and the palette row make, so no
+route has an opinion of its own. `setBottomPanelHeight` clamps to the absolute
+bounds only; the half-the-window cap needs a window the store does not know, so
+`BottomPanel` applies `clampBottomPanelHeight` when it draws and a window that is
+briefly small does not overwrite the user's choice. A persisted `bottomPanelTab`
+that names a tab a later release removed resolves to the first one
+(`resolveBottomPanelTab`). The panel renders nothing while closed, so a tab's
+content is mounted only while it is on screen.
+
+**`setDrawerWidth` / `setContextBarWidth` / `setBottomPanelHeight` are not called per `pointermove`.**
 `PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`) holds a
-drag's live width outside the store, painting it onto the panel's own inline
-`style.width` once per animation frame, and calls the setter - the one write
+drag's live size outside the store, painting it onto the panel's own inline
+`style.width` (`style.height` for the bottom panel's top-edge handle) once per animation frame, and calls the setter - the one write
 `partialize` persists - exactly once, on `pointerup`. A store write on every
 `pointermove` was a synchronous `JSON.stringify` + `localStorage.setItem` of the
 whole persisted slice 120-240 times a second (#1715).
@@ -2168,6 +2185,42 @@ UI-only: Which settings category (e.g., "ui") is selected in the sidebar.
 ```typescript
 const { selectedCategory, setSelectedCategory } = useSettingsStore();
 ```
+
+#### `modules/logs/logs-store.ts` - The Logs Tab's Lines
+
+UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the controls that choose them, and the paged read and tail that fill them. The tab's mount is the store's lifetime: `start()` on mount, `stop()` on unmount, which ends the tail, drops the lines and ignores anything main pushes afterwards.
+
+**State:**
+```typescript
+{
+  controls: { minLevel, source, category, search },
+  records: LogEntry[],            // oldest first
+  bytes: number,                  // entryBytes' estimate of `records`
+  follow: boolean,
+  cursor: LogCursor | null,       // where "Search older" continues
+  more: boolean,
+  scannedTo: string | null,       // "Searched back to <time>"
+  dropped: number,                // lines the tail left out of a batch
+  detached: boolean,              // the newest lines are not all held
+  status: "idle" | "loading" | "ready" | "error",
+  loadingOlder: boolean,
+  error: string | null,
+  knownCategories: string[],      // the component filter's options
+  generation: number              // bumps when the list is replaced
+}
+```
+
+**Key Methods:**
+```typescript
+const { records, follow, controls, start, stop, setControls, setFollow, loadOlder, jumpTo, reload } =
+  useLogsStore();
+```
+
+**Filters are evaluated in main, never here.** `setControls` rebuilds the filter (`buildLogFilter`, with the search box read by `parseSearchInput` in `modules/logs/parse-search.ts`, a renderer copy of the reader's own that `electron/log-search.conformance.test.ts` holds equal) and, when it differs, restarts the tail with it and replaces the held lines with a fresh read. The tail starts before the read, so a line written while the read answers waits in a buffer and is merged in once, never lost or doubled.
+
+**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB, two bytes per UTF-16 unit of the line as `estimateResponseBytes` counts a body), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
+
+**Every async step checks `loadId` before it writes**, and `stop()` bumps it, so a read that answers after a filter change or after the tab closed lands nowhere. `loadId`, the tail's buffer and the unsubscribe are module variables, not state: nothing renders from them.
 
 #### `lib/graphql/explorer-store.ts` - GraphQL Schema Explorer View
 

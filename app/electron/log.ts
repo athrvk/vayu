@@ -51,7 +51,7 @@ export interface LogRecord {
 	[field: string]: unknown;
 }
 
-const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+export const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 /**
  * Field names redacted wholesale to `"<redacted>"`. Ported verbatim from

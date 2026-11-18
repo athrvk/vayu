@@ -34,6 +34,7 @@ import { ENGINE_BASE_URL } from "@/config/network";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { describeEngineCrash, engineCrashOutput } from "@/lib/engine-crash";
+import { BottomPanelButton } from "./BottomPanelButton";
 import { ResponsePositionButton } from "./ResponsePositionButton";
 import { regionProps } from "./region-focus";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -615,16 +616,19 @@ export function Dock() {
 			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
 			 * from drifting apart.
 			 *
-			 * Status in the centre, per-tab view controls on the right. #1615
-			 * moved the sidebar-view switchers to `ActivityRail` and the
-			 * context-bar toggle to `ContextRail`, both on a window edge the OS
-			 * never covers, and left this strip status-only; #1711 amends that
-			 * to admit a right-aligned cluster of controls that act on the
-			 * *active tab's* view, rendered only while that tab is a request
-			 * tab. The rule that survives both is the one that matters: every
-			 * item here has a non-footer path (pending restart is the banner in
-			 * Settings, save status opens the tab it names, the response
-			 * position has its chord, its palette row and its Settings row), so
+			 * Status in the centre, controls on the right. #1615 moved the
+			 * sidebar-view switchers to `ActivityRail` and the context-bar
+			 * toggle to `ContextRail`, both on a window edge the OS never
+			 * covers, and left this strip status-only; #1711 amends that to
+			 * admit a right-aligned cluster of controls that act on the *active
+			 * tab's* view, rendered only while that tab is a request tab; #3635
+			 * amends it again for the one control that is not per-tab, the
+			 * bottom panel's button, which leads the cluster on every tab and
+			 * with none. The rule that survives all three is the one that
+			 * matters: every item here has a non-footer path (pending restart
+			 * is the banner in Settings, save status opens the tab it names,
+			 * the response position has its chord, its palette row and its
+			 * Settings row, the bottom panel its chord and its palette row), so
 			 * the system Dock covering this strip on macOS costs a glance, never
 			 * a click.
 			 *
@@ -675,8 +679,10 @@ export function Dock() {
 					<EngineVersion />
 				</div>
 
-				{/* Per-tab view controls - a request tab's only, for now. */}
+				{/* The bottom panel's button on every tab, then the per-tab view
+				    controls - a request tab's only, for now. */}
 				<div className="flex-1 flex items-center justify-end gap-1">
+					<BottomPanelButton />
 					{activeTabType === "request" && <ResponsePositionButton />}
 				</div>
 			</div>

@@ -1989,8 +1989,9 @@ registered, the hint appears on focus and never on a read-only editor) and
 `shortcuts.listed.test.ts` (it reaches the panel).
 
 **Moving focus *between* regions is F6's job, not Tab's** (#1219). The window is
-seven bands - the title bar, the activity rail, the drawer, the main pane, the
-context bar, the context rail and the Dock - and reaching one from another by Tab
+eight bands - the title bar, the activity rail, the drawer, the main pane, the
+context bar, the context rail, the bottom panel (#3635, while it is open) and the
+Dock - and reaching one from another by Tab
 alone meant walking every request in an expanded collection tree on the way. F6
 cycles the bands in that order (document order); Shift+F6 goes back. The two
 rails joined with #1615 and #3498 because each stays on screen while the panel it
@@ -3332,8 +3333,12 @@ Shell                            flex flex-col h-full bg-background
 │       │                    views, plus its PanelResizeHandle on the right edge
 │       └── content column   TabStrip, then a row of [main + ContextBar]
 │                            beside ContextRail (w-[var(--rail-width)])
+├── BottomPanel (section)    bg-panel, 120px to half the window, default 240px,
+│                            closed by default - a tab strip over the active tab,
+│                            its PanelResizeHandle on the top edge (#3635)
 └── Dock                     h-[var(--dock-height)] border-t border-border -
-                             ambient status only, along the bottom of the window
+                             ambient status, then the bottom panel's button and
+                             the per-tab view controls on the right
 ```
 
 ### Push or overlay: the side panels at a narrow window
@@ -3410,18 +3415,24 @@ both panels, and none of them applies to a panel that pushes:
 
 ### The panels that resize, and the one handle that resizes them
 
-The drawer and the context bar are the two panels a user drags, and both use
-`PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one
+The drawer, the context bar and the bottom panel are the panels a user drags, and
+all use `PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one
 focusable `role="separator"` where each panel used to carry its own mouse-only
 copy. `side` sets the direction, so the drawer's right-edge handle widens on
 ArrowRight and the context bar's left-edge one widens on ArrowLeft; Page keys
 jump, Home and End take the bounds, and Enter or Space resets to the default -
-the keyboard equivalent of the double-click that was already there.
+the keyboard equivalent of the double-click that was already there. The bottom
+panel's handle is `side="top"`: a horizontal separator on the panel's top edge,
+dragged on the vertical axis, where pointer up, ArrowUp and PageUp grow the
+panel. It takes its own `min` and `max`: the panel's floor and half the window,
+which is why the props are `size`, `setSize` and `defaultSize` rather than a
+width.
 
 The width itself is a preference, not component state: `drawerWidth` and
 `contextBarWidth` live in `layout-store`, clamped to `PANEL_MIN_WIDTH` (220) and
 `PANEL_MAX_WIDTH` (480) from `app/src/constants/layout.ts`, and survive a
-restart. The request/response split is `react-resizable-panels` through
+restart; so does `bottomPanelHeight`, held to `BOTTOM_PANEL_MIN_HEIGHT` (120)
+there and to half the window as it is drawn. The request/response split is `react-resizable-panels` through
 `components/ui/resizable.tsx`, with one ratio per arrangement in the same store
 (`requestSplitRatioBeside` / `requestSplitRatioBelow`, #1711): the share of the
 width a request wants beside its response is not the share of the height it
@@ -3505,10 +3516,11 @@ section when all are collapsed.
 
 ### Dock
 
-**Status in the centre, per-tab view controls on the right, and every item
-has a non-footer path.** #1615 moved the footer's two switchers onto the rails
-above and left it status-only; #1711 amends that rule to admit a right-aligned
-cluster of controls that act on the *active tab's* view. `Dock`
+**Status in the centre, controls on the right, and every item has a
+non-footer path.** #1615 moved the footer's two switchers onto the rails above
+and left it status-only; #1711 amends that rule to admit a right-aligned
+cluster of controls that act on the *active tab's* view, and #3635 amends it
+again for the bottom panel's button, the one control that is not per-tab. `Dock`
 (`app/src/components/layout/Dock.tsx`) is one flex row,
 `h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`,
 with two equal `flex-1` gutters around the centre group so the connection light
@@ -3535,9 +3547,11 @@ connected" from a poll older than the crash never stands beside Restart (#3493),
 and the poll's next answer is what turns it back. The running-services button
 reads the same derivation and drops out with it.
 
-The right cluster renders **only while the active tab is a request tab**; every
-other tab keeps the centred strip alone. Its one control is
-`ResponsePositionButton` (`app/src/components/layout/ResponsePositionButton.tsx`),
+The right cluster leads with the bottom panel's button
+(`BottomPanelButton.tsx`, see Pane Toggles below), on every tab and with none
+open. The controls that act on the active tab's view follow it and render **only
+while that tab is a request tab**; every other tab's cluster is the one button.
+The first of them is `ResponsePositionButton` (`app/src/components/layout/ResponsePositionButton.tsx`),
 a `TooltipIconButton` that moves the response pane from beside the request to
 below it and back, its chord in the tooltip. The icon names the destination
 (see Pane Toggles below): `PanelBottom` while the response is beside
@@ -3550,11 +3564,30 @@ which setting is in force - the destination glyph by design does not say. →
 `Dock.response-position.test.tsx` (mutation-checked: without the request-tab
 gate, the settings and dashboard cases fail).
 
-The rule that lets a control sit here at all is the one both amendments kept:
+The rule that lets a control sit here at all is the one every amendment kept:
 every item has a path that is not the footer (pending restart is the banner in
 Settings, save status opens the tab it names, the response position has its
-chord ⇧⌘B, its palette row and its Settings > Appearance row), so the system
-Dock covering this strip on macOS costs a glance, never a click.
+chord ⇧⌘B, its palette row and its Settings > Appearance row, the bottom panel
+its chord ⌘J and its palette row), so the system Dock covering this strip on
+macOS costs a glance, never a click. → `Dock.bottom-panel.test.tsx` (the button
+on every tab type and with no tab).
+
+### Bottom panel
+
+`BottomPanel` (`app/src/components/layout/BottomPanel.tsx`, #3635) is a
+full-width band between the main row and the Dock, under the sidebar and the
+content alike: a `<section>` on `bg-panel` labelled by `BOTTOM_PANEL_LABEL`,
+`shrink-0`, with an inline height from `layout-store`'s `bottomPanelHeight`
+held to half the window as it is drawn. It renders nothing while closed, so a
+tab's body mounts only while it is on screen. Its top edge is a
+`PanelResizeHandle side="top"` (above), which also draws the rule against the
+main row; the strip under it is the ordinary `TabsList variant="pane"`, whose
+`border-rule` is right on `bg-panel` because that is the root surface. A
+surface a tab paints inside it declares its own (`surface-card`,
+`surface-sunken`), and `BottomPanel.surface-rule.test.tsx` fails on a `bg-card`
+or `bg-muted` that does not. It is a stop in the F6 cycle, between the context
+rail and the Dock. In prose and in UI text it is named for what it holds (Logs,
+and the Console when #3634 lands) and never "drawer" (`docs/ux-writing.md`).
 
 ### Drawer
 
@@ -3609,6 +3642,16 @@ sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
   grow a close button of its own. A control that changes address with the state
   it controls teaches a position and then abandons it, and the two copies drift
   into saying the same thing differently.
+- **The bottom panel's button is an icon with its own name.** The Dock's
+  button for the bottom panel (`BottomPanelButton.tsx`, #3635) is a
+  `TooltipIconButton` drawing `ScrollText`, a log's lines, in every state: a
+  panel glyph would sit a few pixels from the response-position button's
+  `PanelBottom` and read as the same control. It is named by the panel's label
+  (`BOTTOM_PANEL_LABEL`, "Logs" today) as its `aria-label` and tooltip, and the
+  tooltip carries the chord. The name never changes with the state; the state
+  is `aria-pressed` bound to `bottomPanelOpen`, as the rails' buttons do, rather
+  than `aria-expanded`, so a pressed button reads as "Logs, on". It stays put
+  when the panel opens, and the panel grows no close button of its own.
 - **A switch between two arrangements names the destination too.** The Dock's
   response-position button draws `PanelBottom` while the response is *beside*
   the request and `PanelRight` while it is *below*: the glyph is where a click

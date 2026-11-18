@@ -228,6 +228,11 @@ main process. A call served through this transport and one served through the
 Electron-hosted transport each leave a `src: "mcp"` record; see
 [Engine Logging](logging.md).
 
+The log files are not readable over MCP: the server has no tools, resources or
+prompts for them, because they hold what the app logged about your work,
+including text a script threw, and the Logs tab reads them only for the person
+at the window (`mcp/log-reader.guard.test.ts` holds that, #3635).
+
 ### What is live on each transport
 
 Two things need the person or the client to hear from the server mid-session:

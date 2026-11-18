@@ -8,9 +8,16 @@
 import type { ConsoleLevel } from "@/types";
 
 /**
- * How each `console.*` level is drawn - the Console tab's script log and an
- * element row's console sample (#3127) read this one table, so a `warn` is the
- * same colour wherever it prints.
+ * The levels the table draws: a script's `console.*` levels, and `debug`, which
+ * is a log record's lowest level (`LogFileRecord["level"]`) and has no `console`
+ * counterpart a script can call.
+ */
+export type ToneLevel = ConsoleLevel | "debug";
+
+/**
+ * How each level is drawn - the Console tab's script log, an element row's
+ * console sample (#3127) and the Logs tab's records (#3635) read this one table,
+ * so a `warn` is the same colour wherever it prints.
  *
  * `log` and `info` share the plain foreground on purpose - that is Chrome's
  * behaviour, and a fourth saturated tone inside a slab that already carries a
@@ -23,7 +30,10 @@ import type { ConsoleLevel } from "@/types";
  * would carry it, a column of noise saying what the absence of a marker already
  * says. The column is still reserved, so messages stay aligned.
  */
-export const LEVEL_TONE: Record<ConsoleLevel, { gutter: string; text: string; label: string }> = {
+export const LEVEL_TONE: Record<ToneLevel, { gutter: string; text: string; label: string }> = {
+	// Muted text as well as a muted label: debug is the volume a quiet reader
+	// scrolls past, and it is the level a record carries most of.
+	debug: { gutter: "debug", text: "text-muted-foreground", label: "text-muted-foreground" },
 	log: { gutter: "", text: "text-foreground", label: "text-muted-foreground" },
 	info: { gutter: "info", text: "text-foreground", label: "text-muted-foreground" },
 	warn: { gutter: "warn", text: "text-status-warning-text", label: "text-status-warning-text" },

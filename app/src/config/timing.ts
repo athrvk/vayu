@@ -275,6 +275,13 @@ export const TIMING = {
 	 */
 	MARK_FADE_MS: 150,
 
+	/**
+	 * How long the Logs tab's search box has to stop changing before the filter
+	 * is re-issued: every change restarts the main-process tail and reads again,
+	 * so a keystroke is not a search. The History sidebar's box waits the same.
+	 */
+	LOG_SEARCH_DEBOUNCE_MS: 300,
+
 	/** GraphQL editor diagnostics debounce. */
 	GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS: 250,
 	/** GraphQL schema introspection debounce after URL/headers change. */

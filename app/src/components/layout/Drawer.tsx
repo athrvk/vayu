@@ -115,9 +115,9 @@ export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 
 					<PanelResizeHandle
 						side="right"
-						width={drawerWidth}
-						setWidth={setDrawerWidth}
-						defaultWidth={DEFAULT_DRAWER_WIDTH}
+						size={drawerWidth}
+						setSize={setDrawerWidth}
+						defaultSize={DEFAULT_DRAWER_WIDTH}
 						label="Resize sidebar"
 					/>
 				</aside>

@@ -18,6 +18,7 @@
  */
 
 import { isMac, type Chord } from "@/lib/platform";
+import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import type { DrawerView } from "@/stores/layout-store";
 
 /** Send the request. */
@@ -68,6 +69,24 @@ export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
 	mod: true,
 	key: "I",
 	label: "Show or hide the context bar",
+};
+
+/**
+ * Show/hide the bottom panel (#3635). The Dock button and the palette row are
+ * the other two routes to the same store action.
+ *
+ * ⌘J, the chord VS Code binds to its own bottom panel. Plain ⌘J rather than a
+ * shifted one, by the same elimination the chords below record: Monaco's only
+ * CtrlCmd+J is the second half of its ⌘K ⌘J chord (unfold all), which is never
+ * a key of its own, and its joinLines is ⌃J on macOS, a Control the lenient
+ * `mod` does not mean there; this registry holds no J; and the native menu
+ * binds none (`electron/menu-accelerators.ts`). So Monaco never swallows it
+ * and it needs no entry in `lib/editor-chords.ts`.
+ */
+export const TOGGLE_BOTTOM_PANEL_CHORD: Chord = {
+	mod: true,
+	key: "J",
+	label: `Show or hide the ${BOTTOM_PANEL_LABEL.toLowerCase()}`,
 };
 
 /**
@@ -520,6 +539,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 			CLOSE_TAB_CHORD,
 			TOGGLE_DRAWER_CHORD,
 			TOGGLE_CONTEXT_BAR_CHORD,
+			TOGGLE_BOTTOM_PANEL_CHORD,
 			TOGGLE_RESPONSE_POSITION_CHORD,
 			SETTINGS_CHORD,
 			APP_MENU_CHORD,

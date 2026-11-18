@@ -38,7 +38,7 @@ The Vayu Manager is an Electron-based desktop application built with React and T
 │  └──────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  Shell.tsx                                        │  │
-│  │  - Main layout (sidebar + content)              │  │
+│  │  - Main layout (sidebar + content + bottom)     │  │
 │  │  - Routes to screens based on state              │  │
 │  └──────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -163,7 +163,7 @@ The React app follows a component-based architecture:
 ```
 src/
 ├── components/          # Shared UI components
-│   ├── layout/         # Shell, TitleBar, TabStrip, ActivityRail, Drawer, Dock, ContextBar, ContextRail
+│   ├── layout/         # Shell, TitleBar, TabStrip, ActivityRail, Drawer, BottomPanel, Dock, ContextBar, ContextRail
 │   ├── shared/         # Cross-feature shared components
 │   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries
@@ -179,10 +179,11 @@ src/
 │   ├── collections/      # Collections and requests tree
 │   ├── variables/        # Environment and variable editors
 │   ├── settings/         # App settings
+│   ├── logs/             # The bottom panel's Logs tab body
 │   └── welcome/          # Onboarding screen
 ├── stores/             # Cross-cutting Zustand stores (UI state)
 │   ├── tabs-store.ts        # Active tab state (determines main content)
-│   ├── layout-store.ts      # Drawer/sidebar visibility
+│   ├── layout-store.ts      # Drawer/sidebar visibility, bottom panel open/height/tab
 │   ├── session-store.ts     # Session and user info
 │   ├── engine-store.ts      # Engine health and connectivity
 │   ├── dashboard-store.ts   # Live metrics and test state
@@ -199,13 +200,17 @@ src/
 └── config/             # Configuration (API endpoints, metrics thresholds)
 ```
 
+#### The shell's bands
+
+`Shell` stacks full-width bands, none of which a tab type can take over: the title bar, then the main row, then the **bottom panel** (`components/layout/BottomPanel.tsx`, #3635), then the Dock. The main row is the activity rail, the drawer and the content column (tab strip over main, context bar and context rail). The bottom panel is a band of its own rather than a part of the content column so that it sits under the sidebar and the content alike; it renders nothing while closed and takes its height from the main row, never more than half the window (the window's minimum height is 768px, which leaves the main pane a usable height, #3494). It holds a strip of tabs (`BOTTOM_PANEL_TABS`, `constants/layout.ts`); a tab's body is mounted only while the panel is open on it. Open state, height and the active tab are `layout-store` fields; the Dock button, the ⌘J chord and the palette row all flip the one `toggleBottomPanel` action. Each band is a stop in the F6 focus cycle (`region-focus.ts`).
+
 #### State Management
 
 The app uses a dual-state management approach:
 
 1. **Zustand Stores** (`stores/` and `lib/`): UI state, navigation, temporary data
    - `tabs-store.ts`: Active tab state; determines which feature module renders in the main content area
-   - `layout-store.ts`: Drawer and sidebar visibility/state
+   - `layout-store.ts`: Drawer and sidebar visibility/state, the bottom panel's open state, height and active tab
    - `session-store.ts`: Active environment id (mirrored from the engine) and the last-used collection
    - `engine-store.ts`: Engine health, connectivity status
    - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), the run phase

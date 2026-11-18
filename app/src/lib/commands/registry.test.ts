@@ -25,8 +25,15 @@ import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
 import { tabElementId } from "@/components/layout/tab-aria";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
-import { SEND_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
-import { useImportModalStore, useTabsStore, useSaveStore, type TabType } from "@/stores";
+import { SEND_CHORD, TOGGLE_BOTTOM_PANEL_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
+import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
+import {
+	useImportModalStore,
+	useLayoutStore,
+	useTabsStore,
+	useSaveStore,
+	type TabType,
+} from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
@@ -585,6 +592,33 @@ describe("the sidebar toggle", () => {
 		const title = commandTitle(commandById("toggle-drawer"), fullContext());
 		expect(title).toBe("Show or hide the sidebar");
 		expect(title).toBe(TOGGLE_DRAWER_CHORD.label);
+	});
+});
+
+describe("the bottom panel toggle (#3635)", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({ bottomPanelOpen: false });
+	});
+
+	it("is titled as its chord is labelled, from the panel's one name", () => {
+		const title = commandTitle(commandById("toggle-bottom-panel"), fullContext());
+		expect(title).toBe(TOGGLE_BOTTOM_PANEL_CHORD.label);
+		expect(title).toBe(`Show or hide the ${BOTTOM_PANEL_LABEL.toLowerCase()}`);
+		expect(commandById("toggle-bottom-panel").shortcut).toBe(TOGGLE_BOTTOM_PANEL_CHORD);
+	});
+
+	it("flips the one store field the Dock button and the chord flip", () => {
+		const command = commandById("toggle-bottom-panel");
+		command.perform(baseCommandContext());
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+		command.perform(baseCommandContext());
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
+	});
+
+	it("is offered on every tab and with none, and without a host", () => {
+		expect(availableCommands(baseCommandContext()).map((c) => c.id)).toContain(
+			"toggle-bottom-panel"
+		);
 	});
 });
 

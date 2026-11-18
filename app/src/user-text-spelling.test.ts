@@ -108,6 +108,11 @@ export const FILESYSTEM_FOLDERS: readonly {
 		reason: "the directory a file body's path sits in, which Settings › Files allows",
 	},
 	{
+		file: "src/modules/logs/LogsToolbar.tsx",
+		phrases: ["logs folder"],
+		reason: "the directory the log files are in, opened in the file manager",
+	},
+	{
 		file: "src/modules/request-builder/components/RequestTabs/panels/body/BinaryBodyPanel.tsx",
 		phrases: ["allowed folder", "Allow folder", "allow its folder", "from a folder allowed"],
 		reason: "the allowed directories a binary body's path may sit under",

@@ -24,3 +24,15 @@ function windowWidth(): number {
 export function useWindowWidth(): number {
 	return useSyncExternalStore(subscribe, windowWidth);
 }
+
+function windowHeight(): number {
+	return window.innerHeight;
+}
+
+/**
+ * The window's height in CSS px, re-read on every resize - the vertical
+ * counterpart of `useWindowWidth`, for the bottom panel's half-the-window cap.
+ */
+export function useWindowHeight(): number {
+	return useSyncExternalStore(subscribe, windowHeight);
+}

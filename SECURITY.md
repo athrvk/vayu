@@ -100,6 +100,9 @@ opened through the app, and the one that reports a file's size answers only for
 those or for files under a folder you allowed. The engine does not take the
 renderer's word for file access either: a binary body or a form file part is
 sent only if the file is under a folder you allowed or is one you picked.
+The Logs tab's reader takes no path from the window at all: it opens only files
+whose names it listed itself in the logs folder, and it shows what those files
+hold, which can include text a script threw.
 
 These layers keep a compromised window away from Node and the operating system.
 They do not keep it away from your data: the engine trusts the window, so script

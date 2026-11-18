@@ -58,6 +58,7 @@ vi.mock("@/modules/variables/main/VariablesMain", () => ({
 	default: () => <div data-testid="variables-main" />,
 }));
 vi.mock("@/modules/inbox", () => ({ default: () => <div data-testid="inbox" /> }));
+vi.mock("@/modules/logs", () => ({ LogsTab: () => <div data-testid="logs-tab" /> }));
 
 /** Shell, optionally with a real dialog open beside it - as the app has. */
 function renderShell(withDialog: boolean) {
@@ -107,6 +108,7 @@ describe("Shell chords behind an open modal", () => {
 			contextBarOpen: false,
 			contextBarWidth: 400,
 			responsePosition: "beside",
+			bottomPanelOpen: false,
 		});
 	});
 
@@ -145,6 +147,20 @@ describe("Shell chords behind an open modal", () => {
 		renderShell(true);
 		chord("s");
 		expect(triggerSave).toHaveBeenCalledTimes(1);
+	});
+
+	it("toggles the bottom panel on mod+J with nothing open, and not while a dialog is open", () => {
+		const nothingOpen = renderShell(false);
+		chord("j");
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(true);
+
+		// Unmounted first: a second Shell beside the first would toggle twice, and
+		// a toggle that wrongly fired under the dialog would cancel itself out.
+		nothingOpen.unmount();
+		useLayoutStore.setState({ bottomPanelOpen: false });
+		renderShell(true);
+		chord("j");
+		expect(useLayoutStore.getState().bottomPanelOpen).toBe(false);
 	});
 
 	it("does not toggle the drawer on mod+B while a dialog is open", () => {

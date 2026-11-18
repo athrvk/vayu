@@ -262,6 +262,90 @@ export type SaveFileReply =
 	| { outcome: "cancelled" }
 	| { outcome: "failed"; fileName: string; message: string };
 
+/**
+ * The Logs tab's reader (#3635). These mirror `log-reader.ts` and
+ * `log-reader-ipc.ts`, which this file cannot import.
+ */
+export type LogFileSource = "engine" | "app" | "cli" | "mcp";
+
+export interface LogFileInfo {
+	name: string;
+	source: LogFileSource;
+	size: number;
+	mtimeMs: number;
+}
+
+/** One line of a log file that is a record (`docs/engine/log-record.schema.json`). */
+export interface LogFileRecord {
+	ts: string;
+	level: "debug" | "info" | "warn" | "error";
+	src: string;
+	cat: string;
+	msg: string;
+	pid: number;
+	tid?: string;
+	[field: string]: unknown;
+}
+
+/** A line that is not JSON, or is JSON without the record's required keys. */
+export interface UnparsedLogLine {
+	unparsed: true;
+	raw: string;
+}
+
+export type LogEntry = LogFileRecord | UnparsedLogLine;
+
+/** `field:value`; `exact` (the value was quoted) compares whole and case-sensitive. */
+export interface LogFieldTerm {
+	field: string;
+	value: string;
+	exact: boolean;
+}
+
+/** What a read or a tail keeps. An absent or empty set does not constrain. */
+export interface LogFilter {
+	minLevel?: LogFileRecord["level"];
+	sources?: string[];
+	categories?: string[];
+	text?: string;
+	terms?: LogFieldTerm[];
+}
+
+/**
+ * Where a backward read stopped, per file. Opaque to the renderer: hand back
+ * what `logs.read` returned, never one built from a name.
+ */
+export interface LogCursor {
+	files: { name: string; id: string; offset: number }[];
+}
+
+export interface LogReadRequest {
+	/** Continue from a previous read's `cursor`. Not with `around`. */
+	before?: LogCursor;
+	/** Jump to time: the newest records at or before this `ts`. Not with `before`. */
+	around?: string;
+	filter: LogFilter;
+	/** Clamped to 1000 by main. */
+	limit: number;
+}
+
+export interface LogReadResult {
+	/** Oldest first. */
+	records: LogEntry[];
+	cursor: LogCursor;
+	/** Older data remains that this call did not search or did not return. */
+	more: boolean;
+	/** The `ts` of the oldest record this call examined, matching or not. */
+	scannedTo: string | null;
+}
+
+/** What `logs.onRecords` delivers: one tail poll's matching records, oldest first. */
+export interface LogBatch {
+	records: LogEntry[];
+	/** Matching records left out because the poll found more than 500. */
+	dropped: number;
+}
+
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
 
@@ -435,6 +519,19 @@ interface ElectronAPI {
 	}>;
 	/** Open the logs directory in the OS file manager (Settings, General). */
 	openLogsFolder: () => Promise<string>;
+	/**
+	 * The log files, read through main (#3635). Every call rejects when it is
+	 * malformed or does not come from the app window.
+	 */
+	logs: {
+		list: () => Promise<LogFileInfo[]>;
+		read: (request: LogReadRequest) => Promise<LogReadResult>;
+		/** Starts this window's tail, replacing one already running. */
+		tailStart: (filter: LogFilter) => Promise<void>;
+		tailStop: () => Promise<void>;
+		/** Subscribe to the tail's batches; returns the unsubscribe. */
+		onRecords: (callback: (batch: LogBatch) => void) => () => void;
+	};
 	/**
 	 * Open the installer's THIRD_PARTY_NOTICES.txt in the OS viewer (Settings,
 	 * General). Resolves with an empty string on success and the reason on

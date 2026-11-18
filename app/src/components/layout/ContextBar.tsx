@@ -160,9 +160,9 @@ export function ContextBar({ mode = "push", siblingMode = "push" }: ContextBarPr
 				>
 					<PanelResizeHandle
 						side="left"
-						width={contextBarWidth}
-						setWidth={setContextBarWidth}
-						defaultWidth={DEFAULT_CONTEXT_BAR_WIDTH}
+						size={contextBarWidth}
+						setSize={setContextBarWidth}
+						defaultSize={DEFAULT_CONTEXT_BAR_WIDTH}
 						label="Resize context bar"
 					/>
 

@@ -1,0 +1,374 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * The Logs tab's lines (#3635): what the tail pushed, what a read paged in, and
+ * the bound that keeps both from growing for as long as the tab is open.
+ *
+ * A store rather than component state because the work outlives a render and
+ * has races of its own: a filter change replaces the list while a page is in
+ * flight, and the tail pushes while a read is still answering. Every async step
+ * checks `loadId` before it writes, and `stop()` bumps it, so nothing lands after
+ * the tab is gone.
+ *
+ * **Filters are evaluated in main.** Changing one re-issues the read and
+ * restarts the tail with the new filter (`logs:tail-start` replaces the running
+ * one), and the lines already held are replaced by the fresh read. This store
+ * never filters a line itself.
+ *
+ * **The bound** is `LOG_MAX_RECORDS` lines or `LOG_MAX_BYTES`, whichever comes
+ * first. Following drops the oldest; paging older drops the newest, and having
+ * dropped them the list is `detached` from the tail, since a batch appended
+ * after a hole would be a lie about what happened between. Following again then
+ * means reading afresh, never appending.
+ */
+
+import { create } from "zustand";
+import type {
+	LogBatch,
+	LogCursor,
+	LogEntry,
+	LogFileRecord,
+	LogFilter,
+	LogReadResult,
+} from "@/types/electron";
+import { entryBytes, entryLine, isUnparsedEntry } from "./log-entry";
+import { parseSearchInput } from "./parse-search";
+
+/** The most lines the renderer holds. */
+export const LOG_MAX_RECORDS = 10_000;
+/** The most bytes of lines the renderer holds, by `entryBytes`' estimate. */
+export const LOG_MAX_BYTES = 16 * 1024 * 1024;
+/** Lines a read asks for; main clamps to 1000. */
+const LOG_PAGE_SIZE = 1000;
+
+export type LogLevelName = LogFileRecord["level"];
+
+/** What the controls say; `buildLogFilter` turns it into what main evaluates. */
+export interface LogControls {
+	/** The lowest level shown; `debug` is every level. */
+	minLevel: LogLevelName;
+	source: string | null;
+	category: string | null;
+	/** The search box, as typed: free text and `field:value` terms. */
+	search: string;
+}
+
+const DEFAULT_CONTROLS: LogControls = {
+	minLevel: "debug",
+	source: null,
+	category: null,
+	search: "",
+};
+
+/** The filter main evaluates for @p controls. Keys that constrain nothing are left out. */
+export function buildLogFilter(controls: LogControls): LogFilter {
+	const { text, terms } = parseSearchInput(controls.search);
+	const filter: LogFilter = {};
+	if (controls.minLevel !== "debug") filter.minLevel = controls.minLevel;
+	if (controls.source !== null) filter.sources = [controls.source];
+	if (controls.category !== null) filter.categories = [controls.category];
+	if (text !== "") filter.text = text;
+	if (terms.length > 0) filter.terms = terms;
+	return filter;
+}
+
+interface Held {
+	records: LogEntry[];
+	bytes: number;
+}
+
+function totalBytes(records: readonly LogEntry[]): number {
+	return records.reduce((sum, entry) => sum + entryBytes(entry), 0);
+}
+
+/**
+ * @p held cut to the bound from one end, keeping at least one line: a single
+ * line over the byte budget is still the one on screen, as a response over the
+ * response cache's.
+ */
+function trimToBound(held: Held, drop: "oldest" | "newest"): Held & { trimmed: boolean } {
+	let start = 0;
+	let end = held.records.length;
+	let bytes = held.bytes;
+	while (end - start > 1 && (end - start > LOG_MAX_RECORDS || bytes > LOG_MAX_BYTES)) {
+		bytes -= entryBytes(drop === "oldest" ? held.records[start++] : held.records[--end]);
+	}
+	const trimmed = start > 0 || end < held.records.length;
+	return { records: trimmed ? held.records.slice(start, end) : held.records, bytes, trimmed };
+}
+
+/** Lines the tail delivered while a read was in flight that the read did not already return. */
+function withoutRepeats(late: LogEntry[], read: LogEntry[]): LogEntry[] {
+	if (late.length === 0 || read.length === 0) return late;
+	const seen = new Set(read.map(entryLine));
+	return late.filter((entry) => !seen.has(entryLine(entry)));
+}
+
+/** @p known with the categories of @p records added; the same array when there is nothing new. */
+function withCategories(known: string[], records: readonly LogEntry[]): string[] {
+	const next = new Set(known);
+	for (const entry of records) {
+		if (!isUnparsedEntry(entry)) next.add(entry.cat);
+	}
+	return next.size === known.length ? known : [...next].sort();
+}
+
+interface LogsData {
+	controls: LogControls;
+	/** Oldest first. */
+	records: LogEntry[];
+	bytes: number;
+	follow: boolean;
+	/** Where the next page older starts; null until a read has answered. */
+	cursor: LogCursor | null;
+	/** Older lines remain that the last read did not search or did not return. */
+	more: boolean;
+	/** The `ts` of the oldest line the last read examined, matching or not. */
+	scannedTo: string | null;
+	/** Lines the tail left out of a batch, since this list was read. */
+	dropped: number;
+	/** The newest lines are not all held, so the tail is not appended. */
+	detached: boolean;
+	status: "idle" | "loading" | "ready" | "error";
+	loadingOlder: boolean;
+	error: string | null;
+	/** Every category any read has returned, for the component filter's options. */
+	knownCategories: string[];
+	/** Changes whenever the list is replaced, so a window over it starts again. */
+	generation: number;
+}
+
+interface LogsActions {
+	/** Mount: read the newest lines and follow the tail. */
+	start: () => Promise<void>;
+	/** Unmount: end the tail and let go of the lines. */
+	stop: () => void;
+	setControls: (patch: Partial<LogControls>) => void;
+	/** Turning it on while detached reads the newest lines afresh. */
+	setFollow: (follow: boolean) => void;
+	loadOlder: () => Promise<void>;
+	/** The newest lines at or before @p ts, an ISO instant. */
+	jumpTo: (ts: string) => Promise<void>;
+	/** Read afresh with the current controls: also the retry after an error. */
+	reload: () => Promise<void>;
+}
+
+export type LogsState = LogsData & LogsActions;
+
+/** What the store holds with nothing loaded: the state after `stop()`. */
+const NOTHING_LOADED = {
+	records: [],
+	bytes: 0,
+	follow: true,
+	cursor: null,
+	more: false,
+	scannedTo: null,
+	dropped: 0,
+	detached: false,
+	status: "idle",
+	loadingOlder: false,
+	error: null,
+} satisfies Partial<LogsData>;
+
+function bridge(): NonNullable<Window["electronAPI"]>["logs"] | undefined {
+	return typeof window === "undefined" ? undefined : window.electronAPI?.logs;
+}
+
+function describeFailure(error: unknown): string {
+	return `Couldn't read the logs - ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/**
+ * The in-flight state that is not display state, so it is not in the store.
+ * `loadId` is what each async step compares before it writes; `buffered` holds
+ * the tail's lines while a read is answering and is null otherwise.
+ */
+let active = false;
+let loadId = 0;
+let buffered: LogEntry[] | null = null;
+let unsubscribe: (() => void) | null = null;
+
+export const useLogsStore = create<LogsState>()((set, get) => {
+	/** Show @p result as the whole list, with the tail's @p late lines after it. */
+	function show(
+		result: LogReadResult,
+		late: LogEntry[],
+		attach: { follow: boolean; detached: boolean }
+	): void {
+		const all = late.length > 0 ? [...result.records, ...late] : result.records;
+		const { records, bytes } = trimToBound({ records: all, bytes: totalBytes(all) }, "oldest");
+		set((state) => ({
+			...NOTHING_LOADED,
+			...attach,
+			records,
+			bytes,
+			status: "ready",
+			cursor: result.cursor,
+			more: result.more,
+			scannedTo: result.scannedTo,
+			knownCategories: withCategories(state.knownCategories, records),
+			generation: state.generation + 1,
+		}));
+	}
+
+	function fail(error: unknown): void {
+		buffered = null;
+		set({ status: "error", error: describeFailure(error), loadingOlder: false });
+	}
+
+	/** The newest lines under the current filter, and a tail restarted on that filter. */
+	async function reloadFresh(): Promise<void> {
+		const logs = bridge();
+		if (!logs) return;
+		const id = ++loadId;
+		const filter = buildLogFilter(get().controls);
+		set({ status: "loading", error: null, loadingOlder: false });
+		try {
+			// The tail first, so a line written while the read answers waits in
+			// `buffered` instead of falling between the two.
+			await logs.tailStart(filter);
+			if (id !== loadId) return;
+			const waiting: LogEntry[] = [];
+			buffered = waiting;
+			const result = await logs.read({ filter, limit: LOG_PAGE_SIZE });
+			if (id !== loadId) return;
+			buffered = null;
+			show(result, withoutRepeats(waiting, result.records), {
+				follow: true,
+				detached: false,
+			});
+		} catch (error) {
+			if (id === loadId) fail(error);
+		}
+	}
+
+	async function jumpTo(ts: string): Promise<void> {
+		const logs = bridge();
+		if (!logs) return;
+		const id = ++loadId;
+		set({ status: "loading", error: null, loadingOlder: false });
+		try {
+			const filter = buildLogFilter(get().controls);
+			const result = await logs.read({ around: ts, filter, limit: LOG_PAGE_SIZE });
+			if (id !== loadId) return;
+			show(result, [], { follow: false, detached: true });
+		} catch (error) {
+			if (id === loadId) fail(error);
+		}
+	}
+
+	async function loadOlder(): Promise<void> {
+		const logs = bridge();
+		const { cursor, more, loadingOlder, status, controls } = get();
+		if (!logs || !cursor || !more || loadingOlder || status !== "ready") return;
+		const id = loadId;
+		set({ loadingOlder: true, follow: false, error: null });
+		try {
+			const result = await logs.read({
+				before: cursor,
+				filter: buildLogFilter(controls),
+				limit: LOG_PAGE_SIZE,
+			});
+			if (id !== loadId) return;
+			set((state) => {
+				const held = trimToBound(
+					{
+						records: [...result.records, ...state.records],
+						bytes: state.bytes + totalBytes(result.records),
+					},
+					"newest"
+				);
+				return {
+					records: held.records,
+					bytes: held.bytes,
+					detached: state.detached || held.trimmed,
+					cursor: result.cursor,
+					more: result.more,
+					scannedTo: result.scannedTo ?? state.scannedTo,
+					loadingOlder: false,
+					knownCategories: withCategories(state.knownCategories, result.records),
+				};
+			});
+		} catch (error) {
+			if (id === loadId) set({ loadingOlder: false, error: describeFailure(error) });
+		}
+	}
+
+	function receive(batch: LogBatch): void {
+		if (!active) return;
+		if (buffered) {
+			buffered.push(...batch.records);
+			return;
+		}
+		const state = get();
+		if (state.detached || state.status !== "ready") return;
+		const held = trimToBound(
+			{
+				records: [...state.records, ...batch.records],
+				bytes: state.bytes + totalBytes(batch.records),
+			},
+			"oldest"
+		);
+		set({
+			records: held.records,
+			bytes: held.bytes,
+			dropped: state.dropped + batch.dropped,
+			knownCategories: withCategories(state.knownCategories, batch.records),
+		});
+	}
+
+	return {
+		controls: DEFAULT_CONTROLS,
+		knownCategories: [],
+		generation: 0,
+		...NOTHING_LOADED,
+
+		start: async () => {
+			const logs = bridge();
+			if (!logs) return;
+			active = true;
+			unsubscribe?.();
+			unsubscribe = logs.onRecords(receive);
+			await reloadFresh();
+		},
+
+		stop: () => {
+			if (!active) return;
+			active = false;
+			loadId++;
+			buffered = null;
+			unsubscribe?.();
+			unsubscribe = null;
+			// A tail main cannot stop ends with the window or the app; nothing here
+			// is left to show the user once the tab is gone.
+			bridge()
+				?.tailStop()
+				.catch(() => undefined);
+			set(NOTHING_LOADED);
+		},
+
+		setControls: (patch) => {
+			const before = JSON.stringify(buildLogFilter(get().controls));
+			const controls = { ...get().controls, ...patch };
+			set({ controls });
+			if (active && JSON.stringify(buildLogFilter(controls)) !== before) void reloadFresh();
+		},
+
+		setFollow: (follow) => {
+			if (follow && get().detached) {
+				void reloadFresh();
+				return;
+			}
+			set({ follow });
+		},
+
+		loadOlder,
+		jumpTo,
+		reload: reloadFresh,
+	};
+});
