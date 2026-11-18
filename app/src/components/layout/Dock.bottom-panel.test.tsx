@@ -93,9 +93,10 @@ describe("the Dock's bottom panel button", () => {
 		expect(button()).toBeInTheDocument();
 	});
 
-	it("is named by the panel's one label and carries a visible name", () => {
+	it("is an icon named by the panel's one label", () => {
 		renderDockOn("settings");
-		expect(button()).toHaveTextContent(BOTTOM_PANEL_LABEL);
+		expect(button()).toHaveAccessibleName(BOTTOM_PANEL_LABEL);
+		expect(button()).toHaveTextContent("");
 	});
 
 	it("leads the right cluster, before the request tab's response-position button", () => {

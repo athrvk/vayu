@@ -5,29 +5,22 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { PanelBottomClose, PanelBottomOpen } from "lucide-react";
-import {
-	Button,
-	IconSwap,
-	Tooltip,
-	TooltipContent,
-	TooltipShortcutLabel,
-	TooltipTrigger,
-} from "@/components/ui";
+import { ScrollText } from "lucide-react";
+import { TooltipIconButton } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import { TOGGLE_BOTTOM_PANEL_CHORD } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
 
 /**
- * The Dock's button for the bottom panel (#3635): always present, at the start
- * of the right cluster, pressed while the panel is open.
+ * The Dock's button for the bottom panel (#3635): always present, first in the
+ * right cluster, pressed while the panel is open.
  *
- * Labelled in words, unlike the response-position button beside it, because it
- * names a place the user goes to rather than flipping an arrangement. The name
- * never changes with the state - `aria-pressed` carries that, as the rails'
- * buttons do - and the glyph follows the pane-toggle rule: the one that says
- * what a click does (`docs/design-system.md`, "Pane Toggles").
+ * An icon, named "Logs" by its label and tooltip like the response-position
+ * button beside it. The glyph is a log's lines, not a panel: the response
+ * position's own glyphs are panels (`PanelBottom`, `PanelRight`), and a second
+ * one a few pixels away reads as the same control. The name never changes with
+ * the state - `aria-pressed` carries that, as the rails' buttons do.
  *
  * The chord and the palette row are the other two routes to the same store
  * action, so a macOS Dock covering this strip costs a glance, never a click.
@@ -37,31 +30,13 @@ export function BottomPanelButton() {
 	const toggleBottomPanel = useLayoutStore((s) => s.toggleBottomPanel);
 
 	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<Button
-					variant="ghost"
-					size="sm"
-					aria-pressed={open}
-					onClick={toggleBottomPanel}
-					className="gap-1.5 px-2 text-muted-foreground hover:text-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground"
-				>
-					<IconSwap
-						state={open ? "open" : "closed"}
-						icons={{
-							closed: <PanelBottomOpen className="size-icon-sm" aria-hidden="true" />,
-							open: <PanelBottomClose className="size-icon-sm" aria-hidden="true" />,
-						}}
-					/>
-					{BOTTOM_PANEL_LABEL}
-				</Button>
-			</TooltipTrigger>
-			<TooltipContent side="top">
-				<TooltipShortcutLabel
-					label={TOGGLE_BOTTOM_PANEL_CHORD.label ?? BOTTOM_PANEL_LABEL}
-					shortcut={formatChord(TOGGLE_BOTTOM_PANEL_CHORD)}
-				/>
-			</TooltipContent>
-		</Tooltip>
+		<TooltipIconButton
+			label={BOTTOM_PANEL_LABEL}
+			tooltipHint={formatChord(TOGGLE_BOTTOM_PANEL_CHORD)}
+			icon={<ScrollText className="size-icon-sm" aria-hidden="true" />}
+			aria-pressed={open}
+			onClick={toggleBottomPanel}
+			className="text-muted-foreground hover:text-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+		/>
 	);
 }

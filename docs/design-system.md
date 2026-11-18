@@ -3642,15 +3642,16 @@ sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
   grow a close button of its own. A control that changes address with the state
   it controls teaches a position and then abandons it, and the two copies drift
   into saying the same thing differently.
-- **The bottom panel's button is a toggle on the same rule, with its own name.**
-  The Dock's button for the bottom panel (`BottomPanelButton.tsx`, #3635) draws
-  `PanelBottomOpen` while the panel is closed and `PanelBottomClose` while it is
-  open - the glyph says what a click does - and carries the panel's visible name
-  (`BOTTOM_PANEL_LABEL`, "Logs" today), which never changes with the state. Its
-  state is `aria-pressed` bound to `bottomPanelOpen`, as the rails' buttons do,
-  rather than `aria-expanded`: it is labelled by the place it goes to, so a
-  pressed button reads as "Logs, on". It stays put when the panel opens, and the
-  panel grows no close button of its own.
+- **The bottom panel's button is an icon with its own name.** The Dock's
+  button for the bottom panel (`BottomPanelButton.tsx`, #3635) is a
+  `TooltipIconButton` drawing `ScrollText`, a log's lines, in every state: a
+  panel glyph would sit a few pixels from the response-position button's
+  `PanelBottom` and read as the same control. It is named by the panel's label
+  (`BOTTOM_PANEL_LABEL`, "Logs" today) as its `aria-label` and tooltip, and the
+  tooltip carries the chord. The name never changes with the state; the state
+  is `aria-pressed` bound to `bottomPanelOpen`, as the rails' buttons do, rather
+  than `aria-expanded`, so a pressed button reads as "Logs, on". It stays put
+  when the panel opens, and the panel grows no close button of its own.
 - **A switch between two arrangements names the destination too.** The Dock's
   response-position button draws `PanelBottom` while the response is *beside*
   the request and `PanelRight` while it is *below*: the glyph is where a click
