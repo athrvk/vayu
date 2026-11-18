@@ -116,6 +116,13 @@ export interface MetricsViewProps {
 		startConcurrency?: number;
 		targetConcurrency?: number;
 	};
+	/**
+	 * The run is aimed at a collection, as the run's own row says (#3570). The
+	 * sequence block arrives with the first gate frame, about a second in; until
+	 * then this is what keeps the cards from reading a collection run as a single
+	 * request. Absent reads as a single-request run.
+	 */
+	isCollectionRun?: boolean;
 }
 
 /** Where a Stop ended a run against its plan; the card states it beside a pace-judged figure (#2805). */
@@ -201,6 +208,15 @@ export interface DashboardDerived {
 	 * (#2823); absent for a single-request run, which pools nothing.
 	 */
 	pooledLatency?: PooledLatency;
+	/**
+	 * Mean wall clock of one iteration, ms (#3570): the completed passes' mean on
+	 * a sequence (timer waits included), the mean request latency on a
+	 * single-request run, where an iteration is one request. Absent, never 0,
+	 * where a sequence has no pass time yet (a collection run before its first
+	 * gate frame included) or its engine reports none - not `meanLatency`, which
+	 * is one request's latency on a sequence.
+	 */
+	meanIterationTime?: number;
 	// Timing
 	testDuration?: number;
 	/** The configured duration, seconds; live only, so the Duration card has something to say before the run ends. */

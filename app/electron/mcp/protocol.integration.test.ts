@@ -37,6 +37,7 @@ import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, isListed, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
+import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_MODEL } from "./variable-origins.js";
 import { EngineRequestError, type EngineClient } from "./engine-client.js";
 import type { Logger } from "../log.js";
 import { freePort } from "./free-port.testkit.js";
@@ -277,6 +278,21 @@ describe("MCP protocol handshake (in-memory)", () => {
 			RUN_REPORT_RESOURCE.uriTemplate,
 		]) {
 			expect(instructions).toContain(uri);
+		}
+		await server.close();
+	});
+
+	/*
+	 * #3559: a client that reads no resources never sees
+	 * `vayu://variables/resolution`, and no tool serves it, so the rules a tool's
+	 * pointer leads to are stated where every client reads.
+	 */
+	it("states the variable resolution order and rules in the instructions", async () => {
+		const { client, server } = await connectClient();
+		const instructions = client.getInstructions() ?? "";
+		expect(VARIABLE_RESOLUTION_MODEL.rules.length).toBeGreaterThan(0);
+		for (const rule of [VARIABLE_PRECEDENCE_SENTENCE, ...VARIABLE_RESOLUTION_MODEL.rules]) {
+			expect(instructions).toContain(rule);
 		}
 		await server.close();
 	});

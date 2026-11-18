@@ -68,6 +68,7 @@
 #include <thread>
 
 #include "task_queue.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::tests {
 
@@ -625,6 +626,15 @@ class CrlServer {
  * answers `302` to that URL, which is how a test leaves TLS for a cleartext
  * target (#2949). Given a handshake delay it holds every connection that long
  * before answering the hello, which is a connect that is slow and succeeds.
+ *
+ * Its read, write and keep-alive timeouts are `WAIT_DEADLINE`, not httplib's
+ * 5s default. `SSLServer` bounds the whole server-side accept, client
+ * certificate verification included, by the read timeout and closes the socket
+ * without a word when it expires, which a client sees as a failed handshake.
+ * A healthy handshake takes milliseconds; the sanitizer legs on a loaded
+ * Windows runner (#3588) are the slowest this has to survive. The budget is a
+ * hang detector like every deadline here: an idle keep-alive wait ends as soon
+ * as the listener stops, so it never lengthens a teardown.
  */
 class TlsServer {
     public:
@@ -712,6 +722,9 @@ class TlsServer {
         svr_.Get ("/bounce", [] (const httplib::Request& req, httplib::Response& res) {
             res.set_redirect (req.get_param_value ("to"), 302);
         });
+        svr_.set_read_timeout (WAIT_DEADLINE);
+        svr_.set_write_timeout (WAIT_DEADLINE);
+        svr_.set_keep_alive_timeout (WAIT_DEADLINE);
         if (handshake_delay > std::chrono::milliseconds::zero ()) {
             svr_.new_task_queue = delayed_task_queue (4, handshake_delay);
         }

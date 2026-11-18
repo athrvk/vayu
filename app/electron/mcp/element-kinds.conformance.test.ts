@@ -9,7 +9,8 @@
  * @file element-kinds.conformance.test.ts
  * @brief Keeps the MCP element surface honest against the engine's registry
  *        (issue #1517). The `vayu://elements/kinds` resource must serve
- *        exactly what the engine's `GET /elements/kinds` returns - the same
+ *        exactly what the engine's `GET /elements/kinds` returns, and the
+ *        `list_element_kinds` tool (#3559) list exactly its kinds - the same
  *        anti-drift shape `variable-origins.conformance.test.ts` follows for
  *        variable resolution - and any kind literal a tool schema names as an
  *        example (the `elements` field's `kind` description, or the
@@ -24,6 +25,7 @@ import { describe, expect, test, vi } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { STATIC_RESOURCES, type ElementKindEntry } from "./resources.js";
 import {
+	dispatchTool,
 	elementSchema,
 	resolveDescription,
 	TOOLS,
@@ -57,6 +59,33 @@ describe("the vayu://elements/kinds resource agrees with the engine's fixture", 
 	test("the fixture is non-empty and covers more than one category", () => {
 		expect(fixture.length).toBeGreaterThan(0);
 		expect(CATEGORY_PREFIXES.length).toBeGreaterThan(1);
+	});
+});
+
+describe("the list_element_kinds tool agrees with the engine's fixture", () => {
+	function contextServing(payload: unknown): ToolContext {
+		const getElementKinds = vi.fn().mockResolvedValue(payload);
+		return {
+			client: { getElementKinds } as unknown as EngineClient,
+			config: resolveSafetyConfig(),
+			host: "app",
+		} as ToolContext;
+	}
+
+	test("lists exactly the fixture's kinds, in its order", async () => {
+		const res = await dispatchTool("list_element_kinds", {}, contextServing(fixture));
+		const rows = (res.structuredContent as { kinds: ElementKindEntry[] }).kinds;
+
+		expect(res.isError).toBeFalsy();
+		expect(rows.map((row) => row.kind)).toEqual(fixture.map((k) => k.kind));
+	});
+
+	test("answers each kind's own configSchema", async () => {
+		const ctx = contextServing(fixture);
+		for (const entry of fixture) {
+			const res = await dispatchTool("list_element_kinds", { kind: entry.kind }, ctx);
+			expect(res.structuredContent, entry.kind).toEqual(entry);
+		}
 	});
 });
 
@@ -102,10 +131,11 @@ describe("every element kind a tool schema names is a real registry kind", () =>
 	});
 
 	// #2774: the engine refuses a key the kind does not declare, so the field an
-	// agent fills blind has to say where the valid keys are listed.
-	test("the `config` field points at the resource that lists a kind's settings", () => {
+	// agent fills blind has to say where the valid keys are listed - by tool
+	// first, for a client that cannot read resources (#3559).
+	test("the `config` field points at the tool and the resource that list a kind's settings", () => {
 		expect(elementSchema.shape.config.description).toContain(
-			"List the valid settings with the `vayu://elements/kinds` resource or a single kind's entry"
+			"Read the kind's settings with list_element_kinds and its `kind` (or the `vayu://elements/kinds` resource)"
 		);
 	});
 

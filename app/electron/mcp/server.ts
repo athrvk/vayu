@@ -43,6 +43,11 @@ import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
 import { MaskingIncompleteError } from "./withhold.js";
+import {
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_MODEL,
+	VARIABLE_RESOLUTION_URI,
+} from "./variable-origins.js";
 
 /** Provides the per-request tool context (client + current safety config). */
 export type ToolContextProvider = () => ToolContext;
@@ -144,9 +149,14 @@ const INSTRUCTIONS_TAIL =
 	`and ${RESOURCE_URIS[RESOURCE_URIS.length - 1]}) to attach as ` +
 	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +
 	"suggest_load_profile) provide ready-made starting points. Before writing a " +
-	"preRequestScript or postRequestScript, read vayu://scripting/completions - it is " +
-	"the engine's own list of every pm.* name the script sandbox provides, including " +
-	"synchronous pm.crypto hashing and btoa/atob for signing a request. A GraphQL " +
+	"preRequestScript or postRequestScript, read the engine's own list of every pm.* " +
+	"name the script sandbox provides, including synchronous pm.crypto hashing and " +
+	"btoa/atob for signing a request: a read tool answers it, as " +
+	"vayu://scripting/completions does, and another lists each element kind and its " +
+	"config schema, as vayu://elements/kinds does. " +
+	`How {{variables}} resolve, for a client that cannot read ${VARIABLE_RESOLUTION_URI}: ` +
+	`${VARIABLE_PRECEDENCE_SENTENCE} ${VARIABLE_RESOLUTION_MODEL.rules.join(" ")} ` +
+	"A GraphQL " +
 	"request's schema can be read through Vayu, introspected with the request's own " +
 	"auth and answered as SDL, before a query is written.";
 

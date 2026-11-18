@@ -169,7 +169,7 @@ export const validationScriptInput = z
 	.string()
 	.optional()
 	.describe(
-		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one. Read the `vayu://scripting/completions` resource for the sandbox's full surface (pm.expect chains, pm.response.to.*, the variable scopes) rather than assuming what exists. Refused while Reveal secrets to agents is off."
+		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one. Read get_script_api (or the `vayu://scripting/completions` resource) for the sandbox's full surface (pm.expect chains, pm.response.to.*, the variable scopes) rather than assuming what exists. Refused while Reveal secrets to agents is off."
 	);
 
 export const validationScriptAliasInput = z
@@ -465,10 +465,11 @@ export const streamBudgetMsInput = z
  * extractors, assertions, timers, controllers and scripts, each a `kind` plus
  * its own `config`. `kind` is a bare string rather than a Zod enum - the
  * engine's registry is the authority on what kinds exist (`GET
- * /elements/kinds`, served here as the `vayu://elements/kinds` resource), and
- * enumerating them here would need a tool change every time the engine adds
- * one. `element-kinds.conformance.test.ts` is what keeps this schema and the
- * resource from silently drifting apart. Strict at this level, the members a
+ * /elements/kinds`, served here by `list_element_kinds` and the
+ * `vayu://elements/kinds` resource), and enumerating them here would need a
+ * tool change every time the engine adds one.
+ * `element-kinds.conformance.test.ts` is what keeps this schema, the tool and
+ * the resource from silently drifting apart. Strict at this level, the members a
  * stored element carries (`ElementDef`); `config` stays an open record, judged
  * engine-side against the kind's own schema.
  */
@@ -477,14 +478,14 @@ export const elementSchema = z.strictObject({
 	kind: z
 		.string()
 		.describe(
-			'Element kind, e.g. "script.pre", "extract.json", "assert.status" - read the `vayu://elements/kinds` resource for the current catalogue and each kind\'s config shape before writing one blind.'
+			'Element kind, e.g. "script.pre", "extract.json", "assert.status" - list the current kinds with list_element_kinds (or the `vayu://elements/kinds` resource) before writing one blind.'
 		),
 	enabled: z.boolean().optional().describe("Defaults to true."),
 	name: z.string().optional().describe("Optional display name."),
 	config: z
 		.record(z.string(), z.unknown())
 		.describe(
-			"Kind-specific configuration, validated engine-side against that kind's schema - a key the kind does not declare is refused. List the valid settings with the `vayu://elements/kinds` resource or a single kind's entry."
+			"Kind-specific configuration, validated engine-side against that kind's schema - a key the kind does not declare is refused. Read the kind's settings with list_element_kinds and its `kind` (or the `vayu://elements/kinds` resource)."
 		),
 });
 
@@ -535,7 +536,7 @@ export function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 		.string()
 		.optional()
 		.describe(
-			`${what} Stored as a \`script.${which}\` element. Read the \`vayu://scripting/completions\` resource for the sandbox's surface rather than assuming what exists.` +
+			`${what} Stored as a \`script.${which}\` element. Read get_script_api (or the \`vayu://scripting/completions\` resource) for the sandbox's surface rather than assuming what exists.` +
 				(clearable
 					? " Leave it out to keep the stored script; pass an empty string to clear it."
 					: "")
@@ -563,7 +564,7 @@ export function collectionScriptInput(which: "pre" | "post") {
 		.string()
 		.optional()
 		.describe(
-			`JavaScript run ${when} - the app's collection-level scripts, stored as a \`script.${which}\` element. It runs for every request in the collection and in its sub-collections, so scope it accordingly. Read the \`vayu://scripting/completions\` resource for the sandbox's surface. Leave it out to keep the stored script; pass an empty string to clear it.`
+			`JavaScript run ${when} - the app's collection-level scripts, stored as a \`script.${which}\` element. It runs for every request in the collection and in its sub-collections, so scope it accordingly. Read get_script_api (or the \`vayu://scripting/completions\` resource) for the sandbox's surface. Leave it out to keep the stored script; pass an empty string to clear it.`
 		);
 }
 

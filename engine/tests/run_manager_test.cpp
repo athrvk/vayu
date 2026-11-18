@@ -1909,6 +1909,10 @@ TEST (LoadClock, GateFramesCarryTheScenarioSequenceTheSummaryEndsOn) {
         EXPECT_EQ (live.at ("iterationsAbandoned"), summary.at ("iterations_abandoned"));
         EXPECT_EQ (live.at ("stepsExecuted"), summary.at ("steps_executed"));
         EXPECT_GT (live.at ("stepsExecuted").get<size_t> (), 0u) << live.dump ();
+        // #3570: the mean pass, from the same sum and count the summary reads.
+        ASSERT_TRUE (live.contains ("meanIterationMs")) << live.dump ();
+        EXPECT_DOUBLE_EQ (live.at ("meanIterationMs").get<double> (),
+        summary.at ("pass_duration").at ("mean").get<double> ());
 
         const auto& live_steps   = live.at ("steps");
         const auto& stored_steps = summary.at ("steps");

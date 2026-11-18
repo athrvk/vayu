@@ -101,6 +101,7 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { resolveLoadTestLimits } from "@/constants/load-test";
+import { COLLECTION_ITERATIONS_LABEL } from "@/constants/load-test-modes";
 import { Callout, NumberField, StopRunButton } from "@/components/shared";
 import {
 	useCollectionsQuery,
@@ -193,14 +194,9 @@ export interface RunCollectionDialogProps {
 /** Matches the engine's `iterations` bound: a whole number, 1 or more. */
 const MIN_ITERATIONS = 1;
 
-/**
- * In the Fixed request count mode the count is passes through the sequence
- * here, not requests, and `LOAD_TEST_MODES` is not reworded for it:
- * `loadTestModeLabel` names stored runs on every other screen.
- */
 const SEQUENCE_PROFILE_COPY: ProfilePickerCopy = {
 	iterations: {
-		label: "Fixed passes",
+		label: COLLECTION_ITERATIONS_LABEL,
 		description: "Walk the sequence an exact number of times in total, then stop.",
 	},
 };

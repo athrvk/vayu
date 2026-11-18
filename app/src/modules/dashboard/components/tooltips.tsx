@@ -97,7 +97,7 @@ export const TOOLTIPS = {
 	remainingEta:
 		"Estimated time to complete the remaining requests, computed as (requestsExpected - requestsSent) / currentRps. Updates each tick - a noisy ETA early in the run usually stabilises within 5–10s.",
 	meanIterTime:
-		"Average wall-clock time per iteration. Closely tracks p50 latency in closed-loop tests; divergence indicates queueing or other generator overhead.",
+		"Average wall-clock time per iteration. For a collection run it is the whole pass over the sequence, timer waits included, so it is the sum of its steps and not one request's latency; shown as - until a pass completes. For a single request it is one request's latency and closely tracks p50 in closed-loop tests; divergence indicates queueing or other generator overhead.",
 	breakpoint:
 		'The number of virtual users at which p99 latency first crossed the run\'s p99 budget (SLO), or when the run set none, the threshold in Settings (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under that line for the whole run, so the ceiling is above the load tested.',
 	p99AtPeak:

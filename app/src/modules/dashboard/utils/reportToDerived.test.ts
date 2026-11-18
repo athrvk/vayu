@@ -641,3 +641,25 @@ describe("reportToDerived pooled latency (#2823)", () => {
 		expect(reportToDerived(baseReport()).pooledLatency).toBeUndefined();
 	});
 });
+
+// Mutation checked: read `lat?.avg` for a scenario report and the first two cases fail;
+// read `passDuration` for a single-request report and the last one fails.
+describe("reportToDerived mean iteration time (#3570)", () => {
+	const passDuration = { count: 400, mean: 83.4, min: 61, p50: 80, p95: 110, p99: 130, max: 150 };
+	const scenario = (extra: object = {}) => ({ ...extra }) as RunReport["scenario"];
+
+	it("is the passes' mean on a sequence, not the request latency beside it", () => {
+		const d = reportToDerived(baseReport({ scenario: scenario({ passDuration }) }));
+		expect(d.meanIterationTime).toBe(83.4);
+		expect(d.meanLatency).toBe(101);
+	});
+
+	it("is absent on a sequence from an engine that reports no pass time", () => {
+		const d = reportToDerived(baseReport({ scenario: scenario() }));
+		expect(d.meanIterationTime).toBeUndefined();
+	});
+
+	it("is the request latency on a single-request report", () => {
+		expect(reportToDerived(baseReport()).meanIterationTime).toBe(101);
+	});
+});

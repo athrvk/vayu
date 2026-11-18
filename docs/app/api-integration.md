@@ -1153,8 +1153,12 @@ history row reads it because a run whose work is a sequence has no `url` or
 A scenario load run's **report** carries the per-step breakdown the design-mode
 runner has no need for: `scenario.steps[]`
 (`{index, name, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`)
-plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
-rows, so that array is the only per-step record such a run keeps.
+plus `virtualUsers`, `iterationsAbandoned` and, once a pass completed,
+`passDuration` (`{count, mean, min, p50, p95, p99, max}` in ms, #3570: each
+completed pass from the claim of its first step to the completion of its last,
+timer waits between steps included, abandoned passes left out). It stores no
+per-step `results` rows, so that array is the only per-step record such a run
+keeps.
 
 It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run
 made at least one exact assertion: every `assert.*` outcome, required `extract.*`
@@ -1458,10 +1462,11 @@ collection run's per-step progress.
   turns them into the report's `timingBreakdown` shape for the waterfall and the percentile table,
   and shows the latency distribution's `count` as "N completions so far". A scenario load run's
   gate frame also carries `scenario` (`{iterations, iterationsCompleted, iterationsAbandoned,
-  stepsExecuted, steps: [{index, name, executed, errors}]}`, issue #2823), mapped as sent onto
-  `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a scenario load", never a zeroed
-  block. The live sequence panel reads it from the latest frame carrying it
-  (`utils/liveScenario.ts`).
+  stepsExecuted, meanIterationMs?, steps: [{index, name, executed, errors}]}`, issue #2823;
+  `meanIterationMs`, #3570, is the mean completed pass so far and absent before the first
+  one), mapped as sent onto `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a
+  scenario load", never a zeroed block. The live sequence panel reads it from the latest frame
+  carrying it (`utils/liveScenario.ts`).
 - **Capacity state**: a capacity run's frames carry `capacity: {level, levelElapsedMs,
   levelsJudged, stopReason?}` from tick 0 (issue #2928), and `mapSseMetrics()` passes it through
   as `LoadTestMetrics.capacity` unchanged. Absent is "not a capacity run" (or an engine from

@@ -330,6 +330,20 @@
             "stepsDropped": {"type": "number"},
             "virtualUsers": {"type": "number"},
             "iterationsAbandoned": {"type": "number"},
+            "passDuration": {
+              "description": "A scenario load run's completed passes, in milliseconds: from the claim of a pass's first step to the completion of its last, timer waits between steps included. An abandoned pass is not counted. Absent when no pass completed.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "count": {"type": "number"},
+                "mean": {"type": "number"},
+                "min": {"type": "number"},
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"}
+              }
+            },
             "assertions": {
               "description": "A scenario load run's exact assertion population: assert.* outcomes, required extract.* misses and inline pm.test calls, counted on every completion; never the deferred sampled replay. Absent when the run made none.",
               "$ref": "#/definitions/assertionPopulation"

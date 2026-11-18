@@ -91,7 +91,11 @@ function DashboardHeader({
 		);
 	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
-	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
+	// A collection run is the one the header names by its collection, not a URL.
+	if (configuration?.mode)
+		configParts.push(
+			loadTestModeLabel(configuration.mode, collectionName ? "collection" : undefined)
+		);
 	// The rows are never stored, so the count (and, since #2051, the file's
 	// name) is the only trace on the dashboard that a file drove the run
 	// (#1940). Nothing for a run without one.

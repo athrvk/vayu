@@ -198,7 +198,9 @@ constexpr auto WARNING_KEYS = std::to_array<std::string_view> (
 constexpr auto SCENARIO_KEYS = std::to_array<std::string_view> ({ "iterations",
 "iterationsCompleted", "stepsExecuted", "passed", "failed", "skipped", "errored",
 "stepsStored", "stepsDropped", "virtualUsers", "iterationsAbandoned" });
-constexpr auto STEP_KEYS     = std::to_array<std::string_view> (
+constexpr auto PASS_DURATION_KEYS = std::to_array<std::string_view> (
+{ "count", "mean", "min", "p50", "p95", "p99", "max" });
+constexpr auto STEP_KEYS = std::to_array<std::string_view> (
 { "index", "name", "requestId", "method", "executed", "errors", "httpErrors",
 "noResponse", "unresolvedTokens", "extractorMisses", "preRequestScript" });
 constexpr auto STEP_LATENCY_KEYS =
@@ -336,6 +338,10 @@ ordered scenario_section (const json& scenario) {
     ordered out = pick (scenario, SCENARIO_KEYS);
     if (const json& assertions = member (scenario, "assertions"); assertions.is_object ()) {
         out["assertions"] = pick (assertions, ASSERTION_POPULATION_KEYS);
+    }
+    if (const json& pass_duration = member (scenario, "passDuration");
+    pass_duration.is_object ()) {
+        out["passDuration"] = pick (pass_duration, PASS_DURATION_KEYS);
     }
     if (const json& steps = member (scenario, "steps"); steps.is_array ()) {
         ordered picked = ordered::array ();

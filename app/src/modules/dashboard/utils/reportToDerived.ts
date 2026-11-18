@@ -146,6 +146,9 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		backpressure: 0,
 		p99Latency: lat?.p99,
 		meanLatency: lat?.avg,
+		// On a sequence the pass's wall clock; an engine without it says nothing,
+		// and `lat.avg` (one request) is not a stand-in (#3570).
+		meanIterationTime: report.scenario ? report.scenario.passDuration?.mean : lat?.avg,
 		medianLatency: lat?.median ?? lat?.p50,
 		p95Latency: lat?.p95,
 		pooledLatency: pooledLatencyOf(report),

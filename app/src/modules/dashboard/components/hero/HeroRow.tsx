@@ -93,7 +93,10 @@ function renderModeCards(d: DashboardDerived) {
 						requestsExpected={d.requestsExpected}
 						currentRps={d.currentRps}
 					/>
-					<ThroughputCard throughput={d.throughput} meanLatency={d.meanLatency} />
+					<ThroughputCard
+						throughput={d.throughput}
+						meanIterationTime={d.meanIterationTime}
+					/>
 				</>
 			);
 		// Capacity discovery climbs toward the ceiling the user set, so the
