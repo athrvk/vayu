@@ -16,7 +16,9 @@
  * for the report are not transitions either; the run is still going, or its
  * ending is about to be said. The engine's process ending under a load test
  * is one (#3605): the run ended, and nothing says how until a restarted engine
- * serves its report, so that is said then, as the run's ending.
+ * serves its report, so that is said then, as the run's ending. So is a
+ * collection run's (#3621): the stop is said once, a later ending still
+ * speaks, and a stop is never said over an ending already heard.
  *
  * The verdict is the banner's (`reportOutcome`), so the spoken line and the one
  * on screen cannot disagree.
@@ -38,6 +40,7 @@ export interface DashboardSnapshot {
 export interface ScenarioSnapshot {
 	runId: string | null;
 	isStreaming: boolean;
+	endedByEngineStop: boolean;
 	endedAs: TerminalRunStatus | null;
 }
 
@@ -99,6 +102,8 @@ export interface ScenarioEnding {
  * ended; the service writes the ending and the budgets in one `runEnded`, so a
  * missed budget is in the one sentence rather than a second (#3539). A run
  * that started and ended between two renders is announced by its ending alone.
+ * An engine stop carries no ending (`endedAs` stays null), so it is said once
+ * as its own sentence (#3621), unless the run's ending was heard already.
  */
 export function scenarioAnnouncement(
 	prev: ScenarioSnapshot,
@@ -111,6 +116,9 @@ export function scenarioAnnouncement(
 	if (next.endedAs && ended && (!sameRun || next.endedAs !== prev.endedAs)) {
 		return `${name} ${next.endedAs}. ${stepOutcomeLine(ended.counts, ended.thresholdValidation)}`;
 	}
+	// A run that had already ended keeps its ending; the flag is no news then.
+	const engineStopNews = next.endedByEngineStop && (!sameRun || !prev.endedByEngineStop);
+	if (engineStopNews && !next.endedAs) return `${name} ended. Vayu's engine stopped`;
 	if (!sameRun && next.isStreaming) return `${name} started`;
 	return null;
 }

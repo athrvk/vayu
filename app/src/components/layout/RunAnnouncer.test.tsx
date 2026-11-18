@@ -20,7 +20,12 @@
  * the same run and the Retry case does; drop the verdict from `loadTestEnded`
  * and the four ending cases do; drop `spokenSymbols` and the less-than case
  * does; fall `engineStopped` through to `running` in `dashboardStage` and the
- * engine-stop case does (it says nothing). Removing `<RunAnnouncer />` from `Shell` reddens
+ * engine-stop case does (it says nothing); drop the engine-stop branch from
+ * `scenarioAnnouncement` and the collection engine-stop cases do; drop
+ * `endedByEngineStop` from the `moved` check in `RunAnnouncer` and the case
+ * where only the flag changes does; drop the `!next.endedAs` guard and the
+ * already-ended case does; drop the `prev.endedByEngineStop` test and the
+ * another-field-moves case does. Removing `<RunAnnouncer />` from `Shell` reddens
  * `shell-tab-identity.test.tsx`.
  */
 
@@ -278,5 +283,96 @@ describe("RunAnnouncer", () => {
 		act(() => scenario().streamLost("coll_1", "dropped"));
 		act(() => scenario().setStreaming("coll_1", false));
 		expect(region()).toHaveTextContent("Collection run started");
+	});
+
+	describe("a collection run the engine's process ended under (#3621)", () => {
+		it("says it once, not again on a rerender, and not as a start", () => {
+			const { rerender } = render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			const started = region().firstElementChild;
+
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			expect(region().textContent).toBe("Collection run ended. Vayu's engine stopped");
+			expect(region().firstElementChild).not.toBe(started);
+			const ended = region().firstElementChild;
+
+			rerender(<RunAnnouncer />);
+			act(() => scenario().addSteps("coll_1", [step(0, "passed")]));
+			expect(region().firstElementChild).toBe(ended);
+		});
+
+		it("does not say the stop again when another field of the stopped run moves", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			const stopped = region().firstElementChild;
+
+			act(() => scenario().setStreaming("coll_1", true));
+			expect(region().firstElementChild).toBe(stopped);
+		});
+
+		it("speaks only the stop for a run that started and stopped between two renders", () => {
+			render(<RunAnnouncer />);
+			act(() => {
+				scenario().startRun("coll_1");
+				scenario().engineStopped("coll_1", "Vayu's engine stopped");
+			});
+			expect(region().textContent).toBe("Collection run ended. Vayu's engine stopped");
+		});
+
+		it("does not announce an engine stop for a run whose ending was already heard", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			act(() => scenario().runEnded("coll_1", "completed"));
+			expect(region()).toHaveTextContent("Collection run completed");
+			const completed = region().firstElementChild;
+
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			expect(region().firstElementChild).toBe(completed);
+			expect(region()).toHaveTextContent("Collection run completed");
+		});
+
+		it("still says the run's ending when one arrives after the stop", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			const stopped = region().firstElementChild;
+
+			act(() => scenario().addSteps("coll_1", [step(0, "passed")]));
+			act(() => scenario().runEnded("coll_1", "failed"));
+			expect(region().textContent).toBe("Collection run failed. 1 passed, 0 failed");
+			expect(region().firstElementChild).not.toBe(stopped);
+		});
+
+		it("says a next run started again", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			const stopped = region().firstElementChild;
+
+			act(() => scenario().startRun("coll_2"));
+			expect(region().textContent).toBe("Collection run started");
+			expect(region().firstElementChild).not.toBe(stopped);
+		});
+
+		it("says the stop when only the flag changed, with streaming already lowered", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			// A dropped stream first: `isStreaming` is already false when the stop lands.
+			act(() => scenario().streamLost("coll_1", "dropped"));
+			expect(region()).toHaveTextContent("Collection run started");
+
+			act(() => scenario().engineStopped("coll_1", "Vayu's engine stopped"));
+			expect(region().textContent).toBe("Collection run ended. Vayu's engine stopped");
+		});
+
+		it("leaves a healthy run's sentences alone", () => {
+			render(<RunAnnouncer />);
+			act(() => scenario().startRun("coll_1"));
+			expect(region().textContent).toBe("Collection run started");
+			act(() => scenario().addSteps("coll_1", [step(0, "passed")]));
+			act(() => scenario().runEnded("coll_1", "completed"));
+			expect(region().textContent).toBe("Collection run completed. 1 passed, 0 failed");
+		});
 	});
 });
