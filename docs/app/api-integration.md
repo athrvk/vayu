@@ -1454,10 +1454,11 @@ collection run's per-step progress.
   turns them into the report's `timingBreakdown` shape for the waterfall and the percentile table,
   and shows the latency distribution's `count` as "N completions so far". A scenario load run's
   gate frame also carries `scenario` (`{iterations, iterationsCompleted, iterationsAbandoned,
-  stepsExecuted, steps: [{index, name, executed, errors}]}`, issue #2823), mapped as sent onto
-  `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a scenario load", never a zeroed
-  block. The live sequence panel reads it from the latest frame carrying it
-  (`utils/liveScenario.ts`).
+  stepsExecuted, meanIterationMs?, steps: [{index, name, executed, errors}]}`, issue #2823;
+  `meanIterationMs`, #3570, is the mean completed pass so far and absent before the first
+  one), mapped as sent onto `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a
+  scenario load", never a zeroed block. The live sequence panel reads it from the latest frame
+  carrying it (`utils/liveScenario.ts`).
 - **Capacity state**: a capacity run's frames carry `capacity: {level, levelElapsedMs,
   levelsJudged, stopReason?}` from tick 0 (issue #2928), and `mapSseMetrics()` passes it through
   as `LoadTestMetrics.capacity` unchanged. Absent is "not a capacity run" (or an engine from

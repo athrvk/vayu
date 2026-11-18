@@ -92,6 +92,7 @@
 #include <vector>
 
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/core/pass_duration.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -201,6 +202,11 @@ struct VirtualUser {
     /// or anywhere else - never claims a second iteration for the one it is
     /// still inside of.
     bool iteration_boundary = true;
+    /// Steady-clock microseconds at which this VU claimed its current
+    /// iteration's first step: where its pass duration starts (#3570).
+    /// Stamped only where `iteration_boundary` is consumed, so a
+    /// `control.loop` jump back to step 0 does not restart the pass.
+    int64_t iteration_started_us = 0;
     /// 0-based, and only ever advanced by this VU.
     size_t iteration = 0;
     /**
@@ -562,6 +568,12 @@ struct ScenarioLoadState {
     /// allocated up front from the same plan scan `element_spans` is, so
     /// recording into it takes no lock.
     TransactionHistograms transactions;
+    /// Every completed pass's wall clock (#3570), from the claim of its
+    /// first step to the completion of its last, timer waits between steps
+    /// included; the last step's own `step.between` wait and the next pass's
+    /// pacing fall outside it. An abandoned pass is not recorded: it is
+    /// `iterations_abandoned`, and a pass cut short is not a pass time.
+    PassDurationRecorder pass_durations;
     /// Steps a `control.if` / `control.once` / `control.throughput` element
     /// skipped before they reached the wire (issue #1515), less those whose
     /// inline `script.pre` threw or whose jump the run could not honour,
@@ -696,7 +708,8 @@ struct ScenarioLoadState {
  * the report route reads one shape for both run kinds, under one definition
  * (#2824): `passed + failed + skipped + errored == steps_executed`, and
  * `steps_executed` is every step reached, skipped ones included.
- * `virtual_users`, `abandoned` and `steps` are this mode's own.
+ * `virtual_users`, `abandoned`, `steps` and `pass_duration` are this mode's
+ * own; `pass_duration` is absent while no pass has completed.
  */
 [[nodiscard]] nlohmann::json
 build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan& plan);
@@ -704,11 +717,13 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
 /**
  * @brief The `scenario` object a live gate frame carries for a scenario load
  *        run (#2823): `{iterations, iterationsCompleted, iterationsAbandoned,
- *        stepsExecuted, steps: [{index, name, executed, errors}]}`.
+ *        stepsExecuted, meanIterationMs?, steps: [{index, name, executed,
+ *        errors}]}`, `meanIterationMs` from the first completed pass on.
  *
  * Built while the workers still write, so it reads only relaxed atomics and the
- * immutable `step_labels`, never a step's histogram (`percentiles`,
- * `latency_samples`), whose plain hdr reads would race the workers. The counts
+ * immutable `step_labels`, never a histogram (a step's `percentiles` and
+ * `latency_samples`, the pass durations' percentiles), whose plain hdr reads
+ * would race the workers. The counts
  * are the same counters `build_scenario_load_summary` reads, so a frame built
  * after the drain says what the summary does.
  */

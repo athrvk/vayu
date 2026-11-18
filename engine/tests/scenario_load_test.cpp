@@ -4364,6 +4364,64 @@ TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
 }
 
 // ============================================================================
+// Pass duration (#3570)
+// ============================================================================
+
+// An abandoned pass is `iterationsAbandoned` and no pass time, so the count is
+// the completed passes. Rows alternate a reachable step 1 and a refused one, so
+// one user completes two passes of four and abandons two. The gate frame's mean
+// is the summary's, read off the same sum and count. Mutation check: record in
+// `end_iteration`'s abandoned branch too and the count reads 4; drop the
+// `meanIterationMs` write in `build_scenario_live_progress` and the frame
+// assertion fails.
+TEST_F (ScenarioLoadTest, AnAbandonedPassIsNotAPassDuration) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/s0"), "{{data.target}}", server.url ("/s2") });
+    with_data (execution,
+    { json{ { "target", server.url ("/s1") } },
+    json{ { "target", "http://127.0.0.1:1/unreachable" } } });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 4 }, { "concurrency", 1 } }, execution);
+    ASSERT_EQ (state->iterations_completed.load (), 2u);
+    ASSERT_EQ (state->iterations_abandoned.load (), 2u);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary.contains ("pass_duration")) << summary.dump ();
+    const json& pass = summary.at ("pass_duration");
+    EXPECT_EQ (pass.at ("count").get<size_t> (), 2u) << pass.dump ();
+
+    const auto frame = vayu::core::build_scenario_live_progress (*state);
+    ASSERT_TRUE (frame.contains ("meanIterationMs")) << frame.dump ();
+    EXPECT_DOUBLE_EQ (frame.at ("meanIterationMs").get<double> (),
+    pass.at ("mean").get<double> ());
+}
+
+// Before a pass completes there is no pass time: the summary leaves
+// `pass_duration` out and the gate frame `meanIterationMs`, rather than a 0
+// nobody measured. Every pass here is abandoned at step 0. Mutation check:
+// write `meanIterationMs` whatever the count in `build_scenario_live_progress`
+// and the frame assertion fails.
+TEST_F (ScenarioLoadTest, NoPassDurationIsReportedBeforeAPassCompletes) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ "http://127.0.0.1:1/unreachable", server.url ("/s1") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    ASSERT_EQ (state->iterations_abandoned.load (), 2u);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_FALSE (summary.contains ("pass_duration")) << summary.dump ();
+    const auto frame = vayu::core::build_scenario_live_progress (*state);
+    EXPECT_TRUE (frame.contains ("iterationsAbandoned")) << frame.dump ();
+    EXPECT_FALSE (frame.contains ("meanIterationMs")) << frame.dump ();
+}
+
+// ============================================================================
 // A skipped step puts nothing in flight (#3540)
 // ============================================================================
 

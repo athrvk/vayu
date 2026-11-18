@@ -1995,6 +1995,14 @@ the same figure as the top-level `assertions` block's `exact`, which the report
 serves as `scenario.assertions` (absent at zero, as stored); the list row reads
 the block.
 
+It also adds **`pass_duration`**, `{count, mean, min, p50, p95, p99, max}` in
+milliseconds (#3570): how long the completed passes took, each from the claim
+of its first step to the completion of its last, timer waits between steps
+included. An abandoned pass is not in it, so `count` is
+`iterations_completed`. Absent for a run in which no pass completed; a
+sequential collection run never writes it and nothing backfills a run stored
+before it.
+
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full
 sample rather than a histogram. It is computed once and is the same sample the run's `thresholds`

@@ -46,6 +46,14 @@ int64_t steady_now_ms () {
     .count ();
 }
 
+/// The same clock in microseconds, for a pass duration (#3570): a pass of
+/// sub-millisecond steps would read 0 at `steady_now_ms`'s resolution.
+int64_t steady_now_us () {
+    return std::chrono::duration_cast<std::chrono::microseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 } // namespace
 
 std::mt19937_64 derive_vu_rng (uint64_t run_seed, size_t vu_index) {
@@ -434,6 +442,9 @@ const ScenarioPlan& plan) {
     if (auto transactions = state.transactions.build (); !transactions.empty ()) {
         summary["transactions"] = std::move (transactions);
     }
+    if (auto pass_duration = state.pass_durations.build (); !pass_duration.empty ()) {
+        summary["pass_duration"] = std::move (pass_duration);
+    }
     return summary;
 }
 
@@ -453,11 +464,17 @@ nlohmann::json build_scenario_live_progress (const ScenarioLoadState& state) {
         steps.push_back ({ { "index", label.index }, { "name", label.name },
         { "executed", state.steps.completed (i) }, { "errors", state.steps.errors (i) } });
     }
-    return { { "iterations", state.iterations_started.load (std::memory_order_relaxed) },
+    nlohmann::json progress = {
+        { "iterations", state.iterations_started.load (std::memory_order_relaxed) },
         { "iterationsCompleted", state.iterations_completed.load (std::memory_order_relaxed) },
         { "iterationsAbandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
         { "stepsExecuted", state.steps_executed.load (std::memory_order_relaxed) },
-        { "steps", std::move (steps) } };
+        { "steps", std::move (steps) }
+    };
+    if (const auto mean = state.pass_durations.mean_ms ()) {
+        progress["meanIterationMs"] = *mean;
+    }
+    return progress;
 }
 
 nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
@@ -1181,7 +1198,8 @@ class ScenarioLoadDriver {
                 return false;
             }
             state_->iterations_started.fetch_add (1, std::memory_order_relaxed);
-            vu.iteration_boundary = false;
+            vu.iteration_boundary   = false;
+            vu.iteration_started_us = steady_now_us ();
             if (state_->data_row_count > 0) {
                 // One claim per iteration off the run-wide cursor, wrapping
                 // always. Claimed here rather than per step so every step
@@ -1682,6 +1700,7 @@ class ScenarioLoadDriver {
         if (abandoned) {
             state.iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
         } else {
+            state.pass_durations.record (steady_now_us () - vu.iteration_started_us);
             state.iterations_completed.fetch_add (1, std::memory_order_relaxed);
         }
         vu.step               = 0;
