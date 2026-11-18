@@ -31,6 +31,21 @@
 
 namespace vayu::core::vayu_ext {
 
+bool is_variable_reference (std::string_view text) {
+    while (!text.empty () && text.front () == ' ') {
+        text.remove_prefix (1);
+    }
+    while (!text.empty () && text.back () == ' ') {
+        text.remove_suffix (1);
+    }
+    if (text.size () < 5 || !text.starts_with ("{{") || !text.ends_with ("}}")) {
+        return false;
+    }
+    const std::string_view inner = text.substr (2, text.size () - 4);
+    return inner.find_first_of ("{}") == std::string_view::npos &&
+    inner.find_first_not_of (' ') != std::string_view::npos;
+}
+
 namespace {
 
 /**
@@ -122,26 +137,6 @@ constexpr auto PARAM_ROW_KEYS = std::to_array<std::string_view> ({ "in", "type" 
 template <size_t N>
 bool one_of (const std::array<std::string_view, N>& set, std::string_view value) {
     return std::find (set.begin (), set.end (), value) != set.end ();
-}
-
-/**
- * Whether @p text is one `{{variable}}` reference and nothing else. Such a
- * value names where the secret lives without being it, so it is portable -
- * and blanking it would lose the one thing the user configured.
- */
-bool is_variable_reference (std::string_view text) {
-    while (!text.empty () && text.front () == ' ') {
-        text.remove_prefix (1);
-    }
-    while (!text.empty () && text.back () == ' ') {
-        text.remove_suffix (1);
-    }
-    if (text.size () < 5 || !text.starts_with ("{{") || !text.ends_with ("}}")) {
-        return false;
-    }
-    const std::string_view inner = text.substr (2, text.size () - 4);
-    return inner.find_first_of ("{}") == std::string_view::npos &&
-    inner.find_first_not_of (' ') != std::string_view::npos;
 }
 
 /// Blanks @p value when it is a non-empty string that is not one

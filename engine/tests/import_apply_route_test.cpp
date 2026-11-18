@@ -430,6 +430,27 @@ TEST_F (ImportApplyRouteTest, ABlankNameIsStillImported) {
     EXPECT_EQ (stored_rows (), 2u);
 }
 
+// The collection and request cores refuse an `auth.config.privateKey` that is
+// not one `{{variable}}` reference (#3632); the shared appliers do not, so an
+// import whose block carries one is stored as written rather than failing
+// whole. Mutation check: move `reject_inline_private_key` into
+// `apply_request_fields` and the import is refused.
+TEST_F (ImportApplyRouteTest, AnInlinePrivateKeyIsStillImported) {
+    const json auth{ { "mode", "oauth2" },
+        { "config", { { "grantType", "jwt_bearer" }, { "privateKey", "not a reference" } } } };
+    json collection    = collection_item ("c1", "root");
+    collection["auth"] = auth;
+    json request       = request_item ("r1", "c1", "get users");
+    request["auth"]    = auth;
+
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection }) },
+    { "requests", json::array ({ request }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (stored_rows (), 2u);
+}
+
 TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
     // A non-string `name` is the shared applier's own 400 naming the field
     // (#3482), which the core carries as a per-item 400 rather than a 500 (the

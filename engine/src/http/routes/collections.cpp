@@ -514,6 +514,9 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto outcome = reject_inline_private_key (json); !outcome) {
+        return as_response (outcome.error ());
+    }
     if (auto outcome = reject_inherit_auth (json); !outcome) {
         return as_response (outcome.error ());
     }
@@ -633,6 +636,9 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (auto outcome = reject_inline_private_key (json); !outcome) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_inherit_auth (json); !outcome) {

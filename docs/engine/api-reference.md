@@ -618,6 +618,15 @@ importer's unrecognised mode is stored as written, so one odd block cannot fail
 an atomic import. The MCP `create_` and `update_` tools for both resources refuse
 an unknown mode as an input error before calling the engine.
 
+An OAuth 2.0 `auth.config.privateKey` (the `jwt_bearer` grant's signing key) is
+stored only as one `{{variable}}` reference naming a secret variable that holds
+the PEM, never as the key (#3632). The same four writes answer `400`
+(`Invalid 'auth.config.privateKey': must be one {{variable}} reference ...`)
+for any other value, a string with text around the reference or a second
+reference included, and write nothing; the message never quotes the value.
+Absent, `null` and `""` pass (a key file in `privateKeyFile`, or no key yet).
+`POST /import/apply` and `POST /specs/sync` are not held to it, as above.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
