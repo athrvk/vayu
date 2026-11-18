@@ -955,10 +955,10 @@ constexpr std::string_view CONSOLE_OUTPUT_LIMIT =
 "[console output limit reached: further output of this script is dropped]";
 } // namespace
 
-void ContextData::add_console_entry (ConsoleLevel level, std::string message) {
+bool ContextData::add_console_entry (ConsoleLevel level, std::string message) {
     namespace limits = vayu::core::constants::script_engine;
     if (console_capped) {
-        return;
+        return false;
     }
     if (message.size () > limits::CONSOLE_LINE_MAX_BYTES) {
         const std::string_view head = vayu::utils::without_incomplete_utf8_tail (
@@ -971,10 +971,11 @@ void ContextData::add_console_entry (ConsoleLevel level, std::string message) {
         console_capped = true;
         console_output.push_back (
         { ConsoleLevel::Warn, std::string (CONSOLE_OUTPUT_LIMIT) });
-        return;
+        return false;
     }
     console_bytes += message.size ();
     console_output.push_back ({ level, std::move (message) });
+    return true;
 }
 
 } // namespace pm_detail
@@ -1633,6 +1634,9 @@ class ScriptEngine::Impl {
         ctx_data.cancel              = ctx.cancel;
         ctx_data.in_scenario         = ctx.in_scenario;
         ctx_data.record_metric       = ctx.record_metric;
+        // Whether `pm.sendRequest` records its exchange (#3633); the list is
+        // per-execution, as the request budget is.
+        ctx_data.record_send_requests = config.record_send_requests;
         // See ScriptContext::local for why an unbound one is not left null.
         ctx_data.local = ctx.local != nullptr ? ctx.local : &ctx_data.script_local;
         JS_SetContextOpaque (js_ctx, &ctx_data);
@@ -1702,6 +1706,11 @@ class ScriptEngine::Impl {
         // Copy results
         result.tests          = std::move (ctx_data.tests);
         result.console_output = std::move (ctx_data.console_output);
+        // One budget for the execution's records: a lifecycle row stores one
+        // execution's, and a send's node shares it again across its scripts.
+        result.script_requests = std::move (ctx_data.script_requests);
+        vayu::json::cap_trace_bodies_together (
+        result.script_requests, config.max_trace_body_bytes);
         // Carried even when the script threw afterwards: the caller decides
         // what an instruction from a script that then failed is worth. The
         // scenario runner ignores it for an errored step (issue #2526).

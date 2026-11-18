@@ -35,6 +35,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::runtime::pm_detail {
@@ -847,11 +848,60 @@ JSValue settled_send_promise (JSContext* ctx, JSValue err, JSValue res) {
     return promise;
 }
 
+// The exchange @p request and @p response made, as the record a trace stores
+// (#3633): `build_result_trace`'s node, masked where it is built, so every
+// reader of the stored trace reads the masked one. `rawRequest` is left out:
+// it repeats the header block as text the mask does not parse, and a reader
+// synthesizes it from the header lines. A urlencoded body is held as fields,
+// which the trace does not write, so the record adds the bytes that went out.
+nlohmann::json send_record (const Request& request, const Response& response, int64_t started_at_ms) {
+    nlohmann::json record = vayu::http::routes::build_result_trace (request, response);
+    auto& sent_request = record["request"];
+    sent_request.erase ("rawRequest");
+    if (!sent_request.contains ("body")) {
+        if (auto bytes = vayu::http::wire_body_bytes (request); !bytes.empty ()) {
+            sent_request["body"] = std::move (bytes);
+        }
+    }
+    record["startedAt"]  = started_at_ms;
+    record["status"]     = response.status_code;
+    record["statusText"] = response.status_text;
+    vayu::core::vayu_ext::mask_script_request_record (
+    record, request.secret_header_names, request.auth_query_param);
+    return record;
+}
+
+// Records the exchange when the caller asked for records
+// (`ScriptConfig::record_send_requests`) and answers its index. Independent of
+// the console: a record is trace, not console output. `Client::send` reports
+// a transport failure on a status-0 `Response`; an `Error` it might answer
+// instead is recorded the same way.
+std::optional<std::size_t> record_send_exchange (ContextData& data,
+const Request& request,
+const Result<Response>& sent,
+int64_t started_at_ms) {
+    if (!data.record_send_requests) {
+        return std::nullopt;
+    }
+    const std::size_t index = data.script_requests.size ();
+    if (sent.is_error ()) {
+        Response failed;
+        failed.error_code    = sent.error ().code;
+        failed.error_message = sent.error ().message;
+        data.script_requests.push_back (send_record (request, failed, started_at_ms));
+    } else {
+        data.script_requests.push_back (send_record (request, sent.value (), started_at_ms));
+    }
+    return index;
+}
+
 // The one Console line a script-issued request leaves, so the Console lists
 // what a script sent - without it a failed token fetch is invisible (#3462).
 // Info level whatever the outcome: the script's own callback decides whether a
 // failure matters. Written before the callback runs, so a line the callback
-// logs follows the line for the call that produced it.
+// logs follows the line for the call that produced it. A kept line carries
+// @p record, the index of the call's record, so a reader can draw the two as
+// one row; a line the console cap dropped links nothing.
 //
 // @p script_url is the URL as the script gave it, before auth is composed: an
 // api key `apply_auth` appends to the query is not the script's text. It goes
@@ -862,11 +912,12 @@ JSValue settled_send_promise (JSContext* ctx, JSValue err, JSValue res) {
 // Nothing is built when the console is off (`scriptEnableConsole`, which a load
 // test is advised to turn off), so a run that has asked for no console output
 // formats no line.
-void record_send_request (ContextData& data,
+void log_send_request (ContextData& data,
 HttpMethod method,
 const std::string& script_url,
 const Result<Response>& sent,
-std::chrono::milliseconds elapsed) {
+std::chrono::milliseconds elapsed,
+std::optional<std::size_t> record) {
     if (!data.console_enabled) {
         return;
     }
@@ -881,7 +932,9 @@ std::chrono::milliseconds elapsed) {
         line += std::string (" failed: ") + vayu::to_string (error_code);
     }
     line += " (" + std::to_string (elapsed.count ()) + " ms)";
-    data.add_console_entry (ConsoleLevel::Info, std::move (line));
+    if (data.add_console_entry (ConsoleLevel::Info, std::move (line))) {
+        data.console_output.back ().script_request = record;
+    }
 }
 
 } // namespace
@@ -1031,11 +1084,14 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         data->cookie_writes->clear ();
     }
     vayu::http::Client client (client_config);
+    const auto started_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ());
     const auto started = std::chrono::steady_clock::now ();
     auto sent          = client.send (request);
-    record_send_request (*data, request.method, script_url, sent,
-    std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now () - started));
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started);
+    const auto record = record_send_exchange (*data, request, sent, started_at.count ());
+    log_send_request (*data, request.method, script_url, sent, elapsed, record);
 
     const auto error_code =
     sent.is_error () ? sent.error ().code : sent.value ().error_code;

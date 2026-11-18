@@ -43,4 +43,11 @@ vayu::runtime::ScriptConfig read_script_config (vayu::db::Database& db) {
     return config;
 }
 
+void record_script_requests (vayu::runtime::ScriptConfig& config, vayu::db::Database& db) {
+    config.record_send_requests = true;
+    config.max_trace_body_bytes =
+    static_cast<size_t> (db.get_config_int ("maxTraceBodyBytes",
+    static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+}
+
 } // namespace vayu::core

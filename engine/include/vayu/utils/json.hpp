@@ -17,6 +17,7 @@
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -189,6 +190,17 @@ const std::vector<vayu::db::Result>& results);
  * (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
+
+/**
+ * Cap the request and response bodies of @p traces as one budget, in place
+ * (#3633): in order, each body is cut by `cap_trace_bodies`' rule to what the
+ * bodies before it left of @p budget_bytes, so once the budget is spent a body
+ * is stored empty with its `bodyTruncated` / `bodyBytes` pair. A body is
+ * charged what it keeps, so a second pass over a list that holds one already
+ * capped this way leaves that part as it was. For a send's `pm.sendRequest`
+ * records (`ScriptResult::script_requests`), which carry no `rawRequest`.
+ */
+void cap_trace_bodies_together (std::span<nlohmann::json> traces, size_t budget_bytes);
 
 /**
  * @brief Call @p visit on every file reference in the request body @p body: a

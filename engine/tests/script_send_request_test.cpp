@@ -24,6 +24,7 @@
 #include <chrono>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -39,6 +40,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 using vayu::runtime::ScriptConfig;
 using vayu::runtime::ScriptContext;
@@ -52,6 +54,9 @@ constexpr int REQUEST_CAP = vayu::core::constants::script_engine::SEND_REQUEST_L
 // returned promptly" assertion below, so a missing clamp shows up as a failure
 // rather than as a slow pass.
 constexpr int SLOW_MS = 3000;
+
+// What /big answers with, past the small trace budgets the record tests set.
+constexpr std::size_t BIG_BODY_BYTES = 200;
 
 class SendRequestServer {
     public:
@@ -110,6 +115,25 @@ class SendRequestServer {
             res.status = accepted ? 200 : 400;
             res.set_content (accepted ? R"({"access_token":"tok_oauth"})" : R"({"error":"invalid_request"})",
             "application/json");
+        });
+
+        // A session cookie in the answer, which a record must mask (#3633).
+        svr.Get ("/cookie", [this] (const httplib::Request&, httplib::Response& res) {
+            hits.fetch_add (1, std::memory_order_relaxed);
+            res.set_header ("Set-Cookie", "session=COOKIESECRET");
+            res.set_content ("cookie body", "text/plain");
+        });
+
+        // A redirect hop that sets a cookie of its own on the way to /cookie.
+        svr.Get ("/hop", [this] (const httplib::Request&, httplib::Response& res) {
+            hits.fetch_add (1, std::memory_order_relaxed);
+            res.set_header ("Set-Cookie", "hop=HOPSECRET");
+            res.set_redirect ("/cookie");
+        });
+
+        svr.Get ("/big", [this] (const httplib::Request&, httplib::Response& res) {
+            hits.fetch_add (1, std::memory_order_relaxed);
+            res.set_content (std::string (BIG_BODY_BYTES, 'b'), "text/plain");
         });
 
         svr.Get ("/slow", [this] (const httplib::Request&, httplib::Response& res) {
@@ -180,6 +204,22 @@ class SendRequestTest : public ::testing::Test {
     // that never asked for the capability gets, MCP included.
     vayu::ScriptResult run_denied (const std::string& script) {
         ScriptEngine engine{ ScriptConfig{} };
+        return execute (engine, script);
+    }
+
+    // The script with each pm.sendRequest recorded, as a design send and a
+    // sequential run configure it (#3633), its records' bodies sharing
+    // @p trace_body_bytes.
+    vayu::ScriptResult run_recorded (const std::string& script,
+    std::size_t trace_body_bytes = vayu::core::constants::json::MAX_TRACE_BODY_BYTES,
+    bool console = true) {
+        ScriptConfig config;
+        config.timeout_ms           = 30000;
+        config.allow_send_request   = true;
+        config.record_send_requests = true;
+        config.max_trace_body_bytes = trace_body_bytes;
+        config.enable_console       = console;
+        ScriptEngine engine (config);
         return execute (engine, script);
     }
 
@@ -1634,6 +1674,247 @@ TEST_F (SendRequestTest, TheLoggedUrlBlanksCredentialsAndKeepsTheRest) {
     EXPECT_NE (lines[0].message.find ("page=2"), std::string::npos) << lines[0].message;
     EXPECT_EQ (lines[1].message.find ("AUTHKEY"), std::string::npos) << lines[1].message;
     EXPECT_EQ (lines[1].message.find ("sig="), std::string::npos) << lines[1].message;
+}
+
+// ============================================================================
+// Each call leaves a record of the exchange (#3633)
+// ============================================================================
+
+// The value a recorded header map holds for @p name, whatever case the map
+// spells it in, or "<absent>".
+std::string header_in (const nlohmann::json& headers, std::string_view name) {
+    for (const auto& [key, value] : headers.items ()) {
+        if (vayu::utils::ascii_lower_equal (key, name) && value.is_string ()) {
+            return value.get<std::string> ();
+        }
+    }
+    return "<absent>";
+}
+
+// The record is the trace's own shape: what was sent and what came back, with
+// the status beside it, and the summary line names its index. Mutation check:
+// drop the `push_back` in `record_send_exchange` and the record is missing.
+TEST_F (SendRequestTest, ARecordCarriesTheExchangeAndTheLineIndexesIt) {
+    SendRequestServer server;
+
+    auto result = run_recorded ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', header: { 'X-Marker': 'm1' }, body: { mode: 'raw', "
+    "raw: "
+    "'hello' } }, function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    const auto& record = result.script_requests[0];
+    EXPECT_EQ (record["request"]["method"], "POST") << record.dump ();
+    EXPECT_EQ (record["request"]["url"], server.url ("/echo"));
+    EXPECT_EQ (header_in (record["request"]["sentHeaders"], "X-Marker"), "m1")
+    << record.dump ();
+    EXPECT_EQ (record["request"]["body"], "hello");
+    EXPECT_FALSE (record["request"].contains ("rawRequest"));
+    EXPECT_EQ (record["status"], 200);
+    EXPECT_EQ (record["statusText"], "OK");
+    EXPECT_NE (
+    record["response"]["body"].get<std::string> ().find ("\"marker\":\"m1\""),
+    std::string::npos)
+    << record.dump ();
+    EXPECT_FALSE (record["response"]["headerLines"].empty ());
+    EXPECT_TRUE (record.contains ("totalMs"));
+    EXPECT_GT (record["startedAt"].get<int64_t> (), 0);
+
+    const auto lines = send_lines (result);
+    ASSERT_EQ (lines.size (), 1u);
+    EXPECT_EQ (lines[0].script_request, std::optional<std::size_t> (0));
+}
+
+// A urlencoded body is held as fields, which the trace does not write; the
+// record still shows the bytes that went out.
+TEST_F (SendRequestTest, ARecordedUrlencodedBodyIsTheEncodedBytes) {
+    SendRequestServer server;
+
+    auto result = run_recorded ("pm.sendRequest({ url: '" + server.url ("/oauth/token") +
+    "', method: 'POST', body: { mode: 'urlencoded', urlencoded: [{ key: "
+    "'grant_type', value: 'client_credentials' }, { key: 'client_id', value: "
+    "'abc' }, { key: 'client_secret', value: 's3cret' }] } }, function () "
+    "{});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    EXPECT_EQ (result.script_requests[0]["request"]["body"],
+    "grant_type=client_credentials&client_id=abc&client_secret=s3cret");
+    EXPECT_EQ (result.script_requests[0]["status"], 200);
+}
+
+// A transfer that never got an answer still says what it attempted and why it
+// failed. Mutation check: return early from `record_send_exchange` on a
+// failed transfer.
+TEST_F (SendRequestTest, AFailedTransferLeavesARecordWithStatusZeroAndItsErrorCode) {
+    auto result = run_recorded (
+    "pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    const auto& record = result.script_requests[0];
+    EXPECT_EQ (record["status"], 0) << record.dump ();
+    EXPECT_EQ (record["error_type"], "CONNECTION_FAILED") << record.dump ();
+    EXPECT_EQ (record["request"]["url"], REFUSED_URL);
+    EXPECT_FALSE (record.contains ("response")) << "nothing answered";
+}
+
+// Several calls, several records in call order, each line naming its own.
+TEST_F (SendRequestTest, EachLineIndexesItsOwnRecord) {
+    SendRequestServer server;
+
+    auto result = run_recorded ("pm.sendRequest('" + server.url ("/token") +
+    "', function () { console.log('between'); }); pm.sendRequest('" +
+    std::string (REFUSED_URL) + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 2u);
+    EXPECT_EQ (result.script_requests[0]["status"], 200);
+    EXPECT_EQ (result.script_requests[1]["status"], 0);
+    ASSERT_EQ (result.console_output.size (), 3u);
+    EXPECT_EQ (result.console_output[0].script_request, std::optional<std::size_t> (0));
+    EXPECT_FALSE (result.console_output[1].script_request.has_value ());
+    EXPECT_EQ (result.console_output[2].script_request, std::optional<std::size_t> (1));
+}
+
+// The record is masked where it is built, by the export's rules plus what the
+// call's own auth wrote; the bodies are left as sent and received. Mutation
+// check: pass `{}` for the auth header names to `mask_script_request_record`
+// and the custom-named API key leaks.
+TEST_F (SendRequestTest, ARecordMasksCredentialsAndKeepsTheBodies) {
+    SendRequestServer server;
+    std::string with_userinfo = server.url ("/hop");
+    with_userinfo.insert (std::string ("http://").size (), "user:hunter2@");
+
+    auto result = run_recorded ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "?api_key=QUERYKEY&page=2', method: 'POST', header: { Authorization: "
+    "'Bearer BEARERTOKEN' }, body: { mode: 'raw', raw: 'body BODYSECRET' } }, "
+    "function () {}); "
+    "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'apikey', apikey: [{ key: 'key', value: "
+    "'X-Tenant-Key' }, { key: 'value', value: 'TENANTKEY' }, { key: 'in', "
+    "value: 'header' }] } }, function () {}); "
+    "pm.sendRequest('" +
+    with_userinfo + "?api_key=HOPKEY', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 3u);
+    const auto& with_header = result.script_requests[0];
+    const auto& with_auth   = result.script_requests[1];
+    const auto& redirected  = result.script_requests[2];
+
+    // Header values read the marker; the URL credentials are blanked as in an
+    // export, the rest of the query kept.
+    EXPECT_EQ (header_in (with_header["request"]["headers"], "Authorization"), "<redacted>")
+    << with_header.dump ();
+    EXPECT_EQ (with_header["request"]["url"], server.url ("/echo") + "?api_key=&page=2");
+    EXPECT_EQ (header_in (with_auth["request"]["sentHeaders"], "X-Tenant-Key"), "<redacted>")
+    << with_auth.dump ();
+    EXPECT_EQ (redirected["status"], 200) << redirected.dump ();
+    EXPECT_EQ (header_in (redirected["response"]["headers"], "Set-Cookie"), "<redacted>")
+    << redirected.dump ();
+    ASSERT_EQ (redirected["response"]["redirects"].size (), 1u) << redirected.dump ();
+
+    // A copy without the echoed body, which repeats what /echo was sent and
+    // is not judged.
+    for (auto record : result.script_requests) {
+        if (record.contains ("response")) {
+            record["response"].erase ("body");
+        }
+        const std::string text = record.dump ();
+        for (const char* secret : { "BEARERTOKEN", "QUERYKEY", "TENANTKEY",
+             "COOKIESECRET", "HOPSECRET", "HOPKEY", "hunter2" }) {
+            EXPECT_EQ (text.find (secret), std::string::npos) << secret << " in " << text;
+        }
+    }
+    // Bodies are not judged: what was sent and what the echo answered stay.
+    EXPECT_EQ (with_header["request"]["body"], "body BODYSECRET");
+    EXPECT_NE (
+    with_header["response"]["body"].get<std::string> ().find ("BEARERTOKEN"), std::string::npos)
+    << "the echoed body keeps the token it echoed";
+}
+
+// Every body of an execution's records shares the trace bound: one past it is
+// cut with its pair, and once it is spent a later body is stored empty with
+// its true size, the request's included. Mutation check: call
+// `cap_trace_bodies_together` with each record alone (a fresh budget per
+// record) and the second body keeps 100 bytes.
+TEST_F (SendRequestTest, RecordedBodiesShareTheTraceBound) {
+    SendRequestServer server;
+    constexpr std::size_t BUDGET = 100;
+
+    auto result = run_recorded ("pm.sendRequest('" + server.url ("/big") +
+    "', function () {}); pm.sendRequest('" + server.url ("/big") +
+    "', function () {}); pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', body: { mode: 'raw', raw: 'tenbytes!!' } }, function "
+    "() {});",
+    BUDGET);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 3u);
+    const auto& first = result.script_requests[0]["response"];
+    EXPECT_EQ (first["body"].get<std::string> ().size (), BUDGET);
+    EXPECT_TRUE (first.value ("bodyTruncated", false));
+    EXPECT_EQ (first.value ("bodyBytes", std::size_t{ 0 }), BIG_BODY_BYTES);
+
+    const auto& second = result.script_requests[1]["response"];
+    EXPECT_EQ (second["body"], "") << second.dump ();
+    EXPECT_TRUE (second.value ("bodyTruncated", false));
+    EXPECT_EQ (second.value ("bodyBytes", std::size_t{ 0 }), BIG_BODY_BYTES);
+
+    const auto& sent = result.script_requests[2]["request"];
+    EXPECT_EQ (sent["body"], "") << sent.dump ();
+    EXPECT_TRUE (sent.value ("bodyTruncated", false));
+    EXPECT_EQ (sent.value ("bodyBytes", std::size_t{ 0 }), 10u);
+}
+
+// A load run leaves recording off: no record, and the summary line as before,
+// linking nothing.
+TEST_F (SendRequestTest, WithRecordingOffNoRecordIsBuiltAndTheLineStays) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/token") + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (result.script_requests.empty ());
+    const auto lines = send_lines (result);
+    ASSERT_EQ (lines.size (), 1u);
+    EXPECT_FALSE (lines[0].script_request.has_value ());
+}
+
+// Recording is trace, not console output: with the console off the record is
+// still built and no line is. Mutation check: gate `record_send_exchange` on
+// `console_enabled`.
+TEST_F (SendRequestTest, WithTheConsoleOffTheRecordStillIsAndNoLine) {
+    SendRequestServer server;
+
+    auto result = run_recorded ("pm.sendRequest('" + server.url ("/token") + "', function () {});",
+    vayu::core::constants::json::MAX_TRACE_BODY_BYTES, /*console=*/false);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    EXPECT_EQ (result.script_requests[0]["status"], 200);
+}
+
+// A line the console cap dropped links nothing, and the limit marker in its
+// place is not the call's line. Mutation check: set `script_request` on
+// `console_output.back ()` whatever `add_console_entry` answered.
+TEST_F (SendRequestTest, ALineTheConsoleCapDroppedLinksNothing) {
+    SendRequestServer server;
+    constexpr auto MAX_ENTRIES = vayu::core::constants::script_engine::CONSOLE_MAX_ENTRIES;
+
+    auto result = run_recorded ("for (var i = 0; i < " +
+    std::to_string (MAX_ENTRIES) + "; i++) { console.log('x'); } pm.sendRequest('" +
+    server.url ("/token") + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    for (const auto& entry : result.console_output) {
+        EXPECT_FALSE (entry.script_request.has_value ()) << entry.message;
+    }
 }
 
 // ============================================================================

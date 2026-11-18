@@ -63,6 +63,27 @@ struct ScriptConfig {
      * message that names why, which is a better answer than a missing global.
      */
     bool allow_send_request = false;
+
+    /**
+     * @brief Whether each `pm.sendRequest` leaves a record on
+     *        `ScriptResult::script_requests` (#3633): the exchange in the
+     *        trace's own shape, its credentials masked.
+     *
+     * Off by default, and turned on only by the two callers that store a trace
+     * per send (`vayu::core::record_script_requests`): a design send and a
+     * sequential collection run. A load run stores no trace per request, so its
+     * scripts build none; their summary line is gated by `enable_console`
+     * alone, which this does not read.
+     */
+    bool record_send_requests = false;
+
+    /**
+     * @brief What one execution's records' bodies may hold between them,
+     *        `maxTraceBodyBytes`; read only when @ref record_send_requests is.
+     *        A body past what is left is cut, with its `bodyTruncated` /
+     *        `bodyBytes` pair.
+     */
+    size_t max_trace_body_bytes = vayu::core::constants::json::MAX_TRACE_BODY_BYTES;
 };
 
 /**
