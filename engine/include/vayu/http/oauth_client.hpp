@@ -31,10 +31,10 @@ namespace vayu::http::oauth {
  * of these names would contradict or repeat one of them, so an import does
  * not carry it and the engine does not send it.
  */
-constexpr auto RESERVED_PARAM_NAMES = std::to_array<std::string_view> (
-{ "grant_type", "client_id", "client_secret", "code", "redirect_uri",
-"code_verifier", "refresh_token", "username", "password", "scope", "state",
-"code_challenge", "code_challenge_method", "response_type", "assertion" });
+constexpr auto RESERVED_PARAM_NAMES =
+std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
+"code", "redirect_uri", "code_verifier", "refresh_token", "username", "password",
+"scope", "state", "code_challenge", "code_challenge_method", "response_type" });
 
 /// The longest a token that states no lifetime is kept for (`fallbackExpiresIn`
 /// seconds, one year): a larger value is clamped to it, so the millisecond

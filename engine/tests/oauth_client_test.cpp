@@ -325,20 +325,6 @@ TEST (OAuthCacheKey, CredentialRowsAreKeyedByNameAlone) {
     EXPECT_NE (key, with_rows ("jwt-1", "other-api"));
 }
 
-// `assertion` is a name the jwt_bearer grant writes itself, so a row of it is
-// not sent and does not enter the key; the app's `computeOAuth2CacheKey` holds
-// the same line in `cache-key.test.ts`. Mutation check: remove "assertion" from
-// RESERVED_PARAM_NAMES and the key differs.
-TEST (OAuthCacheKey, ARowNamedAssertionAddsNothing) {
-    const json base = { { "grantType", "jwt_bearer" },
-        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
-        { "subject", "alice" } };
-    json with_row   = base;
-    with_row["tokenParams"] =
-    json::array ({ { { "key", "assertion" }, { "value", "forged.jwt.value" } } });
-    EXPECT_EQ (oauth::cache_key (with_row), oauth::cache_key (base));
-}
-
 // Row order is not part of the key: two configs listing the same rows in a
 // different order share one cached token. A row's value is, so two audiences
 // on one token URL do not.
@@ -1543,18 +1529,18 @@ TEST_F (OAuthJwtBearerTest, ExtraClaimsAreSignedAndReservedOnesNeverReplaceTheEn
     { "iat", 1'900'000'000 }, { "tenant", "t-1" }, { "env", "prod" } }));
 }
 
-// A `tokenParams` row named `assertion` is not sent in any `sendAs`: the form
-// holds the one the engine signed, the query and the headers none. (A body or
-// url row is also skipped as a name already written; a header row is not, so it
-// is the one that holds the reserved name.) Mutation check: remove "assertion"
-// from RESERVED_PARAM_NAMES and the header row is sent.
-TEST_F (OAuthJwtBearerTest, ATokenParamRowNamedAssertionIsNotSent) {
+// A body or url `tokenParams` row named `assertion` never alters the form's
+// one signed assertion: `append_extra_params` skips a name the grant already
+// wrote, for this grant alone (`assertion` is not in RESERVED_PARAM_NAMES, so
+// no other grant loses a row of that name). A header row is a different
+// channel and is not judged here. Mutation check: empty the `written` set in
+// `append_extra_params` and the body row posts a second `assertion`.
+TEST_F (OAuthJwtBearerTest, ATokenParamRowNamedAssertionDoesNotAlterThePostedAssertion) {
     MockTokenServer idp;
     json cfg           = config (idp, rsa_pem ());
     cfg["tokenParams"] = json::array ({
     { { "key", "assertion" }, { "value", "FORGED-BODY" } },
     { { "key", "assertion" }, { "value", "FORGED-URL" }, { "sendAs", "url" } },
-    { { "key", "assertion" }, { "value", "FORGED-HEADER" }, { "sendAs", "header" } },
     { { "key", "audience" }, { "value", "api" } },
     });
 
@@ -1565,7 +1551,6 @@ TEST_F (OAuthJwtBearerTest, ATokenParamRowNamedAssertionIsNotSent) {
     EXPECT_EQ (form_occurrences (body, "assertion"), 1u);
     EXPECT_EQ (body.find ("FORGED"), std::string::npos);
     EXPECT_EQ (idp.last_target ().find ("assertion"), std::string::npos);
-    EXPECT_EQ (idp.header_count ("assertion"), 0u);
     EXPECT_EQ (form_occurrences (body, "audience"), 1u)
     << "an ordinary row still rides";
 }

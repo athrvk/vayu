@@ -7440,8 +7440,8 @@ request header (`header`). A row is not sent when it is `enabled: false`, has
 no string `key`, has an unknown `sendAs`, or is named like a parameter the
 engine writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
 `redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
-`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`,
-`assertion`); a body or url row naming a form parameter already written (an `audience` the
+`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`);
+a body or url row naming a form parameter already written (an `audience` the
 config sends) and a header row naming a header already set (`Authorization`,
 `Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
 value wins and no name is sent twice. A malformed list or row is skipped, never

@@ -448,7 +448,7 @@ reads them from the raw detail block, in either schema shape, in that order
   writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
   `redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
   `scope`, `state`, `code_challenge`, `code_challenge_method`,
-  `response_type`, `assertion`: `RESERVED_PARAM_NAMES` in `oauth_client.hpp`) is not
+  `response_type`: `RESERVED_PARAM_NAMES` in `oauth_client.hpp`) is not
   carried and is counted as `oauth2_unmapped_param`. The count names its
   requests and, under `names`, the parameter keys; a value is never recorded,
   since it can be a credential. The Preview shows it as an amber line naming
