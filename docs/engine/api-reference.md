@@ -8684,7 +8684,8 @@ what each script result's `scope` (below) is read from, falling back to
 `kind` for an `origin` that carries none.
 
 **`elements` is validated like a stored request's** (#3052): a list the element
-registry refuses (an unrecognized kind, a setting the kind does not declare, a
+registry refuses (an unrecognized kind, the message listing every kind the
+registry holds (#3559), a setting the kind does not declare, a
 pattern that does not compile, an assertion with nothing to compare against, a
 repeated id, a `script.setup` on the request, a value that is not an array) is a
 `400` carrying the message [`POST /requests`](#post-requests) answers for the

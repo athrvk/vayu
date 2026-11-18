@@ -135,6 +135,15 @@ TEST_F (ElementsRegistryTest, AnUnknownKindNamesItselfAndTheKnownList) {
     EXPECT_NE (reason->find ("Item 1"), std::string::npos);
     EXPECT_NE (reason->find ("assert.sttus"), std::string::npos);
     EXPECT_NE (reason->find ("unrecognized kind"), std::string::npos);
+    // The list is what the client should have sent, so it names real kinds
+    // from more than one family and every kind the registry holds.
+    EXPECT_NE (reason->find ("assert.status"), std::string::npos);
+    EXPECT_NE (reason->find ("script.pre"), std::string::npos);
+    for (const auto& kind : Registry::instance ().kinds ()) {
+        EXPECT_NE (reason->find (kind.kind), std::string::npos) << kind.kind;
+    }
+    // Bounded: the built-in names are a fixed list, not a function of the input.
+    EXPECT_LT (reason->size (), 500u);
 }
 
 TEST_F (ElementsRegistryTest, ABadConfigFieldNamesTheElementAndTheKind) {
