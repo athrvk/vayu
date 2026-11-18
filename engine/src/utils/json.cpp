@@ -1939,6 +1939,8 @@ void mask_secret_values (Json& node, const std::vector<std::string>& forms) {
     }
 }
 
+} // namespace
+
 /**
  * Each header line's value in a payload's `headers`, in either shape (issue
  * #2466): an object's member values, or each `{"name", "value"}` line's
@@ -1964,6 +1966,8 @@ const std::function<void (const std::string& name, Json& value)>& visit) {
         }
     }
 }
+
+namespace {
 
 // The members of a composed payload a resolved `{{variable}}` can land in.
 void mask_snapshot_secrets (Json& parsed, const std::vector<std::string>& forms) {

@@ -1488,7 +1488,7 @@ std::vector<vayu::ConsoleEntry> send_lines (const vayu::ScriptResult& result) {
 }
 
 // A success names the method, the URL as the script gave it, the status and a
-// duration, at info level. Mutation check: delete `record_send_request`'s call
+// duration, at info level. Mutation check: delete `log_send_request`'s call
 // in `js_pm_send_request`.
 TEST_F (SendRequestTest, ASuccessfulRequestLeavesOneInfoLineNamingMethodUrlAndStatus) {
     SendRequestServer server;
@@ -1546,7 +1546,7 @@ TEST_F (SendRequestTest, ThePromiseFormLeavesTheSameLine) {
 
 // One line per request, in call order, and the line precedes whatever the
 // callback logs about its own call. Mutation check: return early from
-// `record_send_request` once the script's second request has counted.
+// `log_send_request` once the script's second request has counted.
 TEST_F (SendRequestTest, EachRequestLeavesItsOwnLineBeforeItsCallbacksOwnOutput) {
     SendRequestServer server;
 
@@ -1569,7 +1569,7 @@ TEST_F (SendRequestTest, EachRequestLeavesItsOwnLineBeforeItsCallbacksOwnOutput)
 // The duration covers the error path too, which has no response to read a
 // timing off. Healthy: a 150 ms timeout reports at least about 150 ms; broken
 // (no clock around the send): 0. The lower bound cannot fail slow.
-// Mutation check: pass a zero duration to `record_send_request`.
+// Mutation check: pass a zero duration to `log_send_request`.
 TEST_F (SendRequestTest, ATimedOutRequestReportsHowLongItWaited) {
     SendRequestServer server;
 
@@ -1625,7 +1625,7 @@ TEST_F (SendRequestTest, TheLineIsSubjectToTheConsoleLimit) {
 // scriptEnableConsole off means the script's output is not kept, and a load
 // run turns it off to stop paying for exactly this. The request still goes
 // out. Mutation check: drop the `console_enabled` guard in
-// `record_send_request`.
+// `log_send_request`.
 TEST_F (SendRequestTest, WithTheConsoleOffNothingIsRecorded) {
     SendRequestServer server;
     ScriptConfig config;

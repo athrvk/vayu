@@ -18,6 +18,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/log_redact.hpp"
 
 #include <algorithm>
@@ -638,28 +639,12 @@ void redact_recorded (nlohmann::json& value) {
 }
 
 void mask_header_set (nlohmann::json& set, const RecordSecrets& secrets) {
-    if (set.is_object ()) {
-        for (auto& [name, value] : set.items ()) {
-            if (utils::is_secret_header_name (name, secrets.header_names)) {
-                redact_recorded (value);
-            }
+    json::for_each_header_value (
+    set, [&secrets] (const std::string& name, nlohmann::json& value) {
+        if (utils::is_secret_header_name (name, secrets.header_names)) {
+            redact_recorded (value);
         }
-        return;
-    }
-    if (!set.is_array ()) {
-        return;
-    }
-    for (auto& line : set) {
-        const auto name = line.is_object () ? line.find ("name") : line.end ();
-        const auto value = line.is_object () ? line.find ("value") : line.end ();
-        if (name == line.end () || value == line.end () || !name->is_string ()) {
-            continue;
-        }
-        if (utils::is_secret_header_name (
-            name->get_ref<const std::string&> (), secrets.header_names)) {
-            redact_recorded (*value);
-        }
-    }
+    });
 }
 
 void mask_record_node (nlohmann::json& node, const RecordSecrets& secrets) {

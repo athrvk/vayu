@@ -380,7 +380,8 @@ propagating one. Either kind reads its script's result as `script.post` does (`r
 a throw is `"error"`, a script that only failed `pm.test`s is `"failed"` with the first failing test as
 its message, and its console lines and tests are kept on the outcome and serialised by
 `build_lifecycle_node` (not by `ElementOutcome::to_json`) as the row's `console` and `messages` lists, the
-shape and cap of an inline element's (#3455). A design (sequential) run writes its variable scopes back after teardown, so a
+shape and cap of an inline element's (#3455). The `pm.sendRequest` records the script made (a sequential
+run's only) ride the same row as `scriptRequests` (`ElementOutcome::script_requests`, #3633). A design (sequential) run writes its variable scopes back after teardown, so a
 teardown's `pm.environment.set` / `pm.globals.set` is saved with the steps' (#3249); a load run
 persists none. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate` - on a load run
 the report's, by the [one error definition](api-reference.md#what-counts-as-an-error) -

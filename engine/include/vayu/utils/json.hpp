@@ -192,6 +192,14 @@ const std::vector<vayu::db::Result>& results);
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
 
 /**
+ * Calls @p visit with each header value in a payload's header set, in either
+ * shape (#2466): an object's member values, or each `{"name", "value"}` line's
+ * `value`. A name is never visited. Anything else is left alone.
+ */
+void for_each_header_value (nlohmann::json& headers,
+const std::function<void (const std::string& name, nlohmann::json& value)>& visit);
+
+/**
  * Cap the request and response bodies of @p traces as one budget, in place
  * (#3633): in order, each body is cut by `cap_trace_bodies`' rule to what the
  * bodies before it left of @p budget_bytes, so once the budget is spent a body

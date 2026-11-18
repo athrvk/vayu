@@ -738,7 +738,7 @@ struct ElementOutcome {
     /// load run's tallies and `build_lifecycle_node` are its readers.
     std::vector<ElementMessage> messages;
     /// `ElementContext::outcome_script_requests`. Not serialised by
-    /// `to_json`: `build_lifecycle_node` is its one reader.
+    /// `to_json`: `lifecycle_row` (reached through `build_lifecycle_node`) is its one reader.
     std::vector<nlohmann::json> script_requests;
 
     [[nodiscard]] nlohmann::json to_json () const;
