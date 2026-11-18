@@ -11,6 +11,7 @@ Component (Auto-Applied) - WHERE            Type (Manual, pick one) - WHAT
   component:database  🟪  Storage              type:enhancement   🔵  Improvement
   component:ci        ⚪  CI config            type:perf          🟧  Speed/resource
   component:build     ⚫  Build system         type:test          🟦  Tests/benchmarks
+                                               type:docs          🔷  Docs-only change
 
 Area (feature sub-areas, auto-applied)       Status (PRs, manual)
   area:http       HTTP server, SSE             status:needs-review  🟧  Awaiting review
@@ -22,7 +23,8 @@ Area (feature sub-areas, auto-applied)       Status (PRs, manual)
                                               Priority (issues, manual)
 Special                                        priority:critical  🔴  Blocks other work
   documentation      🔵  Docs, guides           priority:high      🟧  Important
-  good first issue   🟦  Newcomer-friendly      priority:low       🟢  Nice-to-have
+  good first issue   🟦  Newcomer-friendly      priority:medium    🟡  Should be done
+                                               priority:low       🟢  Nice-to-have
   help wanted        🟪  Needs expertise
   severity:blocking  🔴  Breaking change
   dependencies       ⚪  Dependency updates
@@ -73,6 +75,7 @@ These labels describe the **kind of change** (the WHAT). **Applied manually** - 
 | `type:enhancement` | Blue (#3498DB) | Enhancement to existing feature | Improving an existing feature |
 | `type:perf` | Amber (#F39C12) | Performance optimization | Improving speed, latency, or resource use |
 | `type:test` | Teal (#16A085) | Tests, benchmarks, test infrastructure | Adding or improving tests |
+| `type:docs` | Light blue (#5DADE2) | Documentation-only change | The whole fix is a doc change; no code changes. Distinct from `documentation`, which is auto-applied to any change touching a doc |
 
 ### Status Labels (`status:*`)
 
@@ -92,6 +95,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 |-------|-------|---------|
 | `priority:critical` | Dark red (#C0392B) | Needs immediate attention; blocks other work |
 | `priority:high` | Amber (#F39C12) | Important, should be tackled soon |
+| `priority:medium` | Yellow (#F1C40F) | Should be done, not urgent |
 | `priority:low` | Green (#27AE60) | Nice-to-have, can wait |
 
 ### Severity Labels
@@ -132,7 +136,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 
 1. **Component:** Add one `component:*` label to indicate where the issue lives. This may be auto-applied if the issue references a specific file.
 2. **Type:** Add one `type:*` label to indicate what kind of work it is.
-3. **Priority:** Add one `priority:*` label if it's urgent.
+3. **Priority:** Add one `priority:*` label.
 4. **Area:** Add an `area:*` label if the issue fits a sub-area (engine sub-areas, or `area:mcp`).
 5. **Special:** Add special labels as needed (`good first issue`, `help wanted`, `documentation`, etc.).
 
