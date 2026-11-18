@@ -880,8 +880,8 @@ read_key_file (vayu::db::Database& db, const std::string& path) {
 /// `privateKeyFile`. Exactly one is set.
 ///
 /// A `privateKey` that is still a `{{reference}}` was never resolved: the
-/// caller that holds the saved request resolves it before the engine is asked
-/// for a token, so this is the one seam where that value arrives.
+/// caller that holds the request's scopes resolves it before the engine is
+/// asked for a token, so this is the one seam where that value arrives.
 std::expected<std::string, TokenError>
 signing_key_pem (vayu::db::Database& db, const nlohmann::json& config) {
     std::string inline_key = field (config, "privateKey");
@@ -896,9 +896,7 @@ signing_key_pem (vayu::db::Database& db, const nlohmann::json& config) {
     }
     if (inline_key.find ("{{") != std::string::npos) {
         return std::unexpected (
-        invalid_config ("privateKey is an unresolved {{reference}}: send the "
-                        "saved request, or name "
-                        "a key file in privateKeyFile"));
+        invalid_config (unresolved_private_key_message (inline_key)));
     }
     return inline_key;
 }
@@ -1015,6 +1013,16 @@ std::chrono::system_clock::time_point now) {
         key_member + "): " + signed_jwt.error ().message));
     }
     return *signed_jwt;
+}
+
+std::string unresolved_private_key_message (std::string_view written) {
+    const std::string named = vayu::core::vayu_ext::is_variable_reference (written) ?
+    "privateKey names " + std::string (written) + ", which" :
+    std::string ("privateKey holds a {{reference}} that");
+    return named +
+    " no variable in scope defines - define it as a secret variable in the "
+    "environment, the collection or the globals the request is sent with, or "
+    "name a key file in privateKeyFile";
 }
 
 int refresh_followers_waiting (const std::string& cache_key) {

@@ -626,6 +626,12 @@ for any other value, a string with text around the reference or a second
 reference included, and write nothing; the message never quotes the value.
 Absent, `null` and `""` pass (a key file in `privateKeyFile`, or no key yet).
 `POST /import/apply` and `POST /specs/sync` are not held to it, as above.
+`POST /compose` leaves the reference written in every mode, so no composed
+payload carries the key; it is resolved only where a token is acquired: after
+the pre-request script on a Send and a sequential collection run, once at the
+start of a load run from the run's own scopes (a reference none answers is
+the run's `400`, `invalid_run_config` or `invalid_scenario`, naming it), and by
+[`POST /oauth2/token`](#post-oauth2token) from the scopes it names.
 
 ### The request `body` union
 
@@ -7349,9 +7355,20 @@ Acquire (or return a cached) token for an `OAuth2Config`. Supports the
   "config": { "grantType": "client_credentials", "accessTokenUrl": "https://idp/token",
               "clientId": "...", "clientSecret": "...", "scope": "openid" },
   "force": false,
-  "interactive": { "code": "...", "codeVerifier": "...", "redirectUri": "..." }
+  "interactive": { "code": "...", "codeVerifier": "...", "redirectUri": "..." },
+  "environmentId": "env_...",
+  "collectionId": "col_..."
 }
 ```
+
+`environmentId` and `collectionId` (optional strings; another type is a `400`
+`oauth2_invalid_config` naming it) are the scopes a Send of the request reads:
+the route resolves the config's `privateKey` reference against that
+environment, that collection's chain and the globals, and nothing else in the
+config, which the caller sends resolved (#3632). A `privateKey` reference with
+neither id is a `400` `oauth2_invalid_config` saying to send the saved request
+or name a key file in `privateKeyFile`; one no named scope defines is the same
+`400` naming the reference. A `privateKeyFile` needs no id.
 
 `force: true` bypasses the cache (refreshes via the refresh token when present,
 else re-acquires). `interactive` is only used for the `authorization_code` grant,

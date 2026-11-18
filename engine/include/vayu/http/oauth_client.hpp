@@ -140,8 +140,9 @@ std::string cache_key (const nlohmann::json& config);
  * The key is `privateKey`, the PEM itself, or `privateKeyFile`, a path read
  * through the file-trust rule (`FileAccessPolicy::approved_path`); exactly one
  * is set. A `privateKey` is the *resolved* PEM: one still holding a
- * `{{reference}}` is refused, so whoever holds the saved request resolves it
- * before asking for a token.
+ * `{{reference}}` is refused (@ref unresolved_private_key_message), so whoever
+ * holds the request's scopes resolves it before asking for a token
+ * (`http::resolve_private_key_reference`).
  *
  * @param now the clock reading `iat` and `exp` are written from; a parameter so
  *        a test asserts `exp - iat` without reading the wall clock.
@@ -151,6 +152,13 @@ std::string cache_key (const nlohmann::json& config);
 std::expected<std::string, TokenError> build_jwt_assertion (vayu::db::Database& db,
 const nlohmann::json& config,
 std::chrono::system_clock::time_point now);
+
+/**
+ * Why a `privateKey` still written as @p written cannot sign: no variable in
+ * scope answered the reference (#3632). Quotes @p written only when it is one
+ * `{{variable}}` reference, so text that may be key material is never echoed.
+ */
+std::string unresolved_private_key_message (std::string_view written);
 
 /**
  * @brief Expiry check with skew: expired iff expires_in > 0 and
