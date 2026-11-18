@@ -721,18 +721,26 @@ Notes:
   the main exchange: **each record's `request` and `response` body is cut to
   the same 32 KB**, with the same `bodyTruncated` / `bodyBytes` pair, and the
   records count toward the row's share of the 96 KB budget. **A trace over
-  what is left of the budget gives up its records' bodies first**: each one
-  is stored `""` with `bodyTruncated: true` and its true `bodyBytes`, the
-  engine's own spelling for a record body past its shared budget, and the
-  `scripts` node gains `scriptRequestBodiesOmitted: true`. The records stay
-  (method, URL, status, headers, timing), and the main exchange is never cut
-  for them; only a trace still over after the shed is omitted, as above. The
-  first trace sheds the same way before it is embedded, so a design run's
-  single row is bounded too. A sequential collection run's `lifecycle` rows
-  (`script.setup` / `script.teardown`) carry records as `scriptRequests` too:
-  their nodes are cut per node the same way, and their records together are
-  held to a 96 KB budget of their own in run order, setup before teardown, a
-  row past what is left shedding its bodies under the same flag. A secret
+  what is left of the budget gives up its records before anything of its
+  own**, one step at a time, stopping at the first that fits. First the
+  bodies: each one is stored `""` with `bodyTruncated: true` and its true
+  `bodyBytes`, the engine's own spelling for a record body past its shared
+  budget, and the `scripts` node gains `scriptRequestBodiesOmitted: true`.
+  Then the detail: each record is cut to `source`, `scope`, `status`,
+  `error_type`, `totalMs` and `request.method` / `request.url` (header maps,
+  redirect hops, timing phases and the `response` node go), in the same
+  order so a console line's `scriptRequest` index still names its call, and
+  the node gains `scriptRequestDetailOmitted: true`. Last the records
+  themselves: `scriptRequests` and both flags are removed and
+  `scriptRequestsOmitted` holds how many there were. The main exchange is
+  never cut for them; only a trace still over with no records left is
+  omitted, as above. The first trace sheds the same way before it is
+  embedded, so a design run's single row is bounded too. A sequential
+  collection run's `lifecycle` rows (`script.setup` / `script.teardown`)
+  carry records as `scriptRequests` too: their nodes are cut per node the
+  same way, and their records together are held to a 96 KB budget of their
+  own in run order, setup before teardown, a row past what is left giving
+  them up by the same three steps under the same flags. A secret
   variable's value in any string of a record, a body included, is masked like
   the rest of the run's output, since a record uses the trace's own member
   names. The MCP server never sets `allowScriptRequests`, so only a run the

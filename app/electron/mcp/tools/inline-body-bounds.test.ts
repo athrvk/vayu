@@ -147,6 +147,88 @@ describe("a stored trace's script requests (#3633)", () => {
 		expect(carried).toBeLessThanOrEqual(MAX_REPORT_TRACE_BYTES);
 	});
 
+	/**
+	 * A record that is all metadata: 100 request headers and 20 redirect hops,
+	 * about 10 KiB with no body at all.
+	 */
+	function heavyRecord(url = "http://127.0.0.1:7000/token"): Json {
+		const headers = Object.fromEntries(
+			Array.from({ length: 100 }, (_, i) => [`X-Trace-${i}`, "v".repeat(64)])
+		);
+		const hop = { status: 302, url, headers: { Location: url } };
+		const base = record("", "");
+		return {
+			...base,
+			request: { ...node(base, "request"), url, headers },
+			response: {
+				...node(base, "response"),
+				redirects: Array.from({ length: 20 }, () => hop),
+			},
+			error_type: "",
+		};
+	}
+
+	const passedStep = (index: number, trace: Json) => ({
+		id: index + 1,
+		trace: { ...trace, stepIndex: index, outcome: "passed" },
+	});
+
+	// Mutation check: drop `summarizeScriptRequests` from the shed steps and the
+	// records go whole (`scriptRequestsOmitted`); drop it and
+	// `omitScriptRequests` both and the later row loses its trace.
+	test("a later row whose records are over even without bodies keeps its exchange and each call's summary", () => {
+		const records = Array.from({ length: 10 }, () => heavyRecord());
+		expect(bytesOf(records)).toBeGreaterThan(MAX_REPORT_TRACE_BYTES);
+		const out = bound({
+			results: [passedStep(0, traceWith(huge, [])), passedStep(1, traceWith(huge, records))],
+		});
+
+		expect(out).not.toHaveProperty("tracesOmitted");
+		const later = rows(out)[1];
+		expect(later).not.toHaveProperty("traceOmitted");
+		const trace = later.trace as Json;
+		expect(Buffer.byteLength(node(trace, "response").body as string, "utf8")).toBe(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(node(trace, "request")).toEqual({ url: "https://api.test/orders" });
+
+		const scripts = scriptsOf(later);
+		expect(scripts.scriptRequestDetailOmitted).toBe(true);
+		const summaries = recordsOf(scripts);
+		expect(summaries).toHaveLength(records.length);
+		for (const summary of summaries) {
+			expect(summary).toEqual({
+				source: "pre",
+				scope: "collection",
+				status: 200,
+				error_type: "",
+				totalMs: 12,
+				request: { method: "POST", url: "http://127.0.0.1:7000/token" },
+			});
+		}
+		const carried = rows(out).reduce((sum, row) => sum + bytesOf(row.trace), 0);
+		expect(carried).toBeLessThanOrEqual(MAX_REPORT_TRACE_BYTES);
+	});
+
+	// Mutation check: drop `omitScriptRequests` from the shed steps and the later
+	// row loses its trace.
+	test("a later row whose records' summaries are still over gives the records up, counted, and keeps its exchange", () => {
+		const longUrl = `http://127.0.0.1:7000/token?q=${"u".repeat(8_000)}`;
+		const records = Array.from({ length: 10 }, () => heavyRecord(longUrl));
+		const out = bound({
+			results: [passedStep(0, traceWith(huge, [])), passedStep(1, traceWith(huge, records))],
+		});
+
+		expect(out).not.toHaveProperty("tracesOmitted");
+		const later = rows(out)[1];
+		expect(later).not.toHaveProperty("traceOmitted");
+		expect(
+			Buffer.byteLength(node(later.trace as Json, "response").body as string, "utf8")
+		).toBe(MAX_INLINE_BODY_BYTES);
+		const scripts = scriptsOf(later);
+		expect(scripts).toEqual({ consoleLogs: [], scriptRequestsOmitted: records.length });
+	});
+
 	test("a shed body the engine had already cut keeps the size the engine recorded", () => {
 		const engineCut = {
 			...record("", ""),
@@ -200,6 +282,33 @@ describe("a lifecycle row's script requests (#3633)", () => {
 			status: 200,
 			response: { body: "", bodyTruncated: true, bodyBytes: huge.length },
 		});
+		expect(teardown).toMatchObject({ id: "el_2", outcome: "ok" });
+	});
+
+	// Mutation check: drop `summarizeScriptRequests` from the shed steps and
+	// teardown's records go whole (`scriptRequestsOmitted`).
+	test("a row past what is left, still over without bodies, keeps each call's summary", () => {
+		const headers = Object.fromEntries(
+			Array.from({ length: 400 }, (_, i) => [`X-Trace-${i}`, "v".repeat(64)])
+		);
+		const metadataOnly = { ...record("", ""), response: { headers, body: "" } };
+		const out = bound({
+			lifecycle: {
+				setup: [lifecycleRow("el_1", [record(huge, huge)])],
+				teardown: [lifecycleRow("el_2", [metadataOnly, metadataOnly])],
+			},
+		});
+
+		const [teardown] = (out.lifecycle as { teardown: Json[] }).teardown;
+		expect(teardown.scriptRequestDetailOmitted).toBe(true);
+		expect(recordsOf(teardown)).toEqual([
+			expect.objectContaining({
+				status: 200,
+				request: { method: "POST", url: expect.any(String) },
+			}),
+			expect.objectContaining({ status: 200 }),
+		]);
+		expect(recordsOf(teardown)[0]).not.toHaveProperty("response");
 		expect(teardown).toMatchObject({ id: "el_2", outcome: "ok" });
 	});
 
