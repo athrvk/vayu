@@ -7,15 +7,32 @@
 
 /**
  * What the Logs tab does with one line of a log file (#3635): tell a record
- * from a line that is not one, turn it back into the text that Copy line and
- * Export write, and estimate what holding it costs.
+ * from a line that is not one, draw its extra fields, turn it back into the text
+ * that Copy line and Export write, and estimate what holding it costs.
  */
 
-import type { LogEntry, UnparsedLogLine } from "@/types/electron";
+import type { LogEntry, LogFileRecord, UnparsedLogLine } from "@/types/electron";
 
 /** A record always carries a string `ts`, so a field named `unparsed` cannot pass for this. */
 export function isUnparsedEntry(entry: LogEntry): entry is UnparsedLogLine {
 	return "unparsed" in entry && !("ts" in entry);
+}
+
+/**
+ * The keys the `key=value` text leaves out: the table's columns, and `pid` and
+ * `tid`, which `electron/log.ts`'s text renderer leaves out too (the opened
+ * row's JSON shows them).
+ */
+const COLUMN_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid"]);
+
+/** The record's fields that have no column, as `key=value` pairs. */
+export function fieldsText(record: LogFileRecord): string {
+	return Object.entries(record)
+		.filter(([key]) => !COLUMN_KEYS.has(key))
+		.map(
+			([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`
+		)
+		.join(" ");
 }
 
 /** The line as the file holds it: a record as one JSON object, an unparsed line as its raw text. */
@@ -38,4 +55,17 @@ export function entryBytes(entry: LogEntry): number {
 		sizes.set(entry, bytes);
 	}
 	return bytes;
+}
+
+const keys = new WeakMap<LogEntry, number>();
+let nextKey = 0;
+
+/** A stable React key for a held line: the lines have no id of their own. */
+export function entryKey(entry: LogEntry): number {
+	let key = keys.get(entry);
+	if (key === undefined) {
+		key = nextKey++;
+		keys.set(entry, key);
+	}
+	return key;
 }

@@ -17,11 +17,42 @@
  * when it is closed and Radix drops an inactive tab's content, so this
  * component's mount and unmount are exactly "the tab is showing" and "the tab
  * is hidden or the panel closed", which is when a tail (`logs:tail`) must
- * start and stop.
+ * start and stop. The store's `start` and `stop` are bound to them here and
+ * nowhere else.
+ *
+ * The files are read by the main process, so outside Electron (the renderer
+ * under plain vite, `app/CLAUDE.md`) there is nothing to read and the tab says
+ * so: no stub bridge, which would answer as if it were one.
  */
 
-import { EmptyState } from "@/components/shared";
+import { useEffect } from "react";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { LogList } from "./LogList";
+import { LogsFooter } from "./LogsFooter";
+import { LogsToolbar } from "./LogsToolbar";
+import { useLogsStore } from "./logs-store";
+
+function LogsView() {
+	const start = useLogsStore((s) => s.start);
+	const stop = useLogsStore((s) => s.stop);
+
+	useEffect(() => {
+		void start();
+		return stop;
+	}, [start, stop]);
+
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<LogsToolbar />
+			<LogList />
+			<LogsFooter />
+		</div>
+	);
+}
 
 export function LogsTab() {
-	return <EmptyState variant="inline" title="Nothing to show here yet" />;
+	if (!window.electronAPI?.logs) {
+		return <EmptyState variant="inline" title="Logs are available in the desktop app." />;
+	}
+	return <LogsView />;
 }

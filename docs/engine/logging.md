@@ -193,7 +193,8 @@ at 20 records per second per window - the 21st in a window is dropped with one
 cannot fill the disk with either the records or the warnings about them.
 Settings,
 General's **Open logs folder** button (`app:openLogsFolder`) opens
-`<data-dir>/logs/` in the OS file manager.
+`<data-dir>/logs/` in the OS file manager, and so does the one in the Logs tab
+(below), which reads the same files without leaving the app.
 
 The renderer chooses nothing about a line's size or ownership, so `log-ipc.ts`
 bounds what it sends. `msg` is cut at 2000 characters; `err` is kept only as an
@@ -235,6 +236,35 @@ destroyed or its main frame navigates, and when the app quits. Nothing in the
 MCP server reaches these files: no tool, resource or prompt names a log, and
 `mcp/log-reader.guard.test.ts` holds that.
 
+**The Logs tab** (#3635) is the bottom panel's one tab today: the Dock's Logs
+button, the palette's "Show or hide the logs" row and Ctrl+J / ⌘J open it. It
+reads the newest lines, then follows the files, and draws one row per line:
+the time in your zone (UTC and the zone on hover), the level, `src`, `cat`, the
+message and the record's remaining fields as `key=value`, the text rendering's
+shape above. A row opens to the whole record as formatted JSON, and a line that
+is not a record (a crash's stack, a half-written line) is shown raw with an
+"unparsed" marker. Above the table: level, source and component filters, a
+search box (free text, or `field:value`, where a quoted value is exact and a
+bare one a substring: `cat:oauth`, `status:"500"`), **Follow** (on by default,
+off when you scroll up, on again by its switch or by scrolling to the end), a
+**Jump to time** control (the platform's own date-time input), **Export** (the
+lines held in the table, as JSON lines, through the save dialog, with the count
+it wrote) and the logs folder button; a line's **Copy line** is in its opened
+row. The filters are evaluated in the main process: a change restarts the tail
+and reads again, replacing what the table held.
+
+The tab holds at most 10,000 lines or 16 MiB, whichever comes first. Following
+drops the oldest. **Search older** pages back through the files, says how far
+it has looked ("Searched back to ..."), turns Follow off and drops the newest;
+having dropped any, the tab stops appending the tail (it would sit after a
+gap), and Follow reads the newest lines again. A burst past the tail's 500 lines
+per poll shows as "N lines skipped in a burst": the lines are in the files. The
+footer names the engine's `logLevel` and says requests answered 2xx and
+database writes are written at `debug`, which a default install does not keep,
+with a link to Settings › Observability, where the level changes and applies
+after a restart. Outside Electron (the renderer under plain vite) the tab says
+the logs are available in the desktop app.
+
 ## Reading the files
 
 ```bash
@@ -245,3 +275,6 @@ jq -s 'sort_by(.ts) | .[] | "\(.ts) \(.src) \(.level) \(.cat) \(.msg)"' logs/*.l
 The second line is the merge across every file in the directory - `engine_*`,
 `cli_*`, `app_*` and, when it exists, `mcp_*` - every record from every
 source, interleaved by timestamp.
+
+The app's Logs tab does the same merge, by `ts`, without leaving the window
+([Reading the files in the app](#reading-the-files-in-the-app)).

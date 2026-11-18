@@ -22,11 +22,16 @@
  * to the same rule.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as renderWithTooltips } from "@/test/render-with-tooltips";
 import { useLayoutStore } from "@/stores";
 import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
+import { fakeLogsBridge, logRecord } from "@/modules/logs/logs-bridge.testkit";
+import { useLogsStore } from "@/modules/logs/logs-store";
 import { BottomPanel } from "./BottomPanel";
+
+vi.mock("@/queries", () => ({ useConfigQuery: () => ({ data: undefined }) }));
 
 beforeEach(() => {
 	useLayoutStore.setState({ bottomPanelOpen: true, bottomPanelTab: "logs" });
@@ -34,8 +39,22 @@ beforeEach(() => {
 
 function panelAndDescendants(): HTMLElement[] {
 	render(<BottomPanel />);
+	return everythingInPanel();
+}
+
+function everythingInPanel(): HTMLElement[] {
 	const root = screen.getByRole("region", { name: BOTTOM_PANEL_LABEL });
 	return [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+}
+
+function undeclared(elements: HTMLElement[]): string[] {
+	return elements
+		.filter(
+			(el) =>
+				(/\bbg-card\b/.test(el.className) && !/\bsurface-card\b/.test(el.className)) ||
+				(/\bbg-muted\b/.test(el.className) && !/\bsurface-sunken\b/.test(el.className))
+		)
+		.map((el) => el.className);
 }
 
 describe("the bottom panel's surface", () => {
@@ -51,11 +70,32 @@ describe("the bottom panel's surface", () => {
 	});
 
 	it("paints no card or muted fill without the surface class that declares its rule", () => {
-		const bare = panelAndDescendants().filter(
-			(el) =>
-				(/\bbg-card\b/.test(el.className) && !/\bsurface-card\b/.test(el.className)) ||
-				(/\bbg-muted\b/.test(el.className) && !/\bsurface-sunken\b/.test(el.className))
-		);
-		expect(bare.map((el) => el.className)).toEqual([]);
+		expect(undeclared(panelAndDescendants())).toEqual([]);
+	});
+});
+
+describe("the bottom panel's surface with the Logs tab's lines drawn", () => {
+	const bridge = fakeLogsBridge();
+
+	beforeEach(() => {
+		bridge.answer({ records: [logRecord(1), { unparsed: true, raw: "raw line" }] });
+		vi.stubGlobal("electronAPI", { logs: bridge.logs });
+	});
+
+	afterEach(() => {
+		useLogsStore.getState().stop();
+		vi.unstubAllGlobals();
+	});
+
+	it("declares the surface of the block an opened row draws", async () => {
+		renderWithTooltips(<BottomPanel />);
+		await waitFor(() => expect(useLogsStore.getState().records).toHaveLength(2));
+		fireEvent.click(await screen.findByRole("button", { name: /line 1/ }));
+
+		const everything = everythingInPanel();
+		// The opened row's JSON block is on a sunken surface; a guard that found no
+		// such block would be reading a tab that drew none of its own surfaces.
+		expect(everything.some((el) => /\bsurface-sunken\b/.test(el.className))).toBe(true);
+		expect(undeclared(everything)).toEqual([]);
 	});
 });
