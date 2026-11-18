@@ -42,7 +42,7 @@ import { useRunWatchers } from "./hooks/useRunWatchers";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useLiveWindowSync } from "./hooks/useLiveChartSettings";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
-import { useRunningServicesPublisher } from "@/modules/services";
+import { useLiveRunPublisher, useRunningServicesPublisher } from "@/modules/services";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -173,6 +173,9 @@ function App() {
 	// and the engine goes down with the app. This is what lets the close name
 	// what it is about to stop instead of taking it silently (#1363).
 	useRunningServicesPublisher();
+	// A live run goes down with the engine too, and the same close names it
+	// first (#3604).
+	useLiveRunPublisher();
 
 	// Register Electron before-quit handler to flush pending saves. The result
 	// rides the ACK back to main, which asks before discarding anything that

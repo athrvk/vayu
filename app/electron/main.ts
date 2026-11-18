@@ -69,7 +69,11 @@ import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
 import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
 import { startsMainFramePage } from "./main-frame-page.js";
-import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
+import {
+	CONFIRM_RESTART_CHANNEL,
+	createServiceStopGuard,
+	registerRunningServicesIpc,
+} from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
 import {
@@ -480,9 +484,10 @@ const rendererRecovery = createRendererRecovery({
 	onRecovered: () => quitFlow.reset(),
 });
 
-// What a close is about to stop, said before it stops it (#1363). The renderer
-// publishes what the engine is holding for it; the wording, the platform rule
-// and the button order are this side's. See service-stop-guard.ts.
+// What a close is about to stop, said before it stops it (#1363, #3604). The
+// renderer publishes what the engine is holding for it and the run it shows
+// live; the wording, the platform rule and the button order are this side's.
+// See service-stop-guard.ts.
 const serviceStopGuard = createServiceStopGuard({
 	ask: async (prompt) => {
 		const choice = await askOnWindow({
@@ -1264,9 +1269,10 @@ function setupIpcHandlers() {
 	// about the window's focus, which only this side can answer.
 	registerOsIconIpc(ipcMain, osIcon, (msg, fields) => appLogger().warn("ipc", msg, fields));
 
-	// What the Services drawer has listening, kept current for the close that
-	// would stop it (#1363). One snapshot per change, not a question asked while
-	// the user waits on the close - see service-stop-guard.ts.
+	// What the Services drawer has listening and the run the window shows live,
+	// kept current for the close that would stop them (#1363, #3604). One
+	// publication per change on each channel, not a question asked while the
+	// user waits on the close - see service-stop-guard.ts.
 	registerRunningServicesIpc(ipcMain, serviceStopGuard, (msg, fields) =>
 		appLogger().warn("ipc", msg, fields)
 	);
@@ -1279,6 +1285,11 @@ function setupIpcHandlers() {
 	ipcMain.handle("shell:openAppLink", async (_e, key: string) => {
 		await shell.openExternal(appLinkUrl(key));
 	});
+
+	// Asked by the renderer before it prepares a restart, not inside
+	// `engine:restart`: a dialog there would sit over a start window the healthy
+	// engine's next poll closes (#3604). Answers yes at once with no run live.
+	ipcMain.handle(CONFIRM_RESTART_CHANNEL, () => serviceStopGuard.confirm("restart"));
 
 	// Handle engine restart request from renderer
 	ipcMain.handle("engine:restart", async () => {

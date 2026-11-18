@@ -167,6 +167,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	enginePort: enginePortFromArgv(process.argv),
 	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
+	// Whether Restart may go on: asks first when a run is live (#3604).
+	confirmEngineRestart: (): Promise<boolean> => ipcRenderer.invoke("engine:confirm-restart"),
 	getEngineStartFailure: (): Promise<string | null> => ipcRenderer.invoke("engine:startFailure"),
 	getEngineLifecycle: (): Promise<EngineLifecyclePayload> =>
 		ipcRenderer.invoke("engine:lifecycle"),
@@ -653,6 +655,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			port: number;
 		}>
 	): void => ipcRenderer.send("services:running", services),
+
+	// The run this window shows live, or null once none is, so the same close
+	// can name it first (#3604). Mirrors `LiveRun` in
+	// `electron/service-stop-guard.ts`, inlined for the same reason.
+	setLiveRun: (run: { kind: "load" | "collection"; label: string | null } | null): void =>
+		ipcRenderer.send("runs:live", run),
 
 	// System notifications for what finishes while the user is elsewhere
 	// (#1358). The renderer sends what happened; main decides whether to post

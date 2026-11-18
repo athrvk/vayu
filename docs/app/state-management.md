@@ -775,7 +775,10 @@ each `useEngineRestart` instance so that the Dock's button and the Settings
 banner share it: a second click, or the other surface's button, finds it set and
 asks the main process for nothing. The hook reads it from the store, not from
 its render's value, because two clicks in one frame both see a stale `false`
-there.
+there. It is set only once the restart question is answered yes (issue #3604:
+with a run live, Restart asks first), so a Cancel never shows "Restarting…";
+two clicks while that question is up join the one question and the store is
+read again after it.
 
 `workers` is the `workers` field from the same poll (issue #1508) - the
 `workers` setting's effective value, not the machine's raw core count - read by

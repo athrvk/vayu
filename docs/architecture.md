@@ -584,9 +584,10 @@ which case the app picks a fallback (below).
   screen.
 - **A quit or window-close asks before discarding a flush that did not land**
   (issue #1489). Both gestures go through one state machine in the main
-  process, `quit-flow.ts`: `idle`, then the running-services question below,
-  then the flush, then the loss question, then `proceeding`, after which a quit
-  hands over to `quit-shutdown.ts` to stop the engine and the MCP server. The
+  process, `quit-flow.ts`: `idle`, then the question below about running
+  services and a live run, then the flush, then the loss question, then
+  `proceeding`, after which a quit hands over to `quit-shutdown.ts` to stop
+  the engine and the MCP server. The
   flush waits out its round trip (the renderer's ACK, or a 2 s ceiling if it
   never comes) whenever there is a page to ask. With no window, a renderer
   that is gone, or a page that has not finished loading, nothing is sent and
@@ -625,17 +626,27 @@ which case the app picks a fallback (below).
   until Quit. Neither one takes a listening service silently: a close or quit
   that would stop something names it - "Close Vayu and stop the 2 services it is
   running?", with the inbox's port and the mock server's collection - and Cancel
-  leaves everything up. macOS's window-close asks nothing, having stopped
-  nothing. The one quit that never asks is a signal: `install.sh` replaces a
-  running AppImage that way, and a dialog would hold the upgrade open waiting for
-  an answer nobody is there to give (issue #1363). The flush-failure dialog above
-  is no exception: a signal quit that cannot save its edits would stall on it
-  until `install.sh` killed the app and orphaned the engine (issue #1908).
+  leaves everything up. A live run dies the same way, and the same dialog names
+  it first: the load test or collection run the app is showing, which the
+  renderer publishes from `stores/run-gate.ts` only while the engine is serving
+  ("Quit Vayu and stop the load test and the 2 services it is running?", the
+  load test by its method and URL, and that it ends as stopped with what it has
+  measured so far; issue #3604). macOS's window-close asks nothing, having
+  stopped nothing. The one quit that never asks is a signal: `install.sh`
+  replaces a running AppImage that way, and a dialog would hold the upgrade
+  open waiting for an answer nobody is there to give (issue #1363). The
+  flush-failure dialog above is no exception: a signal quit that cannot save
+  its edits would stall on it until `install.sh` killed the app and orphaned
+  the engine (issue #1908).
   An engine restart stops them too, whether a crash ended the old engine or
-  the user pressed Restart, and neither asks first. What it does instead is
-  say so afterwards: the renderer keeps what the cached Services lists said
-  was running when the outage began, and once the health poll or the Restart
-  sees the engine back it compares that by id with the engine's fresh lists
+  the user pressed Restart, and neither asks first about services. A Restart
+  pressed with a run live is the exception: it asks before it does anything,
+  in the same dialog ("Restart Vayu's engine and stop the load test it is
+  running?", the services beside the run), and Cancel leaves the run, the
+  services and the engine as they were (issue #3604). For services, what a
+  restart does instead is say so afterwards: the renderer keeps what the
+  cached Services lists said was running when the outage began, and once the
+  health poll or the Restart sees the engine back it compares that by id with the engine's fresh lists
   and raises one toast naming what is no longer running (three by name, then a
   count), with a View services action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
   reconnect paths report, and one snapshot is pending per outage, so the user
