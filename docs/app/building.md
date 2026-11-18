@@ -515,7 +515,11 @@ at runtime:
   root it returns. All are imported on the first verification, so they are not
   on the startup graph. With their closure (`@sigstore/core`, `@tufjs/models`,
   `minimatch`) they add about 160 files and 0.8 MB to the asar. `tuf-js` needs
-  Node `^22.22.2 || ^24.15.0 || >=26`; Electron 44 bundles 24.21
+  Node `^22.22.2 || ^24.15.0 || >=26`; Electron 44 bundles 24.21.
+  The floor is `tuf-js` 6.0.2 (`@tufjs/models` 5.0.2): 5.0.0 called
+  `crypto.verify` without a digest, which BoringSSL (Electron) refuses for the
+  ECDSA keys every Sigstore role uses, so no update could verify
+  (`electron/sigstore-tuf-signatures.test.ts` holds it under Node)
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
 package listed there ships a copy the app never opens: before the test that
