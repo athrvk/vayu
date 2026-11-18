@@ -9,7 +9,8 @@
 // Server state (runs) is now managed by TanStack Query
 
 import { create } from "zustand";
-import type { Run, RunOrigin } from "@/types";
+import type { Run, RunOrigin, StoredRunOutcome } from "@/types";
+import { rowStoredOutcome } from "@/components/shared/run-outcome";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 
 /**
@@ -22,6 +23,8 @@ export type FilterType = "all" | Run["type"];
 export type FilterStatus = "all" | "pending" | "running" | "completed" | "stopped" | "failed";
 /** The origin Select's kinds: `RunOrigin["kind"]` minus `other`, which has no entry of its own. */
 export type FilterOrigin = "all" | Exclude<RunOrigin["kind"], "other">;
+/** The outcome Select's verdicts, in the engine's spelling (`GET /runs?outcome=`). */
+export type FilterOutcome = "all" | StoredRunOutcome;
 type SortBy = "newest" | "oldest";
 
 interface HistoryUIState {
@@ -45,6 +48,14 @@ interface HistoryUIState {
 	 */
 	filterOrigin: FilterOrigin;
 	/**
+	 * The verdict the row draws. Applied on both sides like `filterOrigin`:
+	 * `GET /runs?outcome=` decides which runs are fetched (the engine stores the
+	 * verdict, so a failure older than the loaded pages is reachable) and
+	 * `filterRuns` decides which fetched rows are shown, from the row's stored
+	 * outcome or the one `rowOutcome` derives for a row that has none.
+	 */
+	filterOutcome: FilterOutcome;
+	/**
 	 * Narrows `filterOrigin: "mcp"` to one client, held as the **display name**
 	 * (`mcpClientDisplayName`) rather than the raw identifier: two spellings of
 	 * one product (`claude-code`, `Claude Code`) are one entry in the Select,
@@ -61,6 +72,7 @@ interface HistoryUIState {
 	setFilterStatus: (status: FilterStatus) => void;
 	setPinnedOnly: (pinnedOnly: boolean) => void;
 	setFilterOrigin: (origin: FilterOrigin) => void;
+	setFilterOutcome: (outcome: FilterOutcome) => void;
 	setFilterClient: (client: string | null) => void;
 	setSortBy: (sortBy: SortBy) => void;
 	resetFilters: () => void;
@@ -72,6 +84,7 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 	filterStatus: "all",
 	pinnedOnly: false,
 	filterOrigin: "all",
+	filterOutcome: "all",
 	filterClient: null,
 	sortBy: "newest",
 
@@ -82,6 +95,7 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 	// A client belongs to the kind it was picked under, so changing the kind
 	// drops it: "Agents > Cursor" must not survive a switch to "App".
 	setFilterOrigin: (origin) => set({ filterOrigin: origin, filterClient: null }),
+	setFilterOutcome: (outcome) => set({ filterOutcome: outcome }),
 	setFilterClient: (client) => set({ filterClient: client }),
 	setSortBy: (sortBy) => set({ sortBy }),
 	resetFilters: () =>
@@ -91,21 +105,22 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 			filterStatus: "all",
 			pinnedOnly: false,
 			filterOrigin: "all",
+			filterOutcome: "all",
 			filterClient: null,
 			sortBy: "newest",
 		}),
 }));
 
 /**
- * Filter (by type/status/pin/origin) and sort a run list. Search is *not* handled
+ * Filter (by type/status/pin/origin/outcome) and sort a run list. Search is *not* handled
  * here: it moved server-side to the `q` param so it covers all runs, not just
  * the pages loaded into the sidebar (see `useRunsQuery`). Only the MCP-client
  * narrowing and the sort are client-side alone, over the loaded pages.
  * Use with the flattened infinite-query data.
  *
- * Type, status, `pinnedOnly` and the origin kind are applied on *both* sides,
- * and deliberately: the `type=` / `status=` / `baseline=true` / `origin=`
- * params decide which runs are fetched, and this pass decides which of the
+ * Type, status, `pinnedOnly`, the origin kind and the outcome are applied on
+ * *both* sides, and deliberately: the `type=` / `status=` / `baseline=true` /
+ * `origin=` / `outcome=` params decide which runs are fetched, and this pass decides which of the
  * fetched rows are shown. Unpinning patches the loaded pages in place rather
  * than refetching them (`useSetRunBaselineMutation` - a refetch would lose a
  * pin the user scrolled to), so without this pass the run just unpinned would
@@ -115,10 +130,24 @@ export function filterRuns(
 	runs: Run[],
 	filters: Pick<
 		HistoryUIState,
-		"filterType" | "filterStatus" | "pinnedOnly" | "filterOrigin" | "filterClient" | "sortBy"
+		| "filterType"
+		| "filterStatus"
+		| "pinnedOnly"
+		| "filterOrigin"
+		| "filterOutcome"
+		| "filterClient"
+		| "sortBy"
 	>
 ): Run[] {
-	const { filterType, filterStatus, pinnedOnly, filterOrigin, filterClient, sortBy } = filters;
+	const {
+		filterType,
+		filterStatus,
+		pinnedOnly,
+		filterOrigin,
+		filterOutcome,
+		filterClient,
+		sortBy,
+	} = filters;
 
 	let filtered = runs;
 
@@ -141,6 +170,11 @@ export function filterRuns(
 	// it is shown under neither Select entry.
 	if (filterOrigin !== "all") {
 		filtered = filtered.filter((run) => run.origin?.kind === filterOrigin);
+	}
+
+	// A row the renderer draws no verdict for has no outcome, and matches none.
+	if (filterOutcome !== "all") {
+		filtered = filtered.filter((run) => rowStoredOutcome(run) === filterOutcome);
 	}
 
 	if (filterClient !== null) {

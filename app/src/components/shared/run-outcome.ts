@@ -321,6 +321,12 @@ const OUTCOME_OF_STORED: Record<StoredRunOutcome, RunOutcome> = {
 	not_judged: "not-judged",
 };
 
+const STORED_OF_OUTCOME: Record<RunOutcome, StoredRunOutcome> = {
+	passed: "passed",
+	failed: "failed",
+	"not-judged": "not_judged",
+};
+
 /**
  * The verdict a history list row can state from its own `resultSummary`. Only a
  * terminal load or collection run's row carries one; every other row, and a row
@@ -366,4 +372,14 @@ export function rowOutcome(run: Run): RunJudgement | null {
 	const outcome = OUTCOME_OF_STORED[run.outcome];
 	if (!outcome) return derived;
 	return derived?.outcome === outcome ? derived : { outcome, reason: STORED_OUTCOME_REASON };
+}
+
+/**
+ * The row's verdict in the engine's spelling, the one `GET /runs?outcome=`
+ * takes and a stored `run.outcome` holds; `null` where {@link rowOutcome} draws
+ * none, which is also where the engine stores none and matches no filter.
+ */
+export function rowStoredOutcome(run: Run): StoredRunOutcome | null {
+	const judged = rowOutcome(run);
+	return judged ? STORED_OF_OUTCOME[judged.outcome] : null;
 }

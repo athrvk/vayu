@@ -27,7 +27,13 @@ import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { isRunInProgress } from "@/lib/run-status";
 import { HISTORY_SERIES_MAX_POINTS, RUNS_PAGE_LIMIT } from "@/config/network";
-import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
+import type {
+	Run,
+	RunListResponse,
+	RunOrigin,
+	StartScenarioRunRequest,
+	StoredRunOutcome,
+} from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
@@ -84,13 +90,17 @@ export function runsPollInterval(loadedPages: number): number | false {
  *          reason as `origin`: "Failed" has to find the failures older than the
  *          loaded pages, and the header total has to count what is listed.
  * @param status Server-side (`status=<status>`) and keyed like `type`.
+ * @param outcome Server-side (`outcome=<verdict>`) and keyed like `type`: the
+ *          engine stores the verdict, so "Failed" finds the failed runs older
+ *          than the loaded pages (#3547).
  */
 export function runsListInfiniteOptions(
 	q?: string,
 	pinnedOnly = false,
 	origin?: RunOrigin["kind"],
 	type?: Run["type"],
-	status?: Run["status"]
+	status?: Run["status"],
+	outcome?: StoredRunOutcome
 ) {
 	const search = q?.trim() || undefined;
 	const baseline = pinnedOnly ? true : undefined;
@@ -101,6 +111,7 @@ export function runsListInfiniteOptions(
 			...(origin && { origin }),
 			...(type && { type }),
 			...(status && { status }),
+			...(outcome && { outcome }),
 		}),
 		queryFn: ({ pageParam }: { pageParam: string | undefined }): Promise<RunListResponse> =>
 			apiService.listRuns({
@@ -109,6 +120,7 @@ export function runsListInfiniteOptions(
 				origin,
 				type,
 				status,
+				outcome,
 				limit: RUNS_PAGE_LIMIT,
 				before: pageParam,
 			}),
@@ -137,10 +149,11 @@ export function useRunsQuery(
 	pinnedOnly = false,
 	origin?: RunOrigin["kind"],
 	type?: Run["type"],
-	status?: Run["status"]
+	status?: Run["status"],
+	outcome?: StoredRunOutcome
 ) {
 	return useInfiniteQuery({
-		...runsListInfiniteOptions(q, pinnedOnly, origin, type, status),
+		...runsListInfiniteOptions(q, pinnedOnly, origin, type, status, outcome),
 		refetchInterval: (query) => runsPollInterval(query.state.data?.pages.length ?? 0),
 	});
 }

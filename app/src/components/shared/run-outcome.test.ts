@@ -68,6 +68,7 @@ import {
 	missedBudgetsReason,
 	reportOutcome,
 	rowOutcome,
+	rowStoredOutcome,
 	type RunJudgement,
 	type RunOutcomeInput,
 } from "./run-outcome";
@@ -1097,11 +1098,12 @@ describe("row outcome conformance", () => {
 	});
 
 	it.each(CASES.map((c) => [c.name, c] as const))("%s", (_name, c) => {
-		const judged = rowOutcome(
-			row({ type: c.type, status: c.status, resultSummary: c.resultSummary } as Partial<Run>)
-		);
-		const wire = judged === null ? null : judged.outcome.replace("-", "_");
-		expect(wire).toBe(c.expected);
+		const derived = row({
+			type: c.type,
+			status: c.status,
+			resultSummary: c.resultSummary,
+		} as Partial<Run>);
+		expect(rowStoredOutcome(derived)).toBe(c.expected);
 	});
 });
 
