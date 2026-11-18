@@ -565,6 +565,37 @@ const VariableValues& vars,
 const BoundColumnNames& bound_columns = {});
 
 /**
+ * The OAuth 2.0 config member holding the `jwt_bearer` grant's signing key as
+ * one `{{variable}}` reference (#3632). Composition leaves it written in both
+ * @ref OAuth2Resolution modes, so no payload a client carries from
+ * `POST /compose` to a send holds the PEM. It is resolved only into the config
+ * a token is acquired with, held in memory beside that acquisition: by
+ * `routes::apply_late_auth` with the rest of the config on a Send and a
+ * sequential collection step, and by @ref resolve_private_key_reference at a
+ * load run's start and at `POST /oauth2/token`.
+ */
+inline constexpr std::string_view OAUTH2_PRIVATE_KEY = "privateKey";
+
+/**
+ * @p config's @ref OAUTH2_PRIVATE_KEY, when it is one `{{variable}}`
+ * reference, resolved against @p vars in place. What it leaves in @p config is
+ * key material: never store, log or answer that config.
+ *
+ * @return the refusal (`oauth::unresolved_private_key_message`) when no
+ *         variable answers the reference; nothing when the member is absent,
+ *         is not one reference, or resolved.
+ */
+[[nodiscard]] std::optional<std::string>
+resolve_private_key_reference (nlohmann::json& config, const VariableValues& vars);
+
+/**
+ * The `auth.config` of a payload (or request) @p payload when it states a
+ * @ref OAUTH2_PRIVATE_KEY, so a caller reads the variable scopes only for a
+ * config that needs them; null otherwise.
+ */
+[[nodiscard]] nlohmann::json* config_naming_private_key (nlohmann::json& payload);
+
+/**
  * Root-first ancestor chain for a collection (inclusive of the collection
  * itself). Cycle-guarded, so corrupted `parent_id` data terminates instead of
  * looping under the DB mutex. Empty for an unknown or empty id.

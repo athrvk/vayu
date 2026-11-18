@@ -25,6 +25,7 @@
 
 import { effectiveOAuth2Config } from "@/modules/request-builder/utils/auth-resolution";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
+import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import {
 	buildVariableValues,
 	resolveStringsDeep,
@@ -34,10 +35,15 @@ import {
 import type { Collection, OAuth2Config, Request } from "@/types";
 import { walkAncestors } from "./tree-utils";
 
-/** One distinct token the run sends: its cache key and a config that yields it. */
+/**
+ * One distinct token the run sends: its cache key, a config that yields it and
+ * the collection of the request it was first seen on, whose chain resolves a
+ * `jwt_bearer` key reference when the guard refreshes it.
+ */
 export interface RunOAuth2Config {
 	key: string;
 	config: OAuth2Config;
+	collectionId: string;
 }
 
 /** The stored requests of one collection the run sends. */
@@ -63,7 +69,7 @@ export function distinctRunOAuth2Configs(
 	collections: readonly Collection[],
 	scopes: RunVariableScopes
 ): RunOAuth2Config[] {
-	const byKey = new Map<string, OAuth2Config>();
+	const byKey = new Map<string, Omit<RunOAuth2Config, "key">>();
 	for (const { collectionId, requests } of groups) {
 		// One walk and one lookup per collection: every request in it inherits
 		// down the same chain and resolves against the same scopes.
@@ -81,11 +87,13 @@ export function distinctRunOAuth2Configs(
 			const raw = effectiveOAuth2Config(auth, ancestors);
 			if (raw === null || seen.has(raw)) continue;
 			seen.add(raw);
-			const config = resolveStringsDeep(raw, resolveString);
+			// The signing key stays the reference the config wrote: the engine
+			// resolves it, so the PEM never rides a request this app builds.
+			const config = keepSigningKeyReference(resolveStringsDeep(raw, resolveString), raw);
 			if (!config.accessTokenUrl || !config.clientId) continue;
 			const key = computeOAuth2CacheKey(config);
-			if (!byKey.has(key)) byKey.set(key, config);
+			if (!byKey.has(key)) byKey.set(key, { config, collectionId });
 		}
 	}
-	return [...byKey].map(([key, config]) => ({ key, config }));
+	return [...byKey].map(([key, entry]) => ({ key, ...entry }));
 }

@@ -107,7 +107,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
 - **MCP server for coding agents** - 82 typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off (and withholds the write tools until it is on)
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
-- **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
+- **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, JWT bearer, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
 - **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified (not `cheerio`, Backbone or Node built-ins)
 - **Composable scripting** - pre/post-request scripts compose down the hierarchy (root → folder → request)
 - **Command palette + deep search** - one shortcut to jump to any collection, request, environment or setting, searching inside them rather than just their names

@@ -7,18 +7,23 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
+#include "jwt_keys.hpp"
 #include "nested_json.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/utils/encoding.hpp"
 
 using nlohmann::json;
 
@@ -177,6 +182,188 @@ TEST_F (OAuthRouteTest, DeleteReportsWhetherRowExisted) {
 
     auto [s2, b2] = vayu::http::routes::oauth2_token_delete (*db_, "k2");
     EXPECT_EQ (b2["deleted"], false);
+}
+
+// ---------------------------------------------------------------------------
+// jwt_bearer: the key's reference resolves against the scopes named (#3632)
+// ---------------------------------------------------------------------------
+
+namespace jwt = vayu::tests::jwt;
+
+class OAuthRouteJwtBearerTest : public OAuthRouteTest {
+    protected:
+    void SetUp () override {
+        OAuthRouteTest::SetUp ();
+        db_->init ();
+    }
+
+    void TearDown () override {
+        std::error_code ignored;
+        if (!scratch_.empty ()) {
+            std::filesystem::remove_all (scratch_, ignored);
+        }
+        OAuthRouteTest::TearDown ();
+    }
+
+    /// A key file holding @p pem in a directory only this test uses, removed
+    /// with the fixture (a failing assertion included).
+    std::string key_file (const std::string& pem, const std::string& name) {
+        if (scratch_.empty ()) {
+            scratch_ = std::filesystem::temp_directory_path () /
+            (std::string ("vayu-oauth-route-jwt-") +
+            ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
+            std::filesystem::create_directories (scratch_);
+        }
+        const auto path = scratch_ / name;
+        std::ofstream (path, std::ios::binary) << pem;
+        return path.string ();
+    }
+
+    std::filesystem::path scratch_;
+
+    static json jwt_config (const vayu::tests::MockTokenServer& idp, const std::string& key) {
+        return json{ { "grantType", "jwt_bearer" },
+            { "accessTokenUrl", idp.url ("/token") },
+            { "clientId", "svc-client" }, { "subject", "alice@example.com" },
+            { "assertionAudience", "https://idp.example/token" }, { "privateKey", key } };
+    }
+
+    /// `{name: {value, enabled, secret}}`, the stored variables shape.
+    static std::string secret_variable (const std::string& name, const std::string& value) {
+        return json{ { name, { { "value", value }, { "enabled", true }, { "secret", true } } } }
+        .dump ();
+    }
+
+    void seed_environment (const std::string& variables) const {
+        vayu::db::Environment env;
+        env.id         = "env_1";
+        env.name       = "Env";
+        env.variables  = variables;
+        env.created_at = 1;
+        env.updated_at = 1;
+        db_->save_environment (env);
+    }
+
+    void seed_collection (const std::string& variables) const {
+        vayu::db::Collection col;
+        col.id         = "col_1";
+        col.name       = "Collection";
+        col.variables  = variables;
+        col.created_at = 1;
+        col.updated_at = 1;
+        db_->create_collection (col);
+    }
+
+    /// The assertion the token endpoint last received.
+    static std::string posted_assertion (const vayu::tests::MockTokenServer& idp) {
+        const auto form  = vayu::tests::parse_form (idp.last_body ());
+        const auto found = form.find ("assertion");
+        return found == form.end () ? std::string () :
+                                      vayu::utils::url_decode (found->second);
+    }
+};
+
+// The app's Get new token sends the stored reference with the request's
+// scopes; the engine signs with the key the scope holds, and the answer holds
+// neither the key nor the assertion. Mutation check: drop the
+// `resolve_token_signing_key` call from `oauth2_token_post` and both cases are
+// refused as an unresolved reference.
+TEST_F (OAuthRouteJwtBearerTest, AReferenceResolvesAgainstTheScopesTheBodyNames) {
+    const std::string pem = jwt::pkcs8 (jwt::keys ().rsa);
+    seed_environment (secret_variable ("env_key", pem));
+    seed_collection (secret_variable ("collection_key", pem));
+
+    for (const auto& [reference, scope] :
+    { std::pair<std::string, json>{ "{{env_key}}", { { "environmentId", "env_1" } } },
+    std::pair<std::string, json>{ "{{collection_key}}", { { "collectionId", "col_1" } } } }) {
+        SCOPED_TRACE (reference);
+        vayu::tests::MockTokenServer idp;
+        json request      = scope;
+        request["config"] = jwt_config (idp, reference);
+
+        auto [status, body] =
+        vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+
+        ASSERT_EQ (status, 200) << body.dump ();
+        EXPECT_EQ (idp.hits (), 1);
+        const std::string assertion = posted_assertion (idp);
+        EXPECT_TRUE (jwt::verifies (assertion, jwt::public_half (jwt::keys ().rsa), "RS256"));
+        EXPECT_EQ (body.dump ().find (assertion), std::string::npos);
+        EXPECT_EQ (body.dump ().find ("PRIVATE KEY"), std::string::npos);
+    }
+}
+
+TEST_F (OAuthRouteJwtBearerTest, AReferenceWithNoScopeNamedIs400) {
+    vayu::tests::MockTokenServer idp;
+    const json request = { { "config", jwt_config (idp, "{{signing_key}}") } };
+
+    auto [status, body] = vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config");
+    const std::string message = body["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{signing_key}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("environmentId"), std::string::npos) << message;
+    EXPECT_NE (message.find ("privateKeyFile"), std::string::npos) << message;
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+TEST_F (OAuthRouteJwtBearerTest, AReferenceNoNamedScopeDefinesIs400NamingIt) {
+    seed_environment ("{}");
+    vayu::tests::MockTokenServer idp;
+    const json request = { { "config", jwt_config (idp, "{{signing_key}}") },
+        { "environmentId", "env_1" } };
+
+    auto [status, body] = vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config");
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("{{signing_key}}"), std::string::npos)
+    << body.dump ();
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+TEST_F (OAuthRouteJwtBearerTest, AScopeIdThatIsNotAStringIs400) {
+    vayu::tests::MockTokenServer idp;
+    for (const char* member : { "environmentId", "collectionId" }) {
+        const json request = { { "config", jwt_config (idp, "{{signing_key}}") },
+            { member, 7 } };
+
+        auto [status, body] =
+        vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config");
+        EXPECT_NE (body["error"]["message"].get<std::string> ().find (member),
+        std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+// A key file needs no scope: the path is the config's own.
+TEST_F (OAuthRouteJwtBearerTest, AKeyFileSignsWithNoScopeNamed) {
+    const std::string path = key_file (jwt::pkcs8 (jwt::keys ().p256), "key.pem");
+    const auto canonical = vayu::http::grantable_file_path (path);
+    ASSERT_HAS_VALUE (canonical);
+    vayu::FileGrant grant;
+    grant.id         = "fgrant_route_key";
+    grant.path       = *canonical;
+    grant.created_at = 1;
+    db_->save_file_grant (grant);
+
+    vayu::tests::MockTokenServer idp;
+    json config = jwt_config (idp, "");
+    config.erase ("privateKey");
+    config["privateKeyFile"]   = path;
+    config["signingAlgorithm"] = "ES256";
+    auto [status, body]        = vayu::http::routes::oauth2_token_post (
+    *db_, json{ { "config", config } }.dump ());
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_TRUE (jwt::verifies (
+    posted_assertion (idp), jwt::public_half (jwt::keys ().p256), "ES256"));
 }
 
 } // namespace

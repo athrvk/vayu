@@ -19,6 +19,7 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { TOOLS } from "../tools.js";
 import { argumentsSchema } from "./kit.js";
+import { oauth2ConfigInput } from "./oauth2.js";
 import { authInput, storedAuthInput, storedCollectionAuthInput } from "./input-schemas.js";
 
 const MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"];
@@ -41,6 +42,19 @@ describe("authInput modes", () => {
 
 	it("keeps the members the engine owns", () => {
 		const block = { mode: "oauth2", config: { grantType: "client_credentials" } };
+		expect(authInput.parse(block)).toEqual(block);
+	});
+
+	it("keeps a jwt_bearer config's members, privateKeyFile included", () => {
+		const block = {
+			mode: "oauth2",
+			config: {
+				grantType: "jwt_bearer",
+				subject: "svc@example.com",
+				assertionClaims: [{ key: "tenant", value: "t1" }],
+				privateKeyFile: "/keys/sign.pem",
+			},
+		};
 		expect(authInput.parse(block)).toEqual(block);
 	});
 
@@ -250,5 +264,23 @@ describe("an object written back as read is accepted", () => {
 			config: { equals: 200 },
 		};
 		expect(parse("create_request", { ...SAVED, elements: [element] }).success).toBe(true);
+	});
+});
+
+describe("fetch_oauth2_token's config input", () => {
+	const jwtConfig = {
+		grantType: "jwt_bearer",
+		accessTokenUrl: "https://id.example.com/token",
+		clientId: "c",
+		privateKeyFile: "/keys/sign.pem",
+	};
+
+	it("passes members it does not enumerate through, so the engine sees privateKeyFile", () => {
+		expect(oauth2ConfigInput.parse(jwtConfig)).toEqual(jwtConfig);
+	});
+
+	it("tells an agent the jwt_bearer grant is available and how it names its key", () => {
+		expect(oauth2ConfigInput.shape.grantType.description).toContain("jwt_bearer");
+		expect(oauth2ConfigInput.description).toContain("privateKeyFile");
 	});
 });

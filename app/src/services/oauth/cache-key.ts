@@ -81,6 +81,13 @@ function extraParamsSegment(
 	return `${US}${list}:${pairs.map(([k, v]) => `${k}=${v}`).join(RS)}`;
 }
 
+/** The fourth slot: who the token is for under the grants that name one, else "". */
+function grantIdentity(config: OAuth2Config): string {
+	if (config.grantType === "password") return text(config.username);
+	if (config.grantType === "jwt_bearer") return text(config.subject);
+	return "";
+}
+
 /**
  * Compute the token cache key for an OAuth 2.0 config.
  *
@@ -90,7 +97,8 @@ function extraParamsSegment(
  * pin the format:
  *
  *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
- *   \x1f (grantType === "password" ? username : "")
+ *   \x1f (grantType === "password" ? username :
+ *          grantType === "jwt_bearer" ? subject : "")
  *
  * then, for each of authorizationParams, tokenParams and refreshParams with at
  * least one row the engine would send (issue #2536):
@@ -109,12 +117,12 @@ function extraParamsSegment(
  * distinct credentialsId to separate them. An audience sent as a row is read.
  */
 export function computeOAuth2CacheKey(config: OAuth2Config): string {
-	const username = config.grantType === "password" ? text(config.username) : "";
+	const identity = grantIdentity(config);
 	const base = [
 		text(config.accessTokenUrl),
 		text(config.clientId),
 		text(config.credentialsId) || "default",
-		username,
+		identity,
 	].join(US);
 	return base + EXTRA_PARAM_LISTS.map((list) => extraParamsSegment(config, list)).join("");
 }

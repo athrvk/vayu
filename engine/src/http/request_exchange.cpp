@@ -1033,7 +1033,9 @@ LateTokenAcquisition* acquisition) {
         return std::nullopt;
     }
     const auto unspellable = resolve_auth_credentials (auth, vars, {});
-    // Before `apply_auth`, which computes the cache key from it (D10).
+    // Before `apply_auth`, which computes the cache key from it (D10). A
+    // `privateKey` reference resolves here too, into this copy alone: the PEM
+    // reaches the acquisition and nothing the send records (#3632).
     if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
         oauth2->config = vayu::http::resolve_json_strings (oauth2->config, vars);
     }

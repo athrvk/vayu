@@ -3145,6 +3145,30 @@ nlohmann::json& scenario_manifest) {
 }
 
 /**
+ * A single-request run's `auth.config.privateKey` reference resolved in
+ * @p json from the run's own scopes, once, before anything reads the config
+ * (#3632). A load run acquires its token before any script, and its watchdog
+ * re-signs from the same config mid-run, so the PEM is held in this in-memory
+ * payload for the run's life. The stored snapshot was taken from the body as
+ * sent, so it keeps the reference. A scenario's steps resolve their own when
+ * the plan is (`core::resolve_scenario`); its payload carries no `auth`.
+ *
+ * @return the refusal naming the reference when no variable answers it.
+ */
+std::optional<std::string> resolve_run_signing_key (vayu::db::Database& db,
+const vayu::db::Run& run,
+const std::string& collection_id,
+nlohmann::json& json) {
+    auto* config = vayu::http::config_naming_private_key (json);
+    if (config == nullptr) {
+        return std::nullopt;
+    }
+    return vayu::http::resolve_private_key_reference (*config,
+    flatten_variable_scopes (
+    load_script_variable_scopes (db, run.environment_id, collection_id)));
+}
+
+/**
  * Pre-flight auth: reject an unauthorizable run before creating it, and warm
  * the token cache so the worker's `apply_auth` is a cache hit.
  *
@@ -3343,21 +3367,6 @@ httplib::Response& res) {
         }
     }
 
-    // The rows a single-request run binds (issue #993), validated and credential-
-    // planned here for the reason the scenario block is resolved here: a set the
-    // engine cannot read must leave no run row behind.
-    auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
-    // Every file the run's request can send, checked and read once here too,
-    // for the same reason: a file the run cannot send leaves no run row.
-    std::shared_ptr<vayu::http::FilePlan> load_files;
-    std::optional<nlohmann::json> load_body_file;
-    if (auto refusal = refuse_load_inputs (
-        ctx, json, is_scenario, load_data, load_files, load_body_file)) {
-        vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
-        send_error (res, 400, refusal->first, refusal->second);
-        return;
-    }
-
     // Create run record
     std::string run_id = vayu::utils::generate_id ("run_");
     vayu::db::Run run;
@@ -3373,13 +3382,35 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
-    // Ahead of the snapshot, which reads the scopes these name.
+    // Ahead of the snapshot, which reads the scopes these name, and of the
+    // credential plan below, which reads the signing key they answer.
     const auto collection_id = read_run_scope (ctx.db, json, run);
     if (!collection_id) {
         vayu::utils::log_warning ("http", "POST /runs - " + collection_id.error ());
         send_error (res, 400, collection_id.error ());
         return;
     }
+    if (auto refusal = resolve_run_signing_key (ctx.db, run, *collection_id, json)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + *refusal);
+        send_error (res, 400, *refusal, "invalid_run_config");
+        return;
+    }
+
+    // The rows a single-request run binds (issue #993), validated and credential-
+    // planned here for the reason the scenario block is resolved here: a set the
+    // engine cannot read must leave no run row behind.
+    auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
+    // Every file the run's request can send, checked and read once here too,
+    // for the same reason: a file the run cannot send leaves no run row.
+    std::shared_ptr<vayu::http::FilePlan> load_files;
+    std::optional<nlohmann::json> load_body_file;
+    if (auto refusal = refuse_load_inputs (
+        ctx, json, is_scenario, load_data, load_files, load_body_file)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
+        send_error (res, 400, refusal->first, refusal->second);
+        return;
+    }
+
     run.origin        = std::move (origin.kind);
     run.origin_client = std::move (origin.client);
     const auto max_snapshot_body_bytes =

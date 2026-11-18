@@ -355,6 +355,30 @@ const std::vector<vayu::db::Request>& rows) {
 }
 
 /**
+ * A load step's `auth.config.privateKey` reference resolved in @p payload from
+ * the scopes its composition read (#3632), before its token is acquired below.
+ * The PEM stays in memory in the step's `oauth2_config` for the watchdog to
+ * re-sign with; a sequential step leaves the reference to `apply_late_auth`.
+ *
+ * @return the refusal naming the reference when no variable answers it.
+ */
+std::optional<std::string> resolve_load_step_signing_key (vayu::db::Database& db,
+const ScenarioResolveOptions& options,
+const vayu::db::Request& row,
+nlohmann::json& payload) {
+    auto* config = vayu::http::config_naming_private_key (payload);
+    if (config == nullptr) {
+        return std::nullopt;
+    }
+    const std::optional<std::string> environment_id = options.environment_id.empty () ?
+    std::nullopt :
+    std::optional<std::string> (options.environment_id);
+    return vayu::http::resolve_private_key_reference (*config,
+    vayu::http::routes::flatten_variable_scopes (vayu::http::routes::load_script_variable_scopes (
+    db, environment_id, row.collection_id)));
+}
+
+/**
  * One step of the plan: composed, built, and refused if it carries a token
  * nothing in this run could bind.
  *
@@ -410,6 +434,11 @@ nlohmann::json& raw_elements_out) {
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +
         compose_error_message (payload));
+    }
+    if (!options.oauth2_after_scripts) {
+        if (auto refusal = resolve_load_step_signing_key (db, options, row, payload)) {
+            return describe_step (index, row) + ": " + *refusal;
+        }
     }
 
     // Auth is resolved into headers/url here, which is what makes the plan

@@ -180,7 +180,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
 - :material-key-variant: **Auth that inherits**
 
     Bearer, Basic, API key, and OAuth 2.0 (client credentials, password,
-    authorization code + PKCE) - resolved engine-side, inherited down the tree.
+    JWT bearer, authorization code + PKCE) - resolved engine-side, inherited down the tree.
 
 - :material-broadcast: **Watch a stream as it arrives**
 

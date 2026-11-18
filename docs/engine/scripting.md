@@ -3483,6 +3483,9 @@ algorithm and no cipher (the digests are `pm.crypto.sha256` and the
 `Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
 and the timers run, on queues drained before the script ends, but nothing
 settles a promise after it has.
+Signing a request with a private key is the OAuth 2.0 JWT bearer grant's job,
+which the engine does itself, not the sandbox's; `pm.crypto` does not gain
+RS256.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded; without a callback it returns a promise that is

@@ -237,12 +237,13 @@ function RunTokenGuard({
 	durationSeconds: number;
 	onGateChange: (key: string, gated: boolean) => void;
 }) {
-	const { key, config } = entry;
+	const { key, config, collectionId } = entry;
 	const report = useCallback((gated: boolean) => onGateChange(key, gated), [onGateChange, key]);
 	return (
 		<OAuth2LoadTestGuard
 			config={config}
 			durationSeconds={durationSeconds}
+			collectionId={collectionId}
 			onGateChange={report}
 		/>
 	);

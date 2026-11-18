@@ -21,11 +21,13 @@ import { deferredTokens } from "@/lib/deferred-note";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
-import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import { useToastStore } from "@/stores";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
+import { tokenScopeIds } from "@/services/oauth/signing-key";
+import { useSessionStore, useToastStore } from "@/stores";
 import { oauthSignin, useIsSigningIn } from "@/stores/oauth-signin-store";
 import { useNow } from "@/hooks/useNow";
 import type { OAuth2Config } from "@/types";
+import { missingOAuth2Fields } from "./missing-fields";
 import {
 	TOKEN_ACTION_LABELS,
 	lapseInstant,
@@ -49,6 +51,11 @@ interface TokenStatusRowProps {
 	 * none of them gives it a query client by contract. Memoise it.
 	 */
 	deferredNames?: readonly string[];
+	/**
+	 * The collection a Get token names to the engine beside the active
+	 * environment, which resolve a `jwt_bearer` key reference (#3632).
+	 */
+	collectionId?: string | null;
 }
 
 function maskToken(token: string): string {
@@ -70,10 +77,20 @@ function TokenExpiry({ expiry }: { expiry: TokenExpiryText }) {
 	);
 }
 
-export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenStatusRowProps) {
+export default function TokenStatusRow({
+	resolvedConfig,
+	deferredNames,
+	collectionId,
+}: TokenStatusRowProps) {
 	if (deferredNames && deferredNames.length > 0)
-		return <DeferredTokenRow resolvedConfig={resolvedConfig} names={deferredNames} />;
-	return <CachedTokenRow resolvedConfig={resolvedConfig} />;
+		return (
+			<DeferredTokenRow
+				resolvedConfig={resolvedConfig}
+				names={deferredNames}
+				collectionId={collectionId}
+			/>
+		);
+	return <CachedTokenRow resolvedConfig={resolvedConfig} collectionId={collectionId} />;
 }
 
 /**
@@ -82,8 +99,9 @@ export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenS
  * rest) and clear it. The rows differ in what they report, never in what the
  * actions do.
  */
-function useTokenActions(resolvedConfig: OAuth2Config) {
+function useTokenActions(resolvedConfig: OAuth2Config, collectionId: string | null | undefined) {
 	const showToast = useToastStore((s) => s.showToast);
+	const environmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const queryClient = useQueryClient();
 
 	const cacheKey = useMemo(() => {
@@ -103,21 +121,9 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 	const busy = fetchMutation.isPending || clearMutation.isPending || authorizing;
 	const fetching = fetchMutation.isPending || authorizing;
 
-	// What the engine needs before a token request can go anywhere: the authorize
-	// start rejects without authorizationUrl + clientId, the token endpoint without
-	// accessTokenUrl + clientId (clientId for every grant, not just the ones RFC
-	// 6749 requires it for). Presence only - the engine owns URL validity, and
-	// duplicating that rule here would be a second copy of it to keep in step;
-	// its 400 arrives relabelled instead (humanizeOAuth2Error).
-	const missingFields = useMemo(() => {
-		const missing: string[] = [];
-		if (interactive && !resolvedConfig.authorizationUrl) {
-			missing.push(OAUTH2_FIELD_LABELS.authorizationUrl);
-		}
-		if (!resolvedConfig.accessTokenUrl) missing.push(OAUTH2_FIELD_LABELS.accessTokenUrl);
-		if (!resolvedConfig.clientId) missing.push(OAUTH2_FIELD_LABELS.clientId);
-		return missing;
-	}, [interactive, resolvedConfig]);
+	// Which fields are absent is `missingOAuth2Fields`'s to say; this memo only
+	// keeps the list's identity still across renders that change nothing.
+	const missingFields = useMemo(() => missingOAuth2Fields(resolvedConfig), [resolvedConfig]);
 	const incomplete = missingFields.length > 0;
 
 	// Engine-hosted loopback + PKCE; opens the system browser (or the embedded
@@ -157,7 +163,7 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 			return;
 		}
 		fetchMutation.mutate(
-			{ config: resolvedConfig, force: true },
+			{ config: resolvedConfig, force: true, ...tokenScopeIds(environmentId, collectionId) },
 			{
 				onError: (err) => {
 					const message =
@@ -300,11 +306,13 @@ function GetTokenButton({
 function DeferredTokenRow({
 	resolvedConfig,
 	names,
+	collectionId,
 }: {
 	resolvedConfig: OAuth2Config;
 	names: readonly string[];
+	collectionId: string | null | undefined;
 }) {
-	const actions = useTokenActions(resolvedConfig);
+	const actions = useTokenActions(resolvedConfig, collectionId);
 	return (
 		<TokenRowShell
 			dotClass="bg-muted-foreground/40"
@@ -368,8 +376,14 @@ function NoTokenSummary({
 	}
 }
 
-function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
-	const actions = useTokenActions(resolvedConfig);
+function CachedTokenRow({
+	resolvedConfig,
+	collectionId,
+}: {
+	resolvedConfig: OAuth2Config;
+	collectionId: string | null | undefined;
+}) {
+	const actions = useTokenActions(resolvedConfig, collectionId);
 	const { cacheKey, missingFields, incomplete } = actions;
 	const [revealed, setRevealed] = useState(false);
 

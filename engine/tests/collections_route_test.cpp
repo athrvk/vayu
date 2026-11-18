@@ -576,6 +576,80 @@ TEST_F (CollectionsRouteTest, AnUpdateWithAnUnknownAuthModeIsRefusedAndLeavesThe
     EXPECT_EQ (after->updated_at, before->updated_at);
 }
 
+// -- An OAuth 2.0 privateKey is stored as a reference only (#3632) ----------
+//
+// Mutation check: drop `reject_inline_private_key` from either core and the
+// matching refusal test reds; make it refuse an empty, null or one-reference
+// value and the valid-write test reds.
+
+constexpr const char* INLINE_PEM =
+"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END "
+"PRIVATE KEY-----\n";
+
+json jwt_bearer_auth (const json& private_key) {
+    return json{ { "mode", "oauth2" },
+        { "config", { { "grantType", "jwt_bearer" }, { "privateKey", private_key } } } };
+}
+
+const std::vector<json>& inline_private_keys () {
+    static const std::vector<json> keys = { INLINE_PEM, "{{signing_key}} tail",
+        "head{{signing_key}}", "{{a}}{{b}}", 42, json::object () };
+    return keys;
+}
+
+/// The refusal names the member and never quotes the key.
+void expect_private_key_refusal (int status, const json& body, const json& key) {
+    EXPECT_EQ (status, 400) << key.dump () << " -> " << body.dump ();
+    const std::string message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    EXPECT_NE (message.find ("auth.config.privateKey"), std::string::npos) << message;
+    EXPECT_EQ (message.find ("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"), std::string::npos)
+    << message;
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithAnInlinePrivateKeyIsRefusedAndWritesNothing) {
+    for (const json& key : inline_private_keys ()) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", jwt_bearer_auth (key) } });
+
+        expect_private_key_refusal (status, body, key);
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithAnInlinePrivateKeyIsRefusedAndLeavesTheRowAlone) {
+    seed_collection ("col_a", "A");
+    const auto before = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (before);
+
+    for (const json& key : inline_private_keys ()) {
+        auto [status, body] = vayu::http::routes::update_collection_response (*db_,
+        "col_a", json{ { "name", "Renamed" }, { "auth", jwt_bearer_auth (key) } });
+
+        expect_private_key_refusal (status, body, key);
+    }
+    const auto after = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "A");
+    EXPECT_EQ (after->auth, before->auth);
+    EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+TEST_F (CollectionsRouteTest, APrivateKeyReferenceOrNoKeyIsStoredOnBothVerbs) {
+    seed_collection ("col_a", "A");
+    for (const json& key :
+    { json ("{{signing_key}}"), json (" {{ signing_key }} "), json (""), json () }) {
+        auto [created_status, created] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", jwt_bearer_auth (key) } });
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "auth", jwt_bearer_auth (key) } });
+
+        EXPECT_EQ (created_status, 200) << key.dump () << " -> " << created.dump ();
+        EXPECT_EQ (status, 200) << key.dump () << " -> " << body.dump ();
+        EXPECT_EQ (body["auth"]["config"]["privateKey"], key);
+    }
+}
+
 // A bare array was already a 400 from `apply_json_field`; it must still store
 // nothing on either verb now that the mode check sits ahead of it.
 TEST_F (CollectionsRouteTest, AnAuthThatIsNotAnObjectIsStillRefusedOnBothVerbs) {

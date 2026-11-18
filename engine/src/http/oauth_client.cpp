@@ -13,12 +13,19 @@
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "vayu/utils/jwt.hpp"
 #include "vayu/utils/logger.hpp"
+
+#include <openssl/crypto.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <expected>
 #include <future>
 #include <map>
 #include <memory>
@@ -26,6 +33,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -133,6 +141,25 @@ int64_t parse_expires_in (const nlohmann::json& body) {
         }
     }
     return 0;
+}
+
+// What `fallbackExpiresIn` asks a token that states no lifetime to be kept for,
+// in seconds, held to MAX_FALLBACK_EXPIRES_IN_SECONDS, or 0 (non-expiring, as
+// before) when it is absent or not a positive number. The comparison is written
+// so NaN falls to 0 and the cast sees only a value in range.
+int64_t fallback_expires_in (const nlohmann::json& config) {
+    const auto it = config.find ("fallbackExpiresIn");
+    if (it == config.end () || !it->is_number ()) {
+        return 0;
+    }
+    const double seconds = it->get<double> ();
+    if (!(seconds > 0)) {
+        return 0;
+    }
+    if (seconds >= static_cast<double> (MAX_FALLBACK_EXPIRES_IN_SECONDS)) {
+        return MAX_FALLBACK_EXPIRES_IN_SECONDS;
+    }
+    return static_cast<int64_t> (seconds);
 }
 
 struct TokenRequest {
@@ -328,7 +355,10 @@ const std::atomic<bool>* cancel) {
     token.refresh_token = field (body, "refresh_token");
     token.scope         = field (body, "scope");
     token.expires_in    = parse_expires_in (body);
-    token.created_at    = now_ms ();
+    if (token.expires_in <= 0) {
+        token.expires_in = fallback_expires_in (config);
+    }
+    token.created_at = now_ms ();
     return token;
 }
 
@@ -424,6 +454,18 @@ std::string extra_params_key_segment (const nlohmann::json& config, std::string_
     return segment;
 }
 
+/// The cache key's fourth slot: who the token is for, under the grants that
+/// name one.
+std::string grant_identity (const nlohmann::json& config, const std::string& grant) {
+    if (grant == "password") {
+        return field (config, "username");
+    }
+    if (grant == "jwt_bearer") {
+        return field (config, "subject");
+    }
+    return {};
+}
+
 } // namespace
 
 std::vector<ExtraParam> extra_params (const nlohmann::json& config, std::string_view list) {
@@ -458,7 +500,7 @@ std::string cache_key (const nlohmann::json& config) {
     }
     std::string key = field (config, "accessTokenUrl") + "\x1f" +
     field (config, "clientId") + "\x1f" + creds_id + "\x1f" +
-    (grant == "password" ? field (config, "username") : "");
+    grant_identity (config, grant);
     for (std::string_view list : EXTRA_PARAM_LISTS) {
         key += extra_params_key_segment (config, list);
     }
@@ -744,12 +786,161 @@ const std::atomic<bool>* cancel) {
     std::move (*cached), deadline, network_ms, cancel);
 }
 
+/// `jwt_bearer` (RFC 7523 section 2.1): the grant type URN, the assertion's
+/// lifetime in seconds when the config names none, and the bounds a named one
+/// is held to.
+constexpr std::string_view JWT_BEARER_URN =
+"urn:ietf:params:oauth:grant-type:jwt-bearer";
+constexpr double DEFAULT_ASSERTION_LIFETIME_SECONDS = 180;
+constexpr double MIN_ASSERTION_LIFETIME_SECONDS     = 1;
+constexpr double MAX_ASSERTION_LIFETIME_SECONDS     = 3600;
+
+/// A key file larger than this is not a key: a PEM private key is a few KiB.
+constexpr std::uint64_t MAX_KEY_FILE_BYTES = std::uint64_t{ 64 } * 1024;
+
+TokenError invalid_config (std::string message) {
+    return TokenError{ 400, "oauth2_invalid_config", std::move (message) };
+}
+
+/// A required string member, or the refusal naming it.
+std::expected<std::string, TokenError>
+required_member (const nlohmann::json& config, const char* member) {
+    std::string value = field (config, member);
+    if (value.empty ()) {
+        return std::unexpected (invalid_config (
+        std::string (member) + " is required for the jwt_bearer grant"));
+    }
+    return value;
+}
+
+/// `exp - iat`, held to its bounds. Absent or null is the default; a value that
+/// is not a number is refused rather than read as the default.
+std::expected<int64_t, TokenError> assertion_lifetime_seconds (const nlohmann::json& config) {
+    const auto it = config.find ("assertionLifetimeSeconds");
+    if (it == config.end () || it->is_null ()) {
+        return static_cast<int64_t> (DEFAULT_ASSERTION_LIFETIME_SECONDS);
+    }
+    if (!it->is_number ()) {
+        return std::unexpected (invalid_config (
+        "assertionLifetimeSeconds must be a number of seconds"));
+    }
+    return static_cast<int64_t> (std::clamp (it->get<double> (),
+    MIN_ASSERTION_LIFETIME_SECONDS, MAX_ASSERTION_LIFETIME_SECONDS));
+}
+
+/// The claims the assertion carries: the five the engine writes, then each
+/// enabled `assertionClaims` row. A row naming a claim already written, a
+/// reserved one included, is skipped so the engine's value wins.
+nlohmann::ordered_json assertion_claims (const nlohmann::json& config,
+const std::string& subject,
+const std::string& audience,
+std::chrono::seconds issued_at,
+std::chrono::seconds lifetime) {
+    nlohmann::ordered_json claims = { { "iss", field (config, "clientId") },
+        { "sub", subject }, { "aud", audience },
+        { "exp", (issued_at + lifetime).count () }, { "iat", issued_at.count () } };
+    const auto rows = config.find (std::string (ASSERTION_CLAIMS));
+    if (rows == config.end () || !rows->is_array ()) {
+        return claims;
+    }
+    for (const nlohmann::json& row : *rows) {
+        if (!row.is_object () || !flag (row, "enabled", true)) {
+            continue;
+        }
+        if (const std::string name = field (row, "key");
+        !name.empty () && !claims.contains (name)) {
+            claims[name] = field (row, "value");
+        }
+    }
+    return claims;
+}
+
+/// The key file's text, read from the path the trust rule approved and never
+/// from the path as written (#2416).
+std::expected<std::string, TokenError>
+read_key_file (vayu::db::Database& db, const std::string& path) {
+    const auto canonical = FileAccessPolicy::from_database (db).approved_path (path);
+    if (!canonical) {
+        return std::unexpected (invalid_config ("privateKeyFile '" + path +
+        "' was not picked on this machine and is not under an allowed folder - "
+        "pick it again, or allow its folder in Settings"));
+    }
+    const auto opened = ApprovedFile::open (*canonical);
+    if (!opened) {
+        return std::unexpected (invalid_config (
+        "privateKeyFile '" + path + "' cannot be read: " + opened.error ()));
+    }
+    const ApprovedFile& file = **opened;
+    if (file.size () > MAX_KEY_FILE_BYTES) {
+        return std::unexpected (invalid_config ("privateKeyFile '" + path + "' is larger than " +
+        std::to_string (MAX_KEY_FILE_BYTES) + " bytes and is not a key"));
+    }
+    std::string text (static_cast<size_t> (file.size ()), '\0');
+    const auto read = file.read_at (0, text);
+    if (!read || *read != text.size ()) {
+        return std::unexpected (
+        invalid_config ("privateKeyFile '" + path + "' cannot be read"));
+    }
+    return text;
+}
+
+/// The signing key's PEM: `privateKey` as given, or the contents of
+/// `privateKeyFile`. Exactly one is set.
+///
+/// A `privateKey` that is still a `{{reference}}` was never resolved: the
+/// caller that holds the request's scopes resolves it before the engine is
+/// asked for a token, so this is the one seam where that value arrives.
+std::expected<std::string, TokenError>
+signing_key_pem (vayu::db::Database& db, const nlohmann::json& config) {
+    std::string inline_key = field (config, "privateKey");
+    const std::string file = field (config, "privateKeyFile");
+    if (inline_key.empty () == file.empty ()) {
+        return std::unexpected (
+        invalid_config ("the jwt_bearer grant needs exactly one of privateKey "
+                        "and privateKeyFile"));
+    }
+    if (!file.empty ()) {
+        return read_key_file (db, file);
+    }
+    if (inline_key.find ("{{") != std::string::npos) {
+        return std::unexpected (
+        invalid_config (unresolved_private_key_message (inline_key)));
+    }
+    return inline_key;
+}
+
+bool is_supported_grant (const std::string& grant) {
+    return grant == "client_credentials" || grant == "password" ||
+    grant == "authorization_code" || grant == "jwt_bearer";
+}
+
+/// Client authentication for a fresh grant. A `jwt_bearer` client with no
+/// secret authenticates by the assertion alone (RFC 7523 section 3), so it
+/// sends no `client_id` beside it.
+bool sends_client_auth (const nlohmann::json& config, const std::string& grant) {
+    return grant != "jwt_bearer" || !field (config, "clientSecret").empty ();
+}
+
+/// The `jwt_bearer` form: the grant type URN and the signed assertion.
+std::optional<TokenError> add_jwt_bearer_form (vayu::db::Database& db,
+const nlohmann::json& config,
+TokenRequest& req) {
+    auto assertion = build_jwt_assertion (db, config, std::chrono::system_clock::now ());
+    if (!assertion) {
+        return std::move (assertion.error ());
+    }
+    req.form.emplace_back ("grant_type", std::string (JWT_BEARER_URN));
+    req.form.emplace_back ("assertion", std::move (*assertion));
+    return std::nullopt;
+}
+
 /**
  * The form a fresh grant posts.
  *
  * @return the refusal this grant cannot be built without, or nothing.
  */
-std::optional<TokenError> build_grant_request (const nlohmann::json& config,
+std::optional<TokenError> build_grant_request (vayu::db::Database& db,
+const nlohmann::json& config,
 const std::string& grant,
 const std::optional<InteractiveExchange>& interactive,
 TokenRequest& req) {
@@ -759,6 +950,10 @@ TokenRequest& req) {
         req.form.emplace_back ("grant_type", "password");
         req.form.emplace_back ("username", field (config, "username"));
         req.form.emplace_back ("password", field (config, "password"));
+    } else if (grant == "jwt_bearer") {
+        if (auto refusal = add_jwt_bearer_form (db, config, req)) {
+            return refusal;
+        }
     } else { // authorization_code
         if (!interactive.has_value ()) {
             return TokenError{ 409, "oauth2_interactive_required",
@@ -776,12 +971,67 @@ TokenRequest& req) {
             req.form.emplace_back (extra, value);
         }
     }
-    apply_client_auth (req, config);
+    if (sends_client_auth (config, grant)) {
+        apply_client_auth (req, config);
+    }
     append_extra_params (req, config, TOKEN_PARAMS);
     return std::nullopt;
 }
 
 } // namespace
+
+std::expected<std::string, TokenError> build_jwt_assertion (vayu::db::Database& db,
+const nlohmann::json& config,
+std::chrono::system_clock::time_point now) {
+    const auto subject = required_member (config, "subject");
+    if (!subject) {
+        return std::unexpected (subject.error ());
+    }
+    const auto audience = required_member (config, "assertionAudience");
+    if (!audience) {
+        return std::unexpected (audience.error ());
+    }
+    const auto lifetime = assertion_lifetime_seconds (config);
+    if (!lifetime) {
+        return std::unexpected (lifetime.error ());
+    }
+    auto pem = signing_key_pem (db, config);
+    if (!pem) {
+        return std::unexpected (pem.error ());
+    }
+
+    const auto claims     = assertion_claims (config, *subject, *audience,
+    std::chrono::floor<std::chrono::seconds> (now).time_since_epoch (),
+    std::chrono::seconds (*lifetime));
+    std::string algorithm = field (config, "signingAlgorithm");
+    if (algorithm.empty ()) {
+        algorithm = "RS256";
+    }
+    const std::string key_id = field (config, "keyId");
+    auto signed_jwt          = vayu::utils::sign_jwt (algorithm, *pem,
+    key_id.empty () ? std::nullopt : std::optional<std::string_view> (key_id),
+    claims.dump ());
+    OPENSSL_cleanse (pem->data (), pem->size ());
+    if (!signed_jwt) {
+        const std::string key_member =
+        field (config, "privateKeyFile").empty () ? "privateKey" : "privateKeyFile";
+        return std::unexpected (
+        invalid_config ("Cannot sign the jwt_bearer assertion (check "
+                        "signingAlgorithm, keyId and " +
+        key_member + "): " + signed_jwt.error ().message));
+    }
+    return *signed_jwt;
+}
+
+std::string unresolved_private_key_message (std::string_view written) {
+    const std::string named = vayu::core::vayu_ext::is_variable_reference (written) ?
+    "privateKey names " + std::string (written) + ", which" :
+    std::string ("privateKey holds a {{reference}} that");
+    return named +
+    " no variable in scope defines - define it as a secret variable in the "
+    "environment, the collection or the globals the request is sent with, or "
+    "name a key file in privateKeyFile";
+}
 
 int refresh_followers_waiting (const std::string& cache_key) {
     auto& registry = refresh_registry ();
@@ -811,7 +1061,7 @@ const std::atomic<bool>* cancel) {
         return TokenError{ 400, "oauth2_invalid_config", "clientId is required" };
     }
     const std::string grant = field (config, "grantType");
-    if (grant != "client_credentials" && grant != "password" && grant != "authorization_code") {
+    if (!is_supported_grant (grant)) {
         return TokenError{ 400, "oauth2_invalid_config",
             "Unsupported grantType: " + (grant.empty () ? "(none)" : grant) };
     }
@@ -832,7 +1082,7 @@ const std::atomic<bool>* cancel) {
     }
 
     TokenRequest req;
-    if (auto refusal = build_grant_request (config, grant, interactive, req)) {
+    if (auto refusal = build_grant_request (db, config, grant, interactive, req)) {
         return *refusal;
     }
 

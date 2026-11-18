@@ -257,6 +257,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			<AuthFields
 				value={auth}
 				onChange={setAuth}
+				collectionId={collection.id}
 				noAuthDescription={
 					mode === "noauth" ? (
 						<>

@@ -1053,6 +1053,19 @@ the rest: every string of it is resolved after the script, and then the token is
 acquired, so the key is computed from the resolved config. A load run acquires
 its token once, before any script, and resolves the config at compose.
 
+**A JWT bearer `privateKey` is the one string that is not resolved by the renderer
+(#3632).** It is exactly one `{{variable}}` naming a secret variable that holds the
+PEM, and only the engine resolves it, where the token is acquired, so the PEM never
+passes through a config the renderer builds, logs or caches. `OAuth2Form`'s
+`resolvedConfig` carries it as written, and the hosts that resolve a whole config
+(`AuthContextSection`, the builder's load dialog, `runOAuth2Configs.ts`) put it back
+with `keepSigningKeyReference`, and the request builder's `resolvedAuth` preview,
+which is the GraphQL schema cache's identity, with `keepSigningKeyReferenceInAuth`. `POST /oauth2/token` resolves it from the
+`environmentId` and `collectionId` the request names (the active environment and the
+request's collection), and the token cache key never reads it. The preview resolver
+therefore never shows the key, and a hint under the field warns when the variable it
+names is not marked secret.
+
 ---
 
 ## Script composition
