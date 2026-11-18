@@ -5,7 +5,7 @@ description: >-
 
 # Vayu MCP Server
 
-**Endpoint:** `http://127.0.0.1:9877/mcp` (Streamable HTTP) · **Also:** stdio CLI
+**Endpoint:** `http://127.0.0.1:9877/mcp` by default (Streamable HTTP) · **Also:** stdio CLI
 
 Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
@@ -40,9 +40,11 @@ client shows its own connection error. Threat model and posture: [`SECURITY.md`]
   cannot import the renderer's `@/services`, so this client is standalone.
 - **Local-only.** Binds `127.0.0.1`, with Host- and Origin-header
   (DNS-rebinding) validation on `/mcp`.
-- **Configurable from Settings.** Server on/off, the allowlist, caps, the write
-  toggle, and per-tool switches live in **Settings → MCP** and persist across
-  restarts.
+- **Configurable from Settings.** Server on/off, the port, the allowlist, caps, the
+  write toggle, and per-tool switches live in **Settings → MCP** and persist
+  across restarts. A new port takes effect after an engine restart, which the
+  panel offers, and changes the endpoint URL: an agent registered with the old
+  one has to be connected again.
 
 ## Connecting
 
@@ -104,7 +106,7 @@ url = "http://127.0.0.1:9877/mcp"
 ### Client compatibility
 
 MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
-**HTTP+SSE** (deprecated; not built for). The fixed-port Streamable HTTP endpoint
+**HTTP+SSE** (deprecated; not built for). The Streamable HTTP endpoint
 covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 | Client           | Streamable HTTP    | stdio | Config location                                 |
@@ -119,7 +121,7 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 ### Streamable HTTP (primary)
 
-`listener.ts` binds `127.0.0.1:9877` at launch and answers what needs no SDK
+`listener.ts` binds `127.0.0.1:9877` by default at launch and answers what needs no SDK
 (`gates.ts`: non-`/mcp` paths `404`, `GET`/`DELETE` `405`); `http.ts` serves
 each `POST /mcp` once the first one has loaded it, through the SDK's
 `createMcpHandler`. Every request gets a fresh server, in both protocol eras:
@@ -3344,6 +3346,19 @@ An unreadable `mcp-config.json` looks, on screen, like a config nobody ever set,
 so the panel says otherwise: once the first change has set the old file aside
 (`corruptCopy` in `mcp:status`, re-read by the panel after each change), a
 warning above the cards gives the copy's full path.
+
+The Connection card's **Port** field (`McpPortSection.tsx`) commits on blur
+through `mcp:setPort`. The renderer judges nothing: it sends what was typed and
+shows the refusal `validateMcpPort` answers with, stating the range and the
+reserved engine ports only as help text. The field shows the configured port
+from `mcp:status`, while the endpoint and every snippet keep the port in force
+until the engine restarts. A `restartRequired` status adds a notice with the
+engine restart (`useEngineRestart`, the action the Dock and the engine settings
+banner use), after which the panel re-reads the status to show the new URL, and
+`storedPortError` is shown as written. The engine store's pending-restart flag
+is not set from here: `restartRequired` is derived in the main process and
+survives a reload, and that flag would add a second banner on the engine
+settings with no label for it.
 
 ## Configuration
 

@@ -495,7 +495,8 @@ which case the app picks a fallback (below).
 - **Another program on 9876 moves the engine, it does not stop the app** (issue
   #2118). The sidecar walks an ordered list: 9876, then 9880-9889 (a fixed list
   rather than an OS-assigned port, because the renderer's CSP names its
-  `connect-src` origins at build time, and clear of the MCP port 9877). A port
+  `connect-src` origins at build time, and clear of the MCP port's default, 9877; an
+  MCP port set inside 9876 or 9880-9889 is refused, so the two cannot collide). A port
   where the app's own engine answers `/health` has it replaced there (above), a
   free one is taken, a held one is skipped. The first start fixes the choice for
   the life of the app: the main process passes it to the renderer once, as

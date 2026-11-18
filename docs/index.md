@@ -313,8 +313,10 @@ the report without leaving your editor.
 
 Vayu ships an **MCP server**, so an agent can use the same engine the UI does -
 send a request, start a load run, read the report, compare two runs. It runs
-inside the app on `127.0.0.1:9877`, proxying the engine's REST API; there is no
-second process to manage, and nothing leaves the machine.
+inside the app on `127.0.0.1:9877` by default, proxying the engine's REST API;
+there is no second process to manage, and nothing leaves the machine. The port
+is a setting in **Settings → MCP**; if you change it, substitute the port that
+panel shows for `9877` in the snippets below.
 
 === "Claude Code"
 
@@ -452,7 +454,7 @@ persists.
 
 ??? question "Can my coding agent use it?"
 
-    Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
+    Yes - Vayu hosts an MCP server on `127.0.0.1:9877` by default and one command registers
     it with Claude Code, Cursor, VS Code or Codex (Zed connects through the stdio
     CLI). The agent gets 80 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
