@@ -65,7 +65,7 @@
  */
 
 import { formatNumber } from "@/lib/format-number";
-import type { CollectionResultSummary, Run, RunReport } from "@/types";
+import type { CollectionResultSummary, Run, RunReport, StoredRunOutcome } from "@/types";
 import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import {
 	failedCheckPhrases,
@@ -312,13 +312,22 @@ export function collectionReportOutcome(report: RunReport | null | undefined): R
 	);
 }
 
+/** What a stored outcome says when the row's own numbers do not reach the same verdict. */
+const STORED_OUTCOME_REASON = "Judged by the engine";
+
+const OUTCOME_OF_STORED: Record<StoredRunOutcome, RunOutcome> = {
+	passed: "passed",
+	failed: "failed",
+	not_judged: "not-judged",
+};
+
 /**
  * The verdict a history list row can state from its own `resultSummary`. Only a
  * terminal load or collection run's row carries one; every other row, and a row
  * from an engine that predates the summary, answers `null` and keeps its status
  * glyph. A clean collection row also answers `null`, met budgets included.
  */
-export function rowOutcome(run: Run): RunJudgement | null {
+function derivedRowOutcome(run: Run): RunJudgement | null {
 	if (!run.resultSummary) return null;
 	if (run.type === "scenario") {
 		const { verdict } = run.resultSummary;
@@ -336,4 +345,25 @@ export function rowOutcome(run: Run): RunJudgement | null {
 		...failedChecksOf(rowAssertionsOf(run.resultSummary)),
 		drainCutCancelled: drainCutCancelledOf(run.resultSummary),
 	});
+}
+
+/**
+ * The verdict a history list row draws (#3547). The engine's stored
+ * `run.outcome` is the authority for the category: it is what `GET
+ * /runs?outcome=` filters on, so a row can never be listed under a verdict it
+ * does not wear. The reason is the row's own derivation (`derivedRowOutcome`)
+ * when that reaches the same category, which is every row of an engine and a
+ * renderer that agree, and a generic line otherwise.
+ *
+ * A row with no stored outcome - one stored before the column, or one the
+ * engine judged nothing about - is derived from its `resultSummary` alone, the
+ * rule the engine's `judge_run_row` is held to by
+ * `engine/tests/fixtures/run-row-outcome-conformance.json`.
+ */
+export function rowOutcome(run: Run): RunJudgement | null {
+	const derived = derivedRowOutcome(run);
+	if (run.outcome === undefined) return derived;
+	const outcome = OUTCOME_OF_STORED[run.outcome];
+	if (!outcome) return derived;
+	return derived?.outcome === outcome ? derived : { outcome, reason: STORED_OUTCOME_REASON };
 }
