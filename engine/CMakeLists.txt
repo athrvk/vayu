@@ -588,6 +588,7 @@ add_library(vayu_core STATIC
     src/core/run_export_html.cpp
     src/core/run_export_markdown.cpp
     src/core/run_export_view.cpp
+    src/core/run_result_summary.cpp
     src/core/svg_chart.cpp
     src/core/vayu_extensions.cpp
     src/core/path_template.cpp

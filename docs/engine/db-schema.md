@@ -1923,10 +1923,10 @@ this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 populations summed as `assertionsPassed` / `assertionsFailed` (#2820, #3458,
 #3537), `drainCut` as it is stored (#3538), and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
-`knee_concurrency` (#2930); `build_load_result_summary` in
-`http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`
+`knee_concurrency` (#2930); `load_result_summary` in
+`core/run_result_summary.cpp`) and, on a terminal collection run, from `scenario.passed`
 / `failed` / `skipped` / `errored` / `stopped` and the same `thresholds` verdict
-(`build_scenario_result_summary`, #2954), held in the same cache, which is
+(`scenario_result_summary`, #2954), held in the same cache, which is
 sound for the same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the
 summary after the terminal status, or rewrites it later, breaks that** too.

@@ -3612,7 +3612,7 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 // (#2820), so a row whose every assertion failed at 0% errors can say so; a
 // run that asserted nothing, or stored a malformed object, carries neither key.
 // Mutation check: drop the `assertionsFailed` write in
-// `build_load_result_summary` and the first row fails.
+// `load_result_summary` and the first row fails.
 TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
     auto with_assertions        = nlohmann::json::parse (judged_summary (true));
     with_assertions["scenario"] = { { "iterations", 4 },
@@ -3654,7 +3654,7 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
 // #3538: a load row carries the drain a Stop cut beside its budget verdict,
 // which stays as stored; a summary with no cut, or a malformed one, carries no
 // key. Mutation check: drop the `record_drain_cut` call in
-// `build_load_result_summary` and the first expectation fails.
+// `load_result_summary` and the first expectation fails.
 TEST_F (RunsRouteTest, LoadRowCarriesTheDrainCutOnlyWhenStored) {
     auto cut         = nlohmann::json::parse (judged_summary (true));
     cut["cancelled"] = 15;
@@ -3963,7 +3963,7 @@ const char* stop_reason) {
 // highest level it held and the level it broke at, the same three the report
 // headlines. A level the search never found is absent, never 0, which would
 // read as a service that held nothing or broke at nothing.
-// Mutation check: drop the `capacity` write in `build_load_result_summary` and
+// Mutation check: drop the `capacity` write in `load_result_summary` and
 // every capacity row fails.
 TEST_F (RunsRouteTest, CapacityRowCarriesTheHeldAndKneeLevels) {
     seed ({ .id = "run_capacity_knee", .start_time = 1 });
@@ -4124,7 +4124,7 @@ TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {
 // The design row keeps its own two numbers even when it stored a summary a load
 // row would read, and a collection row reads only the `scenario` block of its
 // summary: a load-shaped summary without one yields no `resultSummary`.
-// Mutation check: make `build_terminal_result_summary` build the load shape for
+// Mutation check: make `terminal_result_summary` build the load shape for
 // a Scenario run and the second half fails (rps, p95Ms and errorRate appear).
 TEST_F (RunsRouteTest, DesignRowKeepsItsOwnResultSummaryAndCollectionRowReadsOnlyItsScenarioBlock) {
     const auto stored =
@@ -4185,7 +4185,7 @@ size_t stopped         = 0) {
 // the run recorded it - and no budget declared means no `verdict`.
 // Mutation check: restore the Load-only gate (`carries_result_summary`) and
 // every row here loses its `resultSummary`; drop the `errored` copy in
-// `build_scenario_result_summary` and the second row fails; drop the
+// `scenario_result_summary` and the second row fails; drop the
 // `stopped` copy and every row fails.
 TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
     seed ({ .id = "run_clean", .type = vayu::RunType::Scenario, .start_time = 1 });
@@ -4224,7 +4224,7 @@ TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
 
 // The verdict is read exactly as a load row reads it: present only when the
 // summary recorded a judged budget, and as stored for a stopped run too.
-// Mutation check: drop `record_verdict` from `build_scenario_result_summary`
+// Mutation check: drop `record_verdict` from `scenario_result_summary`
 // and the first two rows lose their verdict.
 TEST_F (RunsRouteTest, CollectionRowCarriesTheBudgetVerdictOnlyWhenOneWasJudged) {
     seed ({ .id = "run_met", .type = vayu::RunType::Scenario, .start_time = 1 });
@@ -4264,7 +4264,7 @@ TEST_F (RunsRouteTest, CollectionRowCarriesTheBudgetVerdictOnlyWhenOneWasJudged)
 // an older engine), and a summary with no readable `scenario` object, an empty
 // one included, adds no `resultSummary` at all.
 // Mutation check: replace `copy_optional_number` in
-// `build_scenario_result_summary` with an unconditional write and the partial
+// `scenario_result_summary` with an unconditional write and the partial
 // row gains zeroed keys.
 TEST_F (RunsRouteTest, CollectionResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     seed ({ .id = "run_partial", .type = vayu::RunType::Scenario, .start_time = 1 });
