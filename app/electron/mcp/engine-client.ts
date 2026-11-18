@@ -124,6 +124,14 @@ function listPageParams(query: ListPageQuery): URLSearchParams {
 	return params;
 }
 
+/**
+ * How a stored series (`/runs/:id/metrics`, `/runs/:id/monitor`) is read: one
+ * page of raw rows, or the whole run folded to at most `maxPoints` (#3560). A
+ * union because the engine ignores `limit` and `offset` once `maxPoints` is
+ * present, so a call naming both would silently read only one of them.
+ */
+export type RunSeriesRead = { limit: number; offset: number } | { maxPoints: number };
+
 /** What a run is a run of: the saved request it sent, or the collection a load run drove. */
 export type RunIdentity = { requestId: string } | { collectionId: string };
 
@@ -645,30 +653,24 @@ export class EngineClient {
 	}
 
 	/**
-	 * One page of a run's per-tick time series (`GET /runs/:id/metrics`) - the
-	 * series the dashboard charts are drawn from.
+	 * A run's per-tick time series (`GET /runs/:id/metrics`) - the series the
+	 * dashboard charts are drawn from - as one page or as the whole run folded.
 	 */
-	getRunTimeSeries(
-		runId: string,
-		limit: number,
-		offset: number,
-		signal?: AbortSignal
-	): Promise<unknown> {
-		return this.pagedRunRead(runId, "metrics", limit, offset, signal);
+	getRunTimeSeries(runId: string, read: RunSeriesRead, signal?: AbortSignal): Promise<unknown> {
+		return this.runSeriesRead(runId, "metrics", read, signal);
 	}
 
 	/**
-	 * One page of the server vitals scraped during a run
-	 * (`GET /runs/:id/monitor`). A run that configured no monitor is an empty
-	 * page, not a 404 - it exists and simply scraped nothing.
+	 * The server vitals scraped during a run (`GET /runs/:id/monitor`), paged or
+	 * folded as {@link getRunTimeSeries} is. A run that configured no monitor is
+	 * an empty page, not a 404 - it exists and simply scraped nothing.
 	 */
 	getRunMonitorSeries(
 		runId: string,
-		limit: number,
-		offset: number,
+		read: RunSeriesRead,
 		signal?: AbortSignal
 	): Promise<unknown> {
-		return this.pagedRunRead(runId, "monitor", limit, offset, signal);
+		return this.runSeriesRead(runId, "monitor", read, signal);
 	}
 
 	/** The three per-run paginated reads differ only in their path segment. */
@@ -680,6 +682,33 @@ export class EngineClient {
 		signal?: AbortSignal
 	): Promise<unknown> {
 		const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+		return this.runRead(runId, segment, params, signal);
+	}
+
+	/**
+	 * A series is read paged or folded, never both: the engine ignores `limit`
+	 * and `offset` once `maxPoints` is present, so only the one mode's
+	 * parameters travel.
+	 */
+	private runSeriesRead(
+		runId: string,
+		segment: string,
+		read: RunSeriesRead,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		const params =
+			"maxPoints" in read
+				? new URLSearchParams({ maxPoints: String(read.maxPoints) })
+				: new URLSearchParams({ limit: String(read.limit), offset: String(read.offset) });
+		return this.runRead(runId, segment, params, signal);
+	}
+
+	private runRead(
+		runId: string,
+		segment: string,
+		params: URLSearchParams,
+		signal?: AbortSignal
+	): Promise<unknown> {
 		return this.request(
 			"GET",
 			`/runs/${encodeURIComponent(runId)}/${segment}?${params.toString()}`,

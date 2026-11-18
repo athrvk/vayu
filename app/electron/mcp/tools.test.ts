@@ -44,7 +44,7 @@ import {
 import type { McpHost } from "./tools/contract.js";
 import { engineCode } from "./tools/failure.js";
 import { composeLoadRunRequest } from "./tools/compose.js";
-import { argumentsSchema, INPUT_REQUIRED } from "./tools/kit.js";
+import { argumentsSchema, INPUT_REQUIRED, jsonResult, structuredResult } from "./tools/kit.js";
 import { RUN_STATUSES } from "./tools/run-housekeeping.js";
 import { classifyRunStatus, PARTIAL_REPORT_NOTE } from "./tools/run-status.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
@@ -11306,8 +11306,8 @@ describe("start_load_run resolves and states the load shape", () => {
 			)
 		);
 		expect(preview).toContain("(constant_concurrency, 100 virtual users, closed loop, 60 s)?");
-		expect(preview).toContain('"concurrency": 100');
-		expect(preview).toContain('"duration": "60s"');
+		expect(preview).toContain('"concurrency":100');
+		expect(preview).toContain('"duration":"60s"');
 		expect(client.startRun).not.toHaveBeenCalled();
 
 		const paced = firstText(
@@ -13144,14 +13144,12 @@ describe("run housekeeping tools", () => {
 			]);
 			expect(forwarded(client, "getRunTimeSeries")).toEqual([
 				"run_1",
-				DEFAULT_RUN_SERIES_LIMIT,
-				0,
+				{ limit: DEFAULT_RUN_SERIES_LIMIT, offset: 0 },
 				undefined,
 			]);
 			expect(forwarded(client, "getRunMonitorSeries")).toEqual([
 				"run_1",
-				DEFAULT_RUN_SERIES_LIMIT,
-				0,
+				{ limit: DEFAULT_RUN_SERIES_LIMIT, offset: 0 },
 				undefined,
 			]);
 		});
@@ -13169,7 +13167,199 @@ describe("run housekeeping tools", () => {
 				{ runId: "run_1", limit: 250, offset: 500 },
 				ctxWith(client)
 			);
-			expect(forwarded(client, "getRunTimeSeries")).toEqual(["run_1", 250, 500, undefined]);
+			expect(forwarded(client, "getRunTimeSeries")).toEqual([
+				"run_1",
+				{ limit: 250, offset: 500 },
+				undefined,
+			]);
+		});
+
+		describe("maxPoints folds the whole run (#3560)", () => {
+			const SERIES_TOOLS = [
+				["get_run_timeseries", "getRunTimeSeries"],
+				["get_run_monitor", "getRunMonitorSeries"],
+			] as const;
+
+			test.each(SERIES_TOOLS)("%s forwards maxPoints and no page", async (tool, method) => {
+				const client = fakeClient();
+				const res = await dispatchTool(
+					tool,
+					{ runId: "run_1", maxPoints: 30 },
+					ctxWith(client)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(forwarded(client, method)).toEqual(["run_1", { maxPoints: 30 }, undefined]);
+			});
+
+			test.each(SERIES_TOOLS)(
+				"%s refuses maxPoints beside limit or offset",
+				async (tool, method) => {
+					const client = fakeClient();
+					for (const paging of [{ offset: 100 }, { limit: 50 }, { offset: 0 }]) {
+						const res = await dispatchTool(
+							tool,
+							{ runId: "run_1", maxPoints: 30, ...paging },
+							ctxWith(client)
+						);
+						expect(res.isError, JSON.stringify(paging)).toBe(true);
+						expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+						expect(firstText(res)).toContain(`"${Object.keys(paging)[0]}"`);
+					}
+					expect(client[method]).not.toHaveBeenCalled();
+				}
+			);
+
+			test.each(SERIES_TOOLS)(
+				"%s holds maxPoints to a positive whole number within the page ceiling",
+				async (tool, method) => {
+					const client = fakeClient();
+					for (const maxPoints of [0, -1, 2.5, MAX_RUN_SERIES_LIMIT + 1]) {
+						const res = await dispatchTool(
+							tool,
+							{ runId: "run_1", maxPoints },
+							ctxWith(client)
+						);
+						expect(res.isError, String(maxPoints)).toBe(true);
+					}
+					expect(client[method]).not.toHaveBeenCalled();
+				}
+			);
+
+			test("a folded answer keeps bucketed and ticksPerBucket, with no next page", async () => {
+				const folded = {
+					data: [{ elapsed_seconds: 10 }],
+					pagination: { total: 300, limit: 30, offset: 0, hasMore: false, returned: 1 },
+					bucketed: true,
+					ticksPerBucket: 10,
+				};
+				const client = fakeClient({ getRunTimeSeries: vi.fn().mockResolvedValue(folded) });
+				const res = await dispatchTool(
+					"get_run_timeseries",
+					{ runId: "run_1", maxPoints: 30 },
+					ctxWith(client)
+				);
+				expect(res.structuredContent).toMatchObject({ bucketed: true, ticksPerBucket: 10 });
+				expect(res.structuredContent).not.toHaveProperty("pagination.note");
+			});
+
+			test("the descriptions state the fold's semantics", () => {
+				const timeseries = descriptionOf(
+					TOOLS.find((t) => t.name === "get_run_timeseries")
+				);
+				expect(timeseries).toMatch(/maxPoints/);
+				expect(timeseries).toMatch(/bucketed/);
+				expect(timeseries).toMatch(/ticksPerBucket/);
+				expect(timeseries).toMatch(/MAX over its ticks/);
+				expect(timeseries).toMatch(/current_rps the mean/);
+				expect(descriptionOf(TOOLS.find((t) => t.name === "get_run_monitor"))).toMatch(
+					/maxPoints[\s\S]*MAX over them/
+				);
+			});
+		});
+
+		describe("get_run_timeseries fields", () => {
+			const TICK = {
+				timestamp: 1_700_000_000_000,
+				elapsed_seconds: 12.5,
+				requests_completed: 1500,
+				requests_failed: 5,
+				http_errors: 3,
+				no_response: 2,
+				current_rps: 150.5,
+				current_concurrency: 100,
+				throughput: 149.5,
+				error_rate: 0.33,
+				status_codes: { "200": 1495, "500": 5 },
+				status_seconds: [{ second: 12, span: 1, counts: [149, 0, 0, 1, 0] }],
+				latency_p50_ms: 38.5,
+				latency_p95_ms: 95.1,
+				latency_p99_ms: 120,
+			};
+			const withTick = () =>
+				fakeClient({
+					getRunTimeSeries: vi
+						.fn()
+						.mockResolvedValue(page([TICK, { ...TICK, elapsed_seconds: 13.5 }])),
+				});
+			const rowsOf = (res: { content: Array<{ text: string }> }) =>
+				(JSON.parse(firstText(res)) as { data: Array<Record<string, unknown>> }).data;
+
+			test("summary keeps only the trend keys, on every tick", async () => {
+				const res = await dispatchTool(
+					"get_run_timeseries",
+					{ runId: "run_1", fields: "summary" },
+					ctxWith(withTick())
+				);
+				const rows = rowsOf(res);
+				expect(rows).toHaveLength(2);
+				for (const row of rows) {
+					expect(Object.keys(row).sort()).toEqual(
+						[
+							"current_rps",
+							"elapsed_seconds",
+							"error_rate",
+							"latency_p95_ms",
+							"requests_completed",
+							"requests_failed",
+						].sort()
+					);
+				}
+				expect(rows[1].elapsed_seconds).toBe(13.5);
+			});
+
+			test("a tick with no latency (a second nothing completed) simply lacks the key", async () => {
+				const { latency_p95_ms: _dropped, ...quiet } = TICK;
+				const client = fakeClient({
+					getRunTimeSeries: vi.fn().mockResolvedValue(page([quiet])),
+				});
+				const res = await dispatchTool(
+					"get_run_timeseries",
+					{ runId: "run_1", fields: "summary" },
+					ctxWith(client)
+				);
+				expect(rowsOf(res)[0]).not.toHaveProperty("latency_p95_ms");
+			});
+
+			test.each([[undefined], ["full"]])(
+				"fields %s returns the whole tick",
+				async (fields) => {
+					const res = await dispatchTool(
+						"get_run_timeseries",
+						{ runId: "run_1", ...(fields ? { fields } : {}) },
+						ctxWith(withTick())
+					);
+					expect(rowsOf(res)[0]).toEqual(TICK);
+				}
+			);
+
+			test("summary also trims a folded answer and keeps its envelope", async () => {
+				const folded = { ...page([TICK], 300), bucketed: true, ticksPerBucket: 10 };
+				const client = fakeClient({ getRunTimeSeries: vi.fn().mockResolvedValue(folded) });
+				const res = await dispatchTool(
+					"get_run_timeseries",
+					{ runId: "run_1", maxPoints: 30, fields: "summary" },
+					ctxWith(client)
+				);
+				expect(res.structuredContent).toMatchObject({ bucketed: true, ticksPerBucket: 10 });
+				expect(rowsOf(res)[0]).not.toHaveProperty("status_codes");
+			});
+
+			test("an unknown fields value is an input error and reaches no engine", async () => {
+				const client = withTick();
+				const res = await dispatchTool(
+					"get_run_timeseries",
+					{ runId: "run_1", fields: "tiny" },
+					ctxWith(client)
+				);
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+				expect(client.getRunTimeSeries).not.toHaveBeenCalled();
+			});
+
+			test("get_run_monitor takes no fields: its samples have no fixed keys", () => {
+				const monitor = TOOLS.find((t) => t.name === "get_run_monitor");
+				expect(Object.keys(monitor!.inputSchema)).not.toContain("fields");
+			});
 		});
 
 		test("the series cap is the tool's, well below the engine's 50000", async () => {
@@ -15091,8 +15281,8 @@ describe("start_load_run recording knobs", () => {
 		);
 
 		expect(client.startRun).not.toHaveBeenCalled();
-		expect(firstText(res)).toMatch(/"response_sample_rate": 10/);
-		expect(firstText(res)).toMatch(/"max_response_samples": 50/);
+		expect(firstText(res)).toMatch(/"response_sample_rate":10/);
+		expect(firstText(res)).toMatch(/"max_response_samples":50/);
 	});
 
 	test("a scenario load run carries the response-sample knobs", async () => {
@@ -15428,8 +15618,8 @@ describe("OAuth 2.0 token tools", () => {
 			undefined
 		);
 		const text = firstText(res);
-		expect(text).toContain('"found": true');
-		expect(text).toContain('"expired": false');
+		expect(text).toContain('"found":true');
+		expect(text).toContain('"expired":false');
 		expect(text).not.toContain(OAUTH2_TOKEN_RECORD.accessToken);
 	});
 
@@ -15444,7 +15634,7 @@ describe("OAuth 2.0 token tools", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		expect(firstText(res)).toContain('"found": false');
+		expect(firstText(res)).toContain('"found":false');
 	});
 
 	test("clearing is refused while writes are off, and reports what it removed when on", async () => {
@@ -15469,7 +15659,7 @@ describe("OAuth 2.0 token tools", () => {
 			OAUTH2_TOKEN_RECORD.cacheKey,
 			undefined
 		);
-		expect(firstText(res)).toContain('"deleted": true');
+		expect(firstText(res)).toContain('"deleted":true');
 	});
 
 	test("the cache families the renderer must refetch are declared", () => {
@@ -18358,7 +18548,7 @@ describe("secret withholding", () => {
 	test.each(WRITE_ECHOES)("$tool withholds the echoed row's secrets by default", async (echo) => {
 		const { text } = await echoOf(echo, { allowWrites: true });
 		for (const secret of echo.secrets) expect(text).not.toContain(secret);
-		expect(text).toMatch(/Withheld": true/);
+		expect(text).toMatch(/Withheld":true/);
 	});
 
 	test.each(WRITE_ECHOES)("$tool echoes the stored row whole with reveal on", async (echo) => {
@@ -19500,7 +19690,7 @@ describe("secret withholding", () => {
 		const client = runClient({ composeRequest: vi.fn().mockResolvedValue(LOAD_TARGET) });
 		const preview = firstText(await planLoadRun(client, REVEAL));
 		expect(preview).toContain(QUERY_FORM);
-		expect(preview).toContain('"token": "typed-bearer-token"');
+		expect(preview).toContain('"token":"typed-bearer-token"');
 		expect(client.getGlobals).not.toHaveBeenCalled();
 		expect(client.listAllRequests).not.toHaveBeenCalled();
 	});
@@ -21034,5 +21224,32 @@ describe("every structured read answers structuredContent its outputSchema accep
 		expect(res.structuredContent).toMatchObject({ id: "run_1", terminal: true });
 		const parsed = outputSchemaOf("get_run").parse({ id: "run_1", novel: 1 });
 		expect(parsed).toMatchObject({ novel: 1 });
+	});
+});
+
+/*
+ * The reader of a result is a model's context window, so indentation is cost
+ * with no reader (#3560). A newline in a JSON result's text means a pretty
+ * printer is back.
+ */
+describe("result text is compact JSON", () => {
+	const NESTED = { allowlist: ["a.test"], caps: { duration: { max: 60 }, rows: [{ a: 1 }] } };
+
+	test("jsonResult and structuredResult carry no newline or indent", () => {
+		for (const result of [jsonResult(NESTED), structuredResult(NESTED)]) {
+			expect(firstText(result as { content: Array<{ text: string }> })).toBe(
+				JSON.stringify(NESTED)
+			);
+		}
+	});
+
+	test("a structured read tool's text has no newline and equals its structuredContent", async () => {
+		const res = await dispatchTool(
+			"get_safety_config",
+			{},
+			ctxWith(fakeClient(), { allowlist: ["a.test"], allowAll: true })
+		);
+		expect(firstText(res)).not.toContain("\n");
+		expect(JSON.parse(firstText(res))).toEqual(res.structuredContent);
 	});
 });

@@ -553,7 +553,7 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 					{
 						uri: uri.href,
 						mimeType: "application/json",
-						text: JSON.stringify(await r.read(ctx, sdkCtx.mcpReq.signal), null, 2),
+						text: JSON.stringify(await r.read(ctx, sdkCtx.mcpReq.signal)),
 					},
 				],
 			}))
@@ -605,7 +605,7 @@ function registerResources(mcp: McpServer, ctx: ToolContext): void {
 					{
 						uri: uri.href,
 						mimeType: "application/json",
-						text: JSON.stringify(report, null, 2),
+						text: JSON.stringify(report),
 					},
 				],
 			};

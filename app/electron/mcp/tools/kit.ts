@@ -65,13 +65,13 @@ export function argumentsSchema<Shape extends Record<string, z.ZodType>>(shape: 
 // --- Result helpers ----------------------------------------------------------
 
 export function jsonResult(value: unknown): ToolResult {
-	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+	return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
 
 /** Result that carries both a text rendering and structured content. */
 export function structuredResult(value: Record<string, unknown>): ToolResult {
 	return {
-		content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+		content: [{ type: "text", text: JSON.stringify(value) }],
 		structuredContent: value,
 	};
 }

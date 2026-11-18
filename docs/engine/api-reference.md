@@ -11994,8 +11994,10 @@ is never added.
 Only `GET /runs/:runId/metrics` and `GET /runs/:runId/monitor`
 ([the same parameter, folded differently](#downsampling-the-monitor-series))
 downsample. The run-report export
-([`POST /export/run-report`](#post-exportrun-report)) and the MCP
-`get_run_timeseries` and `get_run_monitor` tools read the raw rows.
+([`POST /export/run-report`](#post-exportrun-report)) reads the raw rows; the MCP
+`get_run_timeseries` and `get_run_monitor` tools page raw rows by default and
+pass `maxPoints` on request (at most 1000 there, never beside `limit` or
+`offset`).
 
 ### GET /runs/:runId/monitor
 
@@ -12079,8 +12081,8 @@ The max keeps a one-scrape spike in a gauge (cpu, memory, a queue depth) that a
 mean would flatten, and for a monotone counter it equals the last reading. A
 name no sample in the bucket carried is never added to the folded `series`, so
 a gap in the target's reporting stays a gap; a non-number value is skipped.
-The MCP `get_run_monitor` tool does not pass `maxPoints` and reads the raw
-samples.
+The MCP `get_run_monitor` tool passes `maxPoints` when asked and otherwise
+pages the raw samples.
 
 ### GET /runs/:runId/live
 

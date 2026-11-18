@@ -611,12 +611,23 @@ describe("EngineClient run housekeeping", () => {
 		const { fetchImpl, calls } = recordingFetch();
 		const engine = client(fetchImpl);
 		await engine.getRunSamples("run_1", 25, 0);
-		await engine.getRunTimeSeries("run_1", 100, 100);
-		await engine.getRunMonitorSeries("run_1", 10, 5);
+		await engine.getRunTimeSeries("run_1", { limit: 100, offset: 100 });
+		await engine.getRunMonitorSeries("run_1", { limit: 10, offset: 5 });
 		expect(calls.map((c) => c.url)).toEqual([
 			"http://127.0.0.1:9876/runs/run_1/samples?limit=25&offset=0",
 			"http://127.0.0.1:9876/runs/run_1/metrics?limit=100&offset=100",
 			"http://127.0.0.1:9876/runs/run_1/monitor?limit=10&offset=5",
+		]);
+	});
+
+	it("folds a whole series with maxPoints alone, never beside limit or offset (#3560)", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		const engine = client(fetchImpl);
+		await engine.getRunTimeSeries("run_1", { maxPoints: 30 });
+		await engine.getRunMonitorSeries("run_1", { maxPoints: 20 });
+		expect(calls.map((c) => c.url)).toEqual([
+			"http://127.0.0.1:9876/runs/run_1/metrics?maxPoints=30",
+			"http://127.0.0.1:9876/runs/run_1/monitor?maxPoints=20",
 		]);
 	});
 });
