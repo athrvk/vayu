@@ -44,11 +44,12 @@ import {
 	RECORD_MAX_BYTES,
 	UNPARSED_RAW_MAX_BYTES,
 	compileLogFilter,
+	RAW_LINE_KEY,
 	createLogTail,
 	isUnparsedLine,
 	listLogFiles,
 	parseSearchInput,
-	readLogs,
+	readLogs as readLogsWithRaw,
 	type LogBatch,
 	type LogEntry,
 	type LogFileRecord,
@@ -114,6 +115,19 @@ function engineRecord(
 }
 
 const line = (record: object) => JSON.stringify(record) + "\n";
+
+/** @p entry without the raw line every record carries, so it compares against its fixture. */
+function withoutRawLine<T extends LogEntry>(entry: T): T {
+	if (isUnparsedLine(entry)) return entry;
+	const { [RAW_LINE_KEY]: _raw, ...fields } = entry as LogFileRecord;
+	return fields as T;
+}
+
+/** `readLogs` with the raw line stripped; the raw-line cases call `readLogsWithRaw`. */
+const readLogs: typeof readLogsWithRaw = async (readerDeps, options) => {
+	const result = await readLogsWithRaw(readerDeps, options);
+	return { ...result, records: result.records.map(withoutRawLine) };
+};
 
 function writeLog(name: string, records: object[], eol = "\n"): void {
 	writeFileSync(
@@ -321,6 +335,60 @@ describe("readLogs - records", () => {
 		expect(record.body).toBe("x".repeat(1024) + "...[truncated]");
 		expect({ ...record, body: big.body }).toEqual(big);
 		expect(Buffer.byteLength(JSON.stringify(record))).toBeLessThanOrEqual(RECORD_MAX_BYTES);
+	});
+
+	describe("the raw line", () => {
+		/** Not what `JSON.stringify` writes: `1.0` and a space after a colon survive only as text. */
+		const RAW_TEXT =
+			'{"ts":"2026-11-18T10:00:00.000Z","level":"info","src":"engine","cat":"http","msg":"ok","pid":1,"x":1.0, "y":"\\u00e9"}';
+
+		it("comes back with each record, byte for byte as the file holds it", async () => {
+			writeFileSync(path.join(dir, "engine_20261118_100000.log"), RAW_TEXT + "\r\n");
+
+			const [record] = (await readLogsWithRaw(deps, { filter: {}, limit: 1 }))
+				.records as LogFileRecord[];
+
+			expect(record[RAW_LINE_KEY]).toBe(RAW_TEXT);
+			expect(record.x).toBe(1);
+		});
+
+		it("comes back with each record the tail delivers", async () => {
+			writeFileSync(path.join(dir, "engine_20261118_100000.log"), "");
+			const clock = manualTimers();
+			const batches: LogBatch[] = [];
+			const tail = await createLogTail(
+				{ ...deps, timers: clock.timers },
+				{ filter: {}, onBatch: (batch) => batches.push(batch) }
+			);
+
+			appendFileSync(path.join(dir, "engine_20261118_100000.log"), RAW_TEXT + "\n");
+			await clock.poll();
+
+			expect((batches[0].records[0] as LogFileRecord)[RAW_LINE_KEY]).toBe(RAW_TEXT);
+			tail.stop();
+		});
+
+		it("is the line cut at the record bound for a record that had fields cut", async () => {
+			const big = engineRecord(0, "client", "curl exchange", {
+				body: "x".repeat(2 * RECORD_MAX_BYTES),
+			});
+			writeLog("engine_20261118_100000.log", [big]);
+
+			const [record] = (await readLogsWithRaw(deps, { filter: {}, limit: 1 }))
+				.records as LogFileRecord[];
+
+			expect(record[RAW_LINE_KEY]).toBe(JSON.stringify(big).slice(0, RECORD_MAX_BYTES));
+		});
+
+		it("is not searched by free text, which matches field values only", async () => {
+			writeFileSync(path.join(dir, "engine_20261118_100000.log"), RAW_TEXT + "\n");
+
+			const byKeyName = await readLogsWithRaw(deps, { filter: { text: "level" }, limit: 5 });
+			const byValue = await readLogsWithRaw(deps, { filter: { text: "ok" }, limit: 5 });
+
+			expect(byKeyName.records).toEqual([]);
+			expect(byValue.records).toHaveLength(1);
+		});
 	});
 
 	it("answers a line past the parse ceiling as unparsed, from its first byte", async () => {
@@ -783,7 +851,8 @@ async function startTail(filter: LogFilter = {}, readerDeps: LogReaderDeps = dep
 		{ ...readerDeps, timers: clock.timers },
 		{
 			filter,
-			onBatch: (batch) => batches.push(batch),
+			onBatch: (batch) =>
+				batches.push({ ...batch, records: batch.records.map(withoutRawLine) }),
 		}
 	);
 	return { clock, batches, tail };

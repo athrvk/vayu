@@ -72,6 +72,7 @@ type LogEntryShape =
 			msg: string;
 			pid: number;
 			tid?: string;
+			$raw?: string;
 	  } & Record<string, unknown>)
 	| { unparsed: true; raw: string };
 interface LogReadRequestShape {

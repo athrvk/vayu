@@ -82,6 +82,17 @@ export interface LogFileInfo {
 	mtimeMs: number;
 }
 
+/**
+ * The key a record carries its own line under, so Copy line and Export write
+ * what the file holds and not a re-serialisation (`1.0` reads back as `1`). It
+ * starts with `$`, which `docs/engine/log-record.schema.json`'s `propertyNames`
+ * refuses, so no field of a schema-valid record shares it and a `key:value`
+ * search term (`FIELD_NAME`) cannot name it. A line that does carry the key has
+ * it overwritten, and loses nothing: the line is the value. Mirrored by
+ * `RAW_LINE_KEY` in `src/modules/logs/log-entry.ts`.
+ */
+export const RAW_LINE_KEY = "$raw";
+
 /** One line of a log file that is a record (`docs/engine/log-record.schema.json`). */
 export interface LogFileRecord {
 	ts: string;
@@ -91,6 +102,8 @@ export interface LogFileRecord {
 	msg: string;
 	pid: number;
 	tid?: string;
+	/** The line as the file holds it, cut at `RECORD_MAX_BYTES`. Absent on a record built outside the reader. */
+	[RAW_LINE_KEY]?: string;
 	[field: string]: unknown;
 }
 
@@ -434,14 +447,21 @@ function decodeLine(line: RawLine): LogEntry | null {
 		return unparsed(bytes);
 	}
 	if (!isLogRecord(value)) return unparsed(bytes);
-	return line.length > RECORD_MAX_BYTES ? cutLargestFields(value, line.length) : value;
+	const record = line.length > RECORD_MAX_BYTES ? cutLargestFields(value, line.length) : value;
+	// The bounded line, never the whole text: a record the parse ceiling lets
+	// through can be 16 MiB, and a copy of it would double what the IPC carries.
+	record[RAW_LINE_KEY] = utf8Prefix(bytes, RECORD_MAX_BYTES).toString("utf8");
+	return record;
 }
 
 // ---------------------------------------------------------------------------
 // Filter
 
-/** Keys free text does not search: the table shows them in columns of their own. */
-const TEXT_EXCLUDED_KEYS = new Set(["ts", "level", "src", "cat", "pid", "tid"]);
+/**
+ * Keys free text does not search: the table shows them in columns of their own,
+ * and the raw line repeats every field, so it would match on key names.
+ */
+const TEXT_EXCLUDED_KEYS = new Set(["ts", "level", "src", "cat", "pid", "tid", RAW_LINE_KEY]);
 
 function containsText(value: unknown, needle: string): boolean {
 	if (typeof value === "string") return value.toLowerCase().includes(needle);

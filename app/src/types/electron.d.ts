@@ -284,6 +284,8 @@ export interface LogFileRecord {
 	msg: string;
 	pid: number;
 	tid?: string;
+	/** The line as the file holds it, cut at 256 KiB. Mirrors `RAW_LINE_KEY` in `electron/log-reader.ts`. */
+	$raw?: string;
 	[field: string]: unknown;
 }
 

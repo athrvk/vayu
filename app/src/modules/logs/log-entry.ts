@@ -19,11 +19,18 @@ export function isUnparsedEntry(entry: LogEntry): entry is UnparsedLogLine {
 }
 
 /**
+ * Where a record carries the line it was read from (`RAW_LINE_KEY` in
+ * `electron/log-reader.ts`, which this file cannot import). It is not a field
+ * of the record: nothing draws it as one.
+ */
+const RAW_LINE_KEY = "$raw";
+
+/**
  * The keys the `key=value` text leaves out: the table's columns, and `pid` and
  * `tid`, which `electron/log.ts`'s text renderer leaves out too (the opened
- * row's JSON shows them).
+ * row's JSON shows them), and the raw line.
  */
-const COLUMN_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid"]);
+const COLUMN_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid", RAW_LINE_KEY]);
 
 /** The record's fields that have no column, as `key=value` pairs. */
 export function fieldsText(record: LogFileRecord): string {
@@ -35,9 +42,20 @@ export function fieldsText(record: LogFileRecord): string {
 		.join(" ");
 }
 
-/** The line as the file holds it: a record as one JSON object, an unparsed line as its raw text. */
+/** The record as the opened row shows it: its fields, without the raw line. */
+export function recordJson(record: LogFileRecord): string {
+	const fields = Object.entries(record).filter(([key]) => key !== RAW_LINE_KEY);
+	return JSON.stringify(Object.fromEntries(fields), null, 2);
+}
+
+/**
+ * The line as the file holds it, so `1.0` copies as `1.0`: the raw text for an
+ * unparsed line and for a record that carries its own. A record without one
+ * (a fixture) is re-serialised.
+ */
 export function entryLine(entry: LogEntry): string {
-	return isUnparsedEntry(entry) ? entry.raw : JSON.stringify(entry);
+	if (isUnparsedEntry(entry)) return entry.raw;
+	return typeof entry[RAW_LINE_KEY] === "string" ? entry[RAW_LINE_KEY] : JSON.stringify(entry);
 }
 
 const sizes = new WeakMap<LogEntry, number>();

@@ -250,7 +250,12 @@ off when you scroll up, on again by its switch or by scrolling to the end), a
 **Jump to time** control (the platform's own date-time input), **Export** (the
 lines held in the table, as JSON lines, through the save dialog, with the count
 it wrote) and the logs folder button; a line's **Copy line** is in its opened
-row. The filters are evaluated in the main process: a change restarts the tail
+row. Copy and Export write the line as the file holds it, not the record
+re-serialised (`1.0` stays `1.0`): the reader attaches each record's own line
+under the `$raw` key, which the schema's `propertyNames` refuses, so no field
+shares it, and the table, the opened row's JSON and free-text search all leave
+it out. For a record over 256 KiB the line is cut at that bound, as the
+record's largest fields are. The filters are evaluated in the main process: a change restarts the tail
 and reads again, replacing what the table held.
 
 The tab holds at most 10,000 lines or 16 MiB, whichever comes first. Following

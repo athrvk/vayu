@@ -47,6 +47,10 @@ let writeText: ReturnType<typeof vi.fn>;
 const request = logRecord(1, { status: 200, path: "/inbox", ms: 1.3 });
 const unparsed: LogEntry = { unparsed: true, raw: "SEGFAULT at 0xdeadbeef" };
 
+/** A record carrying the line the file holds, which `JSON.stringify` would not write back (`1.0`, a space). */
+const FILE_LINE = `{"ts":"${logRecord(2).ts}","level":"info","src":"engine","cat":"http","msg":"line 2","pid":4242,"x":1.0, "path":"/raw"}`;
+const withFileLine = logRecord(2, { x: 1, path: "/raw", $raw: FILE_LINE });
+
 beforeEach(() => {
 	bridge = fakeLogsBridge();
 	openLogsFolder = vi.fn(async () => "");
@@ -170,6 +174,44 @@ describe("copy line", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Copy line" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith("SEGFAULT at 0xdeadbeef"));
+	});
+});
+
+describe("the raw line", () => {
+	it("is what Copy line writes, not a re-serialisation of the record", async () => {
+		await openTab([withFileLine]);
+		fireEvent.click(screen.getByRole("button", { expanded: false }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Copy line" }));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith(FILE_LINE));
+		expect(FILE_LINE).toContain("1.0");
+	});
+
+	it("is what Export writes", async () => {
+		await openTab([withFileLine, unparsed]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+		await waitFor(() =>
+			expect(saveFile).toHaveBeenCalledWith(
+				`${FILE_LINE}\nSEGFAULT at 0xdeadbeef\n`,
+				"vayu-logs.jsonl"
+			)
+		);
+	});
+
+	it("is drawn neither as a field in the row nor in the opened row's JSON", async () => {
+		await openTab([withFileLine]);
+		const row = screen.getByRole("button", { expanded: false });
+
+		expect(within(row).getByText("x=1 path=/raw")).toBeInTheDocument();
+		fireEvent.click(row);
+
+		const { $raw, ...record } = withFileLine;
+		expect($raw).toBe(FILE_LINE);
+		expect(document.querySelector("pre")?.textContent).toBe(JSON.stringify(record, null, 2));
+		expect(screen.queryByText(/\$raw/)).toBeNull();
 	});
 });
 
