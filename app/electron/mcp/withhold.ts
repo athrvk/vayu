@@ -786,9 +786,9 @@ function foldOriginPart(text: string): string {
  * @p scheme and @p authority as one comparable origin: the userinfo left out,
  * scheme and host folded, the scheme's default port the same as none. What
  * cannot be read as `host[:port]` (a `{{variable}}` port, stray colons) is
- * compared as written, and an authority holding a backslash or whitespace, which
- * parsers disagree on, whole including its userinfo, so either can only match
- * an identical spelling.
+ * compared as written. An authority holding a backslash or whitespace is
+ * compared whole, userinfo included, because parsers disagree on where its host
+ * is; it matches only an identical spelling.
  */
 function foldOrigin(scheme: string, authority: string): string {
 	if (/[\\\s]/.test(authority)) return `${scheme}://${authority}`;
