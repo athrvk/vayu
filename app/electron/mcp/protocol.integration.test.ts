@@ -30,6 +30,7 @@ import { createMcpServer } from "./server.js";
 import { VayuMcpService } from "./index.js";
 import { McpHttpServer, type McpHttpServerOptions } from "./http.js";
 import { InFlightCalls } from "./in-flight-calls.js";
+import { CALL_CANCELLED, CUT_ERROR_CODE, SERVER_STOPPED } from "./held-exchange.js";
 import { McpListener } from "./listener.js";
 import { createMcpLifecycle, type McpLifecycle } from "./lifecycle.js";
 import { MCP_HOST, MCP_PORT, mcpEndpointUrl } from "../constants.js";
@@ -2396,9 +2397,10 @@ describe("stopping the MCP server through its lifecycle", () => {
 	const stopping = () => lifecycle!.stop().then(() => "stopped");
 
 	/*
-	 * The mutation checks, in `http.ts`: drop the `res.destroy()` sweep from
-	 * `endStreams()` and the stop waits on the engine call; skip
-	 * `holdUntilClosed` for the call and the same. Either loses its race.
+	 * The mutation checks, in `http.ts`: drop the `res.destroy()` from
+	 * `endStreams()` and the stream ends empty, leaving the client waiting for
+	 * an answer; skip `holdUntilClosed` for the call and the stop waits on the
+	 * engine call. Either loses its race.
 	 */
 	it("stops while a 2025-era call waits for its headers, failing the client's fetch", async () => {
 		const hang = hangingEngineCall();
@@ -2423,38 +2425,155 @@ describe("stopping the MCP server through its lifecycle", () => {
 		await expectPortFree(port);
 	});
 
+	/** A one-row smoke run whose request never settles until it is aborted. */
+	function hangingSmoke(hang: ReturnType<typeof hangingEngineCall>): EngineClient {
+		return fakeClient({
+			listRequests: async () => [
+				{ id: "a", name: "req a", method: "GET", url: "https://api.example.com/a" },
+			],
+			composeRequest: async () => ({ method: "GET", url: "https://api.example.com/a" }),
+			executeRequest: (_payload: unknown, signal?: AbortSignal) => hang.call(signal),
+		});
+	}
+	const SMOKE_SAFETY = { allowlist: ["api.example.com"] };
+
+	/**
+	 * Start a smoke call on @p c and return once its first progress event has
+	 * reached the client, so the call's response stream is under way.
+	 */
+	async function streamingSmokeCall(c: Client): Promise<{ outcome: Promise<unknown> }> {
+		let heardProgress!: () => void;
+		const progressed = new Promise<void>((resolve) => (heardProgress = resolve));
+		const outcome = c
+			.callTool(
+				{ name: "run_collection_smoke", arguments: { collectionId: "c1" } },
+				{ onprogress: () => heardProgress() }
+			)
+			.then(
+				() => "answered",
+				(err: unknown) => err
+			);
+		await progressed;
+		return { outcome };
+	}
+
+	/**
+	 * A call cut once its stream was under way is answered with the error
+	 * frame the host writes; one cut with no answer would hold it until the
+	 * SDK client's own 60 s request timeout, which `within` reads as still
+	 * waiting.
+	 */
+	async function expectCutWith(outcome: Promise<unknown>, cause: string) {
+		const err = await within(outcome);
+		expect(err).toBeInstanceOf(ProtocolError);
+		expect(err).toMatchObject({
+			code: CUT_ERROR_CODE,
+			message: expect.stringContaining(cause),
+		});
+	}
+
 	/*
 	 * Once a progress event (or a keep-alive comment, every 15 s) is out, the
-	 * client is reading a 200 stream, and a dropped one ends with no answer: the
-	 * SDK client holds the call until its own timeout, so nothing here waits on
-	 * it. The server's side is the same as before the headers. The mutation
-	 * check is the first test's.
+	 * client is reading a 200 stream, and the SDK client settles the call only
+	 * on a JSON-RPC response for its id (#3598). The mutation check: drop the
+	 * error frames `HeldExchange.relay` enqueues when the stream ends, and the
+	 * call is still waiting.
 	 */
 	it("stops while a 2025-era call is streaming, its headers already sent", async () => {
 		const hang = hangingEngineCall();
-		const port = await serve(
-			fakeClient({
-				listRequests: async () => [
-					{ id: "a", name: "req a", method: "GET", url: "https://api.example.com/a" },
-				],
-				composeRequest: async () => ({ method: "GET", url: "https://api.example.com/a" }),
-				executeRequest: (_payload: unknown, signal?: AbortSignal) => hang.call(signal),
-			}),
-			{ allowlist: ["api.example.com"] }
-		);
+		const port = await serve(hangingSmoke(hang), SMOKE_SAFETY);
 		const c = await connectLegacy(port);
-		let heardProgress!: () => void;
-		const progressed = new Promise<void>((resolve) => (heardProgress = resolve));
-		const call = c.callTool(
-			{ name: "run_collection_smoke", arguments: { collectionId: "c1" } },
-			{ onprogress: () => heardProgress() }
-		);
-		void call.catch(() => {});
-		await progressed;
+		const { outcome } = await streamingSmokeCall(c);
 		await hang.started;
 
 		expect(await within(stopping())).toBe("stopped");
 		await hang.aborted;
+		await expectCutWith(outcome, SERVER_STOPPED);
+		await expectPortFree(port);
+	});
+
+	/*
+	 * The SDK client cancels by aborting its own call, which rejects at once;
+	 * an agent that sends `notifications/cancelled` itself is still waiting on
+	 * the stream, as is a client whose cancel the host matched for it. The
+	 * mutation check is the stop test's.
+	 */
+	it("ends a cancelled 2025-era call whose stream is under way with an error", async () => {
+		const hang = hangingEngineCall();
+		const port = await serve(hangingSmoke(hang), SMOKE_SAFETY);
+		const sent: Array<{ id?: string | number; method?: string }> = [];
+		const recording: typeof fetch = (input, init) => {
+			if (typeof init?.body === "string") sent.push(...[JSON.parse(init.body)].flat());
+			return fetch(input, init);
+		};
+		const c = new Client({ name: "legacy-e2e", version: "1.0.0" });
+		await c.connect(
+			new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`), {
+				fetch: recording,
+			})
+		);
+		clients.push(c);
+		expect(c.getProtocolEra()).toBe("legacy");
+		const { outcome } = await streamingSmokeCall(c);
+		await hang.started;
+		const call = sent.find((message) => message.method === "tools/call");
+		expect(call?.id).toBeDefined();
+
+		await c.notification({
+			method: "notifications/cancelled",
+			params: { requestId: call!.id!, reason: "test" },
+		});
+		await hang.aborted;
+		await expectCutWith(outcome, CALL_CANCELLED);
+	});
+
+	async function connectModern(port: number): Promise<Client> {
+		const c = new Client(
+			{ name: "modern-e2e", version: "1.0.0" },
+			{ versionNegotiation: { mode: "auto" } }
+		);
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		clients.push(c);
+		expect(c.getProtocolEra()).toBe("modern");
+		return c;
+	}
+
+	/*
+	 * The 2026-07-28 leg answers a call cut before its first frame with a bare
+	 * 499, which the client fails on at once, and the host adds nothing to it;
+	 * after progress, the SDK ends the stream with no answer and the host
+	 * writes the error. The mutation check of the second is the stop test's.
+	 */
+	it("stops while a 2026-07-28 call waits for its first frame, failing it with a 499", async () => {
+		const hang = hangingEngineCall();
+		const port = await serve(
+			fakeClient({ health: (signal?: AbortSignal) => hang.call(signal) })
+		);
+		const c = await connectModern(port);
+		const outcome = c.callTool({ name: "get_engine_health", arguments: {} }).then(
+			() => "answered",
+			(err: unknown) => err
+		);
+		await hang.started;
+
+		expect(await within(stopping())).toBe("stopped");
+		await hang.aborted;
+		const err = await within(outcome);
+		expect(err).not.toBeInstanceOf(ProtocolError);
+		expect(err).toMatchObject({ data: { status: 499 } });
+		await expectPortFree(port);
+	});
+
+	it("stops while a 2026-07-28 call is streaming, its progress already sent", async () => {
+		const hang = hangingEngineCall();
+		const port = await serve(hangingSmoke(hang), SMOKE_SAFETY);
+		const c = await connectModern(port);
+		const { outcome } = await streamingSmokeCall(c);
+		await hang.started;
+
+		expect(await within(stopping())).toBe("stopped");
+		await hang.aborted;
+		await expectCutWith(outcome, SERVER_STOPPED);
 		await expectPortFree(port);
 	});
 

@@ -158,15 +158,21 @@ own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
 Stopping the server (MCP switched off in Settings, or the app quitting) first
 ends every exchange the socket's close would otherwise wait on, on both legs.
 What a 2026-07-28 client holds open is ended by the SDK: a
-`subscriptions/listen` stream lasts as long as the client likes, and a call in
-flight is cut with an empty response. Every 2025-era exchange in flight has its
-connection dropped (#3575), whether or not the cancel registry below holds it:
-no result and no JSON-RPC error is written, and the engine request behind it is
-aborted as a cancel would abort it. What the client sees depends on how far its
-answer got. Before any of the response is sent, an SDK client's call fails at
-once with a connection error. Once a progress event or a keep-alive comment
-(every 15 s) is out, the client is reading a stream that ends with no answer,
-and it holds the call until its own request timeout. Then the socket closes
+`subscriptions/listen` stream lasts as long as the client likes and is closed
+with its own final answer, and a call in flight is cut. Every 2025-era exchange
+in flight is cut by the host (#3575), whether or not the cancel registry below
+holds it, and the engine request behind it is aborted as a cancel would abort
+it. What the client is sent depends on how far its answer got (#3598). Before
+any of the response is out, a 2025-era call has its connection dropped and an
+SDK client's call fails at once with a connection error; a 2026-07-28 call is
+answered with a bare `499`, which fails it as fast. Once a progress event or a
+keep-alive comment (every 15 s) is out, the client is reading a stream, and an
+SDK client acts on nothing but a JSON-RPC response for its request id: a stream
+that just ended would hold the call until the client's own request timeout (60 s
+by default). So a call of either era cut there ends with a JSON-RPC error for
+each request id the stream has not answered (`-32000`, "Vayu stopped the MCP
+server."), written as the SDK writes a message (`held-exchange.ts`), and the
+client's call rejects with it at once. Then the socket closes
 gracefully, so a request still arriving is answered rather than cut off. A
 connection still answering at that moment is closed once its answer is
 flushed, rather than held for its keep-alive timeout; one whose request is
@@ -267,12 +273,18 @@ alone would answer `202` and drop it. The host keeps an abort handle for
 each 2025-era request it is serving instead (`in-flight-calls.ts`, #3574), under the `Mcp-Session-Id` it
 issued and the JSON-RPC request id, and a `notifications/cancelled` naming both
 ends that request's exchange, which aborts the signal; the cancel still gets its
-`202`. A cancel with no session id, or another session's, reaches nothing: every
-client counts its request ids from 0, so the id alone names no one call. The
+`202`. Once a progress event or a keep-alive comment is out, the exchange ends
+as a stop's does (above), with a JSON-RPC error for the request id (`-32000`,
+"The call was cancelled.", #3598); with nothing of the response out, its stream
+ends empty. An SDK client that cancels by aborting its own call has rejected it
+already; a client that sends the cancel and keeps reading the stream gets the
+error as its answer. A cancel with no session id, or another session's, reaches
+nothing: every client counts its request ids from 0, so the id alone names no
+one call. The
 handle is dropped when the exchange ends however it ends - an answer, a cancel,
 the client disconnecting, a stop - and at most 256 are held, the oldest dropped
 first (its call keeps running, no longer cancellable). A stop does not need the
-handle: it drops every 2025-era exchange, held or not. The issued session id is
+handle: it cuts every 2025-era exchange, held or not. The issued session id is
 the whole binding: a loopback caller that presents it and a request id can
 abort that call.
 
@@ -1286,8 +1298,11 @@ Notes:
   The masking reads that follow the loop run without the aborted signal, since
   one that fails closes the call and would discard the rows. The SDK itself
   sends no response to a request whose signal aborted (a `notifications/cancelled`
-  for it, or the connection closing), so the partial result is what a caller
-  that reads the handler's return value gets - the tests, `dispatchTool` - and
+  for it, or the connection closing; on 2025-era HTTP the host answers a cancelled
+  stream already under way with an error instead, see
+  [What is live on each transport](#what-is-live-on-each-transport)), so the
+  partial result is what a caller that reads the handler's return value gets -
+  the tests, `dispatchTool` - and
   what the cancelled loop no longer does is walk the remaining rows, each a
   failed fetch the instant after the abort. That holds on every transport: on
   2025-era HTTP the host matches the client's cancel to the call and ends its
