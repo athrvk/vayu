@@ -1224,15 +1224,20 @@ when the search found no such level, #2930), which the row's result line reads
 in place of the run-average `rps`; an engine that predates it sends none.
 
 A list row also carries the engine's stored verdict, `outcome` (`"passed"`,
-`"failed"` or `"not_judged"`, #3547), only when the engine judged one: no design
-run, no clean collection run, no run still in flight and no row stored before the
-column has it, and `GET /runs/:id` carries none. `rowOutcome` reads it first as
+`"failed"` or `"not_judged"`, #3547), only when the engine judged one: no clean
+collection run, no design run that did not fail, no run still in flight and no row
+stored before the column has it, and `GET /runs/:id` carries none. A run whose
+status is `failed` always has `outcome: "failed"`, of any type and with or
+without a `resultSummary` (#3643), the status being the verdict. `rowOutcome` reads it first as
 the authority for the row's category, which is what `GET /runs?outcome=` filters
 on, so a row cannot wear a verdict it is not listed under; the `resultSummary`
 derivation above is the fallback for a row without one and supplies the reason
 when it reaches the same category. The derivation is the rule the engine stores
 by, held equal to it by `engine/tests/fixtures/run-row-outcome-conformance.json`
-(a collection row is `failed` or has no outcome, never `passed`).
+(a collection row is `failed` or has no outcome, never `passed`). A row stored
+before the column keeps a NULL `outcome` even when it failed (no backfill), yet
+`rowOutcome` derives `failed` for it from its status, so such a row is drawn
+failed but is not listed by a `GET /runs?outcome=failed` page (#3643).
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept

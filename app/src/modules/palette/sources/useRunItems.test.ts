@@ -102,6 +102,17 @@ describe("the palette's run rows, for a run with a verdict (#3496)", () => {
 		expect(row.subtitle).not.toContain("verdict");
 	});
 
+	// #3643: a failed status is the verdict, so the subtitle says it once.
+	it.each(["design", "scenario", "load"] as const)(
+		"says a failed %s run Failed and adds no verdict word",
+		(type) => {
+			const [row] = rows(type, "failed");
+
+			expect(row.subtitle?.startsWith(`${RUN_TYPE_NAME[type]} · Failed · `)).toBe(true);
+			expect(row.subtitle).not.toContain("verdict");
+		}
+	);
+
 	it("keeps the status as a search keyword", () => {
 		const row = scenarioRowWith({ passed: 2, failed: 1 });
 

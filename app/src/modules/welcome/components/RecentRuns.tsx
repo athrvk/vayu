@@ -33,9 +33,9 @@ import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
 import {
 	MethodBadge,
-	OUTCOME_TITLE,
 	TruncatedText,
 	rowOutcome,
+	verdictBesideStatus,
 	runStatusDisplay,
 } from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
@@ -55,7 +55,7 @@ const SETTLED_STATUSES: ReadonlySet<Run["status"]> = new Set(["completed", "stop
 interface StatusLabel {
 	text: string;
 	className: string;
-	/** The verdict's word when the run has one, for the row's accessible name. */
+	/** The verdict's word when it adds to the status word, for the row's accessible name. */
 	verdict: string | null;
 }
 
@@ -73,7 +73,7 @@ function statusLabel(run: Run): StatusLabel | null {
 	return {
 		text: label,
 		className: text,
-		verdict: judgement ? OUTCOME_TITLE[judgement.outcome].toLowerCase() : null,
+		verdict: verdictBesideStatus(run.status, judgement),
 	};
 }
 

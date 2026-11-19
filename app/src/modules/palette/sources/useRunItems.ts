@@ -38,7 +38,7 @@ import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
-import { OUTCOME_TITLE, rowOutcome } from "@/components/shared/run-outcome";
+import { rowOutcome, verdictBesideStatus } from "@/components/shared/run-outcome";
 import { RUN_STATUS } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatInstant } from "@/lib/time-value";
@@ -72,17 +72,16 @@ function runTitle(run: Run, collectionsById: Map<string, Collection>): string {
 }
 
 /**
- * The status word, then the run's verdict in words when it has one: a subtitle
+ * The status word, then the run's verdict in words when it adds one: a subtitle
  * is plain text, so where the other lists colour "Completed" red the palette
  * says `verdict failed`, the accessible name's own phrase. Without it a
- * collection run with failed steps reads as plain "Completed" (#3496).
+ * collection run with failed steps reads as plain "Completed" (#3496). A
+ * `Failed` status already says it (#3643).
  */
 function statusWords(run: Run): string {
 	const status = RUN_STATUS[run.status].label;
-	const judgement = rowOutcome(run);
-	return judgement
-		? `${status} · verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
-		: status;
+	const verdict = verdictBesideStatus(run.status, rowOutcome(run));
+	return verdict ? `${status} · verdict ${verdict}` : status;
 }
 
 export function useRunItems(query: string): PaletteItem[] {

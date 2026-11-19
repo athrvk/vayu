@@ -2126,10 +2126,12 @@ interface RunFields {
 	origin?: RunOrigin;
 	/**
 	 * The row's verdict as the engine stored it (#3547), on list rows and the
-	 * pin's PUT answer; `GET /runs/:id` carries none. Absent when the engine
-	 * judged nothing (a design run, a clean collection run, a run still in
-	 * flight) and on every row stored before the column - absent is not
-	 * `passed`. `rowOutcome` reads it before it derives anything.
+	 * pin's PUT answer; `GET /runs/:id` carries none. Always `failed` for a
+	 * failed run of any type, summary or not (#3643). Absent when the engine
+	 * judged nothing (a clean collection run, a design run that did not fail, a
+	 * run still in flight) and on every row stored before the column, a failed
+	 * one included - absent is not `passed`. `rowOutcome` reads it before it
+	 * derives anything, and derives `failed` for a failed status itself.
 	 */
 	outcome?: StoredRunOutcome;
 }
@@ -2241,7 +2243,8 @@ export interface LoadResultSummary {
  * with either reads as failed, and its subtitle prints the counts
  * (`rowOutcome`, `collectionSubtitle`). So does a `verdict` of `"failed"`
  * (#3539): a missed budget fails the row with or without "Fail the run". A
- * `"passed"` verdict changes nothing on the row. The MCP `list_runs` row, which
+ * `"passed"` verdict changes nothing on the row. A run whose status is `failed`
+ * reads as failed whatever these hold (#3643). The MCP `list_runs` row, which
  * passes the summary through, reads it too.
  */
 export interface CollectionResultSummary {

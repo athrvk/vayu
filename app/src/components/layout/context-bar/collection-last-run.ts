@@ -12,7 +12,7 @@
  * makes for the run tab's sections.
  */
 
-import { OUTCOME_TITLE, rowOutcome } from "@/components/shared/run-outcome";
+import { rowOutcome, verdictBesideStatus } from "@/components/shared/run-outcome";
 import { RUN_STATUS, runStatusDisplay } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { Run } from "@/types";
@@ -27,7 +27,7 @@ const QUEUED_TONE: RunStatusTone = {
 export interface RunStatusTone {
 	label: string;
 	className: string;
-	/** The verdict's word when the run has one, for the row's accessible name. */
+	/** The verdict's word when it adds to the status word, for the row's accessible name. */
 	verdict: string | null;
 }
 
@@ -46,7 +46,7 @@ export function runStatusTone(run: Run): RunStatusTone {
 	return {
 		label,
 		className: text,
-		verdict: judgement ? OUTCOME_TITLE[judgement.outcome].toLowerCase() : null,
+		verdict: verdictBesideStatus(run.status, judgement),
 	};
 }
 

@@ -23,12 +23,12 @@ import { useCopy } from "@/hooks/useCopy";
 import type { TimeRow } from "@/lib/time-value";
 import {
 	MethodBadge,
-	OUTCOME_TITLE,
 	RowContextMenu,
 	ROW_ACTIONS_REVEAL,
 	RunStatusGlyph,
 	RUN_STATUS,
 	rowOutcome,
+	verdictBesideStatus,
 	type RowAction,
 } from "@/components/shared";
 import { TimeTooltip } from "@/components/shared/TimeValue";
@@ -303,9 +303,8 @@ function RunItem({
 	// glyph's shape and said in words in the activator's name, and the headline
 	// numbers as a line. A row with no `resultSummary` has neither.
 	const judgement = rowOutcome(run);
-	const verdictName = judgement
-		? `, verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
-		: "";
+	const verdict = verdictBesideStatus(run.status, judgement);
+	const verdictName = verdict ? `, verdict ${verdict}` : "";
 	const resultLine = resultLineOf(run);
 	// Why the run was run: the one line a user writes about it. A permanent line,
 	// not a hover row - it is what tells two runs of one url apart.

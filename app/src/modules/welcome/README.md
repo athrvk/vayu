@@ -51,7 +51,9 @@ Two consequences worth keeping in mind before adding anything here:
 - A `RecentRuns` row for a collection run names the collection (resolved from
   `summary.scenario.collectionId`, the id once the collection is gone) and draws
   no method badge, and its status word takes the run's verdict (`rowOutcome`) so
-  a run with failed steps or a missed budget is not green (#3496, #3539).
+  a run with failed steps or a missed budget is not green (#3496, #3539). A run
+  whose status is already `Failed` adds no verdict word to the row's name
+  (`verdictBesideStatus`, #3643).
 - Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel
   (the keys live in `electron/app-links.ts`). The renderer cannot open
   arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged

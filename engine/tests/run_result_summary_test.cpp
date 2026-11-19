@@ -93,23 +93,32 @@ TEST (StoredRunOutcome, AStoredBudgetMissFailsACompletedLoadRun) {
     RunOutcome::Failed);
 }
 
-// No row summary, no verdict: the row the renderer draws with its status
-// glyph alone. Mutation check: drop the `carries_result_summary` gate in
-// `stored_run_outcome` together with `judge_load_row`'s in-flight branch and
-// the running row answers failed.
+// No row summary, no verdict, unless the status is failed: the row the
+// renderer draws with its status glyph alone. Mutation check: drop the
+// `carries_result_summary` gate in `stored_run_outcome` together with
+// `judge_load_row`'s in-flight branch and the running row answers failed.
 TEST (StoredRunOutcome, ARowCarryingNoResultSummaryHasNoOutcome) {
     EXPECT_FALSE (stored_run_outcome (
     stored_run (RunType::Load, RunStatus::Running, MISSED_BUDGET)))
     << "a summary written before the final status is not final";
     EXPECT_FALSE (stored_run_outcome (stored_run (RunType::Load, RunStatus::Stopped, "")))
     << "a Stop that landed before the worker's summary";
-    EXPECT_FALSE (
-    stored_run_outcome (stored_run (RunType::Load, RunStatus::Failed, "not json")))
-    << "an unreadable summary builds no row summary";
-    EXPECT_FALSE (stored_run_outcome (stored_run (RunType::Load, RunStatus::Failed, "{}")))
-    << "a summary that records nothing builds no row summary";
     EXPECT_FALSE (stored_run_outcome (
     stored_run (RunType::Design, RunStatus::Completed, MISSED_BUDGET)));
+}
+
+// A failed status is the verdict, whatever the run type and whatever the
+// summary holds (#3643): the list draws the failed mark from the status alone.
+// Mutation check: drop the status-failed branch in `judge_run_row` and every
+// row below reads no outcome.
+TEST (StoredRunOutcome, AFailedStatusIsFailedWithOrWithoutASummary) {
+    for (const auto type : { RunType::Load, RunType::Scenario, RunType::Design }) {
+        for (const char* summary : { "", "not json", "{}", MISSED_BUDGET }) {
+            EXPECT_EQ (stored_run_outcome (stored_run (type, RunStatus::Failed, summary)),
+            RunOutcome::Failed)
+            << vayu::to_string (type) << " with summary `" << summary << "`";
+        }
+    }
 }
 
 // A collection run reads its own summary shape: the step counts under

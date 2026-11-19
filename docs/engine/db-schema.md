@@ -1589,7 +1589,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `has_warnings`    | INTEGER | `1` when `summary.warnings` is non-empty. NOT NULL DEFAULT `0`               |
 | `origin`          | TEXT    | Who started the run: `"app"` / `"mcp"` / `"other"`. NOT NULL DEFAULT `'other'` |
 | `origin_client`   | TEXT    | The MCP client's name, `mcp` runs only (nullable)                            |
-| `outcome`         | TEXT    | The verdict the run's list row draws: `"passed"` / `"failed"` / `"not_judged"`; NULL = none (nullable, no default) |
+| `outcome`         | TEXT    | The verdict the run's list row draws: `"passed"` / `"failed"` / `"not_judged"`; NULL = none (nullable, no default); `"failed"` for every `failed` status, summary or not |
 
 **`status`** moves through `Database::transition_run_status` (#3340), which takes
 an edge only when the row's current status is one the caller names: there is no
@@ -1702,9 +1702,14 @@ write of either column, inside the same retried callback as the write
 worker stores `summary` while the row is still `running` and the terminal
 move comes after; `update_run_summary`, because a Stop's `stopped` can land
 before the worker's summary; and `reconcile_orphaned_runs`, which writes
-`failed` directly. NULL is no verdict: a run in flight, a design run, a clean
-collection run, a terminal row with no summary that yields a `resultSummary`,
-and every row stored before the column. Nullable with no default because a
+`failed` directly. A `failed` status is `failed` for every run type with no
+summary needed (#3643: the list draws the failed mark from the status, so a
+failed design run, a run that failed before a summary was written and an
+orphan with no metric tick are listed by `?outcome=failed`). NULL is no
+verdict: a run in flight, a design run that did not fail, a clean collection
+run, a `completed` or `stopped` row with no summary that yields a
+`resultSummary`, and every row stored before the column, `failed` ones
+included. Nullable with no default because a
 default would claim a verdict nothing judged; `sync_schema` adds it and
 backfills nothing, and the migration only stamps.
 
