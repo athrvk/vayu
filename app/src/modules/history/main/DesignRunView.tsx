@@ -68,15 +68,38 @@ import { buildComposeBody } from "@/modules/request-builder/utils/compose-body";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { ApiError } from "@/services";
-import { seedFromRun, scriptPartToElement } from "./design-run-seed";
+import { seedFromRun, scriptPartToElement, type DesignRunSeed } from "./design-run-seed";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import SaveAgentRunButton from "./SaveAgentRunButton";
 import { isUnsavedAgentRun } from "./save-run-as-request";
 import { WithheldValuesNotice } from "./components/WithheldValuesNotice";
-import type { Run, ScriptPart, ResolvedElement } from "@/types";
+import type { Run, ResolvedElement } from "@/types";
 
 interface DesignRunViewProps {
 	run: Run;
+}
+
+/**
+ * The one glued script of a run recorded before script parts existed, replayed
+ * as a single request-origin element per hook: `seedFromRun` cannot split it,
+ * so the string is the only record of what ran. Dropping it (which is what
+ * happened while nothing read `legacyPreScript`) meant a resend of any
+ * pre-existing run silently executed no script at all. A blank one is left out
+ * (#3066): the engine refuses a script element with no text, which would 400
+ * the resend.
+ */
+function legacyElements(seed: DesignRunSeed): ResolvedElement[] {
+	const pre = scriptPartToElement(
+		{ origin: "request", script: seed.legacyPreScript },
+		"script.pre"
+	);
+	const post = scriptPartToElement(
+		{ origin: "request", script: seed.legacyPostScript },
+		"script.post"
+	);
+	return [pre, post].flatMap((element) =>
+		element ? [{ ...element, origin: { kind: "request" as const } }] : []
+	);
 }
 
 export default function DesignRunView({ run }: DesignRunViewProps) {
@@ -163,67 +186,13 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		[run]
 	);
 
-	/**
-	 * Replay: the recorded collection scripts (as `script.pre` / `script.post`
-	 * elements), then the editor's own current elements (issue #1512).
-	 *
-	 * The collection parts go out exactly as they were stored, which is the
-	 * point of a snapshot - it runs the collection's scripts as they were then,
-	 * not as they read now. The editor's own part is live, not historical: it
-	 * was seeded from the run's own recorded script (`seedFromRun`) but can be
-	 * edited like any other request's Elements tab, and any other kind added
-	 * there runs too - something a script-only replay could never do.
-	 *
-	 * A run recorded before script parts existed has no parts at all, only the
-	 * one glued string, and `seedFromRun` cannot fill the editor from it - so
-	 * the editor is empty and the string is the only record of what ran. It is
-	 * replayed as a single request-origin element. Dropping it (which is what
-	 * happened while nothing read `legacyPreScript`) meant a resend of any
-	 * pre-existing run silently executed no script at all.
-	 *
-	 * A part with no script text is left out rather than replayed (#3066): the
-	 * engine refuses a script element with none, which would 400 the resend.
+	/*
+	 * Replay: the elements the run recorded for the collection chain, exactly as
+	 * stored (what the collection ran then, not what it reads now), then the
+	 * editor's own current elements. Those were seeded from the run's own
+	 * recorded elements (`seedFromRun`) but can be edited like any other
+	 * request's Elements tab, and any other kind added there runs too.
 	 */
-	const replayElements = useCallback(
-		(
-			collectionParts: ScriptPart[],
-			legacyScript: string | undefined,
-			kind: "script.pre" | "script.post"
-		): ResolvedElement[] => {
-			const elements: ResolvedElement[] = [];
-			for (const part of collectionParts) {
-				const element = scriptPartToElement(part, kind);
-				if (element) {
-					elements.push({
-						...element,
-						origin: { kind: "collection", id: part.id, name: part.name },
-					});
-				}
-			}
-			const legacy = scriptPartToElement({ origin: "request", script: legacyScript }, kind);
-			if (legacy) elements.push({ ...legacy, origin: { kind: "request" } });
-			return elements;
-		},
-		[]
-	);
-
-	/**
-	 * The collection's own elements as the run recorded them (issue #1512),
-	 * for `InheritedElementsNotice` to show in place of the live chain - the
-	 * same "as it was, not as it reads now" rule `replayElements` applies for
-	 * execution above. No legacy element here: `LegacyScriptNotice` already
-	 * shows the glued string via `legacyPreScript`/`legacyPostScript` below,
-	 * and folding it into this list too would show it twice, mislabeled as
-	 * something a collection contributed.
-	 */
-	const inheritedElements = useMemo<ResolvedElement[]>(
-		() => [
-			...replayElements(seed.collectionPreScripts, undefined, "script.pre"),
-			...replayElements(seed.collectionPostScripts, undefined, "script.post"),
-		],
-		[replayElements, seed.collectionPreScripts, seed.collectionPostScripts]
-	);
-
 	const handleExecute = useCallback(
 		async (
 			request: RequestState,
@@ -245,16 +214,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				 * exactly as it ran - the engine drops a none-auth at compose.
 				 */
 				const elements: ResolvedElement[] = [
-					...replayElements(
-						seed.collectionPreScripts,
-						seed.legacyPreScript,
-						"script.pre"
-					),
-					...replayElements(
-						seed.collectionPostScripts,
-						seed.legacyPostScript,
-						"script.post"
-					),
+					...seed.inheritedElements,
+					...legacyElements(seed),
 					...request.elements.map((el): ResolvedElement => ({
 						...el,
 						origin: { kind: "request" },
@@ -342,7 +303,6 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		[
 			seed,
 			run.requestId,
-			replayElements,
 			engineComposeRequest,
 			engineExecuteRequest,
 			activeEnvironmentId,
@@ -459,7 +419,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					   bounds it. */
 					memoryKey={run.id}
 					initialResponse={initialResponse}
-					inheritedElements={inheritedElements}
+					inheritedElements={seed.inheritedElements}
 					legacyPreScript={seed.legacyPreScript}
 					legacyPostScript={seed.legacyPostScript}
 					collectionId={null}

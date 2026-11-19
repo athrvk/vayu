@@ -16,7 +16,12 @@
  *   configSnapshot    the payload that was sent, minus what the engine
  *                     withholds: auth is stored as its mode only, and a
  *                     credential header or a secret variable's value is
- *                     replaced by `<redacted>` (`sanitize_config_snapshot`)
+ *                     replaced by `<redacted>` (`sanitize_config_snapshot`).
+ *                     Its `elements` is the composed list the send ran,
+ *                     each entry stamped with its origin; a run recorded
+ *                     before #1514 holds the retired `preRequestScripts` /
+ *                     `postRequestScripts` instead, read only when `elements`
+ *                     is absent
  *   result.trace      what went out, after the engine applied auth
  *   the live request  credentials, which the snapshot does not hold
  */
@@ -27,6 +32,9 @@ import type {
 	RequestAuth,
 	ScriptPart,
 	ElementDef,
+	ElementOrigin,
+	ElementScope,
+	ResolvedElement,
 	KeyValueEntry,
 	FileRef,
 	HeaderLine,
@@ -82,6 +90,14 @@ interface DesignSnapshot {
 		bodyBytes?: number;
 	};
 	auth?: { mode?: string };
+	/**
+	 * The composed element list the send ran: the collection chain's, then the
+	 * request's own, each stamped with its `origin`, and without the elements
+	 * the send left out (disabled, incomplete). Read defensively - the snapshot
+	 * is not typed engine-side. Absent on a run recorded before #1514.
+	 */
+	elements?: unknown;
+	/** Retired by #1514: read only when `elements` is absent. */
 	preRequestScripts?: ScriptPart[];
 	postRequestScripts?: ScriptPart[];
 	preRequestScript?: string;
@@ -103,16 +119,13 @@ export interface DesignRunSeed {
 	/** Starting values. `id` is null, and that is what detaches the copy. */
 	request: Partial<RequestState>;
 	/**
-	 * Collection parts, to show read-only next to the request's own and to
-	 * replay unchanged.
-	 *
-	 * Split by which hook they run on, not merged: `ScriptPart` records where a
-	 * part came from but not when it runs, so a single list cannot be filtered
-	 * back apart. Merging them would replay the collection's *test* scripts as
-	 * *pre-request* scripts, and would show every part under both labels.
+	 * What the collection chain contributed, as the run recorded it, to show
+	 * read-only next to the request's own and to replay unchanged: every stored
+	 * element whose origin is a collection, with its origin (scope included) as
+	 * stored. For a run recorded before #1514 these are rebuilt from the retired
+	 * script parts, pre before post, with no scope.
 	 */
-	collectionPreScripts: ScriptPart[];
-	collectionPostScripts: ScriptPart[];
+	inheritedElements: ResolvedElement[];
 	/** Set only for a run stored before script parts existed. */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
@@ -319,6 +332,125 @@ export function scriptPartToElement(
 	return isBlankScriptElement(element) ? null : element;
 }
 
+/** The run's elements, split by who owns them. */
+interface RecordedElements {
+	/** The request's own, for the copy's Elements tab. */
+	own: ElementDef[];
+	inherited: ResolvedElement[];
+}
+
+const ELEMENT_SCOPES: readonly ElementScope[] = ["collection", "folder", "request"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A stored origin as an `ElementOrigin`, or null when it is not one. */
+function storedOriginOf(raw: unknown): ElementOrigin | null {
+	if (!isRecord(raw) || (raw.kind !== "collection" && raw.kind !== "request")) return null;
+	const scope = ELEMENT_SCOPES.find((s) => s === raw.scope);
+	return {
+		kind: raw.kind,
+		...(scope ? { scope } : {}),
+		...(typeof raw.id === "string" ? { id: raw.id } : {}),
+		...(typeof raw.name === "string" ? { name: raw.name } : {}),
+	};
+}
+
+/**
+ * One stored element, or null when it is not one the copy can hold: not an
+ * object, no string `id` / `kind`, no object `config`, an origin of an unknown
+ * kind, or a script with no text (`isBlankScriptElement`, #3052: the engine
+ * refuses one, so replaying it would turn the resend into a 400).
+ */
+function storedElementOf(raw: unknown): ResolvedElement | null {
+	if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.kind !== "string") return null;
+	if (!isRecord(raw.config)) return null;
+	const origin = raw.origin === undefined ? undefined : storedOriginOf(raw.origin);
+	if (origin === null) return null;
+	const element: ResolvedElement = {
+		id: raw.id,
+		kind: raw.kind,
+		enabled: raw.enabled !== false,
+		...(typeof raw.name === "string" ? { name: raw.name } : {}),
+		config: raw.config,
+		...(origin ? { origin } : {}),
+	};
+	return isBlankScriptElement(element) ? null : element;
+}
+
+/**
+ * The stored `elements` list, with an entry owned by the request (its origin
+ * says so, or it has none) apart from the ones a collection contributed.
+ */
+function recordedElementsOf(stored: unknown[]): RecordedElements {
+	const own: ElementDef[] = [];
+	const inherited: ResolvedElement[] = [];
+	for (const raw of stored) {
+		const element = storedElementOf(raw);
+		if (!element) continue;
+		if (!element.origin || element.origin.kind === "request") {
+			own.push({
+				id: element.id,
+				kind: element.kind,
+				enabled: element.enabled,
+				...(element.name ? { name: element.name } : {}),
+				config: element.config,
+			});
+		} else {
+			inherited.push(element);
+		}
+	}
+	return { own, inherited };
+}
+
+/** The request's own part of a retired snapshot as an element, or none when it holds no script. */
+function retiredOwnElement(
+	parts: ScriptPart[] | undefined,
+	kind: "script.pre" | "script.post",
+	id: string
+): ElementDef[] {
+	const script = ownScript(parts);
+	return script.trim() ? [{ id, kind, enabled: true, config: { script } }] : [];
+}
+
+/** The retired snapshot's collection parts of one hook as stored-shape elements. */
+function retiredInheritedElements(
+	parts: ScriptPart[] | undefined,
+	kind: "script.pre" | "script.post"
+): ResolvedElement[] {
+	return collectionParts(parts).flatMap((part) => {
+		const element = scriptPartToElement(part, kind);
+		return element
+			? [
+					{
+						...element,
+						origin: { kind: "collection" as const, id: part.id, name: part.name },
+					},
+				]
+			: [];
+	});
+}
+
+/**
+ * What the run recorded of its elements: `elements` when the snapshot has it,
+ * else (a run from before #1514) the retired script parts, rebuilt as the same
+ * shape. `elements` wins when both exist.
+ */
+function recordedElements(snapshot: DesignSnapshot): RecordedElements {
+	if (Array.isArray(snapshot.elements)) return recordedElementsOf(snapshot.elements);
+	return {
+		own: [
+			...retiredOwnElement(snapshot.preRequestScripts, "script.pre", "seed-script-pre"),
+			...retiredOwnElement(snapshot.postRequestScripts, "script.post", "seed-script-post"),
+		],
+		inherited: [
+			...retiredInheritedElements(snapshot.preRequestScripts, "script.pre"),
+			...retiredInheritedElements(snapshot.postRequestScripts, "script.post"),
+		],
+	};
+}
+
 /**
  * The name the copy starts with, which Send records on its run
  * (`execIdentity`): the run's recorded request name when it is one the user set
@@ -353,6 +485,9 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	const bodyMode = (body?.mode ?? "none") as RequestState["bodyMode"];
 	const withheld = withheldParts(snapshot, recordedHeaders);
 	const name = copyName(run, snapshot, withheld.url);
+	const recorded = recordedElements(snapshot);
+	// The glued strings are for a run with neither the list nor its parts.
+	const hasElementList = Array.isArray(snapshot.elements);
 
 	return {
 		request: {
@@ -372,28 +507,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			),
 			binaryFile: bodyMode === "binary" ? fileRefOf(body?.file) : noFile(),
 			auth,
-			elements: [
-				...(ownScript(snapshot.preRequestScripts).trim()
-					? [
-							{
-								id: "seed-script-pre",
-								kind: "script.pre",
-								enabled: true,
-								config: { script: ownScript(snapshot.preRequestScripts) },
-							} satisfies ElementDef,
-						]
-					: []),
-				...(ownScript(snapshot.postRequestScripts).trim()
-					? [
-							{
-								id: "seed-script-post",
-								kind: "script.post",
-								enabled: true,
-								config: { script: ownScript(snapshot.postRequestScripts) },
-							} satisfies ElementDef,
-						]
-					: []),
-			],
+			elements: recorded.own,
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
 			// The timeout the send named, so a replay waits as long as the run did;
@@ -419,10 +533,11 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 				: [],
 			disableUrlEncoding: snapshot.disableUrlEncoding ?? DEFAULT_DISABLE_URL_ENCODING,
 		},
-		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
-		collectionPostScripts: collectionParts(snapshot.postRequestScripts),
-		legacyPreScript: snapshot.preRequestScripts ? undefined : snapshot.preRequestScript,
-		legacyPostScript: snapshot.postRequestScripts ? undefined : snapshot.postRequestScript,
+		inheritedElements: recorded.inherited,
+		legacyPreScript:
+			hasElementList || snapshot.preRequestScripts ? undefined : snapshot.preRequestScript,
+		legacyPostScript:
+			hasElementList || snapshot.postRequestScripts ? undefined : snapshot.postRequestScript,
 		// "none" carries no information the absence would not, so normalise it away.
 		recordedAuthMode:
 			snapshot.auth?.mode && snapshot.auth.mode !== "none" ? snapshot.auth.mode : undefined,

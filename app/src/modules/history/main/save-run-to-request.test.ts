@@ -36,6 +36,52 @@ import {
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
 
+/** The request's own elements, as the request stores them and as a send records them. */
+const ownElements = [
+	{
+		id: "el_own_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "Own setup",
+		config: { script: "console.log(t);" },
+	},
+	{
+		id: "el_own_post",
+		kind: "script.post",
+		enabled: true,
+		name: "Own check",
+		config: { script: "pm.test('ok', () => {});" },
+	},
+];
+
+/** What a send stores as `configSnapshot.elements`: the collection's, then the request's own. */
+const storedElements = [
+	{
+		id: "el_col_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "API",
+		config: { script: "const t = 1;" },
+		origin: { kind: "collection", scope: "collection", id: "col_1", name: "API" },
+	},
+	...ownElements.map((el) => ({
+		...el,
+		origin: { kind: "request", scope: "request", id: "req_1" },
+	})),
+];
+
+/** The retired shape, from a run recorded before #1514. */
+const retiredScripts = {
+	preRequestScripts: [
+		{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
+		{ origin: "request", id: "req_1", script: "console.log(t);" },
+	],
+	postRequestScripts: [
+		{ origin: "collection", id: "col_1", name: "API", script: "chainTest();" },
+		{ origin: "request", id: "req_1", script: "pm.test('ok', () => {});" },
+	],
+};
+
 function run(overrides: Partial<Run> = {}): Run {
 	return {
 		id: "run_1",
@@ -51,14 +97,7 @@ function run(overrides: Partial<Run> = {}): Run {
 			headers: { "X-Plain": "visible" },
 			body: { mode: "json", content: '{"a":1}' },
 			auth: { mode: "bearer" },
-			preRequestScripts: [
-				{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
-				{ origin: "request", id: "req_1", script: "console.log(t);" },
-			],
-			postRequestScripts: [
-				{ origin: "collection", id: "col_1", name: "API", script: "chainTest();" },
-				{ origin: "request", id: "req_1", script: "pm.test('ok', () => {});" },
-			],
+			elements: storedElements,
 			followRedirects: false,
 			maxRedirects: 3,
 			verifySSL: true,
@@ -175,8 +214,19 @@ describe("applyRunToRequest", () => {
 		const live = liveRequest();
 		const patch = applyRunToRequest(seedFromRun(run(), live), live);
 
-		// `const t = 1;` / `chainTest();` came from the collection and must not
-		// end up inside the request - the next send would run it twice.
+		// `const t = 1;` came from the collection and must not end up inside the
+		// request - the next send would run it twice.
+		expect(patch.elements).toEqual(ownElements);
+	});
+
+	it("writes the retired script parts' request half for a run recorded before #1514", () => {
+		const live = liveRequest();
+		const retired = run({
+			configSnapshot: { method: "POST", url: "https://x.test/", ...retiredScripts },
+		} as unknown as Partial<Run>);
+
+		const patch = applyRunToRequest(seedFromRun(retired, live), live);
+
 		expect(patch.elements).toEqual([
 			{
 				id: "seed-script-pre",
@@ -191,6 +241,38 @@ describe("applyRunToRequest", () => {
 				config: { script: "pm.test('ok', () => {});" },
 			},
 		]);
+	});
+
+	describe("a request that holds a disabled element", () => {
+		// A send leaves a disabled element out, so the run never recorded it.
+		const disabled = {
+			id: "el_off",
+			kind: "assert.status",
+			enabled: false,
+			config: { equals: 200 },
+		};
+
+		it("keeps it beside the run's own elements instead of deleting it", () => {
+			const live = liveRequest({ elements: [...ownElements, disabled] } as Partial<Request>);
+
+			const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+			expect(patch.elements).toEqual([...ownElements, disabled]);
+		});
+
+		it("lets the run's enabled element win when it holds the same id", () => {
+			const live = liveRequest({
+				elements: [{ ...ownElements[0], enabled: false }],
+			} as Partial<Request>);
+
+			const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+			expect(patch.elements).toEqual(ownElements);
+		});
+
+		it("does not carry the saved request's elements into a request created from the run", () => {
+			expect(createFieldsFromRun(seedFromRun(run(), null)).elements).toEqual(ownElements);
+		});
 	});
 
 	it("never writes auth, even though the run recorded a mode", () => {
@@ -559,6 +641,17 @@ describe("buildChangeset", () => {
 		expect(row!.segments).toBeDefined();
 	});
 
+	it("shows no Elements row for a copy that was not touched", () => {
+		// The saved request holds the same elements the run recorded, so a save
+		// would write what is already there. While the seed read the retired keys
+		// it was empty, and this row read as every script deleted.
+		const live = liveRequest({ elements: ownElements } as Partial<Request>);
+
+		const set = buildChangeset(seedFromRun(run(), live), live);
+
+		expect(set.map((i) => i.field)).not.toContain("Elements");
+	});
+
 	it("makes scripts a single kept row for a legacy run", () => {
 		const legacy = run({
 			configSnapshot: {
@@ -660,20 +753,7 @@ describe("buildChangeset", () => {
 			headers: [{ key: "X-Plain", value: "visible", enabled: true }],
 			body: { mode: "json", content: '{"a":1}' },
 			bodyType: "json",
-			elements: [
-				{
-					id: "live-pre",
-					kind: "script.pre",
-					enabled: true,
-					config: { script: "console.log(t);" },
-				},
-				{
-					id: "live-post",
-					kind: "script.post",
-					enabled: true,
-					config: { script: "pm.test('ok', () => {});" },
-				},
-			],
+			elements: ownElements,
 			followRedirects: false,
 			maxRedirects: 3,
 			httpVersion: "http2",

@@ -101,6 +101,58 @@ vi.mock("@/components/ui/code-editor", () => ({
 	CodeEditor: ({ value }: { value: string }) => <pre data-testid="code">{value}</pre>,
 }));
 
+/**
+ * What a send stores as `configSnapshot.elements`: the composed list, each
+ * entry stamped with its origin, a disabled element left out.
+ */
+const storedElements = [
+	{
+		id: "el_col_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "API",
+		config: { script: "const t = 1;" },
+		origin: { kind: "collection", scope: "collection", id: "col_1", name: "API" },
+	},
+	{
+		id: "el_own_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "Own setup",
+		config: { script: "console.log(t);" },
+		origin: { kind: "request", scope: "request", id: "req_1" },
+	},
+	{
+		id: "el_own_post",
+		kind: "script.post",
+		enabled: true,
+		name: "Own check",
+		config: { script: "pm.test('ok', () => {});" },
+		origin: { kind: "request", scope: "request", id: "req_1" },
+	},
+];
+
+/** The retired shape, from a run recorded before #1514. */
+const retiredScripts = {
+	preRequestScripts: [
+		{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
+		{ origin: "request", id: "req_1", script: "console.log(t);" },
+	],
+	postRequestScripts: [
+		{ origin: "collection", id: "col_1", name: "API", script: "chainAssert();" },
+		{ origin: "request", id: "req_1", script: "pm.test('ok', () => {});" },
+	],
+};
+
+function retiredRunSnapshot() {
+	return {
+		method: "POST",
+		url: "https://api.example.test/users?page=2",
+		...retiredScripts,
+		requestId: "req_1",
+	};
+}
+
 function designRun(overrides: Partial<Run> = {}): Run {
 	return {
 		id: "run_1",
@@ -116,14 +168,7 @@ function designRun(overrides: Partial<Run> = {}): Run {
 			headers: { "X-Plain": "visible" },
 			body: { mode: "json", content: '{"a":1}' },
 			auth: { mode: "bearer" },
-			preRequestScripts: [
-				{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
-				{ origin: "request", id: "req_1", script: "console.log(t);" },
-			],
-			postRequestScripts: [
-				{ origin: "collection", id: "col_1", name: "API", script: "chainAssert();" },
-				{ origin: "request", id: "req_1", script: "pm.test('ok', () => {});" },
-			],
+			elements: storedElements,
 			followRedirects: false,
 			maxRedirects: 3,
 			verifySSL: true,
@@ -234,16 +279,28 @@ describe("DesignRunView - the copy shows the stored exchange", () => {
 		expect((url as HTMLInputElement).value).toBe("https://api.example.test/users?page=2");
 	});
 
-	it("lists the collection elements the run recorded", () => {
+	it("lists the collection's recorded element as inherited and the request's own on the tab", () => {
 		renderView(designRun());
 
-		selectTab(/^elements/i);
+		selectRequestTab(/^elements/i);
 
-		// From the run's own parts. The live chain is mocked empty, so anything
+		// From the run's own elements. The live chain is mocked empty, so anything
 		// listed here can only have come from what was stored.
 		expect(screen.getByText(/runs before your own/i)).toBeTruthy();
-		// Both the collection's script.pre and script.post parts came from
-		// "API", so its name appears once per entry.
+		expect(screen.getByText("1 element is inherited from a collection.")).toBeTruthy();
+		expect(screen.getByText("API")).toBeTruthy();
+		// The request's own two are the copy's editable list, not the notice's.
+		expect(screen.getByText("Own setup")).toBeTruthy();
+		expect(screen.getByText("Own check")).toBeTruthy();
+	});
+
+	it("lists a run recorded with the retired script parts the same way", () => {
+		renderView(designRun({ configSnapshot: retiredRunSnapshot() } as Partial<Run>));
+
+		selectRequestTab(/^elements/i);
+
+		expect(screen.getByText(/runs before your own/i)).toBeTruthy();
+		// The collection's pre and post parts both came from "API".
 		expect(screen.getAllByText("API").length).toBe(2);
 	});
 });
@@ -351,7 +408,7 @@ describe("DesignRunView - the copy is detached", () => {
 });
 
 describe("DesignRunView - sending it again", () => {
-	it("replays the recorded collection elements plus the edited request's own", async () => {
+	it("replays every stored element with its origin, the request's own from the copy", async () => {
 		executeRequest.mockResolvedValue({
 			status: 200,
 			statusText: "OK",
@@ -360,6 +417,65 @@ describe("DesignRunView - sending it again", () => {
 		});
 
 		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		const payload = executeRequest.mock.calls[0][0];
+
+		/*
+		 * The collection's element goes out as recorded, scope and all - what the
+		 * collection ran then, not what it reads now. The request's two come from
+		 * the copy's own Elements list, which the seed filled from the stored ones
+		 * (ids and names intact), so a resend of an untouched run runs what the run
+		 * ran. They were dropped while the seed read the retired keys. The editor
+		 * stamps its own as `{ kind: "request" }`, as every Send does.
+		 */
+		expect(payload.elements).toEqual([
+			storedElements[0],
+			{ ...storedElements[1], origin: { kind: "request" } },
+			{ ...storedElements[2], origin: { kind: "request" } },
+		]);
+		// Filed under the same request, so the new run lands beside the old one.
+		expect(payload.requestId).toBe("req_1");
+	});
+
+	it("replays a stored list without the script elements that have no text", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const blank = { ...storedElements[0], id: "el_blank", config: { script: " \n " } };
+		renderView(
+			designRun({
+				configSnapshot: {
+					method: "GET",
+					url: "https://api.example.test/users",
+					elements: [blank, storedElements[1]],
+					requestId: "req_1",
+				},
+			} as unknown as Partial<Run>)
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		expect(executeRequest.mock.calls[0][0].elements).toEqual([
+			{ ...storedElements[1], origin: { kind: "request" } },
+		]);
+	});
+
+	it("replays a run recorded with the retired script parts from them", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(designRun({ configSnapshot: retiredRunSnapshot() } as Partial<Run>));
 
 		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
