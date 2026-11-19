@@ -759,10 +759,10 @@ export default function RequestBuilderProvider({
 		collectionId,
 		initialResponse,
 	});
-	if (
-		initialRequest &&
-		(lastReset.id !== initialRequest.id || lastReset.initialResponse !== initialResponse)
-	) {
+	const isReset =
+		!!initialRequest &&
+		(lastReset.id !== initialRequest.id || lastReset.initialResponse !== initialResponse);
+	if (initialRequest && isReset) {
 		setLastReset({ id: initialRequest.id, collectionId, initialResponse });
 		setRestoredResponse(null);
 		const seeded: RequestState = {
@@ -848,8 +848,13 @@ export default function RequestBuilderProvider({
 	 * Gated on `initialRequest`'s own identity, not on every render: it is a
 	 * JSON-comparing diff over every mergeable field, and `index.tsx` only
 	 * produces a new object when the underlying fetch actually changes.
+	 *
+	 * Skipped in a render that is a reset (#3662): the reset above has already
+	 * seeded `baseline` and cleared `touchedFields` through queued setters, so
+	 * this render still reads the previous request's values and would report its
+	 * touched fields as conflicts over the fresh state.
 	 */
-	if (initialRequest && initialRequest !== lastProcessedInitialRequest) {
+	if (initialRequest && !isReset && initialRequest !== lastProcessedInitialRequest) {
 		setLastProcessedInitialRequest(initialRequest);
 		const incoming: RequestState = { ...baseline, ...initialRequest };
 		const outcome = mergeExternalWrite(

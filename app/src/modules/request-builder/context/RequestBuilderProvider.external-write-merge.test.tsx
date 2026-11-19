@@ -284,6 +284,59 @@ describe("the request builder's draft adopts an external write per field", () =>
 		expect(shown("dirty")).toBe("true");
 	});
 
+	it("does not report the previous request's edits as conflicts when a different request loads (#3662)", () => {
+		const { rerender } = render(
+			<Harness
+				initialRequest={{
+					id: "req_1",
+					url: "https://api.test/one",
+					description: "one description",
+				}}
+			/>
+		);
+
+		click("type url");
+		click("type description");
+		expect(shown("dirty")).toBe("true");
+
+		act(() =>
+			rerender(
+				<Harness
+					initialRequest={{
+						id: "req_2",
+						url: "https://api.test/two",
+						description: "two description",
+					}}
+				/>
+			)
+		);
+
+		// The reset seeds req_2's baseline; the merge must not run against req_1's
+		// touched fields in the same render.
+		expect(shown("conflicts")).toBe("");
+		expect(shown("dirty")).toBe("false");
+		expect(shown("url")).toBe("https://api.test/two");
+		expect(shown("description")).toBe("two description");
+
+		// The baseline is req_2's: editing it, then a refetch carrying the same
+		// values, is no conflict.
+		click("type url");
+		act(() =>
+			rerender(
+				<Harness
+					initialRequest={{
+						id: "req_2",
+						url: "https://api.test/two",
+						description: "two description",
+					}}
+				/>
+			)
+		);
+
+		expect(shown("url")).toBe("https://typed.test/mine");
+		expect(shown("conflicts")).toBe("");
+	});
+
 	it("disables the save manager once the request is deleted elsewhere", () => {
 		const onSave = vi.fn().mockResolvedValue(undefined);
 		const { rerender } = render(
