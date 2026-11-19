@@ -98,19 +98,9 @@ function PagingBar({
 function OlderBar() {
 	const more = useLogsStore((s) => s.more);
 	const scannedTo = useLogsStore((s) => s.scannedTo);
-	const olderLetGo = useLogsStore((s) => s.olderLetGo);
 	const loadingOlder = useLogsStore((s) => s.loadingOlder);
 	const loadOlder = useLogsStore((s) => s.loadOlder);
 
-	if (olderLetGo) {
-		return (
-			<PagingBar>
-				<span>
-					Older lines were let go to hold the newest. Jump to a time to read them.
-				</span>
-			</PagingBar>
-		);
-	}
 	if (!more) {
 		return (
 			<PagingBar>

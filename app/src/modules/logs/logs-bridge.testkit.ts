@@ -9,6 +9,11 @@
  * A fake `window.electronAPI.logs` for the Logs tab's tests (#3635), and the
  * lines to feed it. `push` is the main process delivering a tail batch; every
  * method is a `vi.fn` the case can read the filter and cursor off.
+ *
+ * Every line carries its `$pos`, as the reader's do. `logRecord(n)` is line `n`
+ * of one engine file at one byte a line, so it starts at offset `n` and a
+ * backward `logCursor(n)` continues with line `n - 1`. `serveLog` answers the
+ * reads over any lines the way the reader does, per file from the cursor.
  */
 
 import { vi } from "vitest";
@@ -18,9 +23,11 @@ import type {
 	LogEntry,
 	LogFileRecord,
 	LogFilter,
+	LogLinePosition,
 	LogReadRequest,
 	LogReadResult,
 } from "@/types/electron";
+import { isUnparsedEntry } from "./log-entry";
 
 const NO_MORE: LogReadResult = { records: [], cursor: { files: [] }, more: false, scannedTo: null };
 
@@ -34,14 +41,20 @@ function readKind(request: LogReadRequest): LogReadKind {
 	return "newest";
 }
 
+/** The file `logRecord` and `logCursor` are in, as a cursor entry names it. */
+export const ENGINE_LOG = { name: "engine_20261118_100000.log", id: "1:2" };
+
 /** A cursor a case can tell from another by `===` and by its offset. */
 export function logCursor(offset: number): LogCursor {
-	return { files: [{ name: "engine_20261118_100000.log", id: "1:2", offset }] };
+	return { files: [{ ...ENGINE_LOG, offset }] };
 }
 
 const FIRST_TS = Date.UTC(2026, 10, 18, 10, 0, 0);
 
-/** A record, `ts` one second after the previous @p n, so a list of them is in time order. */
+/**
+ * A record, `ts` one second after the previous @p n, so a list of them is in
+ * time order; it is line @p n of `ENGINE_LOG`, at offset @p n.
+ */
 export function logRecord(n: number, overrides: Partial<LogFileRecord> = {}): LogFileRecord {
 	return {
 		ts: new Date(FIRST_TS + n * 1000).toISOString(),
@@ -50,8 +63,80 @@ export function logRecord(n: number, overrides: Partial<LogFileRecord> = {}): Lo
 		cat: "http",
 		msg: `line ${n}`,
 		pid: 4242,
+		$pos: { ...ENGINE_LOG, start: n, end: n + 1 },
 		...overrides,
 	};
+}
+
+function positionOf(entry: LogEntry): LogLinePosition {
+	if (!entry.$pos) throw new Error(`A fixture line without a position: ${JSON.stringify(entry)}`);
+	return entry.$pos;
+}
+
+function sameFile(
+	a: Pick<LogLinePosition, "name" | "id">,
+	b: Pick<LogLinePosition, "name" | "id">
+) {
+	return a.id === "" ? a.name === b.name : a.id === b.id;
+}
+
+/**
+ * The page older the reader answers over @p log for @p before: per cursor
+ * file, its lines that end at or before the offset, merged newest first by
+ * `ts` (a line without one keeps the time of the line after it in its file),
+ * at most @p limit, and a cursor at each file's oldest line taken.
+ */
+function readBefore(log: readonly LogEntry[], before: LogCursor, limit: number): LogReadResult {
+	const streams = before.files.map((file) => ({
+		file,
+		offset: file.offset,
+		lines: log
+			.filter(
+				(entry) => sameFile(positionOf(entry), file) && positionOf(entry).end <= file.offset
+			)
+			.sort((a, b) => positionOf(b).start - positionOf(a).start),
+		key: "\uffff",
+	}));
+	const keyOf = (stream: (typeof streams)[number]) => {
+		const head = stream.lines[0];
+		return isUnparsedEntry(head) ? stream.key : head.ts;
+	};
+	const newestFirst: LogEntry[] = [];
+	while (newestFirst.length < limit) {
+		const open = streams.filter((stream) => stream.lines.length > 0);
+		if (open.length === 0) break;
+		const stream = open.reduce((newest, other) =>
+			keyOf(other) > keyOf(newest) ? other : newest
+		);
+		stream.key = keyOf(stream);
+		const entry = stream.lines.shift() as LogEntry;
+		stream.offset = positionOf(entry).start;
+		newestFirst.push(entry);
+	}
+	const records = newestFirst.reverse();
+	const oldest = records.find((entry) => !isUnparsedEntry(entry));
+	return {
+		records,
+		cursor: {
+			files: streams
+				.filter((stream) => stream.offset > 0)
+				.map((stream) => ({ ...stream.file, offset: stream.offset })),
+		},
+		more: streams.some((stream) => stream.lines.length > 0),
+		scannedTo: oldest && !isUnparsedEntry(oldest) ? oldest.ts : null,
+	};
+}
+
+/** A cursor at the end of every file @p log has lines in: where the newest read starts. */
+function cursorAtEnds(log: readonly LogEntry[]): LogCursor {
+	const files: LogCursor["files"] = [];
+	for (const entry of log) {
+		const { name, id, end } = positionOf(entry);
+		const file = files.find((other) => sameFile(other, { name, id }));
+		if (!file) files.push({ name, id, offset: end });
+		else file.offset = Math.max(file.offset, end);
+	}
+	return { files };
 }
 
 export function fakeLogsBridge() {
@@ -79,6 +164,15 @@ export function fakeLogsBridge() {
 		/** The answer the next reads give, until it is set again. */
 		answer: (result: Partial<LogReadResult>) => {
 			logs.read.mockResolvedValue({ ...NO_MORE, ...result });
+		},
+		/**
+		 * The reads answer from @p log as the reader would: the newest from every
+		 * file's end, a page older by `readBefore`. Until it is set again.
+		 */
+		serveLog: (log: readonly LogEntry[]) => {
+			logs.read.mockImplementation(async (request: LogReadRequest) =>
+				readBefore(log, request.before ?? cursorAtEnds(log), request.limit)
+			);
 		},
 		/** The answer the next reads give by the way each one goes, until it is set again. */
 		answerReads: (answers: Partial<Record<LogReadKind, Partial<LogReadResult>>>) => {

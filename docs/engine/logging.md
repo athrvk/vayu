@@ -259,7 +259,14 @@ schema's `propertyNames` refuses, so no field shares it, and the table, the
 opened row's JSON and free-text search all leave it out. For a record over
 256 KiB the line is cut at that bound, as the record's largest fields are:
 Copy line copies the cut line, and Export writes the cut record re-serialised
-instead, so every line of the export is still one JSON value. The filters are
+instead, so every line of the export is still one JSON value. Every line the
+reader delivers, by a read or the tail and an unparsed one too, also carries
+its place in its file under the `$pos` key (#3652): `{ name, id, start, end }`,
+the file's name and identity as a cursor names them, the offset of the line's
+first byte, and the offset just past its newline (the file's end for a last
+line without one). The table, the opened row's JSON, Copy line, Export and
+free-text search leave it out, as they leave out `$raw`; the 16 MiB bound
+counts it. The filters are
 evaluated in the main process: a change restarts the tail and reads again,
 replacing what the table held.
 
@@ -272,11 +279,14 @@ way: it shows the lines at and before the time and, read at once after them,
 the next hundred; **Search newer** below the last line pages on ("Searched
 forward to ...") and drops the oldest, and the page that reaches the end of
 the logs appends the tail again, which it restarted before reading, so the
-table follows once you scroll to the end. Once the bound drops the oldest
-lines, by following or by Search newer, Search older ends: the table says the
-older lines were let go and points at Jump to time, since a page older from
-where it last read would leave a gap. A burst past the tail's 500 lines
-per poll shows as "N lines skipped in a burst": the lines are in the files. The
+table follows once you scroll to the end. When the bound drops the oldest
+lines, by following, by Search newer or from a read over the 16 MiB, Search
+older is still offered and reads exactly the lines before the oldest one the
+table holds, the dropped ones first, each file from where its own held lines
+begin (by `$pos`), so none is skipped or shown twice. A burst past the tail's
+500 lines per poll shows as "N lines skipped in a burst": the lines are in the
+files, and Search older reads them once the bound has dropped the lines before
+them. The
 footer names the engine's `logLevel` and says requests answered 2xx and
 database writes are written at `debug`, which a default install does not keep,
 with a link to Settings › Observability, where the level changes and applies

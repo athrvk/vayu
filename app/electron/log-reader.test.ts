@@ -22,7 +22,18 @@
  * the offset where it was in `mergeOldestFirst` and the forward paging cases
  * repeat records (or never end); cut `newer` at the file's end and the jump
  * case loses t+1; drop the `unopened` entries from `readForward`'s cursor and
- * the rotation-between-listing-and-open case reads the renamed file twice.
+ * the rotation-between-listing-and-open case reads the renamed file twice;
+ * return `null` from `openFollowingRename` where the open misses and the
+ * backward rotation-between-listing-and-open cases lose the renamed file.
+ *
+ * Every read and tail case checks each line's `$pos` against the file
+ * (`expectAtItsPosition`), and the position cases pin the numbers (#3652):
+ * end every backward line one past its length and the unterminated cases red;
+ * leave `ForwardLines`' line start where it was and the forward cases red; end
+ * its flushed line one byte late and the unterminated case reds; start a
+ * tailed file's splitter at 0 and the tail cases red; search `$pos` as text
+ * and the free-text case matches the file name; attach an empty `id` and
+ * every read case reds.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -48,6 +59,7 @@ import {
 	RECORD_MAX_BYTES,
 	UNPARSED_RAW_MAX_BYTES,
 	compileLogFilter,
+	POSITION_KEY,
 	RAW_LINE_KEY,
 	createLogTail,
 	isUnparsedLine,
@@ -58,6 +70,7 @@ import {
 	type LogEntry,
 	type LogFileRecord,
 	type LogFilter,
+	type LogLinePosition,
 	type LogReaderDeps,
 	type LogTailTimers,
 	type ReadLogsOptions,
@@ -120,17 +133,64 @@ function engineRecord(
 
 const line = (record: object) => JSON.stringify(record) + "\n";
 
-/** @p entry without the raw line every record carries, so it compares against its fixture. */
-function withoutRawLine<T extends LogEntry>(entry: T): T {
-	if (isUnparsedLine(entry)) return entry;
-	const { [RAW_LINE_KEY]: _raw, ...fields } = entry as LogFileRecord;
+/** The identity the reader gives the file at @p name, spelled as `LogCursorFile.id` is. */
+function fileId(name: string): string {
+	const stats = fs.statSync(path.join(dir, name), { bigint: true });
+	return stats.ino === 0n ? "" : `${stats.dev}:${stats.ino}`;
+}
+
+/**
+ * Check that @p entry's position names the bytes it was decoded from, in the
+ * file as it is now: from just after a newline (or the file's start) to just
+ * after the next one (or the file's end), holding the text the entry carries.
+ */
+function expectAtItsPosition(entry: LogEntry): void {
+	const position = entry[POSITION_KEY];
+	if (!position) throw new Error("A delivered line carries no position");
+	const { name, id, start, end } = position;
+	expect(id).toBe(fileId(name));
+	const fd = fs.openSync(path.join(dir, name), "r");
+	try {
+		const from = Math.max(0, start - 1);
+		const bytes = Buffer.alloc(end - from);
+		expect(fs.readSync(fd, bytes, 0, bytes.length, from)).toBe(bytes.length);
+		if (start > 0) expect(bytes[0]).toBe(0x0a);
+		const held = bytes.subarray(start - from);
+		const newline = held.indexOf(0x0a);
+		if (newline === -1) expect(end).toBe(fs.fstatSync(fd).size);
+		else expect(newline).toBe(held.length - 1);
+		const text = held.toString("utf8").replace(/\r?\n$/, "");
+		const carried = isUnparsedLine(entry) ? entry.raw : (entry as LogFileRecord)[RAW_LINE_KEY];
+		const bound = isUnparsedLine(entry) ? UNPARSED_RAW_MAX_BYTES : RECORD_MAX_BYTES;
+		expect(typeof carried).toBe("string");
+		if (Buffer.byteLength(text) <= bound) expect(carried).toBe(text);
+		else expect(text.startsWith(carried as string)).toBe(true);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
+ * @p entry, its position checked, without the keys the reader adds, so it
+ * compares against its fixture.
+ */
+function asFixture<T extends LogEntry>(entry: T): T {
+	expectAtItsPosition(entry);
+	if (isUnparsedLine(entry)) {
+		const { [POSITION_KEY]: _position, ...rest } = entry;
+		return rest as T;
+	}
+	const { [RAW_LINE_KEY]: _raw, [POSITION_KEY]: _position, ...fields } = entry as LogFileRecord;
 	return fields as T;
 }
 
-/** `readLogs` with the raw line stripped; the raw-line cases call `readLogsWithRaw`. */
+/**
+ * `readLogs` with every position checked and the reader's keys stripped; the
+ * raw-line and position cases call `readLogsWithRaw`.
+ */
 const readLogs: typeof readLogsWithRaw = async (readerDeps, options) => {
 	const result = await readLogsWithRaw(readerDeps, options);
-	return { ...result, records: result.records.map(withoutRawLine) };
+	return { ...result, records: result.records.map(asFixture) };
 };
 
 function writeLog(name: string, records: object[], eol = "\n"): void {
@@ -506,6 +566,92 @@ describe("readLogs - backward paging", () => {
 		expect(page2.records).toEqual(first.slice(2, 6));
 		expect(page3.records).toEqual(first.slice(0, 2));
 		expect(page3.more).toBe(false);
+	});
+
+	describe("a file rotated between the listing and the open", () => {
+		const name = "engine_20261118_100000.log";
+		const first = Array.from({ length: 10 }, (_, second) =>
+			engineRecord(second, "http", `r${second}`)
+		);
+		const fresh = [engineRecord(10, "http", "after rotation")];
+
+		/**
+		 * `fs.promises` that rotates the file on the next open once armed: the
+		 * listing saw it under its name, and by the open it is `.1`.
+		 */
+		function rotatingOnOpen() {
+			let armed = false;
+			const rotatingFs: LogReaderDeps["fs"] = {
+				readdir: (target) => fs.promises.readdir(target),
+				lstat: (target, options) => fs.promises.lstat(target, options),
+				open: async (target, flags) => {
+					if (armed) {
+						armed = false;
+						renameSync(path.join(dir, name), path.join(dir, `${name}.1`));
+						writeLog(name, fresh);
+					}
+					return fs.promises.open(target, flags);
+				},
+			};
+			return { deps: { ...deps, fs: rotatingFs }, arm: () => (armed = true) };
+		}
+
+		it("is read under its new name by the newest read, and the fresh file is left to the tail", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+
+			rotating.arm();
+			const records = await readAll(rotating.deps, { filter: {}, limit: 4 });
+
+			expect(records).toEqual(first);
+		});
+
+		it("is read under its new name by a page older", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+			const page1 = await readLogs(rotating.deps, { filter: {}, limit: 4 });
+
+			rotating.arm();
+			const page2 = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: page1.cursor,
+			});
+			const page3 = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: page2.cursor,
+			});
+
+			expect(page1.records).toEqual(first.slice(6));
+			expect(page2.records).toEqual(first.slice(2, 6));
+			expect(page3.records).toEqual(first.slice(0, 2));
+			expect(page3.more).toBe(false);
+		});
+
+		it("is cut at the time by a jump, in both its cursors", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+
+			rotating.arm();
+			const landed = await readLogs(rotating.deps, { filter: {}, limit: 4, around: tsAt(5) });
+			const older = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: landed.cursor,
+			});
+			const newer = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 10,
+				after: landed.newer,
+			});
+
+			expect(landed.records).toEqual(first.slice(2, 6));
+			expect(older.records).toEqual(first.slice(0, 2));
+			expect(older.more).toBe(false);
+			expect(newer.records).toEqual([...first.slice(6), ...fresh]);
+			expect(newer.more).toBe(false);
+		});
 	});
 
 	it("caps a page at the read limit", async () => {
@@ -944,6 +1090,135 @@ describe("parseSearchInput", () => {
 	});
 });
 
+describe("each line's position", () => {
+	const name = "engine_20261118_100000.log";
+	/** A record, a CRLF record, a line that is not one and a record with multi-byte text. */
+	const LINES = [
+		line(ENGINE_FIXTURE[0]),
+		JSON.stringify(ENGINE_FIXTURE[1]) + "\r\n",
+		"not json at all\n",
+		line(ENGINE_FIXTURE[5]),
+	];
+
+	/** Where each of @p lines sits in @p file, written in order from @p from. */
+	function expectedPositions(file: string, lines: string[], from = 0): LogLinePosition[] {
+		const id = fileId(file);
+		let start = from;
+		return lines.map((text) => {
+			const end = start + Buffer.byteLength(text);
+			const position = { name: file, id, start, end };
+			start = end;
+			return position;
+		});
+	}
+
+	const positions = (records: LogEntry[]) => records.map((entry) => entry[POSITION_KEY]);
+
+	it.each([1, 7, 65536])(
+		"is exact on a backward read, for lines that span chunks too (chunk %i bytes)",
+		async (chunkBytes) => {
+			writeFileSync(path.join(dir, name), LINES.join(""));
+
+			const { records } = await readLogsWithRaw(
+				{ ...deps, chunkBytes },
+				{ filter: {}, limit: 10 }
+			);
+
+			expect(positions(records)).toEqual(expectedPositions(name, LINES));
+		}
+	);
+
+	it.each([1, 7, 65536])(
+		"is exact on a forward read, for lines that span chunks too (chunk %i bytes)",
+		async (chunkBytes) => {
+			writeFileSync(path.join(dir, name), LINES.join(""));
+
+			const { records } = await readLogsWithRaw(
+				{ ...deps, chunkBytes },
+				{ filter: {}, limit: 10, after: { files: [] } }
+			);
+
+			expect(positions(records)).toEqual(expectedPositions(name, LINES));
+		}
+	);
+
+	it("ends at the file's end for a last line with no newline, read either way", async () => {
+		const older = "engine_20261118_090000.log";
+		const unterminated = [line(ENGINE_FIXTURE[0]), JSON.stringify(ENGINE_FIXTURE[1])];
+		writeFileSync(path.join(dir, older), unterminated.join(""));
+		// A newer file of the same source, so the older one has no writer.
+		writeLog(name, [ENGINE_FIXTURE[2]]);
+		const expected = [
+			...expectedPositions(older, unterminated),
+			...expectedPositions(name, [line(ENGINE_FIXTURE[2])]),
+		];
+
+		const backward = await readLogsWithRaw(deps, { filter: {}, limit: 10 });
+		const forward = await readLogsWithRaw(deps, {
+			filter: {},
+			limit: 10,
+			after: { files: [] },
+		});
+
+		expect(positions(backward.records)).toEqual(expected);
+		expect(positions(forward.records)).toEqual(expected);
+	});
+
+	it("is exact on what the tail delivers, for a line written in two halves too", async () => {
+		const file = path.join(dir, name);
+		writeLog(name, [ENGINE_FIXTURE[0]]);
+		const clock = manualTimers();
+		const batches: LogBatch[] = [];
+		const tail = await createLogTail(
+			{ ...deps, chunkBytes: 7, timers: clock.timers },
+			{ filter: {}, onBatch: (batch) => batches.push(batch) }
+		);
+		const appended = [line(ENGINE_FIXTURE[1]), "not json at all\n", line(ENGINE_FIXTURE[2])];
+
+		appendFileSync(file, appended[0] + appended[1] + appended[2].slice(0, 20));
+		await clock.poll();
+		appendFileSync(file, appended[2].slice(20));
+		await clock.poll();
+
+		expect(positions(batches.flatMap((batch) => batch.records))).toEqual(
+			expectedPositions(name, appended, Buffer.byteLength(line(ENGINE_FIXTURE[0])))
+		);
+		tail.stop();
+	});
+
+	it("names the renamed file by the same identity after a rotation between pages", async () => {
+		const first = Array.from({ length: 8 }, (_, second) =>
+			engineRecord(second, "http", `r${second}`)
+		);
+		writeLog(name, first);
+		const page1 = await readLogsWithRaw(deps, { filter: {}, limit: 4 });
+		renameSync(path.join(dir, name), path.join(dir, `${name}.1`));
+		writeLog(name, [engineRecord(10, "http", "after rotation")]);
+
+		const page2 = await readLogsWithRaw(deps, { filter: {}, limit: 4, before: page1.cursor });
+
+		const before = positions(page1.records);
+		const after = positions(page2.records);
+		expect(before.map((position) => position?.name)).toEqual(Array(4).fill(name));
+		expect(after.map((position) => position?.name)).toEqual(Array(4).fill(`${name}.1`));
+		expect(new Set([...before, ...after].map((position) => position?.id)).size).toBe(1);
+		expect(after[3]?.end).toBe(before[0]?.start);
+	});
+
+	it("is not searched by free text", async () => {
+		writeLog(name, [ENGINE_FIXTURE[0]]);
+
+		const byFileName = await readLogsWithRaw(deps, {
+			filter: { text: "100000.log" },
+			limit: 5,
+		});
+		const byValue = await readLogsWithRaw(deps, { filter: { text: "starting" }, limit: 5 });
+
+		expect(byFileName.records).toEqual([]);
+		expect(byValue.records).toHaveLength(1);
+	});
+});
+
 describe("trust", () => {
 	const listed = "engine_20261118_100000.log";
 
@@ -1046,8 +1321,7 @@ async function startTail(filter: LogFilter = {}, readerDeps: LogReaderDeps = dep
 		{ ...readerDeps, timers: clock.timers },
 		{
 			filter,
-			onBatch: (batch) =>
-				batches.push({ ...batch, records: batch.records.map(withoutRawLine) }),
+			onBatch: (batch) => batches.push({ ...batch, records: batch.records.map(asFixture) }),
 		}
 	);
 	return { clock, batches, tail };

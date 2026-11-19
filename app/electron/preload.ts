@@ -63,6 +63,12 @@ interface LogFilterShape {
 interface LogCursorShape {
 	files: { name: string; id: string; offset: number }[];
 }
+interface LogLinePositionShape {
+	name: string;
+	id: string;
+	start: number;
+	end: number;
+}
 type LogEntryShape =
 	| ({
 			ts: string;
@@ -73,8 +79,9 @@ type LogEntryShape =
 			pid: number;
 			tid?: string;
 			$raw?: string;
+			$pos?: LogLinePositionShape;
 	  } & Record<string, unknown>)
-	| { unparsed: true; raw: string };
+	| { unparsed: true; raw: string; $pos?: LogLinePositionShape };
 interface LogReadRequestShape {
 	before?: LogCursorShape;
 	around?: string;

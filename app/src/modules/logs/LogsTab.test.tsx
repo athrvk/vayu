@@ -18,7 +18,8 @@
  * `logs-store.ts` and the bound cases in `logs-store.test.ts` red; drop
  * `addedBelow` from the window in `LogList.tsx` and the Search newer window case
  * unmounts the reader's rows; export with `entryLine` in `LogsToolbar.tsx` and
- * the cut record case writes a line that is not JSON.
+ * the cut record case writes a line that is not JSON; set `more` false after a
+ * trim in `logs-store.ts` and the case past the bound offers no Search older.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,10 +27,10 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { render } from "@/test/render-with-tooltips";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore, useToastStore } from "@/stores";
-import type { LogEntry, SaveFileReply } from "@/types/electron";
+import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
-import { useLogsStore } from "./logs-store";
+import { LOG_MAX_BYTES, useLogsStore } from "./logs-store";
 
 const config = vi.hoisted(() => ({ logLevel: "info" as string | undefined }));
 
@@ -46,6 +47,13 @@ let bridge: FakeLogsBridge;
 let openLogsFolder: ReturnType<typeof vi.fn>;
 let saveFile: ReturnType<typeof vi.fn>;
 let writeText: ReturnType<typeof vi.fn>;
+
+/** @p record's own fields: what a row opens to, Copy line copies and Export writes. */
+function ownFields(record: LogFileRecord): LogFileRecord {
+	const fields = { ...record };
+	delete fields.$pos;
+	return fields;
+}
 
 const request = logRecord(1, { status: 200, path: "/inbox", ms: 1.3 });
 const unparsed: LogEntry = { unparsed: true, raw: "SEGFAULT at 0xdeadbeef" };
@@ -141,7 +149,9 @@ describe("the table", () => {
 
 		const row = screen.getByRole("button", { expanded: true });
 		expect(row).toBeInTheDocument();
-		expect(document.querySelector("pre")?.textContent).toBe(JSON.stringify(request, null, 2));
+		expect(document.querySelector("pre")?.textContent).toBe(
+			JSON.stringify(ownFields(request), null, 2)
+		);
 		// pid and tid have no column: the opened row is where they read.
 		expect(document.querySelector("pre")?.textContent).toContain('"pid": 4242');
 
@@ -171,7 +181,9 @@ describe("copy line", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Copy line" }));
 
-		await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify(request)));
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith(JSON.stringify(ownFields(request)))
+		);
 		expect(toastTexts()).toEqual(["success:Line copied"]);
 	});
 
@@ -195,7 +207,7 @@ describe("the raw line", () => {
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(FILE_LINE));
 		// The line the file holds parses to the fields the row shows, and no more.
 		expect(JSON.parse(writeText.mock.calls[0][0] as string)).toEqual(
-			logRecord(2, { x: 1, path: "/raw" })
+			ownFields(logRecord(2, { x: 1, path: "/raw" }))
 		);
 	});
 
@@ -220,7 +232,7 @@ describe("the raw line", () => {
 		fireEvent.click(row);
 
 		expect(JSON.parse(document.querySelector("pre")?.textContent ?? "")).toEqual(
-			logRecord(2, { x: 1, path: "/raw" })
+			ownFields(logRecord(2, { x: 1, path: "/raw" }))
 		);
 		expect(screen.queryByText(/\$raw/)).toBeNull();
 	});
@@ -235,8 +247,8 @@ describe("the raw line", () => {
 
 		await waitFor(() => expect(saveFile).toHaveBeenCalled());
 		const [exported] = saveFile.mock.calls[0] as [string];
-		expect(exported).toBe(`${JSON.stringify(cutRecord)}\n`);
-		expect(JSON.parse(exported)).toEqual(cutRecord);
+		expect(exported).toBe(`${JSON.stringify(ownFields(cutRecord))}\n`);
+		expect(JSON.parse(exported)).toEqual(ownFields(cutRecord));
 	});
 });
 
@@ -389,18 +401,24 @@ describe("search older", () => {
 		expect(time).toHaveAttribute("datetime", searched.ts);
 	});
 
-	it("says older lines were let go once the bound dropped them, and offers no Search older", async () => {
-		await openTab([logRecord(10)], true);
+	it("still offers Search older once the bound drops the oldest, from the oldest line held", async () => {
+		await openTab([logRecord(10)], false);
+		expect(screen.getByText("Reached the start of the logs.")).toBeInTheDocument();
 
-		act(() => useLogsStore.setState({ olderLetGo: true, more: false, cursor: null }));
+		// One line that alone fills the byte budget drops line 10, the only older one.
+		act(() => bridge.push([logRecord(11, { msg: "x".repeat(LOG_MAX_BYTES / 2) })]));
 
-		expect(
-			screen.getByText(
-				"Older lines were let go to hold the newest. Jump to a time to read them."
-			)
-		).toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: "Search older" })).toBeNull();
 		expect(screen.queryByText("Reached the start of the logs.")).toBeNull();
+		expect(screen.queryByText(/Searched back to/)).toBeNull();
+		bridge.answer({ records: [logRecord(10)], more: false });
+		fireEvent.click(screen.getByRole("button", { name: "Search older" }));
+
+		expect(await screen.findByText("line 10")).toBeInTheDocument();
+		expect(bridge.logs.read).toHaveBeenLastCalledWith({
+			before: logCursor(11),
+			filter: {},
+			limit: 1000,
+		});
 	});
 
 	it("says it has reached the start when nothing older remains", async () => {
@@ -524,7 +542,7 @@ describe("export", () => {
 
 		await waitFor(() => expect(saveFile).toHaveBeenCalled());
 		expect(saveFile).toHaveBeenCalledWith(
-			`${JSON.stringify(request)}\nSEGFAULT at 0xdeadbeef\n`,
+			`${JSON.stringify(ownFields(request))}\nSEGFAULT at 0xdeadbeef\n`,
 			"vayu-logs.jsonl"
 		);
 		await waitFor(() =>
