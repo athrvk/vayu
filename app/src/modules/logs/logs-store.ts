@@ -24,8 +24,9 @@
  * first. Following drops the oldest; paging older drops the newest, and having
  * dropped them the list is `detached` from the tail, since a batch appended
  * after a hole would be a lie about what happened between. Following again then
- * means reading afresh, never appending. Dropping the oldest ends paging older
- * for the same reason (`OLDER_LET_GO`).
+ * means reading afresh, never appending. Dropping the oldest moves the older
+ * cursor up to the lines still held (`cursorAfterTrim`), so paging older reads
+ * the dropped lines again.
  *
  * **Jump to time** is detached too, and pages newer from the time it landed
  * on: one page at once, then one per "Search newer". Paging newer drops the
@@ -48,9 +49,10 @@ import type {
 	LogEntry,
 	LogFileRecord,
 	LogFilter,
+	LogLinePosition,
 	LogReadResult,
 } from "@/types/electron";
-import { entryBytes, entryLine, isUnparsedEntry } from "./log-entry";
+import { POSITION_KEY, entryBytes, entryLine, isUnparsedEntry } from "./log-entry";
 import { parseSearchInput } from "./parse-search";
 
 /** The most lines the renderer holds. */
@@ -110,15 +112,19 @@ function totalBytes(records: readonly LogEntry[]): number {
  * line over the byte budget is still the one on screen, as a response over the
  * response cache's.
  */
-function trimToBound(held: Held, drop: "oldest" | "newest"): Held & { trimmed: boolean } {
+function trimToBound(held: Held, drop: "oldest" | "newest"): Held & { dropped: LogEntry[] } {
 	let start = 0;
 	let end = held.records.length;
 	let bytes = held.bytes;
 	while (end - start > 1 && (end - start > LOG_MAX_RECORDS || bytes > LOG_MAX_BYTES)) {
 		bytes -= entryBytes(drop === "oldest" ? held.records[start++] : held.records[--end]);
 	}
-	const trimmed = start > 0 || end < held.records.length;
-	return { records: trimmed ? held.records.slice(start, end) : held.records, bytes, trimmed };
+	if (start === 0 && end === held.records.length) return { ...held, dropped: [] };
+	return {
+		records: held.records.slice(start, end),
+		bytes,
+		dropped: drop === "oldest" ? held.records.slice(0, start) : held.records.slice(end),
+	};
 }
 
 /** Lines the tail delivered that @p read did not already return. */
@@ -128,31 +134,87 @@ function withoutRepeats(late: LogEntry[], read: LogEntry[]): LogEntry[] {
 	return late.filter((entry) => !seen.has(entryLine(entry)));
 }
 
-/**
- * What paging older is once the oldest held lines have been let go: ended. The
- * cursor points before the first line read and the renderer has none for the
- * line now oldest, so a page older would sit behind the lines just dropped. A
- * read `around` the oldest held `ts` is no cursor either: it can skip lines,
- * since lines from different files arrive out of `ts` order and an unparsed
- * line has none. A jump to time or a fresh read starts paging older again.
- */
-const OLDER_LET_GO = {
-	cursor: null,
-	more: false,
-	scannedTo: null,
-	olderLetGo: true,
-} satisfies Partial<LogsData>;
+type CursorFile = LogCursor["files"][number];
 
-/** @p held with @p added after it, cut to the bound from the oldest end. */
-function appendNewest(held: Held, added: readonly LogEntry[]): Partial<LogsData> & Held {
+const isLess = (a: number, b: number) => a < b;
+const isGreater = (a: number, b: number) => a > b;
+
+/** A cursor entry's file as the reader resolves it: by identity, or by name where there is none. */
+function fileKey(file: Pick<CursorFile, "name" | "id">): string {
+	return file.id === "" ? `name:${file.name}` : `id:${file.id}`;
+}
+
+/**
+ * Per file of @p entries, the offset @p offsetOf reads off the line that
+ * @p wins over every other line of that file; null when a line carries no
+ * position (a fixture), since its file cannot be told.
+ */
+function offsetsByFile(
+	entries: readonly LogEntry[],
+	offsetOf: (position: LogLinePosition) => number,
+	wins: (offset: number, current: number) => boolean
+): Map<string, CursorFile> | null {
+	const byFile = new Map<string, CursorFile>();
+	for (const entry of entries) {
+		const position = entry[POSITION_KEY];
+		if (!position) return null;
+		const key = fileKey(position);
+		const offset = offsetOf(position);
+		const current = byFile.get(key);
+		if (!current || wins(offset, current.offset)) {
+			byFile.set(key, { name: position.name, id: position.id, offset });
+		}
+	}
+	return byFile;
+}
+
+/**
+ * Where paging older continues once @p dropped, the oldest lines, are no longer
+ * held: per file, the start of its oldest line still held, or else the end of
+ * its newest line dropped, so the read takes the dropped lines in again; a file
+ * with neither keeps @p previous's entry. Per file over every line, because the
+ * held order is not time order across files (a poll's batch is sorted on its
+ * own, a lagging file's lines arrive late). Null, which ends paging older, when
+ * a line has no position to place it by: a page from a guessed cursor could
+ * skip lines or repeat them.
+ */
+function cursorAfterTrim(
+	previous: LogCursor | null,
+	held: readonly LogEntry[],
+	dropped: readonly LogEntry[]
+): LogCursor | null {
+	if (previous === null) return null;
+	const oldestHeld = offsetsByFile(held, (position) => position.start, isLess);
+	const newestDropped = offsetsByFile(dropped, (position) => position.end, isGreater);
+	if (!oldestHeld || !newestDropped) return null;
+	const files = new Map(previous.files.map((file) => [fileKey(file), file]));
+	for (const [key, file] of newestDropped) files.set(key, file);
+	for (const [key, file] of oldestHeld) files.set(key, file);
+	return { files: [...files.values()].filter((file) => file.offset > 0) };
+}
+
+/**
+ * @p held with @p added after it, cut to the bound from the oldest end. A cut
+ * always makes a new cursor, so a page older requested before it is discarded
+ * (`loadOlder`): it would sit behind the lines the cut dropped.
+ */
+function appendNewest(
+	held: Held & Pick<LogsData, "cursor">,
+	added: readonly LogEntry[]
+): Partial<LogsData> & Held {
 	const kept = trimToBound(
 		{ records: [...held.records, ...added], bytes: held.bytes + totalBytes(added) },
 		"oldest"
 	);
+	if (kept.dropped.length === 0) return { records: kept.records, bytes: kept.bytes };
+	const cursor = cursorAfterTrim(held.cursor, kept.records, kept.dropped);
 	return {
 		records: kept.records,
 		bytes: kept.bytes,
-		...(kept.trimmed ? OLDER_LET_GO : {}),
+		cursor,
+		more: cursor !== null && cursor.files.length > 0,
+		// Nothing older than the held lines has been searched since the cut.
+		scannedTo: null,
 	};
 }
 
@@ -171,14 +233,15 @@ interface LogsData {
 	records: LogEntry[];
 	bytes: number;
 	follow: boolean;
-	/** Where the next page older starts; null until a read has answered. */
+	/**
+	 * Where the next page older starts; null until a read has answered, and
+	 * after a trim that could not place a line (`cursorAfterTrim`).
+	 */
 	cursor: LogCursor | null;
 	/** Older lines remain that the last read did not search or did not return. */
 	more: boolean;
 	/** The `ts` of the oldest line the last read examined, matching or not. */
 	scannedTo: string | null;
-	/** The oldest lines were dropped to the bound, which ended paging older. */
-	olderLetGo: boolean;
 	/** Lines the tail left out of a batch, since this list was read. */
 	dropped: number;
 	/** The newest lines are not all held, so the tail is not appended. */
@@ -203,7 +266,7 @@ interface LogsData {
 interface LogsActions {
 	/** Mount: read the newest lines and follow the tail. */
 	start: () => Promise<void>;
-	/** Unmount: end the tail and let go of the lines. */
+	/** Unmount: end the tail and drop the lines. */
 	stop: () => void;
 	setControls: (patch: Partial<LogControls>) => void;
 	/** Turning it on while detached reads the newest lines afresh. */
@@ -227,7 +290,6 @@ const NOTHING_LOADED = {
 	cursor: null,
 	more: false,
 	scannedTo: null,
-	olderLetGo: false,
 	dropped: 0,
 	detached: false,
 	newerCursor: null,
@@ -266,7 +328,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		attach: Pick<LogsData, "follow" | "detached"> & Partial<Pick<LogsData, "newerCursor">>
 	): void {
 		const kept = appendNewest(
-			{ records: result.records, bytes: totalBytes(result.records) },
+			{ records: result.records, bytes: totalBytes(result.records), cursor: result.cursor },
 			late
 		);
 		set((state) => ({
@@ -406,7 +468,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			});
 			if (id !== loadId) return;
 			set((state) => {
-				// The oldest lines were let go meanwhile: this page would sit behind the hole.
+				// A trim moved the cursor meanwhile: this page would sit behind the lines it dropped.
 				if (state.cursor !== cursor) return { loadingOlder: false };
 				const held = trimToBound(
 					{
@@ -418,8 +480,8 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 				return {
 					records: held.records,
 					bytes: held.bytes,
-					detached: state.detached || held.trimmed,
-					newerCursor: held.trimmed ? null : state.newerCursor,
+					detached: state.detached || held.dropped.length > 0,
+					newerCursor: held.dropped.length > 0 ? null : state.newerCursor,
 					cursor: result.cursor,
 					more: result.more,
 					scannedTo: result.scannedTo ?? state.scannedTo,

@@ -17,17 +17,38 @@
  * `reloadFresh` call in `setControls` and the filter cases red; keep the list
  * detached in `appendNewer` and the end-of-the-logs case reds; drop the page
  * newer from `jumpTo` and the jump puts no line after the time in the list;
- * drop `OLDER_LET_GO` from `appendNewest` and the let-go cases page older past
- * a hole; drop `pastOverlap` from `receive` and the overlap cases hold a line
- * twice; count only the raw line in `entryBytes` and the byte bound case holds
- * twice as many lines.
+ * drop `pastOverlap` from `receive` and the overlap cases hold a line twice;
+ * count only the raw line in `entryBytes` and the byte bound case holds twice as
+ * many lines. After a trim (#3652): keep the cursor from before it and the
+ * follow and Search newer cases page past a hole; set `more` false and they
+ * read nothing; rebuild only the file of the first held line, or of the newest
+ * line dropped, and the interleaved case skips another file's dropped lines;
+ * leave out the newest dropped line of a file with none held and the byte case
+ * never reads the file it dropped; start from no entries instead of the
+ * previous cursor and the rotated file is never reached; let the newest line
+ * dropped win over the oldest held and the burst case skips what the burst left
+ * out; drop the `state.cursor !== cursor` check in `loadOlder` and the
+ * in-flight case lands its page behind a hole; skip a line without a position
+ * instead of ending and the unplaced case pages older.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
-import type { LogEntry, LogFileRecord, LogReadRequest, LogReadResult } from "@/types/electron";
+import type {
+	LogEntry,
+	LogFileRecord,
+	LogLinePosition,
+	LogReadRequest,
+	LogReadResult,
+} from "@/types/electron";
 import { entryBytes } from "./log-entry";
-import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
+import {
+	ENGINE_LOG,
+	fakeLogsBridge,
+	logCursor,
+	logRecord,
+	type FakeLogsBridge,
+} from "./logs-bridge.testkit";
 import { LOG_MAX_BYTES, LOG_MAX_RECORDS, buildLogFilter, useLogsStore } from "./logs-store";
 
 let bridge: FakeLogsBridge;
@@ -87,6 +108,65 @@ function expectNoMissingLine(): void {
 	expect(numbers.length).toBeGreaterThan(0);
 	expect(missing).toEqual([]);
 }
+
+/**
+ * Each file's held lines are one run: sorted by offset, each starts where the
+ * one before it ended, so none is missing and none is held twice.
+ */
+function expectEachFileUnbroken(): Map<string, LogLinePosition[]> {
+	const byFile = new Map<string, LogLinePosition[]>();
+	for (const entry of state().records) {
+		const position = entry.$pos as LogLinePosition;
+		byFile.set(position.name, [...(byFile.get(position.name) ?? []), position]);
+	}
+	const breaks: string[] = [];
+	for (const [name, positions] of byFile) {
+		positions.sort((a, b) => a.start - b.start);
+		positions.forEach((position, i) => {
+			if (i > 0 && position.start !== positions[i - 1].end) {
+				breaks.push(`${name} at ${position.start}`);
+			}
+		});
+	}
+	expect(byFile.size).toBeGreaterThan(0);
+	expect(breaks).toEqual([]);
+	return byFile;
+}
+
+/**
+ * Lines spread over files as the reader delivers them: each file's lines in
+ * order, ten bytes a line, `$pos` counted per file. `add` takes the line's
+ * time as seconds into the fixtures' day; an unparsed line has none.
+ */
+function multiFileLog() {
+	const lines: LogEntry[] = [];
+	const nextStart = new Map<string, number>();
+	const place = (file: { name: string; id: string }): LogLinePosition => {
+		const start = nextStart.get(file.name) ?? 0;
+		nextStart.set(file.name, start + 10);
+		return { ...file, start, end: start + 10 };
+	};
+	return {
+		lines,
+		add(file: { name: string; id: string }, n: number, overrides: Partial<LogFileRecord> = {}) {
+			const line = logRecord(n, {
+				msg: `${file.name} ${n}`,
+				$pos: place(file),
+				...overrides,
+			});
+			lines.push(line);
+			return line;
+		},
+		addUnparsed(file: { name: string; id: string }) {
+			const line: LogEntry = { unparsed: true, raw: "SEGFAULT", $pos: place(file) };
+			lines.push(line);
+			return line;
+		},
+	};
+}
+
+const APP_LOG = { name: "app_20261118_100000.log", id: "1:3" };
+const ROTATED_ENGINE_LOG = { name: "engine_20261118_090000.log", id: "1:1" };
 
 beforeEach(() => {
 	bridge = fakeLogsBridge();
@@ -266,21 +346,114 @@ describe("the bound", () => {
 		);
 	});
 
-	it("ends paging older once following lets the oldest go, rather than page past the hole", async () => {
-		bridge.answer({ records: span(0, 1000), more: true, cursor: logCursor(0) });
+	it("pages older from the oldest line held once following drops the oldest, none missing or repeated", async () => {
+		numberedLog(5000);
 		await state().start();
-		expect(state()).toMatchObject({ more: true, olderLetGo: false });
+		const { cursor } = state();
 
-		// 1,000 + 18 batches of 500 is the bound exactly; one line more lets the oldest go.
-		for (let batch = 0; batch < 18; batch++) bridge.push(span(1000 + batch * 500, 500));
-		expect(state()).toMatchObject({ more: true, olderLetGo: false });
-		bridge.push(span(10_000, 1));
+		// 1,000 + 18 batches of 500 is the bound exactly; one line more drops line 5000.
+		for (let batch = 0; batch < 18; batch++) bridge.push(span(6000 + batch * 500, 500));
+		expect(state()).toMatchObject({ more: true, cursor });
+		bridge.push(span(15_000, 1));
 
-		expect(state()).toMatchObject({ more: false, cursor: null, olderLetGo: true });
+		expect(state()).toMatchObject({ more: true, cursor: logCursor(5001), scannedTo: null });
+		await state().loadOlder();
+
+		expect(bridge.logs.read).toHaveBeenLastCalledWith(
+			expect.objectContaining({ before: logCursor(5001) })
+		);
+		expect(messages()[0]).toBe("line 4001");
+		expectNoMissingLine();
+	});
+
+	it("reads the lines a burst left out again, once the bound drops the lines before them", async () => {
+		numberedLog(5000);
+		await state().start();
+		// Lines 6000 to 6099 were left out of a burst, which the tail counts.
+		bridge.push(span(6100, 500), 100);
+		bridge.push(span(6600, 9500));
+
+		expect(messages()[0]).toBe("line 6100");
+		expect(state().cursor).toEqual(logCursor(6100));
+		await state().loadOlder();
+
+		expect(messages()[0]).toBe("line 5100");
+		expectNoMissingLine();
+	});
+
+	it("pages older through files the tail interleaves, a lagging file and an unparsed line, none missing or repeated", async () => {
+		const log = multiFileLog();
+		// An older engine file a rotation renamed: nothing of it is held when the bound first cuts.
+		for (let n = 0; n < 1000; n++) log.add(ROTATED_ENGINE_LOG, n);
+		const tailFrom = (n: number) => (n % 3 === 0 ? APP_LOG : ENGINE_LOG);
+		for (let n = 1000; n < 3000; n++) log.add(tailFrom(n), n);
+		const readable = [...log.lines];
+		const windows: LogEntry[][] = [];
+		for (let n = 3000; n < 14_000; n++) {
+			if (n % 300 === 0) windows.push([]);
+			windows[windows.length - 1].push(log.add(tailFrom(n), n));
+			if (n === 3100) windows[windows.length - 1].push(log.addUnparsed(ENGINE_LOG));
+		}
+		bridge.serveLog(readable);
+		await state().start();
+		expect(state().records).toHaveLength(1000);
+
+		// The app file lags a poll: each batch carries its lines from the window before.
+		const ofApp = (window: LogEntry[] = []) => window.filter((l) => l.$pos?.id === APP_LOG.id);
+		const ofEngine = (window: LogEntry[]) => window.filter((l) => l.$pos?.id !== APP_LOG.id);
+		windows.forEach((window, i) =>
+			bridge.push([...ofApp(windows[i - 1]), ...ofEngine(window)])
+		);
+		bridge.push(ofApp(windows[windows.length - 1]));
+
+		expect(state().records).toHaveLength(LOG_MAX_RECORDS);
+		expect(state().more).toBe(true);
+		expectEachFileUnbroken();
+		bridge.serveLog(log.lines);
+		for (let page = 0; page < 20 && state().more; page++) {
+			await state().loadOlder();
+			expectEachFileUnbroken();
+		}
+
+		expect(state().more).toBe(false);
+		const files = expectEachFileUnbroken();
+		expect([...files.keys()].sort()).toEqual(
+			[APP_LOG.name, ENGINE_LOG.name, ROTATED_ENGINE_LOG.name].sort()
+		);
+		for (const positions of files.values()) expect(positions[0].start).toBe(0);
+		expect(state().records).toContainEqual(expect.objectContaining({ unparsed: true }));
+	});
+
+	it("pages older through a file whose lines the byte bound dropped whole, from a read over the budget", async () => {
+		const log = multiFileLog();
+		const big = { msg: "x".repeat(1_000_000) };
+		const rotated = [log.add(ROTATED_ENGINE_LOG, 0, big), log.add(ROTATED_ENGINE_LOG, 1, big)];
+		for (let n = 2; n < 10; n++) log.add(ENGINE_LOG, n, big);
+		// Two bytes a unit: eight of these fit in the 16 MiB, ten do not.
+		expect(Math.floor(LOG_MAX_BYTES / entryBytes(log.lines[2]))).toBe(8);
+		bridge.serveLog(log.lines);
+
+		await state().start();
+
+		expect(state().records).toEqual(log.lines.slice(2));
+		expect(state()).toMatchObject({ more: true, scannedTo: null });
+		await state().loadOlder();
+
+		expect(state().records).toEqual([...rotated, ...log.lines.slice(2, 8)]);
+		expect(state()).toMatchObject({ more: false, detached: true });
+	});
+
+	it("ends paging older when a trim cannot place a line: one that carries no position", async () => {
+		numberedLog(5000);
+		await state().start();
+		bridge.push(span(6000, 9000));
+
+		bridge.push([logRecord(15_000, { $pos: undefined })]);
+
+		expect(state()).toMatchObject({ more: false, cursor: null });
 		bridge.logs.read.mockClear();
 		await state().loadOlder();
 		expect(bridge.logs.read).not.toHaveBeenCalled();
-		expectNoMissingLine();
 	});
 
 	it("keeps the newest line even when it alone is over the byte budget", async () => {
@@ -517,25 +690,26 @@ describe("paging newer", () => {
 		]);
 	});
 
-	it("leaves no line missing when Search older follows Search newer past the bound", async () => {
+	it("pages older from the oldest line held once Search newer drops the oldest, none missing or repeated", async () => {
 		bridge.answer({ records: span(0, 2) });
 		await state().start();
 		numberedLog(9000);
 		await state().jumpTo(logRecord(9500).ts);
-		expect(state()).toMatchObject({ more: true, olderLetGo: false });
 
+		// 1,000 landed, 100 read at once and ten pages of 1,000: 1,100 over the bound.
 		for (let page = 0; page < 10; page++) await state().loadNewer();
 		expect(state().records).toHaveLength(LOG_MAX_RECORDS);
+		expect(state()).toMatchObject({ more: true, cursor: logCursor(10_100) });
 		await state().loadOlder();
 
-		expectNoMissingLine();
-		expect(state()).toMatchObject({ more: false, olderLetGo: true });
-		expect(bridge.logs.read).not.toHaveBeenCalledWith(
-			expect.objectContaining({ before: expect.anything() })
+		expect(bridge.logs.read).toHaveBeenLastCalledWith(
+			expect.objectContaining({ before: logCursor(10_100) })
 		);
+		expect(messages()[0]).toBe("line 9100");
+		expectNoMissingLine();
 	});
 
-	it("drops a page older still in flight when a page newer lets the oldest go", async () => {
+	it("discards a page older still in flight when a page newer drops the oldest, then pages from the oldest held", async () => {
 		bridge.answer({ records: span(0, 2) });
 		await state().start();
 		numberedLog(9000);
@@ -546,10 +720,13 @@ describe("paging newer", () => {
 			() => new Promise((resolve) => (release = resolve))
 		);
 		const paging = state().loadOlder();
-		await waitFor(() => expect(state().loadingOlder).toBe(true));
-		numberedLog(9000);
+		await waitFor(() =>
+			expect(bridge.logs.read).toHaveBeenLastCalledWith(
+				expect.objectContaining({ before: logCursor(9000) })
+			)
+		);
 		for (let page = 0; page < 2; page++) await state().loadNewer();
-		expect(state().olderLetGo).toBe(true);
+		expect(state().cursor).toEqual(logCursor(10_100));
 
 		release({
 			records: span(8000, 1000),
@@ -559,8 +736,12 @@ describe("paging newer", () => {
 		});
 		await paging;
 
+		expect(state()).toMatchObject({ loadingOlder: false, cursor: logCursor(10_100) });
+		expect(messages()[0]).toBe("line 10100");
 		expectNoMissingLine();
-		expect(state()).toMatchObject({ loadingOlder: false, olderLetGo: true });
+		await state().loadOlder();
+		expect(messages()[0]).toBe("line 9100");
+		expectNoMissingLine();
 	});
 
 	it("drops the oldest at the bound, as following does", async () => {

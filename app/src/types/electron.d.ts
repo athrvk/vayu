@@ -331,8 +331,9 @@ export interface LogFilter {
 }
 
 /**
- * Where a read stopped, per file. Opaque to the renderer: hand back what
- * `logs.read` returned, never one built from a name.
+ * Where a read stopped, per file. The renderer hands back what `logs.read`
+ * returned, or one placed by the `$pos` of lines the reader delivered (the
+ * logs store's `cursorAfterTrim`), never one built from a name.
  */
 export interface LogCursor {
 	files: { name: string; id: string; offset: number }[];
