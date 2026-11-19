@@ -2797,6 +2797,17 @@ export interface SanityResult extends HttpResponse {
 	 */
 	authHeaders?: string[];
 	authQueryParam?: string;
+	/**
+	 * The method and URL the transfer was dialled with, raw
+	 * (`record_request_line`, #3650): the stored trace's `request.method` and
+	 * `request.url`. A pre-request script can retarget the send after the
+	 * renderer composed it, so these, not the composed request, are what the
+	 * Console's Send row lists. The URL still holds an auth-written query
+	 * value, which the reader masks by {@link authQueryParam}. Absent from an
+	 * engine that predates #3650, and from a stream's 202.
+	 */
+	method?: string;
+	url?: string;
 	error?: string;
 	/**
 	 * What checking this response against its declared schema found (issue

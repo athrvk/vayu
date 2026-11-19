@@ -194,6 +194,24 @@ TEST_F (ExecuteAuthProvenanceTest, ASendWithNoAuthAnswersNeitherKey) {
     EXPECT_FALSE (answer.contains ("authNotice")) << answer.dump ();
 }
 
+// #3650: the answer names the method and URL the transfer was dialled with, the
+// stored trace's `request.method` / `request.url`, raw, so the app's Console
+// lists what was sent. Mutation check: drop the `record_request_line` call from
+// the `POST /execute` handler and this and the retarget test below red.
+TEST_F (ExecuteAuthProvenanceTest, TheAnswerNamesTheUrlItDialledAuthQueryIncluded) {
+    const vayu::tests::EchoServer echo;
+    const auto answer = execute (echo,
+    { { "mode", "apikey" }, { "key", "access_token" }, { "value", TOKEN }, { "in", "query" } });
+
+    EXPECT_EQ (answer.value ("method", ""), "GET") << answer.dump ();
+    const std::string url = answer.value ("url", "");
+    EXPECT_NE (url.find (std::string ("access_token=") + TOKEN), std::string::npos) << url;
+    const json trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("request")) << trace.dump ();
+    EXPECT_EQ (url, trace.at ("request").value ("url", "<absent>"));
+    EXPECT_EQ (answer.value ("method", ""), trace.at ("request").value ("method", "<absent>"));
+}
+
 // A bearer token is a header auth wrote, but not one `apply_auth` names: the
 // reader masks `Authorization` by its own rule, so nothing is recorded.
 TEST_F (ExecuteAuthProvenanceTest, ABearerTokenRecordsNoProvenance) {
@@ -493,6 +511,26 @@ TEST_F (ExecuteAuthProvenanceTest, AStreamingSendCarriesAScriptAssignedAuth) {
     ASSERT_TRUE (vayu::tests::wait_until ([&] { return !echo.path ().empty (); }))
     << "the stream never reached the server";
     EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "ada:pw");
+}
+
+// --- the dialled request line (#3650) ---------------------------------------
+
+/// What the client composed is not what was dialled once a script retargets the
+/// send: the answer carries the dialled pair, never the payload's.
+TEST_F (ExecuteAuthProvenanceTest, TheAnswerNamesTheTargetAScriptRetargetedTheSendTo) {
+    const vayu::tests::EchoServer composed;
+    const vayu::tests::EchoServer dialled;
+    const auto answer = post_execute (
+    scripted_payload (composed, no_auth (),
+    "pm.request.url = '" + dialled.url () + "'; pm.request.method = 'PUT';"),
+    200);
+
+    EXPECT_EQ (answer.value ("url", ""), dialled.url ()) << answer.dump ();
+    EXPECT_EQ (answer.value ("method", ""), "PUT") << answer.dump ();
+    const json trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("request")) << trace.dump ();
+    EXPECT_EQ (answer.value ("url", ""), trace.at ("request").value ("url", "<absent>"));
+    EXPECT_EQ (answer.value ("method", ""), trace.at ("request").value ("method", "<absent>"));
 }
 
 } // namespace

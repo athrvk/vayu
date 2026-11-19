@@ -8908,6 +8908,8 @@ run-shaped way of stating the same field, not a second store.
     { "name": "accept", "value": "*/*" }
   ],
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
+  "method": "GET",
+  "url": "https://api.example.com/users?access_token=...",
   "authQueryParam": "access_token",
   "body": { "id": 1, "name": "John" },
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
@@ -9393,6 +9395,17 @@ on a step that sent nothing and on rows written before the field existed; see
 [db-schema](db-schema.md#results). The redaction posture is the live field's,
 for the reason [Security](architecture.md#security) records: a trace is the
 record of what was sent.
+
+**The answer names the request line the transfer was dialled with** (#3650):
+top-level `method` and `url`, the stored trace's `request.method` and
+`request.url`, written by the same function (`record_request_line`) so the two
+cannot disagree. A pre-request script can retarget the send after the client
+composed it (`pm.request.url`, `pm.request.method`), so these, not the composed
+request, say where it went; the app's Console row reads them. The `url` is raw,
+like `rawRequest` beside it: it keeps the query parameter auth wrote, which a
+reader masks by `authQueryParam` below. A streaming send answers `202` before
+any of this exists, so only its stored trace carries them, and a build that
+failed before a request was dialled answers without them.
 
 **The answer and the stored trace also name what auth wrote** (#1835, #1845),
 as two additive keys: `authQueryParam`, the raw (unencoded) name of the query

@@ -18983,8 +18983,10 @@ describe("secret withholding", () => {
 		const SESSION = "session-header-value-66";
 		const answer = {
 			...EXECUTE_ANSWER,
-			// The engine's `/execute` answer has no `url`: the request line in
-			// `rawRequest` is the only place the placed token appears.
+			// The answer's `url` is the dialled one (#3650), raw, so the placed
+			// token is in it and in the request line of `rawRequest`.
+			method: "GET",
+			url: `https://u:pw-literal-77@api.example.com/v1?page=2&access_token=${TOKEN}`,
 			authQueryParam: "access_token",
 			authHeaders: ["X-Session"],
 			requestHeaders: { "X-Session": SESSION, Accept: "*/*" },
@@ -18996,6 +18998,10 @@ describe("secret withholding", () => {
 		const withheld = await sendRequest(client);
 		expect(withheld.text).not.toContain(TOKEN);
 		expect(withheld.text).not.toContain(SESSION);
+		expect(withheld.text).not.toContain("pw-literal-77");
+		expect(withheld.body.url).toBe(
+			"https://u@api.example.com/v1?page=2&access_token=<redacted>"
+		);
 		expect(withheld.body.authQueryParam).toBe("access_token");
 		expect(withheld.body.requestHeaders).toEqual({ "X-Session": "<redacted>", Accept: "*/*" });
 		expect(withheld.body.rawRequest).toBe(

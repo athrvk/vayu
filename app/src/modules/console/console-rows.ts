@@ -44,7 +44,7 @@ import { parseConsoleLogs } from "@/modules/request-builder/components/ResponseV
 
 /** A Send that finished, with what each completion knows about what it sent. */
 export interface CompletedSend {
-	/** As sent: the composed request's on the buffered path, the stored trace's on a stream. */
+	/** As dialled: the answer's on the buffered path (the composed request's for an older engine), the stored trace's on a stream. */
 	method: string;
 	url: string;
 	response: ResponseState;

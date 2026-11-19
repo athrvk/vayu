@@ -1952,6 +1952,8 @@ replay puts the run's recorded list back on its seeded rows.
   httpVersionDowngraded: false,
   // authNotice: "auth mode 'ntlm' is not executed by Vayu; ..."  (absent here)
   // authHeaders: ["X-Api-Key"], authQueryParam: "access_token"  (absent here)
+  method: "GET",  // what was dialled, after any pre-request script (#3650)
+  url: "https://api.example.com/users",
   warnings: [],  // [{ code: "cookie_not_sent", message: "..." }, ...]
   clientCertificate: "",
   bodyCapped: false,
@@ -2082,6 +2084,16 @@ Both funnels set `ResponseState.authHeaders` / `authQueryParam` through
 `auth-provenance-funnels.test.ts`. Their one reader is the session Console's row
 builder (`modules/console/console-rows.ts`, #3634), which masks the values under
 these names before a Send's row is stored.
+
+`method` and `url` (#3650) are the request line the transfer was dialled with,
+the live spelling of `trace.request.method` / `url`, raw (the URL keeps an
+auth-written query value, masked by the reader through `authQueryParam`). A
+pre-request script can retarget a send after `/compose`, so the buffered Send's
+Console row reads them (`handleExecute`: `result.url ?? composed.url`, the
+composed request standing in for an engine that predates them), never the
+composed request alone. They live on `SanityResult` only, not on
+`ResponseState`: the one reader is that call site, and a History replay does not
+list a Send. A stream's `202` carries none; its row reads the stored trace.
 
 `warnings` lists what the engine did to a design send that the response does not
 show ([#3307](https://github.com/athrvk/vayu/issues/3307)), each as

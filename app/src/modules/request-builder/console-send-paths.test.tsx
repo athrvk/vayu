@@ -21,6 +21,11 @@
  * `finalizeStreamRun` and "a finished stream appends its rows" fails; move it
  * below the `overtaken` test and "appends a stream a newer Send overtook"
  * fails.
+ *
+ * Mutation check for the dialled URL (#3650): have `handleExecute` read
+ * `composed.url` / `composed.method` again and "lists the URL the script
+ * retargeted the send to" fails; drop the `??` fallback and "falls back to the
+ * composed request" fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -114,6 +119,8 @@ const PHASES = { dnsMs: 1, connectMs: 2, tlsMs: 3, firstByteMs: 20, downloadMs: 
 const PROVENANCE = { authHeaders: ["X-Tenant-Key"], authQueryParam: "access_token" };
 
 const executeAnswer = {
+	method: METHOD,
+	url: URL,
 	status: 200,
 	statusText: "OK",
 	headers: RESPONSE_HEADERS,
@@ -218,6 +225,36 @@ describe("the session Console's two send paths", () => {
 			requestId: "req_1",
 		});
 		expect(rows[0]).not.toHaveProperty("runId");
+	});
+
+	it("lists the method and URL the script retargeted the send to, masked", async () => {
+		executeRequest.mockResolvedValue({
+			...executeAnswer,
+			method: "PUT",
+			url: "https://u:pw@moved.test/v2?access_token=AT&page=2",
+		});
+
+		await sendBuffered();
+
+		const rows = useConsoleStore.getState().rows;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			kind: "send",
+			method: "PUT",
+			url: "https://u@moved.test/v2?access_token=<redacted>&page=2",
+		});
+	});
+
+	it("falls back to the composed request when the answer carries no method or URL", async () => {
+		executeRequest.mockResolvedValue({ ...executeAnswer, method: undefined, url: undefined });
+
+		await sendBuffered();
+
+		expect(useConsoleStore.getState().rows[0]).toMatchObject({
+			kind: "send",
+			method: "POST",
+			url: "https://u@api.test/token?access_token=<redacted>",
+		});
 	});
 
 	it("a Send that gets no answer is still listed, with its error", async () => {
