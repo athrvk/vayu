@@ -1773,6 +1773,7 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
  *
  * A status says how a run ended, this says whether it held up; a run the
  * renderer draws with no verdict has no outcome at all, never `NotJudged`.
+ * Every terminal `failed` row is `Failed`, summary or not (#3643).
  */
 enum class RunOutcome : std::uint8_t { Passed, Failed, NotJudged };
 
@@ -2319,9 +2320,10 @@ struct Run {
     // so `GET /runs?outcome=` can filter on it. Derived, like `has_warnings`,
     // from this row's own status, type and summary by `core::stored_run_outcome`
     // whenever `Database` writes either (`stamp_run_outcome`), and never set
-    // anywhere else. Null is no verdict: in flight, a design run, a clean
-    // collection run, a row with no summary, and every row stored before the
-    // column, which is not backfilled.
+    // anywhere else. A failed status is `failed` with or without a summary
+    // (#3643). Null is no verdict: in flight, a completed design run, a clean
+    // collection run, a non-failed row with no summary, and every row stored
+    // before the column, which is not backfilled.
     std::optional<std::string> outcome;
 };
 

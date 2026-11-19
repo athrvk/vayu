@@ -2578,7 +2578,7 @@ TEST_F (DatabaseTest, ASummaryLandingOnATerminalRowStampsItsOutcome) {
 
 // A run the engine died under is moved to Failed by the startup reconcile,
 // which writes the row directly. Mutation check: drop `stamp_run_outcome`
-// from `reconcile_orphaned_runs` and both outcomes stay null.
+// from `reconcile_orphaned_runs` and every outcome stays null.
 TEST_F (DatabaseTest, ReconcileStampsTheOutcomeOfTheRunsItFails) {
     {
         Database db (TEST_DB_PATH);
@@ -2589,6 +2589,7 @@ TEST_F (DatabaseTest, ReconcileStampsTheOutcomeOfTheRunsItFails) {
         seed_orphan (db, "ticked", vayu::RunStatus::Running);
         add_tick (db, "ticked", 10, 1.0);
         seed_orphan (db, "silent", vayu::RunStatus::Pending);
+        seed_orphan (db, "design", vayu::RunStatus::Running, vayu::RunType::Design);
     }
 
     Database db (TEST_DB_PATH);
@@ -2596,8 +2597,34 @@ TEST_F (DatabaseTest, ReconcileStampsTheOutcomeOfTheRunsItFails) {
     EXPECT_EQ (stored_outcome (db, "summarised"), "failed");
     EXPECT_EQ (stored_outcome (db, "ticked"), "failed")
     << "the partial summary the reconcile builds is judged like any other";
-    EXPECT_EQ (stored_outcome (db, "silent"), std::nullopt)
-    << "a run with no summary has no row summary to judge";
+    EXPECT_EQ (stored_outcome (db, "silent"), "failed")
+    << "a run with no summary is failed all the same (#3643)";
+    EXPECT_EQ (stored_outcome (db, "design"), "failed");
+}
+
+// The list draws the failed mark from the status, so a move to Failed stamps
+// `failed` with or without a summary, for every run type (#3643). Mutation
+// check: drop the status-failed branch in `judge_run_row` and all three stay
+// null.
+TEST_F (DatabaseTest, AMoveToFailedStampsFailedWithNoSummary) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    const int64_t recent = now_ms ();
+    seed_running_run (db, "design", recent, vayu::RunType::Design);
+    seed_running_run (db, "load_no_summary", recent + 1);
+    seed_running_run (db, "scenario_no_summary", recent + 2, vayu::RunType::Scenario);
+    seed_running_run (db, "stopped_no_summary", recent + 3);
+
+    for (const char* id : { "design", "load_no_summary", "scenario_no_summary" }) {
+        EXPECT_EQ (stored_outcome (db, id), std::nullopt) << id << " while running";
+        db.transition_run_status (id, { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
+        EXPECT_EQ (stored_outcome (db, id), "failed") << id;
+    }
+
+    db.transition_run_status ("stopped_no_summary",
+    { vayu::RunStatus::Running }, vayu::RunStatus::Stopped);
+    EXPECT_EQ (stored_outcome (db, "stopped_no_summary"), std::nullopt)
+    << "only a failed status needs no summary";
 }
 
 // Mutation checks: drop the `outcome` term from `run_filter_condition` and the

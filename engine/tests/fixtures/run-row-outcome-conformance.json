@@ -1,5 +1,5 @@
 {
-  "description": "Cross-language conformance fixture for the verdict a GET /runs row draws (issue #3547). Read by the engine gtest suite (engine/tests/run_result_summary_test.cpp, through `vayu::core::judge_run_row`, the rule `runs.outcome` is stamped by and `GET /runs?outcome=` filters on); the app's `rowOutcome` (app/src/components/shared/run-outcome.ts) is the rule it is written from, and its app-side reader is #3547's app slice. Each case is a row cut to what a verdict reads - `type`, `status` and `resultSummary`, absent when the row carries none - and `expected` is the stored outcome: `passed`, `failed`, `not_judged` (the app's `not-judged`), or null for a row the renderer draws with no verdict, which stores no outcome and matches no `outcome` filter.",
+  "description": "Cross-language conformance fixture for the verdict a GET /runs row draws (issues #3547, #3643). Read by the engine gtest suite (engine/tests/run_result_summary_test.cpp, through `vayu::core::judge_run_row`, the rule `runs.outcome` is stamped by and `GET /runs?outcome=` filters on); the app's `rowOutcome` (app/src/components/shared/run-outcome.ts) is the rule it is written from, and its app-side reader is #3547's app slice. Each case is a row cut to what a verdict reads - `type`, `status` and `resultSummary`, absent when the row carries none - and `expected` is the stored outcome: `passed`, `failed`, `not_judged` (the app's `not-judged`), or null for a row the renderer draws with no verdict, which stores no outcome and matches no `outcome` filter. A row whose status is `failed` is failed for every run type, with or without a `resultSummary`: the list draws the failed mark from the status, so the filter follows the mark (#3643).",
   "cases": [
     {
       "name": "load run stopped with its budgets met",
@@ -129,9 +129,25 @@
       "expected": null
     },
     {
-      "name": "load run failed with no row summary: the engine died before it wrote one",
+      "name": "load run failed with no row summary: it failed before one was written",
       "type": "load", "status": "failed",
-      "expected": null
+      "expected": "failed"
+    },
+    {
+      "name": "load run failed with a summary that records nothing",
+      "type": "load", "status": "failed",
+      "resultSummary": {},
+      "expected": "failed"
+    },
+    {
+      "name": "scenario run failed before a summary was written",
+      "type": "scenario", "status": "failed",
+      "expected": "failed"
+    },
+    {
+      "name": "crash-recovery orphan with no metric tick: failed, no summary",
+      "type": "load", "status": "failed",
+      "expected": "failed"
     },
     {
       "name": "collection run completed clean",
@@ -173,6 +189,22 @@
       "name": "collection run failed with a failed step",
       "type": "scenario", "status": "failed",
       "resultSummary": {"failed": 1},
+      "expected": "failed"
+    },
+    {
+      "name": "design run that failed: no summary to read, the status is the verdict",
+      "type": "design", "status": "failed",
+      "expected": "failed"
+    },
+    {
+      "name": "design run that failed with a result row",
+      "type": "design", "status": "failed",
+      "resultSummary": {"latencyMs": 3.2},
+      "expected": "failed"
+    },
+    {
+      "name": "design run still running",
+      "type": "design", "status": "running",
       "expected": null
     },
     {

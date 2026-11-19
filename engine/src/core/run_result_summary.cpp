@@ -180,10 +180,10 @@ std::optional<RunOutcome> judge_load_row (RunStatus status, const nlohmann::json
     if (status == RunStatus::Stopped) {
         return RunOutcome::NotJudged;
     }
-    if (status != RunStatus::Completed && status != RunStatus::Failed) {
+    if (status != RunStatus::Completed) {
         return std::nullopt;
     }
-    if (status == RunStatus::Failed || verdict_is (result_summary, "failed")) {
+    if (verdict_is (result_summary, "failed")) {
         return RunOutcome::Failed;
     }
     if (drain_was_cut (result_summary)) {
@@ -374,6 +374,13 @@ nlohmann::json terminal_result_summary (const vayu::db::Run& run) {
 
 std::optional<RunOutcome>
 judge_run_row (RunType type, RunStatus status, const nlohmann::json& result_summary) {
+    // Ahead of the summary gate and the type switch: the list draws the failed
+    // mark from the status alone, and a failed design run, a run that failed
+    // before a summary was written and a crash orphan with no tick have no
+    // summary to read (#3643).
+    if (status == RunStatus::Failed) {
+        return RunOutcome::Failed;
+    }
     if (!result_summary.is_object () || result_summary.empty ()) {
         return std::nullopt;
     }
@@ -387,10 +394,11 @@ judge_run_row (RunType type, RunStatus status, const nlohmann::json& result_summ
 }
 
 std::optional<RunOutcome> stored_run_outcome (const vayu::db::Run& run) {
-    if (!carries_result_summary (run)) {
-        return std::nullopt;
-    }
-    return judge_run_row (run.type, run.status, terminal_result_summary (run));
+    // A row with no row summary is still judged: a failed status needs none.
+    const auto result_summary = carries_result_summary (run) ?
+    terminal_result_summary (run) :
+    nlohmann::json::object ();
+    return judge_run_row (run.type, run.status, result_summary);
 }
 
 } // namespace vayu::core

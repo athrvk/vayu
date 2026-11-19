@@ -162,13 +162,18 @@ const nlohmann::json& stored);
  * @brief The verdict a `GET /runs` row draws from its own `resultSummary`: the
  * renderer's `rowOutcome`, rule for rule.
  *
- * Nothing (the row keeps its status glyph) for a row with no or an empty
- * `resultSummary`, a design run, and every row below that answers no verdict.
+ * A `failed` status is failed for every run type, ahead of everything below
+ * and with no `resultSummary` needed: the list draws the failed mark from the
+ * status alone, so a failed design run, a run that failed before a summary
+ * was written and a crash orphan with no tick are failed too (#3643).
+ *
+ * Any other row with no or an empty `resultSummary`, a design run, and every
+ * row below that answers no verdict has nothing (it keeps its status glyph).
  *
  * A load row is judged in this order: `stopped` is not judged; any other
- * status but `completed` or `failed` is nothing; a `failed` status or a
- * missed budget (`verdict: "failed"`) is failed; a Stop that cut the drain
- * (`drainCut.cancelled` a positive integer) is not judged; no budget
+ * status but `completed` is nothing; a missed budget (`verdict: "failed"`) is
+ * failed; a Stop that cut the drain (`drainCut.cancelled` a positive integer)
+ * is not judged; no budget
  * (`verdict` absent) is not judged; met budgets are passed unless the error
  * rate is above zero or a check failed (`assertions` `exact.failed`,
  * `sampled.failed`, `errored`, `teardownFailed`), which is not judged. The
@@ -178,13 +183,14 @@ const nlohmann::json& stored);
  *
  * A collection row is failed when it `completed` with a missed budget or a
  * step that failed or errored, and nothing otherwise: a collection run is
- * never judged passed, and a stopped or failed one says nothing.
+ * never judged passed, and a stopped one says nothing.
  */
 [[nodiscard]] std::optional<RunOutcome>
 judge_run_row (RunType type, RunStatus status, const nlohmann::json& result_summary);
 
 /// What `runs.outcome` stores for @p run: @ref judge_run_row over the
-/// `resultSummary` its row carries, or nothing when it carries none.
+/// `resultSummary` its row carries (an empty one when it carries none, which
+/// only a failed status judges).
 [[nodiscard]] std::optional<RunOutcome> stored_run_outcome (const vayu::db::Run& run);
 
 } // namespace vayu::core

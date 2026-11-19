@@ -5344,8 +5344,9 @@ TEST (RunFilterFromQuery, OutcomeIsReadOnlyForAKnownVerdict) {
 }
 
 // `outcome=failed` answers what the renderer draws failed: a `completed` run
-// with a missed budget among them, which its status alone never shows, and
-// not the clean run beside it nor a row with no verdict. Each row carries its
+// with a missed budget among them, which its status alone never shows, and a
+// run that failed with no summary or of no summarised type (#3643), not the
+// clean run beside it nor a row with no verdict. Each row carries its
 // `outcome`, and a row with none carries no key. Mutation checks: drop the
 // `outcome` member from `serialize_run_row` and the row assertions fail;
 // drop the `outcome` term from `run_filter_condition` and every row is listed.
@@ -5357,20 +5358,31 @@ TEST_F (RunsRouteTest, OutcomeFilterListsTheRunsTheRendererDrawsFailed) {
     R"({"rps":5,"status_codes":{"200":10},"thresholds":{"checks":[{"metric":"latencyP99Ms","passed":true}],"passed":1,"failed":0}})");
     seed ({ .id = "run_halted", .status = vayu::RunStatus::Failed, .start_time = 2 });
     db_->update_run_summary ("run_halted", R"({"rps":5,"status_codes":{"200":10}})");
-    seed ({ .id = "run_unsummarised", .status = vayu::RunStatus::Failed, .start_time = 1 });
-    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 0 });
+    // Failed the way the engine fails them: a move from Running, no summary.
+    seed ({ .id = "run_unsummarised", .status = vayu::RunStatus::Running, .start_time = 1 });
+    seed ({ .id = "run_design_failed",
+    .type       = vayu::RunType::Design,
+    .status     = vayu::RunStatus::Running,
+    .start_time = 0 });
+    for (const char* id : { "run_unsummarised", "run_design_failed" }) {
+        db_->transition_run_status (id, { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
+    }
+    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = -1 });
 
     httplib::Request req;
     req.params.emplace ("outcome", "failed");
     auto [status, body] = vayu::http::routes::get_runs_response (
     *db_, vayu::http::routes::run_filter_from_query (req), 50, 0, summaries_);
     ASSERT_EQ (status, 200);
-    ASSERT_EQ (body["data"].size (), 2u) << body.dump ();
+    ASSERT_EQ (body["data"].size (), 4u) << body.dump ();
     EXPECT_EQ (body["data"][0]["id"], "run_missed");
     EXPECT_EQ (body["data"][0]["status"], "completed");
     EXPECT_EQ (body["data"][0]["outcome"], "failed");
     EXPECT_EQ (body["data"][1]["id"], "run_halted");
-    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
+    EXPECT_EQ (body["data"][2]["id"], "run_unsummarised");
+    EXPECT_EQ (body["data"][2]["outcome"], "failed");
+    EXPECT_EQ (body["data"][3]["id"], "run_design_failed");
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 4);
 
     vayu::db::RunFilter passed;
     passed.outcome = vayu::RunOutcome::Passed;
@@ -5383,9 +5395,8 @@ TEST_F (RunsRouteTest, OutcomeFilterListsTheRunsTheRendererDrawsFailed) {
     vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
     ASSERT_EQ (all_status, 200);
     EXPECT_EQ (row_of (all, "run_clean")["outcome"], "passed");
-    for (const char* id : { "run_unsummarised", "run_design" }) {
-        EXPECT_FALSE (row_of (all, id).contains ("outcome")) << id;
-    }
+    EXPECT_FALSE (row_of (all, "run_design").contains ("outcome"))
+    << "a design run that completed has no verdict";
 }
 
 // The outcome filter composes with the others as one more `AND` term: each

@@ -104,7 +104,8 @@ int64_t end_time_after (const Run& run, RunStatus to) {
 // stored with (#3547). Called by every write of either - a terminal move, a
 // summary landing on a terminal row (a Stop's status can land first), the
 // startup reconcile - so the column cannot describe a status or summary the
-// row no longer holds. A move to an in-flight status clears it.
+// row no longer holds. A move to an in-flight status clears it; a move to
+// Failed stamps `failed` with no summary at all (#3643).
 void stamp_run_outcome (Run& run) {
     const auto outcome = vayu::core::stored_run_outcome (run);
     run.outcome =

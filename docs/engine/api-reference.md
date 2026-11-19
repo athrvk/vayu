@@ -12756,8 +12756,9 @@ seconds.
 - `outcome` - `passed` | `failed` | `not_judged`, exact match on the run's
   stored `outcome` (#3547, below), the verdict its row draws rather
   than how it ended: `outcome=failed` lists a `completed` run that missed a
-  budget, which `status` alone never shows. A row with no outcome matches no
-  value, so a run recorded before the field existed is in no `outcome` page.
+  budget, which `status` alone never shows, and every run whose status is
+  `failed`, summary or not (#3643). A row with no outcome matches no value, so
+  a run recorded before the field existed is in no `outcome` page.
   An unrecognised value is ignored, like an unrecognised `type`.
 
 Every parameter composes with every other; each one left out is a wildcard.
@@ -12871,7 +12872,12 @@ history row draws by (`rowOutcome`, `run-outcome.ts`;
 `engine/tests/fixtures/run-row-outcome-conformance.json`). The key is
 **omitted** on a row with no verdict, never `null`.
 
-- A **load run**: `stopped` is `not_judged`; a `failed` status or a missed budget
+- A **`failed` status is `failed`** for every run type, with or without a
+  `resultSummary` (#3643): the list draws the failed mark from the status, so
+  the filter follows the mark. A design run that failed, a load or collection
+  run that failed before a summary was written, and a crash-recovery orphan
+  with no metric tick are all `failed`. It outranks every rule below.
+- A **load run**: `stopped` is `not_judged`; a missed budget
   (`verdict: "failed"`) is `failed`; a drain a Stop cut (`drainCut`) is
   `not_judged`; no budget (no `verdict`) is `not_judged`; met budgets are
   `passed`, unless `errorRate` is above zero or a check failed (`assertions`:
@@ -12879,11 +12885,12 @@ history row draws by (`rowOutcome`, `run-outcome.ts`;
   `not_judged`. In that order: the first rule that applies decides.
 - A **collection run** is `failed` when it `completed` with a missed budget or a
   step that `failed` or `errored`, and has no outcome otherwise: a clean one is
-  never `passed`, and a `stopped` or `failed` one says nothing.
-- A **design run**, a `pending` or `running` row, and a terminal load or
-  collection row with no `resultSummary` (no stored summary yet, or one that
-  records none of its keys) have no outcome. Neither has a run recorded before
-  the field existed: the column is not backfilled.
+  never `passed`, and a `stopped` one says nothing.
+- A **design run** that did not fail, a `pending` or `running` row, and a
+  `completed` or `stopped` load or collection row with no `resultSummary` (no
+  stored summary yet, or one that records none of its keys) have no outcome.
+  Neither has a run recorded before the field existed, `failed` ones included:
+  the column is not backfilled.
 
 It is derived from the row's own status, type and stored summary whenever the
 engine writes either - the final status, a summary that lands after a Stop's
