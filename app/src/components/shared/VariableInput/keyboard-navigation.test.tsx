@@ -177,10 +177,97 @@ describe("the suggestion list the arrows steer", () => {
 		});
 
 		fireEvent.focus(input);
+		// The first arrow lands on the first row (nothing is lit before it).
+		fireEvent.keyDown(input, { key: "ArrowDown" });
 		fireEvent.keyDown(input, { key: "ArrowDown" });
 		fireEvent.keyDown(input, { key: "Enter" });
 
 		expect(input.value).toBe("Accept-Encoding");
+	});
+});
+
+/**
+ * The plain list opens with nothing highlighted (#3667).
+ *
+ * It opens over what the user is typing, so a lit first row made Tab turn
+ * `Accept` into `Accept-Charset` and swallowed the Tab; the `{{` list keeps its
+ * first row because there the user asked for a variable.
+ */
+describe("the plain suggestion list's highlight", () => {
+	const HEADERS = ["Accept", "Accept-Charset", "Accept-Encoding", "Host", "X-Forwarded-Host"];
+
+	/** A keydown a test can read `defaultPrevented` back from. */
+	function press(input: HTMLInputElement, key: string): boolean {
+		// `fireEvent` returns false when a handler called `preventDefault`.
+		return !fireEvent.keyDown(input, { key });
+	}
+
+	it("keeps what was typed on Tab, and leaves the Tab alone", () => {
+		const { container, input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Accept");
+		const list = ownList(container);
+		expect(list.querySelectorAll("[cmdk-item]").length).toBeGreaterThan(0);
+		expect(highlighted(list)).toBeNull();
+		expect(input).not.toHaveAttribute("aria-activedescendant");
+
+		const prevented = press(input, "Tab");
+
+		expect(input.value).toBe("Accept");
+		expect(prevented).toBe(false);
+	});
+
+	it("leaves Enter alone too while nothing is highlighted", () => {
+		const { input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Host");
+
+		expect(press(input, "Enter")).toBe(false);
+		expect(input.value).toBe("Host");
+	});
+
+	it("commits a row the arrow keys highlighted on Tab", () => {
+		const { container, input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Acc");
+		fireEvent.keyDown(input, { key: "ArrowDown" });
+		const list = ownList(container);
+		expect(highlighted(list)).toHaveTextContent("Accept");
+		expect(input.getAttribute("aria-activedescendant")).toBe(highlighted(list)?.id);
+
+		fireEvent.keyDown(input, { key: "ArrowDown" });
+		expect(press(input, "Tab")).toBe(true);
+
+		expect(input.value).toBe("Accept-Charset");
+	});
+
+	it("lands on the first row from ArrowUp too, rather than wrapping", () => {
+		const { container, input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Acc");
+		fireEvent.keyDown(input, { key: "ArrowUp" });
+
+		expect(highlighted(ownList(container))).toHaveTextContent("Accept");
+	});
+
+	it("commits a row the pointer highlighted", () => {
+		const { container, input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Acc");
+		const rows = ownList(container).querySelectorAll<HTMLElement>("[cmdk-item]");
+		fireEvent.pointerMove(rows[1]);
+
+		expect(press(input, "Tab")).toBe(true);
+		expect(input.value).toBe("Accept-Charset");
+	});
+
+	it("still commits the first row of the `{{` list on Enter", () => {
+		const { input } = renderHarness({ suggestions: HEADERS });
+
+		type(input, "{{");
+
+		expect(press(input, "Enter")).toBe(true);
+		expect(input.value).toBe("{{alpha}}");
 	});
 });
 
@@ -265,6 +352,7 @@ describe("the list scrolls to the highlight the field moves", () => {
 
 		fireEvent.focus(input);
 		const list = ownList(container);
+		fireEvent.keyDown(input, { key: "ArrowDown" });
 		scrolled.length = 0;
 		fireEvent.keyDown(input, { key: "ArrowDown" });
 

@@ -156,6 +156,7 @@ export {
 	CommandSeparator,
 	CommandListboxProbe,
 	CommandScrollIntoView,
+	NO_HIGHLIGHT,
 } from "./command";
 export type { CommandListboxState } from "./command";
 

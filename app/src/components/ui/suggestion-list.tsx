@@ -41,6 +41,7 @@ import {
 	CommandItem,
 	CommandListboxProbe,
 	CommandScrollIntoView,
+	NO_HIGHLIGHT,
 	type CommandListboxState,
 } from "./command";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,9 @@ export interface SuggestionListProps {
 	/**
 	 * The highlighted item. Supplied by `VariableInput`, which owns the arrow
 	 * keys because they arrive at the text field this list hangs off rather than
-	 * at the list (issue #1215). Omitted, `cmdk` highlights on its own.
+	 * at the list (issue #1215). Omitted, `cmdk` highlights on its own - the first
+	 * row. An empty string is "no row highlighted", which `cmdk` would otherwise
+	 * read as unset and answer with that same first row (#3667).
 	 */
 	value?: string;
 	/** Fires when `cmdk` moves the highlight itself - a pointer over a row. */
@@ -96,7 +99,11 @@ export function SuggestionList({
 				className
 			)}
 		>
-			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
+			<Command
+				shouldFilter={false}
+				value={value === "" ? NO_HIGHLIGHT : value}
+				onValueChange={onValueChange}
+			>
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
 					<CommandScrollIntoView />
