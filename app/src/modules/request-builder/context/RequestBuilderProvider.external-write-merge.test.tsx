@@ -25,6 +25,9 @@
  *     a dirty edit on another;
  *   - a request moved to a different collection (the `move_item` case)
  *     updates just `collectionId` in place, keeping the rest of a dirty draft;
+ *   - a render that resets the draft (a different request id or
+ *     `initialResponse`) skips the merge, so the previous request's touched
+ *     fields are not reported as conflicts over the fresh baseline (#3662);
  *   - a request deleted elsewhere disables the save manager, so its autosave
  *     timer cannot fire a PUT against an id that now 404s;
  *   - a foreign write landing while a save is in flight bumps the generation,
@@ -42,7 +45,7 @@ import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
-import type { RequestState } from "../types";
+import type { RequestState, ResponseState } from "../types";
 
 let managerOptions: {
 	onSave: () => Promise<void>;
@@ -118,10 +121,12 @@ function FieldProbe() {
 function Harness({
 	initialRequest,
 	collectionId,
+	initialResponse,
 	onSave,
 }: {
 	initialRequest?: Partial<RequestState>;
 	collectionId?: string | null;
+	initialResponse?: ResponseState | null;
 	onSave?: (request: RequestState, changed: ReadonlySet<string>) => Promise<void>;
 }) {
 	return (
@@ -129,6 +134,7 @@ function Harness({
 			<RequestBuilderProvider
 				initialRequest={initialRequest}
 				collectionId={collectionId ?? "col_1"}
+				initialResponse={initialResponse}
 				onSave={onSave}
 			>
 				<FieldProbe />
@@ -335,6 +341,24 @@ describe("the request builder's draft adopts an external write per field", () =>
 
 		expect(shown("url")).toBe("https://typed.test/mine");
 		expect(shown("conflicts")).toBe("");
+	});
+
+	it("skips the merge in a render that changes only initialResponse (#3662)", () => {
+		const first = { id: "req_1", url: "https://api.test/one" };
+		const { rerender } = render(<Harness initialRequest={first} initialResponse={null} />);
+		click("type url");
+
+		act(() =>
+			rerender(
+				<Harness
+					initialRequest={{ id: "req_1", url: "https://api.test/refetched" }}
+					initialResponse={{} as ResponseState}
+				/>
+			)
+		);
+
+		expect(shown("conflicts")).toBe("");
+		expect(shown("url")).toBe("https://api.test/refetched");
 	});
 
 	it("disables the save manager once the request is deleted elsewhere", () => {
