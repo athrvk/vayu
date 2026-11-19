@@ -82,9 +82,7 @@ interface DesignRunViewProps {
 /**
  * The one glued script of a run recorded before script parts existed, replayed
  * as a single request-origin element per hook: `seedFromRun` cannot split it,
- * so the string is the only record of what ran. Dropping it (which is what
- * happened while nothing read `legacyPreScript`) meant a resend of any
- * pre-existing run silently executed no script at all. A blank one is left out
+ * so the string is the only record of what ran. A blank one is left out
  * (#3066): the engine refuses a script element with no text, which would 400
  * the resend.
  */
@@ -187,11 +185,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	);
 
 	/*
-	 * Replay: the elements the run recorded for the collection chain, exactly as
-	 * stored (what the collection ran then, not what it reads now), then the
-	 * editor's own current elements. Those were seeded from the run's own
-	 * recorded elements (`seedFromRun`) but can be edited like any other
-	 * request's Elements tab, and any other kind added there runs too.
+	 * Replay: the inherited elements exactly as recorded (what the collection
+	 * ran then, not what it reads now), then the copy's own, which are live and
+	 * editable.
 	 */
 	const handleExecute = useCallback(
 		async (
