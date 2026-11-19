@@ -41,6 +41,13 @@ std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
 /// arithmetic every reader of `expires_in` does cannot overflow.
 constexpr int64_t MAX_FALLBACK_EXPIRES_IN_SECONDS = int64_t{ 365 } * 24 * 3600;
 
+/// The longest a token response's own `expires_in` is believed (seconds, one
+/// year, #3645): a provider stating more is clamped to it rather than refused,
+/// because the token is still good and a year is already past any refresh
+/// schedule. Held at the one place the response is read, so every reader's
+/// `expires_in * 1000` stays far below int64's range whatever a provider sends.
+constexpr int64_t MAX_EXPIRES_IN_SECONDS = int64_t{ 365 } * 24 * 3600;
+
 /// The config members naming a URL @ref acquire_token posts to: the grant's
 /// endpoint, and the refresh endpoint, which falls back to it when empty. A
 /// caller's target policy judges both (`refuse_token_endpoints`, #2521).

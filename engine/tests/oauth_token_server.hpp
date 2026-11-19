@@ -80,7 +80,8 @@ inline constexpr std::string_view GATEWAY_ERROR_PAGE =
 /// 503 with `GATEWAY_ERROR_PAGE`, its second 429, and then `AT-AFTER-OUTAGE`;
 /// `/refresh-scope-refused` and `/refresh-client-refused` refuse a refresh with
 /// 400 `invalid_scope` and 401 `invalid_client` (#3360). Each of the three
-/// answers a fresh grant `FRESH-GRANT`.
+/// answers a fresh grant `FRESH-GRANT`. `EXPIRES_IN_NUMBER_PREFIX` and
+/// `EXPIRES_IN_STRING_PREFIX` answer whatever `expires_in` the path spells.
 class MockTokenServer {
     public:
     MockTokenServer () {
@@ -114,6 +115,15 @@ class MockTokenServer {
             } else if (req.path == "/token-past-depth-bound") {
                 res.set_content (token_body_nested_to (
                                  vayu::core::constants::elements::MAX_BODY_DEPTH + 1),
+                "application/json");
+            } else if (req.path.starts_with (EXPIRES_IN_NUMBER_PREFIX)) {
+                // The rest of the path is spliced in as the JSON number.
+                res.set_content (R"({"access_token":"AT-EXPIRES","expires_in":)" +
+                req.path.substr (EXPIRES_IN_NUMBER_PREFIX.size ()) + "}",
+                "application/json");
+            } else if (req.path.starts_with (EXPIRES_IN_STRING_PREFIX)) {
+                res.set_content (R"({"access_token":"AT-EXPIRES","expires_in":")" +
+                req.path.substr (EXPIRES_IN_STRING_PREFIX.size ()) + R"("})",
                 "application/json");
             } else if (req.path == "/token-legacy") {
                 // Form-encoded body with a string expires_in (legacy GitHub style)
@@ -209,6 +219,13 @@ class MockTokenServer {
     static constexpr int SLOW_REFRESH_REJECT_MS = 2500;
     /// The refresh token `/refresh-gated` honours first.
     static constexpr std::string_view GATED_REFRESH_TOKEN = "RT0";
+    /// `<prefix><text>` answers `expires_in` as the JSON number `<text>` (so
+    /// `1e30` is a float) and `<string prefix><text>` as the JSON string
+    /// `"<text>"` (#3645); the path holds characters a URL path keeps as is.
+    static constexpr std::string_view EXPIRES_IN_NUMBER_PREFIX =
+    "/token-expires-in/";
+    static constexpr std::string_view EXPIRES_IN_STRING_PREFIX =
+    "/token-expires-in-string/";
     std::string last_body () const {
         const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_body_;
