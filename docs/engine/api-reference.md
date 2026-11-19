@@ -12866,8 +12866,8 @@ recorded before the field existed reads `{"kind": "other", "client": null}`.
 Metadata, not identity: nothing authorises on it.
 
 **`outcome`** (#3547) is the verdict the row's own
-`resultSummary` (below) gives the run, stored when the run ends so the list can
-filter on it: `"passed"`, `"failed"` or `"not_judged"`, the rule the app's
+status and `resultSummary` (below) give the run (a `failed` status needs no
+summary), stored when the run ends so the list can filter on it: `"passed"`, `"failed"` or `"not_judged"`, the rule the app's
 history row draws by (`rowOutcome`, `run-outcome.ts`;
 `engine/tests/fixtures/run-row-outcome-conformance.json`). The key is
 **omitted** on a row with no verdict, never `null`.
