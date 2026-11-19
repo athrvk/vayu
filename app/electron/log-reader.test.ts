@@ -22,7 +22,9 @@
  * the offset where it was in `mergeOldestFirst` and the forward paging cases
  * repeat records (or never end); cut `newer` at the file's end and the jump
  * case loses t+1; drop the `unopened` entries from `readForward`'s cursor and
- * the rotation-between-listing-and-open case reads the renamed file twice.
+ * the rotation-between-listing-and-open case reads the renamed file twice;
+ * return `null` from `openFollowingRename` where the open misses and the
+ * backward rotation-between-listing-and-open cases lose the renamed file.
  *
  * Every read and tail case checks each line's `$pos` against the file
  * (`expectAtItsPosition`), and the position cases pin the numbers (#3652):
@@ -564,6 +566,92 @@ describe("readLogs - backward paging", () => {
 		expect(page2.records).toEqual(first.slice(2, 6));
 		expect(page3.records).toEqual(first.slice(0, 2));
 		expect(page3.more).toBe(false);
+	});
+
+	describe("a file rotated between the listing and the open", () => {
+		const name = "engine_20261118_100000.log";
+		const first = Array.from({ length: 10 }, (_, second) =>
+			engineRecord(second, "http", `r${second}`)
+		);
+		const fresh = [engineRecord(10, "http", "after rotation")];
+
+		/**
+		 * `fs.promises` that rotates the file on the next open once armed: the
+		 * listing saw it under its name, and by the open it is `.1`.
+		 */
+		function rotatingOnOpen() {
+			let armed = false;
+			const rotatingFs: LogReaderDeps["fs"] = {
+				readdir: (target) => fs.promises.readdir(target),
+				lstat: (target, options) => fs.promises.lstat(target, options),
+				open: async (target, flags) => {
+					if (armed) {
+						armed = false;
+						renameSync(path.join(dir, name), path.join(dir, `${name}.1`));
+						writeLog(name, fresh);
+					}
+					return fs.promises.open(target, flags);
+				},
+			};
+			return { deps: { ...deps, fs: rotatingFs }, arm: () => (armed = true) };
+		}
+
+		it("is read under its new name by the newest read, and the fresh file is left to the tail", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+
+			rotating.arm();
+			const records = await readAll(rotating.deps, { filter: {}, limit: 4 });
+
+			expect(records).toEqual(first);
+		});
+
+		it("is read under its new name by a page older", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+			const page1 = await readLogs(rotating.deps, { filter: {}, limit: 4 });
+
+			rotating.arm();
+			const page2 = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: page1.cursor,
+			});
+			const page3 = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: page2.cursor,
+			});
+
+			expect(page1.records).toEqual(first.slice(6));
+			expect(page2.records).toEqual(first.slice(2, 6));
+			expect(page3.records).toEqual(first.slice(0, 2));
+			expect(page3.more).toBe(false);
+		});
+
+		it("is cut at the time by a jump, in both its cursors", async () => {
+			writeLog(name, first);
+			const rotating = rotatingOnOpen();
+
+			rotating.arm();
+			const landed = await readLogs(rotating.deps, { filter: {}, limit: 4, around: tsAt(5) });
+			const older = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 4,
+				before: landed.cursor,
+			});
+			const newer = await readLogs(rotating.deps, {
+				filter: {},
+				limit: 10,
+				after: landed.newer,
+			});
+
+			expect(landed.records).toEqual(first.slice(2, 6));
+			expect(older.records).toEqual(first.slice(0, 2));
+			expect(older.more).toBe(false);
+			expect(newer.records).toEqual([...first.slice(6), ...fresh]);
+			expect(newer.more).toBe(false);
+		});
 	});
 
 	it("caps a page at the read limit", async () => {

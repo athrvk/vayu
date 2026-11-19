@@ -959,6 +959,29 @@ export async function readLogs(
 	}
 }
 
+/**
+ * Open a listed file for a backward read, following it to its new name when a
+ * rotation renamed it between the listing and the open (#3652). The forward
+ * read can leave such a file in its cursor for the next page, since it knows
+ * the offset that page starts from; a backward read without a cursor measures
+ * where the file's lines end on the file itself, and an `around` read where
+ * the time cuts it, so it reads the renamed file now. `null` when the file is
+ * gone, or has no identity to follow it by.
+ */
+async function openFollowingRename(
+	context: ReadContext,
+	file: ScannedFile
+): Promise<{ file: ScannedFile; handle: LogFileHandle } | null> {
+	const handle = await openForRead(context, file);
+	if (handle) return { file, handle };
+	if (file.id === "") return null;
+	const relisted = await scanLogFiles(context.deps);
+	const renamed = relisted.find((other) => other.id === file.id && other.name !== file.name);
+	if (!renamed) return null;
+	const reopened = await openForRead(context, renamed);
+	return reopened ? { file: renamed, handle: reopened } : null;
+}
+
 async function readBackward(
 	context: ReadContext,
 	options: ReadLogsOptions
@@ -969,15 +992,24 @@ async function readBackward(
 	/** Where each file was cut: for `around`, where the records later than the time start. */
 	const cut: LogCursorFile[] = [];
 	for (const { file, end: cursorEnd } of filesToRead(files, options.before)) {
-		const handle = await openForRead(context, file);
-		if (!handle) continue;
+		const opened = await openFollowingRename(context, file);
+		if (!opened) continue;
+		// Measured as the listing saw the file, under the name it was listed by:
+		// a line appended after the listing, before a rotation, is the tail's.
 		const end =
 			cursorEnd ??
-			(await streamEnd(handle, file, options, live.has(file.name), chunkBytes, counter));
-		cut.push(cursorEntry(file, end));
-		const lines = new BackwardLines(handle, end, chunkBytes, counter);
+			(await streamEnd(
+				opened.handle,
+				file,
+				options,
+				live.has(file.name),
+				chunkBytes,
+				counter
+			));
+		cut.push(cursorEntry(opened.file, end));
+		const lines = new BackwardLines(opened.handle, end, chunkBytes, counter);
 		const stream: BackwardStream = {
-			file,
+			file: opened.file,
 			lines,
 			offset: end,
 			head: null,
