@@ -251,6 +251,20 @@ nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
 
 /**
+ * Record the method and URL @p request was dialled with onto @p node, as
+ * `method` and `url`, raw (the URL keeps its auth-written query parameter, as
+ * the trace's `request.url` and `rawRequest` do; masking is the reader's, which
+ * has `authQueryParam` to mask by).
+ *
+ * A pre-request script can retarget the send after the client composed it
+ * (`pm.request.url`, `pm.request.method`), so this is the only record of where
+ * it went. One writer, two homes, as for `record_auth_provenance`:
+ * `build_result_trace` calls it on the trace's `request` node and `POST
+ * /execute` on the top level of its buffered answer (#3650).
+ */
+void record_request_line (nlohmann::json& node, const vayu::Request& request);
+
+/**
  * Record what `apply_auth` did to @p request onto @p node: the two keys a
  * reader that masks credentials cannot recover from the URL or the header set
  * (#1835), `authQueryParam` (the raw name of the query parameter) and

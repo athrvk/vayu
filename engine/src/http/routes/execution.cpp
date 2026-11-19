@@ -2609,6 +2609,9 @@ std::chrono::steady_clock::time_point handler_start) {
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);
     }
+    // Where the send went and with what, since a pre-request script may have
+    // retargeted it after the caller composed it (#3650).
+    record_request_line (body, exchange.request);
     // What auth wrote, so a reader that masks the answer (the MCP server) can
     // tell the credential in `rawRequest` from any other query parameter (#1845).
     record_auth_provenance (body, exchange.request);

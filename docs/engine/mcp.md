@@ -3046,7 +3046,9 @@ as a value too. A credential no stored row holds, such as an OAuth 2.0 token the
 engine fetched, is masked by *where* it went instead: the stored trace names the
 query parameter (`request.authQueryParam`) and the headers
 (`request.authHeaders`) auth wrote, `run_request`'s live answer names them as
-`authQueryParam` and `authHeaders` at its top level (#1845), and the masking
+`authQueryParam` and `authHeaders` at its top level (#1845) beside the `url`
+and `method` it dialled (#3650, the `url` masked as the trace's `request.url`
+is), and the masking
 reads them per record. `run_request` passes the engine's top-level `authNotice`
 (#2474, #3202) and `warnings` (#3307, `[{code, message}]`, `[]` when empty; a cookie
 named by name only, never a value) through as they came, unmasked, and

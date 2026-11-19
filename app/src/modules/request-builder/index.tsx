@@ -624,11 +624,12 @@ export default function RequestBuilder() {
 				// Shared with the History run view's send path - see execute-mapping.ts
 				const response = responseFromExecuteResult(result);
 				// A session send, so the Console lists it (#3634); a History
-				// replay maps its answer without this. The composed method and
-				// URL are what was sent: the answer does not restate them.
+				// replay maps its answer without this. The answer's method and URL
+				// are what was dialled, after any pre-request script retargeted the
+				// send; the composed ones stand in for an engine that predates them.
 				appendSendToConsole({
-					method: composed.method,
-					url: composed.url,
+					method: result.method ?? composed.method,
+					url: result.url ?? composed.url,
 					response,
 					requestId: fetchedRequest.id,
 				});

@@ -141,6 +141,11 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request) {
     return std::optional<nlohmann::json> (std::in_place, std::move (node));
 }
 
+void record_request_line (nlohmann::json& node, const vayu::Request& request) {
+    node["method"] = to_string (request.method);
+    node["url"]    = request.url;
+}
+
 void record_auth_provenance (nlohmann::json& node, const vayu::Request& request) {
     if (!request.auth_query_param.empty ()) {
         node["authQueryParam"] = request.auth_query_param;
@@ -220,8 +225,8 @@ nlohmann::json response_trace_node (const vayu::Response& response) {
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
-    trace["request"] = { { "method", to_string (request.method) },
-        { "url", request.url }, { "headers", request.headers.folded () } };
+    record_request_line (trace["request"], request);
+    trace["request"]["headers"] = request.headers.folded ();
     if (!request.body.content.empty ()) {
         trace["request"]["body"] = request.body.content;
     }
