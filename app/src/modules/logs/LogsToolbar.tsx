@@ -30,7 +30,7 @@ import { downloadTextFile, saveFailedMessage } from "@/lib/download-text-file";
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useToastStore } from "@/stores";
-import { entryLine } from "./log-entry";
+import { exportLine } from "./log-entry";
 import { useLogsStore, type LogLevelName } from "./logs-store";
 
 /** The Select's stand-in for "no filter": an item cannot carry an empty value. */
@@ -180,7 +180,7 @@ function ExportButton() {
 
 	const exportLines = async () => {
 		const { records } = useLogsStore.getState();
-		const text = `${records.map(entryLine).join("\n")}\n`;
+		const text = `${records.map(exportLine).join("\n")}\n`;
 		const saved = await downloadTextFile(text, EXPORT_FILE_NAME, "application/x-ndjson");
 		if (saved.outcome === "failed") {
 			showToast(saveFailedMessage(EXPORT_FILE_NAME, saved), "error");

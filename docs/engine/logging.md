@@ -216,14 +216,15 @@ process logs itself is redacted by field name alone, as above.
 
 The Logs tab reads `<data-dir>/logs/` through the main process, never through a
 path the renderer names (#3635). `log-reader.ts` lists the files, reads a page
-backwards merged across them by `ts`, and follows them with a 500 ms poll;
+merged across them by `ts` (backwards, or forwards from a jump), and follows
+them with a 500 ms poll;
 `log-reader-ipc.ts` puts it on five channels, `electronAPI.logs` in the
 renderer:
 
 | Channel | Direction | Carries |
 |---------|-----------|---------|
 | `logs:list` | invoke | the log files: name, source, size, modified time |
-| `logs:read` | invoke | `{ before?, around?, filter, limit }` in; `{ records, cursor, more, scannedTo }` out |
+| `logs:read` | invoke | `{ before?, around?, after?, filter, limit }` in, at most one of the three anchors; `{ records, cursor, more, scannedTo, newer? }` out, where `cursor`, `more` and `scannedTo` point the way the read went (newer for `after`) and an `around` read's `newer` is where `after` starts |
 | `logs:tail-start` | invoke | a filter; starts this window's tail, replacing one running |
 | `logs:tail-stop` | invoke | nothing; ends this window's tail |
 | `logs:records` | main to renderer, one-way | `{ records, dropped }`, one batch per poll that found matches |
@@ -248,17 +249,33 @@ is not a record (a crash's stack, a half-written line) is shown raw with an
 search box (free text, or `field:value`, where a quoted value is exact and a
 bare one a substring: `cat:oauth`, `status:"500"`), **Follow** (on by default,
 off when you scroll up, on again by its switch or by scrolling to the end), a
-**Jump to time** control (the platform's own date-time input), **Export** (the
-lines held in the table, as JSON lines, through the save dialog, with the count
-it wrote) and the logs folder button; a line's **Copy line** is in its opened
-row. The filters are evaluated in the main process: a change restarts the tail
-and reads again, replacing what the table held.
+**Jump to time** control (the platform's own date-time input, landing on the
+lines either side of it), **Export** (the lines held in the table, as JSON
+lines, through the save dialog, with the count it wrote) and the logs folder
+button; a line's **Copy line** is in its opened row. Copy and Export write the
+line as the file holds it, not the record re-serialised (`1.0` stays `1.0`):
+the reader attaches each record's own line under the `$raw` key, which the
+schema's `propertyNames` refuses, so no field shares it, and the table, the
+opened row's JSON and free-text search all leave it out. For a record over
+256 KiB the line is cut at that bound, as the record's largest fields are:
+Copy line copies the cut line, and Export writes the cut record re-serialised
+instead, so every line of the export is still one JSON value. The filters are
+evaluated in the main process: a change restarts the tail and reads again,
+replacing what the table held.
 
 The tab holds at most 10,000 lines or 16 MiB, whichever comes first. Following
 drops the oldest. **Search older** pages back through the files, says how far
 it has looked ("Searched back to ..."), turns Follow off and drops the newest;
 having dropped any, the tab stops appending the tail (it would sit after a
-gap), and Follow reads the newest lines again. A burst past the tail's 500 lines
+gap), and Follow reads the newest lines again. A jump is detached the same
+way: it shows the lines at and before the time and, read at once after them,
+the next hundred; **Search newer** below the last line pages on ("Searched
+forward to ...") and drops the oldest, and the page that reaches the end of
+the logs appends the tail again, which it restarted before reading, so the
+table follows once you scroll to the end. Once the bound drops the oldest
+lines, by following or by Search newer, Search older ends: the table says the
+older lines were let go and points at Jump to time, since a page older from
+where it last read would leave a gap. A burst past the tail's 500 lines
 per poll shows as "N lines skipped in a burst": the lines are in the files. The
 footer names the engine's `logLevel` and says requests answered 2xx and
 database writes are written at `debug`, which a default install does not keep,

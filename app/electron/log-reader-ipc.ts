@@ -161,13 +161,15 @@ function readCursor(value: unknown): LogCursor {
 /**
  * `logs:read`'s payload as the reader's options. The reader checks the values
  * (a name against the log file pattern, an offset a whole number, `around` a
- * timestamp); this checks that each is the type it will be asked to compare.
+ * timestamp, one of `before`, `around` and `after`); this checks that each is
+ * the type it will be asked to compare.
  */
 export function readLogsRequest(value: unknown): ReadLogsOptions {
 	const input = asRecord(value, "the payload");
 	if (typeof input.limit !== "number") refuse("needs a limit that is a number");
 	const options: ReadLogsOptions = { filter: readLogFilter(input.filter), limit: input.limit };
 	if (input.before !== undefined) options.before = readCursor(input.before);
+	if (input.after !== undefined) options.after = readCursor(input.after);
 	if (input.around !== undefined) {
 		if (typeof input.around !== "string") refuse("needs `around` to be a timestamp of text");
 		options.around = input.around;

@@ -72,11 +72,13 @@ type LogEntryShape =
 			msg: string;
 			pid: number;
 			tid?: string;
+			$raw?: string;
 	  } & Record<string, unknown>)
 	| { unparsed: true; raw: string };
 interface LogReadRequestShape {
 	before?: LogCursorShape;
 	around?: string;
+	after?: LogCursorShape;
 	filter: LogFilterShape;
 	limit: number;
 }
@@ -85,6 +87,7 @@ interface LogReadResultShape {
 	cursor: LogCursorShape;
 	more: boolean;
 	scannedTo: string | null;
+	newer?: LogCursorShape;
 }
 interface LogBatchShape {
 	records: LogEntryShape[];

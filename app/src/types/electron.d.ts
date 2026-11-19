@@ -284,6 +284,8 @@ export interface LogFileRecord {
 	msg: string;
 	pid: number;
 	tid?: string;
+	/** The line as the file holds it, cut at 256 KiB. Mirrors `RAW_LINE_KEY` in `electron/log-reader.ts`. */
+	$raw?: string;
 	[field: string]: unknown;
 }
 
@@ -312,31 +314,38 @@ export interface LogFilter {
 }
 
 /**
- * Where a backward read stopped, per file. Opaque to the renderer: hand back
- * what `logs.read` returned, never one built from a name.
+ * Where a read stopped, per file. Opaque to the renderer: hand back what
+ * `logs.read` returned, never one built from a name.
  */
 export interface LogCursor {
 	files: { name: string; id: string; offset: number }[];
 }
 
+/** At most one of `before`, `around` and `after`; none reads the newest records. */
 export interface LogReadRequest {
-	/** Continue from a previous read's `cursor`. Not with `around`. */
+	/** Continue older from a previous backward or `around` read's `cursor`. */
 	before?: LogCursor;
-	/** Jump to time: the newest records at or before this `ts`. Not with `before`. */
+	/** Jump to time: the newest records at or before this `ts`. */
 	around?: string;
+	/** Continue newer from an `after` read's `cursor` or an `around` read's `newer`. */
+	after?: LogCursor;
 	filter: LogFilter;
 	/** Clamped to 1000 by main. */
 	limit: number;
 }
 
+/** `cursor`, `more` and `scannedTo` point the way the read went: older, or newer for `after`. */
 export interface LogReadResult {
 	/** Oldest first. */
 	records: LogEntry[];
+	/** Where the next page in the same direction starts. */
 	cursor: LogCursor;
-	/** Older data remains that this call did not search or did not return. */
+	/** Data remains in that direction that this call did not search or did not return. */
 	more: boolean;
-	/** The `ts` of the oldest record this call examined, matching or not. */
+	/** The `ts` of the furthest record this call examined, matching or not. */
 	scannedTo: string | null;
+	/** An `around` read's: where the records later than the time start, for an `after` read. */
+	newer?: LogCursor;
 }
 
 /** What `logs.onRecords` delivers: one tail poll's matching records, oldest first. */

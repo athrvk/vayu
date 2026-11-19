@@ -14,6 +14,7 @@
 import { vi } from "vitest";
 import type {
 	LogBatch,
+	LogCursor,
 	LogEntry,
 	LogFileRecord,
 	LogFilter,
@@ -22,6 +23,21 @@ import type {
 } from "@/types/electron";
 
 const NO_MORE: LogReadResult = { records: [], cursor: { files: [] }, more: false, scannedTo: null };
+
+/** Which way a read goes: the newest lines, or from one of the request's anchors. */
+export type LogReadKind = "newest" | "before" | "around" | "after";
+
+function readKind(request: LogReadRequest): LogReadKind {
+	if (request.before) return "before";
+	if (request.around !== undefined) return "around";
+	if (request.after) return "after";
+	return "newest";
+}
+
+/** A cursor a case can tell from another by `===` and by its offset. */
+export function logCursor(offset: number): LogCursor {
+	return { files: [{ name: "engine_20261118_100000.log", id: "1:2", offset }] };
+}
 
 const FIRST_TS = Date.UTC(2026, 10, 18, 10, 0, 0);
 
@@ -63,6 +79,13 @@ export function fakeLogsBridge() {
 		/** The answer the next reads give, until it is set again. */
 		answer: (result: Partial<LogReadResult>) => {
 			logs.read.mockResolvedValue({ ...NO_MORE, ...result });
+		},
+		/** The answer the next reads give by the way each one goes, until it is set again. */
+		answerReads: (answers: Partial<Record<LogReadKind, Partial<LogReadResult>>>) => {
+			logs.read.mockImplementation(async (request: LogReadRequest) => ({
+				...NO_MORE,
+				...answers[readKind(request)],
+			}));
 		},
 	};
 }

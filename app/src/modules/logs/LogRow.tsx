@@ -27,7 +27,7 @@ import { Button } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
 import { cn } from "@/lib/utils";
 import type { LogEntry, LogFileRecord } from "@/types/electron";
-import { entryLine, fieldsText, isUnparsedEntry } from "./log-entry";
+import { entryLine, fieldsText, isUnparsedEntry, recordJson } from "./log-entry";
 import { LOG_COLUMNS } from "./log-columns";
 
 /** The marker a line that is not a record carries where a record's component would be. */
@@ -90,7 +90,7 @@ function RowDetail({ entry }: { entry: LogEntry }) {
 				Copy line
 			</Button>
 			<pre className="surface-sunken max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-rule p-2 font-mono text-xs">
-				{unparsed ? entry.raw : JSON.stringify(entry, null, 2)}
+				{unparsed ? entry.raw : recordJson(entry)}
 			</pre>
 		</div>
 	);
