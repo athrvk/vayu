@@ -120,6 +120,7 @@ import { scenarioRunService } from "./scenario-run-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
+import { useConsoleStore } from "@/stores/console-store";
 import { queryKeys } from "@/queries/keys";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
 import { RUN_PROGRESS_KEYS } from "./run-progress";
@@ -397,6 +398,32 @@ describe("ScenarioRunService", () => {
 			// run tab keeps its Running spinner beside "Live updates stopped".
 			expect(mockStreamLost).toHaveBeenCalledWith("run_7", "engine gone");
 			expect(mockAddSteps.mock.calls.every(([runId]) => runId === "run_7")).toBe(true);
+		});
+
+		/*
+		 * The session Console lists a run's steps as they commit (#3634).
+		 * Mutation check: drop the `useConsoleStore` append from the batcher's
+		 * commit and this case reds.
+		 */
+		it("appends one Console row per step frame, and a replayed frame none", () => {
+			useConsoleStore.getState().clear();
+			scenarioRunService.startMonitoring("run_c");
+
+			deliverStep(0);
+			deliverStep(1);
+			deliverStep(1);
+			vi.advanceTimersByTime(FLUSH_MS);
+
+			const rows = useConsoleStore.getState().rows;
+			expect(rows.map((row) => row.kind)).toEqual(["step", "step"]);
+			expect(rows[1]).toMatchObject({
+				runId: "run_c",
+				iteration: 0,
+				stepIndex: 1,
+				name: "Step 2",
+				status: 200,
+				timeMs: 10,
+			});
 		});
 
 		it("drops what a replaced run left buffered rather than committing it into the next", () => {

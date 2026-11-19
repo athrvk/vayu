@@ -55,6 +55,23 @@ export {
 	collectionAuthDraftKey,
 } from "./entity-draft-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
+export {
+	useConsoleStore,
+	selectConsoleRows,
+	selectConsoleEvictedCount,
+	CONSOLE_MAX_ROWS,
+	CONSOLE_MAX_BYTES,
+	CONSOLE_BODY_MAX_CHARS,
+	type ConsoleBody,
+	type ConsoleExchange,
+	type ConsoleRow,
+	type ConsoleRowInput,
+	type ConsoleRowKind,
+	type ConsoleSendRow,
+	type ConsoleScriptRequestRow,
+	type ConsoleLineRow,
+	type ConsoleStepRow,
+} from "./console-store";
 export { useTabSelectionStore } from "./tab-selection-store";
 export {
 	useTabsStore,

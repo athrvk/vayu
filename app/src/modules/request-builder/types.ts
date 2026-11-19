@@ -477,6 +477,14 @@ export interface ResponseState {
 	 * from History or a cold start.
 	 */
 	leftOutElements?: LeftOutElement[];
+	/**
+	 * The header names and the query parameter this send's auth wrote, absent
+	 * when it wrote none: the live body's top-level keys and the stored trace's
+	 * `request` node, built into this state by both funnels. Read by the
+	 * session Console's row builder, which masks the values under them (#3634).
+	 */
+	authHeaders?: string[];
+	authQueryParam?: string;
 	errorCode?: string;
 	errorMessage?: string;
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */

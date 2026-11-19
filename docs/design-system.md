@@ -3334,8 +3334,9 @@ Shell                            flex flex-col h-full bg-background
 │       └── content column   TabStrip, then a row of [main + ContextBar]
 │                            beside ContextRail (w-[var(--rail-width)])
 ├── BottomPanel (section)    bg-panel, 120px to half the window, default 240px,
-│                            closed by default - a tab strip over the active tab,
-│                            its PanelResizeHandle on the top edge (#3635)
+│                            closed by default - a tab strip (Console, Logs) over
+│                            the active tab, its PanelResizeHandle on the top
+│                            edge (#3635, #3634)
 └── Dock                     h-[var(--dock-height)] border-t border-border -
                              ambient status, then the bottom panel's button and
                              the per-tab view controls on the right
@@ -3585,9 +3586,16 @@ main row; the strip under it is the ordinary `TabsList variant="pane"`, whose
 `border-rule` is right on `bg-panel` because that is the root surface. A
 surface a tab paints inside it declares its own (`surface-card`,
 `surface-sunken`), and `BottomPanel.surface-rule.test.tsx` fails on a `bg-card`
-or `bg-muted` that does not. It is a stop in the F6 cycle, between the context
-rail and the Dock. In prose and in UI text it is named for what it holds (Logs,
-and the Console when #3634 lands) and never "drawer" (`docs/ux-writing.md`).
+or `bg-muted` at rest that does not (a `hover:` fill and a translucent tint
+such as `SampledExchange`'s `bg-muted/30` expansion are not surfaces, and no
+`surface-*` class could declare them). It is a stop in the F6 cycle, between
+the context rail and the Dock. Its tabs are Console, first and the one a fresh
+install opens on, then Logs; in UI text the panel is named for the first,
+"Console" (`BOTTOM_PANEL_LABEL`), and never "drawer" (`docs/ux-writing.md`).
+The Console tab's rows are `SampledExchange` rows, the same row History's
+samples and steps draw, in a flat `divide-y divide-rule` list on the panel's
+surface; a console line between them is a dense mono row with the
+`LogGutter` the response pane's Console and the Logs tab draw.
 
 ### Drawer
 
@@ -3644,13 +3652,15 @@ sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
   into saying the same thing differently.
 - **The bottom panel's button is an icon with its own name.** The Dock's
   button for the bottom panel (`BottomPanelButton.tsx`, #3635) is a
-  `TooltipIconButton` drawing `ScrollText`, a log's lines, in every state: a
-  panel glyph would sit a few pixels from the response-position button's
-  `PanelBottom` and read as the same control. It is named by the panel's label
-  (`BOTTOM_PANEL_LABEL`, "Logs" today) as its `aria-label` and tooltip, and the
-  tooltip carries the chord. The name never changes with the state; the state
-  is `aria-pressed` bound to `bottomPanelOpen`, as the rails' buttons do, rather
-  than `aria-expanded`, so a pressed button reads as "Logs, on". It stays put
+  `TooltipIconButton` drawing `SquareTerminal`, a console's prompt, in every
+  state (#3634): it is what a user arriving from Postman looks for in the
+  footer, and it serves the Logs tab beside the Console. A panel glyph would
+  sit a few pixels from the response-position button's `PanelBottom` and read
+  as the same control. It is named by the panel's label (`BOTTOM_PANEL_LABEL`,
+  "Console") as its `aria-label` and tooltip, and the tooltip carries the
+  chord. The name never changes with the state; the state is `aria-pressed`
+  bound to `bottomPanelOpen`, as the rails' buttons do, rather than
+  `aria-expanded`, so a pressed button reads as "Console, on". It stays put
   when the panel opens, and the panel grows no close button of its own.
 - **A switch between two arrangements names the destination too.** The Dock's
   response-position button draws `PanelBottom` while the response is *beside*

@@ -18,8 +18,8 @@
  * a card or a muted fill without declaring the matching surface, which would
  * leave every divider inside it on a default that is invisible there. Asserting
  * `border-rule` is present would prove nothing; the declaration is what is
- * pinned. This renders the real tab content, so whatever the tab adds is held
- * to the same rule.
+ * pinned. This renders the real tab content, both tabs and their opened rows,
+ * so whatever a tab adds is held to the same rule.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -29,9 +29,11 @@ import { useLayoutStore } from "@/stores";
 import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
 import { fakeLogsBridge, logRecord } from "@/modules/logs/logs-bridge.testkit";
 import { useLogsStore } from "@/modules/logs/logs-store";
+import { useConsoleStore } from "@/stores/console-store";
 import { BottomPanel } from "./BottomPanel";
 
 vi.mock("@/queries", () => ({ useConfigQuery: () => ({ data: undefined }) }));
+vi.mock("@/components/ui/code-editor", () => ({ CodeEditor: () => <div /> }));
 
 beforeEach(() => {
 	useLayoutStore.setState({ bottomPanelOpen: true, bottomPanelTab: "logs" });
@@ -47,12 +49,23 @@ function everythingInPanel(): HTMLElement[] {
 	return [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
 }
 
+/**
+ * An opaque fill at rest: the bare class, with no variant in front and no
+ * opacity after. A `hover:` fill is a state, never the surface a rule sits on,
+ * and a tint (`bg-muted/30`, `SampledExchange`'s expansion) has no `surface-*`
+ * class that could declare it - the surfaces are opaque - so the rule under it
+ * is the panel's, which is what it inherits.
+ */
+const restingFill = (fill: string) => new RegExp(`(?:^|\\s)${fill}(?:\\s|$)`);
+
 function undeclared(elements: HTMLElement[]): string[] {
 	return elements
 		.filter(
 			(el) =>
-				(/\bbg-card\b/.test(el.className) && !/\bsurface-card\b/.test(el.className)) ||
-				(/\bbg-muted\b/.test(el.className) && !/\bsurface-sunken\b/.test(el.className))
+				(restingFill("bg-card").test(el.className) &&
+					!/\bsurface-card\b/.test(el.className)) ||
+				(restingFill("bg-muted").test(el.className) &&
+					!/\bsurface-sunken\b/.test(el.className))
 		)
 		.map((el) => el.className);
 }
@@ -78,6 +91,7 @@ describe("the bottom panel's surface with the Logs tab's lines drawn", () => {
 	const bridge = fakeLogsBridge();
 
 	beforeEach(() => {
+		useLayoutStore.setState({ bottomPanelTab: "logs" });
 		bridge.answer({ records: [logRecord(1), { unparsed: true, raw: "raw line" }] });
 		vi.stubGlobal("electronAPI", { logs: bridge.logs });
 	});
@@ -96,6 +110,40 @@ describe("the bottom panel's surface with the Logs tab's lines drawn", () => {
 		// The opened row's JSON block is on a sunken surface; a guard that found no
 		// such block would be reading a tab that drew none of its own surfaces.
 		expect(everything.some((el) => /\bsurface-sunken\b/.test(el.className))).toBe(true);
+		expect(undeclared(everything)).toEqual([]);
+	});
+});
+
+describe("the bottom panel's surface with the Console tab's rows drawn", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({ bottomPanelTab: "console" });
+		useConsoleStore.getState().clear();
+		useConsoleStore.getState().append([
+			{ kind: "line", source: "pre", level: "warn", message: "token expires soon" },
+			{
+				kind: "send",
+				method: "GET",
+				url: "https://api.test/users",
+				status: 200,
+				timeMs: 12,
+				sizeBytes: 11,
+				exchange: {
+					requestHeaders: { Accept: "application/json" },
+					responseHeaders: { "content-type": "application/json" },
+					responseBody: { text: '{"ok":true}' },
+				},
+			},
+		]);
+	});
+
+	it("declares the surface of everything an opened request row draws", () => {
+		renderWithTooltips(<BottomPanel />);
+		fireEvent.click(screen.getByRole("button", { name: /api\.test\/users/ }));
+
+		const everything = everythingInPanel();
+		// The opened row's exchange viewer is a card; a guard that found none would
+		// be reading a row that never opened.
+		expect(everything.some((el) => /\bsurface-card\b/.test(el.className))).toBe(true);
 		expect(undeclared(everything)).toEqual([]);
 	});
 });

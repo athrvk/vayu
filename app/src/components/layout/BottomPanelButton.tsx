@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { ScrollText } from "lucide-react";
+import { SquareTerminal } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { BOTTOM_PANEL_LABEL } from "@/constants/layout";
@@ -16,11 +16,13 @@ import { formatChord } from "@/lib/platform";
  * The Dock's button for the bottom panel (#3635): always present, first in the
  * right cluster, pressed while the panel is open.
  *
- * An icon, named "Logs" by its label and tooltip like the response-position
- * button beside it. The glyph is a log's lines, not a panel: the response
- * position's own glyphs are panels (`PanelBottom`, `PanelRight`), and a second
- * one a few pixels away reads as the same control. The name never changes with
- * the state - `aria-pressed` carries that, as the rails' buttons do.
+ * An icon, named "Console" by its label and tooltip like the response-position
+ * button beside it. The glyph is a console's prompt, what a user arriving from
+ * Postman looks for in the footer (#3634), and it serves the Logs tab beside
+ * the Console as well; it is not a panel, because the response position's own
+ * glyphs are panels (`PanelBottom`, `PanelRight`) and a second one a few pixels
+ * away reads as the same control. The name never changes with the state -
+ * `aria-pressed` carries that, as the rails' buttons do.
  *
  * The chord and the palette row are the other two routes to the same store
  * action, so a macOS Dock covering this strip costs a glance, never a click.
@@ -33,7 +35,7 @@ export function BottomPanelButton() {
 		<TooltipIconButton
 			label={BOTTOM_PANEL_LABEL}
 			tooltipHint={formatChord(TOGGLE_BOTTOM_PANEL_CHORD)}
-			icon={<ScrollText className="size-icon-sm" aria-hidden="true" />}
+			icon={<SquareTerminal className="size-icon-sm" aria-hidden="true" />}
 			aria-pressed={open}
 			onClick={toggleBottomPanel}
 			className="text-muted-foreground hover:text-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground"

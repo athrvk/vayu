@@ -67,7 +67,6 @@ import {
 	UnifiedResponseViewer,
 	ValidationChip,
 	phasesFromTrace,
-	type ExchangeState,
 } from "@/components/shared/response-viewer";
 import ConsoleOutput from "@/modules/request-builder/components/ResponseViewer/ConsoleOutput";
 import ElementOutcomes from "@/modules/request-builder/components/ResponseViewer/ElementOutcomes";
@@ -76,35 +75,8 @@ import TestResults from "@/modules/request-builder/components/ResponseViewer/Tes
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { heldBodySize } from "@/modules/request-builder/utils/response-bytes";
 import { cn } from "@/lib/utils";
-import type { StepOutcome } from "@/types";
 import { stepsNotRunText, tallyTests, type ScenarioStepRow } from "../scenario-steps";
-
-/**
- * How each outcome reads in the row.
- *
- * `skipped` has its own state and its own chip and is never dressed as a pass:
- * a step the runner did not execute asserted nothing. `failed` is a test
- * assertion that did not hold - the response itself may well be a `200`, which
- * is exactly why the state cannot be derived from the status code. `stopped` is
- * a step the run's Stop cut short (#3397): no failure, so it takes the Stopped
- * glyph the run's own status wears rather than the error tick.
- */
-const OUTCOME_STATE: Record<StepOutcome, ExchangeState> = {
-	passed: "success",
-	failed: "error",
-	skipped: "skipped",
-	errored: "error",
-	stopped: "stopped",
-};
-
-/** Chip tint per outcome. `-fill` under a white label, per the token rules. */
-const OUTCOME_CHIP: Record<StepOutcome, string> = {
-	passed: "bg-status-success-fill text-white",
-	failed: "bg-status-error-fill text-white",
-	skipped: "bg-muted text-muted-foreground",
-	errored: "bg-status-error-fill text-white",
-	stopped: "bg-status-stopped-fill text-white",
-};
+import { STEP_OUTCOME_CHIP, STEP_OUTCOME_STATE, stepWasAnswered } from "../step-outcome";
 
 export interface ScenarioStepCardProps {
 	step: ScenarioStepRow;
@@ -174,10 +146,7 @@ function ScenarioStepCard({
 	// A stopped step's stored error is the cancel ("Request cancelled"), which
 	// the Stopped chip already says and a red Error block would contradict.
 	const error = step.outcome === "stopped" ? undefined : step.result?.error;
-	// A skipped step sent nothing: the stored row's status 0 and latency 0 are
-	// storage values, not a status and a time (#2824). A stopped step's send was
-	// cut short, so its 0 is no status and its latency no response time (#3397).
-	const answered = step.outcome !== "skipped" && step.outcome !== "stopped";
+	const answered = stepWasAnswered(step.outcome);
 	const notRun = stepsNotRunText(step.stepsNotRun);
 
 	// "Iteration 2 · Row 3". The row is shown whenever the run had a data set,
@@ -217,7 +186,10 @@ function ScenarioStepCard({
 			title={
 				<span className="flex min-w-0 items-center gap-2">
 					<span className="truncate text-sm text-foreground">{step.name}</span>
-					<Badge variant="chip" className={cn("shrink-0", OUTCOME_CHIP[step.outcome])}>
+					<Badge
+						variant="chip"
+						className={cn("shrink-0", STEP_OUTCOME_CHIP[step.outcome])}
+					>
 						{step.outcome}
 					</Badge>
 					{/*
@@ -274,7 +246,7 @@ function ScenarioStepCard({
 					</Button>
 				) : undefined
 			}
-			state={OUTCOME_STATE[step.outcome]}
+			state={STEP_OUTCOME_STATE[step.outcome]}
 			statusCode={answered ? step.statusCode : undefined}
 			statusText={step.result?.statusText}
 			latencyMs={answered ? step.latencyMs : undefined}

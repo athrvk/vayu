@@ -17,6 +17,8 @@
  * list can hold, so a caller passes it in.
  */
 
+import { WITHHELD_MARKER } from "./withheld-value";
+
 export const SENSITIVE_HEADER_NAMES: readonly string[] = [
 	"authorization",
 	"proxy-authorization",
@@ -33,4 +35,24 @@ export function isSensitiveHeaderName(name: string, apiKeyHeaderName?: string): 
 	if (folded === "") return false;
 	if (SENSITIVE_HEADER_NAMES.includes(folded)) return true;
 	return folded === apiKeyHeaderName?.trim().toLowerCase();
+}
+
+/**
+ * @p headers with the value of each credential header reading
+ * {@link WITHHELD_MARKER}: a name {@link isSensitiveHeaderName} matches, or one
+ * of @p authHeaderNames (what the request's auth wrote, `authHeaders`). A value
+ * sent empty stays empty, as in the engine's script-request records (#3633).
+ */
+export function maskSensitiveHeaders(
+	headers: Readonly<Record<string, string>>,
+	authHeaderNames: readonly string[] = []
+): Record<string, string> {
+	const masked: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers)) {
+		const sensitive =
+			isSensitiveHeaderName(name) ||
+			authHeaderNames.some((auth) => isSensitiveHeaderName(name, auth));
+		masked[name] = sensitive && value !== "" ? WITHHELD_MARKER : value;
+	}
+	return masked;
 }

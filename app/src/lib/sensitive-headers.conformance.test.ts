@@ -18,7 +18,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { SENSITIVE_HEADER_NAMES, isSensitiveHeaderName } from "./sensitive-headers";
+import {
+	SENSITIVE_HEADER_NAMES,
+	isSensitiveHeaderName,
+	maskSensitiveHeaders,
+} from "./sensitive-headers";
 
 /** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
 const [fixturePath] = ENGINE_READING_GUARDS.sensitiveHeaders.paths.map(fromRepoRoot);
@@ -53,5 +57,25 @@ describe("isSensitiveHeaderName", () => {
 		expect(isSensitiveHeaderName("Content-Type", "X-Tenant-Key")).toBe(false);
 		expect(isSensitiveHeaderName("", "")).toBe(false);
 		expect(isSensitiveHeaderName("  ", "  ")).toBe(false);
+	});
+});
+
+describe("maskSensitiveHeaders", () => {
+	it("masks a listed header's value and passes the rest through", () => {
+		expect(
+			maskSensitiveHeaders({ Authorization: "Bearer T", "Content-Type": "application/json" })
+		).toEqual({ Authorization: "<redacted>", "Content-Type": "application/json" });
+	});
+
+	it("masks a header the request's auth wrote, in any case", () => {
+		const headers = { "X-Tenant-Key": "K" };
+		expect(maskSensitiveHeaders(headers)).toEqual(headers);
+		expect(maskSensitiveHeaders(headers, ["x-tenant-key"])).toEqual({
+			"X-Tenant-Key": "<redacted>",
+		});
+	});
+
+	it("keeps a value sent empty empty", () => {
+		expect(maskSensitiveHeaders({ Cookie: "" })).toEqual({ Cookie: "" });
 	});
 });

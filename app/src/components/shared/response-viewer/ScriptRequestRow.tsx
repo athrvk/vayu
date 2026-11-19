@@ -11,9 +11,10 @@
  * Setup / teardown card under a lifecycle row.
  *
  * Composed from the per-concern primitives rather than `UnifiedResponseViewer`:
- * that viewer shows a request's body only when there is no response, never the
- * sent header lines, and pins its panels at 500px, where a script request
- * wants both bodies, both header lists and the timing in one short stack.
+ * that viewer puts each body and the header lists on tabs of their own, never
+ * shows the sent header lines, and pins its panels at 500px, where a script
+ * request wants both bodies, both header lists and the timing in one short
+ * stack.
  *
  * The record is masked by the engine where it is built, so every value is
  * drawn as written: a `<redacted>` header is the engine's word, not ours.

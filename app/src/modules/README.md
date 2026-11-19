@@ -150,6 +150,39 @@ Some modules have components displayed in both the sidebar and main content area
     import MockServerView from "@/modules/mock-server";
     ```
 
+### Bottom Panel Modules
+
+The bottom panel (`components/layout/BottomPanel.tsx`) mounts one tab body per
+entry of `BOTTOM_PANEL_TABS`, eagerly imported from the module barrel: the panel
+is closed by default and renders nothing then, so a body is mounted only while
+its tab is on screen.
+
+#### `console/`
+
+- **Location:** the bottom panel's first tab, Console (issue #3634)
+- **Components:** `ConsoleTab` - everything this window sent, newest last, from the session
+  ring (`stores/console-store.ts`): each Send, each collection-run step, and their scripts'
+  requests and console lines, with type, level and text filters, Clear and Copy as cURL. The
+  module also builds the rows both Send completions append (`appendSendToConsole`) and a
+  collection run's step row (`step-row.ts`, imported by its own path from the run service).
+- **A step row reads its exchange from History.** A `step` frame is constant-size, so the row's
+  expansion asks for the run's report (`useRunReportQuery`, the query History's run view reads)
+  only while it is open.
+- **Usage:**
+    ```tsx
+    import { ConsoleTab } from "@/modules/console";
+    ```
+
+#### `logs/`
+
+- **Location:** the bottom panel's second tab, Logs (issue #3635)
+- **Components:** `LogsTab` - the files under `<data-dir>/logs/`, read and tailed through the main
+  process while the tab is mounted
+- **Usage:**
+    ```tsx
+    import { LogsTab } from "@/modules/logs";
+    ```
+
 ### Overlay Modules
 
 #### `palette/`

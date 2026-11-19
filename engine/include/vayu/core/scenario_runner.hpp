@@ -95,6 +95,11 @@ struct StepTestTally {
     size_t failed = 0;
 };
 
+/// The longest URL a `step` frame carries, in bytes (#3634): the frame is
+/// constant-size by rule, and a URL is the one client string on it. The stored
+/// row keeps the whole URL.
+inline constexpr size_t STEP_FRAME_URL_MAX_BYTES = 512;
+
 /** One step execution, on its way to a `results` row and an SSE event. */
 struct StepRecord {
     size_t iteration  = 0; ///< 0-based, as `pm.info.iteration` reports it.
@@ -114,6 +119,17 @@ struct StepRecord {
     int status_code     = 0;
     std::string status_text;
     double latency_ms = 0.0;
+    /**
+     * The request this step sent, for the SSE frame (#3634): its verb, its URL
+     * already masked and cut (@ref STEP_FRAME_URL_MAX_BYTES), and the response
+     * body's size in bytes. Empty and absent for a step that sent nothing - a
+     * skip, a row that could not bind - which the frame writes as absent keys,
+     * so a client never reads a method for a request nobody made. `url` is
+     * also empty, and so absent, for a send refused before it had one.
+     */
+    std::string method;
+    std::string url;
+    std::optional<size_t> body_bytes;
     /// Transport error, script error or failed-assertion summary; "" on a pass.
     std::string error;
     /**

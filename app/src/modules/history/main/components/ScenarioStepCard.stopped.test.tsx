@@ -14,10 +14,10 @@
  * the Stopped glyph and chip, draws no "ERR" badge or time, and its expansion
  * carries no red Error block for the cancel.
  *
- * Mutation-check: drop `stopped` from the `answered` test in
- * `ScenarioStepCard.tsx` and the badge case fails; pass `step.result?.error`
+ * Mutation-check: drop `stopped` from `stepWasAnswered` (`step-outcome.ts`)
+ * and the badge case fails; pass `step.result?.error`
  * through for a stopped step and the error-block case fails; map `stopped` to
- * `"error"` in `OUTCOME_STATE` and the glyph case fails.
+ * `"error"` in `STEP_OUTCOME_STATE` (`step-outcome.ts`) and the glyph case fails.
  */
 
 import { describe, it, expect, afterEach } from "vitest";

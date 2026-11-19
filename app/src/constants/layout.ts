@@ -26,20 +26,22 @@ export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
 /* ── Bottom panel ────────────────────────────────────────────────────────── */
 
 /**
- * The bottom panel's tabs, in strip order (#3635). One today; the session
- * Console (#3634) joins as a second, and the persisted `bottomPanelTab` is one
- * of these ids.
+ * The bottom panel's tabs, in strip order: the session Console (#3634), then
+ * Logs (#3635). The persisted `bottomPanelTab` is one of these ids.
  */
-export const BOTTOM_PANEL_TABS = [{ id: "logs", label: "Logs" }] as const;
+export const BOTTOM_PANEL_TABS = [
+	{ id: "console", label: "Console" },
+	{ id: "logs", label: "Logs" },
+] as const;
 
 export type BottomPanelTab = (typeof BOTTOM_PANEL_TABS)[number]["id"];
 
 /**
  * What the panel is called: the Dock's button, the palette row, the chord's
- * label and the panel's own region all read this one constant, so renaming the
- * panel (#3634 will call it Console) is one edit.
+ * label, the resize handle and the panel's own region all read this one
+ * constant. Named for its first tab, the one a fresh install opens on.
  */
-export const BOTTOM_PANEL_LABEL = "Logs";
+export const BOTTOM_PANEL_LABEL = "Console";
 
 /** The tab a fresh install opens on. */
 export const DEFAULT_BOTTOM_PANEL_TAB: BottomPanelTab = BOTTOM_PANEL_TABS[0].id;

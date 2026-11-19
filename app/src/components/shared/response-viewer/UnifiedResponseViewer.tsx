@@ -20,7 +20,9 @@
  *   because the caller sizes the card.
  *
  * Both list the request and response headers on the Headers tab, plus an Events
- * tab when the sample streamed.
+ * tab when the sample streamed. Beside a response, a request that carries a body
+ * gets a Request tab for it (the session Console's rows, #3634); a caller that
+ * passes none sees the viewer it always had.
  */
 
 import { useState } from "react";
@@ -33,7 +35,7 @@ import ResponseEvents from "./ResponseEvents";
 import { CompactHeadersViewer } from "./HeadersViewer";
 import type { ResponseData, UnifiedResponseViewerProps } from "./types";
 
-type ResponseTab = "body" | "headers" | "events";
+type ResponseTab = "body" | "request" | "headers" | "events";
 
 type BodySource = Pick<ResponseData, "body" | "bodyRaw" | "rawBytes" | "headers">;
 
@@ -52,6 +54,7 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
 	const requestOnly = !response && !!request;
 	const source = bodySource(props);
+	const sentBody = !requestOnly && (!!request?.body || !!request?.rawBytes);
 
 	// Empty state. Headers count as content, not just a body: a load-run sample
 	// whose body was binary or dropped for the run's capture budget (#174) has
@@ -100,6 +103,11 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 						<FileText className="size-icon-sm" />
 						<TabLabel>{requestOnly ? "Body" : "Response"}</TabLabel>
 					</TabsTrigger>
+					{sentBody && (
+						<TabsTrigger value="request">
+							<TabLabel>Request</TabLabel>
+						</TabsTrigger>
+					)}
 					<TabsTrigger value="headers">
 						<TabLabel>Headers</TabLabel>
 					</TabsTrigger>
@@ -136,6 +144,17 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 						/>
 					)}
 				</TabsContent>
+
+				{sentBody && request && (
+					<TabsContent value="request" className={panelClass}>
+						<ResponseBody
+							body={request.body ?? ""}
+							rawBytes={request.rawBytes}
+							headers={request.headers ?? {}}
+							showModeToggle
+						/>
+					</TabsContent>
+				)}
 
 				<TabsContent value="headers" className={panelClass}>
 					<div className="p-4 space-y-4 overflow-auto h-full">

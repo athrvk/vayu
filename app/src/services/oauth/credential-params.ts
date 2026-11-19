@@ -99,6 +99,18 @@ function asciiLower(text: string): string {
 	return text.replace(/[A-Z]/g, (char) => char.toLowerCase());
 }
 
+/**
+ * The engine's `is_secret_param_name`: whether a query parameter named @p name
+ * carries a credential, by {@link SENSITIVE_PARAM_NAMES} or by one of
+ * @p extraNames (what the request's auth wrote), both ASCII case folded.
+ */
+export function isSensitiveParamName(name: string, extraNames: readonly string[] = []): boolean {
+	const folded = asciiLower(name);
+	return (
+		SENSITIVE_PARAM_SET.has(folded) || extraNames.some((extra) => asciiLower(extra) === folded)
+	);
+}
+
 /** Whether an extra request parameter row named @p key carries a credential. */
 export function namesCredentialParam(key: string): boolean {
 	return (

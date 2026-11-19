@@ -26,11 +26,13 @@
 #include "vayu/core/script_config.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/core/transaction_histograms.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
@@ -466,7 +468,21 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.unresolved_tokens > 0) {
         data["unresolvedTokens"] = record.unresolved_tokens;
     }
-    return build_sse_frame ("step", data.dump (), offset);
+    // What the step sent (#3634), so a watcher can draw its row live. Absent
+    // for a step that sent nothing, on the same terms as everything above.
+    if (!record.method.empty ()) {
+        data["method"] = record.method;
+    }
+    if (!record.url.empty ()) {
+        data["url"] = record.url;
+    }
+    if (record.body_bytes) {
+        data["bodyBytes"] = *record.body_bytes;
+    }
+    // The URL is a client string, so a byte that is not UTF-8 becomes U+FFFD
+    // instead of throwing, as on the stored row.
+    return build_sse_frame ("step",
+    data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace), offset);
 }
 
 nlohmann::json build_plan_payload (size_t steps_per_iteration, size_t iterations) {
@@ -778,6 +794,25 @@ vayu::http::routes::ExchangeOutcome& exchange) {
 }
 
 /**
+ * The URL a `step` frame carries: credentials masked as an export masks them
+ * (the password of `user:pass@`, the value of a credential query parameter and
+ * of the one the step's own auth wrote), then cut to
+ * `STEP_FRAME_URL_MAX_BYTES` on a character boundary. Masked first, so a
+ * credential straddling the cut cannot survive as a prefix of itself.
+ */
+std::string step_frame_url (const vayu::Request& request) {
+    std::vector<std::string> auth_params;
+    if (!request.auth_query_param.empty ()) {
+        auth_params.push_back (request.auth_query_param);
+    }
+    int omitted = 0;
+    const std::string masked =
+    vayu::core::vayu_ext::redact_url_credentials (request.url, auth_params, omitted);
+    return std::string (vayu::utils::without_incomplete_utf8_tail (
+    std::string_view (masked).substr (0, STEP_FRAME_URL_MAX_BYTES)));
+}
+
+/**
  * What the step did, as the row and the frame a reader sees.
  *
  * A row that could not bind is this step's failure and is not classifiable from
@@ -809,6 +844,14 @@ ScenarioSummaryInputs& summary) {
     record.status_text       = exchange.response.status_text;
     record.latency_ms        = exchange.response.timing.total_ms;
     record.unresolved_tokens = count_distinct (exchange.unresolved_tokens);
+    // A step that sent nothing has no request to name (#3634): a skip's
+    // `exchange` and a row that could not bind hold a default one.
+    if (exchange.sent && data_bind_error.empty ()) {
+        record.method = to_string (exchange.request.method);
+        record.url    = step_frame_url (exchange.request);
+        record.body_bytes =
+        exchange.response.stream_body_bytes.value_or (exchange.response.body_size);
+    }
     // The assertions this step made (issue #724), for the frame a
     // live watcher reads. A step whose row could not bind ran no
     // script and gets no tally - `exchange` is the default one. Nor does a
