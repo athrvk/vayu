@@ -44,6 +44,7 @@ import type { Logger } from "../log.js";
 import { answerInternalError, answerUnlessMcpPost, createMcpSocketServer } from "./gates.js";
 import { ClientSessions } from "./client-sessions.js";
 import { InFlightCalls, type InFlightCall } from "./in-flight-calls.js";
+import { CALL_CANCELLED, HeldExchange, SERVER_STOPPED } from "./held-exchange.js";
 
 export interface McpHttpServerOptions {
 	host: string;
@@ -64,8 +65,8 @@ export class McpHttpServer {
 	private readonly opts: McpHttpServerOptions;
 	private readonly sessions = new ClientSessions();
 	private readonly inFlight: InFlightCalls;
-	/** The response of every 2025-era exchange still open, which a stop drops. */
-	private readonly legacyExchanges = new Set<http.ServerResponse>();
+	/** Every exchange still open, of either era, which a stop cuts. */
+	private readonly exchanges = new Set<HeldExchange>();
 	private handler: McpHttpHandler;
 	private readonly hostIsLoopback = localhostHostValidation();
 	private readonly originIsLoopback = localhostOriginValidation();
@@ -107,22 +108,30 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * End every exchange a socket's close would otherwise wait on: what a
-	 * 2026-07-28 client holds open (a `subscriptions/listen` stream lasts as long
-	 * as the client likes), which the SDK ends; and every 2025-era exchange in
-	 * flight, whose connection is dropped with no result and no error written
-	 * (#3575). The drop reaches the handler as a disconnect does, so the tool's
-	 * signal fires and its engine request is aborted. A client still waiting for
-	 * the response headers sees its fetch fail at once; one already reading the
-	 * stream (a keep-alive comment or a progress event was sent) holds the call
-	 * until its own timeout. Everything else finishes as it would have: an
-	 * upload still arriving is drained and answered (see `readJsonBody`), not
-	 * cut off. The SDK's `close()` is final, so a fresh handler takes the next
-	 * request.
+	 * End every exchange a socket's close would otherwise wait on, on both
+	 * legs. A 2026-07-28 exchange is ended by the SDK when its handler closes:
+	 * a `subscriptions/listen` stream (which lasts as long as the client likes)
+	 * with its own final answer, a call in flight with none. Every 2025-era
+	 * exchange in flight is cut here, held in the cancel registry or not. The
+	 * cut reaches the handler as a disconnect does, so the tool's signal fires
+	 * and its engine request is aborted. What the client is sent depends on how
+	 * far its answer got (#3598): a 2025-era call with nothing written yet has
+	 * its connection dropped, so the client's fetch fails at once (a 2026-07-28
+	 * one is answered with the SDK's bare `499`, as fast); a call of either era
+	 * whose stream is under way (a progress event or a keep-alive comment is
+	 * out) ends with a JSON-RPC error for its request id, the one thing that
+	 * client acts on before its own timeout (`held-exchange.ts`).
+	 * Everything else finishes as it would have: an upload still arriving is
+	 * drained and answered (see `readJsonBody`), not cut off. The SDK's
+	 * `close()` is final, so a fresh handler takes the next request.
 	 */
 	async endStreams(): Promise<void> {
-		for (const res of this.legacyExchanges) res.destroy();
-		this.legacyExchanges.clear();
+		// Before `close()`: a stream the SDK ends must already carry its cause.
+		for (const exchange of this.exchanges) {
+			exchange.cut(SERVER_STOPPED);
+			if (exchange.legacy && !exchange.answering) exchange.res.destroy();
+		}
+		this.exchanges.clear();
 		const ending = this.handler;
 		this.handler = this.createHandler();
 		await ending.close();
@@ -208,9 +217,11 @@ export class McpHttpServer {
 	): Promise<Response> {
 		// The SDK's own routing predicate, so the host and the handler cannot
 		// disagree about which leg serves the request.
-		if (await isLegacyRequest(request, options?.parsedBody)) this.holdUntilClosed(res);
+		const legacy = await isLegacyRequest(request, options?.parsedBody);
+		const exchange = new HeldExchange(res, options?.parsedBody, legacy);
+		this.holdUntilClosed(exchange);
 		const message = soleMessageOf(options?.parsedBody);
-		const response = await this.fetchCancellable(request, options, message);
+		const response = await this.fetchCancellable(request, options, message, exchange);
 		const handshake = handshakeOf(message);
 		if (!handshake || !response.ok) return response;
 		// The stateless legacy leg sends no session id of its own and accepts any
@@ -229,51 +240,59 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * Count @p res among the 2025-era exchanges a stop drops until it closes,
+	 * Count @p exchange among those a stop cuts until its response closes,
 	 * however it closes. Every one, not only the calls `inFlight` holds: that
 	 * registry is keyed and capped for cancels, and a call without a session
 	 * id, inside a longer batch, evicted or replaced under its key still holds
 	 * its connection open.
 	 */
-	private holdUntilClosed(res: http.ServerResponse): void {
-		if (res.destroyed) return;
-		this.legacyExchanges.add(res);
-		res.once("close", () => this.legacyExchanges.delete(res));
+	private holdUntilClosed(exchange: HeldExchange): void {
+		if (exchange.res.destroyed) return;
+		this.exchanges.add(exchange);
+		exchange.res.once("close", () => this.exchanges.delete(exchange));
 	}
 
 	/**
-	 * Hand the request to the handler, wiring a 2025-era client's
-	 * `notifications/cancelled` to the request it names: each request is served
-	 * under a signal of the host's own, held in `inFlight` under the session id
-	 * and request id until its exchange ends, however it ends. The SDK's legacy
-	 * leg tears a request's server down when that signal aborts, which aborts
-	 * the tool's `mcpReq.signal` (#3574).
+	 * Hand the request to the handler. A 2025-era request is served under a
+	 * signal of the host's own, which a cut aborts: the SDK's legacy leg tears
+	 * a request's server down when that signal aborts, which aborts the tool's
+	 * `mcpReq.signal`. Under an issued session id, the request is also held in
+	 * `inFlight` by its request id until its exchange ends, however it ends, so
+	 * that client's `notifications/cancelled` cuts it (#3574).
 	 */
 	private async fetchCancellable(
 		request: Request,
 		options: McpHandlerRequestOptions | undefined,
-		message: unknown
+		message: unknown,
+		exchange: HeldExchange
 	): Promise<Response> {
-		// Absent on every 2026-07-28 exchange, which the SDK cancels itself; and
-		// without one a cancel cannot be matched, since every client counts its
-		// request ids from 0.
+		// A 2026-07-28 exchange is the SDK's to cancel.
+		if (!exchange.legacy) return exchange.relay(await this.handler.fetch(request, options));
+		// Without a session id a cancel cannot be matched, since every client
+		// counts its request ids from 0.
 		const sessionId = request.headers.get("mcp-session-id") ?? undefined;
-		if (sessionId === undefined) return this.handler.fetch(request, options);
+		const call = sessionId === undefined ? undefined : this.routeCancels(sessionId, message);
+		call?.signal.addEventListener("abort", () => exchange.cut(CALL_CANCELLED), { once: true });
+		// The client's disconnect still reaches the handler through this signal.
+		const signal = AbortSignal.any([request.signal, exchange.signal]);
+		try {
+			const response = await this.handler.fetch(new Request(request, { signal }), options);
+			return exchange.relay(response, () => call?.release());
+		} catch (err) {
+			call?.release();
+			throw err;
+		}
+	}
+
+	/**
+	 * Apply the cancel @p message carries, if it is one, and register it for a
+	 * later cancel if it is a request; the registration, or undefined.
+	 */
+	private routeCancels(sessionId: string, message: unknown): InFlightCall | undefined {
 		const cancelled = cancelledRequestIdOf(message);
 		// The cancel itself still goes on, for the 202 the client is owed.
 		if (cancelled !== undefined) this.inFlight.cancel(sessionId, cancelled);
-		if (!isJSONRPCRequest(message)) return this.handler.fetch(request, options);
-
-		const call = this.inFlight.track(sessionId, message.id);
-		// The client's disconnect still reaches the handler through this signal.
-		const signal = AbortSignal.any([request.signal, call.signal]);
-		try {
-			const response = await this.handler.fetch(new Request(request, { signal }), options);
-			return releasedAtEnd(response, call);
-		} catch (err) {
-			call.release();
-			throw err;
-		}
+		return isJSONRPCRequest(message) ? this.inFlight.track(sessionId, message.id) : undefined;
 	}
 
 	/** The handler's factory: a server for one request of era @p era. */
@@ -323,44 +342,6 @@ function handshakeOf(message: unknown): { clientName: string } | undefined {
 /** The request id a `notifications/cancelled` message names, by the SDK's own schema. */
 function cancelledRequestIdOf(message: unknown): RequestId | undefined {
 	return isSpecType.CancelledNotification(message) ? message.params.requestId : undefined;
-}
-
-/**
- * @p response with its body passed through on demand, releasing @p call when
- * the body ends, fails or is cancelled. Nothing is read ahead of the reader:
- * the handler tears its server down when its own stream ends.
- */
-function releasedAtEnd(response: Response, call: InFlightCall): Response {
-	if (response.body === null) {
-		call.release();
-		return response;
-	}
-	const reader = response.body.getReader();
-	const body = new ReadableStream<Uint8Array>(
-		{
-			async pull(controller) {
-				try {
-					const { done, value } = await reader.read();
-					if (!done) return controller.enqueue(value);
-					call.release();
-					controller.close();
-				} catch (err) {
-					call.release();
-					controller.error(err);
-				}
-			},
-			cancel(reason) {
-				call.release();
-				return reader.cancel(reason);
-			},
-		},
-		{ highWaterMark: 0 }
-	);
-	return new Response(body, {
-		status: response.status,
-		statusText: response.statusText,
-		headers: response.headers,
-	});
 }
 
 /**
