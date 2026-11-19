@@ -27,9 +27,16 @@
  * never reads the file it dropped; start from no entries instead of the
  * previous cursor and the rotated file is never reached; let the newest line
  * dropped win over the oldest held and the burst case skips what the burst left
- * out; drop the `state.cursor !== cursor` check in `loadOlder` and the
- * in-flight case lands its page behind a hole; skip a line without a position
- * instead of ending and the unplaced case pages older.
+ * out; drop the `now.cursor === before` check in `loadOlder` and the in-flight
+ * cases land their page behind a hole; skip a line without a position instead
+ * of ending and the unplaced case pages older. A batch out of file order
+ * (#3658): take a file's offset from its held lines alone in `cursorAfterTrim`
+ * and the inversion case never reads the line the trim dropped; leave
+ * `previous`'s entry out of that file's maximum and the two-trim case loses the
+ * line once a later trim drops only another file's lines; drop `notHeld`
+ * from `prependOlder` and it holds a line twice; end `loadOlder` instead of
+ * reading again when a trim overtakes its page and the in-flight cases leave
+ * the page unread until a second click.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -443,6 +450,105 @@ describe("the bound", () => {
 		expect(state()).toMatchObject({ more: false, detached: true });
 	});
 
+	it("pages older past a tail batch sorted out of file order at the trim, every dropped line once", async () => {
+		// Line 2001's time is a millisecond behind line 2000's, as two engine
+		// threads can write them, so the poll delivers it first and the bound
+		// drops it while keeping line 2000.
+		const behind = new Date(Date.parse(logRecord(2000).ts) - 1).toISOString();
+		const log = Array.from({ length: 12_001 }, (_, n) =>
+			n === 2001 ? logRecord(n, { ts: behind }) : logRecord(n)
+		);
+		bridge.serveLog(log.slice(0, 2000));
+		await state().start();
+		expect(messages()[0]).toBe("line 1000");
+
+		// The read's 1,000 and 10,001 from the tail: 1,001 over the bound.
+		for (let from = 2000; from <= 12_000; from += 500)
+			bridge.pushPoll(log.slice(from, from + 500));
+		expect(messages().slice(0, 2)).toEqual(["line 2000", "line 2002"]);
+		bridge.serveLog(log);
+		await state().loadOlder();
+		await state().loadOlder();
+
+		expectEachFileUnbroken();
+		const held = new Map<string, number>();
+		for (const msg of messages()) held.set(msg, (held.get(msg) ?? 0) + 1);
+		const dropped = [...span(1000, 1000), log[2001]].map((line) => (line as LogFileRecord).msg);
+		expect(dropped.filter((msg) => held.get(msg) !== 1)).toEqual([]);
+	});
+
+	it("keeps the cursor past a line dropped out of file order when a later trim drops only another file's lines", async () => {
+		const at = (ms: number) => new Date(Date.parse(logRecord(0).ts) + ms).toISOString();
+		const line = (file: typeof ENGINE_LOG, offset: number, ms: number) =>
+			logRecord(0, {
+				msg: `${file.name} ${offset}`,
+				ts: at(ms),
+				$pos: { ...file, start: offset, end: offset + 1 },
+			});
+		const engineOld = Array.from({ length: 10 }, (_, n) => line(ENGINE_LOG, n, n * 1000));
+		const appOld = Array.from({ length: 2000 }, (_, n) => line(APP_LOG, n, (100 + n) * 1000));
+		// Engine line 11 is two milliseconds behind line 10, and an app line falls
+		// between them, so the poll delivers engine 11, app 2000, engine 10.
+		const engine10 = line(ENGINE_LOG, 10, 3_000_000);
+		const engine11 = line(ENGINE_LOG, 11, 3_000_000 - 2);
+		const appTail = Array.from({ length: 10_000 }, (_, i) =>
+			line(APP_LOG, 2000 + i, i === 0 ? 3_000_000 - 1 : (1000 + 2000 + i) * 1000)
+		);
+		bridge.serveLog([...engineOld, ...appOld]);
+		await state().start();
+		expect(state().records).toHaveLength(1000);
+
+		// The read's 1,000 and 10,001 from the tail: the first trim drops the read
+		// and engine line 11, keeping engine line 10.
+		bridge.pushPoll([engine10, engine11, ...appTail.slice(0, -1)]);
+		expect(state().records).not.toContain(engine11);
+		expect(state().records).toContain(engine10);
+		// The second drops app line 2000 alone: nothing of the engine file.
+		bridge.pushPoll(appTail.slice(-1));
+		expect(state().records[0]).toBe(engine10);
+		bridge.serveLog([...engineOld, ...appOld, engine10, engine11, ...appTail]);
+		for (let page = 0; page < 20 && state().more; page++) await state().loadOlder();
+
+		expect(state().more).toBe(false);
+		const files = expectEachFileUnbroken();
+		expect(files.get(ENGINE_LOG.name)?.map((position) => position.start)).toEqual(
+			Array.from({ length: 12 }, (_, n) => n)
+		);
+	});
+
+	it("reads a page older again when a tail batch trims while it is in flight, so one click lands it", async () => {
+		numberedLog(5000);
+		await state().start();
+		bridge.push(span(6000, 9000));
+		let release: (value: LogReadResult) => void = () => {};
+		bridge.logs.read.mockImplementationOnce(
+			() => new Promise((resolve) => (release = resolve))
+		);
+		const paging = state().loadOlder();
+		await waitFor(() =>
+			expect(bridge.logs.read).toHaveBeenLastCalledWith(
+				expect.objectContaining({ before: logCursor(5000) })
+			)
+		);
+
+		bridge.push(span(15_000, 1));
+		expect(state().cursor).toEqual(logCursor(5001));
+		release({
+			records: span(4000, 1000),
+			cursor: logCursor(4000),
+			more: true,
+			scannedTo: null,
+		});
+		await paging;
+
+		expect(bridge.logs.read).toHaveBeenLastCalledWith(
+			expect.objectContaining({ before: logCursor(5001) })
+		);
+		expect(state()).toMatchObject({ loadingOlder: false, cursor: logCursor(4001) });
+		expect(messages()[0]).toBe("line 4001");
+		expectNoMissingLine();
+	});
+
 	it("ends paging older when a trim cannot place a line: one that carries no position", async () => {
 		numberedLog(5000);
 		await state().start();
@@ -709,7 +815,7 @@ describe("paging newer", () => {
 		expectNoMissingLine();
 	});
 
-	it("discards a page older still in flight when a page newer drops the oldest, then pages from the oldest held", async () => {
+	it("reads a page older again when a page newer drops the oldest while it is in flight", async () => {
 		bridge.answer({ records: span(0, 2) });
 		await state().start();
 		numberedLog(9000);
@@ -736,10 +842,7 @@ describe("paging newer", () => {
 		});
 		await paging;
 
-		expect(state()).toMatchObject({ loadingOlder: false, cursor: logCursor(10_100) });
-		expect(messages()[0]).toBe("line 10100");
-		expectNoMissingLine();
-		await state().loadOlder();
+		expect(state()).toMatchObject({ loadingOlder: false, cursor: logCursor(9100) });
 		expect(messages()[0]).toBe("line 9100");
 		expectNoMissingLine();
 	});

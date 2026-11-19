@@ -281,9 +281,12 @@ forward to ...") and drops the oldest, and the page that reaches the end of
 the logs appends the tail again, which it restarted before reading, so the
 table follows once you scroll to the end. When the bound drops the oldest
 lines, by following, by Search newer or from a read over the 16 MiB, Search
-older is still offered and reads exactly the lines before the oldest one the
-table holds, the dropped ones first, each file from where its own held lines
-begin (by `$pos`), so none is skipped or shown twice. A burst past the tail's
+older is still offered and reads the dropped lines and those before them, each
+file from where its own held lines begin (by `$pos`) or past a dropped line
+that sorted ahead of one it kept (a poll's batch is in time order, not file
+order), leaving out a line the table already holds, so none is skipped or
+shown twice. A Search older that a trim overtakes reads again from there, so
+one click is enough. A burst past the tail's
 500 lines per poll shows as "N lines skipped in a burst": the lines are in the
 files, and Search older reads them once the bound has dropped the lines before
 them. The
