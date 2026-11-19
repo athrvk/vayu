@@ -243,8 +243,8 @@ describe("applyRunToRequest", () => {
 		]);
 	});
 
-	describe("a request that holds a disabled element", () => {
-		// A send leaves a disabled element out, so the run never recorded it.
+	describe("a request that holds an element the send left out", () => {
+		// A send leaves a disabled or incomplete element out, so the run never recorded it.
 		const disabled = {
 			id: "el_off",
 			kind: "assert.status",
@@ -258,6 +258,30 @@ describe("applyRunToRequest", () => {
 			const patch = applyRunToRequest(seedFromRun(run(), live), live);
 
 			expect(patch.elements).toEqual([...ownElements, disabled]);
+		});
+
+		it("keeps the saved order when the left-out element comes first", () => {
+			const live = liveRequest({ elements: [disabled, ...ownElements] } as Partial<Request>);
+
+			const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+			expect(patch.elements).toEqual([disabled, ...ownElements]);
+		});
+
+		it("keeps an enabled element the run did not record, such as an incomplete one", () => {
+			const incomplete = {
+				id: "el_blank",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "" },
+			};
+			const live = liveRequest({
+				elements: [incomplete, ...ownElements],
+			} as Partial<Request>);
+
+			const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+			expect(patch.elements).toEqual([incomplete, ...ownElements]);
 		});
 
 		it("lets the run's enabled element win when it holds the same id", () => {

@@ -538,14 +538,18 @@ type RunWritable = Pick<
 > & { method: string };
 
 /**
- * The elements a save writes: the run's own, plus the saved request's disabled
- * ones. A run stores only what its send ran, and a send leaves out a disabled
- * element, so writing the run's list alone would delete one the request keeps.
- * An id the run also holds is the run's.
+ * The elements a save writes: the run's own, merged into the saved request's
+ * order, plus every saved element the run does not hold. A run stores only what
+ * its send ran, and a send leaves out a disabled element and one that is
+ * incomplete, so writing the run's list alone would delete them from a request
+ * the user never touched. An id the run also holds is the run's version, in the
+ * saved element's place; a run-only element goes last.
  */
 function elementsToWrite(own: ElementDef[], saved: ElementDef[] | undefined): ElementDef[] {
-	const held = new Set(own.map((e) => e.id));
-	return [...own, ...(saved ?? []).filter((e) => !e.enabled && !held.has(e.id))];
+	const ran = new Map(own.map((e) => [e.id, e]));
+	const merged = (saved ?? []).map((e) => ran.get(e.id) ?? e);
+	const held = new Set(merged.map((e) => e.id));
+	return [...merged, ...own.filter((e) => !held.has(e.id))];
 }
 
 /**
