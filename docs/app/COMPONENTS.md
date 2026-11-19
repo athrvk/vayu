@@ -3546,11 +3546,11 @@ ordering `lib/variable-suggestions.ts` builds and `VariableAutocomplete` draws.
 
 **Only the `{{` list opens with a row lit.** The user asked for a variable
 there, so Enter takes the first. The plain list (header names) opens over what
-they are typing, and a lit first row made Tab turn `Accept` into
-`Accept-Charset`, Host into `X-Forwarded-Host`, and swallowed the Tab (#3667).
-Its highlight stays empty - no `aria-activedescendant` either - until an arrow
+they are typing, so a lit first row would rewrite a complete name on Tab
+(#3667). Its highlight stays empty - no `aria-activedescendant` either - until an arrow
 key or the pointer picks a row; Tab and Enter commit only that explicit
-highlight and otherwise fall through, so Tab still moves focus on. The first
+highlight and otherwise fall through, so Tab still moves focus on. A row picked in
+an earlier opening is forgotten when the list closes. The first
 arrow from nothing lands on row 0, ArrowUp included (clamped, not wrapped).
 `cmdk` reads an empty controlled `value` as "unset" and lights the first row
 itself, so `SuggestionList` hands it `NO_HIGHLIGHT` (`ui/command.tsx`, the same

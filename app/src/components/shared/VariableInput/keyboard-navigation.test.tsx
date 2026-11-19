@@ -187,11 +187,8 @@ describe("the suggestion list the arrows steer", () => {
 });
 
 /**
- * The plain list opens with nothing highlighted (#3667).
- *
- * It opens over what the user is typing, so a lit first row made Tab turn
- * `Accept` into `Accept-Charset` and swallowed the Tab; the `{{` list keeps its
- * first row because there the user asked for a variable.
+ * The plain list opens with nothing highlighted (#3667); the `{{` list keeps
+ * its first row because there the user asked for a variable.
  */
 describe("the plain suggestion list's highlight", () => {
 	const HEADERS = ["Accept", "Accept-Charset", "Accept-Encoding", "Host", "X-Forwarded-Host"];
@@ -239,6 +236,20 @@ describe("the plain suggestion list's highlight", () => {
 		expect(press(input, "Tab")).toBe(true);
 
 		expect(input.value).toBe("Accept-Charset");
+	});
+
+	it("does not light a row picked in an earlier opening when the list reopens", () => {
+		const { container, input } = renderHarness({ scoped: false, suggestions: HEADERS });
+
+		type(input, "Acc");
+		fireEvent.keyDown(input, { key: "ArrowDown" });
+		fireEvent.keyDown(input, { key: "ArrowDown" });
+		fireEvent.keyDown(input, { key: "Escape" });
+		type(input, "Accept");
+
+		expect(highlighted(ownList(container))).toBeNull();
+		expect(press(input, "Tab")).toBe(false);
+		expect(input.value).toBe("Accept");
 	});
 
 	it("lands on the first row from ArrowUp too, rather than wrapping", () => {
