@@ -18,7 +18,10 @@
  * Mutation checks: carry no bytes across a chunk boundary in `BackwardLines`
  * and the paging cases lose or garble records; deliver `ForwardLines`' held
  * bytes as a line and the half-written case receives an unparsed line; drop
- * the name check in `checkCursor` and the traversal cases stop refusing.
+ * the name check in `checkCursor` and the traversal cases stop refusing; leave
+ * the offset where it was in `mergeOldestFirst` and the forward paging cases
+ * repeat records (or never end); cut `newer` at the file's end and the jump
+ * case loses t+1.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -630,6 +633,163 @@ describe("readLogs - jump to time", () => {
 		const older = await readLogs(deps, { filter: {}, limit: 5, before: landed.cursor });
 
 		expect(older.records).toEqual(all.slice(41, 46));
+	});
+});
+
+describe("readLogs - forward paging", () => {
+	/** Every `after` page from @p cursor until none remains, oldest first, with each page's furthest `ts`. */
+	async function readAllAfter(
+		readerDeps: LogReaderDeps,
+		options: Omit<ReadLogsOptions, "before" | "around" | "after">,
+		cursor: ReadLogsOptions["after"]
+	): Promise<{ records: LogEntry[]; reached: (string | null)[] }> {
+		const records: LogEntry[] = [];
+		const reached: (string | null)[] = [];
+		let result = await readLogs(readerDeps, { ...options, after: cursor });
+		for (;;) {
+			records.push(...result.records);
+			reached.push(result.scannedTo);
+			if (!result.more) return { records, reached };
+			result = await readLogs(readerDeps, { ...options, after: result.cursor });
+		}
+	}
+
+	it("continues after the time a jump landed on: t+1 then t+2, never t-1 again", async () => {
+		const at = (second: number, src = "engine") =>
+			engineRecord(second, "http", `s${second}`, {}, "info", src);
+		writeLog("engine_20261118_100000.log", [at(8), at(11)]);
+		writeLog("app_20261118_100000.log", [at(9, "app"), at(12, "app")]);
+
+		const landed = await readLogs(deps, { filter: {}, limit: 10, around: tsAt(10) });
+		const after = await readLogs(deps, { filter: {}, limit: 10, after: landed.newer });
+
+		expect(landed.records).toEqual([at(8), at(9, "app")]);
+		expect(after.records).toEqual([at(11), at(12, "app")]);
+		expect(after.more).toBe(false);
+		expect(after.scannedTo).toBe(tsAt(12));
+		expect(landed.newer).toBeDefined();
+	});
+
+	it("answers no `newer` on a read that is not a jump", async () => {
+		writeLog("engine_20261118_100000.log", ENGINE_FIXTURE);
+
+		const newest = await readLogs(deps, { filter: {}, limit: 2 });
+		const older = await readLogs(deps, { filter: {}, limit: 2, before: newest.cursor });
+
+		expect(newest.newer).toBeUndefined();
+		expect(older.newer).toBeUndefined();
+	});
+
+	it.each([1, 7, 50, 65536])(
+		"returns every record after the time once, in ts order, across files and pages (chunk %i bytes)",
+		async (chunkBytes) => {
+			const all: LogFileRecord[] = [];
+			const engine: LogFileRecord[] = [];
+			const app: LogFileRecord[] = [];
+			for (let second = 0; second < 60; second++) {
+				const record =
+					second % 2 === 0
+						? engineRecord(second, "http", `e${second} ✓ 日本語`)
+						: engineRecord(second, "sidecar", `a${second}`, {}, "info", "app");
+				(second % 2 === 0 ? engine : app).push(record);
+				all.push(record);
+			}
+			writeLog("engine_20261118_100000.log", engine);
+			writeLog("app_20261118_100000.log", app);
+			const chunked = { ...deps, chunkBytes };
+
+			const landed = await readLogs(chunked, { filter: {}, limit: 5, around: tsAt(20) });
+			const { records } = await readAllAfter(chunked, { filter: {}, limit: 7 }, landed.newer);
+
+			expect(records).toEqual(all.slice(21));
+		}
+	);
+
+	it("continues on the renamed file after a rotation between pages, then reads the fresh one from its start", async () => {
+		const name = "engine_20261118_100000.log";
+		const first = Array.from({ length: 10 }, (_, second) =>
+			engineRecord(second, "http", `r${second}`)
+		);
+		writeLog(name, first);
+		const landed = await readLogs(deps, { filter: {}, limit: 4, around: tsAt(3) });
+		const page1 = await readLogs(deps, { filter: {}, limit: 3, after: landed.newer });
+		renameSync(path.join(dir, name), path.join(dir, `${name}.1`));
+		const fresh = [engineRecord(10, "http", "after rotation")];
+		writeLog(name, fresh);
+
+		const page2 = await readLogs(deps, { filter: {}, limit: 3, after: page1.cursor });
+		const page3 = await readLogs(deps, { filter: {}, limit: 3, after: page2.cursor });
+
+		expect(page1.records).toEqual(first.slice(4, 7));
+		expect(page2.records).toEqual(first.slice(7, 10));
+		expect(page3.records).toEqual(fresh);
+		expect(page3.more).toBe(false);
+	});
+
+	it("holds back a half-written last line in the live file, and returns it once its newline lands", async () => {
+		const file = path.join(dir, "engine_20261118_100000.log");
+		const whole = line(ENGINE_FIXTURE[1]);
+		writeFileSync(file, line(ENGINE_FIXTURE[0]) + whole.slice(0, 30));
+
+		const first = await readLogs(deps, { filter: {}, limit: 10, after: { files: [] } });
+		appendFileSync(file, whole.slice(30));
+		const second = await readLogs(deps, { filter: {}, limit: 10, after: first.cursor });
+
+		expect(first.records).toEqual([ENGINE_FIXTURE[0]]);
+		expect(first.more).toBe(false);
+		expect(second.records).toEqual([ENGINE_FIXTURE[1]]);
+	});
+
+	it("pages a search forward through many budgets, each one further on, finding the match once", async () => {
+		const noise = Array.from({ length: 300 }, (_, i) => engineRecord(i, "http", "noise"));
+		const needle = engineRecord(300, "oauth", "needle in the newest record");
+		writeLog("engine_20261118_100000.log", [...noise, needle]);
+		const budgeted = { ...deps, scanBudgetBytes: 2048, chunkBytes: 256 };
+
+		const first = await readLogs(budgeted, {
+			filter: { text: "needle" },
+			limit: 100,
+			after: { files: [] },
+		});
+		const { records, reached } = await readAllAfter(
+			budgeted,
+			{ filter: { text: "needle" }, limit: 100 },
+			{ files: [] }
+		);
+
+		expect(first.records).toEqual([]);
+		expect(first.more).toBe(true);
+		expect(records).toEqual([needle]);
+		expect(reached.length).toBeGreaterThan(5);
+		expect(reached).toEqual([...reached].sort());
+		expect(new Set(reached).size).toBe(reached.length);
+		expect(reached[reached.length - 1]).toBe(needle.ts);
+	});
+
+	it("applies the filter", async () => {
+		writeLog("engine_20261118_100000.log", [engineRecord(1, "http", "e1")]);
+		const app = engineRecord(2, "sidecar", "a2", {}, "info", "app");
+		writeLog("app_20261118_100000.log", [app]);
+
+		const result = await readLogs(deps, {
+			filter: { sources: ["app"] },
+			limit: 10,
+			after: { files: [] },
+		});
+
+		expect(result.records).toEqual([app]);
+	});
+
+	it.each<[string, Partial<ReadLogsOptions>]>([
+		["a forward and a backward cursor", { after: { files: [] }, before: { files: [] } }],
+		["a forward cursor and a time", { after: { files: [] }, around: tsAt(0) }],
+		[
+			"a forward cursor with a path",
+			{ after: { files: [{ name: "../x", id: "", offset: 0 }] } },
+		],
+	])("refuses %s", async (_label, overrides) => {
+		writeLog("engine_20261118_100000.log", ENGINE_FIXTURE);
+		await expect(readLogs(deps, { filter: {}, limit: 10, ...overrides })).rejects.toThrow();
 	});
 });
 

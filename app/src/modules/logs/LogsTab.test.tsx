@@ -24,7 +24,7 @@ import { render } from "@/test/render-with-tooltips";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { LogEntry, SaveFileReply } from "@/types/electron";
-import { fakeLogsBridge, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
+import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
 import { useLogsStore } from "./logs-store";
 
@@ -396,6 +396,48 @@ describe("jump to time", () => {
 		await openTab();
 
 		expect(screen.getByRole("button", { name: "Jump" })).toBeDisabled();
+	});
+
+	/** Jump to 10:00:40 over a log holding lines 39 and 41 either side of it. */
+	async function jumpBetween() {
+		await openTab();
+		bridge.answerReads({
+			around: { records: [logRecord(39)], more: true, newer: logCursor(1) },
+			after: { records: [logRecord(41)], more: true, cursor: logCursor(2) },
+		});
+		fireEvent.change(screen.getByLabelText("Jump to time"), {
+			target: { value: "2026-11-18T10:00:40" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Jump" }));
+		await screen.findByText("line 41");
+	}
+
+	it("puts the line after the time in the table, beside the one before it", async () => {
+		await jumpBetween();
+
+		expect(screen.getByText("line 39")).toBeInTheDocument();
+		expect(bridge.logs.read).toHaveBeenLastCalledWith({
+			after: logCursor(1),
+			filter: {},
+			limit: 100,
+		});
+	});
+
+	it("pages newer from Search newer, and follows the tail again once it reaches the end", async () => {
+		await jumpBetween();
+		bridge.answerReads({ after: { records: [logRecord(42)], more: false } });
+
+		fireEvent.click(screen.getByRole("button", { name: "Search newer" }));
+
+		expect(await screen.findByText("line 42")).toBeInTheDocument();
+		expect(bridge.logs.read).toHaveBeenLastCalledWith({
+			after: logCursor(2),
+			filter: {},
+			limit: 1000,
+		});
+		expect(screen.queryByRole("button", { name: "Search newer" })).toBeNull();
+		act(() => bridge.push([logRecord(43)]));
+		expect(await screen.findByText("line 43")).toBeInTheDocument();
 	});
 });
 

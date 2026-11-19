@@ -25,9 +25,16 @@
  * dropped them the list is `detached` from the tail, since a batch appended
  * after a hole would be a lie about what happened between. Following again then
  * means reading afresh, never appending.
+ *
+ * **Jump to time** is detached too, and pages newer from the time it landed
+ * on: one page at once, then one per "Search newer". Paging newer drops the
+ * oldest, as following does; the page that reaches the end of the logs
+ * attaches the tail again, which it restarted before reading so that nothing
+ * written in between is lost.
  */
 
 import { create } from "zustand";
+import { GROWING_WINDOW_STEP } from "@/hooks/useGrowingWindow";
 import type {
 	LogBatch,
 	LogCursor,
@@ -45,6 +52,11 @@ export const LOG_MAX_RECORDS = 10_000;
 export const LOG_MAX_BYTES = 16 * 1024 * 1024;
 /** Lines a read asks for; main clamps to 1000. */
 const LOG_PAGE_SIZE = 1000;
+/**
+ * The page newer a jump reads at once: half the list's window, which renders
+ * the newest lines held, so the window still reaches back past the time.
+ */
+const JUMP_NEWER_PAGE_SIZE = GROWING_WINDOW_STEP / 2;
 
 export type LogLevelName = LogFileRecord["level"];
 
@@ -134,8 +146,16 @@ interface LogsData {
 	dropped: number;
 	/** The newest lines are not all held, so the tail is not appended. */
 	detached: boolean;
+	/**
+	 * Where the next page newer starts, after a jump. Null when there is none to
+	 * read: the list is attached, or it dropped its newest lines paging older.
+	 */
+	newerCursor: LogCursor | null;
+	/** The `ts` of the newest line the last page newer examined, matching or not. */
+	newerScannedTo: string | null;
 	status: "idle" | "loading" | "ready" | "error";
 	loadingOlder: boolean;
+	loadingNewer: boolean;
 	error: string | null;
 	/** Every category any read has returned, for the component filter's options. */
 	knownCategories: string[];
@@ -152,7 +172,9 @@ interface LogsActions {
 	/** Turning it on while detached reads the newest lines afresh. */
 	setFollow: (follow: boolean) => void;
 	loadOlder: () => Promise<void>;
-	/** The newest lines at or before @p ts, an ISO instant. */
+	/** The page after the newest line held, while `newerCursor` says there is one. */
+	loadNewer: () => Promise<void>;
+	/** The lines around @p ts, an ISO instant: the newest at or before it, then a page after. */
 	jumpTo: (ts: string) => Promise<void>;
 	/** Read afresh with the current controls: also the retry after an error. */
 	reload: () => Promise<void>;
@@ -170,8 +192,11 @@ const NOTHING_LOADED = {
 	scannedTo: null,
 	dropped: 0,
 	detached: false,
+	newerCursor: null,
+	newerScannedTo: null,
 	status: "idle",
 	loadingOlder: false,
+	loadingNewer: false,
 	error: null,
 } satisfies Partial<LogsData>;
 
@@ -198,7 +223,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 	function show(
 		result: LogReadResult,
 		late: LogEntry[],
-		attach: { follow: boolean; detached: boolean }
+		attach: Pick<LogsData, "follow" | "detached"> & Partial<Pick<LogsData, "newerCursor">>
 	): void {
 		const all = late.length > 0 ? [...result.records, ...late] : result.records;
 		const { records, bytes } = trimToBound({ records: all, bytes: totalBytes(all) }, "oldest");
@@ -218,7 +243,12 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 
 	function fail(error: unknown): void {
 		buffered = null;
-		set({ status: "error", error: describeFailure(error), loadingOlder: false });
+		set({
+			status: "error",
+			error: describeFailure(error),
+			loadingOlder: false,
+			loadingNewer: false,
+		});
 	}
 
 	/** The newest lines under the current filter, and a tail restarted on that filter. */
@@ -227,7 +257,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		if (!logs) return;
 		const id = ++loadId;
 		const filter = buildLogFilter(get().controls);
-		set({ status: "loading", error: null, loadingOlder: false });
+		set({ status: "loading", error: null, loadingOlder: false, loadingNewer: false });
 		try {
 			// The tail first, so a line written while the read answers waits in
 			// `buffered` instead of falling between the two.
@@ -251,15 +281,75 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		const logs = bridge();
 		if (!logs) return;
 		const id = ++loadId;
-		set({ status: "loading", error: null, loadingOlder: false });
+		set({ status: "loading", error: null, loadingOlder: false, loadingNewer: false });
+		let newer: LogCursor | undefined;
 		try {
 			const filter = buildLogFilter(get().controls);
 			const result = await logs.read({ around: ts, filter, limit: LOG_PAGE_SIZE });
 			if (id !== loadId) return;
-			show(result, [], { follow: false, detached: true });
+			newer = result.newer;
+			show(result, [], { follow: false, detached: true, newerCursor: newer ?? null });
 		} catch (error) {
 			if (id === loadId) fail(error);
 		}
+		if (newer) await pageNewer(logs, id, newer, JUMP_NEWER_PAGE_SIZE);
+	}
+
+	/**
+	 * One page newer than @p after, appended. The tail restarts first, as in
+	 * `reloadFresh`: the page that reaches the end of the logs attaches it, and
+	 * a line written while that page answers waits in `buffered`.
+	 */
+	async function pageNewer(
+		logs: NonNullable<ReturnType<typeof bridge>>,
+		id: number,
+		after: LogCursor,
+		limit: number
+	): Promise<void> {
+		const filter = buildLogFilter(get().controls);
+		set({ loadingNewer: true, error: null });
+		try {
+			await logs.tailStart(filter);
+			if (id !== loadId) return;
+			const waiting: LogEntry[] = [];
+			buffered = waiting;
+			const result = await logs.read({ after, filter, limit });
+			if (id !== loadId) return;
+			buffered = null;
+			appendNewer(after, result, result.more ? [] : withoutRepeats(waiting, result.records));
+		} catch (error) {
+			if (id !== loadId) return;
+			buffered = null;
+			set({ loadingNewer: false, error: describeFailure(error) });
+		}
+	}
+
+	function appendNewer(after: LogCursor, result: LogReadResult, late: LogEntry[]): void {
+		const added = late.length > 0 ? [...result.records, ...late] : result.records;
+		set((state) => {
+			// Paging older dropped the newest lines meanwhile: this page would sit after the hole.
+			if (state.newerCursor !== after) return { loadingNewer: false };
+			const held = trimToBound(
+				{ records: [...state.records, ...added], bytes: state.bytes + totalBytes(added) },
+				"oldest"
+			);
+			return {
+				records: held.records,
+				bytes: held.bytes,
+				detached: result.more,
+				newerCursor: result.more ? result.cursor : null,
+				newerScannedTo: result.scannedTo ?? state.newerScannedTo,
+				loadingNewer: false,
+				knownCategories: withCategories(state.knownCategories, added),
+			};
+		});
+	}
+
+	async function loadNewer(): Promise<void> {
+		const logs = bridge();
+		const { newerCursor, loadingNewer, status } = get();
+		if (!logs || !newerCursor || loadingNewer || status !== "ready") return;
+		await pageNewer(logs, loadId, newerCursor, LOG_PAGE_SIZE);
 	}
 
 	async function loadOlder(): Promise<void> {
@@ -287,6 +377,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 					records: held.records,
 					bytes: held.bytes,
 					detached: state.detached || held.trimmed,
+					newerCursor: held.trimmed ? null : state.newerCursor,
 					cursor: result.cursor,
 					more: result.more,
 					scannedTo: result.scannedTo ?? state.scannedTo,
@@ -368,6 +459,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		},
 
 		loadOlder,
+		loadNewer,
 		jumpTo,
 		reload: reloadFresh,
 	};

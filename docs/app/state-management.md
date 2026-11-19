@@ -2202,8 +2202,11 @@ UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the
   scannedTo: string | null,       // "Searched back to <time>"
   dropped: number,                // lines the tail left out of a batch
   detached: boolean,              // the newest lines are not all held
+  newerCursor: LogCursor | null,  // where "Search newer" continues after a jump
+  newerScannedTo: string | null,  // "Searched forward to <time>"
   status: "idle" | "loading" | "ready" | "error",
   loadingOlder: boolean,
+  loadingNewer: boolean,
   error: string | null,
   knownCategories: string[],      // the component filter's options
   generation: number              // bumps when the list is replaced
@@ -2212,13 +2215,13 @@ UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the
 
 **Key Methods:**
 ```typescript
-const { records, follow, controls, start, stop, setControls, setFollow, loadOlder, jumpTo, reload } =
+const { records, follow, controls, start, stop, setControls, setFollow, loadOlder, loadNewer, jumpTo, reload } =
   useLogsStore();
 ```
 
 **Filters are evaluated in main, never here.** `setControls` rebuilds the filter (`buildLogFilter`, with the search box read by `parseSearchInput` in `modules/logs/parse-search.ts`, a renderer copy of the reader's own that `electron/log-search.conformance.test.ts` holds equal) and, when it differs, restarts the tail with it and replaces the held lines with a fresh read. The tail starts before the read, so a line written while the read answers waits in a buffer and is merged in once, never lost or doubled.
 
-**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB, two bytes per UTF-16 unit of the line as `estimateResponseBytes` counts a body), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
+**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB, two bytes per UTF-16 unit of the line as `estimateResponseBytes` counts a body), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason, and pages newer from where it landed: the `around` read's `newer` cursor feeds one `after` read of 100 lines at once (half the list's window, so the window still reaches back past the time), then one per "Search newer" (`loadNewer`, 1,000). Paging newer drops the oldest. Each page newer restarts the tail before it reads, as a fresh read does, so the page that reaches the end of the logs (`more: false`) appends what the tail delivered meanwhile, once, and attaches: `detached` false, `newerCursor` null, Follow left off until the reader scrolls to the end. Paging older that drops the newest ends paging newer (`newerCursor` null), and a page newer still in flight then lands nowhere, since it would sit after the hole. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
 
 **Every async step checks `loadId` before it writes**, and `stop()` bumps it, so a read that answers after a filter change or after the tab closed lands nowhere. `loadId`, the tail's buffer and the unsubscribe are module variables, not state: nothing renders from them.
 

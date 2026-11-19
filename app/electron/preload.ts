@@ -78,6 +78,7 @@ type LogEntryShape =
 interface LogReadRequestShape {
 	before?: LogCursorShape;
 	around?: string;
+	after?: LogCursorShape;
 	filter: LogFilterShape;
 	limit: number;
 }
@@ -86,6 +87,7 @@ interface LogReadResultShape {
 	cursor: LogCursorShape;
 	more: boolean;
 	scannedTo: string | null;
+	newer?: LogCursorShape;
 }
 interface LogBatchShape {
 	records: LogEntryShape[];

@@ -8,8 +8,8 @@
 /**
  * @file log-reader.ts
  * @brief The main-process reader behind the Logs tab (#3635): a listing of
- *        `<data-dir>/logs/`, a bounded backward page merged across files, and a
- *        polling tail.
+ *        `<data-dir>/logs/`, a bounded page merged across files (backward, or
+ *        forward from a jump), and a polling tail.
  *
  * Electron-free, the `log.ts` / `save-file-ipc.ts` shape: `fs`, the logs
  * directory and the timers arrive as arguments, so it is tested against a temp
@@ -24,8 +24,8 @@
  *
  * Time comes from each record's `ts`, never a file name: the engine stamps its
  * name in local time and the app in UTC, so names do not sort across sources.
- * Within one file records are in time order (one writer per file), which the
- * backward merge and the `around` bisection rely on.
+ * Within one file records are in time order (one writer per file), which both
+ * merges and the `around` bisection rely on.
  */
 
 import path from "path";
@@ -142,11 +142,11 @@ export interface LogFilter {
 }
 
 /**
- * Where a backward read stopped, per file: everything from `offset` to the
- * end of the file as it was first read has been consumed. `id` is the file's
- * device and inode, so a file renamed to `.1` by a rotation between two pages
- * is still found; it is empty where the filesystem reports no inode, and the
- * name is used instead.
+ * Where a read stopped, per file. Backward, everything from `offset` to the
+ * end of the file as it was first read has been consumed; forward, everything
+ * before `offset`. `id` is the file's device and inode, so a file renamed to
+ * `.1` by a rotation between two pages is still found; it is empty where the
+ * filesystem reports no inode, and the name is used instead.
  */
 export interface LogCursorFile {
 	name: string;
@@ -158,24 +158,35 @@ export interface LogCursor {
 	files: LogCursorFile[];
 }
 
+/** At most one of `before`, `around` and `after`; none reads the newest records. */
 export interface ReadLogsOptions {
-	/** Continue from a previous call's `cursor`; files not in it are newer and left to the tail. */
+	/** Continue older from a backward or `around` read's `cursor`; files not in it are newer and left to the tail. */
 	before?: LogCursor;
 	/** Jump to time: answer the newest records at or before this `ts`. */
 	around?: string;
+	/**
+	 * Continue newer from an `after` read's `cursor` or an `around` read's
+	 * `newer`: answer the oldest records past it. Files not in it appeared since
+	 * (a rotation's fresh file, a restarted engine) and are read from their start.
+	 */
+	after?: LogCursor;
 	filter: LogFilter;
 	/** Clamped to `LOG_READ_LIMIT_MAX`. */
 	limit: number;
 }
 
+/** `cursor`, `more` and `scannedTo` point the way the read went: older, or newer for `after`. */
 export interface ReadLogsResult {
 	/** Oldest first. */
 	records: LogEntry[];
+	/** Where the next page in the same direction starts. */
 	cursor: LogCursor;
-	/** Older data remains that this call did not search or did not return. */
+	/** Data remains in that direction that this call did not search or did not return. */
 	more: boolean;
-	/** The `ts` of the oldest record this call examined, matching or not. */
+	/** The `ts` of the furthest record this call examined, matching or not. */
 	scannedTo: string | null;
+	/** An `around` read's: where the records later than the time start, for an `after` read. */
+	newer?: LogCursor;
 }
 
 /** The handle `fs.promises.open` answers, as far as this module uses it. */
@@ -796,14 +807,39 @@ function checkReadOptions(options: ReadLogsOptions): number {
 	if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
 		throw new Error(`A log read limit must be a positive whole number: ${options.limit}`);
 	}
-	if (options.before && options.around !== undefined) {
-		throw new Error("A log read takes `before` or `around`, not both");
+	const anchors = [options.before, options.around, options.after].filter((v) => v !== undefined);
+	if (anchors.length > 1) {
+		throw new Error("A log read takes one of `before`, `around` or `after`, not more");
 	}
 	if (options.around !== undefined && !TS_PATTERN.test(options.around)) {
 		throw new Error(`Not a log timestamp: ${JSON.stringify(options.around)}`);
 	}
 	if (options.before) checkCursor(options.before);
+	if (options.after) checkCursor(options.after);
 	return Math.min(options.limit, LOG_READ_LIMIT_MAX);
+}
+
+/** What one `readLogs` call reads with, shared by both directions. */
+interface ReadContext {
+	deps: LogReaderDeps;
+	files: ScannedFile[];
+	matches: (entry: LogEntry) => boolean;
+	limit: number;
+	budget: number;
+	chunkBytes: number;
+	counter: ScanCounter;
+	/** Every handle the call opened, closed when it answers. */
+	handles: LogFileHandle[];
+}
+
+async function openForRead(context: ReadContext, file: ScannedFile): Promise<LogFileHandle | null> {
+	const handle = await openListed(context.deps, file);
+	if (handle) context.handles.push(handle);
+	return handle;
+}
+
+function cursorEntry(file: ScannedFile, offset: number): LogCursorFile {
+	return { name: file.name, id: file.id, offset };
 }
 
 /** Each file to read and the offset its backward read starts from. */
@@ -835,57 +871,71 @@ async function streamEnd(
 }
 
 /**
- * The newest `limit` records that match the filter and are older than the
- * cursor, merged across every log file by `ts`. Reads backwards in chunks and
- * stops once the call has read its scan budget, so a search through a long
- * history is paged; the returned cursor continues exactly where it stopped.
- * A call always consumes at least one line when any remain, so a page that
- * found nothing still moves `scannedTo` back.
+ * The `limit` records that match the filter nearest the cursor, merged across
+ * every log file by `ts`: the newest older than a `before` or `around` cursor,
+ * or the oldest newer than an `after` one. Reads in chunks and stops once the
+ * call has read its scan budget, so a search through a long history is paged;
+ * the returned cursor continues exactly where it stopped. A call always
+ * consumes at least one line when any remain, so a page that found nothing
+ * still moves `scannedTo` on.
  */
 export async function readLogs(
 	deps: LogReaderDeps,
 	options: ReadLogsOptions
 ): Promise<ReadLogsResult> {
-	const limit = checkReadOptions(options);
-	const matches = compileLogFilter(options.filter);
-	const chunkBytes = deps.chunkBytes ?? CHUNK_BYTES;
-	const budget = deps.scanBudgetBytes ?? LOG_SCAN_BUDGET_BYTES;
-	const counter: ScanCounter = { bytes: 0 };
-	const files = await scanLogFiles(deps);
-	const live = options.before ? new Set<string>() : liveFiles(files);
-	const handles: LogFileHandle[] = [];
+	const context: ReadContext = {
+		deps,
+		limit: checkReadOptions(options),
+		matches: compileLogFilter(options.filter),
+		chunkBytes: deps.chunkBytes ?? CHUNK_BYTES,
+		budget: deps.scanBudgetBytes ?? LOG_SCAN_BUDGET_BYTES,
+		counter: { bytes: 0 },
+		files: await scanLogFiles(deps),
+		handles: [],
+	};
 	try {
-		const streams: BackwardStream[] = [];
-		for (const { file, end: cursorEnd } of filesToRead(files, options.before)) {
-			const handle = await openListed(deps, file);
-			if (!handle) continue;
-			handles.push(handle);
-			const end =
-				cursorEnd ??
-				(await streamEnd(handle, file, options, live.has(file.name), chunkBytes, counter));
-			const lines = new BackwardLines(handle, end, chunkBytes, counter);
-			const stream: BackwardStream = {
-				file,
-				lines,
-				offset: end,
-				head: null,
-				lastKey: NEWEST_KEY,
-			};
-			await loadHead(stream);
-			streams.push(stream);
-		}
-		return await mergeNewestFirst(streams, matches, limit, budget, counter);
+		return options.after
+			? await readForward(context, options.after)
+			: await readBackward(context, options);
 	} finally {
-		await Promise.all(handles.map((handle) => handle.close()));
+		await Promise.all(context.handles.map((handle) => handle.close()));
 	}
+}
+
+async function readBackward(
+	context: ReadContext,
+	options: ReadLogsOptions
+): Promise<ReadLogsResult> {
+	const { files, chunkBytes, counter } = context;
+	const live = options.before ? new Set<string>() : liveFiles(files);
+	const streams: BackwardStream[] = [];
+	/** Where each file was cut: for `around`, where the records later than the time start. */
+	const cut: LogCursorFile[] = [];
+	for (const { file, end: cursorEnd } of filesToRead(files, options.before)) {
+		const handle = await openForRead(context, file);
+		if (!handle) continue;
+		const end =
+			cursorEnd ??
+			(await streamEnd(handle, file, options, live.has(file.name), chunkBytes, counter));
+		cut.push(cursorEntry(file, end));
+		const lines = new BackwardLines(handle, end, chunkBytes, counter);
+		const stream: BackwardStream = {
+			file,
+			lines,
+			offset: end,
+			head: null,
+			lastKey: NEWEST_KEY,
+		};
+		await loadHead(stream);
+		streams.push(stream);
+	}
+	const result = await mergeNewestFirst(streams, context);
+	return options.around === undefined ? result : { ...result, newer: { files: cut } };
 }
 
 async function mergeNewestFirst(
 	streams: BackwardStream[],
-	matches: (entry: LogEntry) => boolean,
-	limit: number,
-	budget: number,
-	counter: ScanCounter
+	{ matches, limit, budget, counter }: ReadContext
 ): Promise<ReadLogsResult> {
 	const newestFirst: LogEntry[] = [];
 	let scannedTo: string | null = null;
@@ -904,11 +954,7 @@ async function mergeNewestFirst(
 		cursor: {
 			files: streams
 				.filter((stream) => stream.offset > 0)
-				.map((stream) => ({
-					name: stream.file.name,
-					id: stream.file.id,
-					offset: stream.offset,
-				})),
+				.map((stream) => cursorEntry(stream.file, stream.offset)),
 		},
 		more: streams.some((stream) => stream.head !== null || stream.lines.hasMore()),
 		scannedTo,
@@ -916,19 +962,25 @@ async function mergeNewestFirst(
 }
 
 // ---------------------------------------------------------------------------
-// Tail
+// Forward read
+
+/** A complete line and where it ends in the chunk it completed in, just past its newline. */
+interface ChunkLine extends RawLine {
+	chunkEnd: number;
+}
 
 /**
- * Splits appended bytes into complete lines. The bytes after the last newline
- * are a line still being written: they wait, as raw bytes, for the newline,
- * so a record is never delivered half-written.
+ * Splits bytes read forward into complete lines. The bytes after the last
+ * newline are a line still being written: they wait, as raw bytes, for the
+ * newline, so a record is never delivered half-written. Shared by the tail and
+ * the forward read.
  */
 class ForwardLines {
 	private carry: Buffer[] = [];
 	private carryBytes = 0;
 
-	push(chunk: Buffer): RawLine[] {
-		const lines: RawLine[] = [];
+	push(chunk: Buffer): ChunkLine[] {
+		const lines: ChunkLine[] = [];
 		let from = 0;
 		for (
 			let newline = chunk.indexOf(NEWLINE);
@@ -936,7 +988,8 @@ class ForwardLines {
 			newline = chunk.indexOf(NEWLINE, from)
 		) {
 			const back = chunk.subarray(from, newline);
-			lines.push(joinLine([...this.carry, back], this.carryBytes + back.length));
+			const line = joinLine([...this.carry, back], this.carryBytes + back.length);
+			lines.push({ ...line, chunkEnd: newline + 1 });
 			this.carry = [];
 			this.carryBytes = 0;
 			from = newline + 1;
@@ -948,7 +1001,182 @@ class ForwardLines {
 		}
 		return lines;
 	}
+
+	holds(): boolean {
+		return this.carryBytes > 0;
+	}
+
+	/** The held bytes as a line: a file no writer appends to may end without a newline. */
+	flush(): RawLine | null {
+		if (this.carryBytes === 0) return null;
+		const line = joinLine(this.carry, this.carryBytes);
+		this.carry = [];
+		this.carryBytes = 0;
+		return line;
+	}
 }
+
+/** A line read forward and the offset of the line after it. */
+interface ForwardLine {
+	line: RawLine;
+	next: number;
+}
+
+/** A file's lines from one offset to another, oldest first, read forward in chunks. */
+class ForwardRange {
+	private readonly splitter = new ForwardLines();
+	private pending: ForwardLine[] = [];
+	private taken = 0;
+
+	constructor(
+		private readonly handle: LogFileHandle,
+		private pos: number,
+		private readonly end: number,
+		private readonly chunkBytes: number,
+		private readonly counter: ScanCounter
+	) {}
+
+	hasMore(): boolean {
+		return this.taken < this.pending.length || this.pos < this.end || this.splitter.holds();
+	}
+
+	async next(): Promise<ForwardLine | null> {
+		while (this.taken === this.pending.length) {
+			if (this.pos >= this.end) return this.takeLastLine();
+			await this.readChunk();
+		}
+		return this.pending[this.taken++];
+	}
+
+	private async readChunk(): Promise<void> {
+		const start = this.pos;
+		const length = Math.min(this.chunkBytes, this.end - start);
+		const chunk = await readAt(this.handle, start, length, this.counter);
+		if (chunk.length !== length) throw new Error("A log file shrank while it was read");
+		this.pos += length;
+		this.pending = this.splitter
+			.push(chunk)
+			.map(({ chunkEnd, ...line }) => ({ line, next: start + chunkEnd }));
+		this.taken = 0;
+	}
+
+	/** At `end`, the bytes after the last newline; a live file's `end` is that newline, so it holds none. */
+	private takeLastLine(): ForwardLine | null {
+		const line = this.splitter.flush();
+		return line ? { line, next: this.end } : null;
+	}
+}
+
+interface ForwardStream {
+	file: ScannedFile;
+	lines: ForwardRange;
+	/** Everything before here has been consumed. */
+	offset: number;
+	head: { entry: LogEntry; key: string; next: number } | null;
+	/** The `ts` of the older neighbour, the merge key of a line that has none. */
+	lastKey: string;
+}
+
+async function loadForwardHead(stream: ForwardStream): Promise<void> {
+	for (;;) {
+		const read = await stream.lines.next();
+		if (read === null) {
+			stream.head = null;
+			return;
+		}
+		const entry = decodeLine(read.line);
+		if (entry === null) {
+			stream.offset = read.next;
+			continue;
+		}
+		const key = isUnparsedLine(entry) ? stream.lastKey : entry.ts;
+		stream.head = { entry, key, next: read.next };
+		return;
+	}
+}
+
+function oldestHead(streams: ForwardStream[]): ForwardStream | null {
+	let oldest: ForwardStream | null = null;
+	for (const stream of streams) {
+		if (stream.head && (oldest === null || stream.head.key < (oldest.head?.key ?? ""))) {
+			oldest = stream;
+		}
+	}
+	return oldest;
+}
+
+/**
+ * Each listed file and the offset its forward read starts from. A file the
+ * cursor does not name appeared after it was made, and one now shorter than
+ * its offset was replaced under the same name: both are read from the start,
+ * as the tail reads them.
+ */
+function forwardStarts(
+	files: ScannedFile[],
+	cursor: LogCursor
+): { file: ScannedFile; start: number }[] {
+	const starts = new Map<ScannedFile, number>();
+	for (const entry of cursor.files) {
+		const file = resolveCursorFile(files, entry);
+		if (file && !starts.has(file)) starts.set(file, entry.offset);
+	}
+	return files.map((file) => {
+		const start = starts.get(file) ?? 0;
+		return { file, start: start > file.size ? 0 : start };
+	});
+}
+
+async function readForward(context: ReadContext, after: LogCursor): Promise<ReadLogsResult> {
+	const { files, chunkBytes, counter } = context;
+	const live = liveFiles(files);
+	const streams: ForwardStream[] = [];
+	for (const { file, start } of forwardStarts(files, after)) {
+		const handle = await openForRead(context, file);
+		if (!handle) continue;
+		const end = live.has(file.name)
+			? await completeLinesEnd(handle, file.size, chunkBytes, counter)
+			: file.size;
+		const stream: ForwardStream = {
+			file,
+			lines: new ForwardRange(handle, start, end, chunkBytes, counter),
+			offset: start,
+			head: null,
+			lastKey: "",
+		};
+		await loadForwardHead(stream);
+		streams.push(stream);
+	}
+	return mergeOldestFirst(streams, context);
+}
+
+async function mergeOldestFirst(
+	streams: ForwardStream[],
+	{ matches, limit, budget, counter }: ReadContext
+): Promise<ReadLogsResult> {
+	const records: LogEntry[] = [];
+	let scannedTo: string | null = null;
+	for (let stream = oldestHead(streams); stream?.head; stream = oldestHead(streams)) {
+		const { entry, key, next } = stream.head;
+		stream.head = null;
+		stream.offset = next;
+		stream.lastKey = key;
+		if (!isUnparsedLine(entry)) scannedTo = entry.ts;
+		if (matches(entry)) records.push(entry);
+		if (records.length >= limit || counter.bytes >= budget) break;
+		await loadForwardHead(stream);
+	}
+	return {
+		records,
+		// Every file read, at its end too: a file the next call finds missing from
+		// the cursor is one that appeared since.
+		cursor: { files: streams.map((stream) => cursorEntry(stream.file, stream.offset)) },
+		more: streams.some((stream) => stream.head !== null || stream.lines.hasMore()),
+		scannedTo,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Tail
 
 interface TailedFile {
 	offset: number;

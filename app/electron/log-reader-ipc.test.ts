@@ -240,6 +240,27 @@ describe("logs:list and logs:read", () => {
 		]);
 	});
 
+	it("reads the page after a jump from the `newer` cursor it returned", async () => {
+		const window = fakeSender(1);
+		const landed = await ipc.invoke(LOGS_READ_CHANNEL, window.event, {
+			filter: {},
+			limit: 10,
+			around: record(0, "x", "y").ts,
+		});
+		const newer = await ipc.invoke(LOGS_READ_CHANNEL, window.event, {
+			filter: {},
+			limit: 10,
+			after: (landed as { newer: unknown }).newer,
+		});
+
+		expect((landed as { records: { msg: string }[] }).records.map((r) => r.msg)).toEqual([
+			"starting",
+		]);
+		expect((newer as { records: { msg: string }[] }).records.map((r) => r.msg)).toEqual([
+			"answered",
+		]);
+	});
+
 	it("applies the filter the renderer sent", async () => {
 		const result = await ipc.invoke(LOGS_READ_CHANNEL, fakeSender(1).event, {
 			filter: { categories: ["http"] },
@@ -321,6 +342,15 @@ describe("a payload of the wrong shape", () => {
 			},
 		],
 		["`around` that is a number", { filter: {}, limit: 10, around: 5 }],
+		["an `after` cursor that is text", { filter: {}, limit: 10, after: "x" }],
+		[
+			"an `after` cursor offset that is text",
+			{
+				filter: {},
+				limit: 10,
+				after: { files: [{ name: "engine_20261118_100000.log", id: "", offset: "0" }] },
+			},
+		],
 	])("is refused on logs:read: %s", async (_name, payload) => {
 		await expect(ipc.invoke(LOGS_READ_CHANNEL, fakeSender(1).event, payload)).rejects.toThrow(
 			/^Refused: a log request /
@@ -355,15 +385,21 @@ describe("a payload of the wrong shape", () => {
 		).rejects.toThrow(/Not a log file name/);
 	});
 
-	it("passes the reader's own refusals through: a cursor with a time to jump to", async () => {
+	it.each<[string, Record<string, unknown>]>([
+		["a cursor with a time to jump to", { before: OK_CURSOR, around: record(1, "x", "y").ts }],
+		["a forward and a backward cursor", { after: OK_CURSOR, before: OK_CURSOR }],
+		[
+			"a forward cursor with a time to jump to",
+			{ after: OK_CURSOR, around: record(1, "x", "y").ts },
+		],
+	])("passes the reader's own refusals through: %s", async (_name, anchors) => {
 		await expect(
 			ipc.invoke(LOGS_READ_CHANNEL, fakeSender(1).event, {
 				filter: {},
 				limit: 10,
-				before: OK_CURSOR,
-				around: record(1, "x", "y").ts,
+				...anchors,
 			})
-		).rejects.toThrow(/not both/);
+		).rejects.toThrow(/one of `before`, `around` or `after`/);
 	});
 
 	it("keeps only the keys a filter has, so nothing else reaches the reader", async () => {

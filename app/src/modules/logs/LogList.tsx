@@ -12,7 +12,9 @@
  * **Follow is the scroll position.** Scrolling off the end turns it off, and
  * reaching the end turns it on again - unless the list is detached from the tail
  * (`logs-store.ts`), where reaching the end of what was paged in must not throw
- * the reader to the newest lines; only the Follow control does that.
+ * the reader to the newest lines; only the Follow control does that. After a
+ * jump, "Search newer" below the last row pages towards them, and the page that
+ * reaches them attaches the tail, so reaching the end follows again.
  *
  * **The window is the newest lines.** `useGrowingWindow` is the app's one list
  * window for rows that are variable-height (an opened row is a block of JSON),
@@ -90,6 +92,34 @@ function OlderBar() {
 					{loadingOlder ? "Searching…" : "Search older"}
 				</Button>
 			)}
+		</div>
+	);
+}
+
+/** After a jump: how far forward the search has got, and the way to go further. */
+function NewerBar() {
+	const newerCursor = useLogsStore((s) => s.newerCursor);
+	const newerScannedTo = useLogsStore((s) => s.newerScannedTo);
+	const loadingNewer = useLogsStore((s) => s.loadingNewer);
+	const loadNewer = useLogsStore((s) => s.loadNewer);
+	if (newerCursor === null) return null;
+
+	return (
+		<div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
+			{newerScannedTo !== null && (
+				<span>
+					Searched forward to <TimeValue value={newerScannedTo} style="datetime" />
+				</span>
+			)}
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				disabled={loadingNewer}
+				onClick={() => void loadNewer()}
+			>
+				{loadingNewer ? "Searching…" : "Search newer"}
+			</Button>
 		</div>
 	);
 }
@@ -177,6 +207,7 @@ export function LogList() {
 					))}
 				</ul>
 			)}
+			<NewerBar />
 		</div>
 	);
 }

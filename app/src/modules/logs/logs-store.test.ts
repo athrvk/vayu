@@ -14,14 +14,16 @@
  *
  * Mutation checks: drop the `trimToBound` call in `receive` and the flood case
  * holds 10,500; drop `tailStop` from `stop` and the unmount case reds; drop the
- * `reloadFresh` call in `setControls` and the filter cases red.
+ * `reloadFresh` call in `setControls` and the filter cases red; keep the list
+ * detached in `appendNewer` and the end-of-the-logs case reds; drop the page
+ * newer from `jumpTo` and the jump puts no line after the time in the list.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
-import type { LogEntry, LogReadRequest } from "@/types/electron";
+import type { LogEntry, LogReadRequest, LogReadResult } from "@/types/electron";
 import { entryBytes } from "./log-entry";
-import { fakeLogsBridge, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
+import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LOG_MAX_BYTES, LOG_MAX_RECORDS, buildLogFilter, useLogsStore } from "./logs-store";
 
 let bridge: FakeLogsBridge;
@@ -32,6 +34,7 @@ function span(from: number, count: number): LogEntry[] {
 }
 
 const state = () => useLogsStore.getState();
+const messages = () => state().records.map((r) => ("msg" in r ? r.msg : ""));
 
 beforeEach(() => {
 	bridge = fakeLogsBridge();
@@ -326,6 +329,39 @@ describe("jump to time", () => {
 		expect(state().records).toHaveLength(3);
 	});
 
+	it("puts the lines after the time in the list: a page newer read at once from the cut", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		const cut = logCursor(10);
+		const further = logCursor(20);
+		bridge.answerReads({
+			around: { records: span(8, 2), more: true, newer: cut },
+			after: {
+				records: span(11, 2),
+				more: true,
+				cursor: further,
+				scannedTo: logRecord(12).ts,
+			},
+		});
+		bridge.logs.tailStart.mockClear();
+
+		await state().jumpTo(logRecord(10).ts);
+
+		expect(bridge.logs.read).toHaveBeenLastCalledWith({ after: cut, filter: {}, limit: 100 });
+		expect(messages()).toEqual(["line 8", "line 9", "line 11", "line 12"]);
+		expect(state()).toMatchObject({
+			follow: false,
+			detached: true,
+			newerCursor: further,
+			newerScannedTo: logRecord(12).ts,
+			loadingNewer: false,
+		});
+		// The tail restarts before the page newer, in case that page reaches the end.
+		expect(bridge.logs.tailStart.mock.invocationCallOrder[0]).toBeLessThan(
+			bridge.logs.read.mock.invocationCallOrder[bridge.logs.read.mock.calls.length - 1]
+		);
+	});
+
 	it("follows again by reading afresh, never by appending", async () => {
 		bridge.answer({ records: span(0, 2) });
 		await state().start();
@@ -339,6 +375,137 @@ describe("jump to time", () => {
 		expect(bridge.logs.tailStart).toHaveBeenCalledTimes(1);
 		expect(state()).toMatchObject({ follow: true });
 		expect((state().records[0] as { msg: string }).msg).toBe("line 300");
+	});
+});
+
+describe("paging newer", () => {
+	/** Jump to a list holding lines 8 and 9, with a page newer that found nothing yet. */
+	async function jumped(): Promise<void> {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		bridge.answerReads({
+			around: { records: span(8, 2), more: true, newer: logCursor(10) },
+			after: { records: [], more: true, cursor: logCursor(11) },
+		});
+		await state().jumpTo(logRecord(10).ts);
+	}
+
+	it("appends the page and stays detached while there is more", async () => {
+		await jumped();
+		bridge.answerReads({ after: { records: span(10, 2), more: true, cursor: logCursor(12) } });
+
+		await state().loadNewer();
+
+		expect(bridge.logs.read).toHaveBeenLastCalledWith({
+			after: logCursor(11),
+			filter: {},
+			limit: 1000,
+		});
+		expect(messages()).toEqual(["line 8", "line 9", "line 10", "line 11"]);
+		expect(state()).toMatchObject({ detached: true, newerCursor: logCursor(12) });
+		bridge.push(span(50, 1));
+		expect(state().records).toHaveLength(4);
+	});
+
+	it("attaches the tail at the end of the logs, keeping a line it delivered during the page once", async () => {
+		await jumped();
+		const repeated = logRecord(11);
+		bridge.logs.read.mockImplementation(async () => {
+			// Delivered after the tail restarted and before the page returned.
+			bridge.push([repeated, logRecord(12)]);
+			return {
+				records: [logRecord(10), repeated],
+				cursor: logCursor(13),
+				more: false,
+				scannedTo: null,
+			};
+		});
+
+		await state().loadNewer();
+
+		expect(messages()).toEqual(["line 8", "line 9", "line 10", "line 11", "line 12"]);
+		expect(state()).toMatchObject({ detached: false, follow: false, newerCursor: null });
+		bridge.push(span(13, 1));
+		expect(messages()).toEqual([
+			"line 8",
+			"line 9",
+			"line 10",
+			"line 11",
+			"line 12",
+			"line 13",
+		]);
+	});
+
+	it("drops the oldest at the bound, as following does", async () => {
+		await jumped();
+		let newer = 0;
+		bridge.logs.read.mockImplementation(async () => {
+			const page = span(100 + 1000 * newer++, 1000);
+			return { records: page, cursor: logCursor(newer), more: true, scannedTo: null };
+		});
+
+		for (let page = 0; page < 10; page++) await state().loadNewer();
+
+		const { records } = state();
+		expect(records).toHaveLength(LOG_MAX_RECORDS);
+		expect((records[records.length - 1] as { msg: string }).msg).toBe("line 10099");
+		expect(records.some((r) => (r as { msg: string }).msg === "line 8")).toBe(false);
+		expect(state()).toMatchObject({ detached: true, newerCursor: logCursor(10) });
+	});
+
+	it("ends when paging older drops the newest lines, and drops a page newer still in flight", async () => {
+		await jumped();
+		let release: (value: LogReadResult) => void = () => {};
+		bridge.logs.read.mockImplementationOnce(
+			() => new Promise((resolve) => (release = resolve))
+		);
+		const paging = state().loadNewer();
+		await waitFor(() => expect(state().loadingNewer).toBe(true));
+		await waitFor(() =>
+			expect(bridge.logs.read).toHaveBeenLastCalledWith(
+				expect.objectContaining({ after: logCursor(11) })
+			)
+		);
+		let older = 0;
+		bridge.logs.read.mockImplementation(async () => ({
+			records: span(-1000 * ++older, 1000),
+			cursor: { files: [] },
+			more: true,
+			scannedTo: null,
+		}));
+		for (let page = 0; page < 10; page++) await state().loadOlder();
+		expect(state()).toMatchObject({ detached: true, newerCursor: null });
+
+		release({ records: span(10, 5), cursor: logCursor(15), more: false, scannedTo: null });
+		await paging;
+
+		expect(state()).toMatchObject({ detached: true, newerCursor: null, loadingNewer: false });
+		expect(state().records.some((r) => (r as { msg: string }).msg === "line 10")).toBe(false);
+	});
+
+	it("asks nothing when there is no page newer", async () => {
+		bridge.answer({ records: span(0, 1) });
+		await state().start();
+		bridge.logs.read.mockClear();
+
+		await state().loadNewer();
+
+		expect(bridge.logs.read).not.toHaveBeenCalled();
+	});
+
+	it("reports a page that fails and keeps what is held", async () => {
+		await jumped();
+		bridge.logs.read.mockRejectedValueOnce(new Error("disk went away"));
+
+		await state().loadNewer();
+
+		expect(state()).toMatchObject({
+			status: "ready",
+			loadingNewer: false,
+			newerCursor: logCursor(11),
+			error: "Couldn't read the logs - disk went away",
+		});
+		expect(state().records).toHaveLength(2);
 	});
 });
 
