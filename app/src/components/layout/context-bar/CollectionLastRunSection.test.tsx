@@ -91,6 +91,19 @@ describe("CollectionLastRunSection", () => {
 		expect(label.className).toContain("text-status-error-text");
 	});
 
+	// #3643: a failed status is the verdict, so the name says it once.
+	it.each([
+		["no summary", undefined],
+		["failed steps", { passed: 1, failed: 2 }],
+	] as const)("says a failed run once in its name, with %s", (_name, resultSummary) => {
+		response = envelope([run("run_1", { status: "failed", resultSummary } as Partial<Run>)]);
+		render(<CollectionLastRunSection tab={TAB} />);
+
+		const name = screen.getByRole("button").getAttribute("aria-label");
+		expect(name).toMatch(/^Open collection run, failed, 3 steps, /);
+		expect(name).not.toMatch(/verdict/);
+	});
+
 	describe("a completed run whose steps did not all pass (#3496)", () => {
 		it.each([
 			["failed", { passed: 27, failed: 6 }],

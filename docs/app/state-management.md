@@ -2134,7 +2134,10 @@ choosing one client does not hide the others.
 sent as `GET /runs?outcome=` through `useRunsQuery`'s sixth argument, and
 `filterRuns` re-applies it from the row's stored `outcome`, or from `rowOutcome`
 for a row without one (`rowStoredOutcome`, `run-outcome.ts`). A row the history
-draws no verdict for matches none of the three values.
+draws no verdict for matches none of the three values. A `failed` status is
+`failed` for every run type, summary or not (#3643), but a failed row stored
+before the column has no stored outcome: `rowOutcome` draws it failed, while the
+engine's `outcome=failed` page does not return it, so the filter does not list it.
 
 **Key Methods:**
 ```typescript
@@ -2644,7 +2647,8 @@ click; refetching either removes it or proves it real.
   `nextBefore: null` ends the paging. `q` is the
   optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
   all) is `GET /runs?origin=`, and `outcome` (`"passed"`, `"failed"` or
-  `"not_judged"`, #3547) is `GET /runs?outcome=`. `type`, `status` and `outcome`
+  `"not_judged"`, #3547) is `GET /runs?outcome=`; the engine stores `failed` for
+  every failed run, but not for one stored before the column (#3643). `type`, `status` and `outcome`
   join the query key only when set, so the unfiltered list keeps its entry.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
     only page 1 is loaded, **off** once the user has paged older runs in.

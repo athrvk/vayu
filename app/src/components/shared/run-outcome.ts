@@ -328,12 +328,30 @@ const STORED_OF_OUTCOME: Record<RunOutcome, StoredRunOutcome> = {
 };
 
 /**
- * The verdict a history list row can state from its own `resultSummary`. Only a
- * terminal load or collection run's row carries one; every other row, and a row
- * from an engine that predates the summary, answers `null` and keeps its status
- * glyph. A clean collection row also answers `null`, met budgets included.
+ * A `failed` status is the verdict, for every run type and with or without a
+ * summary (#3643): the list draws the failed mark from the status alone, so the
+ * verdict cannot depend on a summary the run may have died before writing. The
+ * reason is the unnamed budget miss when the row's own `verdict` says one was
+ * missed, and "failed before it finished" otherwise - a design row's summary
+ * carries no verdict, so it never reads one.
+ */
+function failedRowOutcome(run: Run): RunJudgement {
+	const verdict = run.type === "design" ? undefined : run.resultSummary?.verdict;
+	const budgets: Budgets =
+		verdict === "failed" ? { state: "missed", names: [] } : { state: "none" };
+	return { outcome: "failed", reason: failedReason(budgets) };
+}
+
+/**
+ * The verdict a history list row can state from its own `status` and
+ * `resultSummary`. A failed row is always `failed` (see {@link failedRowOutcome});
+ * past that, only a terminal load or collection run's row carries a summary, so
+ * every other row, and a row from an engine that predates the summary, answers
+ * `null` and keeps its status glyph. A clean collection row also answers `null`,
+ * met budgets included.
  */
 function derivedRowOutcome(run: Run): RunJudgement | null {
+	if (run.status === "failed") return failedRowOutcome(run);
 	if (!run.resultSummary) return null;
 	if (run.type === "scenario") {
 		const { verdict } = run.resultSummary;
@@ -362,9 +380,13 @@ function derivedRowOutcome(run: Run): RunJudgement | null {
  * renderer that agree, and a generic line otherwise.
  *
  * A row with no stored outcome - one stored before the column, or one the
- * engine judged nothing about - is derived from its `resultSummary` alone, the
- * rule the engine's `judge_run_row` is held to by
- * `engine/tests/fixtures/run-row-outcome-conformance.json`.
+ * engine judged nothing about - is derived from its `status` and `resultSummary`
+ * alone, the rule the engine's `judge_run_row` is held to by
+ * `engine/tests/fixtures/run-row-outcome-conformance.json`. A row stored before
+ * the column that failed therefore wears `failed` here though its stored
+ * column stays NULL: the engine's `GET /runs?outcome=failed` does not list it,
+ * so the History outcome filter, which fetches through that param, misses it
+ * (#3643).
  */
 export function rowOutcome(run: Run): RunJudgement | null {
 	const derived = derivedRowOutcome(run);
@@ -372,6 +394,21 @@ export function rowOutcome(run: Run): RunJudgement | null {
 	const outcome = OUTCOME_OF_STORED[run.outcome];
 	if (!outcome) return derived;
 	return derived?.outcome === outcome ? derived : { outcome, reason: STORED_OUTCOME_REASON };
+}
+
+/**
+ * The verdict as a lowercase word to say beside the status word (`completed,
+ * verdict failed`), or `null` when it would add nothing: no verdict, or a
+ * `failed` status that already says it. A failed status always judges failed
+ * (#3643), so the pair would read "failed, verdict failed".
+ */
+export function verdictBesideStatus(
+	status: Run["status"],
+	judgement: RunJudgement | null
+): string | null {
+	if (!judgement) return null;
+	if (status === "failed" && judgement.outcome === "failed") return null;
+	return OUTCOME_TITLE[judgement.outcome].toLowerCase();
 }
 
 /**

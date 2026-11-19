@@ -208,6 +208,30 @@ describe("a load run whose elements errored and whose assertions held (#3537)", 
 	});
 });
 
+// #3643: a failed status is the verdict, so the name says it once.
+describe("a failed run's accessible name", () => {
+	it.each([
+		["with no summary", {}],
+		[
+			"with a failed budget verdict",
+			{ resultSummary: { rps: 485, verdict: "failed" as const } },
+		],
+	])("says failed once %s", (_name, over) => {
+		renderRow(loadRun({ status: "failed", ...over }));
+
+		const name = screen.getByRole("button", { name: /^Open Load test, failed/ });
+		expect(name.getAttribute("aria-label")).not.toMatch(/verdict/);
+	});
+
+	it("still says the verdict of a completed run beside its status", () => {
+		renderRow(loadRun({ resultSummary: { rps: 485, verdict: "failed" } }));
+
+		expect(
+			screen.getByRole("button", { name: /^Open Load test, completed, verdict failed/ })
+		).toBeInTheDocument();
+	});
+});
+
 describe("a load run's verdict glyph", () => {
 	const tick = glyphShape(loadRun());
 

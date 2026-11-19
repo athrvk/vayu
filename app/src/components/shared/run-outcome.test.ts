@@ -55,6 +55,12 @@
  * case reddens. The row-outcome replay reddens on any derivation that parts
  * from `run-row-outcome-conformance.json`, the engine's table: let a clean
  * collection row read `passed`, or a stopped collection row `failed`.
+ *
+ * A failed status (#3643): take the `failed` branch out of `derivedRowOutcome`
+ * and the failed-status row cases and the fixture's failed-status cases redden;
+ * let `verdictBesideStatus` answer for a failed status and its own case and the
+ * `verdict failed` suffix the palette, history, welcome and context-bar rows
+ * must not carry redden.
  */
 
 import { readFileSync } from "node:fs";
@@ -69,7 +75,9 @@ import {
 	reportOutcome,
 	rowOutcome,
 	rowStoredOutcome,
+	verdictBesideStatus,
 	type RunJudgement,
+	type RunOutcome,
 	type RunOutcomeInput,
 } from "./run-outcome";
 
@@ -831,10 +839,70 @@ describe("rowOutcome", () => {
 		expect(rowOutcome(row({}))).toBeNull();
 	});
 
-	it("says nothing for a design row, whatever it carries", () => {
+	it("says nothing for a design row that did not fail, whatever it carries", () => {
 		expect(
 			rowOutcome(row({ type: "design", resultSummary: { statusCode: 500, latencyMs: 3 } }))
 		).toBeNull();
+	});
+
+	// #3643: the status is the verdict of a failed run, so no summary - and no run
+	// type - can leave it without one.
+	describe("a row whose status is failed", () => {
+		const SUMMARY_FREE_REASON = "The run failed before it finished";
+
+		it.each<[string, Partial<Run>]>([
+			["a load row with no summary", { type: "load" }],
+			["a load row with an empty summary", { type: "load", resultSummary: {} }],
+			["a scenario row with no summary", { type: "scenario" }],
+			["a design row with no summary", { type: "design" }],
+			[
+				"a design row with a result",
+				{ type: "design", resultSummary: { statusCode: 500, latencyMs: 3 } },
+			],
+			[
+				"a scenario row whose counts are clean",
+				{ type: "scenario", resultSummary: { passed: 3 } },
+			],
+		])("is failed for %s", (_name, over) => {
+			expect(rowOutcome(row({ ...over, status: "failed" }))).toEqual({
+				outcome: "failed",
+				reason: SUMMARY_FREE_REASON,
+			});
+		});
+
+		it.each<[string, Partial<Run>]>([
+			["a load row", { type: "load", resultSummary: { verdict: "failed" } }],
+			["a scenario row", { type: "scenario", resultSummary: { verdict: "failed" } }],
+		])("keeps the missed-budget reason of %s", (_name, over) => {
+			expect(rowOutcome(row({ ...over, status: "failed" }))).toEqual({
+				outcome: "failed",
+				reason: "Budgets missed",
+			});
+		});
+
+		it("stays failed whatever the summary would have judged", () => {
+			expect(
+				rowOutcome(
+					row({
+						status: "failed",
+						resultSummary: { errorRate: 0, verdict: "passed" },
+					})
+				)?.outcome
+			).toBe("failed");
+		});
+
+		it("is stored as failed, so the outcome filter lists it", () => {
+			expect(rowStoredOutcome(row({ type: "design", status: "failed" }))).toBe("failed");
+		});
+
+		it("derives failed for a row stored before the column, and defers to a stored outcome", () => {
+			const legacy = row({ type: "load", status: "failed" });
+			expect(legacy.outcome).toBeUndefined();
+			expect(rowOutcome(legacy)?.outcome).toBe("failed");
+			expect(rowOutcome({ ...legacy, outcome: "failed" })?.reason).toBe(
+				"The run failed before it finished"
+			);
+		});
 	});
 
 	// #3458: a collection row is failed when a step failed or errored; #3539: or
@@ -897,7 +965,6 @@ describe("rowOutcome", () => {
 			expect(rowOutcome(row({ type: "scenario" }))).toBeNull();
 			expect(rowOutcome(collection({ failed: 2 }, "stopped"))).toBeNull();
 			expect(rowOutcome(collection({ passed: 3, verdict: "failed" }, "stopped"))).toBeNull();
-			expect(rowOutcome(collection({ passed: 3, verdict: "failed" }, "failed"))).toBeNull();
 		});
 	});
 });
@@ -1094,7 +1161,7 @@ describe("row outcome conformance", () => {
 	const CASES = (JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: RowCase[] }).cases;
 
 	it("replays every case of the fixture", () => {
-		expect(CASES.length).toBeGreaterThanOrEqual(27);
+		expect(CASES.length).toBeGreaterThanOrEqual(33);
 	});
 
 	it.each(CASES.map((c) => [c.name, c] as const))("%s", (_name, c) => {
@@ -1104,6 +1171,26 @@ describe("row outcome conformance", () => {
 			resultSummary: c.resultSummary,
 		} as Partial<Run>);
 		expect(rowStoredOutcome(derived)).toBe(c.expected);
+	});
+});
+
+describe("verdictBesideStatus", () => {
+	const judged = (outcome: RunOutcome) => ({ outcome, reason: "x" });
+
+	it("says the verdict a status word does not already say", () => {
+		expect(verdictBesideStatus("completed", judged("failed"))).toBe("failed");
+		expect(verdictBesideStatus("completed", judged("not-judged"))).toBe("not judged");
+		expect(verdictBesideStatus("completed", judged("passed"))).toBe("passed");
+		expect(verdictBesideStatus("stopped", judged("not-judged"))).toBe("not judged");
+	});
+
+	it("is silent beside a failed status, which is the verdict", () => {
+		expect(verdictBesideStatus("failed", judged("failed"))).toBeNull();
+	});
+
+	it("is silent when there is no verdict", () => {
+		expect(verdictBesideStatus("completed", null)).toBeNull();
+		expect(verdictBesideStatus("failed", null)).toBeNull();
 	});
 });
 

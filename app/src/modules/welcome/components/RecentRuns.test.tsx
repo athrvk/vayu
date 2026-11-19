@@ -226,6 +226,24 @@ describe("RecentRuns", () => {
 			}
 		);
 
+		// #3643: a failed status is the verdict, so the name says it once.
+		it.each([
+			["a load run with no summary", () => run({ status: "failed" })],
+			[
+				"a collection run with no summary",
+				() => collectionRun({ status: "failed", resultSummary: undefined }),
+			],
+			["a collection run with failed steps", () => collectionRun({ status: "failed" })],
+		])("says Failed once for %s, with no verdict word", (_name, make) => {
+			render(<RecentRuns runs={[make()]} />);
+
+			const word = screen.getByText("Failed");
+			expect([...word.classList]).toContain("text-status-error-text");
+			const name = screen.getByRole("button").getAttribute("aria-label");
+			expect(name).toMatch(/, failed$/);
+			expect(name).not.toMatch(/verdict/);
+		});
+
 		it("stays green and states no verdict when every step passed", () => {
 			render(
 				<RecentRuns
