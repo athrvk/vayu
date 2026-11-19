@@ -94,6 +94,28 @@ export interface LogFileInfo {
  */
 export const RAW_LINE_KEY = "$raw";
 
+/**
+ * The key every line the reader delivers carries its place in its file under,
+ * so a page can be continued from any line the renderer still holds (#3652).
+ * `$`-prefixed for the reason `RAW_LINE_KEY` is, and mirrored and held equal
+ * the same way (`log-raw-line.conformance.test.ts`). An unparsed line carries
+ * it under the same key.
+ */
+export const POSITION_KEY = "$pos";
+
+/**
+ * Where a delivered line sits. `name` and `id` are the file's, as a cursor
+ * entry names it (`LogCursorFile`); `start` is the offset of the line's first
+ * byte, and `end` the offset just past its newline, or the file's end for a
+ * last line that has none.
+ */
+export interface LogLinePosition {
+	name: string;
+	id: string;
+	start: number;
+	end: number;
+}
+
 /** One line of a log file that is a record (`docs/engine/log-record.schema.json`). */
 export interface LogFileRecord {
 	ts: string;
@@ -105,6 +127,8 @@ export interface LogFileRecord {
 	tid?: string;
 	/** The line as the file holds it, cut at `RECORD_MAX_BYTES`. Absent on a record built outside the reader. */
 	[RAW_LINE_KEY]?: string;
+	/** Absent on a record built outside the reader. */
+	[POSITION_KEY]?: LogLinePosition;
 	[field: string]: unknown;
 }
 
@@ -112,6 +136,8 @@ export interface LogFileRecord {
 export interface UnparsedLogLine {
 	unparsed: true;
 	raw: string;
+	/** Absent on a line built outside the reader. */
+	[POSITION_KEY]?: LogLinePosition;
 }
 
 export type LogEntry = LogFileRecord | UnparsedLogLine;
@@ -346,6 +372,8 @@ interface RawLine {
 interface PositionedLine extends RawLine {
 	/** Byte offset of the line's first byte in its file. */
 	start: number;
+	/** Byte offset just past the line's newline, or the end of what was read when none follows. */
+	end: number;
 }
 
 async function readAt(
@@ -466,14 +494,33 @@ function decodeLine(line: RawLine): LogEntry | null {
 	return record;
 }
 
+/** `decodeLine`, with the line's place in @p file attached under `POSITION_KEY`. */
+function decodeInFile(line: PositionedLine, file: ScannedFile): LogEntry | null {
+	const entry = decodeLine(line);
+	if (entry) {
+		entry[POSITION_KEY] = { name: file.name, id: file.id, start: line.start, end: line.end };
+	}
+	return entry;
+}
+
 // ---------------------------------------------------------------------------
 // Filter
 
 /**
  * Keys free text does not search: the table shows them in columns of their own,
- * and the raw line repeats every field, so it would match on key names.
+ * the raw line repeats every field, so it would match on key names, and the
+ * position names the file.
  */
-const TEXT_EXCLUDED_KEYS = new Set(["ts", "level", "src", "cat", "pid", "tid", RAW_LINE_KEY]);
+const TEXT_EXCLUDED_KEYS = new Set([
+	"ts",
+	"level",
+	"src",
+	"cat",
+	"pid",
+	"tid",
+	RAW_LINE_KEY,
+	POSITION_KEY,
+]);
 
 function containsText(value: unknown, needle: string): boolean {
 	if (typeof value === "string") return value.toLowerCase().includes(needle);
@@ -588,7 +635,7 @@ class BackwardLines {
 
 	constructor(
 		private readonly handle: LogFileHandle,
-		end: number,
+		private readonly end: number,
 		private readonly chunkBytes: number,
 		private readonly counter: ScanCounter
 	) {
@@ -626,12 +673,12 @@ class BackwardLines {
 		}
 		while (newline !== -1) {
 			const bytes = chunk.subarray(newline + 1, end);
-			newestFirst.push({
-				start: start + newline + 1,
-				bytes,
-				length: bytes.length,
-				oversize: false,
-			});
+			newestFirst.push(
+				this.positioned(
+					{ bytes, length: bytes.length, oversize: false },
+					start + newline + 1
+				)
+			);
 			end = newline;
 			newline = lastNewlineBefore(chunk, end);
 		}
@@ -654,7 +701,16 @@ class BackwardLines {
 		const line = joinLine([front, ...this.carry], front.length + this.carryBytes);
 		this.carry = [];
 		this.carryBytes = 0;
-		return { ...line, start };
+		return this.positioned(line, start);
+	}
+
+	/**
+	 * A line ends just past its newline, unless it runs up to the offset this
+	 * read started from: no newline came before that offset, so it is the file's
+	 * end and the line ends there.
+	 */
+	private positioned(line: RawLine, start: number): PositionedLine {
+		return { ...line, start, end: Math.min(start + line.length + 1, this.end) };
 	}
 }
 
@@ -753,7 +809,7 @@ async function loadHead(stream: BackwardStream): Promise<void> {
 			stream.head = null;
 			return;
 		}
-		const entry = decodeLine(line);
+		const entry = decodeInFile(line, stream.file);
 		if (entry === null) {
 			stream.offset = line.start;
 			continue;
@@ -965,23 +1021,27 @@ async function mergeNewestFirst(
 // ---------------------------------------------------------------------------
 // Forward read
 
-/** A complete line and where it ends in the chunk it completed in, just past its newline. */
-interface ChunkLine extends RawLine {
-	chunkEnd: number;
-}
-
 /**
  * Splits bytes read forward into complete lines. The bytes after the last
  * newline are a line still being written: they wait, as raw bytes, for the
  * newline, so a record is never delivered half-written. Shared by the tail and
- * the forward read.
+ * the forward read, which push the file's bytes in order from @p start.
  */
 class ForwardLines {
 	private carry: Buffer[] = [];
 	private carryBytes = 0;
+	/** Where the held line starts in the file. */
+	private lineStart: number;
+	/** Just past the last byte pushed. */
+	private pos: number;
 
-	push(chunk: Buffer): ChunkLine[] {
-		const lines: ChunkLine[] = [];
+	constructor(start: number) {
+		this.lineStart = start;
+		this.pos = start;
+	}
+
+	push(chunk: Buffer): PositionedLine[] {
+		const lines: PositionedLine[] = [];
 		let from = 0;
 		for (
 			let newline = chunk.indexOf(NEWLINE);
@@ -990,11 +1050,14 @@ class ForwardLines {
 		) {
 			const back = chunk.subarray(from, newline);
 			const line = joinLine([...this.carry, back], this.carryBytes + back.length);
-			lines.push({ ...line, chunkEnd: newline + 1 });
+			const end = this.pos + newline + 1;
+			lines.push({ ...line, start: this.lineStart, end });
+			this.lineStart = end;
 			this.carry = [];
 			this.carryBytes = 0;
 			from = newline + 1;
 		}
+		this.pos += chunk.length;
 		const rest = chunk.subarray(from);
 		if (rest.length > 0) {
 			this.carryBytes += rest.length;
@@ -1008,25 +1071,24 @@ class ForwardLines {
 	}
 
 	/** The held bytes as a line: a file no writer appends to may end without a newline. */
-	flush(): RawLine | null {
+	flush(): PositionedLine | null {
 		if (this.carryBytes === 0) return null;
-		const line = joinLine(this.carry, this.carryBytes);
+		const line = {
+			...joinLine(this.carry, this.carryBytes),
+			start: this.lineStart,
+			end: this.pos,
+		};
+		this.lineStart = this.pos;
 		this.carry = [];
 		this.carryBytes = 0;
 		return line;
 	}
 }
 
-/** A line read forward and the offset of the line after it. */
-interface ForwardLine {
-	line: RawLine;
-	next: number;
-}
-
 /** A file's lines from one offset to another, oldest first, read forward in chunks. */
 class ForwardRange {
-	private readonly splitter = new ForwardLines();
-	private pending: ForwardLine[] = [];
+	private readonly splitter: ForwardLines;
+	private pending: PositionedLine[] = [];
 	private taken = 0;
 
 	constructor(
@@ -1035,13 +1097,15 @@ class ForwardRange {
 		private readonly end: number,
 		private readonly chunkBytes: number,
 		private readonly counter: ScanCounter
-	) {}
+	) {
+		this.splitter = new ForwardLines(pos);
+	}
 
 	hasMore(): boolean {
 		return this.taken < this.pending.length || this.pos < this.end || this.splitter.holds();
 	}
 
-	async next(): Promise<ForwardLine | null> {
+	async next(): Promise<PositionedLine | null> {
 		while (this.taken === this.pending.length) {
 			if (this.pos >= this.end) return this.takeLastLine();
 			await this.readChunk();
@@ -1055,16 +1119,13 @@ class ForwardRange {
 		const chunk = await readAt(this.handle, start, length, this.counter);
 		if (chunk.length !== length) throw new Error("A log file shrank while it was read");
 		this.pos += length;
-		this.pending = this.splitter
-			.push(chunk)
-			.map(({ chunkEnd, ...line }) => ({ line, next: start + chunkEnd }));
+		this.pending = this.splitter.push(chunk);
 		this.taken = 0;
 	}
 
 	/** At `end`, the bytes after the last newline; a live file's `end` is that newline, so it holds none. */
-	private takeLastLine(): ForwardLine | null {
-		const line = this.splitter.flush();
-		return line ? { line, next: this.end } : null;
+	private takeLastLine(): PositionedLine | null {
+		return this.splitter.flush();
 	}
 }
 
@@ -1080,18 +1141,18 @@ interface ForwardStream {
 
 async function loadForwardHead(stream: ForwardStream): Promise<void> {
 	for (;;) {
-		const read = await stream.lines.next();
-		if (read === null) {
+		const line = await stream.lines.next();
+		if (line === null) {
 			stream.head = null;
 			return;
 		}
-		const entry = decodeLine(read.line);
+		const entry = decodeInFile(line, stream.file);
 		if (entry === null) {
-			stream.offset = read.next;
+			stream.offset = line.end;
 			continue;
 		}
 		const key = isUnparsedLine(entry) ? stream.lastKey : entry.ts;
-		stream.head = { entry, key, next: read.next };
+		stream.head = { entry, key, next: line.end };
 		return;
 	}
 }
@@ -1237,7 +1298,7 @@ export async function createLogTail(deps: LogTailDeps, options: LogTailOptions):
 			// From the end of its last complete line, so a line mid-write when the
 			// tail starts is delivered whole once its newline arrives.
 			const offset = await completeLinesEnd(handle, file.size, chunkBytes, counter);
-			tracked.set(tailKey(file), { offset, lines: new ForwardLines(), lastKey: "" });
+			tracked.set(tailKey(file), { offset, lines: new ForwardLines(offset), lastKey: "" });
 		} finally {
 			await handle.close();
 		}
@@ -1262,7 +1323,7 @@ export async function createLogTail(deps: LogTailDeps, options: LogTailOptions):
 				if (chunk.length === 0) break;
 				state.offset += chunk.length;
 				for (const line of state.lines.push(chunk)) {
-					const entry = decodeLine(line);
+					const entry = decodeInFile(line, file);
 					if (entry === null) continue;
 					if (!isUnparsedLine(entry)) state.lastKey = entry.ts;
 					if (matches(entry)) collected.push({ entry, key: state.lastKey });
@@ -1289,7 +1350,7 @@ export async function createLogTail(deps: LogTailDeps, options: LogTailOptions):
 			seen.add(key);
 			let state = tracked.get(key);
 			if (!state || file.size < state.offset) {
-				state = { offset: 0, lines: new ForwardLines(), lastKey: "" };
+				state = { offset: 0, lines: new ForwardLines(0), lastKey: "" };
 				tracked.set(key, state);
 			}
 			if (file.size === state.offset || poll.bytes >= budget) continue;

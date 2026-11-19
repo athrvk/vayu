@@ -27,11 +27,21 @@ export function isUnparsedEntry(entry: LogEntry): entry is UnparsedLogLine {
 export const RAW_LINE_KEY = "$raw";
 
 /**
+ * Where every line the reader delivers carries its place in its file
+ * (`POSITION_KEY` in `electron/log-reader.ts`, held equal the same way). Like
+ * the raw line, it is not a field: nothing draws, copies or exports it.
+ */
+export const POSITION_KEY = "$pos";
+
+/** What the reader attaches to a record, which is not the record's own. */
+const READER_KEYS = new Set([RAW_LINE_KEY, POSITION_KEY]);
+
+/**
  * The keys the `key=value` text leaves out: the table's columns, and `pid` and
  * `tid`, which `electron/log.ts`'s text renderer leaves out too (the opened
- * row's JSON shows them), and the raw line.
+ * row's JSON shows them), and what the reader attached.
  */
-const COLUMN_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid", RAW_LINE_KEY]);
+const COLUMN_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid", ...READER_KEYS]);
 
 /** The record's fields that have no column, as `key=value` pairs. */
 export function fieldsText(record: LogFileRecord): string {
@@ -43,12 +53,12 @@ export function fieldsText(record: LogFileRecord): string {
 		.join(" ");
 }
 
-/** The record's own fields, without the raw line it carries. */
+/** The record's own fields, without what the reader attached. */
 function recordFields(record: LogFileRecord): Record<string, unknown> {
-	return Object.fromEntries(Object.entries(record).filter(([key]) => key !== RAW_LINE_KEY));
+	return Object.fromEntries(Object.entries(record).filter(([key]) => !READER_KEYS.has(key)));
 }
 
-/** The record as the opened row shows it: its fields, without the raw line. */
+/** The record as the opened row shows it: its fields, without what the reader attached. */
 export function recordJson(record: LogFileRecord): string {
 	return JSON.stringify(recordFields(record), null, 2);
 }
@@ -60,7 +70,9 @@ export function recordJson(record: LogFileRecord): string {
  */
 export function entryLine(entry: LogEntry): string {
 	if (isUnparsedEntry(entry)) return entry.raw;
-	return typeof entry[RAW_LINE_KEY] === "string" ? entry[RAW_LINE_KEY] : JSON.stringify(entry);
+	return typeof entry[RAW_LINE_KEY] === "string"
+		? entry[RAW_LINE_KEY]
+		: JSON.stringify(recordFields(entry));
 }
 
 /**
@@ -87,14 +99,18 @@ const sizes = new WeakMap<LogEntry, number>();
  * What a held line costs, as a documented estimate and not a measurement: two
  * bytes per UTF-16 code unit, the count `estimateResponseBytes`
  * (`stores/response-store.ts`) uses for a body. A record counts as itself
- * serialised, which takes in both its parsed fields and the raw line it
- * carries; an unparsed line counts as its raw text. Cached per object, so a
- * bound that is re-checked on every batch stringifies a line once.
+ * serialised, which takes in its parsed fields, the raw line and the position
+ * it carries; an unparsed line counts as its raw text and its position
+ * serialised. Cached per object, so a bound that is re-checked on every batch
+ * stringifies a line once.
  */
 export function entryBytes(entry: LogEntry): number {
 	let bytes = sizes.get(entry);
 	if (bytes === undefined) {
-		bytes = (isUnparsedEntry(entry) ? entry.raw : JSON.stringify(entry)).length * 2;
+		const units = isUnparsedEntry(entry)
+			? entry.raw.length + (JSON.stringify(entry[POSITION_KEY]) ?? "").length
+			: JSON.stringify(entry).length;
+		bytes = units * 2;
 		sizes.set(entry, bytes);
 	}
 	return bytes;

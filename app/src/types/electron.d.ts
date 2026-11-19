@@ -286,6 +286,8 @@ export interface LogFileRecord {
 	tid?: string;
 	/** The line as the file holds it, cut at 256 KiB. Mirrors `RAW_LINE_KEY` in `electron/log-reader.ts`. */
 	$raw?: string;
+	/** Where the line sits in its file. Mirrors `POSITION_KEY` in `electron/log-reader.ts`. */
+	$pos?: LogLinePosition;
 	[field: string]: unknown;
 }
 
@@ -293,6 +295,21 @@ export interface LogFileRecord {
 export interface UnparsedLogLine {
 	unparsed: true;
 	raw: string;
+	/** Where the line sits in its file, under the key a record carries it under. */
+	$pos?: LogLinePosition;
+}
+
+/**
+ * Where a line the reader delivered sits. Mirrors `LogLinePosition` in
+ * `electron/log-reader.ts`: the file's `name` and `id` as a `LogCursor` entry
+ * names it, the offset of the line's first byte, and the offset just past its
+ * newline (the file's end for a last line that has none).
+ */
+export interface LogLinePosition {
+	name: string;
+	id: string;
+	start: number;
+	end: number;
 }
 
 export type LogEntry = LogFileRecord | UnparsedLogLine;

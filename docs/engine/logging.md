@@ -259,7 +259,14 @@ schema's `propertyNames` refuses, so no field shares it, and the table, the
 opened row's JSON and free-text search all leave it out. For a record over
 256 KiB the line is cut at that bound, as the record's largest fields are:
 Copy line copies the cut line, and Export writes the cut record re-serialised
-instead, so every line of the export is still one JSON value. The filters are
+instead, so every line of the export is still one JSON value. Every line the
+reader delivers, by a read or the tail and an unparsed one too, also carries
+its place in its file under the `$pos` key (#3652): `{ name, id, start, end }`,
+the file's name and identity as a cursor names them, the offset of the line's
+first byte, and the offset just past its newline (the file's end for a last
+line without one). The table, the opened row's JSON, Copy line, Export and
+free-text search leave it out, as they leave out `$raw`; the 16 MiB bound
+counts it. The filters are
 evaluated in the main process: a change restarts the tail and reads again,
 replacing what the table held.
 
