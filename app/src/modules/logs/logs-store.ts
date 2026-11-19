@@ -171,14 +171,17 @@ function offsetsByFile(
 
 /**
  * Where paging older continues once @p dropped, the oldest lines, are no longer
- * held: per file, the start of its oldest line still held or the end of its
- * newest line dropped, whichever is later, so the read takes the dropped lines
- * in again; a file with neither keeps @p previous's entry. Per file over every
- * line, because the held order is not time order across files (a poll's batch
- * is sorted on its own, a lagging file's lines arrive late), nor file order
- * within one: the batch is sorted by `ts`, which engine threads can write out
- * of order, so a dropped line can lie after a held one. The page older then
- * returns those held lines again, and `notHeld` refuses them. Null, which ends
+ * held: per file, the latest of the start of its oldest line still held, the
+ * end of its newest line dropped and @p previous's entry, so the read takes the
+ * dropped lines in again. Per file over every line, because the held order is
+ * not time order across files (a poll's batch is sorted on its own, a lagging
+ * file's lines arrive late), nor file order within one: the batch is sorted by
+ * `ts`, which engine threads can write out of order, so a dropped line can lie
+ * after a held one. @p previous sits above the held lines only for such a line,
+ * dropped by an earlier trim and not yet read, so a later trim keeps it (a page
+ * older, and the read before any trim, leave the cursor at or below every held
+ * start). The page older then returns those held lines again, and `notHeld`
+ * refuses them. Null, which ends
  * paging older, when a line has no position to place it by: a page from a
  * guessed cursor could skip lines or repeat them.
  */
@@ -192,10 +195,11 @@ function cursorAfterTrim(
 	const newestDropped = offsetsByFile(dropped, (position) => position.end, isGreater);
 	if (!oldestHeld || !newestDropped) return null;
 	const files = new Map(previous.files.map((file) => [fileKey(file), file]));
-	for (const [key, file] of newestDropped) files.set(key, file);
-	for (const [key, file] of oldestHeld) {
-		const dropped = newestDropped.get(key);
-		files.set(key, dropped && dropped.offset > file.offset ? dropped : file);
+	for (const placed of [newestDropped, oldestHeld]) {
+		for (const [key, file] of placed) {
+			const current = files.get(key);
+			if (!current || file.offset > current.offset) files.set(key, file);
+		}
 	}
 	return { files: [...files.values()].filter((file) => file.offset > 0) };
 }

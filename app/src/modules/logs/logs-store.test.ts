@@ -31,7 +31,9 @@
  * cases land their page behind a hole; skip a line without a position instead
  * of ending and the unplaced case pages older. A batch out of file order
  * (#3658): take a file's offset from its held lines alone in `cursorAfterTrim`
- * and the inversion case never reads the line the trim dropped; drop `notHeld`
+ * and the inversion case never reads the line the trim dropped; leave
+ * `previous`'s entry out of that file's maximum and the two-trim case loses the
+ * line once a later trim drops only another file's lines; drop `notHeld`
  * from `prependOlder` and it holds a line twice; end `loadOlder` instead of
  * reading again when a trim overtakes its page and the in-flight cases leave
  * the page unread until a second click.
@@ -473,6 +475,45 @@ describe("the bound", () => {
 		for (const msg of messages()) held.set(msg, (held.get(msg) ?? 0) + 1);
 		const dropped = [...span(1000, 1000), log[2001]].map((line) => (line as LogFileRecord).msg);
 		expect(dropped.filter((msg) => held.get(msg) !== 1)).toEqual([]);
+	});
+
+	it("keeps the cursor past a line dropped out of file order when a later trim drops only another file's lines", async () => {
+		const at = (ms: number) => new Date(Date.parse(logRecord(0).ts) + ms).toISOString();
+		const line = (file: typeof ENGINE_LOG, offset: number, ms: number) =>
+			logRecord(0, {
+				msg: `${file.name} ${offset}`,
+				ts: at(ms),
+				$pos: { ...file, start: offset, end: offset + 1 },
+			});
+		const engineOld = Array.from({ length: 10 }, (_, n) => line(ENGINE_LOG, n, n * 1000));
+		const appOld = Array.from({ length: 2000 }, (_, n) => line(APP_LOG, n, (100 + n) * 1000));
+		// Engine line 11 is two milliseconds behind line 10, and an app line falls
+		// between them, so the poll delivers engine 11, app 2000, engine 10.
+		const engine10 = line(ENGINE_LOG, 10, 3_000_000);
+		const engine11 = line(ENGINE_LOG, 11, 3_000_000 - 2);
+		const appTail = Array.from({ length: 10_000 }, (_, i) =>
+			line(APP_LOG, 2000 + i, i === 0 ? 3_000_000 - 1 : (1000 + 2000 + i) * 1000)
+		);
+		bridge.serveLog([...engineOld, ...appOld]);
+		await state().start();
+		expect(state().records).toHaveLength(1000);
+
+		// The read's 1,000 and 10,001 from the tail: the first trim drops the read
+		// and engine line 11, keeping engine line 10.
+		bridge.pushPoll([engine10, engine11, ...appTail.slice(0, -1)]);
+		expect(state().records).not.toContain(engine11);
+		expect(state().records).toContain(engine10);
+		// The second drops app line 2000 alone: nothing of the engine file.
+		bridge.pushPoll(appTail.slice(-1));
+		expect(state().records[0]).toBe(engine10);
+		bridge.serveLog([...engineOld, ...appOld, engine10, engine11, ...appTail]);
+		for (let page = 0; page < 20 && state().more; page++) await state().loadOlder();
+
+		expect(state().more).toBe(false);
+		const files = expectEachFileUnbroken();
+		expect(files.get(ENGINE_LOG.name)?.map((position) => position.start)).toEqual(
+			Array.from({ length: 12 }, (_, n) => n)
+		);
 	});
 
 	it("reads a page older again when a tail batch trims while it is in flight, so one click lands it", async () => {
