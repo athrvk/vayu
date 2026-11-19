@@ -792,7 +792,11 @@ function foldOriginPart(text: string): string {
  */
 function foldOrigin(scheme: string, authority: string): string {
 	if (/[\\\s]/.test(authority)) return `${scheme}://${authority}`;
-	const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+	const at = authority.lastIndexOf("@");
+	const hostPort = authority.slice(at + 1);
+	// A `{{variable}}` in the user may resolve to a `/`, which moves the real host after it: keep the user.
+	const user = authority.slice(0, Math.max(at, 0)).split(":")[0] ?? "";
+	if (user.includes("{{")) return `${scheme}://${user}@${hostPort}`;
 	const folded = foldOriginPart(scheme);
 	const parsed = /^(\[[^\]]*\]|[^:[\]]*)(?::(\d*))?$/.exec(hostPort);
 	if (!parsed) return `${folded}://${hostPort}`;

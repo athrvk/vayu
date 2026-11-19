@@ -512,6 +512,7 @@ describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () =
 		],
 		["a protocol-relative URL", "//evil.example/x?api_key=#token="],
 		["a missing scheme", "bank.example/x?api_key=#token="],
+		["a variable in the userinfo", "https://{{v}}@bank.example/x?api_key=#token="],
 	])("a write to another origin (%s) carries nothing", (_name, incoming) => {
 		const restored = restoreWithheldRequestUrl(stored, incoming, undefined);
 		expect(restored.originChanged).toBe(true);
