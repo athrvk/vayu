@@ -89,7 +89,8 @@ export interface LogFileInfo {
  * refuses, so no field of a schema-valid record shares it and a `key:value`
  * search term (`FIELD_NAME`) cannot name it. A line that does carry the key has
  * it overwritten, and loses nothing: the line is the value. Mirrored by
- * `RAW_LINE_KEY` in `src/modules/logs/log-entry.ts`.
+ * `RAW_LINE_KEY` in `src/modules/logs/log-entry.ts`, and held equal to it by
+ * `log-raw-line.conformance.test.ts`.
  */
 export const RAW_LINE_KEY = "$raw";
 
@@ -1130,9 +1131,19 @@ async function readForward(context: ReadContext, after: LogCursor): Promise<Read
 	const { files, chunkBytes, counter } = context;
 	const live = liveFiles(files);
 	const streams: ForwardStream[] = [];
+	/**
+	 * Listed files that were gone or no longer that file when opened: a rotation
+	 * between the listing and the open. Each keeps its place in the cursor, so the
+	 * next page finds it by identity (as `.1`) and continues where it was, rather
+	 * than reading it as a file that appeared since, from its start.
+	 */
+	const unopened: LogCursorFile[] = [];
 	for (const { file, start } of forwardStarts(files, after)) {
 		const handle = await openForRead(context, file);
-		if (!handle) continue;
+		if (!handle) {
+			unopened.push(cursorEntry(file, start));
+			continue;
+		}
 		const end = live.has(file.name)
 			? await completeLinesEnd(handle, file.size, chunkBytes, counter)
 			: file.size;
@@ -1146,7 +1157,14 @@ async function readForward(context: ReadContext, after: LogCursor): Promise<Read
 		await loadForwardHead(stream);
 		streams.push(stream);
 	}
-	return mergeOldestFirst(streams, context);
+	const result = await mergeOldestFirst(streams, context);
+	if (unopened.length === 0) return result;
+	return {
+		...result,
+		cursor: { files: [...result.cursor.files, ...unopened] },
+		// Not read, so not known to be at its end: the next page looks again.
+		more: true,
+	};
 }
 
 async function mergeOldestFirst(

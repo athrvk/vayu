@@ -24,13 +24,20 @@
  * first. Following drops the oldest; paging older drops the newest, and having
  * dropped them the list is `detached` from the tail, since a batch appended
  * after a hole would be a lie about what happened between. Following again then
- * means reading afresh, never appending.
+ * means reading afresh, never appending. Dropping the oldest ends paging older
+ * for the same reason (`OLDER_LET_GO`).
  *
  * **Jump to time** is detached too, and pages newer from the time it landed
  * on: one page at once, then one per "Search newer". Paging newer drops the
  * oldest, as following does; the page that reaches the end of the logs
  * attaches the tail again, which it restarted before reading so that nothing
  * written in between is lost.
+ *
+ * **A tail started before a read can repeat it.** The tail delivers what is
+ * appended after it started and the read runs to the files' ends after that, so
+ * the read's newest lines can arrive again in the tail's first batches. Lines
+ * delivered while the read answers are checked against it in `buffered`; the
+ * batches after it, against `overlapping`.
  */
 
 import { create } from "zustand";
@@ -114,11 +121,39 @@ function trimToBound(held: Held, drop: "oldest" | "newest"): Held & { trimmed: b
 	return { records: trimmed ? held.records.slice(start, end) : held.records, bytes, trimmed };
 }
 
-/** Lines the tail delivered while a read was in flight that the read did not already return. */
+/** Lines the tail delivered that @p read did not already return. */
 function withoutRepeats(late: LogEntry[], read: LogEntry[]): LogEntry[] {
 	if (late.length === 0 || read.length === 0) return late;
 	const seen = new Set(read.map(entryLine));
 	return late.filter((entry) => !seen.has(entryLine(entry)));
+}
+
+/**
+ * What paging older is once the oldest held lines have been let go: ended. The
+ * cursor points before the first line read and the renderer has none for the
+ * line now oldest, so a page older would sit behind the lines just dropped. A
+ * read `around` the oldest held `ts` is no cursor either: it can skip lines,
+ * since lines from different files arrive out of `ts` order and an unparsed
+ * line has none. A jump to time or a fresh read starts paging older again.
+ */
+const OLDER_LET_GO = {
+	cursor: null,
+	more: false,
+	scannedTo: null,
+	olderLetGo: true,
+} satisfies Partial<LogsData>;
+
+/** @p held with @p added after it, cut to the bound from the oldest end. */
+function appendNewest(held: Held, added: readonly LogEntry[]): Partial<LogsData> & Held {
+	const kept = trimToBound(
+		{ records: [...held.records, ...added], bytes: held.bytes + totalBytes(added) },
+		"oldest"
+	);
+	return {
+		records: kept.records,
+		bytes: kept.bytes,
+		...(kept.trimmed ? OLDER_LET_GO : {}),
+	};
 }
 
 /** @p known with the categories of @p records added; the same array when there is nothing new. */
@@ -142,6 +177,8 @@ interface LogsData {
 	more: boolean;
 	/** The `ts` of the oldest line the last read examined, matching or not. */
 	scannedTo: string | null;
+	/** The oldest lines were dropped to the bound, which ended paging older. */
+	olderLetGo: boolean;
 	/** Lines the tail left out of a batch, since this list was read. */
 	dropped: number;
 	/** The newest lines are not all held, so the tail is not appended. */
@@ -190,6 +227,7 @@ const NOTHING_LOADED = {
 	cursor: null,
 	more: false,
 	scannedTo: null,
+	olderLetGo: false,
 	dropped: 0,
 	detached: false,
 	newerCursor: null,
@@ -216,6 +254,8 @@ function describeFailure(error: unknown): string {
 let active = false;
 let loadId = 0;
 let buffered: LogEntry[] | null = null;
+/** The read that last attached the tail, which its first batches can repeat; null once past. */
+let overlapping: LogEntry[] | null = null;
 let unsubscribe: (() => void) | null = null;
 
 export const useLogsStore = create<LogsState>()((set, get) => {
@@ -225,18 +265,19 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		late: LogEntry[],
 		attach: Pick<LogsData, "follow" | "detached"> & Partial<Pick<LogsData, "newerCursor">>
 	): void {
-		const all = late.length > 0 ? [...result.records, ...late] : result.records;
-		const { records, bytes } = trimToBound({ records: all, bytes: totalBytes(all) }, "oldest");
+		const kept = appendNewest(
+			{ records: result.records, bytes: totalBytes(result.records) },
+			late
+		);
 		set((state) => ({
 			...NOTHING_LOADED,
 			...attach,
-			records,
-			bytes,
-			status: "ready",
 			cursor: result.cursor,
 			more: result.more,
 			scannedTo: result.scannedTo,
-			knownCategories: withCategories(state.knownCategories, records),
+			...kept,
+			status: "ready",
+			knownCategories: withCategories(state.knownCategories, kept.records),
 			generation: state.generation + 1,
 		}));
 	}
@@ -272,6 +313,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 				follow: true,
 				detached: false,
 			});
+			overlapping = result.records;
 		} catch (error) {
 			if (id === loadId) fail(error);
 		}
@@ -325,24 +367,22 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 	}
 
 	function appendNewer(after: LogCursor, result: LogReadResult, late: LogEntry[]): void {
+		const state = get();
+		// Paging older dropped the newest lines meanwhile: this page would sit after the hole.
+		if (state.newerCursor !== after) {
+			set({ loadingNewer: false });
+			return;
+		}
 		const added = late.length > 0 ? [...result.records, ...late] : result.records;
-		set((state) => {
-			// Paging older dropped the newest lines meanwhile: this page would sit after the hole.
-			if (state.newerCursor !== after) return { loadingNewer: false };
-			const held = trimToBound(
-				{ records: [...state.records, ...added], bytes: state.bytes + totalBytes(added) },
-				"oldest"
-			);
-			return {
-				records: held.records,
-				bytes: held.bytes,
-				detached: result.more,
-				newerCursor: result.more ? result.cursor : null,
-				newerScannedTo: result.scannedTo ?? state.newerScannedTo,
-				loadingNewer: false,
-				knownCategories: withCategories(state.knownCategories, added),
-			};
+		set({
+			...appendNewest(state, added),
+			detached: result.more,
+			newerCursor: result.more ? result.cursor : null,
+			newerScannedTo: result.scannedTo ?? state.newerScannedTo,
+			loadingNewer: false,
+			knownCategories: withCategories(state.knownCategories, added),
 		});
+		if (!result.more) overlapping = result.records;
 	}
 
 	async function loadNewer(): Promise<void> {
@@ -366,6 +406,8 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			});
 			if (id !== loadId) return;
 			set((state) => {
+				// The oldest lines were let go meanwhile: this page would sit behind the hole.
+				if (state.cursor !== cursor) return { loadingOlder: false };
 				const held = trimToBound(
 					{
 						records: [...result.records, ...state.records],
@@ -398,19 +440,25 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		}
 		const state = get();
 		if (state.detached || state.status !== "ready") return;
-		const held = trimToBound(
-			{
-				records: [...state.records, ...batch.records],
-				bytes: state.bytes + totalBytes(batch.records),
-			},
-			"oldest"
-		);
+		const records = pastOverlap(batch.records);
 		set({
-			records: held.records,
-			bytes: held.bytes,
+			...appendNewest(state, records),
 			dropped: state.dropped + batch.dropped,
-			knownCategories: withCategories(state.knownCategories, batch.records),
+			knownCategories: withCategories(state.knownCategories, records),
 		});
+	}
+
+	/**
+	 * @p records without the lines the read that attached the tail returned. A
+	 * poll that listed the files before that read ended delivers only lines the
+	 * read holds, so a batch that repeats none of them is past the overlap and
+	 * ends the check.
+	 */
+	function pastOverlap(records: LogEntry[]): LogEntry[] {
+		if (!overlapping) return records;
+		const fresh = withoutRepeats(records, overlapping);
+		if (fresh.length === records.length) overlapping = null;
+		return fresh;
 	}
 
 	return {
@@ -433,6 +481,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			active = false;
 			loadId++;
 			buffered = null;
+			overlapping = null;
 			unsubscribe?.();
 			unsubscribe = null;
 			// A tail main cannot stop ends with the window or the app; nothing here

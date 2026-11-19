@@ -16,12 +16,16 @@
  * holds 10,500; drop `tailStop` from `stop` and the unmount case reds; drop the
  * `reloadFresh` call in `setControls` and the filter cases red; keep the list
  * detached in `appendNewer` and the end-of-the-logs case reds; drop the page
- * newer from `jumpTo` and the jump puts no line after the time in the list.
+ * newer from `jumpTo` and the jump puts no line after the time in the list;
+ * drop `OLDER_LET_GO` from `appendNewest` and the let-go cases page older past
+ * a hole; drop `pastOverlap` from `receive` and the overlap cases hold a line
+ * twice; count only the raw line in `entryBytes` and the byte bound case holds
+ * twice as many lines.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
-import type { LogEntry, LogReadRequest, LogReadResult } from "@/types/electron";
+import type { LogEntry, LogFileRecord, LogReadRequest, LogReadResult } from "@/types/electron";
 import { entryBytes } from "./log-entry";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LOG_MAX_BYTES, LOG_MAX_RECORDS, buildLogFilter, useLogsStore } from "./logs-store";
@@ -35,6 +39,54 @@ function span(from: number, count: number): LogEntry[] {
 
 const state = () => useLogsStore.getState();
 const messages = () => state().records.map((r) => ("msg" in r ? r.msg : ""));
+
+/** The record carrying its own line, as the reader delivers one. */
+function withRawLine(record: LogFileRecord): LogFileRecord {
+	return { ...record, $raw: JSON.stringify(record) };
+}
+
+/**
+ * A log of numbered lines behind the fake bridge, one cursor offset per line:
+ * a backward cursor at `n` continues with line `n - 1`, a forward one with
+ * line `n`. A jump lands on lines `landed` to `landed + 999`.
+ */
+function numberedLog(landed: number): void {
+	bridge.logs.read.mockImplementation(async (request: LogReadRequest) => {
+		if (request.before) {
+			const end = request.before.files[0].offset;
+			return {
+				records: span(end - request.limit, request.limit),
+				cursor: logCursor(end - request.limit),
+				more: true,
+				scannedTo: null,
+			};
+		}
+		if (request.after) {
+			const start = request.after.files[0].offset;
+			return {
+				records: span(start, request.limit),
+				cursor: logCursor(start + request.limit),
+				more: true,
+				scannedTo: null,
+			};
+		}
+		return {
+			records: span(landed, 1000),
+			cursor: logCursor(landed),
+			more: true,
+			scannedTo: null,
+			newer: logCursor(landed + 1000),
+		};
+	});
+}
+
+/** The held lines' numbers are one run with nothing missing. */
+function expectNoMissingLine(): void {
+	const numbers = messages().map((msg) => Number(msg.slice("line ".length)));
+	const missing = numbers.filter((n, i) => i > 0 && n !== numbers[i - 1] + 1);
+	expect(numbers.length).toBeGreaterThan(0);
+	expect(missing).toEqual([]);
+}
 
 beforeEach(() => {
 	bridge = fakeLogsBridge();
@@ -186,7 +238,7 @@ describe("the bound", () => {
 	});
 
 	it("holds LOG_MAX_BYTES, by the same estimate the response cache uses", async () => {
-		const big = (n: number) => logRecord(n, { msg: "x".repeat(500_000) });
+		const big = (n: number) => withRawLine(logRecord(n, { msg: "x".repeat(500_000) }));
 		bridge.answer({ records: [big(0)] });
 		await state().start();
 
@@ -194,12 +246,41 @@ describe("the bound", () => {
 		bridge.push([big(9), big(10), big(11), big(12), big(13), big(14), big(15), big(16)]);
 		bridge.push([big(17), big(18), big(19)]);
 
+		// Two bytes a UTF-16 unit, of the message once in the fields and once in the raw line.
+		const each = entryBytes(big(20));
+		expect(each).toBeGreaterThan(2 * 2 * 500_000);
 		expect(state().bytes).toBeLessThanOrEqual(LOG_MAX_BYTES);
 		expect(state().bytes).toBe(state().records.reduce((sum, r) => sum + entryBytes(r), 0));
-		expect(state().records.length).toBeLessThan(20);
-		expect((state().records[state().records.length - 1] as { msg: string }).msg).toHaveLength(
-			500_000
+		expect(state().records).toHaveLength(Math.floor(LOG_MAX_BYTES / each));
+		expect((state().records[state().records.length - 1] as { msg: string }).msg).toBe(
+			"x".repeat(500_000)
 		);
+	});
+
+	it("counts an unparsed line as its raw text, and a record as itself serialised", () => {
+		const record = logRecord(1);
+		expect(entryBytes({ unparsed: true, raw: "SEGFAULT" })).toBe(2 * "SEGFAULT".length);
+		expect(entryBytes(record)).toBe(2 * JSON.stringify(record).length);
+		expect(entryBytes(withRawLine(record))).toBeGreaterThan(
+			2 * 2 * JSON.stringify(record).length
+		);
+	});
+
+	it("ends paging older once following lets the oldest go, rather than page past the hole", async () => {
+		bridge.answer({ records: span(0, 1000), more: true, cursor: logCursor(0) });
+		await state().start();
+		expect(state()).toMatchObject({ more: true, olderLetGo: false });
+
+		// 1,000 + 18 batches of 500 is the bound exactly; one line more lets the oldest go.
+		for (let batch = 0; batch < 18; batch++) bridge.push(span(1000 + batch * 500, 500));
+		expect(state()).toMatchObject({ more: true, olderLetGo: false });
+		bridge.push(span(10_000, 1));
+
+		expect(state()).toMatchObject({ more: false, cursor: null, olderLetGo: true });
+		bridge.logs.read.mockClear();
+		await state().loadOlder();
+		expect(bridge.logs.read).not.toHaveBeenCalled();
+		expectNoMissingLine();
 	});
 
 	it("keeps the newest line even when it alone is over the byte budget", async () => {
@@ -436,6 +517,52 @@ describe("paging newer", () => {
 		]);
 	});
 
+	it("leaves no line missing when Search older follows Search newer past the bound", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		numberedLog(9000);
+		await state().jumpTo(logRecord(9500).ts);
+		expect(state()).toMatchObject({ more: true, olderLetGo: false });
+
+		for (let page = 0; page < 10; page++) await state().loadNewer();
+		expect(state().records).toHaveLength(LOG_MAX_RECORDS);
+		await state().loadOlder();
+
+		expectNoMissingLine();
+		expect(state()).toMatchObject({ more: false, olderLetGo: true });
+		expect(bridge.logs.read).not.toHaveBeenCalledWith(
+			expect.objectContaining({ before: expect.anything() })
+		);
+	});
+
+	it("drops a page older still in flight when a page newer lets the oldest go", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		numberedLog(9000);
+		await state().jumpTo(logRecord(9500).ts);
+		for (let page = 0; page < 8; page++) await state().loadNewer();
+		let release: (value: LogReadResult) => void = () => {};
+		bridge.logs.read.mockImplementationOnce(
+			() => new Promise((resolve) => (release = resolve))
+		);
+		const paging = state().loadOlder();
+		await waitFor(() => expect(state().loadingOlder).toBe(true));
+		numberedLog(9000);
+		for (let page = 0; page < 2; page++) await state().loadNewer();
+		expect(state().olderLetGo).toBe(true);
+
+		release({
+			records: span(8000, 1000),
+			cursor: logCursor(8000),
+			more: true,
+			scannedTo: null,
+		});
+		await paging;
+
+		expectNoMissingLine();
+		expect(state()).toMatchObject({ loadingOlder: false, olderLetGo: true });
+	});
+
 	it("drops the oldest at the bound, as following does", async () => {
 		await jumped();
 		let newer = 0;
@@ -451,6 +578,39 @@ describe("paging newer", () => {
 		expect((records[records.length - 1] as { msg: string }).msg).toBe("line 10099");
 		expect(records.some((r) => (r as { msg: string }).msg === "line 8")).toBe(false);
 		expect(state()).toMatchObject({ detached: true, newerCursor: logCursor(10) });
+	});
+
+	it("holds once a line the read returned that the tail delivers after it, on attaching", async () => {
+		await jumped();
+		bridge.answerReads({ after: { records: span(10, 3), more: false, cursor: logCursor(13) } });
+
+		await state().loadNewer();
+		// Written after the tail restarted and before the page read the file's end,
+		// delivered by the tail's first poll after the page answered.
+		bridge.push(span(11, 3));
+		bridge.push(span(14, 1));
+
+		expect(messages()).toEqual([
+			"line 8",
+			"line 9",
+			"line 10",
+			"line 11",
+			"line 12",
+			"line 13",
+			"line 14",
+		]);
+	});
+
+	it("ends the overlap with the first batch that repeats nothing", async () => {
+		bridge.answer({ records: span(0, 3) });
+		await state().start();
+
+		bridge.push(span(2, 2));
+		bridge.push(span(4, 1));
+		// A line the read held, written again: past the overlap it is a line of its own.
+		bridge.push([logRecord(1)]);
+
+		expect(messages()).toEqual(["line 0", "line 1", "line 2", "line 3", "line 4", "line 1"]);
 	});
 
 	it("ends when paging older drops the newest lines, and drops a page newer still in flight", async () => {

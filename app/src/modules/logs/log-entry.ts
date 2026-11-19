@@ -20,10 +20,11 @@ export function isUnparsedEntry(entry: LogEntry): entry is UnparsedLogLine {
 
 /**
  * Where a record carries the line it was read from (`RAW_LINE_KEY` in
- * `electron/log-reader.ts`, which this file cannot import). It is not a field
- * of the record: nothing draws it as one.
+ * `electron/log-reader.ts`, which this file cannot import;
+ * `electron/log-raw-line.conformance.test.ts` holds the spellings equal). It is
+ * not a field of the record: nothing draws it as one.
  */
-const RAW_LINE_KEY = "$raw";
+export const RAW_LINE_KEY = "$raw";
 
 /**
  * The keys the `key=value` text leaves out: the table's columns, and `pid` and
@@ -42,10 +43,14 @@ export function fieldsText(record: LogFileRecord): string {
 		.join(" ");
 }
 
+/** The record's own fields, without the raw line it carries. */
+function recordFields(record: LogFileRecord): Record<string, unknown> {
+	return Object.fromEntries(Object.entries(record).filter(([key]) => key !== RAW_LINE_KEY));
+}
+
 /** The record as the opened row shows it: its fields, without the raw line. */
 export function recordJson(record: LogFileRecord): string {
-	const fields = Object.entries(record).filter(([key]) => key !== RAW_LINE_KEY);
-	return JSON.stringify(Object.fromEntries(fields), null, 2);
+	return JSON.stringify(recordFields(record), null, 2);
 }
 
 /**
@@ -58,18 +63,38 @@ export function entryLine(entry: LogEntry): string {
 	return typeof entry[RAW_LINE_KEY] === "string" ? entry[RAW_LINE_KEY] : JSON.stringify(entry);
 }
 
+/**
+ * The line Export writes: `entryLine`, unless that is a record's raw line the
+ * reader cut at its 256 KiB bound, which is not JSON. That record is written
+ * re-serialised, with its cut fields, so each line of a `.jsonl` export stays
+ * one JSON value. A raw line is cut exactly when it no longer parses:
+ * the reader attaches one only to a line that did.
+ */
+export function exportLine(entry: LogEntry): string {
+	const line = entryLine(entry);
+	if (isUnparsedEntry(entry) || typeof entry[RAW_LINE_KEY] !== "string") return line;
+	try {
+		JSON.parse(line);
+		return line;
+	} catch {
+		return JSON.stringify(recordFields(entry));
+	}
+}
+
 const sizes = new WeakMap<LogEntry, number>();
 
 /**
  * What a held line costs, as a documented estimate and not a measurement: two
- * bytes per UTF-16 code unit of its line, the count `estimateResponseBytes`
- * (`stores/response-store.ts`) uses for a body. Cached per object, so a bound
- * that is re-checked on every batch stringifies a line once.
+ * bytes per UTF-16 code unit, the count `estimateResponseBytes`
+ * (`stores/response-store.ts`) uses for a body. A record counts as itself
+ * serialised, which takes in both its parsed fields and the raw line it
+ * carries; an unparsed line counts as its raw text. Cached per object, so a
+ * bound that is re-checked on every batch stringifies a line once.
  */
 export function entryBytes(entry: LogEntry): number {
 	let bytes = sizes.get(entry);
 	if (bytes === undefined) {
-		bytes = entryLine(entry).length * 2;
+		bytes = (isUnparsedEntry(entry) ? entry.raw : JSON.stringify(entry)).length * 2;
 		sizes.set(entry, bytes);
 	}
 	return bytes;

@@ -15,7 +15,10 @@
  * Mutation checks (revert, confirm red, restore): drop `stop()` from the mount
  * effect's cleanup and the unmount case reds; drop the `setControls` call in
  * `Filters`' debounce and the `cat:oauth` case reds; drop the `trimToBound` in
- * `logs-store.ts` and the bound cases in `logs-store.test.ts` red.
+ * `logs-store.ts` and the bound cases in `logs-store.test.ts` red; drop
+ * `addedBelow` from the window in `LogList.tsx` and the Search newer window case
+ * unmounts the reader's rows; export with `entryLine` in `LogsToolbar.tsx` and
+ * the cut record case writes a line that is not JSON.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +53,11 @@ const unparsed: LogEntry = { unparsed: true, raw: "SEGFAULT at 0xdeadbeef" };
 /** A record carrying the line the file holds, which `JSON.stringify` would not write back (`1.0`, a space). */
 const FILE_LINE = `{"ts":"${logRecord(2).ts}","level":"info","src":"engine","cat":"http","msg":"line 2","pid":4242,"x":1.0, "path":"/raw"}`;
 const withFileLine = logRecord(2, { x: 1, path: "/raw", $raw: FILE_LINE });
+
+/** A record over the reader's 256 KiB bound: its message cut, and its raw line cut mid-value. */
+const cutRecord = logRecord(3, { msg: `${"y".repeat(1024)}...[truncated]` });
+const CUT_LINE = `{"ts":"${cutRecord.ts}","level":"info","src":"engine","cat":"http","msg":"yyyy`;
+const withCutLine = { ...cutRecord, $raw: CUT_LINE };
 
 beforeEach(() => {
 	bridge = fakeLogsBridge();
@@ -185,7 +193,10 @@ describe("the raw line", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Copy line" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(FILE_LINE));
-		expect(FILE_LINE).toContain("1.0");
+		// The line the file holds parses to the fields the row shows, and no more.
+		expect(JSON.parse(writeText.mock.calls[0][0] as string)).toEqual(
+			logRecord(2, { x: 1, path: "/raw" })
+		);
 	});
 
 	it("is what Export writes", async () => {
@@ -208,10 +219,24 @@ describe("the raw line", () => {
 		expect(within(row).getByText("x=1 path=/raw")).toBeInTheDocument();
 		fireEvent.click(row);
 
-		const { $raw, ...record } = withFileLine;
-		expect($raw).toBe(FILE_LINE);
-		expect(document.querySelector("pre")?.textContent).toBe(JSON.stringify(record, null, 2));
+		expect(JSON.parse(document.querySelector("pre")?.textContent ?? "")).toEqual(
+			logRecord(2, { x: 1, path: "/raw" })
+		);
 		expect(screen.queryByText(/\$raw/)).toBeNull();
+	});
+
+	it("is copied cut for a record over the bound, and exported as the cut record so the file stays JSON", async () => {
+		await openTab([withCutLine]);
+		fireEvent.click(screen.getByRole("button", { expanded: false }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Copy line" }));
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith(CUT_LINE));
+		fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+		await waitFor(() => expect(saveFile).toHaveBeenCalled());
+		const [exported] = saveFile.mock.calls[0] as [string];
+		expect(exported).toBe(`${JSON.stringify(cutRecord)}\n`);
+		expect(JSON.parse(exported)).toEqual(cutRecord);
 	});
 });
 
@@ -364,6 +389,20 @@ describe("search older", () => {
 		expect(time).toHaveAttribute("datetime", searched.ts);
 	});
 
+	it("says older lines were let go once the bound dropped them, and offers no Search older", async () => {
+		await openTab([logRecord(10)], true);
+
+		act(() => useLogsStore.setState({ olderLetGo: true, more: false, cursor: null }));
+
+		expect(
+			screen.getByText(
+				"Older lines were let go to hold the newest. Jump to a time to read them."
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Search older" })).toBeNull();
+		expect(screen.queryByText("Reached the start of the logs.")).toBeNull();
+	});
+
 	it("says it has reached the start when nothing older remains", async () => {
 		await openTab([logRecord(1)], false);
 
@@ -421,6 +460,42 @@ describe("jump to time", () => {
 			filter: {},
 			limit: 100,
 		});
+	});
+
+	it("keeps the rows the reader had mounted when Search newer adds a page below them", async () => {
+		// An observer that never fires: the window stays at its first 200 rows.
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				disconnect() {}
+			}
+		);
+		await openTab();
+		bridge.answerReads({
+			around: {
+				records: Array.from({ length: 201 }, (_, n) => logRecord(n)),
+				more: true,
+				newer: logCursor(1),
+			},
+			after: { records: [], more: true, cursor: logCursor(2) },
+		});
+		await act(() => useLogsStore.getState().jumpTo(logRecord(200).ts));
+		expect(screen.queryByText("line 0")).toBeNull();
+		expect(screen.getByText("line 1")).toBeInTheDocument();
+		bridge.answerReads({
+			after: {
+				records: [201, 202, 203, 204, 205].map((n) => logRecord(n)),
+				more: true,
+				cursor: logCursor(3),
+			},
+		});
+
+		fireEvent.click(screen.getByRole("button", { name: "Search newer" }));
+
+		expect(await screen.findByText("line 205")).toBeInTheDocument();
+		expect(screen.getByText("line 1")).toBeInTheDocument();
+		expect(screen.queryByText("line 0")).toBeNull();
 	});
 
 	it("pages newer from Search newer, and follows the tail again once it reaches the end", async () => {

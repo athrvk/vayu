@@ -20,10 +20,12 @@
  * window for rows that are variable-height (an opened row is a block of JSON),
  * and its sentinel sits above the first rendered row, so scrolling up renders
  * the next older slice and the rest stay unmounted. `content-visibility` on each
- * row (`skip-offscreen`) skips layout for what is off screen.
+ * row (`skip-offscreen`) skips layout for what is off screen. Lines added below
+ * while the reader is not following widen the window by as many
+ * (`useRowsAddedBelow`), so the rows they were reading stay mounted.
  */
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button, Eyebrow } from "@/components/ui";
@@ -66,33 +68,70 @@ function ColumnHeader() {
 	);
 }
 
-/** Where the search has got to, and the way to go further back. */
-function OlderBar() {
-	const more = useLogsStore((s) => s.more);
-	const scannedTo = useLogsStore((s) => s.scannedTo);
-	const loadingOlder = useLogsStore((s) => s.loadingOlder);
-	const loadOlder = useLogsStore((s) => s.loadOlder);
-
+/** A paging bar: how far a search has got, and the button that searches further. */
+function PagingBar({
+	children,
+	search,
+}: {
+	children: ReactNode;
+	search?: { label: string; loading: boolean; onSearch: () => void };
+}) {
 	return (
 		<div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
-			{scannedTo !== null && more && (
-				<span>
-					Searched back to <TimeValue value={scannedTo} style="datetime" />
-				</span>
-			)}
-			{!more && <span>Reached the start of the logs.</span>}
-			{more && (
+			{children}
+			{search && (
 				<Button
 					type="button"
 					variant="outline"
 					size="sm"
-					disabled={loadingOlder}
-					onClick={() => void loadOlder()}
+					disabled={search.loading}
+					onClick={search.onSearch}
 				>
-					{loadingOlder ? "Searching…" : "Search older"}
+					{search.loading ? "Searching…" : search.label}
 				</Button>
 			)}
 		</div>
+	);
+}
+
+/** Where the search has got to, and the way to go further back. */
+function OlderBar() {
+	const more = useLogsStore((s) => s.more);
+	const scannedTo = useLogsStore((s) => s.scannedTo);
+	const olderLetGo = useLogsStore((s) => s.olderLetGo);
+	const loadingOlder = useLogsStore((s) => s.loadingOlder);
+	const loadOlder = useLogsStore((s) => s.loadOlder);
+
+	if (olderLetGo) {
+		return (
+			<PagingBar>
+				<span>
+					Older lines were let go to hold the newest. Jump to a time to read them.
+				</span>
+			</PagingBar>
+		);
+	}
+	if (!more) {
+		return (
+			<PagingBar>
+				<span>Reached the start of the logs.</span>
+			</PagingBar>
+		);
+	}
+	return (
+		<PagingBar
+			search={{
+				label: "Search older",
+				loading: loadingOlder,
+				onSearch: () => void loadOlder(),
+			}}
+		>
+			{scannedTo !== null && (
+				<span>
+					Searched back to <TimeValue value={scannedTo} style="datetime" />
+				</span>
+			)}
+		</PagingBar>
 	);
 }
 
@@ -105,23 +144,41 @@ function NewerBar() {
 	if (newerCursor === null) return null;
 
 	return (
-		<div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
+		<PagingBar
+			search={{
+				label: "Search newer",
+				loading: loadingNewer,
+				onSearch: () => void loadNewer(),
+			}}
+		>
 			{newerScannedTo !== null && (
 				<span>
 					Searched forward to <TimeValue value={newerScannedTo} style="datetime" />
 				</span>
 			)}
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				disabled={loadingNewer}
-				onClick={() => void loadNewer()}
-			>
-				{loadingNewer ? "Searching…" : "Search newer"}
-			</Button>
-		</div>
+		</PagingBar>
 	);
+}
+
+/**
+ * How many rows were added below the window while the reader was not
+ * following: a page newer, or a tail batch while scrolled up. The window counts
+ * from the newest line, so without these a page of 1,000 below would leave only
+ * its own rows mounted and move the reader's out from under them. Counted from
+ * where the previous newest line now sits, and reset with the list.
+ */
+function useRowsAddedBelow(records: LogEntry[], follow: boolean, generation: number): number {
+	const last: LogEntry | undefined = records[records.length - 1];
+	const [seen, setSeen] = useState({ generation, last, added: 0 });
+	if (seen.generation === generation && seen.last === last) return seen.added;
+	let added = 0;
+	if (seen.generation === generation) {
+		const at = follow || seen.last === undefined ? -1 : records.lastIndexOf(seen.last);
+		added = seen.added + (at === -1 ? 0 : records.length - 1 - at);
+	}
+	// Adjusted during render, as `useGrowingWindow` resets its own window.
+	setSeen({ generation, last, added });
+	return added;
 }
 
 function LoadError() {
@@ -147,11 +204,12 @@ export function LogList() {
 	const setFollow = useLogsStore((s) => s.setFollow);
 	const scroller = useRef<HTMLDivElement>(null);
 	const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
-	const { visible, sentinelRef, hasMore } = useGrowingWindow(
+	const { visible, sentinelRef } = useGrowingWindow(
 		records.length,
 		GROWING_WINDOW_STEP,
 		generation
 	);
+	const addedBelow = useRowsAddedBelow(records, follow, generation);
 
 	// After the list changes and while following: the newest line is in view.
 	useLayoutEffect(() => {
@@ -177,7 +235,7 @@ export function LogList() {
 		});
 	}, []);
 
-	const shown = records.slice(-visible);
+	const shown = records.slice(-(visible + addedBelow));
 
 	return (
 		<div
@@ -188,7 +246,7 @@ export function LogList() {
 			<ColumnHeader />
 			<LoadError />
 			<OlderBar />
-			{hasMore && <div ref={sentinelRef} aria-hidden="true" />}
+			{shown.length < records.length && <div ref={sentinelRef} aria-hidden="true" />}
 			{records.length === 0 ? (
 				<EmptyState
 					variant="inline"

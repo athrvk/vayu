@@ -249,16 +249,18 @@ search box (free text, or `field:value`, where a quoted value is exact and a
 bare one a substring: `cat:oauth`, `status:"500"`), **Follow** (on by default,
 off when you scroll up, on again by its switch or by scrolling to the end), a
 **Jump to time** control (the platform's own date-time input, landing on the
-lines either side of it), **Export** (the
-lines held in the table, as JSON lines, through the save dialog, with the count
-it wrote) and the logs folder button; a line's **Copy line** is in its opened
-row. Copy and Export write the line as the file holds it, not the record
-re-serialised (`1.0` stays `1.0`): the reader attaches each record's own line
-under the `$raw` key, which the schema's `propertyNames` refuses, so no field
-shares it, and the table, the opened row's JSON and free-text search all leave
-it out. For a record over 256 KiB the line is cut at that bound, as the
-record's largest fields are. The filters are evaluated in the main process: a change restarts the tail
-and reads again, replacing what the table held.
+lines either side of it), **Export** (the lines held in the table, as JSON
+lines, through the save dialog, with the count it wrote) and the logs folder
+button; a line's **Copy line** is in its opened row. Copy and Export write the
+line as the file holds it, not the record re-serialised (`1.0` stays `1.0`):
+the reader attaches each record's own line under the `$raw` key, which the
+schema's `propertyNames` refuses, so no field shares it, and the table, the
+opened row's JSON and free-text search all leave it out. For a record over
+256 KiB the line is cut at that bound, as the record's largest fields are:
+Copy line copies the cut line, and Export writes the cut record re-serialised
+instead, so every line of the export is still one JSON value. The filters are
+evaluated in the main process: a change restarts the tail and reads again,
+replacing what the table held.
 
 The tab holds at most 10,000 lines or 16 MiB, whichever comes first. Following
 drops the oldest. **Search older** pages back through the files, says how far
@@ -269,7 +271,10 @@ way: it shows the lines at and before the time and, read at once after them,
 the next hundred; **Search newer** below the last line pages on ("Searched
 forward to ...") and drops the oldest, and the page that reaches the end of
 the logs appends the tail again, which it restarted before reading, so the
-table follows once you scroll to the end. A burst past the tail's 500 lines
+table follows once you scroll to the end. Once the bound drops the oldest
+lines, by following or by Search newer, Search older ends: the table says the
+older lines were let go and points at Jump to time, since a page older from
+where it last read would leave a gap. A burst past the tail's 500 lines
 per poll shows as "N lines skipped in a burst": the lines are in the files. The
 footer names the engine's `logLevel` and says requests answered 2xx and
 database writes are written at `debug`, which a default install does not keep,

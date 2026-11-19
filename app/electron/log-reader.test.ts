@@ -21,7 +21,8 @@
  * the name check in `checkCursor` and the traversal cases stop refusing; leave
  * the offset where it was in `mergeOldestFirst` and the forward paging cases
  * repeat records (or never end); cut `newer` at the file's end and the jump
- * case loses t+1.
+ * case loses t+1; drop the `unopened` entries from `readForward`'s cursor and
+ * the rotation-between-listing-and-open case reads the renamed file twice.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -724,6 +725,40 @@ describe("readLogs - forward paging", () => {
 		expect(page2.records).toEqual(first.slice(7, 10));
 		expect(page3.records).toEqual(fresh);
 		expect(page3.more).toBe(false);
+	});
+
+	it("continues on a file rotated between the listing and the open, never reading it twice", async () => {
+		const name = "engine_20261118_100000.log";
+		const first = Array.from({ length: 10 }, (_, second) =>
+			engineRecord(second, "http", `r${second}`)
+		);
+		const fresh = [engineRecord(10, "http", "after rotation")];
+		writeLog(name, first);
+		let rotateOnOpen = false;
+		const rotatingFs: LogReaderDeps["fs"] = {
+			readdir: (target) => fs.promises.readdir(target),
+			lstat: (target, options) => fs.promises.lstat(target, options),
+			open: async (target, flags) => {
+				if (rotateOnOpen) {
+					// The listing saw the file under its name; it is `.1` by the open.
+					rotateOnOpen = false;
+					renameSync(path.join(dir, name), path.join(dir, `${name}.1`));
+					writeLog(name, fresh);
+				}
+				return fs.promises.open(target, flags);
+			},
+		};
+		const rotating = { ...deps, fs: rotatingFs };
+		const landed = await readLogs(rotating, { filter: {}, limit: 4, around: tsAt(3) });
+		const page1 = await readLogs(rotating, { filter: {}, limit: 3, after: landed.newer });
+
+		rotateOnOpen = true;
+		const raced = await readLogs(rotating, { filter: {}, limit: 3, after: page1.cursor });
+		const { records } = await readAllAfter(rotating, { filter: {}, limit: 3 }, raced.cursor);
+
+		expect(page1.records).toEqual(first.slice(4, 7));
+		expect(raced.more).toBe(true);
+		expect([...raced.records, ...records]).toEqual([...first.slice(7), ...fresh]);
 	});
 
 	it("holds back a half-written last line in the live file, and returns it once its newline lands", async () => {
