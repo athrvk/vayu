@@ -13,7 +13,8 @@
  * Every line carries its `$pos`, as the reader's do. `logRecord(n)` is line `n`
  * of one engine file at one byte a line, so it starts at offset `n` and a
  * backward `logCursor(n)` continues with line `n - 1`. `serveLog` answers the
- * reads over any lines the way the reader does, per file from the cursor.
+ * reads over any lines the way the reader does, per file from the cursor, and
+ * `pushPoll` orders a batch the way the tail's poll does, by time.
  */
 
 import { vi } from "vitest";
@@ -127,6 +128,25 @@ function readBefore(log: readonly LogEntry[], before: LogCursor, limit: number):
 	};
 }
 
+/**
+ * @p records, each file's in file order, as a tail poll orders its batch: by
+ * `ts`, stably, an unparsed line keyed by the line before it in its file
+ * (`collected.sort` in `electron/log-reader.ts`). A line whose `ts` is behind
+ * the line before it in its file arrives ahead of it, out of offset order.
+ */
+function inPollOrder(records: readonly LogEntry[]): LogEntry[] {
+	const lastKey = new Map<string, string>();
+	const keyed = records.map((entry) => {
+		const { name, id } = positionOf(entry);
+		const file = id === "" ? `name:${name}` : `id:${id}`;
+		const key = isUnparsedEntry(entry) ? (lastKey.get(file) ?? "") : entry.ts;
+		lastKey.set(file, key);
+		return { entry, key };
+	});
+	keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+	return keyed.map(({ entry }) => entry);
+}
+
 /** A cursor at the end of every file @p log has lines in: where the newest read starts. */
 function cursorAtEnds(log: readonly LogEntry[]): LogCursor {
 	const files: LogCursor["files"] = [];
@@ -160,6 +180,11 @@ export function fakeLogsBridge() {
 		/** What main does: deliver one tail batch to everything subscribed. */
 		push: (records: LogEntry[], dropped = 0) => {
 			for (const listener of [...listeners]) listener({ records, dropped });
+		},
+		/** `push`, with @p records in the order the tail's poll sorts a batch into (`inPollOrder`). */
+		pushPoll: (records: readonly LogEntry[], dropped = 0) => {
+			const batch = inPollOrder(records);
+			for (const listener of [...listeners]) listener({ records: batch, dropped });
 		},
 		/** The answer the next reads give, until it is set again. */
 		answer: (result: Partial<LogReadResult>) => {
