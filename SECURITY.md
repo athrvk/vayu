@@ -274,7 +274,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   `valueWithheld: true` and proxy URL credentials stripped; write tools answer
   with the same projection of the row they changed, and a URL written back as
   it was read keeps the credentials the read hid (removing the parameter or the
-  userinfo deletes one); run output (reports,
+  userinfo deletes one), as does a header row written back withheld, but only
+  while the write keeps the request's scheme, host and port: a write that moves
+  it carries none, so an agent cannot send a stored credential to a host of its
+  choosing, and the answer names what was not carried; run output (reports,
   samples, run rows, inbox captures, the run resources and prompts) reads
   `<redacted>` in place of a secret variable's value and a credential header's
   value; and `secret: false` over a stored secret is refused. Reveal in Settings

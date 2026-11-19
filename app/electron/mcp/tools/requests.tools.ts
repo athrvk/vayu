@@ -45,12 +45,13 @@ import {
 	storedScriptInput,
 } from "./input-schemas.js";
 import {
+	carryHeaderRows,
 	droppedHeadersCaveat,
 	droppedWithheldHeaders,
 	keepsStoredValue,
 	newHeaderRows,
 	readHeaderRows,
-	restoreWithheldHeaderRows,
+	uncarriedHeadersCaveat,
 	type HeaderRowArg,
 } from "./header-rows.js";
 import { refuseRedactedHeaders, refuseRedactedUrl } from "./redacted-input.js";
@@ -444,17 +445,23 @@ function mergeRequestEdits(
 ): { body: Record<string, unknown>; caveat: string } {
 	const body: Record<string, unknown> = { ...payload };
 	const notes: string[] = [];
+	let originChanged = false;
 	if (typeof payload.url === "string" && !reveal) {
 		const restored = restoreWithheldRequestUrl(stored.url, payload.url, stored.auth);
 		body.url = restored.url;
-		notes.push(keptUrlSlotsCaveat(restored.kept));
+		originChanged = restored.originChanged;
+		notes.push(keptUrlSlotsCaveat(restored.kept), uncarriedUrlSlotsCaveat(restored.notCarried));
 	}
 	if (edits.headers !== undefined) {
-		const headers = restoreWithheldHeaderRows(stored.headers, edits.headers);
-		body.headers = headers;
+		const carried = carryHeaderRows(stored.headers, edits.headers, originChanged);
+		body.headers = carried.rows;
+		notes.push(uncarriedHeadersCaveat(carried.notCarried));
 		if (!reveal) {
+			// `edits.headers`, not the rows written: a row left out for the host change is named above.
 			notes.push(
-				droppedHeadersCaveat(droppedWithheldHeaders(stored.headers, stored.auth, headers))
+				droppedHeadersCaveat(
+					droppedWithheldHeaders(stored.headers, stored.auth, edits.headers)
+				)
 			);
 		}
 	}
@@ -476,5 +483,18 @@ function keptUrlSlotsCaveat(kept: KeptUrlSlot[]): string {
 				? "The URL's userinfo password kept its stored value; remove the userinfo to drop it."
 				: `${slot.name}${slot.part === "fragment" ? " (in the fragment)" : ""} kept its stored value; remove the parameter to drop it.`
 		)
+		.join("\n");
+}
+
+/** One line per credential slot of the stored URL left empty because the written URL changed the host (#3564). */
+function uncarriedUrlSlotsCaveat(notCarried: KeptUrlSlot[]): string {
+	return notCarried
+		.map((slot) => {
+			const name =
+				slot.part === "userinfo"
+					? "The URL's userinfo password"
+					: `${slot.name}${slot.part === "fragment" ? " (in the fragment)" : ""}`;
+			return `${name} was not carried because the host changed; give it a value or remove it.`;
+		})
 		.join("\n");
 }

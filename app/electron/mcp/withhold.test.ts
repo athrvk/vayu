@@ -21,6 +21,7 @@ import { resolveSafetyConfig } from "./config.js";
 import {
 	MaskingIncompleteError,
 	REDACTED_MARKER,
+	originChanged,
 	restoreConfigCredentials,
 	restoreWithheldRequestUrl,
 	runOutputShape,
@@ -415,6 +416,8 @@ describe("restoreWithheldRequestUrl (#3549)", () => {
 		).toEqual({
 			url: "https://u:PW@h/y?api_key=S&page=3",
 			kept: [{ part: "userinfo" }, { part: "query", name: "api_key" }],
+			originChanged: false,
+			notCarried: [],
 		});
 	});
 
@@ -466,7 +469,111 @@ describe("restoreWithheldRequestUrl (#3549)", () => {
 		expect(restoreWithheldRequestUrl(stored, "/p?token=", undefined)).toEqual({
 			url: "/p?token=",
 			kept: [],
+			originChanged: false,
+			notCarried: [],
 		});
+	});
+});
+
+describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () => {
+	const stored = "https://u:PW@bank.example/x?api_key=S#token=F";
+	const read = String(withholdRequestUrl(stored, undefined));
+	const slots = [
+		{ part: "userinfo" },
+		{ part: "query", name: "api_key" },
+		{ part: "fragment", name: "token" },
+	];
+
+	// Mutation check: make `originChanged` return false and every case below
+	// that moves the origin fails, the host one first.
+	test("a changed host carries nothing and names each slot it did not carry", () => {
+		expect(
+			restoreWithheldRequestUrl(
+				stored,
+				read.replace("bank.example", "evil.example"),
+				undefined
+			)
+		).toEqual({
+			url: "https://u@evil.example/x?api_key=#token=",
+			kept: [],
+			originChanged: true,
+			notCarried: slots,
+		});
+	});
+
+	test.each([
+		["scheme", "http://u@bank.example/x?api_key=#token="],
+		["port", "https://u@bank.example:8443/x?api_key=#token="],
+		["host", "https://u@bank.example.evil.example/x?api_key=#token="],
+		["a userinfo that hides the host", "https://bank.example@evil.example/x?api_key=#token="],
+		[
+			"a backslash before the real host",
+			"https://evil.example\\@bank.example/x?api_key=#token=",
+		],
+		["a protocol-relative URL", "//evil.example/x?api_key=#token="],
+		["a missing scheme", "bank.example/x?api_key=#token="],
+		["a variable in the userinfo", "https://{{v}}@bank.example/x?api_key=#token="],
+	])("a write to another origin (%s) carries nothing", (_name, incoming) => {
+		const restored = restoreWithheldRequestUrl(stored, incoming, undefined);
+		expect(restored.originChanged).toBe(true);
+		expect(restored.url).toBe(incoming);
+		expect(restored.kept).toEqual([]);
+	});
+
+	test("only a slot the stored URL withheld and the write still holds is named", () => {
+		const restored = restoreWithheldRequestUrl(
+			"https://u:PW@bank.example/x?api_key=S&page=2",
+			"https://evil.example/x?page=2&token=",
+			undefined
+		);
+		expect(restored.originChanged).toBe(true);
+		expect(restored.notCarried).toEqual([]);
+	});
+
+	test.each([
+		["a new path", "https://u@bank.example/y/z?api_key=#token="],
+		["a new query", "https://u@bank.example/x?page=3&api_key=#token="],
+		["a changed case of scheme and host", "HTTPS://u@Bank.Example/x?api_key=#token="],
+		["a changed user", "https://v@bank.example/x?api_key=#token="],
+		["the default port written out", "https://u@bank.example:443/x?api_key=#token="],
+	])("%s keeps every slot", (_name, incoming) => {
+		const restored = restoreWithheldRequestUrl(stored, incoming, undefined);
+		expect(restored.originChanged).toBe(false);
+		expect(restored.notCarried).toEqual([]);
+		expect(restored.kept.map((slot) => slot.part)).toEqual(
+			incoming.includes("https://v@")
+				? ["query", "fragment"]
+				: ["userinfo", "query", "fragment"]
+		);
+	});
+
+	test.each([
+		["https://h:443/x", "https://h/x", false],
+		["https://h/x", "https://h:443/x", false],
+		["http://h:80/x", "http://h/x", false],
+		["http://h:8080/x", "http://h/x", true],
+		["https://h:80/x", "https://h/x", true],
+		["http://h:443/x", "http://h/x", true],
+		["https://h:0443/x", "https://h/x", false],
+		["https://h/x", "https://h:444/x", true],
+		["https://[::1]:443/x", "https://[::1]/x", false],
+		["https://[::1]:8443/x", "https://[::1]/x", true],
+		["{{baseUrl}}/x", "{{baseUrl}}/y", false],
+		["{{baseUrl}}/x", "{{BaseUrl}}/x", true],
+		["{{baseUrl}}/x", "https://evil.example/x", true],
+		["https://{{host}}:443/x", "https://{{host}}/x", false],
+		["https://{{host}}:{{port}}/x", "https://{{host}}:{{port}}/y", false],
+		["https://{{host}}:{{port}}/x", "https://{{host}}:{{other}}/x", true],
+		["/x", "/y", false],
+		["/x", "https://evil.example/x", true],
+		["https://a\\b/x", "https://a\\b/y", false],
+		["https://a\\b/x", "https://a/b/x", true],
+	])("originChanged(%s, %s) is %s", (from, to, changed) => {
+		expect(originChanged(from, to)).toBe(changed);
+	});
+
+	test("a stored value that is no string has no origin to differ from", () => {
+		expect(originChanged(undefined, "https://evil.example/x")).toBe(false);
 	});
 });
 
