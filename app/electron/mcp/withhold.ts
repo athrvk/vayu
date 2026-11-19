@@ -667,6 +667,12 @@ function withholdQuery(query: string, apiKeyParam: string | undefined): string {
 		.join("&");
 }
 
+/** Where the `://` of @p head sits when it opens with a scheme: nothing in front of it may be a path or a space. */
+function schemeEndOf(head: string): number | undefined {
+	const schemeEnd = head.indexOf("://");
+	return schemeEnd !== -1 && !/[/ \t]/.test(head.slice(0, schemeEnd)) ? schemeEnd : undefined;
+}
+
 /**
  * Where the userinfo of a URL's scheme-and-authority-and-path part sits:
  * @p start is its first character and `userinfo` runs up to the `@`. The
@@ -675,8 +681,8 @@ function withholdQuery(query: string, apiKeyParam: string | undefined): string {
  * password containing one is wholly inside it. Undefined when there is none.
  */
 function userinfoSpan(head: string): { start: number; userinfo: string } | undefined {
-	const schemeEnd = head.indexOf("://");
-	const hasScheme = schemeEnd !== -1 && !/[/ \t]/.test(head.slice(0, schemeEnd));
+	const schemeEnd = schemeEndOf(head);
+	const hasScheme = schemeEnd !== undefined;
 	const start = hasScheme ? schemeEnd + 3 : 0;
 	const authorityEnd = head.indexOf("/", start);
 	const authority = head.slice(start, authorityEnd === -1 ? undefined : authorityEnd);
@@ -757,6 +763,61 @@ export type KeptUrlSlot = { part: "userinfo" } | { part: "query" | "fragment"; n
 export interface RestoredUrl {
 	url: string;
 	kept: KeptUrlSlot[];
+	/** Whether the incoming URL addresses another origin than the stored one. */
+	originChanged: boolean;
+	/** The slots {@link kept} would have named, left empty because the origin changed. */
+	notCarried: KeptUrlSlot[];
+}
+
+/** Default ports an explicit `:port` is dropped for, so `https://h:443` and `https://h` are one origin. */
+const DEFAULT_PORTS: Readonly<Record<string, string>> = {
+	http: "80",
+	https: "443",
+	ws: "80",
+	wss: "443",
+};
+
+/** @p text folded to lower case unless it holds a `{{variable}}`, whose name is case-sensitive. */
+function foldOriginPart(text: string): string {
+	return text.includes("{{") ? text : asciiLower(text);
+}
+
+/**
+ * @p scheme and @p authority as one comparable origin: the userinfo left out,
+ * scheme and host folded, the scheme's default port the same as none. What
+ * cannot be read as `host[:port]` (a `{{variable}}` port, stray colons) is
+ * compared as written, and an authority holding a backslash or whitespace, which
+ * parsers disagree on, whole including its userinfo, so either can only match
+ * an identical spelling.
+ */
+function foldOrigin(scheme: string, authority: string): string {
+	if (/[\\\s]/.test(authority)) return `${scheme}://${authority}`;
+	const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+	const folded = foldOriginPart(scheme);
+	const parsed = /^(\[[^\]]*\]|[^:[\]]*)(?::(\d*))?$/.exec(hostPort);
+	if (!parsed) return `${folded}://${hostPort}`;
+	const [, host = "", written = ""] = parsed;
+	const port = written.replace(/^0+(?=\d)/, "");
+	const explicit = port === "" || port === DEFAULT_PORTS[folded] ? "" : `:${port}`;
+	return `${folded}://${foldOriginPart(host)}${explicit}`;
+}
+
+/** The origin @p head, a URL's scheme-and-authority-and-path part, addresses; see {@link foldOrigin}. */
+function originOf(head: string): string {
+	const schemeEnd = schemeEndOf(head);
+	const scheme = schemeEnd === undefined ? "" : head.slice(0, schemeEnd);
+	const start = schemeEnd !== undefined ? schemeEnd + 3 : head.startsWith("//") ? 2 : 0;
+	const authorityEnd = head.indexOf("/", start);
+	return foldOrigin(scheme, head.slice(start, authorityEnd === -1 ? undefined : authorityEnd));
+}
+
+/**
+ * Whether @p incoming addresses another origin (scheme, host or port) than the
+ * @p stored URL. A stored value that is no string has none to differ from.
+ */
+export function originChanged(stored: unknown, incoming: string): boolean {
+	if (typeof stored !== "string") return false;
+	return originOf(urlParts(stored).head) !== originOf(urlParts(incoming).head);
 }
 
 /**
@@ -768,14 +829,33 @@ export interface RestoredUrl {
  * occurrence, written `name=`. A slot the caller filled, or removed, stays as
  * written; this is why a slot cannot be set to literally empty over a stored
  * value. @p auth is the stored row's, the one the read withheld under.
+ *
+ * A credential belongs to the address it was stored for (#3564): when
+ * @p incoming changes the origin, nothing is carried and the slots that would
+ * have been come back as `notCarried`, so an agent cannot move a stored
+ * credential to a host of its choosing.
  */
 export function restoreWithheldRequestUrl(
 	stored: unknown,
 	incoming: string,
 	auth: unknown
 ): RestoredUrl {
-	if (typeof stored !== "string") return { url: incoming, kept: [] };
-	const apiKeyParam = apiKeyParamName(auth);
+	if (typeof stored !== "string") {
+		return { url: incoming, kept: [], originChanged: false, notCarried: [] };
+	}
+	const carried = carryWithheldSlots(stored, incoming, apiKeyParamName(auth));
+	if (!originChanged(stored, incoming)) {
+		return { ...carried, originChanged: false, notCarried: [] };
+	}
+	return { url: incoming, kept: [], originChanged: true, notCarried: carried.kept };
+}
+
+/** @p incoming with every withheld slot of @p stored it still holds in the read's form filled in. */
+function carryWithheldSlots(
+	stored: string,
+	incoming: string,
+	apiKeyParam: string | undefined
+): { url: string; kept: KeptUrlSlot[] } {
 	const from = urlParts(stored);
 	const to = urlParts(incoming);
 	const kept: KeptUrlSlot[] = [];

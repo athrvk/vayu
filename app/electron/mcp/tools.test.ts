@@ -1139,6 +1139,136 @@ describe("data-write tools", () => {
 		});
 	});
 
+	describe("a write that moves the request to another origin (#3564)", () => {
+		const storedRow = {
+			id: "req_1",
+			name: "Get users",
+			url: "https://u:PW@bank.example/x?api_key=S&page=2",
+			headers: [
+				{ key: "Authorization", value: "Bearer s3cret", enabled: true },
+				{ key: "X-Trace", value: "1", enabled: true },
+			],
+			updatedAt: 7,
+		};
+		const readHeaders = [
+			{ key: "Authorization", enabled: true, valueWithheld: true },
+			{ key: "X-Trace", value: "1", enabled: true },
+		];
+		const update = (args: Record<string, unknown>, reveal = false) => {
+			const client = fakeClient({
+				getRequest: vi.fn().mockResolvedValue(structuredClone(storedRow)),
+			});
+			return dispatchTool(
+				"update_request",
+				{ requestId: "req_1", ...args },
+				ctxWith(client, { allowWrites: true, revealSecretsToAgents: reveal })
+			).then((res) => ({
+				res,
+				payload: (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0]?.[1],
+				notes: res.content.map((c) => c.text).join("\n"),
+			}));
+		};
+
+		// Mutation check: drop the origin comparison (`originChanged` always false)
+		// and the password and key go to the new host.
+		test("a changed host does not inherit the password or the key, and the answer names them", async () => {
+			const { res, payload, notes } = await update({
+				url: "https://u@evil.example/x?api_key=&page=2",
+			});
+			expect(res.isError).toBeFalsy();
+			expect(payload).toEqual({ url: "https://u@evil.example/x?api_key=&page=2" });
+			expect(notes).toContain(
+				"The URL's userinfo password was not carried because the host changed; give it a value or remove it."
+			);
+			expect(notes).toContain(
+				"api_key was not carried because the host changed; give it a value or remove it."
+			);
+			expect(notes).not.toContain("kept its stored value");
+		});
+
+		// Mutation check: pass `false` for `originChanged` to `carryHeaderRows` in
+		// `mergeRequestEdits` and the PUT carries the Authorization value.
+		test("a changed host leaves a withheld Authorization row out, and the answer names it", async () => {
+			const { res, payload, notes } = await update({
+				url: "https://evil.example/x",
+				headers: readHeaders,
+			});
+			expect(res.isError).toBeFalsy();
+			expect(payload).toEqual({
+				url: "https://evil.example/x",
+				headers: [{ key: "X-Trace", value: "1", enabled: true }],
+			});
+			expect(JSON.stringify(payload)).not.toContain("s3cret");
+			expect(notes).toContain(
+				"Authorization was not carried because the host changed; give it a value."
+			);
+			// Named once, as not carried, and not again as removed unread.
+			expect(notes).not.toContain("cannot read");
+		});
+
+		test("a changed host still takes an Authorization row the call gives a value", async () => {
+			const { payload, notes } = await update({
+				url: "https://evil.example/x",
+				headers: [{ key: "Authorization", value: "Bearer NEW" }, readHeaders[1]],
+			});
+			expect(payload.headers[0]).toEqual({
+				key: "Authorization",
+				value: "Bearer NEW",
+				enabled: true,
+			});
+			expect(notes).not.toContain("was not carried");
+		});
+
+		test("a changed port or scheme is a changed origin for a header row too", async () => {
+			for (const url of ["https://bank.example:8443/x", "http://bank.example/x"]) {
+				const { payload } = await update({ url, headers: readHeaders });
+				expect(JSON.stringify(payload.headers), url).not.toContain("Authorization");
+			}
+		});
+
+		test("a withheld row with nothing stored behind it is still refused when the host changes", async () => {
+			const { res, payload } = await update({
+				url: "https://evil.example/x",
+				headers: [{ key: "X-Api-Key", valueWithheld: true }],
+			});
+			expect(res.isError).toBe(true);
+			expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+			expect(payload).toBeUndefined();
+		});
+
+		test("a same-origin edit keeps the password, the key and the Authorization row", async () => {
+			const { res, payload, notes } = await update({
+				url: "https://u@BANK.example:443/y?api_key=&page=3",
+				headers: readHeaders,
+			});
+			expect(res.isError).toBeFalsy();
+			expect(payload).toEqual({
+				url: "https://u:PW@BANK.example:443/y?api_key=S&page=3",
+				headers: storedRow.headers,
+			});
+			expect(notes).toContain("api_key kept its stored value");
+			expect(notes).not.toContain("was not carried");
+		});
+
+		test("a headers-only write has no URL to move and keeps the row", async () => {
+			const { payload, notes } = await update({ headers: readHeaders });
+			expect(payload).toEqual({ headers: storedRow.headers });
+			expect(notes).not.toContain("was not carried");
+		});
+
+		test("with reveal on the URL is written as given and a withheld row keeps its value", async () => {
+			const { payload, notes } = await update(
+				{ url: "https://evil.example/x", headers: readHeaders },
+				true
+			);
+			expect(payload).toEqual({
+				url: "https://evil.example/x",
+				headers: storedRow.headers,
+			});
+			expect(notes).not.toContain("was not carried");
+		});
+	});
+
 	describe("header rows written back while secrets are withheld (#3550)", () => {
 		const storedHeaders = [
 			{ key: "Authorization", value: "Bearer s3cret", enabled: true },
