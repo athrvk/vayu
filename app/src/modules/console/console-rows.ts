@@ -17,8 +17,10 @@
  *
  * The Send row is built from the live response, so it is masked here before
  * it enters the ring: header values by the engine's logger name set (less the
- * challenge headers) plus the `authHeaders` the response carries, the URL by `maskUrlCredentials` plus `authQueryParam`.
- * Script requests arrive masked by the engine (#3633) and are kept as written.
+ * challenge headers) plus the `authHeaders` the response carries, the URL by
+ * `maskUrlCredentials` plus `authQueryParam`, in the `user:<redacted>@host`
+ * form the engine writes on a script request's row (#3672). Script requests
+ * arrive masked by the engine (#3633) and are kept as written.
  * Bodies are not judged, as in an export.
  */
 

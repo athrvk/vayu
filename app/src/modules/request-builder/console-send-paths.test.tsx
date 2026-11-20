@@ -218,7 +218,7 @@ describe("the session Console's two send paths", () => {
 		expect(rows[0]).toMatchObject({
 			kind: "send",
 			method: "POST",
-			url: "https://u@api.test/token?access_token=<redacted>",
+			url: "https://u:<redacted>@api.test/token?access_token=<redacted>",
 			status: 200,
 			timeMs: 30,
 			sizeBytes: BODY.length,
@@ -241,7 +241,7 @@ describe("the session Console's two send paths", () => {
 		expect(rows[0]).toMatchObject({
 			kind: "send",
 			method: "PUT",
-			url: "https://u@moved.test/v2?access_token=<redacted>&page=2",
+			url: "https://u:<redacted>@moved.test/v2?access_token=<redacted>&page=2",
 		});
 	});
 
@@ -253,7 +253,7 @@ describe("the session Console's two send paths", () => {
 		expect(useConsoleStore.getState().rows[0]).toMatchObject({
 			kind: "send",
 			method: "POST",
-			url: "https://u@api.test/token?access_token=<redacted>",
+			url: "https://u:<redacted>@api.test/token?access_token=<redacted>",
 		});
 	});
 

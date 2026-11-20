@@ -359,9 +359,10 @@ is stored on the send's trace, so History and a run's step show the same rows.
 A setup or teardown script's calls are listed under its row of the run's Setup
 / teardown card. Credentials are masked where the engine records them (a
 credential header reads `<redacted>`, and so does a URL's userinfo password
-or credential query value; a server's `WWW-Authenticate`, `Proxy-Authenticate`
-and `Authentication-Info` are shown); bodies are kept as sent and received. A load run records
-no exchange and keeps only the line. Both are described under
+or credential query value, a redirect hop's included; a server's
+`WWW-Authenticate`, `Proxy-Authenticate` and `Authentication-Info` are shown);
+bodies are kept as sent and received. A load run records no exchange and keeps
+only the line. Both are described under
 [`pm.sendRequest`](../engine/scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **It is bounded three ways, and two of them throw.** The request's timeout is

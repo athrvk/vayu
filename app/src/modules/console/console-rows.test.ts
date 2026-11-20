@@ -15,7 +15,9 @@
  * `authHeaders` in `sendRow` and "a custom
  * API-key header named by authHeaders" stores the key in clear; drop the
  * `authQueryParam` extra name and "masks a query name only the send's auth
- * claims" fails; build
+ * claims" fails; drop the password instead of marking it in
+ * `maskUserinfoPassword` and "copies the same cURL as a script request the
+ * engine masked" fails; build
  * the rows in `consoleRows` order without the pre/post split and "lists a Send's
  * rows in execution order" fails.
  */
@@ -151,7 +153,31 @@ describe("sendConsoleRows", () => {
 		});
 
 		it("masks an auth-written access_token and a user:pass@ password in the URL", () => {
-			expect(row().url).toBe("https://alice@api.test/token?access_token=<redacted>&page=2");
+			expect(row().url).toBe(
+				"https://alice:<redacted>@api.test/token?access_token=<redacted>&page=2"
+			);
+		});
+
+		// The engine writes a script request's URL as `user:<redacted>@host`
+		// (#3672), so a Send row in the old `user@host` form copied as
+		// `-u 'alice:'` beside `-u 'alice:<redacted>'` for the same request.
+		it("copies the same cURL as a script request the engine masked", () => {
+			const engineMasked: ConsoleScriptRequestRow = {
+				kind: "scriptRequest",
+				source: "pre",
+				method: "POST",
+				url: "https://alice:<redacted>@api.test/token?access_token=<redacted>&page=2",
+				status: 200,
+				timeMs: 1,
+				sizeBytes: 0,
+				exchange: { requestHeaders: {}, responseHeaders: {} },
+			};
+			const sendCurl = consoleRowCurl({
+				...row(),
+				exchange: { requestHeaders: {}, responseHeaders: {} },
+			});
+			expect(sendCurl).toContain("-u 'alice:<redacted>'");
+			expect(sendCurl).toBe(consoleRowCurl(engineMasked));
 		});
 
 		it("masks a query name only the send's auth claims", () => {
