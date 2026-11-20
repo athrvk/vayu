@@ -64,7 +64,9 @@ is removed from `params[]` too, rather than left behind as a row the URL no
 longer carries (`mergeParamsFromUrl`, issue #1482). Enabled rows take the
 URL's pair order, so the table's row-ordered rebuild writes back the order that
 was typed, and a disabled row keeps its slot after the enabled row that
-preceded it (issue #3426).
+preceded it (issue #3426). So does an enabled row with a value and no key yet:
+the URL cannot carry it either, and reading it as removed deleted a half-typed
+row on the next URL keystroke and on every save's echo (#3663).
 
 **Query rows hold the query as the URL spells it** (issue #1771), which is
 Postman's own row model: `?q=a%20b` is the row `a%20b`, never decoded, in

@@ -104,6 +104,19 @@ describe("mergeParamsFromUrl", () => {
 		]);
 	});
 
+	it("keeps a row with a value and no key in its slot, and drops the blank spare row (#3663)", () => {
+		// The URL cannot carry a keyless row (`buildUrlWithParams` never writes
+		// one), so like a disabled row it is not "dropped from the URL". Mutation
+		// check: drop the keyless half of `isUnwrittenRow` and the row is gone.
+		const existing = [item("1", "a", "1"), item("half", "", "typed"), item("spare", "", "")];
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&c=3", "https://x/y?a=1");
+		expect(merged.map(({ id, key, value }) => [id, key, value])).toEqual([
+			["1", "a", "1"],
+			["half", "", "typed"],
+			[merged[2].id, "c", "3"],
+		]);
+	});
+
 	it("preserves id, description and source for a row whose key survives", () => {
 		const existing = [
 			item("keep-me", "a", "1", true, { description: "note", source: "body-mode" }),

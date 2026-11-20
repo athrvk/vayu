@@ -13,6 +13,7 @@
 
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
+import { carryIds } from "@/components/shared/KeyValueEditor/key-value";
 import { splitKeyValueLine, stripDisabledMarker, PARAM_SEPARATORS } from "./kv-line";
 import { queryRowsOf } from "./path-variables";
 import { writesBareKey } from "./url";
@@ -67,17 +68,6 @@ export const parseParamsFromText = (
 ): KeyValueItem[] => {
 	const lines = text.split("\n").filter((line) => line.trim());
 	const params: KeyValueItem[] = [];
-	const carried = queryRowsOf(previous);
-	const consumed = new Array<boolean>(carried.length).fill(false);
-	const idFor = (key: string, value: string, valueless: boolean): string => {
-		const match = carried.findIndex(
-			(p, i) =>
-				!consumed[i] && p.key === key && p.value === value && writesBareKey(p) === valueless
-		);
-		if (match === -1) return generateId();
-		consumed[match] = true;
-		return carried[match].id;
-	};
 
 	lines.forEach((line) => {
 		const { enabled, rest } = stripDisabledMarker(line);
@@ -85,7 +75,7 @@ export const parseParamsFromText = (
 		if (!parsed) return;
 
 		params.push({
-			id: idFor(parsed.key, parsed.value, parsed.valueless === true),
+			id: generateId(),
 			key: parsed.key,
 			value: parsed.value,
 			enabled,
@@ -93,7 +83,16 @@ export const parseParamsFromText = (
 		});
 	});
 
-	return params;
+	// The `//` marker is not part of what a line restates: toggling a row off
+	// in the text keeps its id.
+	return carryIds(
+		queryRowsOf(previous),
+		params,
+		(p, row) =>
+			p.key === row.key &&
+			p.value === row.value &&
+			writesBareKey(p) === (row.valueless === true)
+	);
 };
 
 /**

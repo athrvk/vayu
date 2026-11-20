@@ -98,6 +98,79 @@ export const toKeyValueEntries = (items: KeyValueItem[]): FormFieldEntry[] => {
 };
 
 /**
+ * Whether two rows say the same thing, member by member: the engine stores a
+ * row as JSON and hands its members back in another order, so a serialised
+ * compare would read an unchanged row as edited. An absent member and one set
+ * to `undefined` agree. The `id` takes no part.
+ */
+const sameEntry = (a: FormFieldEntry, b: FormFieldEntry): boolean => {
+	const left: Record<string, unknown> = { ...a, id: undefined };
+	const right: Record<string, unknown> = { ...b, id: undefined };
+	const members = new Set([...Object.keys(left), ...Object.keys(right)]);
+	return [...members].every((member) => left[member] === right[member]);
+};
+
+/**
+ * Whether two tables store the same rows (#3663): compared as the entries
+ * `toKeyValueEntries` saves, so neither the ephemeral ids nor the spare blank
+ * row make a refetched table read as changed.
+ */
+export const sameRows = (a: KeyValueItem[], b: KeyValueItem[]): boolean => {
+	const left = toKeyValueEntries(a);
+	const right = toKeyValueEntries(b);
+	return left.length === right.length && left.every((entry, i) => sameEntry(entry, right[i]));
+};
+
+/**
+ * `next` with each row's id taken from the first row of `previous` it
+ * `restates`, each previous row claimed once and in order, so of two identical
+ * rows the first keeps the first's id. A row that restates nothing keeps its
+ * own id.
+ */
+export function carryIds<T extends { id: string }>(
+	previous: readonly T[],
+	next: readonly T[],
+	restates: (previous: T, next: T) => boolean
+): T[] {
+	const claimed = new Array<boolean>(previous.length).fill(false);
+	return next.map((row) => {
+		const match = previous.findIndex((prev, i) => !claimed[i] && restates(prev, row));
+		if (match === -1) return row;
+		claimed[match] = true;
+		return { ...row, id: previous[match].id };
+	});
+}
+
+/**
+ * `incoming` rows, freshly converted from storage, with the ids of the
+ * `current` rows they restate (#3663), so adopting a refetched table remounts
+ * only the rows whose content changed and a caret in any other row stays put.
+ * Rows are keyed by id, so a fresh id is a remount.
+ *
+ * Blank rows restate nothing by content: the spare row instead keeps the id of
+ * the current table's last blank row, so a caret left in it survives too.
+ */
+export function carryRowIds(
+	current: readonly KeyValueItem[],
+	incoming: readonly KeyValueItem[]
+): KeyValueItem[] {
+	const carried = carryIds(
+		current.filter((row) => !isBlankRow(row)),
+		incoming,
+		(prev, next) => !isBlankRow(next) && sameEntry(prev, next)
+	);
+	const spare = current[lastBlankIndex(current)];
+	const incomingSpare = lastBlankIndex(carried);
+	if (!spare || incomingSpare === -1) return carried;
+	return carried.map((row, i) => (i === incomingSpare ? { ...row, id: spare.id } : row));
+}
+
+function lastBlankIndex(rows: readonly KeyValueItem[]): number {
+	for (let i = rows.length - 1; i >= 0; i--) if (isBlankRow(rows[i])) return i;
+	return -1;
+}
+
+/**
  * `item` with the file name its part is sent under set to `name`, or without
  * one when `name` is empty: the engine then sends the file's own name (#3022).
  */

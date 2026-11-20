@@ -190,7 +190,7 @@ export default function ParamsPanel() {
 		resolvedUrl
 	);
 	// The blank row to type into is derived where the rows are rendered, as the
-	// Headers tab does (`useHeadersManager`), because `request.params` does not
+	// Headers tab does (`useHeadersManager`), because `request.params` does not always
 	// carry it: a URL edit goes through `mergeParamsFromUrl`, which drops the
 	// enabled blank row (its key matches nothing in the URL), and the tab
 	// lost its spare row until the next table change (#2155). Memoised so the

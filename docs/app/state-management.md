@@ -3872,11 +3872,25 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
     `fieldConflicts[field]`;
   - a touched field the fetch now agrees with (the save's own echo, or a
     coincidence) resolves quietly - `baseline` moves, nothing is shown.
-  `mergeExternalWrite` compares by JSON content, not by reference: `headers`,
-  `params` and `auth` are rebuilt into fresh arrays/objects on every fetch
+  `mergeExternalWrite` compares by JSON content, not by reference: `auth` and
+  the other object fields are rebuilt into fresh objects on every fetch
   regardless of content, and `===` there would read every refetch as an
   external change - the same reason `useEntityDraft` compares by
-  `JSON.stringify`.
+  `JSON.stringify`. JSON content is not enough for the four key/value tables
+  (`params`, `headers`, `formData`, `urlEncoded`, #3663): every conversion from
+  storage gives each row a fresh ephemeral id and a spare blank row, so the
+  save's own echo never matched and was adopted, replacing every row with a
+  fresh-id copy (rows are keyed by id, so each remounted and the caret was
+  lost), and an outside write to any field over an unsaved table edit raised a
+  conflict on the table. The provider passes `mergeExternalWrite` a per-field
+  equality (`options.equals`) that compares those tables as `sameRows` does
+  (`components/shared/KeyValueEditor/key-value.ts`): the rows
+  `toKeyValueEntries` would store, member by member, with the id and the blank
+  rows out and the engine's member order ignored. When a table really is
+  adopted (an untouched table an outside write changed, or "Take theirs"),
+  `carryRowIds` gives each incoming row the id of the draft row it restates,
+  by content and in order, and the spare row the draft's spare row id, so only
+  the rows the write changed remount.
   The merge is skipped in a render that is a reset (a different request id or
   `initialResponse`, #3662): the reset seeds `baseline` and clears
   `touchedFields` for the request just loaded, and a merge in the same render

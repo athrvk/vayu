@@ -763,7 +763,8 @@ A request stored with its query only in `url` (written before the engine
 derived the rows from a URL-only write, issue #3551, or by a write that stated
 `params: []`) opens with those pairs as rows, through
 `mergeParamsFromUrl` - the rule a URL-bar edit already uses, so stored disabled
-rows stay and a stored row keeps its id and description. Without it the table
+rows and rows with a value and no key stay, and a stored row keeps its id and
+description. Without it the table
 opened empty and its first edit rebuilt `url` from the rows alone, deleting the
 query. The seed is not an edit: the draft's saved baseline is seeded from the
 same rows, so the request is not marked unsaved, and nothing is written back
