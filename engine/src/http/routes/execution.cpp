@@ -2155,7 +2155,7 @@ const std::atomic<bool>* cancel) {
     vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (db));
     if (auto refusal = files.prepare (request)) {
         return ResidualRefusal{
-            vayu::Error{ vayu::ErrorCode::InternalError, std::move (*refusal) }, "unsendable_file"
+            vayu::Error{ vayu::ErrorCode::UnsendableFile, std::move (*refusal) }, "unsendable_file"
         };
     }
     return std::nullopt;

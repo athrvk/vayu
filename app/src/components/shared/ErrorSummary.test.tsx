@@ -64,22 +64,25 @@ describe("ErrorSummary", () => {
 	});
 
 	// The `error_type_name` keys for a redirect loop, an undecodable body (#2462)
-	// and a peer that answered in a protocol other than HTTP/1.x (#3306). The
-	// sentence-cased fallback spells all three the same way, so this pins the
-	// wording, not the table lookup.
+	// a peer that answered in a protocol other than HTTP/1.x (#3306) and a file
+	// the request names that cannot be sent (#3693). The sentence-cased fallback
+	// spells the first three the same way, so this pins the wording, not the
+	// table lookup; the fourth's label differs from its fallback ("Unsendable
+	// file"), so deleting its entry fails here.
 	// Mutation-check: change any label's wording in ERROR_TYPE_LABELS and this
 	// fails; deleting the entry alone does not, the fallback renders it identically.
-	it("labels the redirect-loop, content-encoding and protocol-mismatch types", () => {
+	it("labels the redirect-loop, content-encoding, protocol-mismatch and unsendable-file types", () => {
 		render(
 			<ErrorSummary
 				{...props({
 					errors: {
-						total: 6,
-						withDetails: 6,
+						total: 10,
+						withDetails: 10,
 						types: {
 							too_many_redirects: 3,
 							bad_content_encoding: 2,
 							protocol_mismatch: 1,
+							unsendable_file: 4,
 						},
 					},
 					noResponse: 6,
@@ -93,6 +96,9 @@ describe("ErrorSummary", () => {
 		expect(screen.getByText("Protocol mismatch").nextSibling?.textContent).toBe("1");
 		expect(screen.queryByText("bad_content_encoding")).toBeNull();
 		expect(screen.queryByText("protocol_mismatch")).toBeNull();
+		expect(screen.getByText("File can't be sent").nextSibling?.textContent).toBe("4");
+		expect(screen.queryByText("unsendable_file")).toBeNull();
+		expect(screen.queryByText("Unsendable file")).toBeNull();
 	});
 
 	it("falls back to a sentence-cased label for a type it has no entry for", () => {

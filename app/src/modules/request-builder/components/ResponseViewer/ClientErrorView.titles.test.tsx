@@ -27,6 +27,11 @@ describe("ClientErrorView headings for non-network codes", () => {
 		["AUTH_REQUIRED", "This request needs an OAuth 2.0 token", /Open the Auth tab/],
 		["INVALID_METHOD", "Couldn't send - the method doesn't allow this", /Remove the body/],
 		["DATA_BINDING_FAILED", "Couldn't bind the data row", /column names in the data file/],
+		[
+			"UNSENDABLE_FILE",
+			"Couldn't send a file in this request",
+			/Choose it again in the Body tab or remove it/,
+		],
 	])("names %s rather than a missing response", (code, title, hint) => {
 		render(<ClientErrorView errorCode={code} errorMessage="detail" />);
 
@@ -183,5 +188,16 @@ describe("ClientErrorView glyphs", () => {
 		expect(new Set(glyphs).size).toBe(glyphs.length);
 		expect(glyphs).not.toContain(fallback);
 		expect(glyphs).not.toContain("lucide-server-off");
+	});
+
+	// A file the request names is the request's fault, so it must not wear
+	// Vayu's own-failure glyph (#3693). Mutation-check: add UNSENDABLE_FILE to
+	// the ServerCrash group in getErrorIcon and the first assertion fails; drop
+	// its own case and the fallback comparison does.
+	it("gives an unsendable file a glyph of its own, not Vayu's failure glyph", () => {
+		const file = glyph("UNSENDABLE_FILE");
+
+		expect(file).not.toBe(glyph("INTERNAL_ERROR"));
+		expect(file).not.toBe(glyph("SOMETHING_UNMAPPED"));
 	});
 });

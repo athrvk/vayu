@@ -191,7 +191,7 @@ std::optional<Error> validate_transferable (const Request& request) {
     // any driver; what is left here is the proof it did.
     if (has_body) {
         if (auto unplanned = vayu::http::unplanned_file_ref (request.body)) {
-            return Error{ ErrorCode::InternalError, std::move (*unplanned) };
+            return Error{ ErrorCode::UnsendableFile, std::move (*unplanned) };
         }
     }
     // Header text that would end or truncate the line it is written into. Here

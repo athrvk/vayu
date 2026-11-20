@@ -644,6 +644,7 @@ TEST_F (BinaryBodyWireTest, AnUncheckedBinaryBodyIsRefusedAtTheGate) {
     binary_request (server_->url (), scratch_.write ("a.bin", "abc"));
     const auto refused = detail::validate_transferable (request);
     ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::ErrorCode::UnsendableFile);
     EXPECT_NE (refused->message.find ("was not checked before the send"), std::string::npos)
     << refused->message;
 
@@ -744,6 +745,7 @@ TEST_F (BinaryBodyExchangeTest, AnImportedPathOutsideTheAllowedFoldersIsRefusedB
     FilePlan files (FileAccessPolicy ({ scratch_.dir ("allowed") }));
     const auto outcome = exchange (request, &files);
     EXPECT_EQ (outcome.response.status_code, 0);
+    EXPECT_EQ (outcome.response.error_code, vayu::ErrorCode::UnsendableFile);
     EXPECT_NE (outcome.response.error_message.find (
                "Body file '" + outside + "' was not picked on this machine"),
     std::string::npos)
@@ -752,6 +754,7 @@ TEST_F (BinaryBodyExchangeTest, AnImportedPathOutsideTheAllowedFoldersIsRefusedB
 
     // No plan at all allows no folder: the same refusal, never a send.
     const auto unplanned = exchange (request, nullptr);
+    EXPECT_EQ (unplanned.response.error_code, vayu::ErrorCode::UnsendableFile);
     EXPECT_NE (
     unplanned.response.error_message.find ("not under an allowed folder"), std::string::npos);
 }
@@ -1125,6 +1128,7 @@ TEST_F (FormPartWireTest, AnUncheckedFilePartIsRefusedAtTheGate) {
     form_part_request (server_->url (), scratch_.write ("a.bin", "abc"));
     const auto refused = detail::validate_transferable (request);
     ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::ErrorCode::UnsendableFile);
     EXPECT_EQ (refused->message.rfind ("Form field 'f' '", 0), 0u) << refused->message;
     EXPECT_NE (refused->message.find ("was not checked before the send"), std::string::npos)
     << refused->message;
@@ -1657,6 +1661,27 @@ TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendP
         const auto planned = load_plan (body);
         ASSERT_HAS_VALUE (planned) << body.dump ();
         EXPECT_NE (planned->find (UNTRUSTED), std::string::npos) << *planned;
+    }
+}
+
+// A refusal of the file rule is the request's own fault, so a response carries
+// `UNSENDABLE_FILE` and never the code that means the engine broke (#3693): a
+// form-data file part with no file chosen, and one whose path still holds a
+// `{{variable}}`, as a buffered send answers them. Mutation check: wrap the
+// refusal in `execute_exchange` as `InternalError` again and each reads it.
+TEST_F (StoredTrustTest, AFilePartWithNoFileOrAnUnresolvedPathIsAnUnsendableFile) {
+    for (const std::string& src : { std::string{}, std::string{ "{{fixtures}}/a.bin" } }) {
+        const json body = { { "mode", "form-data" },
+            { "fields",
+            json::array ({ { { "key", "upload" }, { "type", "file" }, { "src", src } } }) } };
+        const auto sent = design_send (body);
+        EXPECT_EQ (sent.response.status_code, 0) << src;
+        EXPECT_EQ (sent.response.error_code, vayu::ErrorCode::UnsendableFile) << src;
+        EXPECT_STREQ (vayu::to_string (sent.response.error_code), "UNSENDABLE_FILE");
+        EXPECT_NE (sent.response.error_message.find ("Form field 'upload'"), std::string::npos)
+        << sent.response.error_message;
+        EXPECT_TRUE (server_->parts ().empty ())
+        << "the send reached the server";
     }
 }
 

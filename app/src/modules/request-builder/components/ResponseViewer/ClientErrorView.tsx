@@ -21,6 +21,7 @@ import {
 	Route,
 	Repeat,
 	FileWarning,
+	FileX,
 	Unplug,
 	ServerOff,
 	ServerCrash,
@@ -93,6 +94,8 @@ const ErrorHints: Record<string, string> = {
 	ENGINE_ERROR: ENGINE_NO_ANSWER,
 	AUTH_REQUIRED: "Open the Auth tab to get a token, then send again.",
 	AUTH_FAILED: "Check the Auth tab's token settings, then send again.",
+	UNSENDABLE_FILE:
+		"A file this request names can't be sent. Choose it again in the Body tab or remove it, and check that a {{variable}} in its path has a value. A file outside the locations allowed in Settings › Files has to be picked in the request.",
 	INVALID_METHOD:
 		"This method can't carry the body this request has. Remove the body, or change the method.",
 	DATA_BINDING_FAILED:
@@ -111,6 +114,11 @@ const ErrorHints: Record<string, string> = {
  * `ENGINE_ERROR` is Vayu's own failure, not the network's, so it names the
  * engine rather than borrowing the network template (docs/ux-writing.md,
  * "Errors have three sources").
+ *
+ * `UNSENDABLE_FILE` is the request's own file (none chosen, an unresolved
+ * variable in its path, unreadable, outside the allowed folders): the engine
+ * refused it before sending, so it names neither the network nor Vayu. A trace
+ * stored before the code existed reads `INTERNAL_ERROR` and keeps that title.
  *
  * `INVALID_URL` covers a URL that does not parse, one that parses but names a
  * scheme other than http or https, and one the engine will not send to (its
@@ -134,6 +142,7 @@ const ErrorTitles: Record<string, string> = {
 	AUTH_REQUIRED: "This request needs an OAuth 2.0 token",
 	INVALID_METHOD: "Couldn't send - the method doesn't allow this",
 	DATA_BINDING_FAILED: "Couldn't bind the data row",
+	UNSENDABLE_FILE: "Couldn't send a file in this request",
 	UNKNOWN_ERROR: ENGINE_ANSWERED_ERROR,
 	internal_error: ENGINE_ANSWERED_ERROR,
 };
@@ -161,6 +170,9 @@ function getErrorIcon(errorCode?: string) {
 			return Unplug;
 		case "DNS_ERROR":
 			return WifiOff;
+		// A file the request names, not a hop or Vayu: nothing was sent.
+		case "UNSENDABLE_FILE":
+			return FileX;
 		// Vayu's own failures get a glyph a target's failure never uses
 		// (docs/ux-writing.md, "Errors have three sources").
 		case "ENGINE_ERROR":
