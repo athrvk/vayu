@@ -321,6 +321,45 @@ describe("the echo of a save an edit raced (#3664)", () => {
 		await saves.finish();
 	});
 
+	it("recognises the first save's echo after a queued second save has started", async () => {
+		// `useSaveManager` starts a queued save in the microtask after the first
+		// resolves, before the first's cache write has rendered.
+		const { saves, deliver } = raceAUrlSave();
+		await saves.finish();
+		save();
+
+		deliver("https://ab");
+
+		expect(shown("conflicts")).toBe("{}");
+		expect(shown("url")).toBe("https://abc");
+		await saves.finish();
+	});
+
+	it("still conflicts on the value of a save that failed", async () => {
+		// A failed save has no echo, so an outside write of its value is not one.
+		let fail!: (error: Error) => void;
+		const onSave = vi.fn(
+			() =>
+				new Promise<void>((_, reject) => {
+					fail = reject;
+				})
+		);
+		const { rerender } = render(
+			<EchoHarness stored={{ id: "req_1", url: "https://a" }} onSave={onSave} />
+		);
+		click("type ab");
+		act(() => void managerOptions.onSave().catch(() => undefined));
+		click("type abc");
+		await act(async () => fail(new Error("engine unavailable")));
+
+		act(() =>
+			rerender(<EchoHarness stored={{ id: "req_1", url: "https://ab" }} onSave={onSave} />)
+		);
+
+		expect(shown("conflicts")).toBe(JSON.stringify({ url: "https://ab" }));
+		expect(shown("url")).toBe("https://abc");
+	});
+
 	it("forgets what was sent once a different request loads", async () => {
 		const saves = heldSave();
 		const { rerender } = render(

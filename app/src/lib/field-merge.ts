@@ -22,10 +22,10 @@
  * has not touched since the last known-good value is adopted silently. A
  * changed field the caller has touched, to the *same* value the fetch now
  * reports, is resolved with no conflict, and so is one whose incoming value is
- * what the caller's own save sent (`MergeOptions.sent`, #3664). Only a changed
- * field the caller has touched to a value neither it nor its save holds is a
- * real conflict: the caller's value is kept, and the incoming one is reported
- * for the UI to offer.
+ * what one of the caller's own saves sent (`MergeOptions.sent`, #3664). Only a
+ * changed field the caller has touched to a value neither it nor its saves
+ * hold is a real conflict: the caller's value is kept, and the incoming one is
+ * reported for the UI to offer.
  */
 
 function sameValue<V>(a: V, b: V): boolean {
@@ -44,14 +44,15 @@ export interface MergeOptions<T, K extends keyof T> {
 	/** Per-field equality, used in place of `sameValue` for every compare of that field. */
 	equals?: { [P in K]?: (a: T[P], b: T[P]) => boolean };
 	/**
-	 * The values the caller's latest save sent, for the fields it sent. An
-	 * incoming value equal to one of them is that save's echo: a keystroke made
-	 * during the round trip leaves the draft ahead of it, and without this the
-	 * echo would read as someone else's write. Keyed on the value, not on a
-	 * save being in flight, so an outside write in the same window still
-	 * conflicts.
+	 * What the caller's recent saves sent, one patch per save holding the
+	 * fields it sent. An incoming value equal to any of them is that save's
+	 * echo: a keystroke made during the round trip leaves the draft ahead of
+	 * it, and without this the echo would read as someone else's write. Keyed
+	 * on the value, not on a save being in flight, so an outside write in the
+	 * same window still conflicts - unless it writes a value one of these
+	 * saves sent, which is indistinguishable from that save's echo.
 	 */
-	sent?: FieldPatch<T, K>;
+	sent?: readonly FieldPatch<T, K>[];
 }
 
 export interface FieldMergeOutcome<T, K extends keyof T> {
@@ -90,7 +91,7 @@ export function mergeExternalWrite<T, K extends keyof T>(
 	const patch: FieldPatch<T, K> = {};
 	const nextBaseline: T = { ...baseline };
 	const conflicts: FieldPatch<T, K> = {};
-	const sent: FieldPatch<T, K> = options.sent ?? {};
+	const sent = options.sent ?? [];
 	let changed = false;
 
 	for (const field of fields) {
@@ -98,7 +99,7 @@ export function mergeExternalWrite<T, K extends keyof T>(
 		const next = incoming[field];
 		if (same(next, baseline[field])) continue;
 		changed = true;
-		const isEcho = field in sent && same(next, sent[field] as T[K]);
+		const isEcho = sent.some((saved) => field in saved && same(next, saved[field] as T[K]));
 		if (!touched.has(field)) {
 			// Untouched: the fetch's value wins, silently.
 			patch[field] = next;

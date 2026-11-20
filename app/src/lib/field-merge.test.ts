@@ -181,7 +181,7 @@ describe("mergeExternalWrite", () => {
 				new Set(["rows"]),
 				{
 					...OPTIONS,
-					sent: { rows: [header("a", "2")] },
+					sent: [{ rows: [header("a", "2")] }],
 				}
 			);
 
@@ -200,7 +200,7 @@ describe("mergeExternalWrite", () => {
 			const incoming: Draft = { name: "ab", tags: ["x"], count: 1 };
 
 			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
-				sent: { name: "ab" },
+				sent: [{ name: "ab" }],
 			});
 
 			expect(outcome.changed).toBe(true);
@@ -213,7 +213,7 @@ describe("mergeExternalWrite", () => {
 			const incoming: Draft = { name: "other", tags: ["x"], count: 1 };
 
 			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
-				sent: { name: "ab" },
+				sent: [{ name: "ab" }],
 			});
 
 			expect(outcome.conflicts).toEqual({ name: "other" });
@@ -229,7 +229,7 @@ describe("mergeExternalWrite", () => {
 				baseline,
 				incoming,
 				new Set(["name", "tags"]),
-				{ sent: { name: "ab" } }
+				{ sent: [{ name: "ab" }] }
 			);
 
 			expect(outcome.conflicts).toEqual({ tags: ["y"] });
@@ -241,11 +241,24 @@ describe("mergeExternalWrite", () => {
 
 			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
 				equals: { name: caseless },
-				sent: { name: "ab" },
+				sent: [{ name: "ab" }],
 			});
 
 			expect(outcome.conflicts).toEqual({});
 			expect(outcome.nextBaseline.name).toBe("AB");
+		});
+
+		it("recognises the echo of an earlier save in the list, not only the newest", () => {
+			// Save one sent "ab", save two (queued behind it) sent "abc" for a
+			// different field set; save one's echo lands after save two started.
+			const incoming: Draft = { name: "ab", tags: ["x"], count: 1 };
+
+			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
+				sent: [{ name: "ab" }, { count: 2 }],
+			});
+
+			expect(outcome.conflicts).toEqual({});
+			expect(outcome.nextBaseline.name).toBe("ab");
 		});
 	});
 });

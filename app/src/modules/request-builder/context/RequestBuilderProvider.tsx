@@ -108,6 +108,14 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
  */
 const ROW_FIELDS = ["params", "headers", "formData", "urlEncoded"] as const;
 
+/**
+ * How many saves' values the merge recognises as echoes. Two, not one: a save
+ * queued behind another (`useSaveManager`) starts in the microtask after the
+ * first resolves, before the first's cache write has rendered, so the first's
+ * echo arrives after the second has already recorded what it sends (#3664).
+ */
+const SENDS_REMEMBERED = 2;
+
 const MERGE_OPTIONS: MergeOptions<RequestState, MergeableRequestField> = {
 	equals: { params: sameRows, headers: sameRows, formData: sameRows, urlEncoded: sameRows },
 };
@@ -479,13 +487,18 @@ export default function RequestBuilderProvider({
 	);
 	const [fieldConflicts, setFieldConflicts] = useState<RequestFieldConflicts>({});
 	/**
-	 * What the latest save sent, field by field - set before `onSave` is awaited
-	 * and kept after it returns, because the cache write that echoes it back can
-	 * land on either side of the resolve (#3664). The merge reads it to tell
-	 * that echo from someone else's write. State, not a ref: the merge reads it
-	 * during render.
+	 * What the last `SENDS_REMEMBERED` saves sent, field by field, newest last
+	 * (#3664). The merge reads it to tell a save's echo from someone else's
+	 * write. An entry is added before `onSave` is awaited and kept after it
+	 * resolves, because the cache write that echoes it can render on either
+	 * side of the resolve; a save that rejects removes its own entry, since it
+	 * has no echo and a later outside write of the same value must conflict.
+	 * A settled save's values stay until later saves or a reset push them out,
+	 * so an outside write equal to one of them reads as an echo - accepted:
+	 * the draft is not touched by it, only the baseline moves. State, not a
+	 * ref: the merge reads it during render.
 	 */
-	const [lastSent, setLastSent] = useState<Partial<RequestState>>({});
+	const [recentSends, setRecentSends] = useState<readonly Partial<RequestState>[]>([]);
 	/**
 	 * The request this builder was showing has been deleted elsewhere, while
 	 * this tab still has it open (issue #1436). Sets `useSaveManager`'s
@@ -824,7 +837,7 @@ export default function RequestBuilderProvider({
 		setBaseline(seeded);
 		setTouchedFields(new Set());
 		setFieldConflicts({});
-		setLastSent({});
+		setRecentSends([]);
 		setRequestGone(false);
 		setLastProcessedInitialRequest(initialRequest);
 
@@ -895,10 +908,10 @@ export default function RequestBuilderProvider({
 	 *
 	 * Our own save's echo is not an outside write even when the user kept typing
 	 * through the round trip (#3664): the cache hands back what the save sent,
-	 * which now disagrees with both `baseline` and the draft. `lastSent` lets the
-	 * merge recognise it by value, move `baseline` to it and leave the field
-	 * touched, so the next save sends the newer draft. A value nobody here sent
-	 * still conflicts, in flight or not.
+	 * which now disagrees with both `baseline` and the draft. `recentSends` lets
+	 * the merge recognise it by value, move `baseline` to it and leave the field
+	 * touched, so the next save sends the newer draft. A value no recent save
+	 * here sent still conflicts, in flight or not.
 	 *
 	 * Gated on `initialRequest`'s own identity, not on every render: it is a
 	 * content-comparing diff over every mergeable field, and `index.tsx` only
@@ -918,7 +931,7 @@ export default function RequestBuilderProvider({
 			baseline,
 			incoming,
 			touchedFields,
-			{ ...MERGE_OPTIONS, sent: lastSent }
+			{ ...MERGE_OPTIONS, sent: recentSends }
 		);
 		if (outcome.changed) {
 			if (Object.keys(outcome.patch).length > 0) {
@@ -1016,10 +1029,13 @@ export default function RequestBuilderProvider({
 			? withoutFields(changedFields, ["elements"])
 			: changedFields;
 		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
-		setLastSent(pickFields(request, sentFields));
+		const sent = pickFields(request, sentFields);
+		setRecentSends((prev) => [...prev, sent].slice(-SENDS_REMEMBERED));
 		try {
 			await onSave(request, sentFields);
 		} catch (error) {
+			// By identity, not position: a later save may already have appended.
+			setRecentSends((prev) => prev.filter((entry) => entry !== sent));
 			// The engine names the element it refused (#3043); the failure itself
 			// still propagates to `useSaveManager` for its toast and Dock status.
 			if (sentFields.has("elements")) refuseElement(error, request.elements);
@@ -1032,7 +1048,7 @@ export default function RequestBuilderProvider({
 		// fields this save carried stay touched, since a fresh edit to one of
 		// them since the snapshot above would otherwise be forgotten, and their
 		// baseline is left to the merge: the cache's echo of this payload moves
-		// it, recognised through `lastSent` (#3664).
+		// it, recognised through `recentSends` (#3664).
 		const settled = changeTokenRef.current === savedGeneration;
 		if (settled) recordSaved(request, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
