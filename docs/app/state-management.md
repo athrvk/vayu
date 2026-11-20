@@ -3859,6 +3859,11 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
   regardless of content, and `===` there would read every refetch as an
   external change - the same reason `useEntityDraft` compares by
   `JSON.stringify`.
+  The merge is skipped in a render that is a reset (a different request id or
+  `initialResponse`, #3662): the reset seeds `baseline` and clears
+  `touchedFields` for the request just loaded, and a merge in the same render
+  would still read the previous request's touched fields and report them as
+  conflicts.
 - **`fieldConflicts`** and **`takeExternalField(field)`** are on
   `RequestBuilderContextValue`. `ExternalChangeNotice`
   (`request-builder/components/`) renders one `ExternalChangeCallout` per
