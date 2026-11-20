@@ -577,9 +577,14 @@ export default function VariableInput({
 	};
 
 	// Handle variable value change from token popover
-	const handleVariableChange = (name: string, newValue: string, scope: VariableScope) => {
+	const handleVariableChange = (
+		name: string,
+		newValue: string,
+		scope: VariableScope,
+		sourceId?: string
+	) => {
 		// Only reachable from a token, and a token only renders with a scope.
-		variables?.updateVariable(name, newValue, scope);
+		variables?.updateVariable(name, newValue, scope, sourceId);
 	};
 
 	/**
@@ -741,6 +746,7 @@ export default function VariableInput({
 							// which environment the value came from.
 							secret={varInfo?.secret}
 							sourceName={varInfo?.sourceName}
+							sourceId={varInfo?.sourceId}
 							onValueChange={handleVariableChange}
 							disabled={disabled}
 							// Non-null by construction: a token only renders under

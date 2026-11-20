@@ -34,6 +34,7 @@ import {
 } from "@/queries";
 import { queryKeys } from "@/queries/keys";
 import { mergeVariableChanges, type VariableMap } from "@/lib/variable-merge";
+import { variableTargetOf } from "@/lib/variable-target";
 import type { Collection, Environment, GlobalVariables, ResolvedVariable } from "@/types";
 
 /**
@@ -187,7 +188,10 @@ export function useVariableCommit(): (
 	 * no version of that walk that cannot drift from the resolver again.
 	 */
 	const commitScopeFor = (resolved: ResolvedVariable): CommitScope | null => {
-		if (resolved.scope === "global") {
+		const target = variableTargetOf(resolved);
+		if (!target) return null;
+
+		if (target.scope === "global") {
 			return {
 				read: () =>
 					queryClient.getQueryData<GlobalVariables>(queryKeys.globals.all)?.variables,
@@ -199,13 +203,8 @@ export function useVariableCommit(): (
 			};
 		}
 
-		// Every non-global winner carries the id of the environment or collection
-		// it came from. One without is a resolver that changed shape, not a
-		// variable to guess a home for.
-		const sourceId = resolved.sourceId;
-		if (!sourceId) return null;
-
-		if (resolved.scope === "environment") {
+		const sourceId = target.id;
+		if (target.scope === "environment") {
 			const key = queryKeys.environments.list();
 			const source = queryClient
 				.getQueryData<Environment[]>(key)

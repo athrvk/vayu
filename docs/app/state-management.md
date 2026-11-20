@@ -3417,7 +3417,7 @@ The request builder re-exposes the resolver plus two things only it can derive:
 
 ```typescript
 getVariableOrigins: (name: string) => VariableOrigin[]
-updateVariable: (name: string, value: string, scope: VariableScope) => void
+updateVariable: (name: string, value: string, scope: VariableScope, sourceId?: string) => void
 writableScopes: VariableScope[]
 ```
 
@@ -3425,6 +3425,15 @@ writableScopes: VariableScope[]
 Each of its branches opens with a guard (`if (!activeEnvironmentId) return`), so
 a write to a scope with no active target is a **silent no-op** - the variable
 popover uses this list so its "create in" picker cannot offer one.
+
+An **edit** passes the `sourceId` of the `ResolvedVariable` the popover showed
+and `updateVariable` writes to the collection or environment with that id - in a
+collection chain, often an ancestor of the request's own collection - spreading
+the existing definition so its `secret`, `type` and `createdAt` survive. A
+`sourceId` naming a source that no longer exists is a no-op, not a fall back to
+the request's collection. A **create** passes none and lands in the hook's own
+`collectionId` or the active environment (#3683; the target naming is
+`lib/variable-target.ts`, shared with the context bar's `useVariableCommit`).
 
 A write through `updateVariable` always sets `enabled: true`. Setting a value
 means "make this value apply"; enabling and disabling belongs to the variables

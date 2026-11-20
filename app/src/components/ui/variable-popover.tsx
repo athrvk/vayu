@@ -107,8 +107,12 @@ export interface VariablePopoverProps {
 	 * value stays editable: it is still the definition.
 	 */
 	note?: string;
-	/** Callback when value changes (required for editable mode) */
-	onValueChange?: (name: string, value: string, scope: VariableScope) => void;
+	/**
+	 * Callback when value changes (required for editable mode). An edit of the
+	 * resolved definition passes its `sourceId` so the write lands there; a
+	 * create passes none (#3683).
+	 */
+	onValueChange?: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
 	/** Save mode: 'manual' shows Save/Cancel buttons, 'auto' saves on close */
 	saveMode?: "manual" | "auto";
 	/** Whether editing is disabled */
@@ -334,7 +338,7 @@ export function VariablePopover({
 			// Closing: auto-save if in auto mode and value changed (unless cancelled)
 			if (!pendingCancelRef.current && saveMode === "auto" && onValueChange && varInfo) {
 				if (editValue !== openValueRef.current) {
-					onValueChange(name, editValue, varInfo.scope);
+					onValueChange(name, editValue, varInfo.scope, varInfo.sourceId);
 				}
 			}
 			pendingCancelRef.current = false;
@@ -344,7 +348,7 @@ export function VariablePopover({
 
 	const handleSave = () => {
 		if (onValueChange && varInfo) {
-			onValueChange(name, editValue, varInfo.scope);
+			onValueChange(name, editValue, varInfo.scope, varInfo.sourceId);
 		}
 		closePopover();
 	};

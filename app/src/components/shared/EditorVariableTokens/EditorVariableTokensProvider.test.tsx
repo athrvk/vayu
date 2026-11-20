@@ -30,7 +30,12 @@ const updateVariable = vi.fn();
 const support: VariableSupport = {
 	resolveField: (input) => ({ text: input, refusals: [] }),
 	getAllVariables: () => ({
-		baseUrl: { value: "https://api.example.com", scope: "environment", sourceName: "Staging" },
+		baseUrl: {
+			value: "https://api.example.com",
+			scope: "environment",
+			sourceName: "Staging",
+			sourceId: "env-staging",
+		},
 		token: { value: "s3cr3t", scope: "environment", secret: true },
 		email: { value: "ada@example.com", scope: "environment", sourceName: "Staging" },
 	}),
@@ -334,7 +339,9 @@ describe("EditorVariableTokensProvider", () => {
 		expect(updateVariable).toHaveBeenCalledWith(
 			"baseUrl",
 			"https://api.staging.example.com",
-			"environment"
+			"environment",
+			// The definition the card showed, so the write lands on it (#3683).
+			"env-staging"
 		);
 	});
 

@@ -16,7 +16,10 @@
  * Parameterised by `collectionId` rather than reading one off context, the
  * same call convention `useVariableResolver`/`useDataContract` already use -
  * the request builder passes the request's own collection id, the Elements
- * tab passes the collection it is editing directly.
+ * tab passes the collection it is editing directly. That id is only where a
+ * *new* collection variable is created: an edit writes to the definition the
+ * resolver named (`sourceId`), which in a collection chain is often an
+ * ancestor of this one (#3683).
  */
 
 import { useCallback, useMemo } from "react";
@@ -29,6 +32,7 @@ import {
 	useUpdateGlobalsMutation,
 } from "@/queries";
 import { useSessionStore } from "@/stores";
+import { variableTargetOf } from "@/lib/variable-target";
 import type { VariableScope, VariableValue } from "@/types";
 
 interface UseVariableWriterOptions {
@@ -36,8 +40,17 @@ interface UseVariableWriterOptions {
 }
 
 interface UseVariableWriterReturn {
-	/** Write a new value for a name, from a token's edit popover. */
-	updateVariable: (name: string, newValue: string, scope: VariableScope) => void;
+	/**
+	 * Write a new value for a name, from a token's edit popover. `sourceId`
+	 * names the collection or environment an edit's definition lives in; a
+	 * create omits it. See `updateVariable` below.
+	 */
+	updateVariable: (
+		name: string,
+		newValue: string,
+		scope: VariableScope,
+		sourceId?: string
+	) => void;
 	/** The scopes `updateVariable` can actually write to right now. */
 	writableScopes: VariableScope[];
 }
@@ -85,10 +98,20 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 	 * that preserved `enabled: false` would appear to work and change nothing
 	 * visible, which is the dead end this rule exists to remove. Enabling and
 	 * disabling on purpose still belongs to the variables editor.
+	 *
+	 * An edit carries the `sourceId` of the definition the popover displayed and
+	 * writes there. A create carries none and lands in this hook's own
+	 * collection or the active environment. A `sourceId` naming a collection or
+	 * environment that is gone is a no-op, never a fallback to the create
+	 * target: that is the copy-into-the-wrong-collection defect (#3683).
 	 */
 	const updateVariable = useCallback(
-		(name: string, newValue: string, scope: VariableScope) => {
-			switch (scope) {
+		(name: string, newValue: string, scope: VariableScope, sourceId?: string) => {
+			const createId = scope === "collection" ? collectionId : activeEnvironmentId;
+			const target = variableTargetOf({ scope, sourceId: sourceId ?? createId ?? undefined });
+			if (!target) return;
+
+			switch (target.scope) {
 				case "global": {
 					if (!globalsData?.variables) return;
 					updateGlobalsMutation.mutate({
@@ -97,21 +120,19 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 					break;
 				}
 				case "collection": {
-					if (!collectionId) return;
-					const collection = collections.find((c) => c.id === collectionId);
+					const collection = collections.find((c) => c.id === target.id);
 					if (!collection) return;
 					updateCollectionMutation.mutate({
-						id: collectionId,
+						id: target.id,
 						variables: mergeVariable(collection.variables, name, newValue),
 					});
 					break;
 				}
 				case "environment": {
-					if (!activeEnvironmentId) return;
-					const environment = environments.find((e) => e.id === activeEnvironmentId);
+					const environment = environments.find((e) => e.id === target.id);
 					if (!environment) return;
 					updateEnvironmentMutation.mutate({
-						id: activeEnvironmentId,
+						id: target.id,
 						variables: mergeVariable(environment.variables, name, newValue),
 					});
 					break;

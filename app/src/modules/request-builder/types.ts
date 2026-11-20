@@ -715,7 +715,8 @@ export interface RequestBuilderContextValue {
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	/** Every definition of a name, winner and losers alike. Display-only. */
 	getVariableOrigins: (name: string) => VariableOrigin[];
-	updateVariable: (name: string, value: string, scope: VariableScope) => void;
+	/** As `VariableSupport.updateVariable`: an edit's `sourceId` picks the definition written. */
+	updateVariable: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
 	/**
 	 * The scopes `updateVariable` can actually write to right now.
 	 *

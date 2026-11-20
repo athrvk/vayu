@@ -287,6 +287,35 @@ describe("the keyboard chord", () => {
 	});
 });
 
+describe("which definition an edit names (#3683)", () => {
+	function editTo(next: string) {
+		const trigger = screen.getByRole("button", { name: /merchantId/ });
+		fireEvent.keyDown(trigger, { key: "Enter" });
+		const field = within(screen.getByRole("dialog")).getByLabelText("Value of merchantId");
+		fireEvent.change(field, { target: { value: next } });
+		fireEvent.keyDown(field, { key: "Enter" });
+	}
+
+	it("hands the popover's write the sourceId the token was drawn with", () => {
+		const onValueChange = vi.fn();
+		renderToken({ scope: "collection", sourceId: "col-root", onValueChange });
+		editTo("mrc_9000");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"mrc_9000",
+			"collection",
+			"col-root"
+		);
+	});
+
+	it("hands over none for a token with none, a global's", () => {
+		const onValueChange = vi.fn();
+		renderToken({ scope: "global", sourceName: undefined, onValueChange });
+		editTo("mrc_9000");
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "mrc_9000", "global", undefined);
+	});
+});
+
 describe("clicking the token", () => {
 	it("does not open the popover by itself any more", () => {
 		renderToken();
