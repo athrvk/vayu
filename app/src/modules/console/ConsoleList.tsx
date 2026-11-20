@@ -18,14 +18,16 @@
  *
  * **It follows the newest while scrolled to the end**, the way a console does:
  * a new row brings the list down only when the reader was already at the
- * bottom.
+ * bottom. Scrolling up stops the following and scrolling back to the end
+ * resumes it (`useStickToEnd`, #3671).
  */
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui";
 import { GROWING_WINDOW_STEP, useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useHoldPlace } from "@/hooks/useHoldPlace";
+import { useStickToEnd } from "@/hooks/useStickToEnd";
 import { formatBytes, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import {
@@ -40,9 +42,6 @@ import { filterConsoleRows, type ConsoleFilter } from "./console-filter";
 import { LineRow } from "./LineRow";
 import { RequestRow } from "./RequestRow";
 import { StepRow } from "./StepRow";
-
-/** How far from the end still counts as at the end: a fractional scroll position never lands exactly. */
-const END_TOLERANCE_PX = 8;
 
 /** Said once, above the oldest row the ring still holds (drawn once the window reaches it). */
 function EvictedNotice({ count }: { count: number }) {
@@ -92,20 +91,13 @@ export function ConsoleList({ filter, onClearFilter }: ConsoleListProps) {
 		filter,
 		holdPlace
 	);
-	const atEnd = useRef(true);
+	const [following, setFollowing] = useState(true);
 	const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
-
-	useLayoutEffect(() => {
-		const element = scroller.current;
-		if (atEnd.current && element) element.scrollTop = element.scrollHeight;
-	}, [listed]);
-
-	const onScroll = () => {
-		const element = scroller.current;
-		if (!element) return;
-		atEnd.current =
-			element.scrollHeight - element.scrollTop - element.clientHeight <= END_TOLERANCE_PX;
-	};
+	const { onScroll, listRef } = useStickToEnd(scroller, {
+		following,
+		onFollowingChange: setFollowing,
+		rows: listed,
+	});
 
 	const toggle = useCallback((id: number) => {
 		setExpanded((current) => {
@@ -140,7 +132,7 @@ export function ConsoleList({ filter, onClearFilter }: ConsoleListProps) {
 					}
 				/>
 			) : (
-				<ul aria-label="Console rows" className="divide-y divide-rule">
+				<ul ref={listRef} aria-label="Console rows" className="divide-y divide-rule">
 					{listed.slice(-visible).map((row) => (
 						<li key={row.id} className="skip-offscreen">
 							<RowItem row={row} expanded={expanded.has(row.id)} onToggle={toggle} />
