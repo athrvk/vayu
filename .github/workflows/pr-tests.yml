@@ -395,6 +395,8 @@ jobs:
               - '.github/actions/linux-release-toolchain/**'
               # The clang-tidy the engine job's lint step installs.
               - 'scripts/install-clang-tidy.sh'
+              # The standard the Windows lint step hands clang-cl.
+              - 'scripts/tidy-msvc-std-args.sh'
               # Names the toolchain in the engine job's vcpkg cache key.
               - 'scripts/vcpkg-toolchain-id.sh'
               - '.github/workflows/pr-tests.yml'
@@ -430,6 +432,8 @@ jobs:
               - 'scripts/test/pre-commit_test.sh'
               - 'scripts/test/pre-push_test.sh'
               - 'scripts/test/hook_test_lib.sh'
+              - 'scripts/tidy-msvc-std-args.sh'
+              - 'scripts/test/tidy_msvc_std_args_test.sh'
               - '.github/workflows/pr-tests.yml'
             # Globs rather than a list, deliberately: the `Script lint` job
             # takes its files from `git ls-files`, so a script added tomorrow is
@@ -1270,10 +1274,17 @@ jobs:
           # its clang-cl mode, and `WarningsAsErrors: '*'` makes that
           # diagnostic fail every file before any check runs. The flag is a
           # build-time one with no bearing on what is linted.
+          # `scripts/tidy-msvc-std-args.sh`: a compile database that spells the
+          # standard `-std:c++23` (CMake 4.5 with MSVC 19.52.37029 and later)
+          # is read by clang-cl as C++14, and every file then fails on the first
+          # STL type. The script prints the override and nothing on Linux and
+          # macOS.
+          std_arg="$(bash scripts/tidy-msvc-std-args.sh engine/build-release/compile_commands.json)"
           printf '%s\0' "${changed[@]}" \
             | xargs -0 -n 1 -P "$(nproc)" \
                 "$tidy" -p engine/build-release --quiet --allow-no-checks \
-                --extra-arg=-Wno-unused-command-line-argument
+                --extra-arg=-Wno-unused-command-line-argument \
+                ${std_arg:+"$std_arg"}
 
       # The escape says so in the job summary as well as on the pull request.
       # Same rule as the step above: a gate that narrowed to nothing must not
@@ -1436,6 +1447,7 @@ jobs:
         run: |
           bash scripts/test/pre-commit_test.sh
           bash scripts/test/pre-push_test.sh
+          bash scripts/test/tidy_msvc_std_args_test.sh
 
       # The dry-run suite above asserts on the commands the installer would have
       # run. This one runs it: a real download from a local release, a real

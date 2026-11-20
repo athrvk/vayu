@@ -442,7 +442,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   a finding anywhere in a file a change touches is that change's to fix, or to
   `NOLINT` with the reason at the site. A pull request that is nothing but a
   bulk reformat carries the **`reformat-pr`** label, the gate's one escape
-  hatch. **CI lints translation units, never a header as an input** (#940): a
+  hatch. **The Windows leg reads its C++ standard from the compile database
+  through `scripts/tidy-msvc-std-args.sh`**: a `-std:c++23` that clang-cl
+  ignores is a C++14 parse, which shows as `std::string_view` missing from the
+  first header and a green test step beside a red lint step
+  (`docs/engine/building.md`). **CI lints translation units, never a header as an input** (#940): a
   header has no `compile_commands.json` entry, so clang-tidy would guess a
   command and parse the wrong STL. A header's findings surface through every
   changed translation unit that includes it; a header-only change relies on
