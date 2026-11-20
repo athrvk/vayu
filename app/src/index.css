@@ -79,12 +79,8 @@
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-sm: calc(var(--radius) - 4px);
 
-	/* Font stacks - Tailwind v4 reads these to build the `font-sans` and
-	 * `font-mono` utilities. Without them, v4 uses its default UI stacks
-	 * (system-ui / ui-monospace), which on macOS resolves to SF Pro / Menlo
-	 * regardless of what's in tailwind.config.js. */
-	--font-sans: "Space Grotesk", system-ui, sans-serif;
-	--font-mono: "JetBrains Mono", "Consolas", "Monaco", monospace;
+	/* The font stacks are in the plain `@theme` block below, not here: they are
+	 * overridden at runtime (#3692). */
 
 	/*
 	 * Body text is 13px (docs/design-system.md), but Tailwind ships `text-sm`
@@ -173,8 +169,21 @@
  * `height: 28px`; plain `@theme` produces `height: var(--spacing-control)`
  * and emits `--spacing-control: 28px` to `:root`, which the Comfortable
  * override below then actually reaches.
+ *
+ * The two font stacks live here for the same reason (#3692). The user's
+ * font choices are written onto `documentElement` as `--font-sans` and
+ * `--font-mono` (`appearance-store`, `client-settings-store`); under `inline`
+ * `font-mono` compiled to the literal stack and ignored that override, so the
+ * Code font reached Monaco and a few `var(--font-mono)` rules and no other
+ * mono surface. As a plain `@theme` token, `font-sans` and `font-mono` compile
+ * to `var(--font-sans)` / `var(--font-mono)`, which the override reaches. The
+ * values are what paints before any script runs, and what v4 would otherwise
+ * replace with its own `system-ui` / `ui-monospace` stacks (SF Pro / Menlo on
+ * macOS, regardless of tailwind.config.js).
  */
 @theme {
+	--font-sans: "Space Grotesk", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	--spacing-band: 32px;
 	/*
 	 * The two wider bands (issue #1688). `band` is the second chrome row - the
@@ -982,7 +991,7 @@
 	body {
 		@apply bg-background text-foreground;
 		/* Drives from --font-sans so the UI-font preference (useAppearance) can
-		 * override it at runtime; defaults to Space Grotesk via @theme inline. */
+		 * override it at runtime; defaults to Space Grotesk via the `@theme` token. */
 		font-family: var(--font-sans);
 		/* The documented body step, so text that names no size is body text
 		 * rather than the browser's 16px (#1202). Every step in the scale is a

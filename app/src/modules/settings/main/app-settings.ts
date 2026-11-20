@@ -195,7 +195,7 @@ export const APP_SETTINGS = [
 		anchor: "code-font",
 		panel: "editor",
 		label: "Code font",
-		searchText: "The monospace typeface used by scripts and request/response bodies.",
+		searchText: "The typeface used by every monospaced field in the app.",
 		keywords: ["monospace", "typeface", "family"],
 	},
 	{
