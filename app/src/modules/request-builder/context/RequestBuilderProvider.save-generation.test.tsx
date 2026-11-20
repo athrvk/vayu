@@ -25,6 +25,11 @@
  * `onSave` by hand and read the `hasChanges` / `changeToken` the hook would
  * have debounced on. That the hook then re-arms on those values is
  * `useSaveManager.debounce.test.tsx`.
+ *
+ * The same race has a second symptom (#3664): the cache's echo of what the
+ * save sent disagrees with the newer draft, and must not read as someone
+ * else's write. The last block covers that, with the echo landing on either
+ * side of the save's resolve.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -196,5 +201,207 @@ describe("a save that raced an edit", () => {
 		click("type second");
 
 		expect(managerOptions.changeToken).not.toBe(afterFirst);
+	});
+});
+
+/** One `X-One` header holding `value`, with ids as fresh as each fetch makes them. */
+function headerRows(value: string, idPrefix: string) {
+	return [
+		{ id: `${idPrefix}-0`, key: "X-One", value, enabled: true },
+		{ id: `${idPrefix}-spare`, key: "", value: "", enabled: true },
+	];
+}
+
+/** Shows the url, the header and the conflicts, and offers the edits the cases type. */
+function EchoProbe() {
+	const { request, updateField, fieldConflicts } = useRequestBuilderContext();
+	const typeHeader = (value: string) =>
+		updateField(
+			"headers",
+			request.headers.map((row) => (row.key === "X-One" ? { ...row, value } : row))
+		);
+	return (
+		<>
+			<span data-testid="url">{request.url}</span>
+			<span data-testid="header">
+				{request.headers.find((row) => row.key === "X-One")?.value}
+			</span>
+			<span data-testid="conflicts">{JSON.stringify(fieldConflicts)}</span>
+			<button onClick={() => updateField("url", "https://ab")}>type ab</button>
+			<button onClick={() => updateField("url", "https://abc")}>type abc</button>
+			<button onClick={() => typeHeader("2")}>type header 2</button>
+			<button onClick={() => typeHeader("3")}>type header 3</button>
+		</>
+	);
+}
+
+function EchoHarness({
+	stored,
+	onSave,
+}: {
+	stored: Partial<RequestState>;
+	onSave: (request: RequestState) => Promise<void>;
+}) {
+	return (
+		<TestQueryClient>
+			<RequestBuilderProvider initialRequest={stored} collectionId="col_1" onSave={onSave}>
+				<EchoProbe />
+			</RequestBuilderProvider>
+		</TestQueryClient>
+	);
+}
+
+describe("the echo of a save an edit raced (#3664)", () => {
+	const shown = (testId: string) => screen.getByTestId(testId).textContent;
+
+	/**
+	 * Stored `https://a`, typed `https://ab`, saved, typed `https://abc` while
+	 * the save is in the air. `deliver` hands the provider a fetched copy, as
+	 * the detail cache does: a new object with the same id.
+	 */
+	function raceAUrlSave() {
+		const saves = heldSave();
+		const { rerender } = render(
+			<EchoHarness stored={{ id: "req_1", url: "https://a" }} onSave={saves.onSave} />
+		);
+		click("type ab");
+		save();
+		click("type abc");
+		const deliver = (url: string) =>
+			act(() =>
+				rerender(<EchoHarness stored={{ id: "req_1", url }} onSave={saves.onSave} />)
+			);
+		return { saves, deliver };
+	}
+
+	it("raises no conflict when the echo lands before the save resolves", async () => {
+		const { saves, deliver } = raceAUrlSave();
+
+		deliver("https://ab");
+		expect(shown("conflicts")).toBe("{}");
+		expect(shown("url")).toBe("https://abc");
+
+		await saves.finish();
+		expect(shown("conflicts")).toBe("{}");
+		expect(managerOptions.hasChanges).toBe(true);
+	});
+
+	it("raises no conflict when the echo lands after the save resolves", async () => {
+		const { saves, deliver } = raceAUrlSave();
+
+		await saves.finish();
+		deliver("https://ab");
+
+		expect(shown("conflicts")).toBe("{}");
+		expect(shown("url")).toBe("https://abc");
+		expect(managerOptions.hasChanges).toBe(true);
+	});
+
+	it("sends the newer url on the follow-up save, and settles on its echo", async () => {
+		const { saves, deliver } = raceAUrlSave();
+		deliver("https://ab");
+		await saves.finish();
+
+		save();
+		await saves.finish();
+		deliver("https://abc");
+
+		expect(saves.sent.map((r) => r.url)).toEqual(["https://ab", "https://abc"]);
+		expect(shown("conflicts")).toBe("{}");
+		expect(managerOptions.hasChanges).toBe(false);
+	});
+
+	it("still conflicts on a value the save did not send", async () => {
+		const { saves, deliver } = raceAUrlSave();
+
+		deliver("https://other");
+
+		expect(shown("conflicts")).toBe(JSON.stringify({ url: "https://other" }));
+		expect(shown("url")).toBe("https://abc");
+		await saves.finish();
+	});
+
+	it("recognises the first save's echo after a queued second save has started", async () => {
+		// `useSaveManager` starts a queued save in the microtask after the first
+		// resolves, before the first's cache write has rendered.
+		const { saves, deliver } = raceAUrlSave();
+		await saves.finish();
+		save();
+
+		deliver("https://ab");
+
+		expect(shown("conflicts")).toBe("{}");
+		expect(shown("url")).toBe("https://abc");
+		await saves.finish();
+	});
+
+	it("still conflicts on the value of a save that failed", async () => {
+		// A failed save has no echo, so an outside write of its value is not one.
+		let fail!: (error: Error) => void;
+		const onSave = vi.fn(
+			() =>
+				new Promise<void>((_, reject) => {
+					fail = reject;
+				})
+		);
+		const { rerender } = render(
+			<EchoHarness stored={{ id: "req_1", url: "https://a" }} onSave={onSave} />
+		);
+		click("type ab");
+		act(() => void managerOptions.onSave().catch(() => undefined));
+		click("type abc");
+		await act(async () => fail(new Error("engine unavailable")));
+
+		act(() =>
+			rerender(<EchoHarness stored={{ id: "req_1", url: "https://ab" }} onSave={onSave} />)
+		);
+
+		expect(shown("conflicts")).toBe(JSON.stringify({ url: "https://ab" }));
+		expect(shown("url")).toBe("https://abc");
+	});
+
+	it("forgets what was sent once a different request loads", async () => {
+		const saves = heldSave();
+		const { rerender } = render(
+			<EchoHarness stored={{ id: "req_1", url: "https://a" }} onSave={saves.onSave} />
+		);
+		click("type ab");
+		save();
+		await saves.finish();
+
+		act(() =>
+			rerender(
+				<EchoHarness stored={{ id: "req_2", url: "https://two" }} onSave={saves.onSave} />
+			)
+		);
+		click("type abc");
+		// Another client writes req_1's last sent value into req_2.
+		act(() =>
+			rerender(
+				<EchoHarness stored={{ id: "req_2", url: "https://ab" }} onSave={saves.onSave} />
+			)
+		);
+
+		expect(shown("conflicts")).toBe(JSON.stringify({ url: "https://ab" }));
+	});
+
+	it("recognises a table's echo by its stored rows, not its ids", async () => {
+		const saves = heldSave();
+		const stored = (value: string, idPrefix: string) => ({
+			id: "req_1",
+			headers: headerRows(value, idPrefix),
+		});
+		const { rerender } = render(
+			<EchoHarness stored={stored("1", "first")} onSave={saves.onSave} />
+		);
+		click("type header 2");
+		save();
+		click("type header 3");
+
+		act(() => rerender(<EchoHarness stored={stored("2", "echo")} onSave={saves.onSave} />));
+
+		expect(shown("conflicts")).toBe("{}");
+		expect(shown("header")).toBe("3");
+		await saves.finish();
 	});
 });

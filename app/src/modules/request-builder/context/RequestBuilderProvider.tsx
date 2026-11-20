@@ -108,6 +108,14 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
  */
 const ROW_FIELDS = ["params", "headers", "formData", "urlEncoded"] as const;
 
+/**
+ * How many saves' values the merge recognises as echoes. Two, not one: a save
+ * queued behind another (`useSaveManager`) starts in the microtask after the
+ * first resolves, before the first's cache write has rendered, so the first's
+ * echo arrives after the second has already recorded what it sends (#3664).
+ */
+const SENDS_REMEMBERED = 2;
+
 const MERGE_OPTIONS: MergeOptions<RequestState, MergeableRequestField> = {
 	equals: { params: sameRows, headers: sameRows, formData: sameRows, urlEncoded: sameRows },
 };
@@ -132,6 +140,20 @@ function withoutFields(
 	const next = new Set(fields);
 	for (const field of removed) next.delete(field);
 	return next;
+}
+
+/** `request`'s values for exactly `fields`. */
+function pickFields(
+	request: RequestState,
+	fields: Iterable<MergeableRequestField>
+): Partial<RequestState> {
+	// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a plain
+	// union member here, not a generic correlated with `request[field]`, so
+	// TypeScript cannot verify the pair matches per assignment - the same reason
+	// `updateField` casts at its call site.
+	const picked: Record<string, unknown> = {};
+	for (const field of fields) picked[field] = request[field];
+	return picked as Partial<RequestState>;
 }
 
 interface RequestBuilderProviderProps {
@@ -464,6 +486,19 @@ export default function RequestBuilderProvider({
 		() => new Set()
 	);
 	const [fieldConflicts, setFieldConflicts] = useState<RequestFieldConflicts>({});
+	/**
+	 * What the last `SENDS_REMEMBERED` saves sent, field by field, newest last
+	 * (#3664). The merge reads it to tell a save's echo from someone else's
+	 * write. An entry is added before `onSave` is awaited and kept after it
+	 * resolves, because the cache write that echoes it can render on either
+	 * side of the resolve; a save that rejects removes its own entry, since it
+	 * has no echo and a later outside write of the same value must conflict.
+	 * A settled save's values stay until later saves or a reset push them out,
+	 * so an outside write equal to one of them reads as an echo - accepted:
+	 * the draft is not touched by it, only the baseline moves. State, not a
+	 * ref: the merge reads it during render.
+	 */
+	const [recentSends, setRecentSends] = useState<readonly Partial<RequestState>[]>([]);
 	/**
 	 * The request this builder was showing has been deleted elsewhere, while
 	 * this tab still has it open (issue #1436). Sets `useSaveManager`'s
@@ -802,6 +837,7 @@ export default function RequestBuilderProvider({
 		setBaseline(seeded);
 		setTouchedFields(new Set());
 		setFieldConflicts({});
+		setRecentSends([]);
 		setRequestGone(false);
 		setLastProcessedInitialRequest(initialRequest);
 
@@ -870,6 +906,13 @@ export default function RequestBuilderProvider({
 	 * let the user resolve. `mergeExternalWrite` does the diffing; this block
 	 * only applies its outcome.
 	 *
+	 * Our own save's echo is not an outside write even when the user kept typing
+	 * through the round trip (#3664): the cache hands back what the save sent,
+	 * which now disagrees with both `baseline` and the draft. `recentSends` lets
+	 * the merge recognise it by value, move `baseline` to it and leave the field
+	 * touched, so the next save sends the newer draft. A value no recent save
+	 * here sent still conflicts, in flight or not.
+	 *
 	 * Gated on `initialRequest`'s own identity, not on every render: it is a
 	 * content-comparing diff over every mergeable field, and `index.tsx` only
 	 * produces a new object when the underlying fetch actually changes.
@@ -888,7 +931,7 @@ export default function RequestBuilderProvider({
 			baseline,
 			incoming,
 			touchedFields,
-			MERGE_OPTIONS
+			{ ...MERGE_OPTIONS, sent: recentSends }
 		);
 		if (outcome.changed) {
 			if (Object.keys(outcome.patch).length > 0) {
@@ -953,13 +996,8 @@ export default function RequestBuilderProvider({
 		(saved: RequestState, fields: ReadonlySet<MergeableRequestField>) => {
 			if (fields.size === 0) return;
 			setTouchedFields((prev) => withoutFields(prev, fields));
-			// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a
-			// plain union member here, not a generic correlated with `saved[field]`,
-			// so TypeScript cannot verify the pair matches per assignment - the same
-			// reason `updateField` below casts at the call site instead.
-			const savedPatch: Record<string, unknown> = {};
-			for (const field of fields) savedPatch[field] = saved[field];
-			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
+			const savedPatch = pickFields(saved, fields);
+			setBaseline((prev) => ({ ...prev, ...savedPatch }));
 		},
 		[]
 	);
@@ -991,9 +1029,13 @@ export default function RequestBuilderProvider({
 			? withoutFields(changedFields, ["elements"])
 			: changedFields;
 		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
+		const sent = pickFields(request, sentFields);
+		setRecentSends((prev) => [...prev, sent].slice(-SENDS_REMEMBERED));
 		try {
 			await onSave(request, sentFields);
 		} catch (error) {
+			// By identity, not position: a later save may already have appended.
+			setRecentSends((prev) => prev.filter((entry) => entry !== sent));
 			// The engine names the element it refused (#3043); the failure itself
 			// still propagates to `useSaveManager` for its toast and Dock status.
 			if (sentFields.has("elements")) refuseElement(error, request.elements);
@@ -1002,11 +1044,11 @@ export default function RequestBuilderProvider({
 		// An edit landed, or a foreign write arrived, while this save was in
 		// flight: either way `changeTokenRef` moved and the payload that went
 		// out is not the whole story any more, so the request is still dirty
-		// and `useSaveManager` has to keep its debounce running for it. No
-		// bookkeeping is safe in that case - not clearing the fields this save
-		// carried, since a fresh edit to one of them since the snapshot above
-		// would be forgotten, and not moving the baseline, since `request` no
-		// longer describes what was actually sent.
+		// and `useSaveManager` has to keep its debounce running for it. The
+		// fields this save carried stay touched, since a fresh edit to one of
+		// them since the snapshot above would otherwise be forgotten, and their
+		// baseline is left to the merge: the cache's echo of this payload moves
+		// it, recognised through `recentSends` (#3664).
 		const settled = changeTokenRef.current === savedGeneration;
 		if (settled) recordSaved(request, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
