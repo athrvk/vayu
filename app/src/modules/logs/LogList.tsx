@@ -29,10 +29,15 @@
  * older" and "Reached the start" both speak of the lines above everything held.
  * Growing the window upward keeps the reader's place (`useHoldPlace`), so a
  * steady scroll up reaches it.
+ *
+ * **The pin is `useStickToEnd`** (#3671): it pins again when the rows settle to
+ * their real height, and ignores the scroll event its own pin causes, so only
+ * the reader's scrolls turn Follow off.
  */
 
-import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import { useHoldPlace } from "@/hooks/useHoldPlace";
+import { useStickToEnd } from "@/hooks/useStickToEnd";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button, Eyebrow } from "@/components/ui";
@@ -43,9 +48,6 @@ import { LogRow } from "./LogRow";
 import { entryKey } from "./log-entry";
 import { useLogsStore } from "./logs-store";
 import { useLogWindow } from "./useLogWindow";
-
-/** How far from the end still counts as at the end: a fractional scroll position never lands exactly. */
-const END_TOLERANCE_PX = 8;
 
 function ColumnHeader() {
 	return (
@@ -189,20 +191,12 @@ export function LogList() {
 		holdPlace
 	);
 
-	// After the list changes and while following: the newest line is in view.
-	useLayoutEffect(() => {
-		const element = scroller.current;
-		if (follow && element) element.scrollTop = element.scrollHeight;
-	}, [follow, records]);
-
-	const onScroll = () => {
-		const element = scroller.current;
-		if (!element) return;
-		const atEnd =
-			element.scrollHeight - element.scrollTop - element.clientHeight <= END_TOLERANCE_PX;
-		if (follow && !atEnd) setFollow(false);
-		else if (!follow && atEnd && !detached && !hasBelow) setFollow(true);
-	};
+	const { onScroll, listRef } = useStickToEnd(scroller, {
+		following: follow,
+		onFollowingChange: setFollow,
+		canResume: !detached && !hasBelow,
+		rows: records,
+	});
 
 	const toggle = useCallback((entry: LogEntry) => {
 		const key = entryKey(entry);
@@ -230,7 +224,7 @@ export function LogList() {
 					title={status === "loading" ? "Reading the logs…" : "No lines to show."}
 				/>
 			) : (
-				<ul>
+				<ul ref={listRef}>
 					{shown.map((entry) => (
 						<LogRow
 							key={entryKey(entry)}
