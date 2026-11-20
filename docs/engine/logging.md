@@ -88,9 +88,10 @@ The app's `log.ts` ports both rules, and
 `engine/tests/fixtures/log-redaction-conformance.json` pins the field list and
 the URL cases for the two languages. Its `sensitiveHeaderNames` is the header
 subset the app's code snippets mask by name (`app/src/lib/sensitive-headers.ts`,
-#1806); each must also be a secret field name here. Its `challengeHeaderNames` are
-secret field names the logger still redacts but that a script-request record and the
-app's session Console show (`app/src/lib/secret-header-name.ts`, #3672). Its `sensitiveParamNames`
+#1806); each must also be a secret field name here. Its
+`challengeHeaderNames` are secret field names the logger still redacts but that
+a script-request record and the app's session Console show
+(`app/src/lib/secret-header-name.ts`, #3672). Its `sensitiveParamNames`
 is the query-parameter and Params-row set the engine blanks in an export
 (`is_secret_param_name` in `vayu_extensions.cpp`: the secret field names less `code`, plus
 `EXTRA_SECRET_PARAM_NAMES`), which the MCP server's `SENSITIVE_PARAM_NAMES`

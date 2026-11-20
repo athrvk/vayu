@@ -213,7 +213,7 @@ CredentialMark mark = CredentialMark::Blank);
  * A `pm.sendRequest` record (#3633, `ScriptResult::script_requests`) with its
  * credentials masked in place, so the stored trace, History and MCP all read
  * the masked record. In every header set of the record, a redirect hop's
- * included, the value of a header `utils::is_secret_header_name` names, or one
+ * included, the value of a header `utils::is_secret_field_name` names, or one
  * of @p auth_header_names (what the call's `options.auth` wrote,
  * `Request::secret_header_names`), reads `utils::kRedactedMarker`; a value
  * sent empty stays empty. The three challenge headers (`WWW-Authenticate`,
@@ -223,7 +223,11 @@ CredentialMark mark = CredentialMark::Blank);
  * and each hop's, goes through @ref redact_url_credentials with
  * @p auth_query_param as an extra name and `CredentialMark::Marker`, so a
  * withheld URL credential reads `<redacted>` as a header's does, where an
- * export blanks it. Bodies are not judged.
+ * export blanks it. A hop URL arrives already redacted (`record_hop`), and a
+ * value blanked there cannot be told from one sent empty, so the marker in a
+ * hop comes from the client (`ClientConfig::redirect_url_mark`, which
+ * `pm.sendRequest` sets); this pass keeps it and guards a hop URL that was
+ * not redacted. Bodies are not judged.
  */
 void mask_script_request_record (nlohmann::json& record,
 const std::vector<std::string>& auth_header_names,

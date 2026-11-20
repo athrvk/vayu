@@ -9134,7 +9134,9 @@ reads a record too:
   `options.auth` placed (`request.authQueryParam`), replaced by the same
   marker (`user:<redacted>@host`, `?client_secret=<redacted>&page=2`) as the
   summary line's URL is, so a withheld value never reads as one resolved
-  empty; an export blanks the same values to `""` instead. Bodies are not
+  empty; a hop's `url` carries no userinfo at all, as in the main trace's
+  `redirects`. An export blanks the same values to `""` instead, and so does
+  the main exchange's own `redirects[].url`. Bodies are not
   judged: a token endpoint's answer keeps its token. This is deliberately not
   the main exchange's rule, whose trace stays raw.
 - **Bodies are bounded by `maxTraceBodyBytes`, all of them together**: in
@@ -12379,7 +12381,8 @@ id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
        "requestId":"req_abc123","method":"POST",
-       "url":"https://api.example.com/login?access_token=","bodyBytes":812,
+       "url":"https://api.example.com/login?access_token=<redacted>",
+       "bodyBytes":812,
        "tests":{"passed":2,"failed":0},"extractorMisses":1,
        "unresolvedTokens":1,
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",

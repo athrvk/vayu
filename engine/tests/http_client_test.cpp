@@ -862,6 +862,33 @@ TEST_F (HttpClientTest, AQueryParamApiKeyIsMaskedInTheRecordedHopUrl) {
     }
 }
 
+// A hop URL's withheld credentials read blank unless the client is told to mark
+// them (#3672): blank is what the trace's `redirects[].url` and
+// `pm.response.redirects` show, `<redacted>` what a `pm.sendRequest` record
+// shows. Mutation check: drop the `mark` argument from `record_hop`'s
+// `redact_url_credentials` call and the marked client's hop reads blank.
+TEST_F (HttpClientTest, AHopUrlIsBlankedByDefaultAndMarkedWhenTheClientAsks) {
+    Request request;
+    request.method = HttpMethod::GET;
+    request.url    = mock_->url ("/chain") + "?client_secret=s3cret&page=2";
+    request.follow_redirects = true;
+
+    auto blanked = client_->send (request);
+    ASSERT_TRUE (blanked.is_ok ()) << blanked.error ().message;
+    ASSERT_EQ (blanked.value ().redirect_hops.size (), 2U);
+    EXPECT_EQ (blanked.value ().redirect_hops[0].url,
+    mock_->url ("/chain") + "?client_secret=&page=2");
+
+    ClientConfig marking;
+    marking.redirect_url_mark = vayu::core::vayu_ext::CredentialMark::Marker;
+    Client marked_client (marking);
+    auto marked = marked_client.send (request);
+    ASSERT_TRUE (marked.is_ok ()) << marked.error ().message;
+    ASSERT_EQ (marked.value ().redirect_hops.size (), 2U);
+    EXPECT_EQ (marked.value ().redirect_hops[0].url,
+    mock_->url ("/chain") + "?client_secret=<redacted>&page=2");
+}
+
 // The one hop a header-placed credential can cross in clear text. The target is
 // the plain mock, reached from a TLS listener that does not verify.
 // Mutation-check: make is_scheme_downgrade answer false and the flag is lost.

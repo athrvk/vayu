@@ -680,7 +680,7 @@ bool masks_in_record (std::string_view name, const RecordSecrets& secrets) {
     if (names_extra (name, secrets.header_names)) {
         return true;
     }
-    return utils::is_secret_header_name (name, {}) && !is_challenge_header (name);
+    return utils::is_secret_field_name (name) && !is_challenge_header (name);
 }
 
 void mask_header_set (nlohmann::json& set, const RecordSecrets& secrets) {

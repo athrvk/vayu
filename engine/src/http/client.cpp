@@ -719,18 +719,20 @@ struct ChainOutcome {
 };
 
 /// Moves the @p status redirect just received into `redirect_hops`, as the
-/// hop that led to @p next_url.
+/// hop that led to @p next_url, its URL credentials written as @p mark says
+/// (`ClientConfig::redirect_url_mark`).
 void record_hop (Response& response,
 CURL* curl,
 int status,
 const std::string& next_url,
-const std::vector<std::string>& secret_params) {
+const std::vector<std::string>& secret_params,
+vayu::core::vayu_ext::CredentialMark mark) {
     const std::string url = detail::effective_url (curl);
     int omitted           = 0;
     response.redirect_hops.push_back ({ status,
     response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
     std::move (response.header_lines),
-    vayu::core::vayu_ext::redact_url_credentials (url, secret_params, omitted),
+    vayu::core::vayu_ext::redact_url_credentials (url, secret_params, omitted, mark),
     is_scheme_downgrade (url, next_url) });
     response.status_text.clear ();
     response.headers.clear ();
@@ -830,7 +832,8 @@ std::chrono::steady_clock::time_point started) {
             out.refusal = std::move (next->error ());
             return out;
         }
-        record_hop (frame.response, curl, static_cast<int> (status), **next, secret_params);
+        record_hop (frame.response, curl, static_cast<int> (status), **next,
+        secret_params, config.redirect_url_mark);
         chain.advance (curl, static_cast<int> (status), std::move (**next));
         out.followed = chain.hop ().followed;
     }

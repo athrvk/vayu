@@ -554,16 +554,25 @@ TEST (VayuExtensions, TheDefaultFormStillBlanksForAnExport) {
 }
 
 // The record masks a URL to the marker, in the request and in a redirect hop.
-// Mutation check: drop `CredentialMark::Marker` from `mask_record_node`.
+// A real hop arrives already redacted by the client (`record_hop`), marked as
+// `pm.sendRequest` asks, and keeps that form here; a blank it arrives with
+// cannot be told from a value sent empty, which is why the client marks it
+// (`SendRequestTest.ARecordedHopUrlReadsRedactedLikeTheRequestUrl` drives a
+// real redirect). An unredacted hop is still masked. Mutation check: drop
+// `CredentialMark::Marker` from `mask_record_node`.
 TEST (VayuExtensions, ARecordsUrlsReadRedactedWhereTheyWereWithheld) {
     nlohmann::json record = nlohmann::json::parse (R"({
         "request": {"url": "https://h/token?client_secret=S&page=2"},
         "response": {"redirects": [
-            {"url": "https://bob:hunter2@h/hop?api_key=K"}]}})");
+            {"url": "https://bob:hunter2@h/hop?api_key=K"},
+            {"url": "https://bob:<redacted>@h/hop?api_key=<redacted>"},
+            {"url": "https://bob@h/hop?api_key="}]}})");
     ext::mask_script_request_record (record, {}, "");
     EXPECT_EQ (record["request"]["url"], "https://h/token?client_secret=<redacted>&page=2");
-    EXPECT_EQ (record["response"]["redirects"][0]["url"],
-    "https://bob:<redacted>@h/hop?api_key=<redacted>");
+    const auto& hops = record["response"]["redirects"];
+    EXPECT_EQ (hops[0]["url"], "https://bob:<redacted>@h/hop?api_key=<redacted>");
+    EXPECT_EQ (hops[1]["url"], "https://bob:<redacted>@h/hop?api_key=<redacted>");
+    EXPECT_EQ (hops[2]["url"], "https://bob@h/hop?api_key=");
 
     nlohmann::json claimed =
     nlohmann::json::parse (R"({"request": {"url": "https://h/p?sig=S&q=1"}})");

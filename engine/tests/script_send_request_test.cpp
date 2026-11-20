@@ -1845,6 +1845,36 @@ TEST_F (SendRequestTest, ARecordMasksCredentialsAndKeepsTheBodies) {
     << "the echoed body keeps the token it echoed";
 }
 
+// A redirect hop's URL reads a withheld query credential as `<redacted>`, the
+// form the record's request URL reads, not as a blank (#3672): the client
+// redacts a hop as it records it, and a blank there would read as "sent
+// empty". libcurl leaves the userinfo out of a hop's URL, so the password is
+// asserted absent rather than marked. Mutation check: drop
+// `redirect_url_mark` from `js_pm_send_request`'s client config and the hop
+// reads `client_secret=&page=2`.
+TEST_F (SendRequestTest, ARecordedHopUrlReadsRedactedLikeTheRequestUrl) {
+    SendRequestServer server;
+    std::string url = server.url ("/hop") + "?client_secret=HOPKEY&page=2";
+    url.insert (std::string ("http://").size (), "bob:hunter2@");
+    std::string marked = server.url ("/hop") + "?client_secret=<redacted>&page=2";
+    marked.insert (std::string ("http://").size (), "bob:<redacted>@");
+
+    auto result = run_recorded ("pm.sendRequest('" + url + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.script_requests.size (), 1u);
+    const auto& record = result.script_requests[0];
+    EXPECT_EQ (record["request"]["url"], marked) << record.dump ();
+    ASSERT_EQ (record["response"]["redirects"].size (), 1u) << record.dump ();
+    const auto hop_url = record["response"]["redirects"][0]["url"].get<std::string> ();
+    EXPECT_NE (hop_url.find ("/hop?client_secret=<redacted>&page=2"), std::string::npos)
+    << hop_url;
+    const std::string text = record.dump ();
+    for (const char* secret : { "HOPKEY", "hunter2" }) {
+        EXPECT_EQ (text.find (secret), std::string::npos) << secret << " in " << text;
+    }
+}
+
 // Every body of an execution's records shares the trace bound: one past it is
 // cut with its pair, and once it is spent a later body is stored empty with
 // its true size, the request's included. Mutation check: call
