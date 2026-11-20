@@ -6,10 +6,10 @@
  */
 
 /**
- * An `IntersectionObserver` for the Logs list's window tests (#3670) that
- * never fires by itself: a case says which sentinel scrolled into view, by its
- * element, so the window only moves for the reason under test. jsdom has no
- * observer, and `useLogWindow` then mounts every row.
+ * An `IntersectionObserver` for the window tests that never fires by itself:
+ * a case says which sentinel scrolled into view, by its element, so the window
+ * only moves for the reason under test. jsdom has no observer, and the window
+ * hooks (`useGrowingWindow`, `useLogWindow`) then mount every row.
  */
 
 import { vi } from "vitest";

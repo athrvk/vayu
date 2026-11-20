@@ -21,7 +21,10 @@
  * from `LogList.tsx`'s scroll handler and the tail window case follows from the
  * end of the window; export with `entryLine` in `LogsToolbar.tsx` and the cut
  * record case writes a line that is not JSON; set `more` false after a trim in
- * `logs-store.ts` and the case past the bound offers no Search older.
+ * `logs-store.ts` and the case past the bound offers no Search older; draw
+ * `OlderBar` regardless of `hasAbove` and the older bar cases show it above a
+ * window that is not at the oldest line held; drop the `beforeGrowUp` call in
+ * `useLogWindow.ts` and the reader's place case reads a `scrollTop` of 0.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,7 +36,8 @@ import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
 import { LOG_MAX_BYTES, useLogsStore } from "./logs-store";
-import { stubSentinelObserver } from "./sentinel-observer.testkit";
+import { makeScrollable, stubRowLayout } from "@/test/row-layout.testkit";
+import { stubSentinelObserver } from "@/test/sentinel-observer.testkit";
 import { LOG_WINDOW_MAX_ROWS, LOG_WINDOW_STEP } from "./useLogWindow";
 
 const config = vi.hoisted(() => ({ logLevel: "info" as string | undefined }));
@@ -582,6 +586,53 @@ describe("the window", () => {
 		expect(screen.getByText("line 800")).toBeInTheDocument();
 		expect(screen.getByText("line 201")).toBeInTheDocument();
 		expect(screen.queryByText("line 200")).toBeNull();
+	});
+
+	it("draws the older bar only above the oldest line held, not above the window", async () => {
+		const observer = stubSentinelObserver();
+		await openTab(lines(0, LOG_WINDOW_STEP + 50), true);
+		act(() => useLogsStore.getState().setFollow(false));
+		const list = screen.getByRole("list");
+		// Lines 0 to 49 are held and not mounted: the bar speaks of what is above all of them.
+		expect(screen.queryByRole("button", { name: "Search older" })).toBeNull();
+		expect(screen.queryByText(/Searched back to/)).toBeNull();
+
+		act(() => observer.reach(list.previousElementSibling as Element));
+
+		expect(screen.getByText("line 0")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Search older" })).toBeInTheDocument();
+		expect(screen.getByText(/Searched back to/)).toBeInTheDocument();
+	});
+
+	it("says it reached the start only once the window does", async () => {
+		const observer = stubSentinelObserver();
+		await openTab(lines(0, LOG_WINDOW_STEP + 50), false);
+		act(() => useLogsStore.getState().setFollow(false));
+		expect(screen.queryByText("Reached the start of the logs.")).toBeNull();
+
+		act(() => observer.reach(screen.getByRole("list").previousElementSibling as Element));
+
+		expect(screen.getByText("Reached the start of the logs.")).toBeInTheDocument();
+	});
+
+	it("keeps the reader's place as the window grows above them, so the next scroll up grows it again", async () => {
+		const observer = stubSentinelObserver();
+		stubRowLayout(20);
+		await openTab(lines(0, 1_000));
+		act(() => useLogsStore.getState().setFollow(false));
+		const list = screen.getByRole("list");
+		const scroller = list.parentElement as HTMLElement;
+		makeScrollable(scroller, 0);
+
+		act(() => observer.reach(list.previousElementSibling as Element));
+		expect(mountedRows()).toBe(2 * LOG_WINDOW_STEP);
+		expect(scroller.scrollTop).toBe(LOG_WINDOW_STEP * 20);
+
+		// The reader scrolls back to the top and reaches the sentinel again.
+		scroller.scrollTop = 0;
+		act(() => observer.reach(list.previousElementSibling as Element));
+		expect(mountedRows()).toBe(LOG_WINDOW_MAX_ROWS);
+		expect(scroller.scrollTop).toBe(LOG_WINDOW_STEP * 20);
 	});
 });
 

@@ -23,9 +23,16 @@
  * into view, and lines added below (a tail batch, a page newer) wait past the
  * lower end until the reader reaches them. Reaching the end of the window with
  * rows still below it is not reaching the end, so it does not follow.
+ *
+ * **The older bar sits above the oldest line held, not above the window**
+ * (#3675): while rows are held above the window it says nothing, because "Search
+ * older" and "Reached the start" both speak of the lines above everything held.
+ * Growing the window upward keeps the reader's place (`useHoldPlace`), so a
+ * steady scroll up reaches it.
  */
 
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useHoldPlace } from "@/hooks/useHoldPlace";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button, Eyebrow } from "@/components/ui";
@@ -173,10 +180,13 @@ export function LogList() {
 	const setFollow = useLogsStore((s) => s.setFollow);
 	const scroller = useRef<HTMLDivElement>(null);
 	const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
+	// Before the follow pin below: an effect that pins the newest line must win.
+	const holdPlace = useHoldPlace(scroller);
 	const { shown, hasAbove, hasBelow, topSentinelRef, bottomSentinelRef } = useLogWindow(
 		records,
 		follow,
-		generation
+		generation,
+		holdPlace
 	);
 
 	// After the list changes and while following: the newest line is in view.
@@ -211,7 +221,7 @@ export function LogList() {
 		>
 			<ColumnHeader />
 			<LoadError />
-			<OlderBar />
+			{!hasAbove && <OlderBar />}
 			{hasAbove && <div ref={topSentinelRef} aria-hidden="true" />}
 			{records.length === 0 ? (
 				<EmptyState

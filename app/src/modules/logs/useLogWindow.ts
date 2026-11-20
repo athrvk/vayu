@@ -18,9 +18,13 @@
  * by a step towards it, and past the cap the far end gives the rows up.
  *
  * Growing a plain list rather than measuring rows is `useGrowingWindow`'s
- * argument (an opened row is a block of JSON): the browser's scroll anchoring
- * keeps the rows in view still while rows mount or unmount above them, and
- * `content-visibility` on the rows skips layout for those off screen.
+ * argument (an opened row is a block of JSON): `content-visibility` on the rows
+ * skips layout for those off screen. Rows mounted above the reader are held in
+ * place by the caller (`useHoldPlace`, #3675), which the top sentinel's growth
+ * asks for just before it happens: the browser does not anchor at `scrollTop` 0,
+ * and without it the sentinel stays in view and the window stops at one step.
+ * Only that growth moves the scroller; the follow pin, the bottom sentinel and
+ * a new generation do not.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -126,7 +130,13 @@ export interface LogWindow {
  * The window over @p records, oldest first; @p generation changes whenever the
  * store replaces the list, and starts the window again at the newest step.
  */
-export function useLogWindow(records: LogEntry[], follow: boolean, generation: number): LogWindow {
+export function useLogWindow(
+	records: LogEntry[],
+	follow: boolean,
+	generation: number,
+	/** Called just before the top sentinel grows the window: `useHoldPlace`'s function. */
+	beforeGrowUp?: () => void
+): LogWindow {
 	const [anchor, setAnchor] = useState(() => initialAnchor(generation));
 
 	// What the observers' callbacks grow against: they run after the render that armed them.
@@ -134,10 +144,10 @@ export function useLogWindow(records: LogEntry[], follow: boolean, generation: n
 	useEffect(() => {
 		latest.current = { records, follow };
 	});
-	const growUp = useCallback(
-		() => setAnchor((prev) => grownUp(latest.current.records, prev, latest.current.follow)),
-		[]
-	);
+	const growUp = useCallback(() => {
+		beforeGrowUp?.();
+		setAnchor((prev) => grownUp(latest.current.records, prev, latest.current.follow));
+	}, [beforeGrowUp]);
 	const growDown = useCallback(
 		() => setAnchor((prev) => grownDown(latest.current.records, prev, latest.current.follow)),
 		[]

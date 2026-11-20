@@ -133,6 +133,21 @@ describe("useGrowingWindow", () => {
 		expect(result.current.visible).toBe(GROWING_WINDOW_STEP);
 	});
 
+	it("tells beforeGrow when the sentinel grows the window, and not for showMore", () => {
+		// The upward caller's hook for holding the reader's place (#3675).
+		const beforeGrow = vi.fn();
+		const { result } = renderHook(() =>
+			useGrowingWindow(1_000, GROWING_WINDOW_STEP, "list", beforeGrow)
+		);
+
+		scrollToEnd(result.current.sentinelRef);
+		expect(beforeGrow).toHaveBeenCalledTimes(1);
+		expect(result.current.visible).toBe(GROWING_WINDOW_STEP * 2);
+
+		act(() => result.current.showMore());
+		expect(beforeGrow).toHaveBeenCalledTimes(1);
+	});
+
 	it("grows by one step on showMore, never past the list", () => {
 		const { result } = renderHook(() => useGrowingWindow(GROWING_WINDOW_STEP + 5));
 

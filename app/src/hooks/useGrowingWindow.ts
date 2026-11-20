@@ -39,6 +39,13 @@
  * continuously and has to be throttled, and it needs to know which element
  * scrolls - here that is an ancestor the hook cannot see. An observer fires
  * once when the sentinel appears and is told nothing about the scroller.
+ *
+ * **Growing upward needs the reader's place held.** Six callers grow downward,
+ * where the rows mount below the reader and nothing moves. The Console grows
+ * upward, from a sentinel above its rows, and rows mounted above the view push
+ * it down - at `scrollTop` 0 the browser does not hold it, so the sentinel would
+ * stay in view and the window stop at one step. That caller passes `beforeGrow`
+ * (`useHoldPlace`, which moves the scroller by the height added above).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -72,7 +79,14 @@ export function useGrowingWindow(
 	 * of rows. A caller whose list also *grows in place* must say so, because
 	 * there the length changes without the list changing (issue #1153).
 	 */
-	resetKey: unknown = total
+	resetKey: unknown = total,
+	/**
+	 * Runs just before the sentinel grows the window. A caller that grows
+	 * *upward* (the sentinel above its rows) passes `useHoldPlace`'s function
+	 * here, so the reader keeps their place; a window that grows downward has no
+	 * use for it.
+	 */
+	beforeGrow?: () => void
 ): GrowingWindow {
 	const [visible, setVisible] = useState(step);
 	const observerRef = useRef<IntersectionObserver | null>(null);
@@ -128,12 +142,13 @@ export function useGrowingWindow(
 
 			observerRef.current = new IntersectionObserver((entries) => {
 				if (entries.some((e) => e.isIntersecting)) {
+					beforeGrow?.();
 					setVisible((n) => Math.min(n + step, total));
 				}
 			});
 			observerRef.current.observe(node);
 		},
-		[step, total]
+		[step, total, beforeGrow]
 	);
 
 	useEffect(() => () => observerRef.current?.disconnect(), []);

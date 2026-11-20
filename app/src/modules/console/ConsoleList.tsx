@@ -10,7 +10,8 @@
  * last, in the tab's own scroller.
  *
  * **The filter runs before the window is taken.** `useGrowingWindow` renders
- * the newest slice and grows upward from a sentinel above it; the toolbar's
+ * the newest slice and grows upward from a sentinel above it, holding the
+ * reader's place as it does (`useHoldPlace`, #3675); the toolbar's
  * filter is applied to every row in the ring first, so a match above what is
  * drawn is still listed. The filter is the window's reset key, so narrowing
  * starts from the newest slice again, and a row appended to the ring does not.
@@ -24,6 +25,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui";
 import { GROWING_WINDOW_STEP, useGrowingWindow } from "@/hooks/useGrowingWindow";
+import { useHoldPlace } from "@/hooks/useHoldPlace";
 import { formatBytes, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import {
@@ -42,7 +44,7 @@ import { StepRow } from "./StepRow";
 /** How far from the end still counts as at the end: a fractional scroll position never lands exactly. */
 const END_TOLERANCE_PX = 8;
 
-/** Said once, above the oldest row the ring still holds. */
+/** Said once, above the oldest row the ring still holds (drawn once the window reaches it). */
 function EvictedNotice({ count }: { count: number }) {
 	if (count === 0) return null;
 	return (
@@ -81,12 +83,15 @@ export function ConsoleList({ filter, onClearFilter }: ConsoleListProps) {
 	const rows = useConsoleStore(selectConsoleRows);
 	const evictedCount = useConsoleStore(selectConsoleEvictedCount);
 	const listed = useMemo(() => filterConsoleRows(rows, filter), [rows, filter]);
+	const scroller = useRef<HTMLDivElement>(null);
+	// Before the pin below: an effect that follows the newest row must win.
+	const holdPlace = useHoldPlace(scroller);
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(
 		listed.length,
 		GROWING_WINDOW_STEP,
-		filter
+		filter,
+		holdPlace
 	);
-	const scroller = useRef<HTMLDivElement>(null);
 	const atEnd = useRef(true);
 	const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
 
@@ -121,7 +126,7 @@ export function ConsoleList({ filter, onClearFilter }: ConsoleListProps) {
 
 	return (
 		<div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-			<EvictedNotice count={evictedCount} />
+			{!hasMore && <EvictedNotice count={evictedCount} />}
 			{hasMore && <div ref={sentinelRef} aria-hidden="true" />}
 			{/* The ring holds rows, so an empty list is the filter's doing. */}
 			{listed.length === 0 ? (
