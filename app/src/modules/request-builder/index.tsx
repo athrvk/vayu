@@ -464,9 +464,6 @@ export default function RequestBuilder() {
 											: "none";
 
 		const rawBody = "content" in body ? body.content : "";
-		const formFields = "fields" in body && body.mode === "form-data" ? body.fields : [];
-		const urlEncodedFields =
-			"fields" in body && body.mode === "x-www-form-urlencoded" ? body.fields : [];
 
 		return {
 			id: fetchedRequest.id,
@@ -479,9 +476,20 @@ export default function RequestBuilder() {
 			headers: toHeaderItems(fetchedRequest.headers),
 			bodyMode,
 			body: rawBody,
-			formData: toKeyValueItems(formFields),
-			urlEncoded: toKeyValueItems(urlEncodedFields),
-			binaryFile: body.mode === "binary" && body.file ? body.file : noFile(),
+			/*
+			 * A request stores one body, so the record has no opinion about the
+			 * modes it does not hold. Naming those keys with empty values made the
+			 * save's own echo read as "formData is now []", which the merge adopts
+			 * over the draft's rows (#3665). Absent keys let `{ ...baseline,
+			 * ...initialRequest }` carry the draft's own. The test is the stored
+			 * mode, not whether it holds anything: a form-data body with no fields
+			 * is still the record's answer.
+			 */
+			...(body.mode === "form-data" && { formData: toKeyValueItems(body.fields) }),
+			...(body.mode === "x-www-form-urlencoded" && {
+				urlEncoded: toKeyValueItems(body.fields),
+			}),
+			...(body.mode === "binary" && { binaryFile: body.file ?? noFile() }),
 			auth: fetchedRequest.auth,
 			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,

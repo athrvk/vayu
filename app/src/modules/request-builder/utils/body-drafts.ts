@@ -21,8 +21,11 @@
  * thing - a raw string body, differing only in syntax highlighting - so carrying
  * text between them is what you want. `graphql` is a structured envelope, and
  * carrying anything into or out of it is what caused the damage. `form-data`
- * and `x-www-form-urlencoded` do not use `body` at all; they have their own
- * arrays.
+ * and `x-www-form-urlencoded` do not use `body` at all, and `binary` does not
+ * either; they have their own `formData`, `urlEncoded` and `binaryFile`. Those
+ * need no bucket because the stored record never overwrites them from another
+ * mode: `initialRequest` names each only while the stored body is that mode, so
+ * a save made in JSON mode does not echo them back empty (#3665).
  *
  * `jsonrpc` and `xml` share the raw bucket rather than taking one of their own
  * because nothing on this side reads their text as a structure: JSON-RPC's
@@ -64,7 +67,8 @@ export type DraftKey = "raw" | "graphql";
 export function draftKey(mode: BodyMode): DraftKey | null {
 	if (mode === "json" || mode === "text" || mode === "jsonrpc" || mode === "xml") return "raw";
 	if (mode === "graphql") return "graphql";
-	// `none` sends nothing; the two form modes keep arrays, not a body string.
+	// `none` sends nothing; the form modes and `binary` keep their own state
+	// (`formData`, `urlEncoded`, `binaryFile`), not a body string.
 	return null;
 }
 
