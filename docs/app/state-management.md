@@ -3493,6 +3493,14 @@ Two things about it are deliberate and easy to undo by accident:
 Deliberately **not** persisted: a request has one body, and storing payloads it
 will never send would put them in exports and in the engine's schema.
 
+The form modes and `binary` need no bucket because the stored record never
+speaks for them from another mode: `initialRequest` in the request builder's
+`index.tsx` names `formData`, `urlEncoded` or `binaryFile` only while the stored
+body is that mode. A save made in JSON mode refetches a record with no form
+rows, and with the keys absent the per-field merge sees no change and keeps the
+draft's rows and chosen file (#3665). The condition is the stored mode, not a
+non-empty value: a stored form-data body with no fields still empties the table.
+
 ### `RequestBuilderContext` - the GraphQL Variables draft
 
 ```typescript
