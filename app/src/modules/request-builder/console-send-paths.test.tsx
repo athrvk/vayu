@@ -26,6 +26,12 @@
  * `composed.url` / `composed.method` again and "lists the URL the script
  * retargeted the send to" fails; drop the `??` fallback and "falls back to the
  * composed request" fails.
+ *
+ * Mutation check for a script's thrown error (#3673): drop the
+ * `scriptErrorRow` calls from `sendConsoleRows` and both "lists a script's
+ * thrown error" cases fail; drop `preScriptError` / `postScriptError` from
+ * `scriptsFromTrace` (`restore-response.ts`) and only the streamed one does;
+ * drop them from `execute-mapping.ts` and only the buffered one does.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -34,6 +40,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore, useConsoleStore } from "@/stores";
 import { useExecutionEventsStore } from "@/stores/execution-events-store";
+import { filterConsoleRows, NO_CONSOLE_FILTER } from "@/modules/console/console-filter";
 import type { RunReport, SanityResult } from "@/types";
 import type { RequestState, ResponseState } from "./types";
 
@@ -194,6 +201,26 @@ const comparable = () =>
 		return withoutRun;
 	});
 
+/** The error rows a Send whose two scripts threw lists, around its own row. */
+const SCRIPT_ERROR_ROWS = [
+	{
+		kind: "line",
+		source: "pre",
+		level: "error",
+		message: "Collection pre-request script failed - boom",
+	},
+	{ kind: "send" },
+	{ kind: "line", source: "test", level: "error", message: "tests blew up" },
+];
+
+/** Each row's kind, and a line's source, level and message. */
+const scriptErrorShape = (rows: ReturnType<typeof useConsoleStore.getState>["rows"]) =>
+	rows.map((row) =>
+		row.kind === "line"
+			? { kind: row.kind, source: row.source, level: row.level, message: row.message }
+			: { kind: row.kind }
+	);
+
 beforeEach(() => {
 	composeRequest.mockReset().mockResolvedValue({ method: METHOD, url: URL, headers: [] });
 	executeRequest.mockReset().mockResolvedValue(executeAnswer);
@@ -291,6 +318,46 @@ describe("the session Console's two send paths", () => {
 
 		expect(buffered).toHaveLength(1);
 		expect(comparable()).toEqual(buffered);
+	});
+
+	it("lists a script's thrown error on the buffered path, found by Level: Error", async () => {
+		executeRequest.mockResolvedValue({
+			...executeAnswer,
+			preScriptError: "Collection pre-request script failed - boom",
+			postScriptError: "tests blew up",
+		});
+
+		await sendBuffered();
+
+		const rows = useConsoleStore.getState().rows;
+		expect(scriptErrorShape(rows)).toEqual(SCRIPT_ERROR_ROWS);
+		const found = filterConsoleRows(rows, { ...NO_CONSOLE_FILTER, level: "error" });
+		expect(found.map((row) => (row.kind === "line" ? row.message : ""))).toEqual([
+			"Collection pre-request script failed - boom",
+			"tests blew up",
+		]);
+	});
+
+	it("lists a script's thrown error on the streamed path", async () => {
+		const [stored] = storedReport.results ?? [];
+		getRunReport.mockResolvedValue({
+			results: [
+				{
+					...stored,
+					trace: {
+						...stored?.trace,
+						scripts: {
+							preScriptError: "Collection pre-request script failed - boom",
+							postScriptError: "tests blew up",
+						},
+					},
+				},
+			],
+		});
+		streamEnded("run_1");
+		await finalizeStreamRun("run_1", vi.fn());
+
+		expect(scriptErrorShape(useConsoleStore.getState().rows)).toEqual(SCRIPT_ERROR_ROWS);
 	});
 
 	it("appends a stream a newer Send overtook, and lands nothing", async () => {
