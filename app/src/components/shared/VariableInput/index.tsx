@@ -36,6 +36,7 @@ import {
 	useCallback,
 	useMemo,
 	useEffect,
+	useLayoutEffect,
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
@@ -191,6 +192,19 @@ export default function VariableInput({
 	const containerRef = useRef<HTMLDivElement>(null);
 	const overlayRef = useRef<HTMLDivElement>(null);
 
+	/**
+	 * The overlay paints the text, but the input is what scrolls: it follows the
+	 * caret past the field's width, and the overlay (`overflow-hidden`, no
+	 * scrollbar) never would, so typed text went unseen and a token's rect
+	 * disagreed with where a click landed (#3684). Copy the input's offset across.
+	 */
+	const syncOverlayScroll = useCallback(() => {
+		const input = inputRef.current;
+		const overlay = overlayRef.current;
+		if (!input || !overlay) return;
+		overlay.scrollLeft = input.scrollLeft;
+	}, []);
+
 	const allVariables = variables ? variables.getAllVariables() : NO_VARIABLES;
 	const segments = useMemo(() => parseSegments(value), [value]);
 	/*
@@ -199,6 +213,12 @@ export default function VariableInput({
 	 * nowhere to write. The literal the user typed is the honest thing to show.
 	 */
 	const hasVariables = Boolean(variables) && segments.some((s) => s.type === "variable");
+
+	// A scroll event covers the caret moving the input; a new value, or the
+	// overlay mounting at all, can change the offset without one in the same frame.
+	useLayoutEffect(() => {
+		syncOverlayScroll();
+	}, [syncOverlayScroll, value, cursorPosition, hasVariables]);
 
 	/**
 	 * The tokens the strip paints, in painted order, each already classified.
@@ -804,6 +824,7 @@ export default function VariableInput({
 				onChange={handleChange}
 				onPaste={onPaste}
 				onKeyDown={handleKeyDown}
+				onScroll={syncOverlayScroll}
 				onFocus={handleFocus}
 				onBlur={handleBlur}
 				placeholder={!hasVariables ? placeholder : undefined}
@@ -865,7 +886,7 @@ export default function VariableInput({
 					onKeyDown={handleOverlayKeyDown}
 					onFocus={handleOverlayFocus}
 				>
-					<span className="whitespace-pre font-[inherit] text-[inherit]">
+					<span className="shrink-0 whitespace-pre font-[inherit] text-[inherit]">
 						{renderOverlayContent()}
 					</span>
 				</div>
