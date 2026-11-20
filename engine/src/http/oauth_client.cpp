@@ -48,12 +48,16 @@ int64_t now_ms () {
     .count ();
 }
 
-std::string field (const nlohmann::json& obj, const char* key) {
+std::string field (const nlohmann::json& obj, std::string_view key) {
     if (auto it = obj.find (key); it != obj.end () && it->is_string ()) {
         return it->get<std::string> ();
     }
     return {};
 }
+
+/// The ASCII whitespace a URL field is trimmed of. Spelled out because
+/// `std::isspace` follows the C locale and a byte above 127 is not ours to judge.
+constexpr std::string_view URL_WHITESPACE = " \t\n\r\v\f";
 
 bool flag (const nlohmann::json& obj, const char* key, bool fallback) {
     if (auto it = obj.find (key); it != obj.end () && it->is_boolean ()) {
@@ -506,6 +510,15 @@ std::vector<ExtraParam> extra_params (const nlohmann::json& config, std::string_
     return rows;
 }
 
+std::string url_field (const nlohmann::json& config, std::string_view name) {
+    const std::string text = field (config, name);
+    const size_t begin     = text.find_first_not_of (URL_WHITESPACE);
+    if (begin == std::string::npos) {
+        return {};
+    }
+    return text.substr (begin, text.find_last_not_of (URL_WHITESPACE) - begin + 1);
+}
+
 // NOTE: `scope`/`audience`/`resource` are intentionally omitted (matches
 // Postman's keying). Configs differing only in scope share a cached token; set a
 // distinct credentialsId to separate them. The extra parameter lists are read
@@ -519,7 +532,7 @@ std::string cache_key (const nlohmann::json& config) {
     if (creds_id.empty ()) {
         creds_id = "default";
     }
-    std::string key = field (config, "accessTokenUrl") + "\x1f" +
+    std::string key = url_field (config, "accessTokenUrl") + "\x1f" +
     field (config, "clientId") + "\x1f" + creds_id + "\x1f" +
     grant_identity (config, grant);
     for (std::string_view list : EXTRA_PARAM_LISTS) {
@@ -690,7 +703,7 @@ const vayu::db::OAuthToken& spent,
 const TokenDeadline& deadline,
 double* network_ms,
 const std::atomic<bool>* cancel) {
-    std::string refresh_url = field (config, "refreshTokenUrl");
+    std::string refresh_url = url_field (config, "refreshTokenUrl");
     if (refresh_url.empty ()) {
         refresh_url = token_url;
     }
@@ -1074,7 +1087,7 @@ const std::atomic<bool>* cancel) {
         return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
     }
 
-    const std::string token_url = field (config, "accessTokenUrl");
+    const std::string token_url = url_field (config, "accessTokenUrl");
     if (token_url.rfind ("http://", 0) != 0 && token_url.rfind ("https://", 0) != 0) {
         return TokenError{ 400, "oauth2_invalid_config", "accessTokenUrl must be an http(s) URL" };
     }

@@ -124,11 +124,25 @@ struct InteractiveExchange {
 };
 
 /**
+ * A URL member of an OAuth 2.0 config (`accessTokenUrl`, `refreshTokenUrl`,
+ * `authorizationUrl`, `callbackUrl`, #3687): the string at @p name with the
+ * ASCII whitespace (space, tab, CR, LF, VT, FF) trimmed from both ends, or ""
+ * when it is absent, not a string, or only whitespace. A pasted URL carries a
+ * trailing space or newline that a server answers with a 404 and that would
+ * otherwise split the cache key from the app's. Every read of one of these
+ * members goes through here - the validation, the dial, the cache key and the
+ * target policy - so the host judged is the host dialled. A byte above 127
+ * (a no-break space) is not whitespace here and stays. A secret is not read
+ * this way: its bytes are the user's.
+ */
+std::string url_field (const nlohmann::json& config, std::string_view name);
+
+/**
  * @brief Deterministic cache key for a token config.
  *
  * Hash-free ("\x1f"-joined) so the app can compute the identical key in
  * TypeScript (computeOAuth2CacheKey) for the GET/DELETE status endpoints:
- *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
+ *   url_field(accessTokenUrl) \x1f clientId \x1f (credentialsId|"default")
  *   \x1f (grantType == "password" ? username :
  *          grantType == "jwt_bearer" ? subject : "")
  * then, for each of `EXTRA_PARAM_LISTS` in order with at least one

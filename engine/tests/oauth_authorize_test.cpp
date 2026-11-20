@@ -114,6 +114,22 @@ TEST (BuildAuthorizeUrl, IncludesPkceAndParams) {
     EXPECT_EQ (q["redirect_uri"], "http%3A%2F%2F127.0.0.1%3A5000%2Fcallback");
 }
 
+// A pasted authorization URL's stray whitespace is not part of the URL the
+// browser is sent to (#3687). Mutation-check: read `authorizationUrl` with
+// `field` in `build_authorize_url` and both URLs keep their padding.
+TEST (BuildAuthorizeUrl, StrayWhitespaceAroundTheAuthorizationUrlIsTrimmed) {
+    json config = { { "authorizationUrl", " \thttps://idp.example/auth\r\n" },
+        { "clientId", "cid" } };
+    EXPECT_EQ (vayu::http::build_authorize_url (config, "S", "", "rt", false)
+               .rfind ("https://idp.example/auth?response_type=code&", 0),
+    0u);
+
+    config["authorizationUrl"] = "https://idp.example/auth?foo=1 \n";
+    const auto url = vayu::http::build_authorize_url (config, "S", "", "rt", false);
+    EXPECT_NE (url.find ("?foo=1&"), std::string::npos) << url;
+    EXPECT_EQ (url.find_first_of (" \t\r\n"), std::string::npos) << url;
+}
+
 TEST (BuildAuthorizeUrl, OmitsPkceWhenDisabled) {
     const json config = { { "authorizationUrl", "https://idp.example/auth?foo=1" },
         { "clientId", "cid" } };
@@ -162,6 +178,32 @@ TEST_F (OAuthAuthorizeTest, EmbeddedRequiresCallbackUrl) {
     auto r = mgr.start (*db_,
     json{ { "authorizationUrl", "https://idp/auth" }, { "clientId", "c" } }, "embedded");
     EXPECT_FALSE (r.ok);
+}
+
+// A URL of whitespace alone is as missing as an absent one, and a padded
+// callback is sent to the provider trimmed (#3687). Mutation-check: read the
+// members with `field` in `start` and the first refusal and the redirect_uri
+// assertion fail.
+TEST_F (OAuthAuthorizeTest, StrayWhitespaceInTheConfigUrlsIsTrimmedByStart) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    EXPECT_FALSE (mgr
+    .start (*db_, json{ { "authorizationUrl", " \n" }, { "clientId", "c" } }, "loopback")
+    .ok);
+    EXPECT_FALSE (mgr
+    .start (*db_,
+    json{ { "authorizationUrl", "https://idp/auth" }, { "clientId", "c" },
+    { "callbackUrl", "\t " } },
+    "embedded")
+    .ok);
+
+    auto start = mgr.start (*db_,
+    json{ { "authorizationUrl", " https://idp/auth\n" }, { "clientId", "c" },
+    { "callbackUrl", "\thttps://app/callback " } },
+    "embedded");
+    ASSERT_TRUE (start.ok);
+    EXPECT_EQ (start.authorize_url.rfind ("https://idp/auth?", 0), 0u) << start.authorize_url;
+    EXPECT_EQ (parse_q (query_of (start.authorize_url))["redirect_uri"],
+    "https%3A%2F%2Fapp%2Fcallback");
 }
 
 TEST_F (OAuthAuthorizeTest, EmbeddedRejectsStateMismatch) {

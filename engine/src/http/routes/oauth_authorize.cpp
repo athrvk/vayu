@@ -146,7 +146,7 @@ const std::string& state,
 const std::string& code_challenge,
 const std::string& redirect_uri,
 bool pkce) {
-    std::string url = field (config, "authorizationUrl");
+    std::string url = oauth::url_field (config, "authorizationUrl");
 
     std::vector<std::pair<std::string, std::string>> params = {
         { "response_type", "code" },
@@ -457,7 +457,7 @@ const nlohmann::json& config,
 const std::string& mode) {
     AuthorizeStart out;
 
-    if (!config.is_object () || field (config, "authorizationUrl").empty () ||
+    if (!config.is_object () || oauth::url_field (config, "authorizationUrl").empty () ||
     field (config, "clientId").empty ()) {
         out.ok            = false;
         out.error_code    = "oauth2_invalid_config";
@@ -489,7 +489,7 @@ const std::string& mode) {
     const std::string attempt_id = generate_attempt_id ();
 
     if (mode == "embedded") {
-        const std::string callback = field (config, "callbackUrl");
+        const std::string callback = oauth::url_field (config, "callbackUrl");
         if (callback.empty ()) {
             out.ok            = false;
             out.error_code    = "oauth2_invalid_config";

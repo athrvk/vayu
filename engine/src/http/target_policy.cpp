@@ -169,15 +169,12 @@ const nlohmann::json& config) {
         return std::nullopt;
     }
     for (const std::string_view member : oauth::TOKEN_ENDPOINT_MEMBERS) {
-        // An empty or non-string member posts nothing: `acquire_token` refuses
-        // the config, or the refresh falls back to the token URL. A member that
-        // posts goes through `Client::post` (default encoding on), so it is
-        // judged as dialled (#3162).
-        const auto url = config.find (member);
-        if (url == config.end () || !url->is_string ()) {
-            continue;
-        }
-        const auto& text = url->get_ref<const std::string&> ();
+        // An empty, whitespace-only or non-string member posts nothing:
+        // `acquire_token` refuses the config, or the refresh falls back to the
+        // token URL. A member that posts goes through `Client::post` (default
+        // encoding on), so it is judged as dialled (#3162), and as trimmed, the
+        // way `acquire_token` reads it (#3687).
+        const std::string text = oauth::url_field (config, member);
         if (text.empty ()) {
             continue;
         }
