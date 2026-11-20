@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { LogEntry } from "@/types/electron";
 import { logRecord } from "./logs-bridge.testkit";
-import { stubSentinelObserver, type SentinelObserver } from "./sentinel-observer.testkit";
+import { stubSentinelObserver, type SentinelObserver } from "@/test/sentinel-observer.testkit";
 import { LOG_WINDOW_MAX_ROWS, LOG_WINDOW_STEP, useLogWindow } from "./useLogWindow";
 
 const lines = (from: number, to: number): LogEntry[] =>

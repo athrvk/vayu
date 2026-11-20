@@ -33,7 +33,7 @@ import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
 import { LOG_MAX_BYTES, useLogsStore } from "./logs-store";
-import { stubSentinelObserver } from "./sentinel-observer.testkit";
+import { stubSentinelObserver } from "@/test/sentinel-observer.testkit";
 import { LOG_WINDOW_MAX_ROWS, LOG_WINDOW_STEP } from "./useLogWindow";
 
 const config = vi.hoisted(() => ({ logLevel: "info" as string | undefined }));
