@@ -9,7 +9,10 @@
  * What one Send hands the session Console (#3634): its rows in execution order,
  * masked before they are stored, bodies intact.
  *
- * Mutation check: pass `[]` for `authHeaders` in `sendRow` and "a custom
+ * Mutation check: mask with `maskSensitiveHeaders` alone in `maskedExchange`
+ * and "masks a header the engine's logger names" and every fixture-name case
+ * but the seven snippet names store the value in clear; pass `[]` for
+ * `authHeaders` in `sendRow` and "a custom
  * API-key header named by authHeaders" stores the key in clear; drop the
  * `authQueryParam` extra name and "masks a query name only the send's auth
  * claims" fails; build
@@ -23,6 +26,9 @@ import type { ResponseState } from "@/modules/request-builder/types";
 import type { ConsoleScriptRequestRow, ConsoleSendRow } from "@/stores/console-store";
 import { sendConsoleRows, type CompletedSend } from "./console-rows";
 import { stepConsoleRow } from "./step-row";
+import { consoleRowCurl } from "./console-curl";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { readFileSync } from "node:fs";
 
 const RAW_REQUEST =
 	"POST /token HTTP/1.1\r\nHost: api.test\r\nAuthorization: Bearer T\r\n\r\n" +
@@ -158,6 +164,99 @@ describe("sendConsoleRows", () => {
 			expect(masked.url).toBe("https://api.test/p?tenant=<redacted>");
 		});
 
+		it("masks a header the engine's logger names and the snippet list does not", () => {
+			const masked = sendConsoleRows(
+				send({
+					response: response({
+						requestHeaders: {
+							apikey: "K-1",
+							Token: "T-1",
+							"X-Plain": "visible",
+							Cookie: "",
+						},
+					}),
+				})
+			)[0] as ConsoleSendRow;
+			expect(masked.exchange.requestHeaders).toEqual({
+				apikey: "<redacted>",
+				Token: "<redacted>",
+				"X-Plain": "visible",
+				Cookie: "",
+			});
+		});
+
+		it("keeps the copied cURL free of those values", () => {
+			const masked = sendConsoleRows(
+				send({
+					response: response({
+						requestHeaders: { apikey: "K-1", token: "T-1", "X-Plain": "visible" },
+					}),
+				})
+			)[0] as ConsoleSendRow;
+			const code = consoleRowCurl(masked);
+			expect(code).not.toContain("K-1");
+			expect(code).not.toContain("T-1");
+			expect(code).toContain("visible");
+		});
+
+		it("keeps a challenge header the server sent", () => {
+			const masked = sendConsoleRows(
+				send({
+					response: response({
+						status: 401,
+						headers: {
+							"WWW-Authenticate": 'Bearer realm="api"',
+							"Proxy-Authenticate": "Basic",
+							"Authentication-Info": "nextnonce=1",
+						},
+					}),
+				})
+			)[0] as ConsoleSendRow;
+			expect(masked.exchange.responseHeaders).toEqual({
+				"WWW-Authenticate": 'Bearer realm="api"',
+				"Proxy-Authenticate": "Basic",
+				"Authentication-Info": "nextnonce=1",
+			});
+		});
+
+		describe("every name the engine fixture lists", () => {
+			const [fixturePath] =
+				ENGINE_READING_GUARDS.consoleHeaderMasking.paths.map(fromRepoRoot);
+			const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
+				secretFieldNames: string[];
+				challengeHeaderNames: string[];
+			};
+			const isChallenge = (name: string) =>
+				fixture.challengeHeaderNames.includes(name.toLowerCase());
+			const sentWith = (name: string) =>
+				(
+					sendConsoleRows(
+						send({
+							response: response({
+								requestHeaders: { [name]: "V-1" },
+								authHeaders: [],
+							}),
+						})
+					)[0] as ConsoleSendRow
+				).exchange.requestHeaders[name];
+
+			it("read a non-empty fixture", () => {
+				expect(fixture.secretFieldNames.length).toBeGreaterThan(0);
+				expect(fixture.challengeHeaderNames.length).toBeGreaterThan(0);
+			});
+
+			it.each(fixture.secretFieldNames.filter((name) => !isChallenge(name)))(
+				"masks %s",
+				(name) => {
+					expect(sentWith(name)).toBe("<redacted>");
+				}
+			);
+
+			it.each(fixture.challengeHeaderNames)("keeps %s", (name) => {
+				expect(sentWith(name)).toBe("V-1");
+			});
+		});
+
 		it("keeps both bodies intact", () => {
 			expect(row().exchange.requestBody).toEqual({
 				text: '{"grant":"password","password":"hunter2"}',
@@ -194,7 +293,7 @@ describe("stepConsoleRow", () => {
 		statusCode: 200,
 		latencyMs: 15,
 		method: "POST",
-		url: "https://api.test/token?access_token=",
+		url: "https://api.test/token?access_token=<redacted>",
 		bodyBytes: 120,
 		requestId: "req_7",
 	};
@@ -208,7 +307,7 @@ describe("stepConsoleRow", () => {
 			name: "Get token",
 			outcome: "passed",
 			method: "POST",
-			url: "https://api.test/token?access_token=",
+			url: "https://api.test/token?access_token=<redacted>",
 			status: 200,
 			timeMs: 15,
 			sizeBytes: 120,

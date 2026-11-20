@@ -442,6 +442,16 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/lib/sensitive-headers.conformance.test.ts",
 		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
 	},
+	/* The session Console's header masking (#3672): the logger's name set less
+	   the challenge headers, as a script-request row carries it. */
+	secretHeaderNames: {
+		reader: "app/src/lib/secret-header-name.conformance.test.ts",
+		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
+	},
+	consoleHeaderMasking: {
+		reader: "app/src/modules/console/console-rows.test.ts",
+		paths: ["engine/tests/fixtures/log-redaction-conformance.json"],
+	},
 	/* The session Console's URL masking (#3634): the engine's
 	   `redact_url_credentials` names, replayed through `maskUrlCredentials`. */
 	urlCredentials: {

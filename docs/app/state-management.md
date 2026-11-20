@@ -1345,13 +1345,20 @@ step's exchange, lines and script requests are read from its stored row by
 
 **Masked before it is stored.** A Send row is built from the live response, so
 `console-rows.ts` masks it on the way in: header values by
-`maskSensitiveHeaders` (`lib/sensitive-headers.ts`, the shared list plus the
-response's `authHeaders`), the URL by `maskUrlCredentials`
+the engine's logger name set (`isSecretHeaderName`, `lib/secret-header-name.ts`:
+`authorization`, `cookie`, `token`, `apikey`, `session_token` and the rest of
+`log_redact.hpp`'s list, ASCII case folded, pinned by
+`secret-header-name.conformance.test.ts`) or by the response's `authHeaders`, so
+a Send row masks the names the engine masks on a script-request row; the
+challenge headers (`WWW-Authenticate`, `Proxy-Authenticate`,
+`Authentication-Info`) are the server's scheme and realm and are shown. The
+snippet list in `lib/sensitive-headers.ts` is narrower and unchanged. The URL by `maskUrlCredentials`
 (`lib/url-credentials.ts`: the userinfo password dropped, a credential query or
 fragment value read `<redacted>`, with `authQueryParam` as an extra name; the
 engine's names, pinned by `url-credentials.conformance.test.ts`). Script
-requests arrive masked by the engine (#3633) and a step's URL is the engine's
-masked one, so both are kept as written. Bodies are not judged. A step's
+requests arrive masked by the engine (#3633, #3672: header values by the same
+name set, a URL's userinfo and credential query values as `<redacted>`) and a
+step's URL is the engine's masked one, so both are kept as written. Bodies are not judged. A step's
 exchange, read back from its stored row when the Console expands it, goes
 through the same `maskedExchange` before it is drawn, and is never put in the
 ring.
