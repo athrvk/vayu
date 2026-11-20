@@ -29,10 +29,11 @@
  * (no environment selected, no collection), so offering any other scope is a
  * Create button that does nothing.
  *
- * The edit buffer, the reveal flag, the picked scope and the Escape/auto-save
- * flow stay here rather than in the two children, which `PopoverContent`
- * unmounts on close: the close path saves or discards the buffer and re-masks
- * the secret, and a picked scope survives a re-open.
+ * The edit buffer, the reveal flag, the picked scope, the create form's secret
+ * flag and the Escape/auto-save flow stay here rather than in the two children,
+ * which `PopoverContent` unmounts on close: the close path saves or discards the
+ * buffer and re-masks the secret, and a picked scope or secret flag survives a
+ * re-open.
  */
 
 import { useState, useRef, useMemo, useEffect } from "react";
@@ -47,7 +48,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
 import { MENU_TRIGGERED_CLICK_DETAIL } from "@/lib/context-menu";
 import { KeyRound } from "lucide-react";
-import type { ResolvedVariable, VariableOrigin } from "@/types";
+import type { ResolvedVariable, VariableCreateOptions, VariableOrigin } from "@/types";
 import { Eyebrow } from "./eyebrow";
 import { Callout } from "@/components/shared/Callout";
 
@@ -110,9 +111,16 @@ export interface VariablePopoverProps {
 	/**
 	 * Callback when value changes (required for editable mode). An edit of the
 	 * resolved definition passes its `sourceId` so the write lands there; a
-	 * create passes none (#3683).
+	 * create passes none (#3683) and always carries `options`, which an edit
+	 * never does.
 	 */
-	onValueChange?: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
+	onValueChange?: (
+		name: string,
+		value: string,
+		scope: VariableScope,
+		sourceId?: string,
+		options?: VariableCreateOptions
+	) => void;
 	/** Save mode: 'manual' shows Save/Cancel buttons, 'auto' saves on close */
 	saveMode?: "manual" | "auto";
 	/** Whether editing is disabled */
@@ -330,6 +338,9 @@ export function VariablePopover({
 	// Held here rather than in the form, which unmounts on close: a scope picked
 	// once survives a re-open of the same token.
 	const [createScope, setCreateScope] = useState<VariableScope | null>(null);
+	// Held beside the value it masks: reopening shows the typed value again, and
+	// it must not come back in the clear.
+	const [createSecret, setCreateSecret] = useState(false);
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
@@ -362,7 +373,7 @@ export function VariablePopover({
 
 	const handleCreate = (scope: VariableScope) => {
 		if (!onValueChange) return;
-		onValueChange(name, editValue, scope);
+		onValueChange(name, editValue, scope, undefined, { secret: createSecret });
 		closePopover();
 	};
 
@@ -637,6 +648,8 @@ export function VariablePopover({
 							scopes={creatableScopes}
 							selectedScope={createScope}
 							onSelectedScopeChange={setCreateScope}
+							secret={createSecret}
+							onSecretChange={setCreateSecret}
 							value={editValue}
 							onValueChange={setEditValue}
 							onCreate={handleCreate}

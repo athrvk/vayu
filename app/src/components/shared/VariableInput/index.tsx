@@ -45,7 +45,12 @@ import { buildVariableSuggestions, variableSuggestionKey } from "@/lib/variable-
 import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { INPUT_HEIGHT, type InputSize } from "@/components/ui/input-size";
-import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
+import type {
+	ResolvedVariable,
+	VariableCreateOptions,
+	VariableScope,
+	VariableSupport,
+} from "@/types";
 import EditableVariable from "./EditableVariable";
 import RuntimeToken from "./RuntimeToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -612,10 +617,12 @@ export default function VariableInput({
 		name: string,
 		newValue: string,
 		scope: VariableScope,
-		sourceId?: string
+		...rest: [sourceId?: string, options?: VariableCreateOptions]
 	) => {
 		// Only reachable from a token, and a token only renders with a scope.
-		variables?.updateVariable(name, newValue, scope, sourceId);
+		// What the popover passed is forwarded as it came: an edit carries a
+		// `sourceId` and no options, a create the reverse.
+		variables?.updateVariable(name, newValue, scope, ...rest);
 	};
 
 	/**

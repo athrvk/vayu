@@ -50,6 +50,7 @@ import type {
 	TestResult,
 	StreamEndReason,
 	StreamEvent,
+	VariableCreateOptions,
 	VariableOrigin,
 	VariableScope,
 	ResponseValidation,
@@ -716,7 +717,13 @@ export interface RequestBuilderContextValue {
 	/** Every definition of a name, winner and losers alike. Display-only. */
 	getVariableOrigins: (name: string) => VariableOrigin[];
 	/** As `VariableSupport.updateVariable`: an edit's `sourceId` picks the definition written. */
-	updateVariable: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
+	updateVariable: (
+		name: string,
+		value: string,
+		scope: VariableScope,
+		sourceId?: string,
+		options?: VariableCreateOptions
+	) => void;
 	/**
 	 * The scopes `updateVariable` can actually write to right now.
 	 *

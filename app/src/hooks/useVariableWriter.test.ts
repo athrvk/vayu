@@ -312,3 +312,79 @@ describe("editing an environment definition", () => {
 		expect(mutateEnvironment).toHaveBeenCalledWith(expect.objectContaining({ id: "e1" }));
 	});
 });
+
+/*
+ * A create can mark the entry secret. It can land on an existing entry (the
+ * popover offers a create while the name's only definition is switched off), so
+ * the mark applies there too; an edit passes no options and never changes it.
+ */
+describe("creating a secret", () => {
+	const SCOPES: Array<["global" | "collection" | "environment", Parameters<typeof setup>[0]]> = [
+		["global", {}],
+		["collection", { cols: [{ id: "c1", name: "Acme" }], collectionId: "c1" }],
+		["environment", { envs: [{ id: "e1", name: "Staging" }], activeEnvironmentId: "e1" }],
+	];
+
+	/** The entry the write put under `name`, from whichever mutation it reached. */
+	function written(scope: "global" | "collection" | "environment", name: string) {
+		const call = {
+			global: mutateGlobals,
+			collection: mutateCollection,
+			environment: mutateEnvironment,
+		}[scope].mock.calls[0][0];
+		return call.variables[name];
+	}
+
+	it.each(SCOPES)("stores secret: true on a new %s entry", (scope, opts) => {
+		const r = setup(opts);
+		r.current.updateVariable("signing_key", "pem", scope, undefined, { secret: true });
+		expect(written(scope, "signing_key")).toEqual({
+			value: "pem",
+			enabled: true,
+			createdAt: expect.any(Number),
+			secret: true,
+		});
+	});
+
+	it.each([
+		["no options", undefined],
+		["secret: false", { secret: false }],
+	])("leaves a new entry as it was with %s", (_label, options) => {
+		const r = setup({});
+		r.current.updateVariable("token", "abc", "global", undefined, options);
+		expect(written("global", "token")).toEqual({
+			value: "abc",
+			enabled: true,
+			createdAt: expect.any(Number),
+		});
+	});
+
+	it("marks an existing definition a create lands on, and re-enables it", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: false, createdAt: 9 } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: true });
+		expect(written("global", "token")).toEqual({
+			value: "abc",
+			enabled: true,
+			createdAt: 9,
+			secret: true,
+		});
+	});
+
+	it("does not mark an existing definition when the flag is off", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: false } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: false });
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true });
+	});
+
+	it("keeps the mark an existing secret has when an edit passes no options", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true, secret: true } } });
+		r.current.updateVariable("token", "abc", "global");
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true, secret: true });
+	});
+
+	it("never un-secrets an existing secret, whatever the flag says", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true, secret: true } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: false });
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true, secret: true });
+	});
+});

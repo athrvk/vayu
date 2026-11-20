@@ -30,7 +30,11 @@ import { TIMING } from "@/config/timing";
 import { deferredNote } from "@/lib/deferred-note";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
-import type { VariableScope as RequestBuilderVariableScope, VariableSupport } from "@/types";
+import type {
+	VariableCreateOptions,
+	VariableScope as RequestBuilderVariableScope,
+	VariableSupport,
+} from "@/types";
 
 export interface EditableVariableProps {
 	/** Variable name */
@@ -52,7 +56,8 @@ export interface EditableVariableProps {
 		name: string,
 		value: string,
 		scope: RequestBuilderVariableScope,
-		sourceId?: string
+		sourceId?: string,
+		options?: VariableCreateOptions
 	) => void;
 	/** Whether editing is disabled */
 	disabled?: boolean;
@@ -133,13 +138,13 @@ export default function EditableVariable({
 		: null;
 
 	const handleValueChange = onValueChange
-		? (varName: string, varValue: string, varScope: VariableScope, varSourceId?: string) => {
-				onValueChange(
-					varName,
-					varValue,
-					varScope as RequestBuilderVariableScope,
-					varSourceId
-				);
+		? (
+				varName: string,
+				varValue: string,
+				varScope: VariableScope,
+				...rest: [sourceId?: string, options?: VariableCreateOptions]
+			) => {
+				onValueChange(varName, varValue, varScope as RequestBuilderVariableScope, ...rest);
 			}
 		: undefined;
 
