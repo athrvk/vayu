@@ -210,7 +210,7 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 };
 
 /** Why a pasted command could not be imported (#3685). */
-export type CommandFailure = "not-a-command" | "unterminated-quote" | "missing-url";
+export type CommandFailure = "not-a-command" | "unterminated-quote" | "missing-url" | "unreadable";
 
 export type CommandReading =
 	{ ok: true; command: CommandImport } | { ok: false; reason: CommandFailure };
@@ -219,9 +219,10 @@ export type CommandReading =
  * Parse a pasted curl/wget command into a request-shape partial and the ledger
  * of what it could not carry, or say why it cannot be imported.
  *
- * Only the tokenizer's `UnterminatedQuoteError` is a verdict on the text; any
- * other throw is a parser bug and propagates rather than passing for a paste
- * that said nothing.
+ * Never throws to the caller. An unterminated quote and a missing URL are
+ * named; any other throw from the parser (a lone surrogate reaching
+ * `encodeURIComponent`, say) is `unreadable`, so a caller that does not guard
+ * the call (`ImportModal`) is as safe as one that does.
  */
 export function readCommand(text: string): CommandReading {
 	const kind = detectCommand(text);
@@ -236,7 +237,7 @@ export function readCommand(text: string): CommandReading {
 	} catch (error) {
 		if (error instanceof UnterminatedQuoteError)
 			return { ok: false, reason: "unterminated-quote" };
-		throw error;
+		return { ok: false, reason: "unreadable" };
 	}
 }
 

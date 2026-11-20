@@ -62,9 +62,10 @@ describe("the paste disclosure notice", () => {
 
 describe("the unreadable command notice (#3685)", () => {
 	it.each([
-		["unterminated-quote", "A quote is opened and never closed"],
+		["unterminated-quote", "You opened a quote and never closed it"],
 		["missing-url", "The command has no URL"],
 		["not-a-command", "The text is not a cURL or wget command"],
+		["unreadable", "Vayu couldn't parse the command"],
 	] as const)("names %s as the reason and says the request is untouched", (reason, cause) => {
 		const notice = unreadableCommandNotice(reason);
 

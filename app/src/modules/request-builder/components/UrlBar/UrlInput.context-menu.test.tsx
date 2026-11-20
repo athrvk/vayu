@@ -130,7 +130,13 @@ describe("the URL bar answers the menu's import", () => {
 
 	it.each([
 		["no URL in it", "curl", "The command has no URL"],
-		["an open quote", "curl -H 'A: b", "A quote is opened and never closed"],
+		["an open quote", "curl -H 'A: b", "You opened a quote and never closed it"],
+		// Throws inside the parser (encodeURIComponent on a lone surrogate).
+		[
+			"a command the parser throws on",
+			"curl -T $'\\ud800' https://x.com",
+			"Vayu couldn't parse the command",
+		],
 	])(
 		"leaves the request alone and says why for a command with %s (#3685)",
 		(_name, text, cause) => {
@@ -146,6 +152,7 @@ describe("the URL bar answers the menu's import", () => {
 			expect(toasts).toHaveLength(1);
 			expect(toasts[0]).toMatchObject({
 				variant: "warning",
+				title: "Couldn't import the command",
 				message: expect.stringContaining(cause),
 			});
 		}

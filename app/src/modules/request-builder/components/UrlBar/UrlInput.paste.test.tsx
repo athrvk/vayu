@@ -142,8 +142,14 @@ describe("pasting a command that cannot be read (#3685)", () => {
 	});
 
 	it.each([
-		["an open quote", "curl -H 'A: b", "A quote is opened and never closed"],
+		["an open quote", "curl -H 'A: b", "You opened a quote and never closed it"],
 		["no URL", "curl -H 'A: b'", "The command has no URL"],
+		// Throws inside the parser (encodeURIComponent on a lone surrogate).
+		[
+			"a command the parser throws on",
+			"curl -T $'\\ud800' https://x.com",
+			"Vayu couldn't parse the command",
+		],
 	])("says so for %s and leaves the request alone", (_name, command, cause) => {
 		const { field, setRequest } = renderField("https://keep.test/");
 
@@ -157,6 +163,7 @@ describe("pasting a command that cannot be read (#3685)", () => {
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0]).toMatchObject({
 			variant: "warning",
+			title: "Couldn't import the command",
 			message: expect.stringContaining(cause),
 		});
 	});

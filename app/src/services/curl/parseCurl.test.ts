@@ -606,6 +606,8 @@ describe("parseCommand - failure modes", () => {
 		["a quote left open before the URL", "curl -H 'A: b https://x.com", "unterminated-quote"],
 		["a curl command with no URL", "curl -H 'A: b'", "missing-url"],
 		["a bare curl", "curl", "missing-url"],
+		// encodeURIComponent throws a URIError on a lone surrogate (withUploadName).
+		["a lone surrogate the parser throws on", "curl -T $'\\ud800' https://x.com", "unreadable"],
 		["a wget command with no URL", "wget --tries=3", "missing-url"],
 	])("readCommand names why %s is refused", (_name, input, reason) => {
 		expect(readCommand(input)).toEqual({ ok: false, reason });

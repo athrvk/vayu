@@ -29,8 +29,9 @@ import { revealSetting } from "@/modules/settings/reveal";
 
 const UNREADABLE_COMMAND_REASON: Record<CommandFailure, string> = {
 	"not-a-command": "The text is not a cURL or wget command",
-	"unterminated-quote": "A quote is opened and never closed",
+	"unterminated-quote": "You opened a quote and never closed it",
 	"missing-url": "The command has no URL",
+	unreadable: "Vayu couldn't parse the command",
 };
 
 /**
