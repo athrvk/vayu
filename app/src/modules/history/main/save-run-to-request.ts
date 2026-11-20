@@ -502,6 +502,7 @@ type WriteFallback = Pick<
 	| "disableCookies"
 	| "disabledSystemHeaders"
 	| "disableUrlEncoding"
+	| "elements"
 > & { url: string };
 
 /** What a request created from a run starts from where the run says nothing. */
@@ -515,6 +516,7 @@ const NEW_REQUEST_FALLBACK: WriteFallback = {
 	disableCookies: DEFAULT_DISABLE_COOKIES,
 	disabledSystemHeaders: [],
 	disableUrlEncoding: DEFAULT_DISABLE_URL_ENCODING,
+	elements: [],
 };
 
 /** The fields a run can write, as both an update and a create state them. */
@@ -534,6 +536,21 @@ type RunWritable = Pick<
 	| "disabledSystemHeaders"
 	| "disableUrlEncoding"
 > & { method: string };
+
+/**
+ * The elements a save writes: the run's own, merged into the saved request's
+ * order, plus every saved element the run does not hold. A run stores only what
+ * its send ran, and a send leaves out a disabled element and one that is
+ * incomplete, so writing the run's list alone would delete them from a request
+ * the user never touched. An id the run also holds is the run's version, in the
+ * saved element's place; a run-only element goes last.
+ */
+function elementsToWrite(own: ElementDef[], saved: ElementDef[] | undefined): ElementDef[] {
+	const ran = new Map(own.map((e) => [e.id, e]));
+	const merged = (saved ?? []).map((e) => ran.get(e.id) ?? e);
+	const held = new Set(merged.map((e) => e.id));
+	return [...merged, ...own.filter((e) => !held.has(e.id))];
+}
 
 /**
  * The fields a run may write, with everything {@link applyRunToRequest}'s rules
@@ -582,7 +599,7 @@ function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritab
 	}
 
 	if (!isLegacyRun(seed)) {
-		patch.elements = request.elements ?? [];
+		patch.elements = elementsToWrite(request.elements ?? [], fallback.elements);
 	}
 
 	return patch;

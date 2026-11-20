@@ -1301,7 +1301,8 @@ flag and is recorded as usual; see
 // non-zero offset (`before_with_offset`). `offset` stays for a caller that
 // jumps to a page number; the MCP server keeps using it.
 apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
-apiService.getRun(id): Promise<Run>            // full configSnapshot
+apiService.getRun(id): Promise<Run>            // full configSnapshot; a design run's holds the
+                                               // composed `elements` it ran (see Execute below)
 apiService.getRunReport(id): Promise<RunReport>
 // Response headers/bodies captured for a run's samples. Its own request, not
 // fields on the report - see below.
@@ -1753,6 +1754,8 @@ answer's `collectionId`, which every one of these sites passes on by spreading
 the answer (issue #3461). A linked `requestId`'s own collection wins, so it
 changes nothing for a Send of a saved request; an orphaned History replay
 composes with no `collectionId` and the answer carries none.
+A replay's `elements` come from the run's own record, not from the saved request
+or today's chain: see "A design run stores the `elements` it ran" below.
 `useEngine.composeRequest` strips only `deferredVariables`.
 `useVariableResolver()` still exists but is **preview-only** (tab titles,
 previews, unresolved-token painting) - see
@@ -1833,6 +1836,29 @@ list from its editor state (`elementsParts()` in
 is never interpolated; the by-id compose path (used by MCP) resolves the same
 list engine-side (`compose_elements`). The **engine** runs each element at its
 kind's phase - see `docs/engine/elements.md`.
+
+**A design run stores the `elements` it ran** (issue #3669). The run's
+`configSnapshot` is the sanitized `POST /execute` body, so its `elements` is the
+composed list above exactly as sent: the collection chain's, then the request's
+own, each entry `{id, kind, enabled, name?, config, origin?}` with `origin` as
+`{kind: "collection", scope: "collection" | "folder", id, name?}` or
+`{kind: "request", scope: "request", id}`. It holds only what the send ran, so a
+disabled or incomplete element (left out by Send, #3066) is not in it. History
+seeds its copy of the run from that list (`seedFromRun`,
+`modules/history/main/design-run-seed.ts`): an entry whose `origin.kind` is
+`"request"`, or that has no origin, becomes the copy's own Elements list with
+`id`, `kind`, `enabled`, `name` and `config` intact; every other entry is the
+recorded inherited list, shown by the Elements tab's "Runs before your own"
+notice and replayed as stored, `origin` and `scope` included. A script element
+with no text is left out of both (`isBlankScriptElement`). **Save to request**
+writes the copy's own list, so an untouched copy changes nothing; the run never
+recorded a disabled element, so the save keeps the saved request's disabled ones
+(`elementsToWrite`) instead of deleting them. The retired
+`preRequestScripts` / `postRequestScripts` `ScriptPart[]` keys are read only when
+`elements` is absent, which is a run recorded before #1514 (and the older glued
+`preRequestScript` / `postRequestScript` strings only when neither is there).
+`elements` takes precedence when both are present. A load run's snapshot also
+has an `elements` key, but it is the run-level override object, not a list.
 
 **Send leaves out the request's own draft elements that cannot run** (issue
 #3066). `POST /execute` validates inline `elements` and refuses the whole

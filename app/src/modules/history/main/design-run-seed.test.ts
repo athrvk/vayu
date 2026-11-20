@@ -28,6 +28,53 @@ import {
 	DEFAULT_MAX_REDIRECTS,
 } from "@/constants/request";
 
+/**
+ * The composed list a send stores as `configSnapshot.elements`: the collection
+ * chain's, then the request's own, each stamped with its origin. A disabled
+ * element is not in it - the send left it out.
+ */
+const storedElements = [
+	{
+		id: "el_col_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "API",
+		config: { script: "const t = 1;" },
+		origin: { kind: "collection", scope: "collection", id: "col_1", name: "API" },
+	},
+	{
+		id: "el_folder_post",
+		kind: "script.post",
+		enabled: true,
+		name: "Users",
+		config: { script: "folderAssert();" },
+		origin: { kind: "collection", scope: "folder", id: "fld_1", name: "Users" },
+	},
+	{
+		id: "el_own_pre",
+		kind: "script.pre",
+		enabled: true,
+		name: "Own setup",
+		config: { script: "console.log(t);" },
+		origin: { kind: "request", scope: "request", id: "req_1" },
+	},
+	{
+		id: "el_own_status",
+		kind: "assert.status",
+		enabled: true,
+		config: { equals: 201 },
+		origin: { kind: "request", scope: "request", id: "req_1" },
+	},
+];
+
+/** The retired shape, from a run recorded before #1514. */
+const retiredScripts = {
+	preRequestScripts: [
+		{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
+		{ origin: "request", id: "req_1", script: "console.log(t);" },
+	],
+};
+
 function run(overrides: Partial<Run> = {}): Run {
 	return {
 		id: "run_1",
@@ -43,15 +90,7 @@ function run(overrides: Partial<Run> = {}): Run {
 			headers: { "X-Plain": "visible" },
 			body: { mode: "json", content: '{"a":1}' },
 			auth: { mode: "bearer" },
-			preRequestScripts: [
-				{
-					origin: "collection",
-					id: "col_1",
-					name: "API",
-					script: "const t = 1;",
-				},
-				{ origin: "request", id: "req_1", script: "console.log(t);" },
-			],
+			elements: storedElements,
 			followRedirects: false,
 			maxRedirects: 3,
 			httpVersion: "http2",
@@ -561,9 +600,170 @@ describe("seedFromRun", () => {
 		});
 	});
 
-	describe("scripts", () => {
-		it("gives the script tab only the request's own part, as a script.pre element", () => {
+	describe("elements", () => {
+		it("gives the copy the request's own stored elements, whole and in order", () => {
 			const { request } = seedFromRun(run(), liveRequest);
+
+			// Every kind, not scripts alone, with `id`, `kind`, `enabled`, `name` and
+			// `config` as stored and no `origin`: an `ElementDef` is the request's own.
+			expect(request.elements).toEqual([
+				{
+					id: "el_own_pre",
+					kind: "script.pre",
+					enabled: true,
+					name: "Own setup",
+					config: { script: "console.log(t);" },
+				},
+				{
+					id: "el_own_status",
+					kind: "assert.status",
+					enabled: true,
+					config: { equals: 201 },
+				},
+			]);
+		});
+
+		it("returns what the collection chain contributed, origin and scope as stored", () => {
+			const { inheritedElements } = seedFromRun(run(), liveRequest);
+
+			expect(inheritedElements).toEqual([storedElements[0], storedElements[1]]);
+		});
+
+		it("treats an element with no origin as the request's own", () => {
+			const { origin: _origin, ...bare } = storedElements[3];
+			const seed = seedFromRun(
+				run({
+					configSnapshot: { method: "GET", url: "https://x.test/", elements: [bare] },
+				} as Partial<Run>),
+				liveRequest
+			);
+
+			expect(seed.request.elements).toEqual([bare]);
+			expect(seed.inheritedElements).toEqual([]);
+		});
+
+		it("prefers elements over the retired keys when a snapshot has both", () => {
+			const both = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					elements: [storedElements[2]],
+					preRequestScripts: [{ origin: "request", id: "req_1", script: "retired();" }],
+				},
+			} as Partial<Run>);
+
+			const { request, inheritedElements } = seedFromRun(both, liveRequest);
+
+			expect(request.elements?.map((e) => e.id)).toEqual(["el_own_pre"]);
+			expect(inheritedElements).toEqual([]);
+		});
+
+		it("seeds an empty list from an empty elements array, and reads no glued string", () => {
+			const empty = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					elements: [],
+					preRequestScript: "glued",
+				},
+			} as Partial<Run>);
+
+			const seed = seedFromRun(empty, liveRequest);
+
+			expect(seed.request.elements).toEqual([]);
+			expect(seed.inheritedElements).toEqual([]);
+			expect(seed.legacyPreScript).toBeUndefined();
+		});
+
+		// The engine refuses a script element with no text (#3052), so a stored one
+		// is left out of the copy and of the replay, as a blank script is everywhere.
+		it.each([
+			["no script", undefined],
+			["a whitespace-only script", "  \n\t"],
+			["a script that is not a string", 42],
+		])(
+			"leaves out a script element with %s, in the copy and in the inherited list",
+			(_, script) => {
+				const blank = (id: string, origin: unknown) => ({
+					id,
+					kind: "script.pre",
+					enabled: true,
+					config: { script },
+					origin,
+				});
+				const odd = run({
+					configSnapshot: {
+						method: "GET",
+						url: "https://x.test/",
+						elements: [
+							blank("a", { kind: "collection", scope: "collection", id: "col_1" }),
+							blank("b", { kind: "request", scope: "request", id: "req_1" }),
+						],
+					},
+				} as unknown as Partial<Run>);
+
+				const seed = seedFromRun(odd, liveRequest);
+
+				expect(seed.request.elements).toEqual([]);
+				expect(seed.inheritedElements).toEqual([]);
+			}
+		);
+
+		it("skips entries that are not elements instead of throwing", () => {
+			const odd = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					elements: [
+						null,
+						"script.pre",
+						{ id: 1, kind: "script.pre", config: {} },
+						{ id: "no-config", kind: "assert.status" },
+						{
+							id: "bad-origin",
+							kind: "assert.status",
+							config: {},
+							origin: { kind: "other" },
+						},
+						storedElements[3],
+					],
+				},
+			} as unknown as Partial<Run>);
+
+			expect(seedFromRun(odd, liveRequest).request.elements?.map((e) => e.id)).toEqual([
+				"el_own_status",
+			]);
+		});
+
+		it("ignores a load run's elements override, which is an object", () => {
+			const load = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					elements: { scripts: "allInline" },
+				},
+			} as unknown as Partial<Run>);
+
+			const seed = seedFromRun(load, liveRequest);
+
+			expect(seed.request.elements).toEqual([]);
+			expect(seed.inheritedElements).toEqual([]);
+		});
+	});
+
+	describe("scripts, for a run recorded before #1514 (the retired keys)", () => {
+		const retired = (extra: Record<string, unknown> = {}) =>
+			run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					...retiredScripts,
+					...extra,
+				},
+			} as unknown as Partial<Run>);
+
+		it("gives the script tab only the request's own part, as a script.pre element", () => {
+			const { request } = seedFromRun(retired(), liveRequest);
 
 			expect(request.elements).toEqual([
 				{
@@ -575,43 +775,47 @@ describe("seedFromRun", () => {
 			]);
 		});
 
-		it("returns the collection parts separately, to show read-only", () => {
-			const { collectionPreScripts } = seedFromRun(run(), liveRequest);
+		it("returns the collection parts as inherited elements, to show read-only", () => {
+			const { inheritedElements } = seedFromRun(retired(), liveRequest);
 
-			expect(collectionPreScripts).toEqual([
+			expect(inheritedElements).toEqual([
 				{
-					origin: "collection",
-					id: "col_1",
+					id: "col_1-script.pre",
+					kind: "script.pre",
+					enabled: true,
 					name: "API",
-					script: "const t = 1;",
+					config: { script: "const t = 1;" },
+					origin: { kind: "collection", id: "col_1", name: "API" },
 				},
 			]);
 		});
 
 		it("keeps the pre and post collection parts apart", () => {
 			// `ScriptPart` says where a part came from, not when it runs. Merged
-			// into one list they cannot be told apart again - and replaying that
-			// list as `preRequestScripts` would run the collection's assertions
-			// before the request instead of after it.
-			const both = run({
-				configSnapshot: {
-					method: "GET",
-					url: "https://x.test/",
-					preRequestScripts: [
-						{ origin: "collection", id: "col_1", name: "API", script: "pre();" },
-						{ origin: "request", id: "req_1", script: "ownPre();" },
-					],
-					postRequestScripts: [
-						{ origin: "collection", id: "col_1", name: "API", script: "post();" },
-						{ origin: "request", id: "req_1", script: "ownPost();" },
-					],
-				},
-			} as Partial<Run>);
+			// into one list they could not be told apart again - and replaying that
+			// list as pre-request scripts would run the collection's assertions
+			// before the request instead of after it. The element's kind says which.
+			const both = retired({
+				preRequestScripts: [
+					{ origin: "collection", id: "col_1", name: "API", script: "pre();" },
+					{ origin: "request", id: "req_1", script: "ownPre();" },
+				],
+				postRequestScripts: [
+					{ origin: "collection", id: "col_1", name: "API", script: "post();" },
+					{ origin: "request", id: "req_1", script: "ownPost();" },
+				],
+			});
 
 			const seed = seedFromRun(both, liveRequest);
 
-			expect(seed.collectionPreScripts.map((p) => p.script)).toEqual(["pre();"]);
-			expect(seed.collectionPostScripts.map((p) => p.script)).toEqual(["post();"]);
+			expect(seed.inheritedElements.map((e) => [e.kind, e.config.script])).toEqual([
+				["script.pre", "pre();"],
+				["script.post", "post();"],
+			]);
+			expect(seed.request.elements?.map((e) => [e.kind, e.config.script])).toEqual([
+				["script.pre", "ownPre();"],
+				["script.post", "ownPost();"],
+			]);
 		});
 
 		// A stored part is not guaranteed to hold script text. Seeding the editor
@@ -622,14 +826,10 @@ describe("seedFromRun", () => {
 			["a whitespace-only script", "  \n\t"],
 			["a script that is not a string", 42],
 		])("seeds no element for the request's own part with %s", (_, script) => {
-			const odd = run({
-				configSnapshot: {
-					method: "GET",
-					url: "https://x.test/",
-					preRequestScripts: [{ origin: "request", id: "req_1", script }],
-					postRequestScripts: [{ origin: "request", id: "req_1", script }],
-				},
-			} as unknown as Partial<Run>);
+			const odd = retired({
+				preRequestScripts: [{ origin: "request", id: "req_1", script }],
+				postRequestScripts: [{ origin: "request", id: "req_1", script }],
+			});
 
 			expect(seedFromRun(odd, liveRequest).request.elements).toEqual([]);
 		});
@@ -648,8 +848,7 @@ describe("seedFromRun", () => {
 			const seed = seedFromRun(legacy, liveRequest);
 
 			expect(seed.legacyPreScript).toBe("collectionPart\n\nrequestPart");
-			expect(seed.collectionPreScripts).toEqual([]);
-			expect(seed.collectionPostScripts).toEqual([]);
+			expect(seed.inheritedElements).toEqual([]);
 			expect(seed.request.elements).toEqual([]);
 		});
 	});
