@@ -30,7 +30,8 @@
  * Mutation check for a script's thrown error (#3673): drop the
  * `scriptErrorRow` calls from `sendConsoleRows` and both "lists a script's
  * thrown error" cases fail; drop `preScriptError` / `postScriptError` from
- * `responseFromRunResult`'s scripts mapping and only the streamed one does.
+ * `scriptsFromTrace` (`restore-response.ts`) and only the streamed one does;
+ * drop them from `execute-mapping.ts` and only the buffered one does.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
