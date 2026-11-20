@@ -656,6 +656,20 @@ export class EngineClient {
 	}
 
 	/**
+	 * One stored result of a run (`GET /runs/:runId/results/:resultId`, #3704),
+	 * shaped as its report `results[]` entry with the trace's bodies at their
+	 * stored length. An unknown run, or a result that is not that run's, is a 404.
+	 */
+	getRunResult(runId: string, resultId: number, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/runs/${encodeURIComponent(runId)}/results/${resultId}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
 	 * A run's per-tick time series (`GET /runs/:id/metrics`) - the series the
 	 * dashboard charts are drawn from - as one page or as the whole run folded.
 	 */

@@ -622,6 +622,17 @@ describe("EngineClient run housekeeping", () => {
 		]);
 	});
 
+	it("reads one stored result under its run (#3704)", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).getRunResult("run/1", 42);
+		expect(calls).toEqual([
+			expect.objectContaining({
+				url: "http://127.0.0.1:9876/runs/run%2F1/results/42",
+				method: "GET",
+			}),
+		]);
+	});
+
 	it("folds a whole series with maxPoints alone, never beside limit or offset (#3560)", async () => {
 		const { fetchImpl, calls } = recordingFetch();
 		const engine = client(fetchImpl);

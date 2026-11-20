@@ -7534,6 +7534,19 @@ describe("inline body bounds", () => {
 		expect(out.bodySize).toBe(huge.length);
 	});
 
+	// Mutation check (#3704): drop `runId` / `resultId` from the bounded answer
+	// (delete them in `boundExecuteResponse`) and both cases fail; the cut one is
+	// the answer an agent needs them on, to page the body with read_body.
+	test.each([
+		["cut", huge],
+		["whole", "{}"],
+	])("run_request names the stored send on a %s body", async (_case, bodyRaw) => {
+		const answer = executeAnswer({ runId: "run_7", resultId: 42, bodyRaw });
+		const out = await runRequest(executed(answer));
+		expect(out.runId).toBe("run_7");
+		expect(out.resultId).toBe(42);
+	});
+
 	test("run_request leaves a body under the bound byte-for-byte", async () => {
 		const small = JSON.stringify({ userId: 1, id: 5, completed: false });
 		const answer = executeAnswer({
@@ -7585,8 +7598,8 @@ describe("inline body bounds", () => {
 
 	test("run_request keeps the engine's bodyCapped distinct from its own cut", async () => {
 		// Two different facts about one body (issue #1157). `bodyTruncated` is
-		// this result showing less than the engine returned - the app's history
-		// still has the rest. `bodyCapped` is the engine never having read more,
+		// this result showing less than the engine returned - read_body pages the
+		// rest out of the stored trace. `bodyCapped` is the engine never having read more,
 		// which a re-send reproduces. An agent that saw only the first flag would
 		// keep re-sending a request that cannot return more.
 		const out = await runRequest(
@@ -21578,6 +21591,16 @@ describe("every structured read answers structuredContent its outputSchema accep
 			args: { requestId: "req_1" },
 			client: {
 				listRequestExamples: vi.fn().mockResolvedValue([{ id: "ex_1", body: "{}" }]),
+			},
+		},
+		{
+			tool: "read_body",
+			has: ["text", "offset", "nextOffset", "totalBytes", "encoding", "done"],
+			args: { runId: "run_1", resultId: 1 },
+			client: {
+				getRunResult: vi
+					.fn()
+					.mockResolvedValue({ id: 1, trace: { response: { body: "{}" } } }),
 			},
 		},
 		{

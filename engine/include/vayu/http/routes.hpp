@@ -2094,8 +2094,11 @@ struct StreamRecord {
  *        only when it happened to stream is how a restored Tests tab came to be
  *        empty for every ordinary send. An empty object writes no node, so a
  *        request with no scripts stores nothing.
+ * @return The stored result row's id, which the buffered `/execute` answer
+ *         returns beside `runId` (#3704); `std::nullopt` for a transient send
+ *         and when the row could not be written.
  */
-void record_design_result (vayu::db::Database& db,
+std::optional<int> record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
@@ -2166,6 +2169,18 @@ live_metrics_unavailable_response (vayu::db::Database& db, const std::string& ru
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id,
 vayu::core::RunManager* live_runs = nullptr);
+
+/**
+ * Testable core of `GET /runs/:runId/results/:resultId` (#3704):
+ * `{http_status, json_body}`, the one stored result as a report `results[]`
+ * entry carries it, trace and its `scripts.scriptRequests` included. A 404
+ * names the run when there is no such run, and the result when @p result_id is
+ * not a stored row of that run: another run's result, or text that is not an
+ * `int`. Defined in runs.cpp.
+ */
+std::pair<int, nlohmann::json> run_result_response (vayu::db::Database& db,
+const std::string& run_id,
+std::string_view result_id);
 
 /**
  * Testable core of `POST /runs/:id/stop` for a run whose context is active:

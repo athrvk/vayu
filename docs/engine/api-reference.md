@@ -8915,6 +8915,8 @@ run-shaped way of stating the same field, not a second store.
 **Response:**
 ```json
 {
+  "runId": "run_1234567890",
+  "resultId": 42,
   "status": 200,
   "statusText": "OK",
   "headers": {
@@ -9023,6 +9025,17 @@ run-shaped way of stating the same field, not a second store.
   }
 }
 ```
+
+**`runId` and `resultId` name what a recorded send stored** (#3704): the run
+row and the id of its one `results` row, which
+[`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid) reads
+back whole, the trace's bodies at their stored length included. A build that
+failed once the row existed (an OAuth 2.0 token refused or not acquired, see
+`refusalCode` below) is recorded too and answers both. Both keys are
+**absent**, never `0` or `""`, from a
+[`transient`](#post-execute) send, which stores nothing, and from a send whose
+result row could not be written. A streaming send answers its `runId` in the
+`202` instead.
 
 **`bodyEncoding` says how to read `bodyRaw`** (issue #2458), and it is always
 present. `"utf8"`: the whole body is valid UTF-8 with no NUL byte, `bodyRaw` is
@@ -14589,6 +14602,47 @@ a **404** in the shared error shape.
 **Response (404):**
 ```json
 { "error": { "code": 404, "message": "Run not found" } }
+```
+
+### GET /runs/:runId/results/:resultId
+
+One stored result of a run (#3704), in the shape of its entry in
+[`GET /runs/:runId/report`](#get-runsrunidreport)'s `results[]`: `id`,
+`timestamp`, `statusCode`, `statusText`, `latencyMs`, `error` when the
+exchange failed, and `trace` when one was stored, without the cost of the
+whole report. The trace is served as stored: a design send's request and
+response bodies at the length `maxTraceBodyBytes` kept, and its
+`scripts.scriptRequests` holding every `pm.sendRequest` the scripts made, by
+index, in the shape [`POST /execute`](#post-execute) answers them. A trace
+that does not parse is served as its stored text, a JSON string, as the
+report serves it. Reads only.
+
+The handle is the `runId` and `resultId` a recorded buffered
+[`POST /execute`](#post-execute) answers; any `results[].id` of the report, or
+`resultId` of [`GET /runs/:runId/samples`](#get-runsrunidsamples), names a row
+too. `resultId` is digits only; anything else matches no route.
+
+**Response:**
+```json
+{
+  "id": 42,
+  "timestamp": 1763452800123,
+  "statusCode": 200,
+  "statusText": "OK",
+  "latencyMs": 245.5,
+  "trace": {
+    "request": { "method": "GET", "url": "https://api.example.com/users", "...": "..." },
+    "response": { "body": "{\"id\":1,\"name\":\"John\"}", "...": "..." },
+    "scripts": { "scriptRequests": [ { "source": "pre", "...": "..." } ] }
+  }
+}
+```
+
+**Response (404):** an unknown run is `Run not found`; a `resultId` that is
+not a stored row of *that* run - another run's result, or an id past the
+32-bit range - is `Result not found`.
+```json
+{ "error": { "code": "not_found", "message": "Result not found" } }
 ```
 
 ### PUT /runs/:runId/baseline

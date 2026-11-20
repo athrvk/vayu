@@ -152,7 +152,7 @@ describe("MCP protocol handshake (in-memory)", () => {
 
 	/*
 	 * Writes ship off, and a write tool that cannot succeed does not ship its
-	 * schema either: on a default install that is 28 of the 68 tools, described
+	 * schema either: on a default install that is 28 of the 83 tools, described
 	 * in full to an agent that can only be refused by them.
 	 *
 	 * Asserted from both sides, because only the pair shows the tools are

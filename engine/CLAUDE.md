@@ -487,13 +487,14 @@ Key endpoints:
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521); the answer names the `collectionId` whose chain it read, the scope `/execute` and `/runs` fall back to when no `requestId` row names one (#3461) |
-| POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521) |
+| POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521); a recorded buffered send answers `runId` and `resultId` (`record_design_result`'s return), both absent when transient (#3704) |
 | POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | POST | `/changes/subscriptions` | A fresh unguessable, single-use id (libsodium random) for one `GET /changes` stream (`ChangeFeed::issue_subscription`; the oldest of `MAX_PENDING_SUBSCRIPTIONS` unspent ids is dropped); a `POST`, so a page cannot send it |
 | GET | `/changes?subscription=<id>` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams; a missing `subscription` is a 400 and an unknown or spent one a 403, neither holding a slot |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
+| GET | `/runs/:runId/results/:resultId` | One stored result as the report's `results[]` entry carries it (`report_result_node`, one copy for both), trace verbatim; 404 for an unknown run, or a result that is not that run's (`Database::get_result` matches both ids, #3704) |
 | GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |

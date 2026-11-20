@@ -1117,7 +1117,15 @@ class Database {
     int64_t count_monitor_samples (const std::string& run_id);
 
     // Results
-    void add_result (const Result& result);
+    /// Inserts one result row and answers the id SQLite assigned it.
+    int add_result (const Result& result);
+    /**
+     * @brief One result row of @p run_id, or nothing.
+     *
+     * Matched on both ids, so a result id reached through another run's path
+     * is not found: `GET /runs/:runId/results/:resultId` answers it a 404.
+     */
+    std::optional<Result> get_result (const std::string& run_id, int result_id);
     /**
      * @brief Batch insert of a run's sampled results, optionally with the
      *        response bodies captured alongside them.
