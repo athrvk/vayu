@@ -479,7 +479,7 @@ std::string extra_params_key_segment (const nlohmann::json& config, std::string_
     return segment;
 }
 
-/// The cache key's fourth slot: who the token is for, under the grants that
+/// The cache key's fifth slot: who the token is for, under the grants that
 /// name one.
 std::string grant_identity (const nlohmann::json& config, const std::string& grant) {
     if (grant == "password") {
@@ -519,13 +519,15 @@ std::string url_field (const nlohmann::json& config, std::string_view name) {
     return text.substr (begin, text.find_last_not_of (URL_WHITESPACE) - begin + 1);
 }
 
-// NOTE: `scope`/`audience`/`resource` are intentionally omitted (matches
+// NOTE: `scope`/`audience`/`resource` are still intentionally omitted (matches
 // Postman's keying). Configs differing only in scope share a cached token; set a
-// distinct credentialsId to separate them. The extra parameter lists are read
-// (issue #2536), one segment each, so an audience sent as a row separates two
-// tokens the way a credentialsId does. Must stay byte-identical with the app's
-// computeOAuth2CacheKey - see cache-key.ts and the shared test vectors; the
-// recipe is in oauth_client.hpp.
+// distinct credentialsId to separate them. The grant type is a segment of its
+// own, as the raw string, so one client's client_credentials token is never
+// answered for its authorization_code request (#3689). The extra parameter
+// lists are read (issue #2536), one segment each, so an audience sent as a row
+// separates two tokens the way a credentialsId does. Must stay byte-identical
+// with the app's computeOAuth2CacheKey - see cache-key.ts and the shared test
+// vectors; the recipe is in oauth_client.hpp.
 std::string cache_key (const nlohmann::json& config) {
     const std::string grant = field (config, "grantType");
     std::string creds_id    = field (config, "credentialsId");
@@ -533,7 +535,7 @@ std::string cache_key (const nlohmann::json& config) {
         creds_id = "default";
     }
     std::string key = url_field (config, "accessTokenUrl") + "\x1f" +
-    field (config, "clientId") + "\x1f" + creds_id + "\x1f" +
+    field (config, "clientId") + "\x1f" + creds_id + "\x1f" + grant + "\x1f" +
     grant_identity (config, grant);
     for (std::string_view list : EXTRA_PARAM_LISTS) {
         key += extra_params_key_segment (config, list);

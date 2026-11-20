@@ -21,7 +21,9 @@ const base = (over: Partial<OAuth2Config>): OAuth2Config => ({
 
 describe("computeOAuth2CacheKey - shared vectors", () => {
 	it("vector 1: minimal client_credentials", () => {
-		expect(computeOAuth2CacheKey(base({}))).toBe("https://idp/token\x1fcid\x1fdefault\x1f");
+		expect(computeOAuth2CacheKey(base({}))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f"
+		);
 	});
 
 	it("vector 2: password grant with credentialsId", () => {
@@ -29,12 +31,12 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			computeOAuth2CacheKey(
 				base({ grantType: "password", credentialsId: "work", username: "u1" })
 			)
-		).toBe("https://idp/token\x1fcid\x1fwork\x1fu1");
+		).toBe("https://idp/token\x1fcid\x1fwork\x1fpassword\x1fu1");
 	});
 
 	it("vector 3: username ignored outside password grant", () => {
 		expect(computeOAuth2CacheKey(base({ username: "u1" }))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1f"
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f"
 		);
 	});
 
@@ -52,7 +54,7 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 				})
 			)
 		).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1f" +
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f" +
 				"\x1fauthorizationParams:prompt=login" +
 				"\x1ftokenParams:audience=a\x1eaudience=b\x1etenant=t1" +
 				"\x1frefreshParams:audience=api"
@@ -76,7 +78,7 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			authorizationParams: [{ key: "n", value: 5 }],
 		} as unknown as Partial<OAuth2Config>;
 		expect(computeOAuth2CacheKey(base(malformed))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1f\x1fauthorizationParams:n="
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f\x1fauthorizationParams:n="
 		);
 	});
 
@@ -92,7 +94,7 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 				})
 			)
 		).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1f" +
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f" +
 				"\x1ftokenParams:X-Api-Key=\x1eaudience=api\x1eclient_assertion="
 		);
 	});
@@ -101,24 +103,26 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 		const jwt = (over: Partial<OAuth2Config>) =>
 			base({ grantType: "jwt_bearer", assertionAudience: "https://idp", ...over });
 		expect(computeOAuth2CacheKey(jwt({ subject: "alice" }))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1falice"
+			"https://idp/token\x1fcid\x1fdefault\x1fjwt_bearer\x1falice"
 		);
 		expect(computeOAuth2CacheKey(jwt({ subject: "bob" }))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1fbob"
+			"https://idp/token\x1fcid\x1fdefault\x1fjwt_bearer\x1fbob"
 		);
 		expect(computeOAuth2CacheKey(jwt({ subject: "alice", username: "u1" }))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1falice"
+			"https://idp/token\x1fcid\x1fdefault\x1fjwt_bearer\x1falice"
 		);
-		expect(computeOAuth2CacheKey(jwt({}))).toBe("https://idp/token\x1fcid\x1fdefault\x1f");
+		expect(computeOAuth2CacheKey(jwt({}))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fjwt_bearer\x1f"
+		);
 	});
 
 	it("vector 8: subject is ignored outside jwt_bearer", () => {
 		expect(computeOAuth2CacheKey(base({ subject: "alice" }))).toBe(
-			"https://idp/token\x1fcid\x1fdefault\x1f"
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f"
 		);
 		expect(
 			computeOAuth2CacheKey(base({ grantType: "password", username: "u1", subject: "alice" }))
-		).toBe("https://idp/token\x1fcid\x1fdefault\x1fu1");
+		).toBe("https://idp/token\x1fcid\x1fdefault\x1fpassword\x1fu1");
 	});
 
 	it("vector 9: ASCII whitespace around accessTokenUrl is trimmed, not inside it (#3687)", () => {
@@ -126,16 +130,37 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			computeOAuth2CacheKey(
 				base({ accessTokenUrl: " \t\r\n\v\fhttps://idp/to ken\f\v\n\r\t " })
 			)
-		).toBe("https://idp/to ken\x1fcid\x1fdefault\x1f");
+		).toBe("https://idp/to ken\x1fcid\x1fdefault\x1fclient_credentials\x1f");
 		expect(computeOAuth2CacheKey(base({ accessTokenUrl: " \t\r\n\v\f" }))).toBe(
-			"\x1fcid\x1fdefault\x1f"
+			"\x1fcid\x1fdefault\x1fclient_credentials\x1f"
 		);
 	});
 
 	it("vector 10: a no-break space is not ASCII whitespace and stays", () => {
 		// String.prototype.trim would strip it and split the key from the engine's.
 		expect(computeOAuth2CacheKey(base({ accessTokenUrl: " https://idp/token " }))).toBe(
-			" https://idp/token \x1fcid\x1fdefault\x1f"
+			" https://idp/token \x1fcid\x1fdefault\x1fclient_credentials\x1f"
+		);
+	});
+
+	it("vector 11: the raw grantType is the fourth segment, so grants are separate keys (#3689)", () => {
+		const clientCredentials = computeOAuth2CacheKey(base({}));
+		const authorizationCode = computeOAuth2CacheKey(base({ grantType: "authorization_code" }));
+		expect(clientCredentials).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f"
+		);
+		expect(authorizationCode).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fauthorization_code\x1f"
+		);
+		expect(authorizationCode).not.toBe(clientCredentials);
+		// An absent or non-string grantType is an empty segment, as the engine reads it.
+		const absent = { grantType: undefined } as unknown as Partial<OAuth2Config>;
+		const numeric = { grantType: 7 } as unknown as Partial<OAuth2Config>;
+		expect(computeOAuth2CacheKey(base(absent))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1f\x1f"
+		);
+		expect(computeOAuth2CacheKey(base(numeric))).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1f\x1f"
 		);
 	});
 });
@@ -182,7 +207,9 @@ describe("computeOAuth2CacheKey - extra parameter rows", () => {
 				{ key: "\u{1F600}", value: "" },
 				{ key: "\uFF5E", value: "" },
 			])
-		).toBe("https://idp/token\x1fcid\x1fdefault\x1f\x1ftokenParams:\uFF5E=\x1e\u{1F600}=");
+		).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f\x1ftokenParams:\uFF5E=\x1e\u{1F600}="
+		);
 	});
 
 	it("breaks a key tie by value, and a shared prefix by length", () => {
@@ -192,6 +219,8 @@ describe("computeOAuth2CacheKey - extra parameter rows", () => {
 				{ key: "a", value: "2" },
 				{ key: "a", value: "1" },
 			])
-		).toBe("https://idp/token\x1fcid\x1fdefault\x1f\x1ftokenParams:a=1\x1ea=2\x1eab=1");
+		).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f\x1ftokenParams:a=1\x1ea=2\x1eab=1"
+		);
 	});
 });

@@ -89,7 +89,7 @@ function extraParamsSegment(
 	return `${US}${list}:${pairs.map(([k, v]) => `${k}=${v}`).join(RS)}`;
 }
 
-/** The fourth slot: who the token is for under the grants that name one, else "". */
+/** The fifth slot: who the token is for under the grants that name one, else "". */
 function grantIdentity(config: OAuth2Config): string {
 	if (config.grantType === "password") return text(config.username);
 	if (config.grantType === "jwt_bearer") return text(config.subject);
@@ -105,8 +105,11 @@ function grantIdentity(config: OAuth2Config): string {
  * pin the format:
  *
  *   trim(accessTokenUrl) \x1f clientId \x1f (credentialsId|"default")
- *   \x1f (grantType === "password" ? username :
+ *   \x1f grantType \x1f (grantType === "password" ? username :
  *          grantType === "jwt_bearer" ? subject : "")
+ *
+ * where the fourth segment is the raw `grantType` string, "" when absent or not
+ * a string (#3689), so one client's grants never share a token.
  *
  * then, for each of authorizationParams, tokenParams and refreshParams with at
  * least one row the engine would send (issue #2536):
@@ -125,7 +128,7 @@ function grantIdentity(config: OAuth2Config): string {
  * URL's stray whitespace out before it keys the cache or dials (#3687), so the
  * two sides must agree on what that is. A no-break space stays.
  *
- * Note: `scope`/`audience`/`resource` are intentionally omitted (matches
+ * Note: `scope`/`audience`/`resource` are still intentionally omitted (matches
  * Postman's keying). Configs differing only in scope share a cached token; set a
  * distinct credentialsId to separate them. An audience sent as a row is read.
  */
@@ -135,6 +138,7 @@ export function computeOAuth2CacheKey(config: OAuth2Config): string {
 		urlText(config.accessTokenUrl),
 		text(config.clientId),
 		text(config.credentialsId) || "default",
+		text(config.grantType),
 		identity,
 	].join(US);
 	return base + EXTRA_PARAM_LISTS.map((list) => extraParamsSegment(config, list)).join("");

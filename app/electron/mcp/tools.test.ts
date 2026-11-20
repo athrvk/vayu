@@ -140,7 +140,8 @@ function pageOf(res: { content: Array<{ text: string }>; structuredContent?: unk
  */
 const OAUTH2_TOKEN_RECORD = {
 	// Unit-separated, as `cache_key(config)` builds it engine-side.
-	cacheKey: "https://id.example.com/oauth/token\u001fclient_a\u001fdefault\u001f",
+	cacheKey:
+		"https://id.example.com/oauth/token\u001fclient_a\u001fdefault\u001fclient_credentials\u001f",
 	accessToken: "eyJhbGciOiJIUzI1NiJ9.thebearer.sig",
 	tokenType: "Bearer",
 	scope: "orders:read",

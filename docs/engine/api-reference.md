@@ -7315,7 +7315,8 @@ post-request script. A load run and a stream record no hops.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `trim(accessTokenUrl) \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant` (the `subject` for a `jwt_bearer` grant, so two
+grantType \x1f username-if-password-grant` (the raw `grantType` string, empty when
+absent; the `subject` for a `jwt_bearer` grant, so two
 subjects of one client hold two tokens; the key never reads `privateKey`,
 `privateKeyFile`, the claims or the algorithm), then one segment per extra parameter list that has
 a row the engine would send, in the order `authorizationParams`, `tokenParams`,
@@ -7332,7 +7333,13 @@ surrounding ASCII whitespace trimmed (#3687, see
 [`POST /oauth2/token`](#post-oauth2token)); the app's key trims the same six
 characters and no others. `scope`, `audience` and `resource` are not read, so a distinct
 `credentialsId` (or an extra parameter row) is what separates two tokens that
-differ only in those. The recipe is `oauth::cache_key`
+differ only in those. The grant type is read (#3689), so one client at one token
+URL holds a separate token per grant: a `client_credentials` token is never
+answered for an `authorization_code` request, which still asks the user to sign
+in. A token cached before that change sits under the old key, which no config
+produces any more, so it is orphaned: it is never reused and never pruned (nothing
+prunes `oauth_tokens` rows), a request re-fetches once, and an `authorization_code`
+user signs in once. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
@@ -7394,7 +7401,7 @@ and an `assertion` the engine signs with the client's key. The config members
 
 | Member | Meaning |
 |--------|---------|
-| `subject` | The `sub` claim; required. Also the fourth slot of the [cache key](#oauth-20-token-cache) |
+| `subject` | The `sub` claim; required. Also the fifth slot of the [cache key](#oauth-20-token-cache) |
 | `assertionAudience` | The `aud` claim; required |
 | `clientId` | The `iss` claim. With no `clientSecret` it is sent in no other way: the assertion alone authenticates the client, so no `client_id` rides beside it |
 | `assertionLifetimeSeconds` | A number, `exp` minus `iat`; 180 when absent or `null`, held to 1..3600, a non-number a `400` |

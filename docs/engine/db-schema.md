@@ -2193,7 +2193,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](api-reference.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f grantType \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](api-reference.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource). A row keyed before `grantType` joined the key (#3689) is orphaned, never reused and never pruned |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |

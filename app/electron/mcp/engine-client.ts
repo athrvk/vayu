@@ -1287,8 +1287,9 @@ export class EngineClient {
 	//
 	// The three routes the app's auth tab drives (`engine/src/http/routes/
 	// oauth.cpp`). The engine owns the cache key - `cache_key(config)` over
-	// accessTokenUrl / clientId / credentialsId / username - so callers name a
-	// config to acquire and the returned `cacheKey` to inspect or clear. The
+	// accessTokenUrl / clientId / credentialsId / grantType / username or
+	// subject, then the extra parameter rows - so callers name a config to
+	// acquire and the returned `cacheKey` to inspect or clear. The
 	// interactive `authorization_code` exchange (`/oauth2/authorize/*`) is
 	// deliberately absent: it needs a browser and a loopback listener the app
 	// owns, and agent-driven browser auth is a non-goal of epic #753.
