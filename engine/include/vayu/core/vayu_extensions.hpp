@@ -45,6 +45,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -163,7 +164,7 @@ void blank_cookie_values (Json& cookies, int& omitted);
 /// absent value, which is right for a document another machine imports; a
 /// record of what was sent says so with the run-record marker instead, since
 /// `client_secret=` would read as "resolved empty".
-enum class CredentialMark {
+enum class CredentialMark : std::uint8_t {
     Blank,  ///< `?api_key=` and `user@host`
     Marker, ///< `?api_key=<redacted>` and `user:<redacted>@host`
 };
