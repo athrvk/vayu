@@ -1337,6 +1337,10 @@ buffered Send in `request-builder/index.tsx` (`handleExecute`, after
 skip, so a stream a newer Send overtook is still listed). A Send's rows run in
 execution order: the pre-request script's lines and requests, the Send, then
 the post-response script's, placed by the response pane's own `consoleRows`. A
+script that threw adds its `preScriptError` / `postScriptError` as an `error`
+line after its phase's rows (#3673), so the Level filter and the text search
+find it; the engine's message already names an inherited level, so the row
+carries the source and no scope. A
 History replay maps its answer through the same funnel but appends nothing: it
 is not a session send. `scenario-run-service.ts` appends one `step` row per
 `step` frame on the batcher's commit; the frame is constant-size by rule, so a

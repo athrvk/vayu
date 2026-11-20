@@ -13,7 +13,9 @@
  * `stream-finalization.ts`: two builders would be a field one path writes and
  * the other does not. A Send contributes its rows in execution order, the
  * pre-request script's lines and requests, the Send itself, then the
- * post-response script's, placed by the response pane's own `consoleRows`.
+ * post-response script's, placed by the response pane's own `consoleRows`. A
+ * script that threw adds its error as an `error` line after its phase's rows
+ * (#3673), where the response pane draws it as a callout above the lines.
  *
  * The Send row is built from the live response, so it is masked here before
  * it enters the ring: header values by the engine's logger name set (less the
@@ -24,7 +26,7 @@
  * Bodies are not judged, as in an export.
  */
 
-import type { ScriptRequestRecord } from "@/types";
+import type { ScriptRequestRecord, ScriptSource } from "@/types";
 import {
 	useConsoleStore,
 	type ConsoleBody,
@@ -181,6 +183,21 @@ function scriptRow(row: ResponseConsoleRow, requestId: string | undefined): Cons
 	};
 }
 
+/**
+ * A script's thrown error as the error line it is (#3673), so the Level filter
+ * and the text search find it as they find a `console.error`. The engine's
+ * message already names an inherited level ("Collection pre-request script
+ * failed - ..."), so no scope is attached: the row's source says which side.
+ */
+function scriptErrorRow(
+	source: ScriptSource,
+	message: string | undefined,
+	requestId: string | undefined
+): ConsoleRowInput[] {
+	if (!message) return [];
+	return [{ kind: "line", source, level: "error", message, ...(requestId && { requestId }) }];
+}
+
 /** A completed Send as Console rows, in the order it ran. */
 export function sendConsoleRows(send: CompletedSend): ConsoleRowInput[] {
 	const { response, requestId } = send;
@@ -190,8 +207,10 @@ export function sendConsoleRows(send: CompletedSend): ConsoleRowInput[] {
 	).map((row) => ({ source: row.source, row: scriptRow(row, requestId) }));
 	return [
 		...scripted.filter((entry) => entry.source === "pre").map((entry) => entry.row),
+		...scriptErrorRow("pre", response.preScriptError, requestId),
 		sendRow(send),
 		...scripted.filter((entry) => entry.source !== "pre").map((entry) => entry.row),
+		...scriptErrorRow("test", response.postScriptError, requestId),
 	];
 }
 

@@ -19,7 +19,8 @@
  * `maskUserinfoPassword` and "copies the same cURL as a script request the
  * engine masked" fails; build
  * the rows in `consoleRows` order without the pre/post split and "lists a Send's
- * rows in execution order" fails.
+ * rows in execution order" fails; drop either `scriptErrorRow` call in
+ * `sendConsoleRows` and the matching "a script that threw" case fails.
  */
 
 import { describe, expect, it } from "vitest";
@@ -120,6 +121,77 @@ describe("sendConsoleRows", () => {
 		expect(pre.exchange.requestHeaders).toEqual({ Authorization: "<redacted>" });
 		expect(pre.exchange.requestBody).toEqual({ text: "client_id=x" });
 		expect(pre.exchange.timing).toMatchObject({ totalMs: 9, dnsMs: 1 });
+	});
+
+	describe("a script that threw (#3673)", () => {
+		const shape = (rows: ReturnType<typeof sendConsoleRows>) =>
+			rows.map((row) => `${row.kind}${"level" in row ? `:${row.level}` : ""}`);
+
+		it("lists a pre-request error as an error line after the pre rows, before the Send", () => {
+			const rows = sendConsoleRows(
+				send({
+					response: response({
+						consoleLogs: [{ source: "pre", level: "log", message: "before the throw" }],
+						preScriptError:
+							"Collection pre-request script failed - boom is not defined",
+					}),
+				})
+			);
+
+			expect(shape(rows)).toEqual(["line:log", "line:error", "send"]);
+			expect(rows[1]).toEqual({
+				kind: "line",
+				source: "pre",
+				level: "error",
+				message: "Collection pre-request script failed - boom is not defined",
+				requestId: "req_1",
+			});
+		});
+
+		it("lists a post-response error as an error line after the post rows", () => {
+			const rows = sendConsoleRows(
+				send({
+					response: response({
+						consoleLogs: [{ source: "test", level: "warn", message: "after the send" }],
+						scriptRequests: [record("test", "http://localhost:4000/c")],
+						postScriptError: "ReferenceError: nope is not defined",
+					}),
+				})
+			);
+
+			expect(shape(rows)).toEqual(["send", "line:warn", "scriptRequest", "line:error"]);
+			expect(rows[3]).toMatchObject({
+				kind: "line",
+				source: "test",
+				level: "error",
+				message: "ReferenceError: nope is not defined",
+			});
+		});
+
+		it("lists both errors, each on its own side of the Send", () => {
+			const rows = sendConsoleRows(
+				send({
+					response: response({
+						preScriptError: "pre boom",
+						postScriptError: "post boom",
+					}),
+				})
+			);
+
+			expect(shape(rows)).toEqual(["line:error", "send", "line:error"]);
+			expect(rows.map((row) => ("message" in row ? row.message : ""))).toEqual([
+				"pre boom",
+				"",
+				"post boom",
+			]);
+		});
+
+		it("adds no row for an empty error", () => {
+			const rows = sendConsoleRows(
+				send({ response: response({ preScriptError: "", postScriptError: undefined }) })
+			);
+			expect(shape(rows)).toEqual(["send"]);
+		});
 	});
 
 	it("draws a Send with no script output as its one row", () => {
