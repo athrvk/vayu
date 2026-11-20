@@ -1654,11 +1654,12 @@ TEST_F (SendRequestTest, WithTheConsoleOffNothingIsRecorded) {
 }
 
 // The line is a summary of what was called, not a place for credentials to
-// land: the userinfo password and a secret-named query value are blanked, the
-// rest of the query stays, and a key `options.auth` appends is not the
-// script's text and is never shown. Mutation check: log `request.url` after
-// auth, or the unredacted `script_url`.
-TEST_F (SendRequestTest, TheLoggedUrlBlanksCredentialsAndKeepsTheRest) {
+// land: the userinfo password and a secret-named query value read `<redacted>`
+// (as a record's do), the rest of the query stays, and a key `options.auth`
+// appends is not the script's text and is never shown. Mutation check: log
+// `request.url` after auth, or the unredacted `script_url`; drop the
+// `CredentialMark::Marker` and the positive assertions read blank.
+TEST_F (SendRequestTest, TheLoggedUrlRedactsCredentialsAndKeepsTheRest) {
     SendRequestServer server;
     std::string with_userinfo = server.url ("/token");
     with_userinfo.insert (std::string ("http://").size (), "user:hunter2@");
@@ -1676,8 +1677,10 @@ TEST_F (SendRequestTest, TheLoggedUrlBlanksCredentialsAndKeepsTheRest) {
     ASSERT_EQ (lines.size (), 2u);
     EXPECT_EQ (lines[0].message.find ("hunter2"), std::string::npos) << lines[0].message;
     EXPECT_EQ (lines[0].message.find ("S3CRET"), std::string::npos) << lines[0].message;
-    EXPECT_NE (lines[0].message.find ("user@"), std::string::npos) << lines[0].message;
-    EXPECT_NE (lines[0].message.find ("page=2"), std::string::npos) << lines[0].message;
+    EXPECT_NE (lines[0].message.find ("user:<redacted>@"), std::string::npos)
+    << lines[0].message;
+    EXPECT_NE (lines[0].message.find ("api_key=<redacted>&page=2"), std::string::npos)
+    << lines[0].message;
     EXPECT_EQ (lines[1].message.find ("AUTHKEY"), std::string::npos) << lines[1].message;
     EXPECT_EQ (lines[1].message.find ("sig="), std::string::npos) << lines[1].message;
 }
@@ -1811,11 +1814,11 @@ TEST_F (SendRequestTest, ARecordMasksCredentialsAndKeepsTheBodies) {
     const auto& with_auth   = result.script_requests[1];
     const auto& redirected  = result.script_requests[2];
 
-    // Header values read the marker; the URL credentials are blanked as in an
-    // export, the rest of the query kept.
+    // Header values and URL credentials alike read the marker, the rest of the
+    // query kept; an export blanks the URL instead.
     EXPECT_EQ (header_in (with_header["request"]["headers"], "Authorization"), "<redacted>")
     << with_header.dump ();
-    EXPECT_EQ (with_header["request"]["url"], server.url ("/echo") + "?api_key=&page=2");
+    EXPECT_EQ (with_header["request"]["url"], server.url ("/echo") + "?api_key=<redacted>&page=2");
     EXPECT_EQ (header_in (with_auth["request"]["sentHeaders"], "X-Tenant-Key"), "<redacted>")
     << with_auth.dump ();
     EXPECT_EQ (redirected["status"], 200) << redirected.dump ();

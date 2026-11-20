@@ -9124,13 +9124,19 @@ reads a record too:
   `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token` and the rest of the set the
   logger redacts) or of one the call's `options.auth` wrote (named in
   `request.authHeaders`) reads `"<redacted>"`, the marker `configSnapshot`
-  uses; a header sent with an empty value stays empty. Each `url`, the
-  request's and each hop's, has a `user:pass@` password and the value of a
-  credential-named query parameter, or of the one `options.auth` placed
-  (`request.authQueryParam`), blanked to `""` exactly as an export blanks a
-  URL and as the summary line already did. Bodies are not judged: a token
-  endpoint's answer keeps its token. This is deliberately not the main
-  exchange's rule, whose trace stays raw.
+  uses; a header sent with an empty value stays empty. The three challenge
+  headers, `WWW-Authenticate`, `Proxy-Authenticate` and `Authentication-Info`,
+  are the exception: they name a scheme the server wants rather than carry a
+  credential, so a record shows them (unless `options.auth` wrote one of
+  those names itself), where the logger and an export still withhold them.
+  Each `url`, the request's and each hop's, has a `user:pass@` password and
+  the value of a credential-named query parameter, or of the one
+  `options.auth` placed (`request.authQueryParam`), replaced by the same
+  marker (`user:<redacted>@host`, `?client_secret=<redacted>&page=2`) as the
+  summary line's URL is, so a withheld value never reads as one resolved
+  empty; an export blanks the same values to `""` instead. Bodies are not
+  judged: a token endpoint's answer keeps its token. This is deliberately not
+  the main exchange's rule, whose trace stays raw.
 - **Bodies are bounded by `maxTraceBodyBytes`, all of them together**: in
   order, each request and response body of every record is cut to what the
   bodies before it left of one `maxTraceBodyBytes`, so a send's script
@@ -12415,9 +12421,11 @@ because an empty id is not a request. `method`, `url` and `bodyBytes` (#3634)
 say what the step sent, so a watched run can draw its row before the rows are
 written: the verb, the URL, and the response body's size in bytes (what the
 stored trace's `response.bodyBytes` reports; a stream's is what it delivered).
-The URL is masked as an export masks one - the password of `user:pass@` is
-dropped and the value of a credential query parameter, or of the one the
-step's own auth wrote, is emptied (`?access_token=`) - and then cut to 512
+The URL is masked as an export masks one - the password of `user:pass@` and
+the value of a credential query parameter, or of the one the step's own auth
+wrote, are withheld - but written as `<redacted>` where an export leaves a
+blank (`user:<redacted>@host`, `?access_token=<redacted>`), so a frame never
+reads as a value resolved empty; it is then cut to 512
 bytes on a character boundary, which keeps the frame constant-size; the stored
 row holds the URL whole and unmasked. All three are absent for a step that sent
 nothing (a skip, a data row that would not bind), and `url` for a send refused

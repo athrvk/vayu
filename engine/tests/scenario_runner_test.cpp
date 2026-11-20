@@ -2575,9 +2575,11 @@ TEST_F (ScenarioRunnerTest, AStreamingStepFrameCarriesTheSizeTheTraceStates) {
 }
 
 // The frame is the one place a step's URL leaves the engine unmasked-by-default
-// (a stored row is the user's own record): the credential never rides it.
-// Mutation check: drop `redact_url_credentials` from `step_frame_url` and the
-// frame carries the token.
+// (a stored row is the user's own record): the credential never rides it, and
+// its place reads `<redacted>` rather than a blank that would look resolved
+// empty (#3672). Mutation check: drop `redact_url_credentials` from
+// `step_frame_url` and the frame carries the token; drop its
+// `CredentialMark::Marker` and the value reads blank.
 TEST_F (ScenarioRunnerTest, ALiveStepFrameMasksTheUrlsCredentials) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok?access_token=SECRET-TOKEN&page=2");
@@ -2590,7 +2592,7 @@ TEST_F (ScenarioRunnerTest, ALiveStepFrameMasksTheUrlsCredentials) {
     const auto frames = step_frames (context);
     ASSERT_EQ (frames.size (), 1u);
     const auto url = step_frame_data (frames[0])["url"].get<std::string> ();
-    EXPECT_EQ (url, server_->url ("/ok?access_token=&page=2"));
+    EXPECT_EQ (url, server_->url ("/ok?access_token=<redacted>&page=2"));
     EXPECT_EQ (frames[0].find ("SECRET-TOKEN"), std::string::npos) << frames[0];
 }
 
