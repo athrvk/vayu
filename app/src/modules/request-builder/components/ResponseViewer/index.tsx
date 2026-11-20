@@ -104,7 +104,7 @@ function tabSet(tabs: readonly { id: ResponseTab; label: string }[]) {
 }
 const DEFAULT_TAB_SET = tabSet(RESPONSE_TABS);
 const STREAM_TAB_SET = tabSet(STREAM_RESPONSE_TABS);
-const responseTabSet = (isStream: boolean) => (isStream ? STREAM_TAB_SET : DEFAULT_TAB_SET);
+const responseTabSet = (streamView: boolean) => (streamView ? STREAM_TAB_SET : DEFAULT_TAB_SET);
 
 /** What each tab's mark may grow to, so a badge arriving after the fit still fits. */
 const RESPONSE_MARK_ALLOWANCE: Partial<Record<ResponseTab, number>> = {
@@ -125,7 +125,7 @@ const responseMarkAllowance = (id: ResponseTab) =>
  * like a result. What it must *not* do is arrive by an instant jump: a mark on
  * a trigger is a flex item, the trigger is `shrink-0` inside this strip's
  * `flex-nowrap` list, so a chip appearing widens the Tests trigger by its own
- * width plus the trigger's `gap-1.5` and pushes Events and Raw along with it -
+ * width plus the trigger's `gap-1.5` and pushes every tab after Tests along with it (Events and Raw, or Raw alone for a stream) -
  * a response with tests and one without would draw the strip two different
  * ways, under a pointer on its way to one of those two tabs.
  *
@@ -264,31 +264,42 @@ export default function ResponseViewer() {
 	/*
 	 * `isStream` is what separates "not a stream" from "a stream with no events
 	 * yet", and it is true for either source - a restored run whose trace has an
-	 * `events` node, or a live one belonging to this request. It holds after the
-	 * stream ends too (the stored trace carries `events`), which is what keeps
-	 * the default tab below from flipping back to Body when `isStreaming` drops.
-	 * Only a stored list can say so: the placeholder built from the `open` frame
-	 * below has none.
+	 * `events` node, or a live one belonging to this request. It stays true once
+	 * the stream is over, so it says what `ResponseEvents` should word its empty
+	 * state as, and is not what picks the default tab (`streamView` below).
 	 */
 	const isStream = response?.events !== undefined || streamIsMine;
 
 	/*
-	 * A tab nobody chose opens on Events for a stream and on Body otherwise
-	 * (#3691). Derived on every render and never written to the remembered-tab
-	 * store, because it is a default and not the user's choice: a later
-	 * ordinary response for the same request still opens on Body.
+	 * Whether the pane is showing a stream, which decides the default tab and
+	 * the strip's order (#3691). A response that has landed says so itself, by
+	 * its `events` node. No response yet means the feed in the store is what is
+	 * on screen - live, or just ended with its stored run still on the way - so
+	 * it is a stream when the store holds this request's. It is not `isStream`
+	 * alone because `streamIsMine` outlives the stream (the store keeps this
+	 * request's id until another stream or a clear replaces it): an ordinary
+	 * Send after a stream lands a response with no `events`, which must read as
+	 * ordinary.
 	 */
-	const activeTab: ResponseTab = chosenTab ?? (isStream ? "events" : "body");
-	const tabSet = responseTabSet(isStream);
+	const streamView = response ? response.events !== undefined : streamIsMine;
+
+	/*
+	 * A tab nobody chose opens on Events for a stream and on Body otherwise.
+	 * Derived on every render and never written to the remembered-tab store,
+	 * because it is a default and not the user's choice: a later ordinary
+	 * response for the same request still opens on Body.
+	 */
+	const activeTab: ResponseTab = chosenTab ?? (streamView ? "events" : "body");
+	const strip = responseTabSet(streamView);
 
 	const [savingExample, setSavingExample] = useState(false);
 
 	// Called ahead of the early returns below, which would skip it; the wrapper it
 	// measures only exists once there is a response to draw. The labels and the
-	// triggers below are the one `tabSet`.
+	// triggers below are the one `strip`.
 	const { containerRef, visibleIds, overflowedIds } = useFittedTabs({
-		ids: tabSet.ids,
-		labels: tabSet.labels,
+		ids: strip.ids,
+		labels: strip.labels,
 		activeId: activeTab,
 		markAllowance: responseMarkAllowance,
 	});
@@ -547,7 +558,7 @@ export default function ResponseViewer() {
 	};
 
 	/*
-	 * One trigger per tab, drawn in `tabSet` order. Each is written out with a
+	 * One trigger per tab, drawn in `strip` order. Each is written out with a
 	 * literal `value` because `tabs-panels.test.tsx` pairs a trigger with its
 	 * panel by that text.
 	 *
@@ -707,11 +718,11 @@ export default function ResponseViewer() {
 					 */}
 					<div ref={containerRef} className="flex min-w-0 flex-1 items-stretch">
 						<TabsList variant="bare" className="overflow-hidden flex-nowrap">
-							{/* Drawn in `tabSet` order, which is why a stream's Events sits beside Body. */}
-							{tabSet.ids.filter(isShown).map((id) => triggers[id])}
+							{/* Drawn in `strip` order, which is why a stream's Events sits beside Body. */}
+							{strip.ids.filter(isShown).map((id) => triggers[id])}
 						</TabsList>
 						<TabOverflowMenu
-							tabs={tabSet.tabs
+							tabs={strip.tabs
 								.filter((t) => overflowedIds.includes(t.id))
 								.map((t) => ({
 									...t,

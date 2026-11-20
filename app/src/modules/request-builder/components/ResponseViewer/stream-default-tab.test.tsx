@@ -20,10 +20,14 @@
  * Body again.
  *
  * Mutation check: make `activeTab` fall back to "body" regardless of
- * `isStream` and the "opens on Events" cases fail; return `DEFAULT_TAB_SET`
- * from `responseTabSet` and the order cases fail.
+ * `streamView` and the "opens on Events" cases fail; return `DEFAULT_TAB_SET`
+ * from `responseTabSet` and the order cases fail; widen `streamView` to
+ * `isStream` and the ordinary-Send-after-a-stream case fails; drop the
+ * `response ?` branch and the stays-on-Events-after-`endStream` case fails; have
+ * the default call `setResponseTab` and the two remembers-nothing cases fail.
  */
 
+import type { ReactElement } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
@@ -128,67 +132,81 @@ afterEach(() => {
 	delete HTMLElement.prototype.clientWidth;
 });
 
+/** A stream whose `open` frame has arrived and whose stored run has not: what Send shows. */
+function liveStreamPlaceholder(requestId = "req_1") {
+	startLiveStream(requestId);
+	useExecutionEventsStore
+		.getState()
+		.noteOpen("run_1", { statusCode: 200, statusText: "OK", headers: {} });
+}
+
+const rerenderViewer = (rerender: (ui: ReactElement) => void) =>
+	rerender(
+		<TooltipProvider>
+			<ResponseViewer />
+		</TooltipProvider>
+	);
+
 describe("the response pane's default tab for a stream", () => {
 	it("opens on Events while a live stream has no remembered tab, and remembers nothing", () => {
-		state.response = { ...plainResponse(), headers: { "content-type": "text/event-stream" } };
-		startLiveStream();
+		state.isExecuting = true;
+		liveStreamPlaceholder();
 		renderViewer();
 
 		expect(activeTabLabel()).toMatch(/^Events/);
 		expect(useTabSelectionStore.getState().getResponseTab("req_1")).toBeNull();
 	});
 
-	it("opens on Events for the stream's headers-only placeholder too", () => {
-		state.isExecuting = true;
-		startLiveStream();
-		useExecutionEventsStore
-			.getState()
-			.noteOpen("run_1", { statusCode: 200, statusText: "OK", headers: {} });
-		renderViewer();
-
-		expect(activeTabLabel()).toMatch(/^Events/);
-	});
-
 	it("keeps the tab the user chose for this request", () => {
 		useTabSelectionStore.getState().setResponseTab("req_1", "headers");
-		state.response = plainResponse();
-		startLiveStream();
+		liveStreamPlaceholder();
 		renderViewer();
 
 		expect(activeTabLabel()).toMatch(/^Headers/);
 	});
 
 	it("stays on Events once the stream ends and the stored run replaces the live rows", () => {
-		state.response = plainResponse();
-		startLiveStream();
+		liveStreamPlaceholder();
 		const { rerender } = renderViewer();
 		expect(activeTabLabel()).toMatch(/^Events/);
 
+		// Ended, and the stored run has not landed: the placeholder is still on
+		// screen and must not fall back to Body while the report is fetched.
 		act(() => useExecutionEventsStore.getState().endStream("run_1", "stopped", 0));
 		expect(activeTabLabel()).toMatch(/^Events/);
 
 		state.response = storedStream();
-		rerender(
-			<TooltipProvider>
-				<ResponseViewer />
-			</TooltipProvider>
-		);
+		rerenderViewer(rerender);
 		expect(activeTabLabel()).toMatch(/^Events/);
 	});
 
-	it("opens a later ordinary response for the same request on Body", () => {
+	it("writes no default to the remembered tab for a stored stream either", () => {
+		state.response = storedStream();
+		renderViewer();
+
+		expect(activeTabLabel()).toMatch(/^Events/);
+		expect(useTabSelectionStore.getState().getResponseTab("req_1")).toBeNull();
+	});
+
+	it("opens an ordinary Send after a stream on Body, in the ordinary order", () => {
+		stubTextMeasure();
+		stubStripWidth(2000);
+		// The production sequence: the stream ends and its stored run lands, and
+		// then an ordinary Send calls only `beginSend`, so the store still holds
+		// this request's id from the stream.
+		liveStreamPlaceholder();
+		act(() => useExecutionEventsStore.getState().endStream("run_1", "completed", 1));
 		state.response = storedStream();
 		const { rerender } = renderViewer();
 		expect(activeTabLabel()).toMatch(/^Events/);
+		expect(shownLabels()).toEqual(STREAM_ORDER);
 
-		act(() => useExecutionEventsStore.getState().clear());
+		act(() => useExecutionEventsStore.getState().beginSend("req_1"));
 		state.response = plainResponse();
-		rerender(
-			<TooltipProvider>
-				<ResponseViewer />
-			</TooltipProvider>
-		);
+		rerenderViewer(rerender);
+
 		expect(activeTabLabel()).toMatch(/^Body/);
+		expect(shownLabels()).toEqual(PLAIN_ORDER);
 	});
 
 	it("opens an ordinary response on Body", () => {
@@ -200,7 +218,7 @@ describe("the response pane's default tab for a stream", () => {
 
 	it("ignores a stream another request started", () => {
 		state.response = plainResponse();
-		startLiveStream("req_other");
+		liveStreamPlaceholder("req_other");
 		renderViewer();
 
 		expect(activeTabLabel()).toMatch(/^Body/);
