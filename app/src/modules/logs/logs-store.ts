@@ -65,10 +65,9 @@ export const LOG_MAX_BYTES = 16 * 1024 * 1024;
 /** Lines a read asks for; main clamps to 1000. */
 const LOG_PAGE_SIZE = 1000;
 /**
- * The page newer a jump reads at once. The list's window stays on the lines
- * before the time and the page lands below it (`useLogWindow`); at half a step,
- * reaching the window's lower end mounts the whole page beside them, under the
- * cap.
+ * The page newer a jump reads at once. The list's window opens a few lines
+ * before the time (`useLogWindow`), and the page lands below it; at half a
+ * step, it mounts whole beside them, under the cap.
  */
 const JUMP_NEWER_PAGE_SIZE = LOG_WINDOW_STEP / 2;
 

@@ -480,7 +480,14 @@ describe("jump to time", () => {
 		expect(screen.getByRole("button", { name: "Jump" })).toBeDisabled();
 	});
 
-	/** Jump to 10:00:40 over a log holding lines 39 and 41 either side of it. */
+	/** @p iso as the zone-less local value a `datetime-local` input holds, so no host zone shifts it. */
+	function localInputValue(iso: string): string {
+		const d = new Date(iso);
+		const pad = (n: number) => String(n).padStart(2, "0");
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+	}
+
+	/** Jump to the instant of line 40 over a log holding lines 39 and 41 either side of it. */
 	async function jumpBetween() {
 		await openTab();
 		bridge.answerReads({
@@ -488,7 +495,7 @@ describe("jump to time", () => {
 			after: { records: [logRecord(41)], more: true, cursor: logCursor(2) },
 		});
 		fireEvent.change(screen.getByLabelText("Jump to time"), {
-			target: { value: "2026-11-18T10:00:40" },
+			target: { value: localInputValue(logRecord(40).ts) },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Jump" }));
 		await screen.findByText("line 41");
@@ -553,9 +560,7 @@ describe("jump to time", () => {
 		const { marker, before, after } = besideMarker();
 		expect(before).toContain("line 39");
 		expect(after).toContain("line 41");
-		expect(marker).toHaveAccessibleName(
-			`Jumped to ${formatInstant(new Date("2026-11-18T10:00:40").toISOString())}`
-		);
+		expect(marker).toHaveAccessibleName(`Jumped to ${formatInstant(logRecord(40).ts)}`);
 		const scroller = screen.getByRole("list").parentElement;
 		expect(scrollWithin).toHaveBeenCalledTimes(1);
 		expect(scrollWithin).toHaveBeenCalledWith(scroller, marker, { block: "center" });
