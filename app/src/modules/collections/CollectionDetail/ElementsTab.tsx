@@ -73,7 +73,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	 * this collection's own variables are writable here; environment is too,
 	 * whenever one is active (`useSessionStore`'s `activeEnvironmentId` is a
 	 * global, session-wide pick, not something scoped to a request) - the same
-	 * three guards `writableScopes` already applies.
+	 * create targets `writableScopes` already lists.
 	 */
 	const { updateVariable, writableScopes } = useVariableWriter({ collectionId: collection.id });
 

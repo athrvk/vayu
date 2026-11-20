@@ -153,8 +153,8 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 
 	/*
 	 * Which scopes `updateVariable` would actually write to, derived from the
-	 * same three guards it opens each branch with - kept beside it so a guard
-	 * changing above is the next thing in this file to change, per this
+	 * same targets a create resolves in `updateVariable` - kept beside it so a
+	 * target changing above is the next thing in this file to change, per this
 	 * codebase's own "written in one branch, re-derived in another" defect
 	 * shape. A caller that offers a scope not in here gets a silent no-op.
 	 */

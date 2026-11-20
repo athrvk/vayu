@@ -3422,8 +3422,8 @@ writableScopes: VariableScope[]
 ```
 
 `writableScopes` lists the scopes `updateVariable` would actually write to.
-Each of its branches opens with a guard (`if (!activeEnvironmentId) return`), so
-a write to a scope with no active target is a **silent no-op** - the variable
+It opens by resolving a target (`variableTargetOf`), and a missing target or a
+source that is gone ends the call, so a write to a scope with no active target is a **silent no-op** - the variable
 popover uses this list so its "create in" picker cannot offer one.
 
 An **edit** passes the `sourceId` of the `ResolvedVariable` the popover showed
