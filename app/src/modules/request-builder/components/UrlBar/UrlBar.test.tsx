@@ -49,6 +49,7 @@ interface CtxOverrides {
 function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBuilderContextValue {
 	return {
 		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
+		memoryKey: "req_test",
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
 		setDisabledDefaultHeaders: vi.fn(),

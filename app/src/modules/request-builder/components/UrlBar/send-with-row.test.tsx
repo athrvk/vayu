@@ -71,6 +71,7 @@ function ctx(
 			id: requestId,
 			url: "https://example.test/x",
 		},
+		memoryKey: requestId ?? "unsaved",
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
 		setDisabledDefaultHeaders: vi.fn(),

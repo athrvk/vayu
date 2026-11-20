@@ -656,6 +656,15 @@ export interface RequestBuilderContextValue {
 	legacyPostScript?: string;
 
 	// UI State
+	/**
+	 * The identity this builder's per-request memory is filed under: the
+	 * provider's `memoryKey` prop, else the request's id. One provider serves
+	 * every request tab, so a component that holds state of its own - a revealed
+	 * secret, a bulk-edit draft, a notice - keeps it across a request switch
+	 * unless it is keyed on this (#3666). Stable across the edits and saves of
+	 * one request; changes only when a different request is put on screen.
+	 */
+	memoryKey: string;
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;
 	/**

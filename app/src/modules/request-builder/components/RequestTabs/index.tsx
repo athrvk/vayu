@@ -70,7 +70,7 @@ function countMarkOf(tab: TabInfo) {
 }
 
 export default function RequestTabs() {
-	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
+	const { request, memoryKey, activeTab, setActiveTab } = useRequestBuilderContext();
 
 	/*
 	 * Force-mounted from first visit onward, not from mount: a request opened
@@ -238,6 +238,13 @@ export default function RequestTabs() {
 			 * force-mounted panel from the accessibility tree and the tab order
 			 * (`data-[state=inactive]:hidden`), the same way `CollectionDetail`
 			 * relies on it for its own force-mounted drafts.
+			 *
+			 * The mount-on-demand panels are keyed on the builder's `memoryKey`
+			 * (#3666): one provider serves every request tab, so a panel whose
+			 * state is its own (a bulk-edit draft, a revealed secret, a signing
+			 * key being typed) would otherwise follow the user into the next
+			 * request. Body and Elements cannot be keyed - a remount rebuilds
+			 * Monaco - so Body resets what it holds itself.
 			 */}
 			{tabs.map((tab) => (
 				<TabsContent
@@ -253,14 +260,14 @@ export default function RequestTabs() {
 						tab.id === "body" && "flex flex-col"
 					)}
 				>
-					{tab.id === "info" && <InfoPanel />}
-					{tab.id === "params" && <ParamsPanel />}
-					{tab.id === "headers" && <HeadersPanel />}
+					{tab.id === "info" && <InfoPanel key={memoryKey} />}
+					{tab.id === "params" && <ParamsPanel key={memoryKey} />}
+					{tab.id === "headers" && <HeadersPanel key={memoryKey} />}
 					{tab.id === "body" && <BodyPanel />}
-					{tab.id === "auth" && <AuthPanel />}
+					{tab.id === "auth" && <AuthPanel key={memoryKey} />}
 					{tab.id === "elements" && <ElementsPanel />}
-					{tab.id === "examples" && <ExamplesPanel />}
-					{tab.id === "settings" && <SettingsPanel />}
+					{tab.id === "examples" && <ExamplesPanel key={memoryKey} />}
+					{tab.id === "settings" && <SettingsPanel key={memoryKey} />}
 				</TabsContent>
 			))}
 		</Tabs>
