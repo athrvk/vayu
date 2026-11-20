@@ -21,7 +21,20 @@ import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
 import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
 import { useVariableSupport } from "../../hooks/useVariableSupport";
-import { mergeParamsFromUrl } from "../../utils/url";
+import { joinWrappedLines, mergeParamsFromUrl } from "../../utils/url";
+
+/**
+ * Type `text` over the input's selection as a user would: the browser's own
+ * `input` event, so the change reaches `onChange` and the caret lands after it
+ * exactly as for a native paste. Setting `value` instead would move the caret
+ * to the end.
+ */
+function insertAtSelection(input: HTMLInputElement, text: string): void {
+	const start = input.selectionStart ?? input.value.length;
+	const end = input.selectionEnd ?? start;
+	input.setRangeText(text, start, end, "end");
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+}
 
 interface UrlInputProps {
 	className?: string;
@@ -76,16 +89,24 @@ export default function UrlInput({ className }: UrlInputProps) {
 		[setRequest, showToast]
 	);
 
-	// Auto-import a pasted curl/wget command into the whole request.
+	/*
+	 * A pasted curl/wget command replaces the whole request. Any other text with
+	 * a line break is a wrapped URL: Chromium would turn each break into a space
+	 * and send the wrong request, so it is joined instead (#3688).
+	 */
 	const handlePaste = useCallback(
 		(e: React.ClipboardEvent<HTMLInputElement>) => {
 			const text = e.clipboardData.getData("text");
-			if (!detectCommand(text)) return; // not a command - normal paste
+			if (detectCommand(text)) {
+				// A multi-line command must never land in the single-line input.
+				e.preventDefault();
+				importIntoRequest(text);
+				return;
+			}
+			if (!/[\r\n]/.test(text)) return; // one line - normal paste
 
-			// A multi-line command must never land in the single-line input.
 			e.preventDefault();
-
-			importIntoRequest(text);
+			insertAtSelection(e.currentTarget, joinWrappedLines(text));
 		},
 		[importIntoRequest]
 	);

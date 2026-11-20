@@ -313,3 +313,23 @@ export function safeDecode(part: string): string {
 		return part;
 	}
 }
+
+/**
+ * A pasted URL with each line break, and the whitespace around it, removed:
+ * what an address bar does with a URL wrapped by a terminal, a mail or a PDF
+ * (#3688). Whitespace elsewhere is the user's own and stays; the engine already
+ * reports a URL with a space in it.
+ *
+ * Split rather than one `\s*[\r\n]\s*` regex: a long run of blanks with no break
+ * after it would make that pattern quadratic.
+ */
+export function joinWrappedLines(text: string): string {
+	const lines = text.split(/[\r\n]+/);
+	const last = lines.length - 1;
+	return lines
+		.map((line, i) => {
+			const afterBreak = i > 0 ? line.trimStart() : line;
+			return i < last ? afterBreak.trimEnd() : afterBreak;
+		})
+		.join("");
+}
