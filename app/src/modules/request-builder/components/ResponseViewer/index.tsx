@@ -546,6 +546,72 @@ export default function ResponseViewer() {
 		tests: testResults.some((t) => !t.passed),
 	};
 
+	/*
+	 * One trigger per tab, drawn in `tabSet` order. Each is written out with a
+	 * literal `value` because `tabs-panels.test.tsx` pairs a trigger with its
+	 * panel by that text.
+	 *
+	 * No icon on any of them: Console was the only one across the fifteen
+	 * triggers in the two strips - the response pane's seven and the request
+	 * builder's eight - so it read as a different *kind* of thing rather than as
+	 * an aid to finding it. What distinguishes a tab when it matters is its mark
+	 * (Console's error dot above all).
+	 *
+	 * Events is always in the set, like the seven beside it (issue #59's
+	 * constant tab set) - a normal response gets an honest "not an event
+	 * stream" rather than a tab that comes and goes. Whether a tab is drawn
+	 * here or in the menu is only the room. Events' count is the *received*
+	 * total, which is not the row count once a stored list has been capped.
+	 * A result chip arriving on Tests must not push the tabs after it
+	 * sideways: see `TestsResultChip`, which holds the width open.
+	 */
+	const triggers: Record<ResponseTab, ReactNode> = {
+		body: (
+			<TabsTrigger key="body" value="body">
+				<TabLabel>Body</TabLabel>
+			</TabsTrigger>
+		),
+		headers: (
+			<TabsTrigger key="headers" value="headers">
+				<TabLabel>Headers</TabLabel>
+				{headersMark}
+			</TabsTrigger>
+		),
+		cookies: (
+			<TabsTrigger key="cookies" value="cookies">
+				<TabLabel>Cookies</TabLabel>
+			</TabsTrigger>
+		),
+		timing: (
+			<TabsTrigger key="timing" value="timing">
+				<TabLabel>Timing</TabLabel>
+			</TabsTrigger>
+		),
+		console: (
+			<TabsTrigger key="console" value="console">
+				<TabLabel>Console</TabLabel>
+				{consoleMark}
+			</TabsTrigger>
+		),
+		tests: (
+			<TabsTrigger key="tests" value="tests">
+				<TabLabel>Tests</TabLabel>
+				{testsMark}
+			</TabsTrigger>
+		),
+		events: (
+			<TabsTrigger key="events" value="events">
+				<TabLabel>Events</TabLabel>
+				{eventsMark}
+			</TabsTrigger>
+		),
+		"raw-request": (
+			<TabsTrigger key="raw-request" value="raw-request">
+				<TabLabel>Raw</TabLabel>
+			</TabsTrigger>
+		),
+	};
+
 	return (
 		<div
 			className="relative flex-1 flex flex-col surface-card overflow-hidden"
@@ -641,33 +707,8 @@ export default function ResponseViewer() {
 					 */}
 					<div ref={containerRef} className="flex min-w-0 flex-1 items-stretch">
 						<TabsList variant="bare" className="overflow-hidden flex-nowrap">
-							{/*
-							 * One trigger per tab in `tabSet` order, which is why a stream's
-							 * Events sits beside Body. No icon on any of them: Console was
-							 * the only one across the fifteen triggers in the two strips -
-							 * the response pane's seven and the request builder's eight - so
-							 * it read as a different *kind* of thing rather than as an aid
-							 * to finding it. What distinguishes a tab when it matters is its
-							 * mark (Console's error dot above all).
-							 *
-							 * Events is always in the set, like the seven beside it (issue
-							 * #59's constant tab set) - a normal response gets an honest
-							 * "not an event stream" rather than a tab that comes and goes.
-							 * Whether a tab is drawn here or in the menu is only the room.
-							 * Events' count is the *received* total, which is not the row
-							 * count once a stored list has been capped.
-							 *
-							 * A result chip arriving on Tests must not push the tabs after it
-							 * sideways: see `TestsResultChip`, which holds the width open.
-							 */}
-							{tabSet.tabs
-								.filter((t) => isShown(t.id))
-								.map((t) => (
-									<TabsTrigger key={t.id} value={t.id}>
-										<TabLabel>{t.label}</TabLabel>
-										{marks[t.id]}
-									</TabsTrigger>
-								))}
+							{/* Drawn in `tabSet` order, which is why a stream's Events sits beside Body. */}
+							{tabSet.ids.filter(isShown).map((id) => triggers[id])}
 						</TabsList>
 						<TabOverflowMenu
 							tabs={tabSet.tabs
