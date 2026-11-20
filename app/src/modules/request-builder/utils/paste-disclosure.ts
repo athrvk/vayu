@@ -24,8 +24,30 @@
  */
 
 import type { ToastOptions } from "@/stores/toast-store";
-import type { DroppedFlag } from "@/services/curl/parseCurl";
+import type { CommandFailure, DroppedFlag } from "@/services/curl/parseCurl";
 import { revealSetting } from "@/modules/settings/reveal";
+
+const UNREADABLE_COMMAND_REASON: Record<CommandFailure, string> = {
+	"not-a-command": "The text is not a cURL or wget command",
+	"unterminated-quote": "A quote is opened and never closed",
+	"missing-url": "The command has no URL",
+};
+
+/**
+ * The notice for a pasted command that could not be imported (#3685).
+ *
+ * The paste is taken over before the import runs, so without this a command the
+ * parser cannot read vanishes: nothing lands in the field and nothing says why.
+ * It names the reason, because "unterminated quote" and "no URL" are fixed in
+ * different places in the command.
+ */
+export function unreadableCommandNotice(reason: CommandFailure): ToastOptions {
+	return {
+		title: "Couldn't import the command",
+		message: `${UNREADABLE_COMMAND_REASON[reason]}, so the request was left as it was.`,
+		variant: "warning",
+	};
+}
 
 /** `-x routed the request through a proxy (Proxy settings)`. */
 function describe(dropped: DroppedFlag): string {

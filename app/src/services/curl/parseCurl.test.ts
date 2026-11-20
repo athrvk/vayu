@@ -8,7 +8,13 @@
 import { describe, expect, test } from "vitest";
 import { MAX_REQUEST_TIMEOUT_MS, MIN_REQUEST_TIMEOUT_MS } from "@/constants/request";
 import { chromeBashCopy, chromeCmdCopy } from "./chrome-copy.testkit";
-import { DROPPED_FLAG_INFO, detectCommand, importCommand, parseCommand } from "./parseCurl";
+import {
+	DROPPED_FLAG_INFO,
+	detectCommand,
+	importCommand,
+	parseCommand,
+	readCommand,
+} from "./parseCurl";
 
 const kv = (items: Array<{ key: string; value: string }>) =>
 	items.map((i) => expect.objectContaining({ ...i, enabled: true }));
@@ -589,6 +595,31 @@ describe("parseCommand - failure modes", () => {
 
 	test("curl with no URL returns null", () => {
 		expect(parseCommand("curl -X POST -H 'A: 1'")).toBeNull();
+	});
+
+	test.each([
+		["text that is not a command", "https://x.com", "not-a-command"],
+		["an empty paste", "", "not-a-command"],
+		["an open single quote", "curl -H 'A: b", "unterminated-quote"],
+		["an open double quote", `curl -d "{\\"a\\":1}`, "unterminated-quote"],
+		["an open ANSI-C quote", "curl -d $'a\\n", "unterminated-quote"],
+		["a quote left open before the URL", "curl -H 'A: b https://x.com", "unterminated-quote"],
+		["a curl command with no URL", "curl -H 'A: b'", "missing-url"],
+		["a bare curl", "curl", "missing-url"],
+		["a wget command with no URL", "wget --tries=3", "missing-url"],
+	])("readCommand names why %s is refused", (_name, input, reason) => {
+		expect(readCommand(input)).toEqual({ ok: false, reason });
+		expect(importCommand(input)).toBeNull();
+	});
+
+	test("readCommand carries the import of a readable command", () => {
+		const reading = readCommand("curl -x http://corp:8080 https://x.com");
+
+		expect(reading).toEqual({
+			ok: true,
+			command: importCommand("curl -x http://corp:8080 https://x.com"),
+		});
+		expect(reading.ok && reading.command.request.url).toBe("https://x.com");
 	});
 
 	test("complete-shape reset: every request field is present", () => {

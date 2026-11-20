@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, act, cleanup } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { useToastStore } from "@/stores";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
@@ -127,15 +128,28 @@ describe("the URL bar answers the menu's import", () => {
 		expect(setRequest.mock.calls[1][0]).not.toHaveProperty("timeout");
 	});
 
-	it("leaves the request alone for a command that does not parse", () => {
-		const { setRequest, send } = renderUrlInput();
+	it.each([
+		["no URL in it", "curl", "The command has no URL"],
+		["an open quote", "curl -H 'A: b", "A quote is opened and never closed"],
+	])(
+		"leaves the request alone and says why for a command with %s (#3685)",
+		(_name, text, cause) => {
+			useToastStore.setState({ toasts: [] });
+			const { setRequest, send } = renderUrlInput();
 
-		act(() => {
-			send({ type: "import-command", text: "curl" }); // no URL in it
-		});
+			act(() => {
+				send({ type: "import-command", text });
+			});
 
-		expect(setRequest).not.toHaveBeenCalled();
-	});
+			expect(setRequest).not.toHaveBeenCalled();
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]).toMatchObject({
+				variant: "warning",
+				message: expect.stringContaining(cause),
+			});
+		}
+	);
 
 	it("ignores the command the token popover owns", () => {
 		const { setRequest, send } = renderUrlInput();

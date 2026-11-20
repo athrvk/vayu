@@ -16,9 +16,10 @@
  */
 
 import { useState, type ReactNode } from "react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, fireEvent, cleanup, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { useToastStore } from "@/stores";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
@@ -132,5 +133,39 @@ describe("pasting anything else", () => {
 		expect(notPrevented).toBe(false);
 		expect(setRequest).toHaveBeenCalledTimes(1);
 		expect(field.value).toBe("");
+	});
+});
+
+describe("pasting a command that cannot be read (#3685)", () => {
+	beforeEach(() => {
+		useToastStore.setState({ toasts: [] });
+	});
+
+	it.each([
+		["an open quote", "curl -H 'A: b", "A quote is opened and never closed"],
+		["no URL", "curl -H 'A: b'", "The command has no URL"],
+	])("says so for %s and leaves the request alone", (_name, command, cause) => {
+		const { field, setRequest } = renderField("https://keep.test/");
+
+		const notPrevented = paste(field, command);
+
+		// Still taken over: a broken command must not drop into the one-line field.
+		expect(notPrevented).toBe(false);
+		expect(setRequest).not.toHaveBeenCalled();
+		expect(field.value).toBe("https://keep.test/");
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0]).toMatchObject({
+			variant: "warning",
+			message: expect.stringContaining(cause),
+		});
+	});
+
+	it("shows no notice for a command that reads", () => {
+		const { field } = renderField();
+
+		paste(field, "curl https://a.test/x");
+
+		expect(useToastStore.getState().toasts).toEqual([]);
 	});
 });
