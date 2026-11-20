@@ -14,7 +14,9 @@
  * `params`, `auth`), which are rebuilt into fresh references on every fetch
  * regardless of content - `===` there would read every refetch as an external
  * change. `sameValue` compares by JSON content instead, the same rule
- * `useEntityDraft` already uses for its single-value case.
+ * `useEntityDraft` already uses for its single-value case. A field whose
+ * content carries more than its stored value (a table's ephemeral row ids,
+ * #3663) names its own rule in `MergeOptions.equals`.
  *
  * A field with no external change is left alone. A changed field the caller
  * has not touched since the last known-good value is adopted silently. A
@@ -36,6 +38,11 @@ function sameValue<V>(a: V, b: V): boolean {
 /** A partial keyed by exactly the merge's field list, not every key of `T`. */
 export type FieldPatch<T, K extends keyof T> = { [P in K]?: T[P] };
 
+export interface MergeOptions<T, K extends keyof T> {
+	/** Per-field equality, used in place of `sameValue` for every compare of that field. */
+	equals?: { [P in K]?: (a: T[P], b: T[P]) => boolean };
+}
+
 export interface FieldMergeOutcome<T, K extends keyof T> {
 	/** Fields to adopt into the draft - untouched fields the fetch changed. */
 	patch: FieldPatch<T, K>;
@@ -56,13 +63,17 @@ export interface FieldMergeOutcome<T, K extends keyof T> {
  * `useEntityDraft` draws. A field the caller touched and then set back to the
  * baseline's own value is not "touched" for this call: `touched` should
  * reflect that, not just "was ever edited".
+ *
+ * `options.equals` replaces the JSON compare for the fields it names, in both
+ * the "did the fetch change it" and the "does the draft already agree" tests.
  */
 export function mergeExternalWrite<T, K extends keyof T>(
 	fields: readonly K[],
 	current: T,
 	baseline: T,
 	incoming: T,
-	touched: ReadonlySet<K>
+	touched: ReadonlySet<K>,
+	options: MergeOptions<T, K> = {}
 ): FieldMergeOutcome<T, K> {
 	const patch: FieldPatch<T, K> = {};
 	const nextBaseline: T = { ...baseline };
@@ -70,14 +81,15 @@ export function mergeExternalWrite<T, K extends keyof T>(
 	let changed = false;
 
 	for (const field of fields) {
+		const same: (a: T[K], b: T[K]) => boolean = options.equals?.[field] ?? sameValue;
 		const next = incoming[field];
-		if (sameValue(next, baseline[field])) continue;
+		if (same(next, baseline[field])) continue;
 		changed = true;
 		if (!touched.has(field)) {
 			// Untouched: the fetch's value wins, silently.
 			patch[field] = next;
 			nextBaseline[field] = next;
-		} else if (sameValue(next, current[field])) {
+		} else if (same(next, current[field])) {
 			// Touched, but the fetch now agrees with the draft (our own save
 			// landed, or a coincidence) - nothing to adopt, just catch baseline up.
 			nextBaseline[field] = next;

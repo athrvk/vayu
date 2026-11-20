@@ -25,7 +25,8 @@ import { createSendTracker, NO_SENDS, type InFlightSends, type SendTicket } from
 import { useVariableResolver, useVariableWriter, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
-import { mergeExternalWrite } from "@/lib/field-merge";
+import { mergeExternalWrite, type MergeOptions } from "@/lib/field-merge";
+import { carryRowIds, sameRows } from "@/components/shared/KeyValueEditor/key-value";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import { useElementRefusals } from "@/components/shared/ElementList/useElementRefusals";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -99,6 +100,30 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"disableUrlEncoding",
 	"stream",
 ];
+
+/**
+ * The key/value tables. Their rows carry ephemeral ids every fetch makes anew,
+ * so they are compared as stored rows and adopted with the draft's ids carried
+ * over, or every save's echo would remount every row under the caret (#3663).
+ */
+const ROW_FIELDS = ["params", "headers", "formData", "urlEncoded"] as const;
+
+const MERGE_OPTIONS: MergeOptions<RequestState, MergeableRequestField> = {
+	equals: { params: sameRows, headers: sameRows, formData: sameRows, urlEncoded: sameRows },
+};
+
+/** `patch` with each table it adopts keeping the ids of `current`'s rows. */
+function withCarriedRowIds(
+	patch: Partial<RequestState>,
+	current: RequestState
+): Partial<RequestState> {
+	const carried = { ...patch };
+	for (const field of ROW_FIELDS) {
+		const rows = patch[field];
+		if (rows) carried[field] = carryRowIds(current[field], rows);
+	}
+	return carried;
+}
 
 function withoutFields(
 	fields: ReadonlySet<MergeableRequestField>,
@@ -846,7 +871,7 @@ export default function RequestBuilderProvider({
 	 * only applies its outcome.
 	 *
 	 * Gated on `initialRequest`'s own identity, not on every render: it is a
-	 * JSON-comparing diff over every mergeable field, and `index.tsx` only
+	 * content-comparing diff over every mergeable field, and `index.tsx` only
 	 * produces a new object when the underlying fetch actually changes.
 	 *
 	 * Skipped in a render that is a reset (#3662): the reset above has already
@@ -862,12 +887,13 @@ export default function RequestBuilderProvider({
 			request,
 			baseline,
 			incoming,
-			touchedFields
+			touchedFields,
+			MERGE_OPTIONS
 		);
 		if (outcome.changed) {
 			if (Object.keys(outcome.patch).length > 0) {
 				const patch = outcome.patch;
-				setRequestState((prev) => ({ ...prev, ...patch }));
+				setRequestState((prev) => ({ ...prev, ...withCarriedRowIds(patch, prev) }));
 			}
 			// The generation bump this earns happens in the effect above, keyed
 			// on `baseline` changing - not here, so nothing during render writes
@@ -891,7 +917,7 @@ export default function RequestBuilderProvider({
 			// matched pair by construction, which a plain computed property
 			// cannot tell TypeScript on its own.
 			const patch = { [field]: value } as Partial<RequestState>;
-			setRequestState((current) => ({ ...current, ...patch }));
+			setRequestState((current) => ({ ...current, ...withCarriedRowIds(patch, current) }));
 			setBaseline((prev) => ({ ...prev, ...patch }));
 			setTouchedFields((prev) => {
 				if (!prev.has(field)) return prev;

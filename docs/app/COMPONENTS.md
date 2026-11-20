@@ -3187,7 +3187,17 @@ The per-row gates are per field (`canEdit(item, "key" | "value")`), and the enab
 `key-value.ts` is the table's **row model**: `toKeyValueItems` /
 `toKeyValueEntries` convert between the domain `FormFieldEntry[]` and the
 UI-layer `KeyValueItem[]` (which adds the ephemeral `id` React keys need), and
-`withTrailingBlank` is the one definition of the spare row at the bottom. It
+`withTrailingBlank` is the one definition of the spare row at the bottom.
+**Row identity** is the id, and every conversion from storage mints new ones, so
+a caller that reconverts a refetched table has two more rules here (#3663):
+`sameRows` says whether two tables store the same rows (compared as their
+entries, member by member, ids and blank rows out), and `carryRowIds` hands a
+refetched table the ids of the current rows it restates, by content and in
+order, with the spare row keeping the current spare row's id; `carryIds` is the
+generic claim-each-once rule under it, which `parseParamsFromText` uses too. A
+fresh id is a remount: the row's inputs are replaced and the caret goes to
+`<body>`. The request builder's merge uses both (see
+`docs/app/state-management.md`). It
 moved here from `modules/request-builder/utils/` with the table (issue #567),
 because a second mount site needs the same conversion and a primitive cannot
 take it from a feature module. What stayed in the request builder is what no

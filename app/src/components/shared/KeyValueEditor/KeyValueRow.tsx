@@ -179,7 +179,8 @@ function ResolvedPeek({
  * as `variables.resolveField`, which the request builder's provider owns
  * (`useVariableSupport`), so it is the same function on the way back in. Row
  * ids come from `toKeyValueItems` at the point the request is fetched, one
- * level above every panel, so they survive the same unmount. See
+ * level above every panel, so they survive the same unmount, and a refetch
+ * carries them over (`carryRowIds`, #3663). See
  * `lib/dynamic-variable-cache.ts` for why this is module scope and keyed by
  * id rather than by the text.
  */

@@ -23,6 +23,9 @@
  *     resolve;
  *   - two different fields are independent: an adopt on one must not disturb
  *     a dirty edit on another;
+ *   - a key/value table is compared as its stored rows, so a refetch that
+ *     only renews the rows' ephemeral ids is no change and raises no conflict,
+ *     and an adopted table keeps the ids of the rows it did not change (#3663);
  *   - a request moved to a different collection (the `move_item` case)
  *     updates just `collectionId` in place, keeping the rest of a dirty draft;
  *   - a render that resets the draft (a different request id or
@@ -89,6 +92,9 @@ vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
+/** The key/value tables, each compared as rows rather than by JSON (#3663). */
+const ROW_TABLES = ["params", "headers", "formData", "urlEncoded"] as const;
+
 /** Shows the fields these cases touch, and offers the writes they make. */
 function FieldProbe() {
 	const { request, updateField, hasUnsavedChanges, fieldConflicts, takeExternalField } =
@@ -96,6 +102,12 @@ function FieldProbe() {
 	return (
 		<>
 			<span data-testid="url">{request.url}</span>
+			<span data-testid="name">{request.name}</span>
+			{ROW_TABLES.map((field) => (
+				<span key={field} data-testid={field}>
+					{request[field].map((row) => `${row.id}:${row.key}=${row.value}`).join(" ")}
+				</span>
+			))}
 			<span data-testid="description">{request.description}</span>
 			<span data-testid="collectionId">{request.collectionId}</span>
 			<span data-testid="protocol">
@@ -114,6 +126,21 @@ function FieldProbe() {
 				type description
 			</button>
 			<button onClick={() => takeExternalField("url")}>take theirs: url</button>
+			{ROW_TABLES.map((field) => (
+				<button
+					key={field}
+					onClick={() =>
+						updateField(
+							field,
+							request[field].map((row) =>
+								row.key === "X-One" ? { ...row, value: "2" } : row
+							)
+						)
+					}
+				>
+					type {field}
+				</button>
+			))}
 		</>
 	);
 }
@@ -420,5 +447,94 @@ describe("the request builder's draft adopts an external write per field", () =>
 		// happened after it was sent, so the request must still read dirty.
 		expect(shown("dirty")).toBe("true");
 		expect(managerOptions.hasChanges).toBe(true);
+	});
+
+	describe("a key/value table (#3663)", () => {
+		/** A table's stored rows as `index.tsx` hands them over: fresh ids every time. */
+		const fetched = (
+			name: string,
+			rows: { key: string; value: string }[],
+			field: (typeof ROW_TABLES)[number] = "headers"
+		) => ({
+			id: "req_1",
+			name,
+			[field]: [
+				...rows.map((entry, i) => ({ ...entry, id: `${name}-${i}`, enabled: true })),
+				{ id: `${name}-spare`, key: "", value: "", enabled: true },
+			],
+		});
+
+		it.each(ROW_TABLES)(
+			"raises no %s conflict when an outside rename lands over an unsaved edit of it",
+			(field) => {
+				const { rerender } = render(
+					<Harness
+						initialRequest={fetched("Before", [{ key: "X-One", value: "1" }], field)}
+					/>
+				);
+				click(`type ${field}`);
+				const typed = shown(field);
+				expect(typed).toBe("Before-0:X-One=2 Before-spare:=");
+
+				// Another window renames the request; the refetch rebuilds the
+				// untouched rows with new ids.
+				act(() =>
+					rerender(
+						<Harness
+							initialRequest={fetched("After", [{ key: "X-One", value: "1" }], field)}
+						/>
+					)
+				);
+
+				expect(shown("name")).toBe("After");
+				expect(shown("conflicts")).toBe("");
+				expect(shown(field)).toBe(typed);
+			}
+		);
+
+		it("still raises a headers conflict when the outside write changed a header name", () => {
+			const { rerender } = render(
+				<Harness initialRequest={fetched("Before", [{ key: "X-One", value: "1" }])} />
+			);
+			click("type headers");
+
+			act(() =>
+				rerender(
+					<Harness
+						initialRequest={fetched("Before", [{ key: "X-Renamed", value: "1" }])}
+					/>
+				)
+			);
+
+			expect(shown("conflicts")).toBe("headers");
+			expect(shown("headers")).toBe("Before-0:X-One=2 Before-spare:=");
+		});
+
+		it("adopts an untouched table keeping the ids of the rows it did not change", () => {
+			const { rerender } = render(
+				<Harness
+					initialRequest={fetched("Before", [
+						{ key: "X-Kept", value: "1" },
+						{ key: "X-Edited", value: "1" },
+					])}
+				/>
+			);
+
+			act(() =>
+				rerender(
+					<Harness
+						initialRequest={fetched("Before2", [
+							{ key: "X-Kept", value: "1" },
+							{ key: "X-Edited", value: "2" },
+						])}
+					/>
+				)
+			);
+
+			// The kept row and the spare row keep the draft's ids, so neither
+			// remounts; the row whose content changed takes the fetch's.
+			expect(shown("headers")).toBe("Before-0:X-Kept=1 Before2-1:X-Edited=2 Before-spare:=");
+			expect(shown("dirty")).toBe("false");
+		});
 	});
 });

@@ -65,9 +65,14 @@ import type {
 import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import { effectiveOAuth2Config, resolveAuthForSend } from "./utils/auth-resolution";
 import { useOAuth2DeferredNames } from "./hooks/useOAuth2DeferredNames";
-import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
+import {
+	toKeyValueItems,
+	toKeyValueEntries,
+	withTrailingBlank,
+} from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import { mergeParamsFromUrl } from "./utils/url";
+import { pathRowsOf, queryRowsOf } from "./utils/path-variables";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import type { LeftOutElement } from "@/lib/elements";
@@ -90,6 +95,8 @@ import {
 	toBodyPayload,
 } from "./utils/execute-mapping";
 import type {
+	FormFieldEntry,
+	KeyValueItem,
 	HttpMethod,
 	LoadTestConfig,
 	StartLoadTestRequest,
@@ -179,6 +186,21 @@ function buildUpdatePayload(
 	if (changedFields.has("stream")) payload.stream = request.stream;
 
 	return payload;
+}
+
+/**
+ * The stored params as the draft's rows.
+ *
+ * A query only in the URL (stored with no `params`) gets its rows here, or the
+ * table opens empty and its first edit rebuilds the URL without that query
+ * (#3491). `baseline` is seeded from this same value, so the rows do not make
+ * the draft unsaved. The query table's spare row sits ahead of the path rows,
+ * where the table's own edits leave it, so adopting a refetch can hand it the
+ * draft's spare row id (`carryRowIds`, #3663).
+ */
+function paramsDraftRows(stored: FormFieldEntry[], url: string): KeyValueItem[] {
+	const rows = mergeParamsFromUrl(toKeyValueItems(stored), url, url);
+	return [...withTrailingBlank(queryRowsOf(rows)), ...pathRowsOf(rows)];
 }
 
 /**
@@ -453,15 +475,7 @@ export default function RequestBuilder() {
 			method: fetchedRequest.method,
 			methodSource: fetchedRequest.methodSource,
 			url: fetchedRequest.url,
-			// A query only in the URL (stored with no `params`) gets its rows here, or
-			// the table opens empty and its first edit rebuilds the URL without that
-			// query (#3491). `baseline` is seeded from this same value, so the rows
-			// do not make the draft unsaved.
-			params: mergeParamsFromUrl(
-				toKeyValueItems(fetchedRequest.params),
-				fetchedRequest.url,
-				fetchedRequest.url
-			),
+			params: paramsDraftRows(fetchedRequest.params, fetchedRequest.url),
 			headers: toHeaderItems(fetchedRequest.headers),
 			bodyMode,
 			body: rawBody,

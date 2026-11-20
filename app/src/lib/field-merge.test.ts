@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from "vitest";
 import { mergeExternalWrite } from "./field-merge";
+import { sameRows } from "@/components/shared/KeyValueEditor/key-value";
+import type { KeyValueItem } from "@/types";
 
 interface Draft {
 	name: string;
@@ -97,5 +99,73 @@ describe("mergeExternalWrite", () => {
 		expect(outcome.patch).toEqual({ name: "b", count: 2 });
 		expect(outcome.conflicts).toEqual({ tags: ["y"] });
 		expect(outcome.nextBaseline).toEqual({ name: "b", tags: ["x"], count: 2 });
+	});
+
+	describe("a field with its own equality (#3663)", () => {
+		interface Table {
+			rows: KeyValueItem[];
+		}
+		const ROWS: readonly (keyof Table)[] = ["rows"];
+		const OPTIONS = { equals: { rows: sameRows } };
+		const header = (id: string, value: string): KeyValueItem => ({
+			id,
+			key: "X-One",
+			value,
+			enabled: true,
+		});
+
+		it("reads rows equal but for their ids as no change", () => {
+			// A refetch rebuilds every row with a fresh id; a JSON compare reads
+			// that as an external write on every fetch.
+			const baseline: Table = { rows: [header("a", "1")] };
+			const incoming: Table = { rows: [header("fresh", "1")] };
+
+			const outcome = mergeExternalWrite(
+				ROWS,
+				baseline,
+				baseline,
+				incoming,
+				new Set(),
+				OPTIONS
+			);
+
+			expect(outcome.changed).toBe(false);
+			expect(outcome.patch).toEqual({});
+		});
+
+		it("resolves a touched table the fetch agrees with but for ids, with no conflict", () => {
+			const baseline: Table = { rows: [header("a", "1")] };
+			const current: Table = { rows: [header("a", "2")] };
+			const incoming: Table = { rows: [header("fresh", "2")] };
+
+			const outcome = mergeExternalWrite(
+				ROWS,
+				current,
+				baseline,
+				incoming,
+				new Set(["rows"]),
+				OPTIONS
+			);
+
+			expect(outcome.conflicts).toEqual({});
+			expect(outcome.nextBaseline.rows).toBe(incoming.rows);
+		});
+
+		it("still reports a touched table whose content the fetch changed", () => {
+			const baseline: Table = { rows: [header("a", "1")] };
+			const current: Table = { rows: [header("a", "2")] };
+			const incoming: Table = { rows: [header("fresh", "3")] };
+
+			const outcome = mergeExternalWrite(
+				ROWS,
+				current,
+				baseline,
+				incoming,
+				new Set(["rows"]),
+				OPTIONS
+			);
+
+			expect(outcome.conflicts).toEqual({ rows: incoming.rows });
+		});
 	});
 });

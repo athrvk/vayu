@@ -15,8 +15,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { toKeyValueEntries, withTrailingBlank } from "./key-value";
-import type { KeyValueItem } from "@/types";
+import {
+	carryRowIds,
+	sameRows,
+	toKeyValueEntries,
+	toKeyValueItems,
+	withTrailingBlank,
+} from "./key-value";
+import type { FormFieldEntry, KeyValueItem } from "@/types";
 
 const fileRow: KeyValueItem = {
 	id: "r1",
@@ -58,5 +64,75 @@ describe("blank rows", () => {
 		const entries = toKeyValueEntries([{ ...fileRow, key: "avatar" }]);
 		expect(entries[0]).not.toHaveProperty("id");
 		expect(entries[0]).toMatchObject({ key: "avatar", type: "file", src: "/tmp/a.png" });
+	});
+});
+
+/**
+ * Row identity across a refetch (#3663). Every conversion from storage makes
+ * fresh ids, and a table keyed by id remounts a row whose id changed, so a
+ * refetched table must neither read as changed for its ids nor lose the ids
+ * of rows it did not change.
+ */
+describe("row identity across a refetch", () => {
+	const row = (id: string, key: string, value: string): KeyValueItem => ({
+		id,
+		key,
+		value,
+		enabled: true,
+	});
+
+	it("reads two tables as the same when only ids and the spare row differ", () => {
+		const draft = [row("a", "X-One", "1"), row("spare", "", "")];
+		const refetched = toKeyValueItems([{ key: "X-One", value: "1", enabled: true }]);
+		expect(sameRows(draft, refetched)).toBe(true);
+	});
+
+	it("reads a row the engine hands back in another member order as the same", () => {
+		const draft = [{ id: "a", key: "X-One", value: "1", enabled: true, description: "d" }];
+		const stored = JSON.parse(
+			'{"description":"d","enabled":true,"key":"X-One","value":"1"}'
+		) as FormFieldEntry;
+		expect(sameRows(draft, toKeyValueItems([stored]))).toBe(true);
+	});
+
+	it("reads a changed name, value, toggle or row count as a change", () => {
+		const draft = [row("a", "X-One", "1")];
+		expect(sameRows(draft, [row("a", "X-Two", "1")])).toBe(false);
+		expect(sameRows(draft, [row("a", "X-One", "2")])).toBe(false);
+		expect(sameRows(draft, [{ ...row("a", "X-One", "1"), enabled: false }])).toBe(false);
+		expect(sameRows(draft, [row("a", "X-One", "1"), row("b", "X-One", "1")])).toBe(false);
+	});
+
+	it("carries ids by content, each once and in order, and gives a changed row a fresh one", () => {
+		const current = [
+			row("dup-1", "X-Dup", "1"),
+			row("dup-2", "X-Dup", "1"),
+			row("edited", "X-Old", "1"),
+			row("spare", "", ""),
+		];
+		const incoming = toKeyValueItems([
+			{ key: "X-Dup", value: "1", enabled: true },
+			{ key: "X-New", value: "1", enabled: true },
+			{ key: "X-Dup", value: "1", enabled: true },
+		]);
+
+		const carried = carryRowIds(current, incoming);
+
+		expect(carried.map((r) => r.id)).toEqual([
+			"dup-1",
+			incoming[1].id,
+			"dup-2",
+			// The spare row keeps the draft's, so a caret left in it stays.
+			"spare",
+		]);
+		expect(carried.map((r) => r.key)).toEqual(["X-Dup", "X-New", "X-Dup", ""]);
+	});
+
+	it("never hands a content row the spare row's id", () => {
+		const carried = carryRowIds(
+			[row("spare", "", "")],
+			[row("fresh", "X-One", "1"), row("fresh-spare", "", "")]
+		);
+		expect(carried.map((r) => r.id)).toEqual(["fresh", "spare"]);
 	});
 });
