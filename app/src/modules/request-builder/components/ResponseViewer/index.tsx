@@ -71,14 +71,18 @@ import { exampleRefusal } from "./save-as-example";
 import { resolveHeaderLines } from "@/lib/header-lines";
 
 /**
- * The eight sub-tabs, in strip order. One list: the fit measures these labels
- * and the strip draws these triggers, so a ninth tab cannot be drawn without
- * being measured.
+ * The eight sub-tabs. One list per order: the fit measures these labels and the
+ * strip draws these triggers, so a ninth tab cannot be drawn without being
+ * measured.
  *
  * Always all eight, whatever the response carries (issue #59's constant tab
  * set) - a normal response gets an honest "not an event stream" rather than a
- * tab that comes and goes.
+ * tab that comes and goes. Only the order moves: a stream has Events directly
+ * after Body, because Events is the tab it opens on and the strip overflows
+ * from the right, so Events in its ordinary seventh place would be the first
+ * one into the "+N" menu (#3691).
  */
+const EVENTS_TAB = { id: "events", label: "Events" } as const;
 const RESPONSE_TABS: readonly { id: ResponseTab; label: string }[] = [
 	{ id: "body", label: "Body" },
 	{ id: "headers", label: "Headers" },
@@ -86,11 +90,21 @@ const RESPONSE_TABS: readonly { id: ResponseTab; label: string }[] = [
 	{ id: "timing", label: "Timing" },
 	{ id: "console", label: "Console" },
 	{ id: "tests", label: "Tests" },
-	{ id: "events", label: "Events" },
+	EVENTS_TAB,
 	{ id: "raw-request", label: "Raw" },
 ];
-const RESPONSE_TAB_IDS = RESPONSE_TABS.map((t) => t.id);
-const RESPONSE_TAB_LABELS = RESPONSE_TABS.map((t) => t.label);
+const STREAM_RESPONSE_TABS = RESPONSE_TABS.flatMap((t) => {
+	if (t === EVENTS_TAB) return [];
+	return t.id === "body" ? [t, EVENTS_TAB] : [t];
+});
+
+/** The tabs in strip order, with the parallel lists the fit reads; one object per order so identities are stable. */
+function tabSet(tabs: readonly { id: ResponseTab; label: string }[]) {
+	return { tabs, ids: tabs.map((t) => t.id), labels: tabs.map((t) => t.label) };
+}
+const DEFAULT_TAB_SET = tabSet(RESPONSE_TABS);
+const STREAM_TAB_SET = tabSet(STREAM_RESPONSE_TABS);
+const responseTabSet = (streamView: boolean) => (streamView ? STREAM_TAB_SET : DEFAULT_TAB_SET);
 
 /** What each tab's mark may grow to, so a badge arriving after the fit still fits. */
 const RESPONSE_MARK_ALLOWANCE: Partial<Record<ResponseTab, number>> = {
@@ -111,7 +125,7 @@ const responseMarkAllowance = (id: ResponseTab) =>
  * like a result. What it must *not* do is arrive by an instant jump: a mark on
  * a trigger is a flex item, the trigger is `shrink-0` inside this strip's
  * `flex-nowrap` list, so a chip appearing widens the Tests trigger by its own
- * width plus the trigger's `gap-1.5` and pushes Events and Raw along with it -
+ * width plus the trigger's `gap-1.5` and pushes every tab after Tests along with it (Events and Raw, or Raw alone for a stream) -
  * a response with tests and one without would draw the strip two different
  * ways, under a pointer on its way to one of those two tabs.
  *
@@ -190,20 +204,21 @@ export default function ResponseViewer() {
 	const requestId = request.id ?? null;
 
 	/*
-	 * Which sub-tab is showing, kept per request id so it survives both
+	 * The sub-tab the user chose, kept per request id so it survives both
 	 * `Shell.tsx` unmounting this pane when its workspace tab is not on
 	 * screen, and switching between two open request tabs, which reuses this
 	 * component without remounting it - `request.id` changes underneath the
-	 * same `useState` either way.
+	 * same `useState` either way. `null` is "no choice yet", and what the pane
+	 * shows then is `activeTab` below.
 	 */
 	const getResponseTab = useTabSelectionStore((s) => s.getResponseTab);
 	const setResponseTab = useTabSelectionStore((s) => s.setResponseTab);
-	const [activeTab, setActiveTabState] = useState<ResponseTab>(
-		() => (requestId ? getResponseTab(requestId) : null) ?? "body"
+	const [chosenTab, setChosenTab] = useState<ResponseTab | null>(() =>
+		requestId ? getResponseTab(requestId) : null
 	);
 	const setActiveTab = useCallback(
 		(tab: ResponseTab) => {
-			setActiveTabState(tab);
+			setChosenTab(tab);
 			if (requestId) setResponseTab(requestId, tab);
 		},
 		[requestId, setResponseTab]
@@ -219,20 +234,8 @@ export default function ResponseViewer() {
 	const [tabSyncedFor, setTabSyncedFor] = useState(requestId);
 	if (requestId !== tabSyncedFor) {
 		setTabSyncedFor(requestId);
-		setActiveTabState((requestId ? getResponseTab(requestId) : null) ?? "body");
+		setChosenTab(requestId ? getResponseTab(requestId) : null);
 	}
-
-	const [savingExample, setSavingExample] = useState(false);
-
-	// Called ahead of the early returns below, which would skip it; the wrapper it
-	// measures only exists once there is a response to draw. The labels and the
-	// triggers below are the one `RESPONSE_TABS` list.
-	const { containerRef, visibleIds, overflowedIds } = useFittedTabs({
-		ids: RESPONSE_TAB_IDS,
-		labels: RESPONSE_TAB_LABELS,
-		activeId: activeTab,
-		markAllowance: responseMarkAllowance,
-	});
 
 	/*
 	 * The live stream, when it is this request's (issue #574).
@@ -257,6 +260,49 @@ export default function ResponseViewer() {
 	const liveError = useExecutionEventsStore((s) => s.error);
 
 	const isStreaming = streamIsMine && liveIsStreaming;
+
+	/*
+	 * `isStream` is what separates "not a stream" from "a stream with no events
+	 * yet", and it is true for either source - a restored run whose trace has an
+	 * `events` node, or a live one belonging to this request. It stays true once
+	 * the stream is over, so it says what `ResponseEvents` should word its empty
+	 * state as, and is not what picks the default tab (`streamView` below).
+	 */
+	const isStream = response?.events !== undefined || streamIsMine;
+
+	/*
+	 * Whether the pane is showing a stream, which decides the default tab and
+	 * the strip's order (#3691). A response that has landed says so itself, by
+	 * its `events` node. No response yet means the feed in the store is what is
+	 * on screen - live, or just ended with its stored run still on the way - so
+	 * it is a stream when the store holds this request's. It is not `isStream`
+	 * alone because `streamIsMine` outlives the stream (the store keeps this
+	 * request's id until another stream or a clear replaces it): an ordinary
+	 * Send after a stream lands a response with no `events`, which must read as
+	 * ordinary.
+	 */
+	const streamView = response ? response.events !== undefined : streamIsMine;
+
+	/*
+	 * A tab nobody chose opens on Events for a stream and on Body otherwise.
+	 * Derived on every render and never written to the remembered-tab store,
+	 * because it is a default and not the user's choice: a later ordinary
+	 * response for the same request still opens on Body.
+	 */
+	const activeTab: ResponseTab = chosenTab ?? (streamView ? "events" : "body");
+	const strip = responseTabSet(streamView);
+
+	const [savingExample, setSavingExample] = useState(false);
+
+	// Called ahead of the early returns below, which would skip it; the wrapper it
+	// measures only exists once there is a response to draw. The labels and the
+	// triggers below are the one `strip`.
+	const { containerRef, visibleIds, overflowedIds } = useFittedTabs({
+		ids: strip.ids,
+		labels: strip.labels,
+		activeId: activeTab,
+		markAllowance: responseMarkAllowance,
+	});
 
 	/*
 	 * A stream has no exchange to render until its response headers arrive, so
@@ -439,13 +485,11 @@ export default function ResponseViewer() {
 	 * having received nothing stores `[]`, and that is an answer, not an absence
 	 * to fall back from.
 	 *
-	 * `isStream` is what separates "not a stream" from "a stream with no events
-	 * yet", and it is true for either source - a restored run whose trace has an
-	 * `events` node, or a live one belonging to this request.
+	 * `isStream` (above) is what separates "not a stream" from "a stream with no
+	 * events yet".
 	 */
 	const storedEvents = shown.events;
 	const events = storedEvents ?? (streamIsMine ? liveEvents : []);
-	const isStream = storedEvents !== undefined || streamIsMine;
 	const totalEvents = storedEvents ? shown.totalEvents : (liveTotalEvents ?? undefined);
 	const eventsTruncated = storedEvents ? shown.eventsTruncated : false;
 	const endReason = storedEvents
@@ -511,6 +555,72 @@ export default function ResponseViewer() {
 	const attention: Partial<Record<ResponseTab, boolean>> = {
 		console: hasScriptError,
 		tests: testResults.some((t) => !t.passed),
+	};
+
+	/*
+	 * One trigger per tab, drawn in `strip` order. Each is written out with a
+	 * literal `value` because `tabs-panels.test.tsx` pairs a trigger with its
+	 * panel by that text.
+	 *
+	 * No icon on any of them: Console was the only one across the fifteen
+	 * triggers in the two strips - the response pane's seven and the request
+	 * builder's eight - so it read as a different *kind* of thing rather than as
+	 * an aid to finding it. What distinguishes a tab when it matters is its mark
+	 * (Console's error dot above all).
+	 *
+	 * Events is always in the set, like the seven beside it (issue #59's
+	 * constant tab set) - a normal response gets an honest "not an event
+	 * stream" rather than a tab that comes and goes. Whether a tab is drawn
+	 * here or in the menu is only the room. Events' count is the *received*
+	 * total, which is not the row count once a stored list has been capped.
+	 * A result chip arriving on Tests must not push the tabs after it
+	 * sideways: see `TestsResultChip`, which holds the width open.
+	 */
+	const triggers: Record<ResponseTab, ReactNode> = {
+		body: (
+			<TabsTrigger key="body" value="body">
+				<TabLabel>Body</TabLabel>
+			</TabsTrigger>
+		),
+		headers: (
+			<TabsTrigger key="headers" value="headers">
+				<TabLabel>Headers</TabLabel>
+				{headersMark}
+			</TabsTrigger>
+		),
+		cookies: (
+			<TabsTrigger key="cookies" value="cookies">
+				<TabLabel>Cookies</TabLabel>
+			</TabsTrigger>
+		),
+		timing: (
+			<TabsTrigger key="timing" value="timing">
+				<TabLabel>Timing</TabLabel>
+			</TabsTrigger>
+		),
+		console: (
+			<TabsTrigger key="console" value="console">
+				<TabLabel>Console</TabLabel>
+				{consoleMark}
+			</TabsTrigger>
+		),
+		tests: (
+			<TabsTrigger key="tests" value="tests">
+				<TabLabel>Tests</TabLabel>
+				{testsMark}
+			</TabsTrigger>
+		),
+		events: (
+			<TabsTrigger key="events" value="events">
+				<TabLabel>Events</TabLabel>
+				{eventsMark}
+			</TabsTrigger>
+		),
+		"raw-request": (
+			<TabsTrigger key="raw-request" value="raw-request">
+				<TabLabel>Raw</TabLabel>
+			</TabsTrigger>
+		),
 	};
 
 	return (
@@ -608,83 +718,17 @@ export default function ResponseViewer() {
 					 */}
 					<div ref={containerRef} className="flex min-w-0 flex-1 items-stretch">
 						<TabsList variant="bare" className="overflow-hidden flex-nowrap">
-							{isShown("body") && (
-								<TabsTrigger value="body">
-									<TabLabel>Body</TabLabel>
-								</TabsTrigger>
-							)}
-							{isShown("headers") && (
-								<TabsTrigger value="headers">
-									<TabLabel>Headers</TabLabel>
-									{headersMark}
-								</TabsTrigger>
-							)}
-							{isShown("cookies") && (
-								<TabsTrigger value="cookies">
-									<TabLabel>Cookies</TabLabel>
-								</TabsTrigger>
-							)}
-							{isShown("timing") && (
-								<TabsTrigger value="timing">
-									<TabLabel>Timing</TabLabel>
-								</TabsTrigger>
-							)}
-							{/*
-							 * No icon. This was the only one across the fifteen triggers in
-							 * the two strips - the response pane's seven and the request
-							 * builder's eight - so it read as Console being a different
-							 * *kind* of thing rather than as an aid to finding it. What
-							 * actually distinguishes this tab when it matters is the error
-							 * dot below, which the icon sat next to and competed with.
-							 *
-							 * It was also 20px on a strip that had just gained four
-							 * permanent tabs, though that is the smaller reason.
-							 */}
-							{isShown("console") && (
-								<TabsTrigger value="console">
-									<TabLabel>Console</TabLabel>
-									{consoleMark}
-								</TabsTrigger>
-							)}
-							{isShown("tests") && (
-								<TabsTrigger value="tests">
-									<TabLabel>Tests</TabLabel>
-									{/* A result, not a count - it keeps its chip, and says nothing
-									    at all when nothing ran rather than a "0/0" that reads like
-									    a result. Rendered unconditionally all the same: see
-									    `TestsResultChip`, which holds the width open so a chip
-									    arriving does not push Events and Raw sideways. */}
-									{testsMark}
-								</TabsTrigger>
-							)}
-							{/*
-							 * Always in the set, like the seven beside it (issue #59's
-							 * constant tab set) - a normal response gets an honest
-							 * "not an event stream" rather than a tab that comes and
-							 * goes. Whether it is drawn here or in the menu is only the
-							 * room. The count is the *received* total, which is not
-							 * the row count once a stored list has been capped.
-							 */}
-							{isShown("events") && (
-								<TabsTrigger value="events">
-									<TabLabel>Events</TabLabel>
-									{eventsMark}
-								</TabsTrigger>
-							)}
-							{isShown("raw-request") && (
-								<TabsTrigger value="raw-request">
-									<TabLabel>Raw</TabLabel>
-								</TabsTrigger>
-							)}
+							{/* Drawn in `strip` order, which is why a stream's Events sits beside Body. */}
+							{strip.ids.filter(isShown).map((id) => triggers[id])}
 						</TabsList>
 						<TabOverflowMenu
-							tabs={RESPONSE_TABS.filter((t) => overflowedIds.includes(t.id)).map(
-								(t) => ({
+							tabs={strip.tabs
+								.filter((t) => overflowedIds.includes(t.id))
+								.map((t) => ({
 									...t,
 									mark: marks[t.id],
 									attention: attention[t.id],
-								})
-							)}
+								}))}
 							onSelect={setActiveTab}
 						/>
 					</div>
