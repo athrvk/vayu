@@ -2158,6 +2158,36 @@ ReportExtras& extras) {
     extras.connection_replays = collector.connection_replays ();
 }
 
+namespace {
+
+/**
+ * One stored result as the report's `results[]` carries it, and as
+ * `GET /runs/:runId/results/:resultId` answers it. The trace is served as
+ * stored; one that does not parse travels as the raw string rather than
+ * failing the read.
+ */
+nlohmann::json report_result_node (const vayu::db::Result& result) {
+    nlohmann::json node;
+    node["id"]         = result.id;
+    node["timestamp"]  = result.timestamp;
+    node["statusCode"] = result.status_code;
+    node["statusText"] = result.status_text;
+    node["latencyMs"]  = result.latency_ms;
+    if (!result.error.empty ()) {
+        node["error"] = result.error;
+    }
+    if (!result.trace_data.empty ()) {
+        try {
+            node["trace"] = nlohmann::json::parse (result.trace_data);
+        } catch (...) {
+            node["trace"] = result.trace_data;
+        }
+    }
+    return node;
+}
+
+} // namespace
+
 /**
  * The run's own exchanges, for a design or load run - a design run has exactly
  * one and a load run's percentiles do not need per-request rows past a
@@ -2169,23 +2199,7 @@ ReportExtras& extras) {
 nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results, size_t cap) {
     nlohmann::json results_array = nlohmann::json::array ();
     for (const auto* row : select_report_results (results, cap)) {
-        const auto& result = *row;
-        nlohmann::json result_obj;
-        result_obj["id"]         = result.id;
-        result_obj["timestamp"]  = result.timestamp;
-        result_obj["statusCode"] = result.status_code;
-        result_obj["statusText"] = result.status_text;
-        result_obj["latencyMs"]  = result.latency_ms;
-        if (!result.error.empty ())
-            result_obj["error"] = result.error;
-        if (!result.trace_data.empty ()) {
-            try {
-                result_obj["trace"] = nlohmann::json::parse (result.trace_data);
-            } catch (...) {
-                result_obj["trace"] = result.trace_data;
-            }
-        }
-        results_array.push_back (result_obj);
+        results_array.push_back (report_result_node (*row));
     }
     return results_array;
 }
@@ -2276,6 +2290,22 @@ vayu::core::RunManager* live_runs) {
     json_report["resultsCap"]    = results_cap;
 
     return { 200, json_report };
+}
+
+std::pair<int, nlohmann::json> run_result_response (vayu::db::Database& db,
+const std::string& run_id,
+std::string_view result_id) {
+    if (!db.get_run (run_id)) {
+        return { 404, error_body (404, "Run not found") };
+    }
+    // Past `int` is an id SQLite never assigned here, so it is as unknown as
+    // any other.
+    const auto id = vayu::utils::parse_number<int> (result_id);
+    auto result   = id ? db.get_result (run_id, *id) : std::nullopt;
+    if (!result) {
+        return { 404, error_body (404, "Result not found") };
+    }
+    return { 200, report_result_node (*result) };
 }
 
 /**
@@ -2599,6 +2629,23 @@ void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, http
     }
 }
 
+void handle_get_run_result (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string run_id    = req.matches[1];
+    const std::string result_id = req.matches[2];
+    try {
+        auto [status, body] = run_result_response (ctx.db, run_id, result_id);
+        res.status          = status;
+        // `replace`: a trace that does not parse is served as its stored
+        // text, which nothing held to UTF-8.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("run", "Reading a stored result failed",
+        { { "runId", run_id }, { "resultId", result_id }, { "error", e.what () } });
+        send_error (res, 500, e.what ());
+    }
+}
+
 void handle_get_run_samples (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -2748,6 +2795,18 @@ void register_run_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/runs/([^/]+)/report)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_get_run_report (ctx, req, res);
+    });
+
+    /**
+     * GET /runs/:runId/results/:resultId
+     * One stored result, in the shape of a report `results[]` entry, so a
+     * reader holding the handle a buffered `POST /execute` answered (#3704)
+     * reads its exchange without fetching the whole report. See
+     * run_result_response.
+     */
+    ctx.server.Get (R"(/runs/([^/]+)/results/(\d+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_get_run_result (ctx, req, res);
     });
 
     /**

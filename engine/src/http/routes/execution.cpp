@@ -1254,7 +1254,7 @@ size_t max_trace_body_bytes) {
  * Non-static: transient_execute_test.cpp drives it against a real database,
  * the suite having no in-process HTTP route harness.
  */
-void record_design_result (vayu::db::Database& db,
+std::optional<int> record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
 const vayu::Request& request,
 const vayu::Response& response,
@@ -1264,8 +1264,11 @@ const nlohmann::json& scripts,
 const nlohmann::json& elements,
 std::optional<double> engine_ms) {
     if (!run_id) {
-        return;
+        return std::nullopt;
     }
+    // Set once the row is in: a failure after the insert still leaves a row
+    // the id reads back.
+    std::optional<int> result_id;
     try {
         const bool has_error = response.has_error ();
 
@@ -1323,7 +1326,7 @@ std::optional<double> engine_ms) {
         // becomes U+FFFD instead of throwing (import.cpp uses the same guard).
         db_result.trace_data =
         trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
-        db.add_result (db_result);
+        result_id = db.add_result (db_result);
 
         // A stream names its own terminal status: one the user stopped is
         // `Stopped`, which neither the response nor the error flag can say.
@@ -1359,6 +1362,7 @@ std::optional<double> engine_ms) {
             vayu::utils::log_error ("http", "Failed to update run status after save error");
         }
     }
+    return result_id;
 }
 
 /**
@@ -2509,6 +2513,21 @@ void stop_if_caller_left (vayu::db::Database& db, const DesignSend& send) {
 }
 
 /**
+ * The handle a buffered answer gives to the result it stored (#3704), which
+ * `GET /runs/:runId/results/:resultId` reads back whole. Both keys or neither:
+ * a transient send stored nothing, and a failed write has no row to name.
+ */
+void add_result_handle (nlohmann::json& body,
+const std::optional<std::string>& run_id,
+std::optional<int> result_id) {
+    if (!run_id || !result_id) {
+        return;
+    }
+    body["runId"]    = *run_id;
+    body["resultId"] = *result_id;
+}
+
+/**
  * The buffered half of a design send: pre-request script, send, test script -
  * the sequence a scenario step performs too, which is why it lives in
  * request_exchange.cpp rather than here (issue #353).
@@ -2595,7 +2614,8 @@ std::chrono::steady_clock::time_point handler_start) {
     // execution stops here: no trace row, so the post-auth headers this
     // exchange carries never reach disk - and neither do these results.
     stop_if_caller_left (ctx.db, send);
-    record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
+    const auto result_id = record_design_result (ctx.db, send.run_id,
+    exchange.request, exchange.response,
     /*send.stream=*/nullptr, validation, scripts, elements, engine_ms);
 
     persist_send_variables (ctx.db, scopes, send.persist_variables);
@@ -2606,6 +2626,7 @@ std::chrono::steady_clock::time_point handler_start) {
     nlohmann::json body = build_response_json (
     exchange.response, send.include_parsed_body, scripts, validation, elements);
     body["timing"]["engineMs"] = engine_ms;
+    add_result_handle (body, send.run_id, result_id);
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);
     }
@@ -2662,10 +2683,12 @@ DesignSend& send) {
     failed.error_code    = built.error_code;
     failed.error_message = built.error_message;
     stop_if_caller_left (ctx.db, send);
+    const auto result_id =
     record_design_result (ctx.db, send.run_id, send.request, failed);
     res.status          = 200;
     nlohmann::json body = vayu::json::serialize (failed);
     body[target_refused ? "refusalCode" : "authErrorCode"] = built.detail_code;
+    add_result_handle (body, send.run_id, result_id);
     res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
     "application/json");
 }

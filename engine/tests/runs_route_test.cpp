@@ -162,8 +162,9 @@ class RunsRouteTest : public ::testing::Test {
     }
     VAYU_DIAGNOSTIC_POP
 
-    /// One stored result carrying @p trace_data as written, parseable or not.
-    void seed_traced_result (const std::string& run_id,
+    /// One stored result carrying @p trace_data as written, parseable or not;
+    /// answers its row id.
+    int seed_traced_result (const std::string& run_id,
     int status_code,
     double latency_ms,
     const std::string& trace_data) {
@@ -175,7 +176,7 @@ class RunsRouteTest : public ::testing::Test {
         result.latency_ms  = latency_ms;
         result.error       = status_code == 0 ? "timed out" : "";
         result.trace_data  = trace_data;
-        db_->add_result (result);
+        return db_->add_result (result);
     }
 
     /// Renames `results` away behind the open connection, so any read of a
@@ -3383,6 +3384,124 @@ TEST_F (RunsRouteTest, ResultsWithoutTracesKeepEveryOtherColumnInIdOrder) {
     }
     EXPECT_LT (without[0].id, without[1].id);
     EXPECT_EQ (without[0].error, "timed out");
+}
+
+// ---------------------------------------------------------------------------
+// GET /runs/:runId/results/:resultId (#3704): one stored result, as the
+// report's `results[]` carries it.
+// ---------------------------------------------------------------------------
+
+namespace {
+/// A design trace holding one script request, the record a reader pages into.
+constexpr std::string_view SCRIPTED_TRACE =
+R"({"request":{"url":"https://x.test/"},"response":{"body":"hello"},)"
+R"("scripts":{"scriptRequests":[{"source":"pre","request":{"url":"https://side.test/"}}]}})";
+
+/// The `error.message` of a refusal body.
+std::string error_message (const json& body) {
+    return body.value (json::json_pointer ("/error/message"), std::string ());
+}
+} // namespace
+
+TEST_F (RunsRouteTest, AStoredResultReadsBackAsItsReportEntry) {
+    seed ({ .id = "run_one", .type = vayu::RunType::Design, .start_time = 1000 });
+    const int id =
+    seed_traced_result ("run_one", 200, 12.5, std::string (SCRIPTED_TRACE));
+
+    const auto [status, node] =
+    vayu::http::routes::run_result_response (*db_, "run_one", std::to_string (id));
+
+    ASSERT_EQ (status, 200) << node.dump ();
+    EXPECT_EQ (node.value ("id", 0), id);
+    EXPECT_EQ (node.value ("statusCode", 0), 200);
+    EXPECT_EQ (node.at ("trace"), json::parse (SCRIPTED_TRACE));
+    EXPECT_EQ (
+    node.value (
+    json::json_pointer ("/trace/scripts/scriptRequests/0/request/url"), std::string ()),
+    "https://side.test/");
+    const auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_one");
+    ASSERT_EQ (report_status, 200);
+    ASSERT_EQ (report.at ("results").size (), 1u);
+    EXPECT_EQ (node, report.at ("results").at (0));
+}
+
+// Each row of a run answers for itself, not the run's first or last.
+TEST_F (RunsRouteTest, EachStoredResultOfARunReadsBackAsItself) {
+    seed ({ .id = "run_two" });
+    const int first  = seed_traced_result ("run_two", 200, 1.0, R"({"n":1})");
+    const int second = seed_traced_result ("run_two", 0, 0.0, R"({"n":2})");
+    ASSERT_NE (first, second);
+
+    const auto [status, node] = vayu::http::routes::run_result_response (
+    *db_, "run_two", std::to_string (second));
+
+    ASSERT_EQ (status, 200) << node.dump ();
+    EXPECT_EQ (node.value ("id", 0), second);
+    EXPECT_EQ (node.value (json::json_pointer ("/trace/n"), 0), 2);
+    EXPECT_EQ (node.value ("error", ""), "timed out");
+}
+
+TEST_F (RunsRouteTest, AResultOfAnUnknownRunIsNotFound) {
+    seed ({ .id = "run_known" });
+    const int id = seed_traced_result ("run_known", 200, 1.0, R"({})");
+
+    const auto [status, body] = vayu::http::routes::run_result_response (
+    *db_, "no_such_run", std::to_string (id));
+
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (error_message (body), "Run not found") << body.dump ();
+}
+
+TEST_F (RunsRouteTest, AnUnknownResultOfAKnownRunIsNotFound) {
+    seed ({ .id = "run_known" });
+    const int id = seed_traced_result ("run_known", 200, 1.0, R"({})");
+
+    for (const std::string& text :
+    { std::to_string (id + 1), std::string ("0"), std::string ("-1"),
+    std::string ("99999999999999999999"), std::string (""), std::string ("1x") }) {
+        const auto [status, body] =
+        vayu::http::routes::run_result_response (*db_, "run_known", text);
+        EXPECT_EQ (status, 404) << "'" << text << "'";
+        EXPECT_EQ (error_message (body), "Result not found") << "'" << text << "'";
+    }
+}
+
+// The run in the path is part of the address: a result id reached through
+// another run is not that run's. Mutation check: drop the `run_id` term from
+// `Database::get_result` and this answers 200 with the other run's trace.
+TEST_F (RunsRouteTest, AResultUnderADifferentRunIsNotFound) {
+    seed ({ .id = "run_owner" });
+    seed ({ .id = "run_other" });
+    const int id = seed_traced_result ("run_owner", 200, 1.0, R"({"owner":true})");
+
+    const auto [status, body] =
+    vayu::http::routes::run_result_response (*db_, "run_other", std::to_string (id));
+
+    EXPECT_EQ (status, 404) << body.dump ();
+    EXPECT_EQ (error_message (body), "Result not found");
+    EXPECT_FALSE (db_->get_result ("run_other", id).has_value ());
+    EXPECT_TRUE (db_->get_result ("run_owner", id).has_value ());
+}
+
+// The report's own rules for a trace hold here too: one that does not parse
+// travels as its stored text, and a row stored with none carries no `trace`
+// key.
+TEST_F (RunsRouteTest, AStoredResultsTraceIsServedAsTheReportServesIt) {
+    seed ({ .id = "run_odd" });
+    const int garbled = seed_traced_result ("run_odd", 200, 1.0, "not json {");
+    const int empty   = seed_traced_result ("run_odd", 200, 1.0, "");
+
+    const auto [garbled_status, garbled_node] =
+    vayu::http::routes::run_result_response (*db_, "run_odd", std::to_string (garbled));
+    ASSERT_EQ (garbled_status, 200);
+    EXPECT_EQ (garbled_node.at ("trace"), json ("not json {"));
+
+    const auto [empty_status, empty_node] =
+    vayu::http::routes::run_result_response (*db_, "run_odd", std::to_string (empty));
+    ASSERT_EQ (empty_status, 200);
+    EXPECT_FALSE (empty_node.contains ("trace")) << empty_node.dump ();
+    EXPECT_FALSE (empty_node.contains ("error")) << empty_node.dump ();
 }
 
 // This run's custom trends, counters and rates (issue #1500), round-tripped

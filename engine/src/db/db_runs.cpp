@@ -744,9 +744,20 @@ int64_t Database::clear_inbox_requests_all () {
 // Results - Individual request outcomes with timing breakdown
 // ============================================================================
 
-void Database::add_result (const Result& result) {
+int Database::add_result (const Result& result) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.insert (result);
+    return impl_->storage.insert (result);
+}
+
+std::optional<Result> Database::get_result (const std::string& run_id, int result_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<Result> (
+    where (c (&Result::id) == result_id && c (&Result::run_id) == run_id),
+    sqlite_orm::limit (1));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    return std::move (rows.front ());
 }
 
 namespace {

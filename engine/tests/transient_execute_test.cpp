@@ -52,6 +52,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
@@ -252,8 +253,11 @@ TEST_F (RecordDesignResultTest, ATransientExecutionWritesNoResultRow) {
     const auto existing  = seed_running_run ("run_existing");
     const int64_t before = db_->count_runs (vayu::db::RunFilter{});
 
+    const auto result_id =
     record_design_result (*db_, std::nullopt, sent_request (), ok_response ());
 
+    EXPECT_FALSE (result_id.has_value ())
+    << "a transient send has no row to name";
     EXPECT_EQ (db_->count_runs (vayu::db::RunFilter{}), before);
     EXPECT_TRUE (db_->get_results (existing).empty ());
     // Untouched, not merely un-inserted: a transient execution must not move
@@ -283,10 +287,13 @@ TEST_F (RecordDesignResultTest, ATransientExecutionLeavesNoCredentialOnDisk) {
 TEST_F (RecordDesignResultTest, ARecordedExecutionStoresTheTraceAndCompletesTheRun) {
     const auto id = seed_running_run ("run_recorded");
 
+    const auto result_id =
     record_design_result (*db_, id, sent_request (), ok_response ());
 
     auto results = db_->get_results (id);
     ASSERT_EQ (results.size (), 1u);
+    // The id the buffered `/execute` answer names (#3704).
+    EXPECT_EQ (result_id, std::optional<int> (results[0].id));
     EXPECT_EQ (results[0].status_code, 200);
     auto trace = json::parse (results[0].trace_data);
     EXPECT_EQ (trace["request"]["url"], "https://api.test/gql");
@@ -295,6 +302,28 @@ TEST_F (RecordDesignResultTest, ARecordedExecutionStoresTheTraceAndCompletesTheR
     auto row = db_->get_run (id);
     ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->status, vayu::RunStatus::Completed);
+}
+
+// A row that could not be written has no id to answer (#3704): the handle is
+// absent rather than naming nothing. Mutation check: start
+// `record_design_result`'s `result_id` at 0 and this reads one.
+TEST_F (RecordDesignResultTest, AResultThatCouldNotBeWrittenAnswersNoId) {
+    const auto id   = seed_running_run ("run_unwritable");
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
+    sqlite3_busy_timeout (handle, 5000);
+    const int renamed = sqlite3_exec (handle,
+    "ALTER TABLE results RENAME TO results_unwritable", nullptr, nullptr, nullptr);
+    sqlite3_close (handle);
+    ASSERT_EQ (renamed, SQLITE_OK);
+
+    const auto result_id =
+    record_design_result (*db_, id, sent_request (), ok_response ());
+
+    EXPECT_FALSE (result_id.has_value ());
+    auto row = db_->get_run (id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->status, vayu::RunStatus::Failed);
 }
 
 // `engineMs` (#2132) rides the trace flat, beside `totalMs`, when the caller
