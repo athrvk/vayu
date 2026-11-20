@@ -6,15 +6,16 @@
  */
 
 /**
- * The undefined branch of `VariablePopover`: a value, a scope to create it in,
- * and Create.
+ * The undefined branch of `VariablePopover`: a value, whether it is a secret, a
+ * scope to create it in, and Create.
  *
- * The value and the picked scope are held by the popover, not here: its content
- * unmounts on close, the value is the same buffer the close path reads, and a
- * scope picked once survives a re-open of the same token.
+ * The value, the secret flag and the picked scope are held by the popover, not
+ * here: its content unmounts on close, the value is the same buffer the close
+ * path reads, and a flag or scope picked once survives a re-open of the same
+ * token.
  */
 
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { KeyRound } from "lucide-react";
 import type { VariableOrigin } from "@/types";
 import { VARIABLE_SCOPE_CONFIG } from "@/constants/variables";
@@ -72,6 +73,19 @@ export function CreateVariableForm({
 	const activeScope = selectedScope && scopes.includes(selectedScope) ? selectedScope : scopes[0];
 	const valueRef = useRef<HTMLInputElement>(null);
 	const scopeLabelId = useId();
+	const refocusValue = useRef(false);
+
+	// The toggle swaps `Input` for `SecretInput`, so the field remounts and the
+	// button that was clicked keeps focus, whether or not the open set `autoFocus`.
+	// Runs after the commit so the ref holds the new input, and only for a toggle
+	// from here: a first mount, or a StrictMode re-run of the effect, must not
+	// take focus the open declined. `SecretInput` has no `autoFocus` of its own:
+	// a keyboard open lets Radix focus the first tabbable, which is its field.
+	useEffect(() => {
+		if (!refocusValue.current) return;
+		refocusValue.current = false;
+		valueRef.current?.focus();
+	}, [secret]);
 
 	/**
 	 * An empty field is not a variable worth writing (issue #1380).
@@ -95,7 +109,6 @@ export function CreateVariableForm({
 		value,
 		placeholder: "value…",
 		"aria-label": `Value for new variable ${name}`,
-		autoFocus,
 		onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
 			// `isCommitEnter`, not a bare Enter (#939): an IME
 			// commits its composition with the same keydown, and
@@ -124,6 +137,11 @@ export function CreateVariableForm({
 		valueRef.current?.focus();
 	};
 
+	const toggleSecret = () => {
+		refocusValue.current = true;
+		onSecretChange(!secret);
+	};
+
 	return (
 		<>
 			<div className="flex items-center gap-1">
@@ -138,6 +156,7 @@ export function CreateVariableForm({
 					) : (
 						<Input
 							{...valueField}
+							autoFocus={autoFocus}
 							onChange={(e) => onValueChange(e.target.value)}
 							className="font-mono text-sm"
 						/>
@@ -151,7 +170,7 @@ export function CreateVariableForm({
 				<TooltipIconButton
 					label={secret ? "Unmark as secret" : "Mark as secret (masks value in UI)"}
 					icon={<KeyRound className="size-icon" />}
-					onClick={() => onSecretChange(!secret)}
+					onClick={toggleSecret}
 					className={cn(
 						"size-control-sm shrink-0 transition-colors",
 						secret
@@ -247,8 +266,8 @@ export function CreateVariableForm({
 					{switchedOffCount === 1
 						? "This name is already defined below, switched off."
 						: `This name is already defined ${switchedOffCount} times below, every one switched off.`}{" "}
-					Switching one back on answers the token; creating here adds another definition
-					and leaves it off.
+					Creating here writes it switched on in the scope you pick, replacing a
+					switched-off definition there.
 				</p>
 			)}
 		</>

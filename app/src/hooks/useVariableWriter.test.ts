@@ -314,8 +314,9 @@ describe("editing an environment definition", () => {
 });
 
 /*
- * A create can mark the new entry secret; the option is create-only, so a name
- * that already exists keeps the mark it has whichever way the option points.
+ * A create can mark the entry secret. It can land on an existing entry (the
+ * popover offers a create while the name's only definition is switched off), so
+ * the mark applies there too; an edit passes no options and never changes it.
  */
 describe("creating a secret", () => {
 	const SCOPES: Array<["global" | "collection" | "environment", Parameters<typeof setup>[0]]> = [
@@ -358,9 +359,32 @@ describe("creating a secret", () => {
 		});
 	});
 
-	it("does not mark a definition that already exists", () => {
-		const r = setup({ globalVars: { token: { value: "old", enabled: true } } });
+	it("marks an existing definition a create lands on, and re-enables it", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: false, createdAt: 9 } } });
 		r.current.updateVariable("token", "abc", "global", undefined, { secret: true });
+		expect(written("global", "token")).toEqual({
+			value: "abc",
+			enabled: true,
+			createdAt: 9,
+			secret: true,
+		});
+	});
+
+	it("does not mark an existing definition when the flag is off", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: false } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: false });
 		expect(written("global", "token")).toEqual({ value: "abc", enabled: true });
+	});
+
+	it("keeps the mark an existing secret has when an edit passes no options", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true, secret: true } } });
+		r.current.updateVariable("token", "abc", "global");
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true, secret: true });
+	});
+
+	it("never un-secrets an existing secret, whatever the flag says", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true, secret: true } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: false });
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true, secret: true });
 	});
 });

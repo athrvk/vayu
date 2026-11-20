@@ -630,14 +630,16 @@ the Variables editor's key toggle ("Mark as secret"), off by default, and while
 it is on the value field is a `SecretInput`: masked, editable, with the eye. A
 create then calls `updateVariable(name, value, scope, undefined, { secret })`
 (`VariableCreateOptions`, `types/domain.ts`), and `useVariableWriter`'s
-`mergeVariable` writes `secret: true` into the *new* entry only; with the flag
-off the stored entry is exactly what it was. The option is create-only, because
-an edit writes into a definition that already exists and whether that one is a
-secret stays the Variables editor's call. The flag is held by the popover with
-the typed value, so a re-open does not show the value unmasked. It exists for
-the cases that need a secret from the first write, such as the OAuth 2.0 JWT
-bearer grant's signing key, whose field warns when the variable it names is
-not marked secret.
+`mergeVariable` writes `secret: true` into the entry; with the flag off the
+stored entry is exactly what it was, and no path un-secrets one. The option comes
+only from a create, so an edit passes none and keeps the mark its definition
+has. A create can still land on a name that exists: the popover offers one while
+the name's only definition is switched off, and the write then re-enables that
+entry and marks it too. The flag is held by the popover with the typed value, so
+a re-open does not show the value unmasked. Toggling it hands focus back to the
+value field, whichever way the popover was opened. It exists for the cases that
+need a secret from the first write, such as the OAuth 2.0 JWT bearer grant's
+signing key, whose field warns when the variable it names is not marked secret.
 
 The bar once walked the collection chain itself for the first definition with a
 truthy `enabled`, which disagrees with the resolver's `isEnabledDefinition` on

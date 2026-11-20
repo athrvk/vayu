@@ -739,8 +739,8 @@ describe("why this value won", () => {
  * A name whose *only* definition is switched off has no winner, so it does not
  * resolve, so it arrived in the create branch: offered a form to define a name
  * that is already defined and one toggle from answering, with nothing on screen
- * saying so. Acting on that offer writes a second definition which shadows
- * nothing and leaves the first one off.
+ * saying so. Acting on that offer writes the name enabled, replacing a
+ * switched-off definition in the scope picked or adding one in another.
  */
 describe("a name whose only definition is switched off", () => {
 	const onlyDisabled: VariableOrigin[] = [
@@ -1122,11 +1122,12 @@ describe("which definition an edit names", () => {
 describe("marking a new variable secret", () => {
 	const MARK = "Mark as secret (masks value in UI)";
 
-	function openCreate() {
+	function openCreate(focusOnOpen = false) {
 		const { onValueChange } = renderPopover({
 			varInfo: null,
 			resolved: false,
 			writableScopes: ["global", "environment"],
+			focusOnOpen,
 		});
 		return { onValueChange, panel: open() };
 	}
@@ -1174,6 +1175,45 @@ describe("marking a new variable secret", () => {
 		fireEvent.change(field(panel), { target: { value: "pem" } });
 		fireEvent.keyDown(field(panel), { key: "Enter" });
 		expect(onValueChange).toHaveBeenCalledTimes(1);
+	});
+
+	/*
+	 * The toggle swaps the field for another element, so focus has to be put
+	 * back by hand. A hover open (`focusOnOpen` false) is the case that has no
+	 * `autoFocus` to lean on: without the refocus, keystrokes after a click on
+	 * the key go to the button and Space flips the mark back.
+	 */
+	describe.each([
+		["a keyboard open", true],
+		["a hover open", false],
+	])("focus after the toggle, from %s", (_label, focusOnOpen) => {
+		it.each([
+			["on", MARK],
+			["off", "Unmark as secret"],
+		])("returns to the value field when it is turned %s", (_dir, name) => {
+			const { panel } = openCreate(focusOnOpen);
+			if (name !== MARK) fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+
+			const key = within(panel).getByRole("button", { name });
+			key.focus();
+			fireEvent.click(key);
+			expect(document.activeElement).toBe(field(panel));
+		});
+	});
+
+	it("does not take focus on a hover open that never toggled", () => {
+		const { panel } = openCreate(false);
+		expect(document.activeElement).not.toBe(field(panel));
+	});
+
+	it("focuses the masked field when a keyboard open lands on a flag already on", () => {
+		const { panel } = openCreate(true);
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+		fireEvent.keyDown(field(panel), { key: "Escape" });
+
+		const reopened = open();
+		expect(field(reopened)).toHaveAttribute("type", "password");
+		expect(document.activeElement).toBe(field(reopened));
 	});
 
 	it("goes back to plain when the mark is taken off", () => {

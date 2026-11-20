@@ -29,10 +29,11 @@
  * (no environment selected, no collection), so offering any other scope is a
  * Create button that does nothing.
  *
- * The edit buffer, the reveal flag, the picked scope and the Escape/auto-save
- * flow stay here rather than in the two children, which `PopoverContent`
- * unmounts on close: the close path saves or discards the buffer and re-masks
- * the secret, and a picked scope survives a re-open.
+ * The edit buffer, the reveal flag, the picked scope, the create form's secret
+ * flag and the Escape/auto-save flow stay here rather than in the two children,
+ * which `PopoverContent` unmounts on close: the close path saves or discards the
+ * buffer and re-masks the secret, and a picked scope or secret flag survives a
+ * re-open.
  */
 
 import { useState, useRef, useMemo, useEffect } from "react";

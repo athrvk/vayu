@@ -67,9 +67,11 @@ interface UseVariableWriterReturn {
  * only a variable created here is stamped, so it lands at the bottom of its
  * scope's list rather than above every row that already existed (#135).
  *
- * `options` is read only when the entry is new. An existing entry keeps the
- * secret mark it has: this path never un-secrets one, and never secrets one the
- * Variables editor left plain.
+ * `options` only ever arrives from a create, and a create can land on an entry
+ * that exists: the popover offers one while the name's only definition is
+ * switched off. So the mark applies to both branches. It only ever sets the
+ * flag: an edit passes no options and keeps the mark the entry has, and no path
+ * here un-secrets one.
  */
 function mergeVariable(
 	existing: Record<string, VariableValue> | undefined,
@@ -81,7 +83,12 @@ function mergeVariable(
 	return {
 		...existing,
 		[name]: current
-			? { ...current, value: newValue, enabled: true }
+			? {
+					...current,
+					value: newValue,
+					enabled: true,
+					...(options?.secret && { secret: true }),
+				}
 			: {
 					value: newValue,
 					enabled: true,

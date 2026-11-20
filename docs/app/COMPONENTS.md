@@ -3689,7 +3689,7 @@ module for its cell input is the same inversion one level down (issue #567).
 context - `resolveField`, `getAllVariables`, `getVariableOrigins`,
 `updateVariable` (an edit passes the shown definition's `sourceId` as a fourth
 argument, a create none and a fifth, `{ secret }`, which only a create carries,
-#3683), `writableScopes` - as a plain object a caller hands in, plus
+#3695), `writableScopes` - as a plain object a caller hands in, plus
 the optional `dataColumns` (the declared data contract in scope, issue #600).
 `dataColumns` is optional *within* a scope rather than with it: absent means the
 chain declares no contract, which is every workspace that has not opened the
@@ -3747,9 +3747,10 @@ takes the focus colour in place of the ring, so one edge draws. No `text-box`
 trim, ever: with `py-0` it clips descenders and underscores (`input.test.tsx`).
 A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`, a
 `VariableInput` or a `SecretInput`: `chrome-floors.test.ts` fails the tag that
-does. `SecretInput` forwards `size`, `onKeyDown`, `autoFocus`, `ref` and `id`, which land on the inner input so a
-`<Label htmlFor>` names the field rather than the wrapper `div`. `size` is the variant, not the native
-numeric `size` attribute, which `Input` omits.
+does. `SecretInput` forwards `size`, `onKeyDown` and `ref` to the inner
+input, and puts `id` there too so a `<Label htmlFor>` names the field rather than
+the wrapper `div`. `size` is the variant, not the native numeric `size`
+attribute, which `Input` omits.
 
 ### `dialog-cancel-button`
 
