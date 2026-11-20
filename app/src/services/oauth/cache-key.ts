@@ -128,7 +128,7 @@ function grantIdentity(config: OAuth2Config): string {
  * URL's stray whitespace out before it keys the cache or dials (#3687), so the
  * two sides must agree on what that is. A no-break space stays.
  *
- * Note: `scope`/`audience`/`resource` are still intentionally omitted (matches
+ * Note: `scope`/`audience`/`resource` are intentionally omitted (matches
  * Postman's keying). Configs differing only in scope share a cached token; set a
  * distinct credentialsId to separate them. An audience sent as a row is read.
  */

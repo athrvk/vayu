@@ -519,7 +519,7 @@ std::string url_field (const nlohmann::json& config, std::string_view name) {
     return text.substr (begin, text.find_last_not_of (URL_WHITESPACE) - begin + 1);
 }
 
-// NOTE: `scope`/`audience`/`resource` are still intentionally omitted (matches
+// NOTE: `scope`/`audience`/`resource` are intentionally omitted (matches
 // Postman's keying). Configs differing only in scope share a cached token; set a
 // distinct credentialsId to separate them. The grant type is a segment of its
 // own, as the raw string, so one client's client_credentials token is never
