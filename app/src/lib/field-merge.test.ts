@@ -167,5 +167,85 @@ describe("mergeExternalWrite", () => {
 
 			expect(outcome.conflicts).toEqual({ rows: incoming.rows });
 		});
+
+		it("reads a table equal to what the save sent but for ids as its echo", () => {
+			const baseline: Table = { rows: [header("a", "1")] };
+			const current: Table = { rows: [header("a", "3")] };
+			const incoming: Table = { rows: [header("fresh", "2")] };
+
+			const outcome = mergeExternalWrite(
+				ROWS,
+				current,
+				baseline,
+				incoming,
+				new Set(["rows"]),
+				{
+					...OPTIONS,
+					sent: { rows: [header("a", "2")] },
+				}
+			);
+
+			expect(outcome.conflicts).toEqual({});
+			expect(outcome.nextBaseline.rows).toBe(incoming.rows);
+		});
+	});
+
+	describe("the echo of the caller's own save (#3664)", () => {
+		// Saved "ab", typed on to "abc" before the save's answer came back.
+		const baseline: Draft = { name: "a", tags: ["x"], count: 1 };
+		const current: Draft = { name: "abc", tags: ["x"], count: 1 };
+		const touched = new Set<keyof Draft>(["name"]);
+
+		it("moves the baseline to the echo and raises no conflict, leaving the draft ahead", () => {
+			const incoming: Draft = { name: "ab", tags: ["x"], count: 1 };
+
+			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
+				sent: { name: "ab" },
+			});
+
+			expect(outcome.changed).toBe(true);
+			expect(outcome.conflicts).toEqual({});
+			expect(outcome.patch).toEqual({});
+			expect(outcome.nextBaseline.name).toBe("ab");
+		});
+
+		it("still conflicts on a value the save did not send", () => {
+			const incoming: Draft = { name: "other", tags: ["x"], count: 1 };
+
+			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
+				sent: { name: "ab" },
+			});
+
+			expect(outcome.conflicts).toEqual({ name: "other" });
+			expect(outcome.nextBaseline.name).toBe("a");
+		});
+
+		it("still conflicts on a field the save did not send", () => {
+			const incoming: Draft = { name: "a", tags: ["y"], count: 1 };
+
+			const outcome = mergeExternalWrite(
+				FIELDS,
+				{ ...current, tags: ["typed"] },
+				baseline,
+				incoming,
+				new Set(["name", "tags"]),
+				{ sent: { name: "ab" } }
+			);
+
+			expect(outcome.conflicts).toEqual({ tags: ["y"] });
+		});
+
+		it("compares against the sent value with the field's own equality", () => {
+			const caseless = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+			const incoming: Draft = { name: "AB", tags: ["x"], count: 1 };
+
+			const outcome = mergeExternalWrite(FIELDS, current, baseline, incoming, touched, {
+				equals: { name: caseless },
+				sent: { name: "ab" },
+			});
+
+			expect(outcome.conflicts).toEqual({});
+			expect(outcome.nextBaseline.name).toBe("AB");
+		});
 	});
 });

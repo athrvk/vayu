@@ -3871,7 +3871,20 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
     being detected until it is resolved), and the incoming value is exposed on
     `fieldConflicts[field]`;
   - a touched field the fetch now agrees with (the save's own echo, or a
-    coincidence) resolves quietly - `baseline` moves, nothing is shown.
+    coincidence) resolves quietly - `baseline` moves, nothing is shown;
+  - a touched field the fetch reports at the value this builder's latest save
+    sent for it is that save's echo even when the draft has moved on (#3664):
+    a keystroke landing during the `PUT`'s round trip leaves the draft ahead of
+    the echo, and `handleSave` skips its bookkeeping for an unsettled save, so
+    without this rule the echo read as a conflict whose "Take theirs" would
+    revert the typing. `handleSave` records the sent values (`lastSent`)
+    before it awaits `onSave` and keeps them after, since the cache write can
+    land on either side of the resolve; the merge receives them as
+    `options.sent`, moves `baseline` to the echo, raises nothing, and leaves
+    the field touched, so the next save sends the newer draft. The rule is
+    keyed on the value, not on a save being in flight: an outside write in the
+    same window, to any other value, still conflicts. A reset clears
+    `lastSent`.
   `mergeExternalWrite` compares by JSON content, not by reference: `auth` and
   the other object fields are rebuilt into fresh objects on every fetch
   regardless of content, and `===` there would read every refetch as an
@@ -3953,6 +3966,8 @@ agree) and keeps whichever row is actually newer.
 Guarded by `RequestBuilderProvider.name-sync.test.tsx` (the name-only case that
 started this), `RequestBuilderProvider.external-write-merge.test.tsx` (the
 general per-field merge, the move, the delete, and the generation bump),
+`RequestBuilderProvider.save-generation.test.tsx` (the echo of a save an edit
+raced, landing before or after the save resolves),
 `field-merge.test.ts` (`mergeExternalWrite` itself), `save-request-name.test.ts`
 and `request-builder.script-clearing.test.tsx` (the partial payload), and
 `collections.update-request-race.test.ts` (the cache race).

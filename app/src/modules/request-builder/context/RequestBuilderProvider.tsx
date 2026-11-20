@@ -134,6 +134,20 @@ function withoutFields(
 	return next;
 }
 
+/** `request`'s values for exactly `fields`. */
+function pickFields(
+	request: RequestState,
+	fields: Iterable<MergeableRequestField>
+): Partial<RequestState> {
+	// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a plain
+	// union member here, not a generic correlated with `request[field]`, so
+	// TypeScript cannot verify the pair matches per assignment - the same reason
+	// `updateField` casts at its call site.
+	const picked: Record<string, unknown> = {};
+	for (const field of fields) picked[field] = request[field];
+	return picked as Partial<RequestState>;
+}
+
 interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
@@ -464,6 +478,14 @@ export default function RequestBuilderProvider({
 		() => new Set()
 	);
 	const [fieldConflicts, setFieldConflicts] = useState<RequestFieldConflicts>({});
+	/**
+	 * What the latest save sent, field by field - set before `onSave` is awaited
+	 * and kept after it returns, because the cache write that echoes it back can
+	 * land on either side of the resolve (#3664). The merge reads it to tell
+	 * that echo from someone else's write. State, not a ref: the merge reads it
+	 * during render.
+	 */
+	const [lastSent, setLastSent] = useState<Partial<RequestState>>({});
 	/**
 	 * The request this builder was showing has been deleted elsewhere, while
 	 * this tab still has it open (issue #1436). Sets `useSaveManager`'s
@@ -802,6 +824,7 @@ export default function RequestBuilderProvider({
 		setBaseline(seeded);
 		setTouchedFields(new Set());
 		setFieldConflicts({});
+		setLastSent({});
 		setRequestGone(false);
 		setLastProcessedInitialRequest(initialRequest);
 
@@ -870,6 +893,13 @@ export default function RequestBuilderProvider({
 	 * let the user resolve. `mergeExternalWrite` does the diffing; this block
 	 * only applies its outcome.
 	 *
+	 * Our own save's echo is not an outside write even when the user kept typing
+	 * through the round trip (#3664): the cache hands back what the save sent,
+	 * which now disagrees with both `baseline` and the draft. `lastSent` lets the
+	 * merge recognise it by value, move `baseline` to it and leave the field
+	 * touched, so the next save sends the newer draft. A value nobody here sent
+	 * still conflicts, in flight or not.
+	 *
 	 * Gated on `initialRequest`'s own identity, not on every render: it is a
 	 * content-comparing diff over every mergeable field, and `index.tsx` only
 	 * produces a new object when the underlying fetch actually changes.
@@ -888,7 +918,7 @@ export default function RequestBuilderProvider({
 			baseline,
 			incoming,
 			touchedFields,
-			MERGE_OPTIONS
+			{ ...MERGE_OPTIONS, sent: lastSent }
 		);
 		if (outcome.changed) {
 			if (Object.keys(outcome.patch).length > 0) {
@@ -953,13 +983,8 @@ export default function RequestBuilderProvider({
 		(saved: RequestState, fields: ReadonlySet<MergeableRequestField>) => {
 			if (fields.size === 0) return;
 			setTouchedFields((prev) => withoutFields(prev, fields));
-			// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a
-			// plain union member here, not a generic correlated with `saved[field]`,
-			// so TypeScript cannot verify the pair matches per assignment - the same
-			// reason `updateField` below casts at the call site instead.
-			const savedPatch: Record<string, unknown> = {};
-			for (const field of fields) savedPatch[field] = saved[field];
-			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
+			const savedPatch = pickFields(saved, fields);
+			setBaseline((prev) => ({ ...prev, ...savedPatch }));
 		},
 		[]
 	);
@@ -991,6 +1016,7 @@ export default function RequestBuilderProvider({
 			? withoutFields(changedFields, ["elements"])
 			: changedFields;
 		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
+		setLastSent(pickFields(request, sentFields));
 		try {
 			await onSave(request, sentFields);
 		} catch (error) {
@@ -1002,11 +1028,11 @@ export default function RequestBuilderProvider({
 		// An edit landed, or a foreign write arrived, while this save was in
 		// flight: either way `changeTokenRef` moved and the payload that went
 		// out is not the whole story any more, so the request is still dirty
-		// and `useSaveManager` has to keep its debounce running for it. No
-		// bookkeeping is safe in that case - not clearing the fields this save
-		// carried, since a fresh edit to one of them since the snapshot above
-		// would be forgotten, and not moving the baseline, since `request` no
-		// longer describes what was actually sent.
+		// and `useSaveManager` has to keep its debounce running for it. The
+		// fields this save carried stay touched, since a fresh edit to one of
+		// them since the snapshot above would otherwise be forgotten, and their
+		// baseline is left to the merge: the cache's echo of this payload moves
+		// it, recognised through `lastSent` (#3664).
 		const settled = changeTokenRef.current === savedGeneration;
 		if (settled) recordSaved(request, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
