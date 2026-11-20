@@ -7597,8 +7597,8 @@ describe("inline body bounds", () => {
 
 	test("run_request keeps the engine's bodyCapped distinct from its own cut", async () => {
 		// Two different facts about one body (issue #1157). `bodyTruncated` is
-		// this result showing less than the engine returned - the app's history
-		// still has the rest. `bodyCapped` is the engine never having read more,
+		// this result showing less than the engine returned - read_body pages the
+		// rest out of the stored trace. `bodyCapped` is the engine never having read more,
 		// which a re-send reproduces. An agent that saw only the first flag would
 		// keep re-sending a request that cannot return more.
 		const out = await runRequest(
@@ -21590,6 +21590,16 @@ describe("every structured read answers structuredContent its outputSchema accep
 			args: { requestId: "req_1" },
 			client: {
 				listRequestExamples: vi.fn().mockResolvedValue([{ id: "ex_1", body: "{}" }]),
+			},
+		},
+		{
+			tool: "read_body",
+			has: ["text", "offset", "nextOffset", "totalBytes", "encoding", "done"],
+			args: { runId: "run_1", resultId: 1 },
+			client: {
+				getRunResult: vi
+					.fn()
+					.mockResolvedValue({ id: 1, trace: { response: { body: "{}" } } }),
 			},
 		},
 		{

@@ -274,6 +274,13 @@
  * (the three land in the same window, and no row was measured apart from the
  * others) took the rows to 157,510 / 154,914 / 232,811 / 228,544 B, 110 to 144 B
  * over the caps; the four caps went to 157,600 / 155,000 / 232,900 / 228,600.
+ *
+ * #3704's `read_body` (a read tool: a description, twelve optional arguments
+ * and an exact output schema) costs 3,616 B with reveal off and 3,461 B with it
+ * on, and the cap sentences that now name it in `run_request`, `get_run_report`,
+ * `get_inbox_captures` and `list_request_examples` add 310 B more. The rows
+ * measure 161,436 / 158,685 / 236,737 / 232,315 B, and the four caps went to
+ * 161,700 / 159,000 / 237,000 / 232,600.
  */
 
 import { describe, it, expect } from "vitest";
@@ -293,10 +300,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 54, maxBytes: 157_600 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 54, maxBytes: 155_000 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 82, maxBytes: 232_900 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 82, maxBytes: 228_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 55, maxBytes: 161_700 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 55, maxBytes: 159_000 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 83, maxBytes: 237_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 83, maxBytes: 232_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

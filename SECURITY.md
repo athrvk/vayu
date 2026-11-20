@@ -278,9 +278,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   while the write keeps the request's scheme, host and port: a write that moves
   it carries none, so an agent cannot send a stored credential to a host of its
   choosing, and the answer names what was not carried; run output (reports,
-  samples, run rows, inbox captures, the run resources and prompts) reads
-  `<redacted>` in place of a secret variable's value and a credential header's
-  value; and `secret: false` over a stored secret is refused. Reveal in Settings
+  samples, run rows, inbox captures, the run resources and prompts, and the
+  stored bodies `read_body` pages, a saved example's included, masked whole
+  before a page is cut) reads `<redacted>` in place of a secret variable's
+  value and a credential header's value; and `secret: false` over a stored secret is refused. Reveal in Settings
   lifts all of it.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by

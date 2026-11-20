@@ -158,6 +158,10 @@ export const ID_KINDS = {
 	mockIssuer: { noun: "mock issuer", list: "list_mock_issuers" },
 	// A spec id comes from a collection's binding; there is no list route for it.
 	spec: { noun: "spec" },
+	// A run's result and an inbox's capture are rows of a parent read
+	// (get_run_report, get_inbox_captures), not of a `list_*` tool.
+	result: { noun: "result" },
+	capture: { noun: "capture" },
 } as const satisfies Record<string, IdKind>;
 
 /**
@@ -195,6 +199,7 @@ function namedId(
 ): string | undefined {
 	const given = (name: string): string | undefined => {
 		const value = args?.[name];
+		if (typeof value === "number") return String(value);
 		return typeof value === "string" && value !== "" ? value : undefined;
 	};
 	if (typeof idArg === "string") return given(idArg);

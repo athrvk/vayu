@@ -52,6 +52,7 @@ import {
 } from "./tools/kit.js";
 import { describeFailure, FAILURES, sdkErrorClass, type Failure } from "./tools/failure.js";
 import { READ_TOOLS } from "./tools/reads.tools.js";
+import { READ_BODY_TOOLS } from "./tools/read-body.tools.js";
 import { SAFETY_TOOLS } from "./tools/safety.tools.js";
 import { GRAPHQL_SCHEMA_TOOLS } from "./tools/graphql-schema.tools.js";
 import { CATALOGUE_TOOLS } from "./tools/catalogue.tools.js";
@@ -172,6 +173,7 @@ export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult
 
 export const TOOLS: McpTool[] = [
 	...READ_TOOLS,
+	...READ_BODY_TOOLS,
 	...SAFETY_TOOLS,
 	...GRAPHQL_SCHEMA_TOOLS,
 	...CATALOGUE_TOOLS,

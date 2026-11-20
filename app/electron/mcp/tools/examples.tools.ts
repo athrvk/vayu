@@ -60,7 +60,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
-			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.` +
+			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them, and read_body (\`requestId\`, \`exampleId\`) pages out either in full. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.` +
 			withheldPointer(config),
 		annotations: {
 			title: "List saved examples",

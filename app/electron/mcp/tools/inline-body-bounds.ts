@@ -39,20 +39,25 @@ import { isRecord } from "./kit.js";
 export const MAX_INLINE_BODY_BYTES = 32_768;
 
 /**
- * Cut a string to at most `maxBytes` UTF-8 bytes, reporting its true size.
- *
- * The cut steps back off a continuation byte rather than landing mid-character:
+ * The start of the UTF-8 character byte @p at of @p buf falls in: @p at itself
+ * unless it is a continuation byte. A cut there never lands mid-character, where
  * a split code point comes back as a replacement glyph, which an agent reads as
  * content the response never carried.
  */
+export function utf8CharStart(buf: Uint8Array, at: number): number {
+	let start = at;
+	while (start > 0 && (buf[start] & 0xc0) === 0x80) start--;
+	return start;
+}
+
+/** Cut a string to at most `maxBytes` UTF-8 bytes on a character boundary, reporting its true size. */
 export function boundText(
 	text: string,
 	maxBytes = MAX_INLINE_BODY_BYTES
 ): { text: string; truncated: boolean; bytes: number } {
 	const buf = Buffer.from(text, "utf8");
 	if (buf.byteLength <= maxBytes) return { text, truncated: false, bytes: buf.byteLength };
-	let end = maxBytes;
-	while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+	const end = utf8CharStart(buf, maxBytes);
 	return { text: buf.subarray(0, end).toString("utf8"), truncated: true, bytes: buf.byteLength };
 }
 
@@ -128,8 +133,8 @@ function boundWireMessage(node: Record<string, unknown>): Record<string, unknown
  *
  * The engine's `bodyCapped` (issue #1157) is carried through untouched, and the
  * two flags must stay distinguishable: `bodyTruncated` set here means this tool
- * result is showing less than the engine returned, which the app's own history
- * still has in full, while `bodyCapped` means the engine never read more than
+ * result is showing less than the engine returned, which `read_body` pages
+ * out of the stored trace, while `bodyCapped` means the engine never read more than
  * this - re-sending returns the same prefix, and only raising
  * `maxDesignResponseBodyBytes` changes it. Both can be true of one response.
  */

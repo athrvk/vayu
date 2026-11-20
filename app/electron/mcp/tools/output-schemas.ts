@@ -260,6 +260,26 @@ export const requestExamplesSchema = z.looseObject({
 	bodyBudgetBytes: optNum,
 });
 
+/**
+ * `read_body`: one page of a stored body. A shape this layer builds, so it is
+ * held exactly: `text` on a window, `find` / `matchCount` / `matches` on a
+ * search, the rest on both.
+ */
+export const bodyPageSchema = z.object({
+	text: optStr,
+	find: optStr,
+	matchCount: optNum,
+	matches: z
+		.array(z.object({ offset: z.number(), contextOffset: z.number(), context: z.string() }))
+		.optional(),
+	offset: z.number(),
+	nextOffset: z.number(),
+	totalBytes: z.number(),
+	encoding: z.enum(["utf8", "base64"]),
+	done: z.boolean(),
+	storedTruncated: optBool,
+});
+
 export const globalsSchema = z.looseObject({
 	id: optStr,
 	variables: z.unknown().optional(),
