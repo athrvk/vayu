@@ -1524,7 +1524,8 @@ collection run, a scenario load) take an optional `{allowAll?, allowedHosts?}`
 case-insensitive; `allowAll` passes any host that can be determined; an empty
 or still-templated host is refused). The engine judges the final URL after the
 pre-request script and the residual pass, and the host of an OAuth 2.0
-`accessTokenUrl` / `refreshTokenUrl` before the token cache is read or anything
+`accessTokenUrl` / `refreshTokenUrl` (trimmed of ASCII whitespace, as
+`acquire_token` reads them, #3687) before the token cache is read or anything
 is posted, so a refused target fetches no token. A load run's `monitor.url` is
 judged once, as the scrape will dial it (`wire_url`), when `POST /runs`
 validates the run (`refuse_monitor_endpoint`, #3121), because the scrape loop sends with no policy of its own; a refused

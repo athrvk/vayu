@@ -120,6 +120,24 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			computeOAuth2CacheKey(base({ grantType: "password", username: "u1", subject: "alice" }))
 		).toBe("https://idp/token\x1fcid\x1fdefault\x1fu1");
 	});
+
+	it("vector 9: ASCII whitespace around accessTokenUrl is trimmed, not inside it (#3687)", () => {
+		expect(
+			computeOAuth2CacheKey(
+				base({ accessTokenUrl: " \t\r\n\v\fhttps://idp/to ken\f\v\n\r\t " })
+			)
+		).toBe("https://idp/to ken\x1fcid\x1fdefault\x1f");
+		expect(computeOAuth2CacheKey(base({ accessTokenUrl: " \t\r\n\v\f" }))).toBe(
+			"\x1fcid\x1fdefault\x1f"
+		);
+	});
+
+	it("vector 10: a no-break space is not ASCII whitespace and stays", () => {
+		// String.prototype.trim would strip it and split the key from the engine's.
+		expect(computeOAuth2CacheKey(base({ accessTokenUrl: " https://idp/token " }))).toBe(
+			" https://idp/token \x1fcid\x1fdefault\x1f"
+		);
+	});
 });
 
 describe("computeOAuth2CacheKey - extra parameter rows", () => {

@@ -300,6 +300,57 @@ TEST (OAuthCacheKey, SharedVectors) {
     "cid\x1f"
     "default\x1f"
     "u1");
+    // Vector 9 (#3687): the six ASCII whitespace bytes around accessTokenUrl
+    // are trimmed from both ends and never from inside it, and a URL of
+    // nothing else keys as empty.
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
+               { "accessTokenUrl", " \t\r\n\v\fhttps://idp/to ken\f\v\n\r\t " },
+               { "clientId", "cid" } }),
+    "https://idp/to ken\x1f"
+    "cid\x1f"
+    "default\x1f");
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
+               { "accessTokenUrl", " \t\r\n\v\f" }, { "clientId", "cid" } }),
+    "\x1f"
+    "cid\x1f"
+    "default\x1f");
+    // Vector 10: a no-break space (U+00A0, UTF-8 C2 A0) is not ASCII
+    // whitespace and stays, so neither side trims it.
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
+               { "accessTokenUrl", "\xc2\xa0https://idp/token\xc2\xa0" },
+               { "clientId", "cid" } }),
+    "\xc2\xa0"
+    "https://idp/token\xc2\xa0\x1f"
+    "cid\x1f"
+    "default\x1f");
+}
+
+// A pasted URL's stray whitespace must neither reach the wire nor split the
+// cache key (#3687). Mutation-check: read `accessTokenUrl` with `field` in
+// `cache_key` and the key assertions fail; in `acquire_token` and the padded
+// acquisitions below fail.
+TEST (OAuthCacheKey, AStrayWhitespaceAroundTheTokenUrlDoesNotChangeTheKey) {
+    const json clean = { { "grantType", "client_credentials" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    for (const char* padding : { " ", "\t", "\r\n", "\n", "\v", "\f", "  \n" }) {
+        json trailing = clean;
+        trailing["accessTokenUrl"] = "https://idp/token" + std::string (padding);
+        json leading              = clean;
+        leading["accessTokenUrl"] = std::string (padding) + "https://idp/token";
+        EXPECT_EQ (oauth::cache_key (trailing), oauth::cache_key (clean)) << padding;
+        EXPECT_EQ (oauth::cache_key (leading), oauth::cache_key (clean)) << padding;
+    }
+}
+
+// Only a string member is read, and one of whitespace is as good as empty.
+TEST (OAuthUrlField, TrimsAsciiWhitespaceAndLeavesTheRest) {
+    const json config = { { "a", " \thttps://idp/x y\n" }, { "blank", " \r\n" },
+        { "number", 7 }, { "nbsp", "\xc2\xa0u\xc2\xa0" } };
+    EXPECT_EQ (oauth::url_field (config, "a"), "https://idp/x y");
+    EXPECT_EQ (oauth::url_field (config, "blank"), "");
+    EXPECT_EQ (oauth::url_field (config, "number"), "");
+    EXPECT_EQ (oauth::url_field (config, "absent"), "");
+    EXPECT_EQ (oauth::url_field (config, "nbsp"), "\xc2\xa0u\xc2\xa0");
 }
 
 // The cache key is handed to clients (`cacheKey`) and stored as the token
@@ -413,6 +464,54 @@ TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
     auto form = parse_form (idp.last_body ());
     EXPECT_EQ (form["grant_type"], "client_credentials");
     EXPECT_EQ (idp.last_content_type (), "application/x-www-form-urlencoded");
+}
+
+// A token URL pasted with a space or a newline around it reached the provider
+// as `/token%20` and failed with a 404 (#3687). Every padding fetches from
+// `/token` and keys as the trimmed config does, so a token fetched under one
+// spelling is a cache hit under the other. Mutation-check: read
+// `accessTokenUrl` with `field` in `acquire_token` and every padded fetch fails
+// validation (leading) or 404s (trailing).
+TEST_F (OAuthClientTest, ATokenUrlWithStrayWhitespaceAroundItIsFetchedAsTrimmed) {
+    MockTokenServer idp;
+    const json clean = cc_config (idp);
+    for (const char* padding : { " ", "\t", "\r\n", "\v\f" }) {
+        for (const bool leading : { false, true }) {
+            json padded              = clean;
+            padded["accessTokenUrl"] = leading ? padding + idp.url ("/token") :
+                                                 idp.url ("/token") + padding;
+            ASSERT_EQ (oauth::cache_key (padded), oauth::cache_key (clean)) << padding;
+            db_->delete_oauth_token (oauth::cache_key (clean));
+
+            const int before = idp.hits ();
+            auto result =
+            oauth::acquire_token (*db_, padded, false, std::nullopt, TOKEN_TIMEOUT_MS);
+            ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result))
+            << "padding " << padding << " leading " << leading;
+            EXPECT_EQ (idp.hits (), before + 1);
+            EXPECT_EQ (idp.last_target (), "/token");
+            EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).cache_key,
+            oauth::cache_key (clean));
+        }
+    }
+
+    // The row the padded config wrote answers the clean one.
+    const int hits_before = idp.hits ();
+    auto cached = oauth::acquire_token (*db_, clean, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (cached));
+    EXPECT_EQ (idp.hits (), hits_before);
+}
+
+// A URL of nothing but whitespace is no URL: the config is refused by name.
+TEST_F (OAuthClientTest, AWhitespaceOnlyTokenUrlIsRefusedAsInvalidConfig) {
+    MockTokenServer idp;
+    json config              = cc_config (idp);
+    config["accessTokenUrl"] = " \t\n";
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    const auto* error = std::get_if<oauth::TokenError> (&result);
+    ASSERT_NE (error, nullptr);
+    EXPECT_EQ (error->code, "oauth2_invalid_config");
+    EXPECT_EQ (idp.hits (), 0);
 }
 
 // The caller's `network_ms` is how a send tells the provider's wait from its own
@@ -740,6 +839,26 @@ TEST_F (OAuthClientTest, ExpiredTokenRefreshesAndKeepsOldRefreshToken) {
     const auto stored_token = db_->get_oauth_token (stale.cache_key);
     ASSERT_HAS_VALUE (stored_token);
     EXPECT_EQ (stored_token->refresh_token, "RT_OLD");
+}
+
+// A `refreshTokenUrl` is read as `accessTokenUrl` is (#3687): padded, it still
+// reaches `/refresh-norotate`, which only a refresh may answer `REFRESHED`; a
+// 404 there falls through to a fresh grant at `/token`, `AT<n>`. Mutation-check:
+// read `refreshTokenUrl` with `field` in `post_refresh` and this fails.
+TEST_F (OAuthClientTest, ARefreshTokenUrlWithStrayWhitespaceIsPostedAsTrimmed) {
+    MockTokenServer idp;
+    auto config               = cc_config (idp);
+    config["refreshTokenUrl"] = " " + idp.url ("/refresh-norotate") + "\n";
+
+    auto stale          = seeded_row (config, 7'200'000);
+    stale.expires_in    = 60;
+    stale.refresh_token = "RT_OLD";
+    db_->save_oauth_token (stale);
+
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "REFRESHED");
+    EXPECT_EQ (idp.last_target (), "/refresh-norotate");
 }
 
 TEST_F (OAuthClientTest, RejectedRefreshFallsBackToFreshGrant) {

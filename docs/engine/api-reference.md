@@ -7314,7 +7314,7 @@ post-request script. A load run and a stream record no hops.
 ### OAuth 2.0 token cache
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
-deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
+deterministic `cacheKey` = `trim(accessTokenUrl) \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant` (the `subject` for a `jwt_bearer` grant, so two
 subjects of one client hold two tokens; the key never reads `privateKey`,
 `privateKeyFile`, the claims or the algorithm), then one segment per extra parameter list that has
@@ -7327,7 +7327,10 @@ is written as `<key>=` with its value left out, because the key is returned as
 `cacheKey`, stored as the cache row's primary key and can reach a log; a
 rotated assertion therefore keeps the token it was cached under. Row order and
 `sendAs` do not change the key; a config with no such row keys exactly as it
-did before the lists existed. `scope`, `audience` and `resource` are not read, so a distinct
+did before the lists existed. The `accessTokenUrl` slot holds the URL with its
+surrounding ASCII whitespace trimmed (#3687, see
+[`POST /oauth2/token`](#post-oauth2token)); the app's key trims the same six
+characters and no others. `scope`, `audience` and `resource` are not read, so a distinct
 `credentialsId` (or an extra parameter row) is what separates two tokens that
 differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
@@ -7373,6 +7376,17 @@ Acquire (or return a cached) token for an `OAuth2Config`. Supports the
 `client_credentials`, `password`, `authorization_code` and `jwt_bearer` grants;
 the `authorization_code` grant requires an `interactive` code exchange (see
 below).
+
+The four URL members, `accessTokenUrl`, `refreshTokenUrl`, `authorizationUrl`
+and `callbackUrl`, are read with the ASCII whitespace (space, tab, CR, LF, VT,
+FF) trimmed from both ends (#3687, `oauth::url_field`): a URL pasted with a
+trailing space or newline is the URL it looks like, not a `404` for
+`/token%20`. The trim happens once, where the config is read, so the same text
+is validated, dialled, judged by a `targetPolicy` and keyed into the
+[`cacheKey`](#oauth-20-token-cache). A member of whitespace alone is empty. A
+byte above 127 is not whitespace here: a no-break space stays in the URL. The
+`callbackUrl` of `POST /oauth2/authorize/complete` is the redirect the browser
+landed on, not a config member, and is read as sent.
 
 The `jwt_bearer` grant (RFC 7523, #3632) posts `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`
 and an `assertion` the engine signs with the client's key. The config members

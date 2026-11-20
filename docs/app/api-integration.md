@@ -1397,7 +1397,7 @@ ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
 to the engine so the app and engine agree on cache slots without a round-trip. The key
 reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
-#2536) beside the token URL, client id, credentials id and the grant's identity (the
+#2536) beside the token URL (trimmed of ASCII whitespace as the engine reads it, #3687), client id, credentials id and the grant's identity (the
 password grant's username, the JWT bearer grant's subject), so
 two audiences sent as rows are two cached tokens; a row whose key names a credential
 (`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its

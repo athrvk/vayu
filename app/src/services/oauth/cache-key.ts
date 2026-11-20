@@ -39,6 +39,14 @@ const encoder = new TextEncoder();
 /** A config field as the engine reads it: a string, else "". */
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/**
+ * A URL config field as the engine reads it (`oauth::url_field`, #3687): a
+ * string with the six ASCII whitespace characters trimmed from both ends, else
+ * "". Not `String.prototype.trim`, which also strips a no-break space and every
+ * other Unicode space the engine leaves alone.
+ */
+const urlText = (v: unknown): string => text(v).replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, "");
+
 /** UTF-8 byte order, which is how the engine's `std::string` sort compares. */
 function compareBytes(a: string, b: string): number {
 	const x = encoder.encode(a);
@@ -96,7 +104,7 @@ function grantIdentity(config: OAuth2Config): string {
  * string, and the shared test vectors in cache-key.test.ts / oauth_client_test.cpp
  * pin the format:
  *
- *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
+ *   trim(accessTokenUrl) \x1f clientId \x1f (credentialsId|"default")
  *   \x1f (grantType === "password" ? username :
  *          grantType === "jwt_bearer" ? subject : "")
  *
@@ -112,6 +120,11 @@ function grantIdentity(config: OAuth2Config): string {
  * config with no row the engine would send keys exactly as it did before the
  * lists existed.
  *
+ * `trim` removes the ASCII whitespace (space, tab, CR, LF, VT, FF) from both
+ * ends and nothing else, as `oauth::url_field` does: the engine reads a pasted
+ * URL's stray whitespace out before it keys the cache or dials (#3687), so the
+ * two sides must agree on what that is. A no-break space stays.
+ *
  * Note: `scope`/`audience`/`resource` are intentionally omitted (matches
  * Postman's keying). Configs differing only in scope share a cached token; set a
  * distinct credentialsId to separate them. An audience sent as a row is read.
@@ -119,7 +132,7 @@ function grantIdentity(config: OAuth2Config): string {
 export function computeOAuth2CacheKey(config: OAuth2Config): string {
 	const identity = grantIdentity(config);
 	const base = [
-		text(config.accessTokenUrl),
+		urlText(config.accessTokenUrl),
 		text(config.clientId),
 		text(config.credentialsId) || "default",
 		identity,

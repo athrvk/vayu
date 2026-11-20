@@ -247,6 +247,28 @@ TEST (TargetPolicyTokenEndpoints, TheHostIsJudgedAsTheTokenRequestWillDialIt) {
     json{ { "accessTokenUrl", "https://evil.example.com\\@idp.example.com/token" } }));
 }
 
+// The client dials the trimmed URL (`url_field`), so that is the one judged
+// (#3687): a padded off-list URL is still refused, a padded listed one is
+// admitted, and a whitespace-only member posts nothing. Mutation-check: judge
+// the raw member in `refuse_token_endpoints` and the whitespace-only case is
+// refused as an unreadable host.
+TEST (TargetPolicyTokenEndpoints, TheHostIsJudgedAsTheTrimmedUrlThatWillBeDialled) {
+    const auto policy = allowing ({ "idp.example.com" });
+    for (const char* member : { "accessTokenUrl", "refreshTokenUrl" }) {
+        const auto refused = refuse_token_endpoints (
+        policy, json{ { member, " https://evil.example.com/token\n" } });
+        ASSERT_HAS_VALUE (refused) << member;
+        EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE) << member;
+        EXPECT_NE (refused->message.find ("\"evil.example.com\""), std::string::npos)
+        << refused->message;
+
+        EXPECT_FALSE (refuse_token_endpoints (
+        policy, json{ { member, "\thttps://idp.example.com/token " } }))
+        << member;
+        EXPECT_FALSE (refuse_token_endpoints (policy, json{ { member, " \r\n" } })) << member;
+    }
+}
+
 TEST (TargetPolicyMonitorEndpoint, TheScrapedHostIsJudgedAndNamedAsTheMonitorUrl) {
     const auto policy = allowing ({ "api.example.com", "metrics.example.com" });
     EXPECT_FALSE (refuse_monitor_endpoint (
