@@ -270,8 +270,10 @@ counts it. The filters are
 evaluated in the main process: a change restarts the tail and reads again,
 replacing what the table held.
 
-The tab holds at most 10,000 lines or 16 MiB, whichever comes first. Following
-drops the oldest. **Search older** pages back through the files, says how far
+The tab holds at most 10,000 lines or 16 MiB, whichever comes first, and
+mounts at most 600 of them at a time, whatever it holds: the rows you are
+reading stay put while lines arrive below, and those mount as you scroll to
+them. Following drops the oldest. **Search older** pages back through the files, says how far
 it has looked ("Searched back to ..."), turns Follow off and drops the newest;
 having dropped any, the tab stops appending the tail (it would sit after a
 gap), and Follow reads the newest lines again. A jump is detached the same

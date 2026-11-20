@@ -16,26 +16,26 @@
  * jump, "Search newer" below the last row pages towards them, and the page that
  * reaches them attaches the tail, so reaching the end follows again.
  *
- * **The window is the newest lines.** `useGrowingWindow` is the app's one list
- * window for rows that are variable-height (an opened row is a block of JSON),
- * and its sentinel sits above the first rendered row, so scrolling up renders
- * the next older slice and the rest stay unmounted. `content-visibility` on each
- * row (`skip-offscreen`) skips layout for what is off screen. Lines added below
- * while the reader is not following widen the window by as many
- * (`useRowsAddedBelow`), so the rows they were reading stay mounted.
+ * **The window is bounded and has two ends** (`useLogWindow`, #3670): at most a
+ * few hundred rows are mounted, whatever the store holds. While following they
+ * are the newest; otherwise the window stays on the reader's rows, a sentinel
+ * above the first and below the last mounts the next step as either end scrolls
+ * into view, and lines added below (a tail batch, a page newer) wait past the
+ * lower end until the reader reaches them. Reaching the end of the window with
+ * rows still below it is not reaching the end, so it does not follow.
  */
 
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button, Eyebrow } from "@/components/ui";
-import { GROWING_WINDOW_STEP, useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { cn } from "@/lib/utils";
 import type { LogEntry } from "@/types/electron";
 import { LOG_COLUMNS } from "./log-columns";
 import { LogRow } from "./LogRow";
 import { entryKey } from "./log-entry";
 import { useLogsStore } from "./logs-store";
+import { useLogWindow } from "./useLogWindow";
 
 /** How far from the end still counts as at the end: a fractional scroll position never lands exactly. */
 const END_TOLERANCE_PX = 8;
@@ -150,27 +150,6 @@ function NewerBar() {
 	);
 }
 
-/**
- * How many rows were added below the window while the reader was not
- * following: a page newer, or a tail batch while scrolled up. The window counts
- * from the newest line, so without these a page of 1,000 below would leave only
- * its own rows mounted and move the reader's out from under them. Counted from
- * where the previous newest line now sits, and reset with the list.
- */
-function useRowsAddedBelow(records: LogEntry[], follow: boolean, generation: number): number {
-	const last: LogEntry | undefined = records[records.length - 1];
-	const [seen, setSeen] = useState({ generation, last, added: 0 });
-	if (seen.generation === generation && seen.last === last) return seen.added;
-	let added = 0;
-	if (seen.generation === generation) {
-		const at = follow || seen.last === undefined ? -1 : records.lastIndexOf(seen.last);
-		added = seen.added + (at === -1 ? 0 : records.length - 1 - at);
-	}
-	// Adjusted during render, as `useGrowingWindow` resets its own window.
-	setSeen({ generation, last, added });
-	return added;
-}
-
 function LoadError() {
 	const error = useLogsStore((s) => s.error);
 	const reload = useLogsStore((s) => s.reload);
@@ -194,12 +173,11 @@ export function LogList() {
 	const setFollow = useLogsStore((s) => s.setFollow);
 	const scroller = useRef<HTMLDivElement>(null);
 	const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
-	const { visible, sentinelRef } = useGrowingWindow(
-		records.length,
-		GROWING_WINDOW_STEP,
+	const { shown, hasAbove, hasBelow, topSentinelRef, bottomSentinelRef } = useLogWindow(
+		records,
+		follow,
 		generation
 	);
-	const addedBelow = useRowsAddedBelow(records, follow, generation);
 
 	// After the list changes and while following: the newest line is in view.
 	useLayoutEffect(() => {
@@ -213,7 +191,7 @@ export function LogList() {
 		const atEnd =
 			element.scrollHeight - element.scrollTop - element.clientHeight <= END_TOLERANCE_PX;
 		if (follow && !atEnd) setFollow(false);
-		else if (!follow && atEnd && !detached) setFollow(true);
+		else if (!follow && atEnd && !detached && !hasBelow) setFollow(true);
 	};
 
 	const toggle = useCallback((entry: LogEntry) => {
@@ -225,8 +203,6 @@ export function LogList() {
 		});
 	}, []);
 
-	const shown = records.slice(-(visible + addedBelow));
-
 	return (
 		<div
 			ref={scroller}
@@ -236,7 +212,7 @@ export function LogList() {
 			<ColumnHeader />
 			<LoadError />
 			<OlderBar />
-			{shown.length < records.length && <div ref={sentinelRef} aria-hidden="true" />}
+			{hasAbove && <div ref={topSentinelRef} aria-hidden="true" />}
 			{records.length === 0 ? (
 				<EmptyState
 					variant="inline"
@@ -255,6 +231,7 @@ export function LogList() {
 					))}
 				</ul>
 			)}
+			{hasBelow && <div ref={bottomSentinelRef} aria-hidden="true" />}
 			<NewerBar />
 		</div>
 	);

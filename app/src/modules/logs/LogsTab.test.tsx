@@ -15,11 +15,13 @@
  * Mutation checks (revert, confirm red, restore): drop `stop()` from the mount
  * effect's cleanup and the unmount case reds; drop the `setControls` call in
  * `Filters`' debounce and the `cat:oauth` case reds; drop the `trimToBound` in
- * `logs-store.ts` and the bound cases in `logs-store.test.ts` red; drop
- * `addedBelow` from the window in `LogList.tsx` and the Search newer window case
- * unmounts the reader's rows; export with `entryLine` in `LogsToolbar.tsx` and
- * the cut record case writes a line that is not JSON; set `more` false after a
- * trim in `logs-store.ts` and the case past the bound offers no Search older.
+ * `logs-store.ts` and the bound cases in `logs-store.test.ts` red; widen the
+ * window in `useLogWindow.ts` by every line appended below it, unbounded, and
+ * the tail and Search newer window cases mount past the cap; drop `!hasBelow`
+ * from `LogList.tsx`'s scroll handler and the tail window case follows from the
+ * end of the window; export with `entryLine` in `LogsToolbar.tsx` and the cut
+ * record case writes a line that is not JSON; set `more` false after a trim in
+ * `logs-store.ts` and the case past the bound offers no Search older.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +33,8 @@ import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
 import { LOG_MAX_BYTES, useLogsStore } from "./logs-store";
+import { stubSentinelObserver } from "./sentinel-observer.testkit";
+import { LOG_WINDOW_MAX_ROWS, LOG_WINDOW_STEP } from "./useLogWindow";
 
 const config = vi.hoisted(() => ({ logLevel: "info" as string | undefined }));
 
@@ -96,6 +100,26 @@ async function openTab(records: LogEntry[] = [request, unparsed], more = false) 
 	await waitFor(() => expect(useLogsStore.getState().status).toBe("ready"));
 	await act(async () => undefined);
 	return view;
+}
+
+/** Lines @p from to @p to, exclusive, as `logRecord` numbers them. */
+const lines = (from: number, to: number) =>
+	Array.from({ length: to - from }, (_, n) => logRecord(from + n));
+
+/** How many rows the list has mounted. */
+const mountedRows = () => screen.getByRole("list").querySelectorAll(":scope > li").length;
+
+/** The list's scroller, laid out as a 1000px list in a 200px box scrolled to @p top. */
+function scrollTo(top: number) {
+	const scroller = screen.getByRole("list").parentElement as HTMLElement;
+	Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1000 });
+	Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 200 });
+	Object.defineProperty(scroller, "scrollTop", {
+		configurable: true,
+		writable: true,
+		value: top,
+	});
+	fireEvent.scroll(scroller);
 }
 
 const toastTexts = () => useToastStore.getState().toasts.map((t) => `${t.variant}:${t.message}`);
@@ -253,19 +277,6 @@ describe("the raw line", () => {
 });
 
 describe("follow", () => {
-	/** The list's scroller, laid out as a 1000px list in a 200px box scrolled to @p top. */
-	function scrollTo(top: number) {
-		const scroller = screen.getByRole("list").parentElement as HTMLElement;
-		Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1000 });
-		Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 200 });
-		Object.defineProperty(scroller, "scrollTop", {
-			configurable: true,
-			writable: true,
-			value: top,
-		});
-		fireEvent.scroll(scroller);
-	}
-
 	const follow = () => screen.getByRole("switch", { name: "Follow" });
 
 	it("is on by default", async () => {
@@ -480,40 +491,35 @@ describe("jump to time", () => {
 		});
 	});
 
-	it("keeps the rows the reader had mounted when Search newer adds a page below them", async () => {
-		// An observer that never fires: the window stays at its first 200 rows.
-		vi.stubGlobal(
-			"IntersectionObserver",
-			class {
-				observe() {}
-				disconnect() {}
-			}
-		);
+	it("keeps the rows the reader had mounted, and no more than the cap, as Search newer adds pages below them", async () => {
+		stubSentinelObserver();
 		await openTab();
 		bridge.answerReads({
-			around: {
-				records: Array.from({ length: 201 }, (_, n) => logRecord(n)),
-				more: true,
-				newer: logCursor(1),
-			},
+			around: { records: lines(0, LOG_WINDOW_STEP + 1), more: true, newer: logCursor(1) },
 			after: { records: [], more: true, cursor: logCursor(2) },
 		});
-		await act(() => useLogsStore.getState().jumpTo(logRecord(200).ts));
+		await act(() => useLogsStore.getState().jumpTo(logRecord(LOG_WINDOW_STEP).ts));
 		expect(screen.queryByText("line 0")).toBeNull();
 		expect(screen.getByText("line 1")).toBeInTheDocument();
-		bridge.answerReads({
-			after: {
-				records: [201, 202, 203, 204, 205].map((n) => logRecord(n)),
-				more: true,
-				cursor: logCursor(3),
-			},
-		});
 
-		fireEvent.click(screen.getByRole("button", { name: "Search newer" }));
+		// Two pages below the window that together pass the cap.
+		for (const [from, to] of [
+			[201, 402],
+			[402, 603],
+		]) {
+			bridge.answerReads({
+				after: { records: lines(from, to), more: true, cursor: logCursor(to) },
+			});
+			fireEvent.click(screen.getByRole("button", { name: "Search newer" }));
+			await waitFor(() => expect(useLogsStore.getState().records).toHaveLength(to));
+			await screen.findByRole("button", { name: "Search newer" });
+		}
 
-		expect(await screen.findByText("line 205")).toBeInTheDocument();
+		expect(mountedRows()).toBeLessThanOrEqual(LOG_WINDOW_MAX_ROWS);
 		expect(screen.getByText("line 1")).toBeInTheDocument();
 		expect(screen.queryByText("line 0")).toBeNull();
+		// The pages wait below the window until the reader scrolls to them.
+		expect(screen.queryByText("line 201")).toBeNull();
 	});
 
 	it("pages newer from Search newer, and follows the tail again once it reaches the end", async () => {
@@ -531,6 +537,51 @@ describe("jump to time", () => {
 		expect(screen.queryByRole("button", { name: "Search newer" })).toBeNull();
 		act(() => bridge.push([logRecord(43)]));
 		expect(await screen.findByText("line 43")).toBeInTheDocument();
+	});
+});
+
+describe("the window", () => {
+	it("mounts no more than the cap as the tail appends below a reader who is not following", async () => {
+		stubSentinelObserver();
+		await openTab(lines(0, LOG_WINDOW_STEP));
+		act(() => useLogsStore.getState().setFollow(false));
+
+		// Two batches that together pass the cap.
+		act(() => bridge.push(lines(200, 400)));
+		act(() => bridge.push(lines(400, 601)));
+
+		expect(useLogsStore.getState().records).toHaveLength(601);
+		expect(mountedRows()).toBeLessThanOrEqual(LOG_WINDOW_MAX_ROWS);
+		expect(screen.getByText("line 0")).toBeInTheDocument();
+		expect(screen.queryByText("line 600")).toBeNull();
+		// The end of the window is not the newest line, so reaching it does not follow.
+		scrollTo(800);
+		expect(screen.getByRole("switch", { name: "Follow" })).not.toBeChecked();
+	});
+
+	it("grows older at the top sentinel, gives up the newest past the cap, and mounts them again at the bottom one", async () => {
+		const observer = stubSentinelObserver();
+		await openTab(lines(0, LOG_WINDOW_MAX_ROWS + LOG_WINDOW_STEP + 1));
+		act(() => useLogsStore.getState().setFollow(false));
+		const list = screen.getByRole("list");
+		expect(screen.getByText("line 601")).toBeInTheDocument();
+		expect(screen.queryByText("line 600")).toBeNull();
+
+		for (let step = 0; step < 3; step++) {
+			act(() => observer.reach(list.previousElementSibling as Element));
+		}
+
+		expect(mountedRows()).toBe(LOG_WINDOW_MAX_ROWS);
+		expect(screen.getByText("line 1")).toBeInTheDocument();
+		expect(screen.getByText("line 600")).toBeInTheDocument();
+		expect(screen.queryByText("line 601")).toBeNull();
+
+		act(() => observer.reach(list.nextElementSibling as Element));
+
+		expect(mountedRows()).toBe(LOG_WINDOW_MAX_ROWS);
+		expect(screen.getByText("line 800")).toBeInTheDocument();
+		expect(screen.getByText("line 201")).toBeInTheDocument();
+		expect(screen.queryByText("line 200")).toBeNull();
 	});
 });
 
