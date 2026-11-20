@@ -1340,9 +1340,8 @@ the post-response script's, placed by the response pane's own `consoleRows`. A
 script that threw adds its `preScriptError` / `postScriptError` as an `error`
 line after its phase's rows (#3673), so the Level filter and the text search
 find it; the engine's message already names an inherited level, so the row
-carries the source and no scope. A
-History replay maps its answer through the same funnel but appends nothing: it
-is not a session send. `scenario-run-service.ts` appends one `step` row per
+carries the source and no scope. A History replay maps its answer through the
+same funnel but appends nothing: it is not a session send. `scenario-run-service.ts` appends one `step` row per
 `step` frame on the batcher's commit; the frame is constant-size by rule, so a
 step's exchange, lines and script requests are read from its stored row by
 `runId`, `iteration` and `stepIndex` when it is expanded.
