@@ -30,7 +30,9 @@
  * there.
  *
  * **Jump to time** is detached too, and pages newer from the time it landed
- * on: one page at once, then one per "Search newer". Paging newer drops the
+ * on: one page at once, then one per "Search newer". It records the time as
+ * `jumpTarget`, which every other replacement of the list clears, so the list
+ * can open on it. Paging newer drops the
  * oldest, as following does; the page that reaches the end of the logs
  * attaches the tail again, which it restarted before reading so that nothing
  * written in between is lost.
@@ -298,6 +300,12 @@ interface LogsData {
 	knownCategories: string[];
 	/** Changes whenever the list is replaced, so a window over it starts again. */
 	generation: number;
+	/**
+	 * The instant the list was last replaced by a jump to, an ISO string; null for
+	 * every other replacement. The list opens its window on it and marks it
+	 * (`useLogWindow`, `LogList`).
+	 */
+	jumpTarget: string | null;
 }
 
 interface LogsActions {
@@ -331,6 +339,7 @@ const NOTHING_LOADED = {
 	detached: false,
 	newerCursor: null,
 	newerScannedTo: null,
+	jumpTarget: null,
 	status: "idle",
 	loadingOlder: false,
 	loadingNewer: false,
@@ -362,7 +371,8 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 	function show(
 		result: LogReadResult,
 		late: LogEntry[],
-		attach: Pick<LogsData, "follow" | "detached"> & Partial<Pick<LogsData, "newerCursor">>
+		attach: Pick<LogsData, "follow" | "detached"> &
+			Partial<Pick<LogsData, "newerCursor" | "jumpTarget">>
 	): void {
 		const kept = appendNewest(
 			{ records: result.records, bytes: totalBytes(result.records), cursor: result.cursor },
@@ -429,7 +439,12 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			const result = await logs.read({ around: ts, filter, limit: LOG_PAGE_SIZE });
 			if (id !== loadId) return;
 			newer = result.newer;
-			show(result, [], { follow: false, detached: true, newerCursor: newer ?? null });
+			show(result, [], {
+				follow: false,
+				detached: true,
+				newerCursor: newer ?? null,
+				jumpTarget: ts,
+			});
 		} catch (error) {
 			if (id === loadId) fail(error);
 		}

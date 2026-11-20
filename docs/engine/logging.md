@@ -253,7 +253,8 @@ search box (free text, or `field:value`, where a quoted value is exact and a
 bare one a substring: `cat:oauth`, `status:"500"`), **Follow** (on by default,
 off when you scroll up, on again by its switch or by scrolling to the end), a
 **Jump to time** control (the platform's own date-time input, landing on the
-lines either side of it), **Export** (the lines held in the table, as JSON
+lines either side of it, with a rule between them naming the time, scrolled to
+the middle of the table), **Export** (the lines held in the table, as JSON
 lines, through the save dialog, with the count it wrote) and the logs folder
 button; a line's **Copy line** is in its opened row. Copy and Export write the
 line as the file holds it, not the record re-serialised (`1.0` stays `1.0`):

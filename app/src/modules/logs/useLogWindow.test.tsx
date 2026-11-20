@@ -16,7 +16,12 @@
  * row the store has dropped and the trim case reds; drop `droppedNewest` and the newest-end case lands on the oldest rows; drop the cap from
  * `grownUp` or `grownDown` and its sentinel case mounts past
  * `LOG_WINDOW_MAX_ROWS`; drop the `beforeGrowUp` call and the "tells the caller" case reds; re-anchor only on a new generation and the Follow off,
- * trim and bottom sentinel cases lose the reader's rows.
+ * trim and bottom sentinel cases lose the reader's rows. For a jump (#3674):
+ * drop `boundsAroundTarget` from `boundsOf` and the cases that open the window
+ * on the time land on the newest rows; hold the first row while the time has no
+ * line (`awaitsTarget`) and the case where the page newer arrives stays on the
+ * old rows; clamp the start to `records.length - count` no longer and the case
+ * near the newest rows mounts a short window.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,11 +45,20 @@ interface Props {
 	records: LogEntry[];
 	follow: boolean;
 	generation: number;
+	/** The instant a jump landed on; none when the list was not replaced by one. */
+	jumpTarget?: string | null;
 }
 
 function renderWindow(initial: Props, beforeGrowUp?: () => void) {
 	return renderHook(
-		(props: Props) => useLogWindow(props.records, props.follow, props.generation, beforeGrowUp),
+		(props: Props) =>
+			useLogWindow(
+				props.records,
+				props.follow,
+				props.generation,
+				beforeGrowUp,
+				props.jumpTarget ?? null
+			),
 		{
 			initialProps: initial,
 		}
@@ -209,5 +223,169 @@ describe("useLogWindow", () => {
 		expect(view.result.current.shown).toHaveLength(1_000);
 		expect(view.result.current.hasAbove).toBe(false);
 		expect(view.result.current.hasBelow).toBe(false);
+	});
+
+	describe("after a jump", () => {
+		const at = (n: number) => logRecord(n).ts;
+
+		it("opens on a few rows before the time, though more than a step is newer than it", () => {
+			const records = lines(0, 1_000);
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(500),
+			});
+
+			expect(span(view.result.current.shown)).toEqual(["line 450", "line 649"]);
+			expect(view.result.current.jumpAt).toBe(50);
+			expect(view.result.current.hasAbove).toBe(true);
+			expect(view.result.current.hasBelow).toBe(true);
+		});
+
+		it("keeps the window full when the time is among the newest rows", () => {
+			const records = lines(0, 1_000);
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(990),
+			});
+
+			expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+			expect(view.result.current.jumpAt).toBe(190);
+		});
+
+		it("opens at the oldest row when fewer rows than the context precede the time", () => {
+			const records = lines(0, 1_000);
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(10),
+			});
+
+			expect(span(view.result.current.shown)).toEqual(["line 0", "line 199"]);
+			expect(view.result.current.jumpAt).toBe(10);
+		});
+
+		it("is the first row at or after a time that falls between two lines, and at a line's own", () => {
+			const records = lines(0, 300);
+			const between = new Date(Date.parse(at(150)) - 500).toISOString();
+
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: between,
+			});
+			const exact = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(150),
+			});
+
+			expect(view.result.current.jumpAt).toBe(exact.result.current.jumpAt);
+			const shown = view.result.current.shown;
+			expect(shown[view.result.current.jumpAt ?? -1]).toBe(records[150]);
+		});
+
+		it("skips a line with no time, which is neither before nor after it", () => {
+			const unparsed: LogEntry = { unparsed: true, raw: "SEGFAULT" };
+			const records = [...lines(0, 5), unparsed, ...lines(5, 10)];
+			const view = renderWindow({ records, follow: false, generation: 1, jumpTarget: at(5) });
+
+			// The marker sits before line 5, the first dated line at the time, so the unparsed line is above it.
+			expect(view.result.current.jumpAt).toBe(6);
+			expect(view.result.current.shown[6]).toBe(records[6]);
+		});
+
+		it("sits at the end of the newest rows while no line is at or after the time, then moves onto it", () => {
+			const records = lines(0, 1_000);
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(1_000),
+			});
+			expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+			expect(view.result.current.jumpAt).toBe(LOG_WINDOW_STEP);
+
+			// The page newer lands below.
+			view.rerender({
+				records: [...records, ...lines(1_000, 1_100)],
+				follow: false,
+				generation: 1,
+				jumpTarget: at(1_000),
+			});
+
+			expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
+			expect(view.result.current.jumpAt).toBe(100);
+		});
+
+		it("stays on those rows as lines are appended below once it has opened", () => {
+			const records = lines(0, 1_100);
+			const props = { follow: false, generation: 1, jumpTarget: at(1_000) };
+			const view = renderWindow({ records, ...props });
+			expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
+
+			view.rerender({ records: [...records, ...lines(1_100, 1_300)], ...props });
+
+			expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
+		});
+
+		it("follows the newest rows, with no rule off the window, when Follow is on", () => {
+			const records = lines(0, 1_000);
+			const view = renderWindow({
+				records,
+				follow: true,
+				generation: 1,
+				jumpTarget: at(500),
+			});
+
+			expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+			expect(view.result.current.jumpAt).toBeNull();
+		});
+
+		it("has no place for the rule once the cap gives up the rows beside the time", () => {
+			const records = lines(0, 2_000);
+			const view = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(500),
+			});
+			const { bottom } = attach(view);
+
+			for (let step = 0; step < 3; step++) act(() => observer.reach(bottom));
+
+			expect(span(view.result.current.shown)).toEqual(["line 650", "line 1249"]);
+			expect(view.result.current.jumpAt).toBeNull();
+		});
+
+		it("returns no place without a jump, and a target no row follows is at the end where there is no observer", () => {
+			vi.unstubAllGlobals();
+			vi.stubGlobal("IntersectionObserver", undefined);
+			const records = lines(0, 300);
+
+			const plain = renderWindow({ records, follow: false, generation: 1 });
+			const jumped = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(100),
+			});
+			const past = renderWindow({
+				records,
+				follow: false,
+				generation: 1,
+				jumpTarget: at(400),
+			});
+
+			expect(plain.result.current.jumpAt).toBeNull();
+			expect(jumped.result.current.jumpAt).toBe(100);
+			expect(past.result.current.jumpAt).toBe(300);
+		});
 	});
 });

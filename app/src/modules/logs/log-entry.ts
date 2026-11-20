@@ -19,6 +19,16 @@ export function isUnparsedEntry(entry: LogEntry): entry is UnparsedLogLine {
 }
 
 /**
+ * The index of the first record of @p records timed at or after @p ts, or
+ * `records.length` when none is. `ts` is ISO UTC, so strings order; a line with
+ * no time (an unparsed one) is never it.
+ */
+export function firstAtOrAfter(records: readonly LogEntry[], ts: string): number {
+	const at = records.findIndex((entry) => !isUnparsedEntry(entry) && entry.ts >= ts);
+	return at === -1 ? records.length : at;
+}
+
+/**
  * Where a record carries the line it was read from (`RAW_LINE_KEY` in
  * `electron/log-reader.ts`, which this file cannot import;
  * `electron/log-raw-line.conformance.test.ts` holds the spellings equal). It is

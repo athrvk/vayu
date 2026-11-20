@@ -2300,7 +2300,8 @@ UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the
   loadingNewer: boolean,
   error: string | null,
   knownCategories: string[],      // the component filter's options
-  generation: number              // bumps when the list is replaced
+  generation: number,             // bumps when the list is replaced
+  jumpTarget: string | null       // the ISO time a jump landed on; null for any other replacement
 }
 ```
 
