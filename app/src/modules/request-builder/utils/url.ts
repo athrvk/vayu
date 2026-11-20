@@ -11,6 +11,7 @@
 
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
+import { isBlankRow } from "@/components/shared/KeyValueEditor/key-value";
 import {
 	isPathRow,
 	maskTokens,
@@ -229,8 +230,12 @@ export function paramsFromUrl(url: string): KeyValueItem[] {
  * rebuild (`buildUrlWithParams`, row order) from reordering the URL on the
  * next table edit (issue #3426).
  *
- * A disabled row has no place in the URL, so it keeps its slot after the
- * enabled row that preceded it (see `disabledRowsByAnchor`).
+ * A row the URL cannot carry keeps its slot after the enabled row that
+ * preceded it (see `unwrittenRowsByAnchor`): a disabled row, and a row with a
+ * value and no key yet, which `buildUrlWithParams` never writes either. Read
+ * as "dropped from the URL", a half-typed row was deleted by the next URL
+ * keystroke, and by every save's echo (#3663). The blank spare row is the
+ * table's, not the URL's, and is left out.
  *
  * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
  * `syncPathRows`, which reads `previousUrl` to tell an edit of those segments
@@ -244,9 +249,9 @@ export function mergeParamsFromUrl(
 	const fromUrl = parseQueryParams(url);
 	const queryRows = queryRowsOf(existing);
 	const claimedBy = claimUrlPairs(queryRows, fromUrl);
-	const disabledAfter = disabledRowsByAnchor(queryRows, new Set(claimedBy));
+	const keptAfter = unwrittenRowsByAnchor(queryRows, new Set(claimedBy));
 
-	const merged: KeyValueItem[] = [...(disabledAfter.get(null) ?? [])];
+	const merged: KeyValueItem[] = [...(keptAfter.get(null) ?? [])];
 	fromUrl.forEach((pair, i) => {
 		const row = claimedBy[i];
 		if (!row) {
@@ -257,7 +262,7 @@ export function mergeParamsFromUrl(
 		const { value, valueless } = pair;
 		merged.push(
 			{ ...rest, value, ...(valueless && { valueless }) },
-			...(disabledAfter.get(row) ?? [])
+			...(keptAfter.get(row) ?? [])
 		);
 	});
 
@@ -283,25 +288,35 @@ function claimUrlPairs(
 }
 
 /**
- * Each disabled row, grouped under the nearest enabled row before it that the
- * URL still carries (`null` when none, so it leads the list). An enabled row
- * the URL dropped cannot anchor anything, so what followed it falls back to the
- * row before it. Order within a group is the existing order.
+ * Each row the URL cannot carry (`isUnwrittenRow`), grouped under the nearest
+ * row before it that the URL still carries (`null` when none, so it leads the
+ * list). An enabled row the URL dropped cannot anchor anything, so what
+ * followed it falls back to the row before it. Order within a group is the
+ * existing order.
  */
-function disabledRowsByAnchor(
+function unwrittenRowsByAnchor(
 	rows: readonly KeyValueItem[],
 	surviving: ReadonlySet<KeyValueItem | undefined>
 ): Map<KeyValueItem | null, KeyValueItem[]> {
 	const groups = new Map<KeyValueItem | null, KeyValueItem[]>();
 	let anchor: KeyValueItem | null = null;
 	for (const row of rows) {
-		if (row.enabled) {
-			if (surviving.has(row)) anchor = row;
+		if (surviving.has(row)) {
+			anchor = row;
 			continue;
 		}
+		if (!isUnwrittenRow(row)) continue;
 		groups.set(anchor, [...(groups.get(anchor) ?? []), row]);
 	}
 	return groups;
+}
+
+/**
+ * A row `buildUrlWithParams` leaves out of the query (`queryRowsToWrite`), so
+ * the URL says nothing about it: disabled, or holding something with no key.
+ */
+function isUnwrittenRow(row: KeyValueItem): boolean {
+	return !row.enabled || (!row.key.trim() && !isBlankRow(row));
 }
 
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */
