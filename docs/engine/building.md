@@ -1613,13 +1613,32 @@ builds the tree, regenerates the compile database without the precompiled
 header, lints every non-vendor translation unit whole-file with
 `-header-filter` on the command line (and, as the pull-request gate does,
 `-Wno-unused-command-line-argument`, without which every MSVC unit fails on
-`/Zc:preprocessor` before a check runs), and reports through
+`/Zc:preprocessor` before a check runs, and the C++ standard from
+`scripts/tidy-msvc-std-args.sh`, see below), and reports through
 `.github/dedupe-tidy-findings.py` - deduplicated by (file, line, column,
 check), with the translation-unit count beside it so the denominator is on the
 record. It fails when the count is not zero, so a green run *is* the claim,
 and it uploads the log, the report and the unit list either way. Run it when
 `engine/.clang-tidy` changes, when a runner image moves its clang-tidy, or to
 re-establish the zero after a paydown.
+
+**On Windows the lint reads the C++ standard from the compile database, and a
+spelling clang-cl cannot read is a silent C++14 parse.** CMake 4.5 writes
+`-std:c++23` for MSVC 19.52.37029 and later, where it wrote `-std:c++latest`
+before. clang-cl 22 ignores `c++23` as an unused argument, so every unit parsed
+as C++14: `std::string_view` and `std::optional` were missing from the first
+header, and the findings after that (unused locals, member-init, narrowing)
+were the broken parse, not the code. `-Wno-unused-command-line-argument` hides
+the one diagnostic that says so, and the engine tests still pass, which is why
+the symptom is a red lint step beside a green test step.
+`scripts/tidy-msvc-std-args.sh` reads the standard out of the database and
+prints `--extra-arg=/clang:-std=<value>` when it is a `-std:c++NN` clang-cl
+does not map; both workflows pass it. A database that spells it `c++latest`,
+`c++23preview`, `c++20` or `c++17`, or in the GCC and Clang form, gets nothing,
+and two different or unrecognised values fail the step by name. It is deleted
+when the clang-tidy floor is an LLVM whose clang-cl maps `/std:c++23`
+(`main` does; 22.x and 23.x do not). `scripts/pre-push` has the same exposure
+for a Windows developer on that toolchain pair and is not changed here.
 
 **"Clean" means the whole tree, headers included - and a scan has to be asked
 for that** (#1013). `run-clang-tidy` reports nothing found in a header unless
