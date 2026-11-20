@@ -204,6 +204,29 @@ function useCachedDeferredNames(tabs: Tab[]): Map<string, readonly string[]> {
 	return names;
 }
 
+/*
+ * One resolver per (`resolveString`, collection scope). `sendsResolver` and the
+ * title cache key on the resolver's identity, so a closure built per render
+ * would reroll every dynamic variable in a title on each one.
+ */
+const scopedResolvers = new WeakMap<
+	(input: string, row?: undefined, collectionId?: string) => string,
+	Map<string | undefined, (text: string) => string>
+>();
+function scopedResolverFor(
+	resolveString: (input: string, row?: undefined, collectionId?: string) => string,
+	collectionId: string | undefined
+): (text: string) => string {
+	let byScope = scopedResolvers.get(resolveString);
+	if (!byScope) scopedResolvers.set(resolveString, (byScope = new Map()));
+	let resolver = byScope.get(collectionId);
+	if (!resolver) {
+		resolver = (text) => resolveString(text, undefined, collectionId);
+		byScope.set(collectionId, resolver);
+	}
+	return resolver;
+}
+
 export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	const requests = useQueries({
 		queries: tabs.map((t) => requestDetailOptions(t.type === "request" ? t.entityId : null)),
@@ -221,6 +244,8 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 		enabled: tabs.some((t) => t.type === "mock-server"),
 	});
 	const { resolveString } = useVariableResolver();
+	const scopedResolver = (collectionId: string | undefined) =>
+		scopedResolverFor(resolveString, collectionId);
 	/*
 	 * The row the open builder is bound to (issue #1074). One resolver serves the
 	 * whole list, so the row cannot be an option on it the way it is inside the
@@ -325,11 +350,15 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				};
 				const deferred = deferredNamesInSends(sends, deferredByTab.get(tab.id) ?? []);
 				const resolvedUrl = row
-					? resolveSendsUrl(sends, (text) => resolveString(text, row), deferred)
+					? resolveSendsUrl(
+							sends,
+							(text) => resolveString(text, row, request.collectionId ?? undefined),
+							deferred
+						)
 					: stableTitleUrl(
 							request.id ?? tab.entityId ?? "",
 							sendsCacheInput(sends, deferred),
-							sendsResolver(resolveString)
+							sendsResolver(scopedResolver(request.collectionId ?? undefined))
 						).url;
 				const name = requestTabTitle(request.name, resolvedUrl);
 				const chain = collectionNamePath(request.collectionId, collections);

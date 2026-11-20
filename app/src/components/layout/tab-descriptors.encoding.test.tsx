@@ -169,7 +169,7 @@ describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) =
 	it("does not cut at a # inside a {{token}}", () => {
 		openRequest({ url: "api.test/{{seg}}#frag" });
 		bind();
-		expect(titleOfRequestTab(request.id)).toBe("api.test/a?b");
+		expect(titleOfRequestTab(request.id)).toBe("api.test/a");
 	});
 
 	it("leaves an API key placed in the query out, which the Sends line shows", () => {
@@ -179,7 +179,7 @@ describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) =
 		});
 		bind();
 		const title = titleOfRequestTab(request.id);
-		expect(title).toBe("api.test/users?page=1");
+		expect(title).toBe("api.test/users");
 		expect(title).not.toContain("s3cret");
 		expect(resolveSendsUrl(request, resolveSeg)).toContain("api_key=s3cret");
 	});
@@ -191,7 +191,7 @@ describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) =
 		});
 		bind();
 		const title = titleOfRequestTab(request.id);
-		expect(title).toBe("api.test/users?page=1");
+		expect(title).toBe("api.test/users");
 		expect(title).not.toContain("tok=");
 		expect(resolveSendsUrl(request, resolveSeg)).toContain("&tok=");
 	});
@@ -204,7 +204,7 @@ describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) =
 		});
 		bind();
 		const title = titleOfRequestTab(request.id);
-		expect(title).toBe("api.test/graphql?page=1");
+		expect(title).toBe("api.test/graphql");
 		expect(title).not.toContain("query=");
 		expect(resolveSendsUrl(request, resolveSeg)).toBe(
 			"api.test/graphql?page=1&query=%7B%20me%20%7D"

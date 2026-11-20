@@ -19,8 +19,11 @@ export function pathLabel(url: string): string {
 		return safeDecode(new URL(url).pathname) || "/";
 	} catch {
 		// Strip scheme+host if present, otherwise show the raw string
-		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
-		return safeDecode(stripped) || safeDecode(url);
+		// A title is drawn, tooltipped and copied: the query and fragment never
+		// belong in a path label, whatever token the host is (#3686).
+		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "").replace(/[?#].*$/s, "");
+		const whole = url.replace(/[?#].*$/s, "");
+		return safeDecode(stripped) || safeDecode(whole);
 	}
 }
 
