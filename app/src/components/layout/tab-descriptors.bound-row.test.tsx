@@ -49,7 +49,16 @@ vi.mock("@/queries", () => ({
 		initialData: undefined,
 		enabled: false,
 	}),
-	useCollectionsQuery: () => ({ data: [] }),
+	useCollectionsQuery: () => ({
+		data: [
+			{
+				id: "col_a",
+				name: "Shop",
+				parentId: null,
+				variables: { baseUrl: { value: "https://shop.test", enabled: true } },
+			},
+		],
+	}),
 	useGlobalsQuery: () => ({ data: { variables: {} } }),
 	useEnvironmentsQuery: () => ({
 		data: [

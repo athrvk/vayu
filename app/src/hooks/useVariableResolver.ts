@@ -87,8 +87,10 @@ interface UseVariableResolverReturn {
 	 * requests at once and so cannot name one row for the whole hook - the tab
 	 * strip, which labels every open tab from a single resolver (issue #1074).
 	 * It answers for that call only, and defaults to the `boundRow` option.
+	 * `collectionId` likewise scopes that one call to a collection chain, over the
+	 * hook's own (issue #3686): a tab titled from its own collection's variables.
 	 */
-	resolveString: (input: string, row?: DataFileRow) => string;
+	resolveString: (input: string, row?: DataFileRow, collectionId?: string) => string;
 	/**
 	 * `resolveString` for a field of a known kind (issue #2639): with a row
 	 * bound, a cell is escaped or encoded for @p context as the send's bind
@@ -153,6 +155,101 @@ function cellsOf(row: DataFileRow): DataRowCells {
  */
 const PICKED_ROW_SUBJECT = "the picked row";
 
+/**
+ * Every definition of every name for one collection scope, lowest precedence
+ * first. Module-level so the hook's own scope and a per-call scope (the tab
+ * strip titles many requests from one resolver) are built by one rule.
+ */
+function buildOrigins(
+	globalsData: { variables?: Record<string, unknown> } | undefined,
+	collections: ReturnType<typeof useCollectionsQuery>["data"] & object,
+	environments: ReturnType<typeof useEnvironmentsQuery>["data"] & object,
+	activeCollectionId: string | null,
+	activeEnvironmentId: string | null | undefined
+): Record<string, ScopeVariableOrigin[]> {
+	const result: Record<string, ScopeVariableOrigin[]> = {};
+
+	const push = (
+		name: string,
+		v: VariableValue,
+		scope: VariableScope,
+		source?: { id: string; name: string }
+	) => {
+		(result[name] ??= []).push({
+			scope,
+			sourceId: source?.id,
+			sourceName: source?.name,
+			// D17 (issue #226): a non-string stored value reads as "", and only
+			// an explicit `enabled: false` disables - absent counts as enabled,
+			// matching the importers and the engine's parse_variables. The
+			// preview must agree with what /compose will actually substitute.
+			value: coerceVariableValue(v.value),
+			secret: v.secret,
+			type: v.type,
+			enabled: isEnabledDefinition(v),
+			// Filled in below, once the whole list for this name exists.
+			winner: false,
+		});
+	};
+
+	// 1. Globals (lowest priority). A singleton, so no source name.
+	for (const [key, val] of Object.entries(globalsData?.variables ?? {})) {
+		push(key, val as VariableValue, "global");
+	}
+
+	// 2. Collection chain - root-first so leaf variables override parent ones.
+	//    Each collection is its own origin: two collections in one chain both
+	//    have scope "collection", and collapsing them by scope would hide the
+	//    override that actually happened.
+	if (activeCollectionId) {
+		for (const col of walkAncestors(activeCollectionId, collections)) {
+			for (const [key, val] of Object.entries(col.variables ?? {})) {
+				push(key, val as VariableValue, "collection", { id: col.id, name: col.name });
+			}
+		}
+	}
+
+	// 3. Environment (highest priority)
+	if (activeEnvironmentId) {
+		const env = environments.find((e) => e.id === activeEnvironmentId);
+		if (env) {
+			for (const [key, val] of Object.entries(env.variables ?? {})) {
+				push(key, val as VariableValue, "environment", { id: env.id, name: env.name });
+			}
+		}
+	}
+
+	// The winner is the *last enabled* definition, which is exactly the value
+	// the old overwrite-as-you-go loop arrived at.
+	for (const list of Object.values(result)) {
+		for (let i = list.length - 1; i >= 0; i--) {
+			if (list[i].enabled) {
+				list[i].winner = true;
+				break;
+			}
+		}
+	}
+
+	return result;
+}
+
+/**
+ * The resolved value per name, derived from the origins so the two cannot
+ * disagree about which definition won. A name whose definitions are all
+ * disabled is absent, not present-and-empty: the unresolved-token painting
+ * (`VariableInput`) depends on it.
+ */
+function winnersOf(
+	originsByName: Record<string, ScopeVariableOrigin[]>
+): Record<string, ResolvedVariable> {
+	const result: Record<string, ResolvedVariable> = {};
+	for (const [name, origins] of Object.entries(originsByName)) {
+		const won = origins.find((o) => o.winner);
+		if (won) result[name] = resolvedFrom(won);
+	}
+	return result;
+}
+
 export function useVariableResolver(
 	options?: UseVariableResolverOptions
 ): UseVariableResolverReturn {
@@ -182,91 +279,23 @@ export function useVariableResolver(
 	 * The winner is marked here rather than inferred by position: once disabled
 	 * definitions are in the list, "last" and "wins" are different things.
 	 */
-	const originsByName = useMemo(() => {
-		const result: Record<string, ScopeVariableOrigin[]> = {};
-
-		const push = (
-			name: string,
-			v: VariableValue,
-			scope: VariableScope,
-			source?: { id: string; name: string }
-		) => {
-			(result[name] ??= []).push({
-				scope,
-				sourceId: source?.id,
-				sourceName: source?.name,
-				// D17 (issue #226): a non-string stored value reads as "", and only
-				// an explicit `enabled: false` disables - absent counts as enabled,
-				// matching the importers and the engine's parse_variables. The
-				// preview must agree with what /compose will actually substitute.
-				value: coerceVariableValue(v.value),
-				secret: v.secret,
-				type: v.type,
-				enabled: isEnabledDefinition(v),
-				// Filled in below, once the whole list for this name exists.
-				winner: false,
-			});
-		};
-
-		// 1. Globals (lowest priority). A singleton, so no source name.
-		for (const [key, val] of Object.entries(globalsData?.variables ?? {})) {
-			push(key, val as VariableValue, "global");
-		}
-
-		// 2. Collection chain - root-first so leaf variables override parent ones.
-		//    Each collection is its own origin: two collections in one chain both
-		//    have scope "collection", and collapsing them by scope would hide the
-		//    override that actually happened.
-		if (activeCollectionId) {
-			for (const col of walkAncestors(activeCollectionId, collections)) {
-				for (const [key, val] of Object.entries(col.variables ?? {})) {
-					push(key, val as VariableValue, "collection", { id: col.id, name: col.name });
-				}
-			}
-		}
-
-		// 3. Environment (highest priority)
-		if (activeEnvironmentId) {
-			const env = environments.find((e) => e.id === activeEnvironmentId);
-			if (env) {
-				for (const [key, val] of Object.entries(env.variables ?? {})) {
-					push(key, val as VariableValue, "environment", { id: env.id, name: env.name });
-				}
-			}
-		}
-
-		// The winner is the *last enabled* definition, which is exactly the value
-		// the old overwrite-as-you-go loop arrived at.
-		for (const list of Object.values(result)) {
-			for (let i = list.length - 1; i >= 0; i--) {
-				if (list[i].enabled) {
-					list[i].winner = true;
-					break;
-				}
-			}
-		}
-
-		return result;
-	}, [globalsData, collections, environments, activeCollectionId, activeEnvironmentId]);
+	const originsByName = useMemo(
+		() =>
+			buildOrigins(
+				globalsData,
+				collections,
+				environments,
+				activeCollectionId,
+				activeEnvironmentId
+			),
+		[globalsData, collections, environments, activeCollectionId, activeEnvironmentId]
+	);
 
 	/**
 	 * The resolved value per name - derived from the origins rather than built
 	 * alongside them, so the two cannot disagree about which definition won.
 	 */
-	const variableMap = useMemo(() => {
-		const result: Record<string, ResolvedVariable> = {};
-		for (const [name, origins] of Object.entries(originsByName)) {
-			const won = origins.find((o) => o.winner);
-			// Every definition disabled: the name resolves to nothing, exactly as
-			// before. The unresolved-token painting (`VariableInput`, which looks
-			// each name up in this map and falls back to the dynamic-variable
-			// table) depends on such a name being absent rather than
-			// present-and-empty.
-			if (!won) continue;
-			result[name] = resolvedFrom(won);
-		}
-		return result;
-	}, [originsByName]);
+	const variableMap = useMemo(() => winnersOf(originsByName), [originsByName]);
 
 	/**
 	 * What each scope answers **on its own** - the names it defines through
@@ -394,14 +423,34 @@ export function useVariableResolver(
 	 * one bind and the send would be a lie about the other one.
 	 */
 	const resolveString = useCallback(
-		(input: string, row?: DataFileRow): string => {
-			const lookup = (name: string) => variableMap[name]?.value;
+		(input: string, row?: DataFileRow, collectionId?: string): string => {
+			const scoped =
+				collectionId && collectionId !== activeCollectionId
+					? winnersOf(
+							buildOrigins(
+								globalsData,
+								collections,
+								environments,
+								collectionId,
+								activeEnvironmentId
+							)
+						)
+					: variableMap;
+			const lookup = (name: string) => scoped[name]?.value;
 			const cells = row ? cellsOf(row) : rowCells;
 			return cells
 				? resolveTemplateWithRow(input, lookup, cells)
 				: resolveTemplate(input, lookup);
 		},
-		[variableMap, rowCells]
+		[
+			variableMap,
+			rowCells,
+			activeCollectionId,
+			globalsData,
+			collections,
+			environments,
+			activeEnvironmentId,
+		]
 	);
 
 	const resolveField = useCallback(

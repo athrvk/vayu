@@ -415,6 +415,12 @@ caller. Every other caller names its row once, as `useVariableResolver`'s
 `boundRow` option, because it resolves for a single request; the strip resolves
 for all of them at once and so has to say which row per call.
 
+The same holds for the collection scope: an optional third argument,
+`resolveString(input, row, collectionId)`, resolves that one call in a
+collection chain other than the hook's own (none, for the strip). The strip
+passes each request's own collection, so an unnamed request under a
+collection-scoped base URL is titled by its path (#3686).
+
 ### Which contract answers for a request: nearest declared ancestor
 
 A collection can **declare** the columns its data files carry (the Data tab,
