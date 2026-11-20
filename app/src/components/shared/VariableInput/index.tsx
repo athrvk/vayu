@@ -404,10 +404,21 @@ export default function VariableInput({
 	 * Derived rather than corrected in an effect: the rows change on every
 	 * keystroke, and a highlight that survives one render past its row would
 	 * leave Enter inserting a name the list no longer offers.
+	 *
+	 * Only the `{{` list opens with its first row lit. The plain list opens over
+	 * what the user is typing, so it stays empty until an arrow key or the
+	 * pointer picks a row, and Tab and Enter fall through (#3667).
 	 */
 	const activeValue = listValues.includes(highlightedValue)
 		? highlightedValue
-		: (listValues[0] ?? "");
+		: variableListOpen
+			? (listValues[0] ?? "")
+			: "";
+
+	// A row picked in an earlier opening must not come back lit when the list
+	// reopens, or Tab would commit it unchosen (#3667). Adjusted during render:
+	// an effect would paint one frame with the stale row.
+	if (!listOpen && highlightedValue !== "") setHighlightedValue("");
 
 	/**
 	 * The ids the combobox has to name, reported by the list itself.

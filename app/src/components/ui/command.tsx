@@ -35,6 +35,15 @@ import { Eyebrow } from "@/components/ui/eyebrow";
  */
 const COMMAND_SURFACE = "bg-card surface-card text-card-foreground";
 
+/**
+ * The highlight cmdk is handed while it must have none. A controlled `value`
+ * that matches no row leaves every row unselected, and it has to be non-empty:
+ * cmdk reads an empty one as "nothing chosen yet" and highlights the first row.
+ * `\u0001` survives the `.trim()` cmdk applies, and no row's text can start
+ * with it.
+ */
+export const NO_HIGHLIGHT = "\u0001no-highlight";
+
 /** The ids an outside control needs to name this list and its highlighted row. */
 export interface CommandListboxState {
 	/** The `role="listbox"` element's id, for `aria-controls`. */

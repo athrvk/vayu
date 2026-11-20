@@ -3544,6 +3544,18 @@ ordering `lib/variable-suggestions.ts` builds and `VariableAutocomplete` draws.
 `CommandListboxProbe` reports them from inside the list for `aria-controls` and
 `aria-activedescendant`.
 
+**Only the `{{` list opens with a row lit.** The user asked for a variable
+there, so Enter takes the first. The plain list (header names) opens over what
+they are typing, so a lit first row would rewrite a complete name on Tab
+(#3667). Its highlight stays empty - no `aria-activedescendant` either - until an arrow
+key or the pointer picks a row; Tab and Enter commit only that explicit
+highlight and otherwise fall through, so Tab still moves focus on. A row picked in
+an earlier opening is forgotten when the list closes. The first
+arrow from nothing lands on row 0, ArrowUp included (clamped, not wrapped).
+`cmdk` reads an empty controlled `value` as "unset" and lights the first row
+itself, so `SuggestionList` hands it `NO_HIGHLIGHT` (`ui/command.tsx`, the same
+sentinel the command palette withholds its highlight with) for an empty `value`.
+
 **The field moves the highlight; the list scrolls it.** That split is not free:
 `cmdk` schedules its scroll inside `setState("value", …)`, the path its own
 `Command.Input` arrow handling takes, and a highlight arriving through the

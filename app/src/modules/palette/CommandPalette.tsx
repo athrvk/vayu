@@ -35,7 +35,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { flushSync } from "react-dom";
-import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui";
+import { CommandDialog, CommandFooter, CommandInput, Kbd, NO_HIGHLIGHT } from "@/components/ui";
 import { useLayoutStore, useToastStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
 import { useCommandContext } from "@/hooks/useCommandContext";
@@ -45,15 +45,6 @@ import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker"
 import { PaletteResults } from "./PaletteResults";
 import { useCommandSurfaces } from "./useCommandSurfaces";
 import type { PaletteItem } from "./types";
-
-/**
- * The highlight cmdk is handed while it must have none. A controlled `value`
- * that matches no row leaves every row unselected, and it has to be non-empty:
- * cmdk reads an empty one as "nothing chosen yet" and highlights the first row.
- * `\u0001` survives the `.trim()` cmdk applies, and no row's text can start
- * with it.
- */
-const NO_HIGHLIGHT = "\u0001no-highlight";
 
 /**
  * The keys cmdk answers by moving the highlight - not Enter, Escape or typing.
