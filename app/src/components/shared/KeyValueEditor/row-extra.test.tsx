@@ -67,6 +67,13 @@ describe("the key/value grid track", () => {
 	});
 });
 
+describe("the form-data track with an extra column", () => {
+	it("gives the extra column a flexible share, never a fixed 14rem (#3690)", () => {
+		expect(KEY_VALUE_GRID_WITH_FILES_AND_EXTRA).not.toContain("14rem");
+		expect(KEY_VALUE_GRID_WITH_FILES_AND_EXTRA).toContain("minmax(6rem,");
+	});
+});
+
 describe("KeyValueEditor without rowExtra", () => {
 	it("keeps the original track on the header band and every row", () => {
 		const { view } = mount();
