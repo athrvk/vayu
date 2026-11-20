@@ -149,8 +149,7 @@ function scriptRequestRow(
 	const { record } = row;
 	return {
 		kind: "scriptRequest",
-		// When the call began, not when the Send finished: a token fetched for three
-		// seconds is listed three seconds before the Send that waited on it (#3680).
+		// The call's start, not the Send's finish (#3680).
 		...(typeof record.startedAt === "number" &&
 			Number.isFinite(record.startedAt) && { at: record.startedAt }),
 		source: row.source,
