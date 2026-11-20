@@ -3208,6 +3208,9 @@ size, never a height class (the key-value rows and the binary body's fields are
 `size="sm"`). The URL bar's `UrlInput` is the exception the sweep names:
 UrlInput is the one text field that is a band component, not a control: it
 fills the min-h-band-md URL bar, so its h-full is correct.
+The token overlay is `overflow-hidden` and follows the input's horizontal scroll
+(`onScroll`, and a layout effect on the value and caret), so text typed past the
+field's width stays visible (#3684).
 
 **A token has five states, decided in the order `resolveTemplate` decides
 them** - reserved namespaces first, then a name the engine defers, then the
