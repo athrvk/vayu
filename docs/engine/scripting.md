@@ -2290,10 +2290,11 @@ pm.sendRequest GET https://auth.example.com/token failed: CONNECTION_FAILED (3 m
 
 A 4xx or 5xx answer is a status, not a failure; `failed:` is the `err.code` the
 callback receives. The URL is the one the script gave, after its variables
-resolve, with its credentials blanked the way an export blanks them: the
+resolve, with its credentials masked the way an export finds them: the
 password of `user:pass@` and the value of a query parameter named like a
-credential (`token`, `api_key`, `client_secret`, ...) are dropped, the rest of
-the query stays, and a key that `auth` appends is never shown. Only a request
+credential (`token`, `api_key`, `client_secret`, ...) read `<redacted>`
+(`user:<redacted>@host`, `?api_key=<redacted>&page=2`), the rest of the query
+stays, and a key that `auth` appends is never shown. Only a request
 that was sent has a line: a call refused before it goes out (the cap, a bad
 option, the capability being off) throws and writes none. The line counts
 against the [console caps](#console-output) like any other, and with

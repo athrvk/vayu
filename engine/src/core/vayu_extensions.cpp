@@ -413,11 +413,12 @@ bool is_secret_param_name (std::string_view name, const std::vector<std::string>
     });
 }
 
-/// `name=value` with the value emptied when @p name is a credential and the
-/// value is neither empty nor one `{{variable}}` reference. A bare `name` has
-/// no value to blank.
+/// `name=value` with the value replaced (emptied, or @p mark's marker) when
+/// @p name is a credential and the value is neither empty nor one
+/// `{{variable}}` reference. A bare `name` has no value to replace.
 std::string redact_query_pair (std::string_view pair,
 const std::vector<std::string>& extra,
+CredentialMark mark,
 int& omitted) {
     const auto equals = pair.find ('=');
     if (equals == std::string_view::npos || equals + 1 == pair.size ()) {
@@ -428,20 +429,26 @@ int& omitted) {
         return std::string (pair);
     }
     omitted += 1;
-    return std::string (pair.substr (0, equals + 1));
+    std::string redacted (pair.substr (0, equals + 1));
+    if (mark == CredentialMark::Marker) {
+        redacted += utils::kRedactedMarker;
+    }
+    return redacted;
 }
 
 /// A `&`-separated query (or a fragment written as one, `#access_token=...`)
 /// with each credential pair redacted and every other byte kept.
-std::string
-redact_query (std::string_view query, const std::vector<std::string>& extra, int& omitted) {
+std::string redact_query (std::string_view query,
+const std::vector<std::string>& extra,
+CredentialMark mark,
+int& omitted) {
     std::string out;
     std::size_t start = 0;
     while (true) {
         const auto ampersand = query.find ('&', start);
         const auto length =
         ampersand == std::string_view::npos ? std::string_view::npos : ampersand - start;
-        out += redact_query_pair (query.substr (start, length), extra, omitted);
+        out += redact_query_pair (query.substr (start, length), extra, mark, omitted);
         if (ampersand == std::string_view::npos) {
             return out;
         }
@@ -451,10 +458,11 @@ redact_query (std::string_view query, const std::vector<std::string>& extra, int
 }
 
 /// The scheme-and-authority-and-path part of a URL with the password of its
-/// userinfo dropped (`user:pass@host` becomes `user@host`). A first segment
-/// holding spaces or nothing is a path, not an authority; the userinfo ends at
-/// the *last* `@`, so a password containing one is still wholly dropped.
-std::string drop_userinfo_password (std::string_view head, int& omitted) {
+/// userinfo dropped (`user:pass@host` becomes `user@host`, or
+/// `user:<redacted>@host` under @p mark's marker). A first segment holding
+/// spaces or nothing is a path, not an authority; the userinfo ends at the
+/// *last* `@`, so a password containing one is still wholly dropped.
+std::string drop_userinfo_password (std::string_view head, CredentialMark mark, int& omitted) {
     const auto scheme_end = head.find ("://");
     const bool has_scheme = scheme_end != std::string_view::npos &&
     head.substr (0, scheme_end).find_first_of ("/ \t") == std::string_view::npos;
@@ -475,9 +483,14 @@ std::string drop_userinfo_password (std::string_view head, int& omitted) {
         return std::string (head);
     }
     omitted += 1;
-    return std::string (head.substr (0, authority_start)) +
-    std::string (userinfo.substr (0, colon)) +
-    std::string (head.substr (authority_start + at));
+    std::string redacted (head.substr (0, authority_start));
+    redacted += userinfo.substr (0, colon);
+    if (mark == CredentialMark::Marker) {
+        redacted += ':';
+        redacted += utils::kRedactedMarker;
+    }
+    redacted += head.substr (authority_start + at);
+    return redacted;
 }
 
 /// The names an API-key auth sends its key under, in the query or in a header.
@@ -585,30 +598,32 @@ void blank_cookie_values (Json& cookies, int& omitted) {
 
 std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
-int& omitted) {
+int& omitted,
+CredentialMark mark) {
     const auto fragment_at        = url.find ('#');
     const std::string_view before = url.substr (0, fragment_at);
     const auto query_at           = before.find ('?');
-    std::string out = drop_userinfo_password (before.substr (0, query_at), omitted);
+    std::string out = drop_userinfo_password (before.substr (0, query_at), mark, omitted);
     if (query_at != std::string_view::npos) {
         out += '?';
-        out += redact_query (before.substr (query_at + 1), extra_param_names, omitted);
+        out += redact_query (before.substr (query_at + 1), extra_param_names, mark, omitted);
     }
     if (fragment_at != std::string_view::npos) {
         out += '#';
-        out += redact_query (url.substr (fragment_at + 1), extra_param_names, omitted);
+        out += redact_query (url.substr (fragment_at + 1), extra_param_names, mark, omitted);
     }
     return out;
 }
 
 std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
-UrlOmitted& omitted) {
-    int total       = 0;
-    std::string out = redact_url_credentials (url, extra_param_names, total);
-    int password    = 0;
+UrlOmitted& omitted,
+CredentialMark mark) {
+    int total = 0;
+    std::string out = redact_url_credentials (url, extra_param_names, total, mark);
+    int password = 0;
     static_cast<void> (redact_url_credentials (
-    url.substr (0, url.find_first_of ("?#")), extra_param_names, password));
+    url.substr (0, url.find_first_of ("?#")), extra_param_names, password, mark));
     omitted.password += password;
     omitted.query += total - password;
     return out;
@@ -645,10 +660,33 @@ void redact_recorded (nlohmann::json& value) {
     }
 }
 
+/// A header a server sends to say which scheme to answer with, never a
+/// credential itself (`WWW-Authenticate: Bearer realm="api"`). It stays
+/// readable in a record, which the logger's and an export's set still masks.
+bool is_challenge_header (std::string_view name) {
+    static constexpr std::array<std::string_view, 3> kChallengeHeaders = {
+        "www-authenticate", "proxy-authenticate", "authentication-info"
+    };
+    return std::any_of (kChallengeHeaders.begin (), kChallengeHeaders.end (),
+    [name] (std::string_view challenge) {
+        return utils::ascii_lower_equal (name, challenge);
+    });
+}
+
+/// Whether a record's header @p name is masked: the shared secret set less the
+/// challenge headers, but a header the call's own auth wrote stays masked
+/// whatever it is called.
+bool masks_in_record (std::string_view name, const RecordSecrets& secrets) {
+    if (names_extra (name, secrets.header_names)) {
+        return true;
+    }
+    return utils::is_secret_field_name (name) && !is_challenge_header (name);
+}
+
 void mask_header_set (nlohmann::json& set, const RecordSecrets& secrets) {
     json::for_each_header_value (
     set, [&secrets] (const std::string& name, nlohmann::json& value) {
-        if (utils::is_secret_header_name (name, secrets.header_names)) {
+        if (masks_in_record (name, secrets)) {
             redact_recorded (value);
         }
     });
@@ -669,8 +707,8 @@ void mask_record_node (nlohmann::json& node, const RecordSecrets& secrets) {
             mask_header_set (value, secrets);
         } else if (member == "url" && value.is_string ()) {
             int omitted = 0;
-            value       = redact_url_credentials (
-            value.get_ref<const std::string&> (), secrets.param_names, omitted);
+            value = redact_url_credentials (value.get_ref<const std::string&> (),
+            secrets.param_names, omitted, CredentialMark::Marker);
         } else {
             mask_record_node (value, secrets);
         }

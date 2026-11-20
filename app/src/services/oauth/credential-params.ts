@@ -95,7 +95,7 @@ const PARAM_KEY_SET: ReadonlySet<string> = new Set(CREDENTIAL_PARAM_KEYS);
 const SENSITIVE_PARAM_SET: ReadonlySet<string> = new Set(SENSITIVE_PARAM_NAMES);
 
 /** ASCII-only fold, the engine's `ascii_lower`: `toLowerCase` would also fold the Kelvin sign into `k`. */
-function asciiLower(text: string): string {
+export function asciiLower(text: string): string {
 	return text.replace(/[A-Z]/g, (char) => char.toLowerCase());
 }
 

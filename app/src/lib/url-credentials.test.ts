@@ -7,12 +7,14 @@
 
 /**
  * The cuts `maskUrlCredentials` shares with the engine's
- * `redact_url_credentials`: the userinfo password, the auth-written query
- * name, a lone `{{variable}}`, and every other byte kept.
+ * `redact_url_credentials` in its marker form (#3672): the userinfo password,
+ * the auth-written query name, a lone `{{variable}}`, and every other byte
+ * kept.
  *
- * Mutation check: return `head` unchanged from `dropUserinfoPassword` and the
- * userinfo cases fail; ignore `extraParamNames` in `maskPair` and the
- * auth-written case fails.
+ * Mutation check: return `head` unchanged from `maskUserinfoPassword` and the
+ * userinfo cases fail; drop the password instead of marking it (the old
+ * `user@host` form) and they fail too; ignore `extraParamNames` in `maskPair`
+ * and the auth-written case fails.
  */
 
 import { describe, expect, it } from "vitest";
@@ -20,10 +22,11 @@ import { maskUrlCredentials } from "./url-credentials";
 
 describe("maskUrlCredentials", () => {
 	it.each([
-		["https://user:secret@h/p", "https://user@h/p"],
-		["http://u:p@ss@h:8080/x", "http://u@h:8080/x"],
-		["user:pw@proxy:8080/x", "user@proxy:8080/x"],
-	])("drops the password of %s and keeps the user", (url, masked) => {
+		["https://user:secret@h/p", "https://user:<redacted>@h/p"],
+		["http://u:p@ss@h:8080/x", "http://u:<redacted>@h:8080/x"],
+		["user:pw@proxy:8080/x", "user:<redacted>@proxy:8080/x"],
+		["https://user:<redacted>@h/p", "https://user:<redacted>@h/p"],
+	])("masks the password of %s and keeps the user", (url, masked) => {
 		expect(maskUrlCredentials(url)).toBe(masked);
 	});
 
@@ -57,7 +60,7 @@ describe("maskUrlCredentials", () => {
 
 	it("masks the password and the query together", () => {
 		expect(maskUrlCredentials("https://u:p@h/p?access_token=T", [])).toBe(
-			"https://u@h/p?access_token=<redacted>"
+			"https://u:<redacted>@h/p?access_token=<redacted>"
 		);
 	});
 });

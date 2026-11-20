@@ -7,16 +7,17 @@
 
 /**
  * A URL with its credentials masked for display (#3634), cut where the
- * engine's `redact_url_credentials` (`core/vayu_extensions.cpp`) cuts it: the
- * password of `user:password@host` is dropped and the user kept, and the value
- * of a query or fragment pair named like a credential
- * (`isSensitiveParamName`, pinned to the engine's list by
+ * engine's `redact_url_credentials` (`core/vayu_extensions.cpp`) cuts it, in
+ * the form its `CredentialMark::Marker` writes for a script-request record and
+ * the summary line (#3672): the password of `user:password@host` reads
+ * `user:<redacted>@host`, and the value of a query or fragment pair named like
+ * a credential (`isSensitiveParamName`, pinned to the engine's list by
  * `url-credentials.conformance.test.ts`) reads {@link WITHHELD_MARKER}. A
  * `{{variable}}` standing alone is kept, and every other byte is as written.
  *
- * The one difference from the engine is the marker: an export empties the
- * value so a re-import holds no placeholder, while a display that showed
- * `access_token=` would say the token was sent empty.
+ * An export blanks the same values instead, so a re-import holds no
+ * placeholder; a display that showed `access_token=` or `user@host` would say
+ * nothing was sent.
  */
 
 import { isSensitiveParamName } from "@/services/oauth/credential-params";
@@ -31,11 +32,12 @@ function isVariableReference(text: string): boolean {
 }
 
 /**
- * The scheme, authority and path with the userinfo password dropped. The
- * userinfo ends at the *last* `@` of the authority, so a password holding one
- * is dropped whole; with no scheme, an authority holding a space is a path.
+ * The scheme, authority and path with the userinfo password read as the
+ * marker. The userinfo ends at the *last* `@` of the authority, so a password
+ * holding one is masked whole; with no scheme, an authority holding a space is
+ * a path.
  */
-function dropUserinfoPassword(head: string): string {
+function maskUserinfoPassword(head: string): string {
 	const schemeEnd = head.indexOf("://");
 	const hasScheme = schemeEnd !== -1 && !/[/ \t]/.test(head.slice(0, schemeEnd));
 	const authorityStart = hasScheme ? schemeEnd + 3 : 0;
@@ -48,9 +50,7 @@ function dropUserinfoPassword(head: string): string {
 	const colon = userinfo.indexOf(":");
 	const password = colon === -1 ? "" : userinfo.slice(colon + 1);
 	if (password === "" || isVariableReference(password)) return head;
-	return (
-		head.slice(0, authorityStart) + userinfo.slice(0, colon) + head.slice(authorityStart + at)
-	);
+	return `${head.slice(0, authorityStart + colon + 1)}${WITHHELD_MARKER}${head.slice(authorityStart + at)}`;
 }
 
 /** One `name=value` pair, its value masked when the name is a credential's. */
@@ -79,7 +79,7 @@ export function maskUrlCredentials(url: string, extraParamNames: readonly string
 	const fragmentAt = url.indexOf("#");
 	const beforeFragment = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
 	const queryAt = beforeFragment.indexOf("?");
-	let out = dropUserinfoPassword(
+	let out = maskUserinfoPassword(
 		queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt)
 	);
 	if (queryAt !== -1) out += `?${maskQuery(beforeFragment.slice(queryAt + 1), extraParamNames)}`;

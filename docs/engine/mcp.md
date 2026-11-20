@@ -740,8 +740,8 @@ Notes:
 - **A trace can also carry `scripts.scriptRequests`** (issue #3633): one
   record per `pm.sendRequest` a design send's or a collection-run step's
   scripts made, each with its own `request` and `response` nodes. The engine
-  writes them masked (credential headers `<redacted>`, URL credentials
-  blanked) and holds all of one trace's record bodies to one
+  writes them masked (credential headers and URL credentials `<redacted>`,
+  the challenge headers shown) and holds all of one trace's record bodies to one
   `maxTraceBodyBytes` together, so a row's records add at most what its own
   response may (see [`POST /execute`](api-reference.md#post-execute)). That
   engine bound is 5 MiB, so `get_run_report` bounds the records as it bounds

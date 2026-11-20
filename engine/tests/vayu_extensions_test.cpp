@@ -498,6 +498,130 @@ TEST (VayuExtensions, BlanksASecretQueryValueAndKeepsTheOtherQueryData) {
     EXPECT_EQ (omitted, 3);
 }
 
+// A record says what was sent, so a withheld URL value reads `<redacted>` where
+// an export leaves a blank (#3672). Every guard the blank form has still holds,
+// and the count is the same. Mutation check: ignore `mark` in
+// `redact_query_pair` and the query cases read blank.
+TEST (VayuExtensions, TheMarkerFormWritesRedactedWhereTheBlankFormEmpties) {
+    constexpr auto marker = ext::CredentialMark::Marker;
+    int omitted           = 0;
+    EXPECT_EQ (ext::redact_url_credentials (
+               "https://h/p?client_secret=S&page=2", {}, omitted, marker),
+    "https://h/p?client_secret=<redacted>&page=2");
+    EXPECT_EQ (omitted, 1);
+
+    EXPECT_EQ (ext::redact_url_credentials (
+               "https://h/cb#access_token=T&state=abc", {}, omitted, marker),
+    "https://h/cb#access_token=<redacted>&state=abc");
+    EXPECT_EQ (ext::redact_url_credentials (
+               "https://h/p?key=AIza&q=1", { "key" }, omitted, marker),
+    "https://h/p?key=<redacted>&q=1");
+    EXPECT_EQ (omitted, 3);
+
+    // Mutation check: drop the marker from `drop_userinfo_password` and the
+    // password reads as no password at all.
+    EXPECT_EQ (ext::redact_url_credentials ("https://bob:s3cret@h/x?page=2", {}, omitted, marker),
+    "https://bob:<redacted>@h/x?page=2");
+    EXPECT_EQ (ext::redact_url_credentials ("http://u:p@ss@h/p", {}, omitted, marker),
+    "http://u:<redacted>@h/p");
+    EXPECT_EQ (omitted, 5);
+
+    // Nothing was withheld, so nothing is marked: an empty value, a lone
+    // variable reference, a bare name, a bare user and a non-secret name stay.
+    const std::string kept =
+    "https://u@h/p?sig=&token={{t}}&flag&code=US&page=2#section-2";
+    EXPECT_EQ (ext::redact_url_credentials (kept, {}, omitted, marker), kept);
+    EXPECT_EQ (ext::redact_url_credentials ("https://u:{{pw}}@h/p", {}, omitted, marker),
+    "https://u:{{pw}}@h/p");
+    EXPECT_EQ (omitted, 5);
+
+    // The split count is the blank form's.
+    ext::UrlOmitted split;
+    EXPECT_EQ (ext::redact_url_credentials (
+               "https://bob:s3cret@h/x?api_key=S&token=T", {}, split, marker),
+    "https://bob:<redacted>@h/x?api_key=<redacted>&token=<redacted>");
+    EXPECT_EQ (split.password, 1);
+    EXPECT_EQ (split.query, 2);
+}
+
+// An export keeps blanking when it names no mark.
+TEST (VayuExtensions, TheDefaultFormStillBlanksForAnExport) {
+    int omitted = 0;
+    EXPECT_EQ (ext::redact_url_credentials (
+               "https://bob:s3cret@h/x?client_secret=S&page=2", {}, omitted),
+    "https://bob@h/x?client_secret=&page=2");
+    EXPECT_EQ (omitted, 2);
+}
+
+// The record masks a URL to the marker, in the request and in a redirect hop.
+// A real hop arrives already redacted by the client (`record_hop`), marked as
+// `pm.sendRequest` asks, and keeps that form here; a blank it arrives with
+// cannot be told from a value sent empty, which is why the client marks it
+// (`SendRequestTest.ARecordedHopUrlReadsRedactedLikeTheRequestUrl` drives a
+// real redirect). An unredacted hop is still masked. Mutation check: drop
+// `CredentialMark::Marker` from `mask_record_node`.
+TEST (VayuExtensions, ARecordsUrlsReadRedactedWhereTheyWereWithheld) {
+    nlohmann::json record = nlohmann::json::parse (R"({
+        "request": {"url": "https://h/token?client_secret=S&page=2"},
+        "response": {"redirects": [
+            {"url": "https://bob:hunter2@h/hop?api_key=K"},
+            {"url": "https://bob:<redacted>@h/hop?api_key=<redacted>"},
+            {"url": "https://bob@h/hop?api_key="}]}})");
+    ext::mask_script_request_record (record, {}, "");
+    EXPECT_EQ (record["request"]["url"], "https://h/token?client_secret=<redacted>&page=2");
+    const auto& hops = record["response"]["redirects"];
+    EXPECT_EQ (hops[0]["url"], "https://bob:<redacted>@h/hop?api_key=<redacted>");
+    EXPECT_EQ (hops[1]["url"], "https://bob:<redacted>@h/hop?api_key=<redacted>");
+    EXPECT_EQ (hops[2]["url"], "https://bob@h/hop?api_key=");
+
+    nlohmann::json claimed =
+    nlohmann::json::parse (R"({"request": {"url": "https://h/p?sig=S&q=1"}})");
+    ext::mask_script_request_record (claimed, {}, "sig");
+    EXPECT_EQ (claimed["request"]["url"], "https://h/p?sig=<redacted>&q=1");
+}
+
+// The three challenge headers name a scheme, not a credential, so a record
+// shows them in every header set; the credentials beside them stay masked.
+// Mutation check: take `is_challenge_header` out of `masks_in_record`.
+TEST (VayuExtensions, ARecordKeepsTheChallengeHeadersAndMasksTheCredentials) {
+    nlohmann::json record = nlohmann::json::parse (R"({
+        "request": {
+            "headers": {"Authorization": "Bearer A", "Proxy-Authenticate": "Basic realm=p"},
+            "sentHeaders": {"authorization": "Bearer A", "AUTHENTICATION-INFO": "nextnonce=n"},
+            "headerLines": [
+                {"name": "Authorization", "value": "Bearer A"},
+                {"name": "www-authenticate", "value": "Bearer realm=\"api\""}]},
+        "response": {
+            "headers": {"WWW-Authenticate": "Bearer realm=\"api\"",
+                        "Set-Cookie": "sid=1", "Proxy-Authorization": "Basic x"},
+            "redirects": [{"url": "https://h/hop", "headers": {
+                "Proxy-Authenticate": "Basic realm=p", "Cookie": "sid=1"}}]}})");
+    ext::mask_script_request_record (record, {}, "");
+
+    const auto& request  = record["request"];
+    const auto& response = record["response"];
+    EXPECT_EQ (request["headers"]["Authorization"], "<redacted>");
+    EXPECT_EQ (request["headers"]["Proxy-Authenticate"], "Basic realm=p");
+    EXPECT_EQ (request["sentHeaders"]["authorization"], "<redacted>");
+    EXPECT_EQ (request["sentHeaders"]["AUTHENTICATION-INFO"], "nextnonce=n");
+    EXPECT_EQ (request["headerLines"][0]["value"], "<redacted>");
+    EXPECT_EQ (request["headerLines"][1]["value"], "Bearer realm=\"api\"");
+    EXPECT_EQ (response["headers"]["WWW-Authenticate"], "Bearer realm=\"api\"");
+    EXPECT_EQ (response["headers"]["Set-Cookie"], "<redacted>");
+    EXPECT_EQ (response["headers"]["Proxy-Authorization"], "<redacted>");
+    EXPECT_EQ (response["redirects"][0]["headers"]["Proxy-Authenticate"], "Basic realm=p");
+    EXPECT_EQ (response["redirects"][0]["headers"]["Cookie"], "<redacted>");
+}
+
+// A header the call's own auth wrote stays masked even under a challenge name:
+// the exemption is for what a server sends, not for a key a caller chose.
+TEST (VayuExtensions, ARecordStillMasksAChallengeNamedHeaderTheCallsAuthWrote) {
+    nlohmann::json record = nlohmann::json::parse (
+    R"({"request": {"sentHeaders": {"WWW-Authenticate": "KEY"}}})");
+    ext::mask_script_request_record (record, { "www-authenticate" }, "");
+    EXPECT_EQ (record["request"]["sentHeaders"]["WWW-Authenticate"], "<redacted>");
+}
+
 TEST (VayuExtensions, BlanksEveryCookieValueWhateverItsName) {
     Json cookies = Json::parse (R"([
         {"key":"sid","value":"abc","path":"/"},

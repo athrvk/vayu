@@ -796,7 +796,8 @@ vayu::http::routes::ExchangeOutcome& exchange) {
 /**
  * The URL a `step` frame carries: credentials masked as an export masks them
  * (the password of `user:pass@`, the value of a credential query parameter and
- * of the one the step's own auth wrote), then cut to
+ * of the one the step's own auth wrote) but written as `<redacted>`, which a
+ * frame shows where an export leaves a blank, then cut to
  * `STEP_FRAME_URL_MAX_BYTES` on a character boundary. Masked first, so a
  * credential straddling the cut cannot survive as a prefix of itself.
  */
@@ -805,9 +806,9 @@ std::string step_frame_url (const vayu::Request& request) {
     if (!request.auth_query_param.empty ()) {
         auth_params.push_back (request.auth_query_param);
     }
-    int omitted = 0;
-    const std::string masked =
-    vayu::core::vayu_ext::redact_url_credentials (request.url, auth_params, omitted);
+    int omitted              = 0;
+    const std::string masked = vayu::core::vayu_ext::redact_url_credentials (
+    request.url, auth_params, omitted, vayu::core::vayu_ext::CredentialMark::Marker);
     return std::string (vayu::utils::without_incomplete_utf8_tail (
     std::string_view (masked).substr (0, STEP_FRAME_URL_MAX_BYTES)));
 }

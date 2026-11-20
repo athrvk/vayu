@@ -47,6 +47,12 @@ TEST (LogRedactionConformance, SecretFieldNamesAndStripUrlSecretsFollowTheShared
     ASSERT_FALSE (fixture.at ("secretFieldNames").empty ());
     ASSERT_FALSE (fixture.at ("stripUrlSecrets").empty ());
     ASSERT_FALSE (fixture.at ("sensitiveHeaderNames").empty ());
+    ASSERT_FALSE (fixture.at ("challengeHeaderNames").empty ());
+    // The logger still masks a challenge header; it is the script-request
+    // record and the app's Console that show it (#3672).
+    for (const auto& name : fixture.at ("challengeHeaderNames")) {
+        EXPECT_TRUE (is_secret_field_name (name.get<std::string> ())) << name;
+    }
     for (const auto& name : fixture.at ("sensitiveHeaderNames")) {
         EXPECT_TRUE (is_secret_field_name (name.get<std::string> ())) << name;
     }

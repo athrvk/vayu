@@ -45,6 +45,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -159,11 +160,22 @@ int& omitted);
  */
 void blank_cookie_values (Json& cookies, int& omitted);
 
+/// What a withheld URL credential is replaced with. A blank reads as an
+/// absent value, which is right for a document another machine imports; a
+/// record of what was sent says so with the run-record marker instead, since
+/// `client_secret=` would read as "resolved empty".
+enum class CredentialMark : std::uint8_t {
+    Blank,  ///< `?api_key=` and `user@host`
+    Marker, ///< `?api_key=<redacted>` and `user:<redacted>@host`
+};
+
 /**
  * A URL with its credentials blanked and everything else kept: the password
  * of `user:pass@host` is dropped (the user name stays), and the value of a
  * query parameter whose name @ref blank_credential_param_rows treats as a
  * credential is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`).
+ * @p mark `Marker` writes `utils::kRedactedMarker` in place of each dropped
+ * value instead (`?api_key=<redacted>&page=2`, `user:<redacted>@host`).
  * Unlike `utils::strip_url_secrets`, which keeps scheme, host and path for a
  * log line, this loses no query data an import would need. A `{{variable}}`
  * reference stays wherever it stands alone. Adds one to @p omitted per value
@@ -171,7 +183,8 @@ void blank_cookie_values (Json& cookies, int& omitted);
  */
 [[nodiscard]] std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
-int& omitted);
+int& omitted,
+CredentialMark mark = CredentialMark::Blank);
 
 /// What blanking one URL withheld, split by whether a Params table repeats
 /// it: the query and fragment are the table's other half, the userinfo
@@ -193,20 +206,28 @@ struct UrlOmitted {
 /// into the password and the query halves instead of one total.
 [[nodiscard]] std::string redact_url_credentials (std::string_view url,
 const std::vector<std::string>& extra_param_names,
-UrlOmitted& omitted);
+UrlOmitted& omitted,
+CredentialMark mark = CredentialMark::Blank);
 
 /**
  * A `pm.sendRequest` record (#3633, `ScriptResult::script_requests`) with its
- * credentials masked in place by the export's rules, so the stored trace,
- * History and MCP all read the masked record. In every header set of the
- * record, a redirect hop's included, the value of a header
- * `utils::is_secret_header_name` names, or one of @p auth_header_names (what
- * the call's `options.auth` wrote, `Request::secret_header_names`), reads
- * `utils::kRedactedMarker`; a value sent empty stays empty. Every `url`
- * member, the request's and each hop's, goes through
- * @ref redact_url_credentials with @p auth_query_param as an extra name, so
- * those credentials are blanked to `""` as in an export. Bodies are not
- * judged.
+ * credentials masked in place, so the stored trace, History and MCP all read
+ * the masked record. In every header set of the record, a redirect hop's
+ * included, the value of a header `utils::is_secret_field_name` names, or one
+ * of @p auth_header_names (what the call's `options.auth` wrote,
+ * `Request::secret_header_names`), reads `utils::kRedactedMarker`; a value
+ * sent empty stays empty. The three challenge headers (`WWW-Authenticate`,
+ * `Proxy-Authenticate`, `Authentication-Info`) are the exception: they name a
+ * scheme rather than carry a credential, so a record keeps them readable
+ * (unless @p auth_header_names claims one). Every `url` member, the request's
+ * and each hop's, goes through @ref redact_url_credentials with
+ * @p auth_query_param as an extra name and `CredentialMark::Marker`, so a
+ * withheld URL credential reads `<redacted>` as a header's does, where an
+ * export blanks it. A hop URL arrives already redacted (`record_hop`), and a
+ * value blanked there cannot be told from one sent empty, so the marker in a
+ * hop comes from the client (`ClientConfig::redirect_url_mark`, which
+ * `pm.sendRequest` sets); this pass keeps it and guards a hop URL that was
+ * not redacted. Bodies are not judged.
  */
 void mask_script_request_record (nlohmann::json& record,
 const std::vector<std::string>& auth_header_names,

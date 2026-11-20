@@ -2471,7 +2471,9 @@ order, each in the design-mode trace shape above (`request`, `response`,
 `error_type` / `error_message`, the eight timing keys) plus `source`, `scope`,
 `startedAt`, `status` and `statusText`, and without `rawRequest`. Unlike the
 trace around them these records are **masked when written** - a credential
-header's value is `"<redacted>"`, a URL's credentials are blanked to `""` (see
+header's value is `"<redacted>"` (the challenge headers `WWW-Authenticate`,
+`Proxy-Authenticate` and `Authentication-Info` excepted), a URL's credentials
+read `<redacted>` rather than a blank (see
 [POST /execute](api-reference.md#post-execute)) - and their bodies share one
 `maxTraceBodyBytes` between them, applied when the `scripts` node is built,
 because the live answer is the same object; `cap_trace_bodies` does not reach

@@ -906,8 +906,8 @@ int64_t started_at_ms) {
 // @p script_url is the URL as the script gave it, before auth is composed: an
 // api key `apply_auth` appends to the query is not the script's text. It goes
 // through the same credential blanking an export uses (userinfo password and
-// secret-named query values), which keeps the rest of the query - the part
-// that says which call this was.
+// secret-named query values, written as `<redacted>` like the record's), which
+// keeps the rest of the query - the part that says which call this was.
 //
 // Nothing is built when the console is off (`scriptEnableConsole`, which a load
 // test is advised to turn off), so a run that has asked for no console output
@@ -924,8 +924,9 @@ std::optional<std::size_t> record) {
     const ErrorCode error_code =
     sent.is_error () ? sent.error ().code : sent.value ().error_code;
     int blanked = 0;
-    std::string line = "pm.sendRequest " + std::string (vayu::to_string (method)) +
-    " " + vayu::core::vayu_ext::redact_url_credentials (script_url, {}, blanked);
+    std::string line = "pm.sendRequest " + std::string (vayu::to_string (method)) + " " +
+    vayu::core::vayu_ext::redact_url_credentials (
+    script_url, {}, blanked, vayu::core::vayu_ext::CredentialMark::Marker);
     if (error_code == ErrorCode::None) {
         line += " -> " + std::to_string (sent.value ().status_code);
     } else {
@@ -1074,6 +1075,10 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     client_config.max_response_bytes = data->max_response_bytes;
     // Ends with the enclosing exchange's own send (issue #2683).
     client_config.cancel = data->cancel;
+    // This response's hops reach the script-request record and nothing a
+    // script reads, so a withheld hop credential reads as the record's other
+    // URLs do (#3672).
+    client_config.redirect_url_mark = vayu::core::vayu_ext::CredentialMark::Marker;
     // Staged jar writes ride the next transfer of this execution, and this is
     // it - so a script that sets a cookie and then sends through
     // pm.sendRequest carries it. Drained rather than copied: this transfer's

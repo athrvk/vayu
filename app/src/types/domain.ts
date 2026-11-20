@@ -1569,8 +1569,10 @@ export interface RunResultScripts {
  * One `pm.sendRequest` exchange a script made (#3633), in the stored trace's
  * own shape: `request`, `response`, the error pair and the eight `*Ms` timings
  * are {@link RunResultTrace}'s members for the call. The engine masks
- * credentials where it builds the record (`<redacted>` in a header value, a
- * blanked URL credential), so a reader renders it as written.
+ * credentials where it builds the record (`<redacted>` in a credential header's
+ * value and in place of a URL's userinfo password or credential query value,
+ * redirect hops included; the challenge headers shown), so a reader renders it
+ * as written.
  *
  * `status` is `0` for a transport failure, with the code in `error_type` and
  * no `response` when nothing answered.

@@ -16,9 +16,11 @@
  * post-response script's, placed by the response pane's own `consoleRows`.
  *
  * The Send row is built from the live response, so it is masked here before
- * it enters the ring: header values by name plus the `authHeaders` the
- * response carries, the URL by `maskUrlCredentials` plus `authQueryParam`.
- * Script requests arrive masked by the engine (#3633) and are kept as written.
+ * it enters the ring: header values by the engine's logger name set (less the
+ * challenge headers) plus the `authHeaders` the response carries, the URL by
+ * `maskUrlCredentials` plus `authQueryParam`, in the `user:<redacted>@host`
+ * form the engine writes on a script request's row (#3672). Script requests
+ * arrive masked by the engine (#3633) and are kept as written.
  * Bodies are not judged, as in an export.
  */
 
@@ -31,8 +33,10 @@ import {
 	type ConsoleScriptRequestRow,
 	type ConsoleSendRow,
 } from "@/stores/console-store";
+import { isSecretHeaderName } from "@/lib/secret-header-name";
 import { maskSensitiveHeaders } from "@/lib/sensitive-headers";
 import { maskUrlCredentials } from "@/lib/url-credentials";
+import { WITHHELD_MARKER } from "@/lib/withheld-value";
 import type { ResponseState } from "@/modules/request-builder/types";
 import { timingFromTrace } from "@/modules/request-builder/utils/restore-response";
 import {
@@ -78,6 +82,23 @@ function sendResponseBody(response: ResponseState): ConsoleBody | undefined {
 }
 
 /**
+ * @p headers with a value masked when its name is one the engine's logger set
+ * names ({@link isSecretHeaderName}, the rule a script request's row arrives
+ * under, #3672), is in the snippet list, or is one of @p authHeaders. A value
+ * sent empty stays empty.
+ */
+function maskedHeaders(
+	headers: Readonly<Record<string, string>>,
+	authHeaders: readonly string[]
+): Record<string, string> {
+	const masked = maskSensitiveHeaders(headers, authHeaders);
+	for (const [name, value] of Object.entries(headers)) {
+		if (value !== "" && isSecretHeaderName(name)) masked[name] = WITHHELD_MARKER;
+	}
+	return masked;
+}
+
+/**
  * A response's exchange as a row keeps it, its header values masked by name and
  * by the `authHeaders` it carries: a Send's, and a collection-run step's when
  * its stored row is read back for the Console's expansion.
@@ -85,9 +106,9 @@ function sendResponseBody(response: ResponseState): ConsoleBody | undefined {
 export function maskedExchange(response: ResponseState): ConsoleExchange {
 	const authHeaders = response.authHeaders ?? [];
 	return {
-		requestHeaders: maskSensitiveHeaders(response.requestHeaders ?? {}, authHeaders),
+		requestHeaders: maskedHeaders(response.requestHeaders ?? {}, authHeaders),
 		requestBody: rawRequestBody(response.rawRequest),
-		responseHeaders: maskSensitiveHeaders(response.headers, authHeaders),
+		responseHeaders: maskedHeaders(response.headers, authHeaders),
 		responseBody: sendResponseBody(response),
 		timing: response.timing,
 	};
