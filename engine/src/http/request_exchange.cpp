@@ -1519,7 +1519,7 @@ ExchangeInputs inputs) {
         // the send, answered in the pre-send gate's shape for the reason the
         // refusal above is.
         outcome.response = vayu::http::detail::error_response (
-        vayu::Error{ vayu::ErrorCode::InternalError, std::move (*unsendable) });
+        vayu::Error{ vayu::ErrorCode::UnsendableFile, std::move (*unsendable) });
         outcome.response.request_headers = outcome.request.headers;
     } else {
         vayu::http::ClientConfig config;

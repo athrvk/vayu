@@ -912,8 +912,9 @@ refuses the send:
 6. It cannot be opened: refused, naming the path and the reason.
 
 On `POST /execute` a refusal is the pre-send gate's shape: `200` with
-`statusCode: 0`, `errorCode: INTERNAL_ERROR` and the message above in
-`errorMessage`. A streaming execute (`stream: true`) answers `400` with code
+`statusCode: 0`, `errorCode: UNSENDABLE_FILE` (#3693; a trace stored before it
+reads `INTERNAL_ERROR`) and the message above in `errorMessage`. A streaming
+execute (`stream: true`) answers `400` with code
 `unsendable_file`. `POST /runs` checks every file the run can send before the
 run row exists and answers `400` with code `unsendable_file`; for a path a data
 row binds, each distinct bound path is checked and the message starts with
@@ -1377,6 +1378,16 @@ https://; this server may speak h2c, which Vayu does not send`. A scheme the
 transfer refuses, a redirect onto `ftp://` included, is still `INVALID_URL`.
 The code is appended like the others, and a script sees it as `err.code`
 (`pm.sendRequest`) or `pm.response.errorCode`.
+
+A file the request names that cannot be sent is `UNSENDABLE_FILE` (issue #3693),
+error type `unsendable_file`: every refusal of the file rule listed under
+[File references](#file-references-binary-bodies-and-file-parts) (no file chosen, an
+unresolved `{{variable}}` in the path, an unreadable file, one outside the
+allowed folders). The request is at fault and nothing was sent, so it is not
+`INTERNAL_ERROR`, which those refusals used to carry; the streaming and
+`POST /runs` answers keep their `unsendable_file` rule code. The code is
+appended like the others, so stored numeric values are unchanged and a trace
+written before it still reads `INTERNAL_ERROR`.
 
 A send still in flight when the engine shuts down is cancelled rather than
 waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is

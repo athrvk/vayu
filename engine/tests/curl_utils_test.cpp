@@ -521,6 +521,14 @@ TEST (CurlToError, TheNewCodesKeepTheirWireSpelling) {
     EXPECT_STREQ (vayu::error_type_name (vayu::ErrorCode::ProtocolMismatch), "protocol_mismatch");
 }
 
+// A file refusal's code is its own, and both name tables spell it (#3693).
+// Mutation-check: drop `UnsendableFile` from `error_type_name` and its type
+// reads "unknown"; from `to_string` and the build fails on -Wswitch.
+TEST (CurlToError, UnsendableFileKeepsItsWireSpelling) {
+    EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::UnsendableFile), "UNSENDABLE_FILE");
+    EXPECT_STREQ (vayu::error_type_name (vayu::ErrorCode::UnsendableFile), "unsendable_file");
+}
+
 // A scheme the handle's allowlist refuses - only one libcurl guessed for a URL
 // naming none reaches it, a redirect's being refused by the engine first - is
 // the same fault the URL check reports for a typed one, under the same code.

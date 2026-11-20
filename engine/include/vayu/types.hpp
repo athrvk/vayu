@@ -791,14 +791,23 @@ enum class ErrorCode : std::uint8_t {
     /// HTTP/1.1 over `http://` (issue #3306). Distinct because the target was
     /// reached and the URL is fine, so `InvalidUrl` sent users to the wrong
     /// fault. Appended for the same reason `ProxyError` was.
-    ProtocolMismatch
+    ProtocolMismatch,
+    /// A file the request names cannot be sent, and the cause is the request:
+    /// an empty path, a `{{variable}}` left unresolved in one, a missing or
+    /// unreadable file, or one outside the folders the user picked (issue
+    /// #3693, the file rule in `file_ref.hpp`). Distinct because the engine did
+    /// not fail and the target was never reached, so `InternalError` sent users
+    /// looking for a Vayu fault where the request needs a different path.
+    /// Stored traces from before it keep `InternalError`. Appended for the same
+    /// reason `ProxyError` was.
+    UnsendableFile
 };
 
 /// How many `ErrorCode` values there are, for a table indexed by one. Names the
 /// last enumerator by hand: appending a code does not move it. The
 /// `static_assert` after `to_string` fails the build when one is appended.
 inline constexpr std::size_t ERROR_CODE_COUNT =
-static_cast<std::size_t> (ErrorCode::ProtocolMismatch) + 1;
+static_cast<std::size_t> (ErrorCode::UnsendableFile) + 1;
 
 /**
  * @brief The name a load run reports an error under: a stored error trace's
@@ -825,6 +834,7 @@ static_cast<std::size_t> (ErrorCode::ProtocolMismatch) + 1;
     case ErrorCode::TooManyRedirects: return "too_many_redirects";
     case ErrorCode::BadContentEncoding: return "bad_content_encoding";
     case ErrorCode::ProtocolMismatch: return "protocol_mismatch";
+    case ErrorCode::UnsendableFile: return "unsendable_file";
     default: return "unknown";
     }
 }
@@ -853,6 +863,7 @@ constexpr const char* to_string (ErrorCode code) {
     case ErrorCode::BadContentEncoding: return "BAD_CONTENT_ENCODING";
     case ErrorCode::InvalidHeaderName: return "INVALID_HEADER_NAME";
     case ErrorCode::ProtocolMismatch: return "PROTOCOL_MISMATCH";
+    case ErrorCode::UnsendableFile: return "UNSENDABLE_FILE";
     }
     return "UNKNOWN";
 }
