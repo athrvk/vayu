@@ -7533,6 +7533,19 @@ describe("inline body bounds", () => {
 		expect(out.bodySize).toBe(huge.length);
 	});
 
+	// Mutation check (#3704): drop `runId` / `resultId` from the bounded answer
+	// (delete them in `boundExecuteResponse`) and both cases fail; the cut one is
+	// the answer an agent needs them on, to page the body with read_body.
+	test.each([
+		["cut", huge],
+		["whole", "{}"],
+	])("run_request names the stored send on a %s body", async (_case, bodyRaw) => {
+		const answer = executeAnswer({ runId: "run_7", resultId: 42, bodyRaw });
+		const out = await runRequest(executed(answer));
+		expect(out.runId).toBe("run_7");
+		expect(out.resultId).toBe(42);
+	});
+
 	test("run_request leaves a body under the bound byte-for-byte", async () => {
 		const small = JSON.stringify({ userId: 1, id: 5, completed: false });
 		const answer = executeAnswer({
