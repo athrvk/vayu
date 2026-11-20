@@ -1149,6 +1149,16 @@ export interface GlobalVariables {
 export type VariableScope = "global" | "collection" | "environment";
 
 /**
+ * What a token popover's create can set beyond the value. Create-only: an edit
+ * writes into a definition that already exists, and whether that is a secret
+ * stays the Variables editor's call.
+ */
+export interface VariableCreateOptions {
+	/** Store the new entry with `secret: true`. Absent or false leaves the entry as it was. */
+	secret?: boolean;
+}
+
+/**
  * Resolved variable with its value, scope, and secret flag.
  * Note: The `secret` field is a UI hint for masking - values are NOT encrypted at rest.
  *

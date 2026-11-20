@@ -46,6 +46,11 @@ interface SecretInputProps {
 	 * only field it cannot mount this primitive in would be the secret one.
 	 */
 	onBlur?: React.FocusEventHandler<HTMLInputElement>;
+	/** For a host that commits on Enter, such as a create form. */
+	onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+	/** The inner input, for a host that returns focus to it after another control took it. */
+	ref?: React.Ref<HTMLInputElement>;
+	autoFocus?: boolean;
 }
 
 export function SecretInput({
@@ -59,16 +64,22 @@ export function SecretInput({
 	readOnly,
 	"aria-label": ariaLabel,
 	onBlur,
+	onKeyDown,
+	ref,
+	autoFocus,
 }: SecretInputProps) {
 	const [revealed, setRevealed] = useState(false);
 	return (
 		<div className="relative">
 			<Input
+				ref={ref}
 				id={id}
 				type={revealed ? "text" : "password"}
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
 				onBlur={onBlur}
+				onKeyDown={onKeyDown}
+				autoFocus={autoFocus}
 				size={size}
 				placeholder={placeholder}
 				disabled={disabled}

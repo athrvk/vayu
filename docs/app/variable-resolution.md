@@ -625,6 +625,20 @@ which has no definition and so no `sourceId`, lands in the request's own
 collection or the active environment. Both writers name their target through
 `lib/variable-target.ts`'s `variableTargetOf`.
 
+**A create can mark the new entry secret.** The popover's create form carries
+the Variables editor's key toggle ("Mark as secret"), off by default, and while
+it is on the value field is a `SecretInput`: masked, editable, with the eye. A
+create then calls `updateVariable(name, value, scope, undefined, { secret })`
+(`VariableCreateOptions`, `types/domain.ts`), and `useVariableWriter`'s
+`mergeVariable` writes `secret: true` into the *new* entry only; with the flag
+off the stored entry is exactly what it was. The option is create-only, because
+an edit writes into a definition that already exists and whether that one is a
+secret stays the Variables editor's call. The flag is held by the popover with
+the typed value, so a re-open does not show the value unmasked. It exists for
+the cases that need a secret from the first write, such as the OAuth 2.0 JWT
+bearer grant's signing key, whose field warns when the variable it names is
+not marked secret.
+
 The bar once walked the collection chain itself for the first definition with a
 truthy `enabled`, which disagrees with the resolver's `isEnabledDefinition` on
 every definition where `enabled` is *absent* (D17 counts absent as enabled) - so

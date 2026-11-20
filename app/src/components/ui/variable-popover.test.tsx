@@ -74,6 +74,9 @@ function renderPopover(props: Partial<React.ComponentProps<typeof VariablePopove
 	return { onValueChange };
 }
 
+/** What a create carries when the secret toggle was left alone. */
+const PLAIN = { secret: false };
+
 const origin = (
 	o: Partial<VariableOrigin> & { scope: VariableOrigin["scope"] }
 ): VariableOrigin => ({
@@ -272,7 +275,13 @@ describe("an undefined variable can define itself", () => {
 			target: { value: "stl_44921" },
 		});
 		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "stl_44921", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"stl_44921",
+			"environment",
+			undefined,
+			PLAIN
+		);
 	});
 
 	it("creates into a scope the user picks instead", () => {
@@ -287,7 +296,7 @@ describe("an undefined variable can define itself", () => {
 			target: { value: "abc" },
 		});
 		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global");
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global", undefined, PLAIN);
 	});
 
 	it("never offers a scope that cannot be written", () => {
@@ -354,7 +363,13 @@ describe("the create row's keyboard model", () => {
 		fireEvent.change(field, { target: { value: "abc" } });
 		fireEvent.keyDown(field, { key: "Enter" });
 		expect(onValueChange).toHaveBeenCalledTimes(1);
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "collection");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"abc",
+			"collection",
+			undefined,
+			PLAIN
+		);
 	});
 
 	it("is one Tab stop, which hands focus to the selected segment", () => {
@@ -418,7 +433,7 @@ describe("the create row's keyboard model", () => {
 		const global = chip("Global");
 		expect(document.activeElement).toBe(global);
 		fireEvent.keyDown(global, { key: "Enter" });
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global");
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global", undefined, PLAIN);
 	});
 
 	it("creates from the default chip too, with no pick of its own", () => {
@@ -430,7 +445,13 @@ describe("the create row's keyboard model", () => {
 		const environment = chip("Environment");
 		expect(document.activeElement).toBe(environment);
 		fireEvent.keyDown(environment, { key: "Enter" });
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"abc",
+			"environment",
+			undefined,
+			PLAIN
+		);
 	});
 
 	it("ignores an Enter that only commits an IME buffer", () => {
@@ -442,7 +463,13 @@ describe("the create row's keyboard model", () => {
 		fireEvent.keyDown(field, { key: "Enter", isComposing: true });
 		expect(onValueChange).not.toHaveBeenCalled();
 		fireEvent.keyDown(field, { key: "Enter" });
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "ab", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"ab",
+			"environment",
+			undefined,
+			PLAIN
+		);
 	});
 });
 
@@ -568,7 +595,13 @@ describe("creating with nothing typed", () => {
 			target: { value: " " },
 		});
 		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", " ", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			" ",
+			"environment",
+			undefined,
+			PLAIN
+		);
 	});
 
 	it("enables Create as soon as something is typed", () => {
@@ -584,7 +617,13 @@ describe("creating with nothing typed", () => {
 		const create = within(panel).getByRole("button", { name: "Create" });
 		expect(create).toBeEnabled();
 		fireEvent.click(create);
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "x", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"x",
+			"environment",
+			undefined,
+			PLAIN
+		);
 	});
 });
 
@@ -1065,6 +1104,115 @@ describe("which definition an edit names", () => {
 		});
 		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
 		expect(onValueChange).toHaveBeenCalledTimes(1);
-		expect(onValueChange.mock.calls[0]).toEqual(["merchantId", "abc", "collection"]);
+		expect(onValueChange.mock.calls[0]).toEqual([
+			"merchantId",
+			"abc",
+			"collection",
+			undefined,
+			PLAIN,
+		]);
+	});
+});
+
+/*
+ * A create can mark the new entry secret: a token naming a signing key or an
+ * API credential would otherwise be defined in the clear and then need a trip to
+ * the Variables editor to hide it. The flag is create-only; an edit never offers it.
+ */
+describe("marking a new variable secret", () => {
+	const MARK = "Mark as secret (masks value in UI)";
+
+	function openCreate() {
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "environment"],
+		});
+		return { onValueChange, panel: open() };
+	}
+
+	const field = (panel: HTMLElement) => within(panel).getByLabelText(/value for new variable/i);
+
+	it("offers the toggle off, with the value in the clear", () => {
+		const { panel } = openCreate();
+		expect(within(panel).getByRole("button", { name: MARK })).toBeInTheDocument();
+		expect(field(panel)).not.toHaveAttribute("type", "password");
+	});
+
+	it("masks the value and creates a secret once it is on", () => {
+		const { onValueChange, panel } = openCreate();
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+		expect(field(panel)).toHaveAttribute("type", "password");
+
+		fireEvent.change(field(panel), { target: { value: "pem" } });
+		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "pem", "environment", undefined, {
+			secret: true,
+		});
+	});
+
+	it("creates in the scope that was picked, secret or not", () => {
+		const { onValueChange, panel } = openCreate();
+		fireEvent.click(within(panel).getByRole("radio", { name: "Global" }));
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+		fireEvent.change(field(panel), { target: { value: "pem" } });
+		fireEvent.keyDown(field(panel), { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "pem", "global", undefined, {
+			secret: true,
+		});
+	});
+
+	it("keeps the keyboard model while masked: a chip hands focus back, Enter creates", () => {
+		const { onValueChange, panel } = openCreate();
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+
+		const global = within(panel).getByRole("radio", { name: "Global" });
+		global.focus();
+		fireEvent.click(global);
+		expect(document.activeElement).toBe(field(panel));
+
+		fireEvent.change(field(panel), { target: { value: "pem" } });
+		fireEvent.keyDown(field(panel), { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledTimes(1);
+	});
+
+	it("goes back to plain when the mark is taken off", () => {
+		const { onValueChange, panel } = openCreate();
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+		fireEvent.click(within(panel).getByRole("button", { name: "Unmark as secret" }));
+		expect(field(panel)).not.toHaveAttribute("type", "password");
+
+		fireEvent.change(field(panel), { target: { value: "abc" } });
+		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"abc",
+			"environment",
+			undefined,
+			PLAIN
+		);
+	});
+
+	it("is still on, and still masked, when the popover is reopened", () => {
+		const { panel } = openCreate();
+		fireEvent.click(within(panel).getByRole("button", { name: MARK }));
+		fireEvent.change(field(panel), { target: { value: "pem" } });
+		fireEvent.keyDown(field(panel), { key: "Escape" });
+
+		const reopened = open();
+		expect(
+			within(reopened).getByRole("button", { name: "Unmark as secret" })
+		).toBeInTheDocument();
+		expect(field(reopened)).toHaveAttribute("type", "password");
+		expect(field(reopened)).toHaveValue("pem");
+	});
+
+	it("is not offered when editing a definition that already exists", () => {
+		renderPopover();
+		const panel = open();
+		expect(within(panel).queryByRole("button", { name: MARK })).not.toBeInTheDocument();
+		expect(
+			within(panel).queryByRole("button", { name: "Unmark as secret" })
+		).not.toBeInTheDocument();
 	});
 });

@@ -312,3 +312,55 @@ describe("editing an environment definition", () => {
 		expect(mutateEnvironment).toHaveBeenCalledWith(expect.objectContaining({ id: "e1" }));
 	});
 });
+
+/*
+ * A create can mark the new entry secret; the option is create-only, so a name
+ * that already exists keeps the mark it has whichever way the option points.
+ */
+describe("creating a secret", () => {
+	const SCOPES: Array<["global" | "collection" | "environment", Parameters<typeof setup>[0]]> = [
+		["global", {}],
+		["collection", { cols: [{ id: "c1", name: "Acme" }], collectionId: "c1" }],
+		["environment", { envs: [{ id: "e1", name: "Staging" }], activeEnvironmentId: "e1" }],
+	];
+
+	/** The entry the write put under `name`, from whichever mutation it reached. */
+	function written(scope: "global" | "collection" | "environment", name: string) {
+		const call = {
+			global: mutateGlobals,
+			collection: mutateCollection,
+			environment: mutateEnvironment,
+		}[scope].mock.calls[0][0];
+		return call.variables[name];
+	}
+
+	it.each(SCOPES)("stores secret: true on a new %s entry", (scope, opts) => {
+		const r = setup(opts);
+		r.current.updateVariable("signing_key", "pem", scope, undefined, { secret: true });
+		expect(written(scope, "signing_key")).toEqual({
+			value: "pem",
+			enabled: true,
+			createdAt: expect.any(Number),
+			secret: true,
+		});
+	});
+
+	it.each([
+		["no options", undefined],
+		["secret: false", { secret: false }],
+	])("leaves a new entry as it was with %s", (_label, options) => {
+		const r = setup({});
+		r.current.updateVariable("token", "abc", "global", undefined, options);
+		expect(written("global", "token")).toEqual({
+			value: "abc",
+			enabled: true,
+			createdAt: expect.any(Number),
+		});
+	});
+
+	it("does not mark a definition that already exists", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true } } });
+		r.current.updateVariable("token", "abc", "global", undefined, { secret: true });
+		expect(written("global", "token")).toEqual({ value: "abc", enabled: true });
+	});
+});

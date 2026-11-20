@@ -33,7 +33,7 @@ import {
 } from "@/queries";
 import { useSessionStore } from "@/stores";
 import { variableTargetOf } from "@/lib/variable-target";
-import type { VariableScope, VariableValue } from "@/types";
+import type { VariableCreateOptions, VariableScope, VariableValue } from "@/types";
 
 interface UseVariableWriterOptions {
 	collectionId?: string;
@@ -43,13 +43,15 @@ interface UseVariableWriterReturn {
 	/**
 	 * Write a new value for a name, from a token's edit popover. `sourceId`
 	 * names the collection or environment an edit's definition lives in; a
-	 * create omits it. See `updateVariable` below.
+	 * create omits it. `options` applies to a create only. See `updateVariable`
+	 * below.
 	 */
 	updateVariable: (
 		name: string,
 		newValue: string,
 		scope: VariableScope,
-		sourceId?: string
+		sourceId?: string,
+		options?: VariableCreateOptions
 	) => void;
 	/** The scopes `updateVariable` can actually write to right now. */
 	writableScopes: VariableScope[];
@@ -64,18 +66,28 @@ interface UseVariableWriterReturn {
  * `createdAt` (the variables editor's row-ordering key) survives untouched;
  * only a variable created here is stamped, so it lands at the bottom of its
  * scope's list rather than above every row that already existed (#135).
+ *
+ * `options` is read only when the entry is new. An existing entry keeps the
+ * secret mark it has: this path never un-secrets one, and never secrets one the
+ * Variables editor left plain.
  */
 function mergeVariable(
 	existing: Record<string, VariableValue> | undefined,
 	name: string,
-	newValue: string
+	newValue: string,
+	options?: VariableCreateOptions
 ): Record<string, VariableValue> {
 	const current = existing?.[name];
 	return {
 		...existing,
 		[name]: current
 			? { ...current, value: newValue, enabled: true }
-			: { value: newValue, enabled: true, createdAt: Date.now() },
+			: {
+					value: newValue,
+					enabled: true,
+					createdAt: Date.now(),
+					...(options?.secret && { secret: true }),
+				},
 	};
 }
 
@@ -106,7 +118,13 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 	 * target: that is the copy-into-the-wrong-collection defect (#3683).
 	 */
 	const updateVariable = useCallback(
-		(name: string, newValue: string, scope: VariableScope, sourceId?: string) => {
+		(
+			name: string,
+			newValue: string,
+			scope: VariableScope,
+			sourceId?: string,
+			options?: VariableCreateOptions
+		) => {
 			const createId = scope === "collection" ? collectionId : activeEnvironmentId;
 			const target = variableTargetOf({ scope, sourceId: sourceId ?? createId ?? undefined });
 			if (!target) return;
@@ -115,7 +133,7 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 				case "global": {
 					if (!globalsData?.variables) return;
 					updateGlobalsMutation.mutate({
-						variables: mergeVariable(globalsData.variables, name, newValue),
+						variables: mergeVariable(globalsData.variables, name, newValue, options),
 					});
 					break;
 				}
@@ -124,7 +142,7 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 					if (!collection) return;
 					updateCollectionMutation.mutate({
 						id: target.id,
-						variables: mergeVariable(collection.variables, name, newValue),
+						variables: mergeVariable(collection.variables, name, newValue, options),
 					});
 					break;
 				}
@@ -133,7 +151,7 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 					if (!environment) return;
 					updateEnvironmentMutation.mutate({
 						id: target.id,
-						variables: mergeVariable(environment.variables, name, newValue),
+						variables: mergeVariable(environment.variables, name, newValue, options),
 					});
 					break;
 				}

@@ -15,14 +15,16 @@
  * and a picked file, and never a PEM typed into a field.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableSupportStub } from "@/test/variable-support";
-import type { OAuth2Config, VariableSupport } from "@/types";
+import type { OAuth2Config, ResolvedVariable, VariableSupport } from "@/types";
+import VariableInput from "@/components/shared/VariableInput";
 import OAuth2Form from "./OAuth2Form";
+import type { OAuth2TextInput } from "./types";
 
 const statusRow = vi.fn();
 vi.mock("./TokenStatusRow", () => ({
@@ -400,6 +402,81 @@ describe("the secret variable hint", () => {
 		renderForm({ ...JWT, privateKey: "{{other}}" }, variables(false));
 
 		expect(screen.queryByText(/not marked secret/)).toBeNull();
+	});
+});
+
+/*
+ * The hint's "mark it secret" has a first step: the name is undefined, so the
+ * token's popover offers to create it. That create used to be plain, which left
+ * the hint to tell the user to go and mark it in the Variables editor.
+ */
+describe("creating the key's variable from its popover", () => {
+	/** A scope whose `updateVariable` records what a create carried, as the writer would store it. */
+	function StatefulForm() {
+		const [defined, setDefined] = useState<Record<string, ResolvedVariable>>({});
+		const variables = useMemo(
+			() =>
+				variableSupportStub(defined, {
+					writableScopes: ["environment"],
+					updateVariable: (name, value, scope, _sourceId, options) =>
+						setDefined((all) => ({
+							...all,
+							[name]: { value, scope, ...(options?.secret && { secret: true }) },
+						})),
+				}),
+			[defined]
+		);
+		// The host's own field (`AuthPanel`'s): the one that paints the token.
+		const TextInput: OAuth2TextInput = ({ id, label, value, onChange, placeholder }) => (
+			<VariableInput
+				id={id}
+				aria-label={label}
+				value={value}
+				onChange={onChange}
+				placeholder={placeholder}
+				variables={variables}
+			/>
+		);
+		return (
+			<TooltipProvider>
+				<OAuth2Form
+					value={{ ...JWT, privateKey: "{{signing_key}}" }}
+					onChange={() => {}}
+					variables={variables}
+					TextInput={TextInput}
+					collectionId="col-1"
+				/>
+			</TooltipProvider>
+		);
+	}
+
+	function createFromPopover({ secret }: { secret: boolean }) {
+		render(<StatefulForm />);
+		fireEvent.keyDown(screen.getByRole("button", { name: "{{signing_key}}" }), {
+			key: "Enter",
+		});
+		const popover = within(screen.getByRole("dialog"));
+		if (secret) {
+			fireEvent.click(
+				popover.getByRole("button", { name: "Mark as secret (masks value in UI)" })
+			);
+		}
+		fireEvent.change(popover.getByLabelText(/value for new variable/i), {
+			target: { value: "pem" },
+		});
+		fireEvent.click(popover.getByRole("button", { name: "Create" }));
+	}
+
+	it("stops the hint warning when the new variable was created secret", () => {
+		createFromPopover({ secret: true });
+
+		expect(screen.queryByText(/not marked secret/)).toBeNull();
+	});
+
+	it("still warns when the new variable was created plain", () => {
+		createFromPopover({ secret: false });
+
+		expect(screen.getByText(/signing_key is not marked secret/)).toBeInTheDocument();
 	});
 });
 

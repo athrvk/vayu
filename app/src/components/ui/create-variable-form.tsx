@@ -15,11 +15,15 @@
  */
 
 import { useId, useRef } from "react";
+import { KeyRound } from "lucide-react";
 import type { VariableOrigin } from "@/types";
 import { VARIABLE_SCOPE_CONFIG } from "@/constants/variables";
 import { isCommitEnter } from "@/lib/keyboard";
+import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { Input } from "./input";
+import { SecretInput } from "./secret-input";
+import { TooltipIconButton } from "./tooltip-icon-button";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 import type { VariableScope } from "./variable-scope-badge";
 
@@ -30,6 +34,9 @@ export interface CreateVariableFormProps {
 	/** The user's pick; `null`, or a scope no longer writable, means the first. */
 	selectedScope: VariableScope | null;
 	onSelectedScopeChange: (scope: VariableScope) => void;
+	/** Whether the new entry is stored as a secret; the value field masks while it is. */
+	secret: boolean;
+	onSecretChange: (secret: boolean) => void;
 	value: string;
 	onValueChange: (value: string) => void;
 	/** Called only with a non-empty value. */
@@ -50,6 +57,8 @@ export function CreateVariableForm({
 	scopes,
 	selectedScope,
 	onSelectedScopeChange,
+	secret,
+	onSecretChange,
 	value,
 	onValueChange,
 	onCreate,
@@ -80,6 +89,24 @@ export function CreateVariableForm({
 		onCreate(activeScope);
 	};
 
+	const valueField = {
+		size: "sm",
+		ref: valueRef,
+		value,
+		placeholder: "value…",
+		"aria-label": `Value for new variable ${name}`,
+		autoFocus,
+		onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+			// `isCommitEnter`, not a bare Enter (#939): an IME
+			// commits its composition with the same keydown, and
+			// the app's Send chord is Ctrl/Cmd+Enter.
+			if (isCommitEnter(e)) {
+				e.preventDefault();
+				create();
+			}
+		},
+	} as const;
+
 	/**
 	 * Picking a scope is a modifier on the value, not a destination (issue #1380).
 	 *
@@ -99,25 +126,40 @@ export function CreateVariableForm({
 
 	return (
 		<>
-			<Input
-				size="sm"
-				ref={valueRef}
-				value={value}
-				onChange={(e) => onValueChange(e.target.value)}
-				onKeyDown={(e) => {
-					// `isCommitEnter`, not a bare Enter (#939): an IME
-					// commits its composition with the same keydown, and
-					// the app's Send chord is Ctrl/Cmd+Enter.
-					if (isCommitEnter(e)) {
-						e.preventDefault();
-						create();
-					}
-				}}
-				placeholder="value…"
-				className="font-mono text-sm"
-				aria-label={`Value for new variable ${name}`}
-				autoFocus={autoFocus}
-			/>
+			<div className="flex items-center gap-1">
+				<div className="min-w-0 flex-1">
+					{/*
+					 * `SecretInput` while the entry is a secret, the same primitive the
+					 * Variables editor masks its secret rows with: the value is typed
+					 * here, so it is masked but editable, with the eye beside it.
+					 */}
+					{secret ? (
+						<SecretInput {...valueField} onChange={onValueChange} />
+					) : (
+						<Input
+							{...valueField}
+							onChange={(e) => onValueChange(e.target.value)}
+							className="font-mono text-sm"
+						/>
+					)}
+				</div>
+				{/*
+				 * The Variables editor's own control and labels, so one mark has one
+				 * name. Off by default: a variable is plain unless it is chosen
+				 * otherwise, and the stored entry is unchanged until then.
+				 */}
+				<TooltipIconButton
+					label={secret ? "Unmark as secret" : "Mark as secret (masks value in UI)"}
+					icon={<KeyRound className="size-icon" />}
+					onClick={() => onSecretChange(!secret)}
+					className={cn(
+						"size-control-sm shrink-0 transition-colors",
+						secret
+							? "text-warning-text hover:text-warning-text hover:bg-warning/10"
+							: "text-muted-foreground hover:text-foreground"
+					)}
+				/>
+			</div>
 			{/*
 			 * The label sits above the control, not beside it, which is how
 			 * `LoadTestConfigDialog` labels its own segmented control: beside it,

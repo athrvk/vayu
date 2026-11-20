@@ -16,6 +16,7 @@ import type {
 	DataContractScope,
 	FormFieldEntry,
 	ResolvedVariable,
+	VariableCreateOptions,
 	VariableOrigin,
 	VariableScope,
 } from "./domain";
@@ -63,9 +64,16 @@ export interface VariableSupport {
 	/**
 	 * Write a new value for a name, from a token's edit popover. An edit passes
 	 * the `sourceId` of the definition it displayed so the write lands there, not
-	 * in the field's own collection; a create passes none (#3683).
+	 * in the field's own collection; a create passes none (#3683) and may carry
+	 * `options`, which an edit never does.
 	 */
-	updateVariable: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
+	updateVariable: (
+		name: string,
+		value: string,
+		scope: VariableScope,
+		sourceId?: string,
+		options?: VariableCreateOptions
+	) => void;
 	/**
 	 * The scopes `updateVariable` can actually write to right now, so the
 	 * popover's scope picker cannot offer a target that does not exist.

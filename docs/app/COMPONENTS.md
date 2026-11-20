@@ -3670,9 +3670,10 @@ is the resolved branch: the masked or revealed field, the secret's eye, the
 auto-save sentence and manual mode's Save/Cancel, plus `SECRET_MASK`, the
 fixed-width mask the origin list reuses. `CreateVariableForm`
 (`ui/create-variable-form.tsx`) is the create offer: the value field, the scope
-`ToggleGroup`, Create, and the bound-row and switched-off notes. Both are
-controlled. The popover keeps the edit buffer, the reveal flag, the picked scope
-and the Enter/Escape and auto-save-on-close flow, because `PopoverContent`
+`ToggleGroup`, Create, the secret toggle (the Variables editor's key button;
+while it is on the value field is a `SecretInput`) and the bound-row and
+switched-off notes. Both are controlled. The popover keeps the edit buffer, the
+reveal flag, the picked scope, the create's secret flag and the Enter/Escape and auto-save-on-close flow, because `PopoverContent`
 unmounts its children on close and the close path is what saves, discards and
 resets them; held in the form, a picked scope would not survive a re-open. The
 chips beside the name (Secret, `data`, `row`, `undefined`) are `Badge
@@ -3687,7 +3688,8 @@ module for its cell input is the same inversion one level down (issue #567).
 `VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
 context - `resolveField`, `getAllVariables`, `getVariableOrigins`,
 `updateVariable` (an edit passes the shown definition's `sourceId` as a fourth
-argument, a create none, #3683), `writableScopes` - as a plain object a caller hands in, plus
+argument, a create none and a fifth, `{ secret }`, which only a create carries,
+#3683), `writableScopes` - as a plain object a caller hands in, plus
 the optional `dataColumns` (the declared data contract in scope, issue #600).
 `dataColumns` is optional *within* a scope rather than with it: absent means the
 chain declares no contract, which is every workspace that has not opened the
@@ -3745,7 +3747,7 @@ takes the focus colour in place of the ring, so one edge draws. No `text-box`
 trim, ever: with `py-0` it clips descenders and underscores (`input.test.tsx`).
 A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`, a
 `VariableInput` or a `SecretInput`: `chrome-floors.test.ts` fails the tag that
-does. `SecretInput` forwards `size`, and `id`, which lands on the inner input so a
+does. `SecretInput` forwards `size`, `onKeyDown`, `autoFocus`, `ref` and `id`, which land on the inner input so a
 `<Label htmlFor>` names the field rather than the wrapper `div`. `size` is the variant, not the native
 numeric `size` attribute, which `Input` omits.
 
