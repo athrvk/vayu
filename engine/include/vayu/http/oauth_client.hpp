@@ -143,8 +143,10 @@ std::string url_field (const nlohmann::json& config, std::string_view name);
  * Hash-free ("\x1f"-joined) so the app can compute the identical key in
  * TypeScript (computeOAuth2CacheKey) for the GET/DELETE status endpoints:
  *   url_field(accessTokenUrl) \x1f clientId \x1f (credentialsId|"default")
- *   \x1f (grantType == "password" ? username :
+ *   \x1f grantType \x1f (grantType == "password" ? username :
  *          grantType == "jwt_bearer" ? subject : "")
+ * where the fourth segment is the raw `grantType` string, "" when absent or not
+ * a string (#3689), so one client's grants never share a token.
  * then, for each of `EXTRA_PARAM_LISTS` in order with at least one
  * `extra_params` row (issue #2536):
  *   \x1f listName ":" key "=" value ( \x1e key "=" value )*

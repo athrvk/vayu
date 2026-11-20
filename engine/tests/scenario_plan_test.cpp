@@ -1705,7 +1705,8 @@ TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanO
     // Cached under the stored config's key, so the load plan's acquisition
     // reads it with no endpoint behind it; non-expiring.
     vayu::db::OAuthToken token;
-    token.cache_key    = vayu::http::oauth::cache_key (json{
+    token.cache_key =
+    vayu::http::oauth::cache_key (json{ { "grantType", "client_credentials" },
     { "accessTokenUrl", "https://auth.test/token" }, { "clientId", "stored" } });
     token.access_token = "AT-stored";
     token.created_at   = 1;

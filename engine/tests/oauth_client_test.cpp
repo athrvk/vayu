@@ -188,7 +188,8 @@ TEST (OAuthCacheKey, SharedVectors) {
                { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } }),
     "https://idp/token\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
     // Vector 2: password grant with explicit credentialsId
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "password" },
                { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
@@ -196,6 +197,7 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "work\x1f"
+    "password\x1f"
     "u1");
     // Vector 3: username ignored outside password grant
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
@@ -203,7 +205,8 @@ TEST (OAuthCacheKey, SharedVectors) {
                { "username", "u1" } }),
     "https://idp/token\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
     // Vector 4: extra parameter rows (issue #2536), one segment per list in
     // the order authorization, token, refresh, each row's pairs sorted by key
     // then value; sendAs is not read.
@@ -219,6 +222,7 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "client_credentials\x1f"
     "\x1f"
     "authorizationParams:prompt=login\x1f"
     "tokenParams:audience=a\x1e"
@@ -241,6 +245,7 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "client_credentials\x1f"
     "\x1f"
     "authorizationParams:n=");
     // Vector 6: a row whose key names a credential - a parameter's name or a
@@ -256,6 +261,7 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "client_credentials\x1f"
     "\x1f"
     "tokenParams:X-Api-Key=\x1e"
     "audience=api\x1e"
@@ -273,11 +279,13 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "jwt_bearer\x1f"
     "alice");
     EXPECT_EQ (oauth::cache_key (jwt_bob),
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "jwt_bearer\x1f"
     "bob");
     EXPECT_EQ (oauth::cache_key (jwt_with_username), oauth::cache_key (jwt_alice));
     json jwt_no_subject = jwt_alice;
@@ -285,20 +293,23 @@ TEST (OAuthCacheKey, SharedVectors) {
     EXPECT_EQ (oauth::cache_key (jwt_no_subject),
     "https://idp/token\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "jwt_bearer\x1f");
     // Vector 8: subject ignored outside jwt_bearer
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
                { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
                { "subject", "alice" } }),
     "https://idp/token\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "password" },
                { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
                { "username", "u1" }, { "subject", "alice" } }),
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f"
+    "password\x1f"
     "u1");
     // Vector 9 (#3687): the six ASCII whitespace bytes around accessTokenUrl
     // are trimmed from both ends and never from inside it, and a URL of
@@ -308,12 +319,14 @@ TEST (OAuthCacheKey, SharedVectors) {
                { "clientId", "cid" } }),
     "https://idp/to ken\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
                { "accessTokenUrl", " \t\r\n\v\f" }, { "clientId", "cid" } }),
     "\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
     // Vector 10: a no-break space (U+00A0, UTF-8 C2 A0) is not ASCII
     // whitespace and stays, so neither side trims it.
     EXPECT_EQ (oauth::cache_key (json{ { "grantType", "client_credentials" },
@@ -322,7 +335,40 @@ TEST (OAuthCacheKey, SharedVectors) {
     "\xc2\xa0"
     "https://idp/token\xc2\xa0\x1f"
     "cid\x1f"
-    "default\x1f");
+    "default\x1f"
+    "client_credentials\x1f");
+    // Vector 11 (#3689): the raw grantType is the fourth segment, so one
+    // client at one URL has a key per grant, and an absent or non-string
+    // grantType is an empty segment.
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", "authorization_code" },
+               { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "authorization_code\x1f");
+    EXPECT_EQ (oauth::cache_key (json{ { "accessTokenUrl", "https://idp/token" },
+               { "clientId", "cid" } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f");
+    EXPECT_EQ (oauth::cache_key (json{ { "grantType", 7 },
+               { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f");
+}
+
+// One client's grants never share a token row: the key carries the grant
+// (#3689). Mutation-check: drop the grantType segment from `cache_key` and
+// the inequality fails.
+TEST (OAuthCacheKey, TwoGrantsOfOneClientAreTwoKeys) {
+    const json client_credentials   = { { "grantType", "client_credentials" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    json authorization_code         = client_credentials;
+    authorization_code["grantType"] = "authorization_code";
+    EXPECT_NE (oauth::cache_key (client_credentials), oauth::cache_key (authorization_code));
 }
 
 // A pasted URL's stray whitespace must neither reach the wire nor split the
@@ -1301,6 +1347,45 @@ TEST_F (OAuthClientTest, NonInteractiveStillAnswersFromTheCache) {
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "OLD");
     EXPECT_EQ (idp.hits (), 0);
+}
+
+// A token one grant minted is not another grant's answer (#3689): the same
+// client at the same URL asking for an authorization code finds no row of its
+// own and is asked to sign in, rather than being handed a client-credentials
+// token. Mutation-check: drop the grantType segment from `cache_key` and the
+// 409 becomes the seeded token.
+TEST_F (OAuthClientTest, AClientCredentialsRowDoesNotAnswerAnAuthCodeRequest) {
+    MockTokenServer idp;
+    db_->save_oauth_token (seeded_row (cc_config (idp, "/token-plain"), 0));
+
+    auto result = oauth::acquire_token (
+    *db_, auth_code_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS);
+
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (result));
+    EXPECT_EQ (std::get<oauth::TokenError> (result).http_status, 409);
+    EXPECT_EQ (std::get<oauth::TokenError> (result).code, "oauth2_interactive_required");
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+// The converse: a client's authorization-code row stays put while its
+// client-credentials request mints and stores a token of its own (#3689).
+TEST_F (OAuthClientTest, AGrantKeepsItsOwnRowBesideAnotherGrantOfTheSameClient) {
+    MockTokenServer idp;
+    const auto auth_code          = auth_code_config (idp);
+    const auto client_credentials = cc_config (idp, "/token-plain");
+    db_->save_oauth_token (seeded_row (auth_code, 0));
+
+    const auto result = oauth::acquire_token (
+    *db_, client_credentials, false, std::nullopt, TOKEN_TIMEOUT_MS);
+
+    EXPECT_NE (access_token_of (result), "OLD");
+    EXPECT_EQ (idp.hits (), 1);
+    const auto kept = db_->get_oauth_token (oauth::cache_key (auth_code));
+    ASSERT_HAS_VALUE (kept);
+    EXPECT_EQ (kept->access_token, "OLD");
+    const auto minted = db_->get_oauth_token (oauth::cache_key (client_credentials));
+    ASSERT_HAS_VALUE (minted);
+    EXPECT_NE (minted->access_token, "OLD");
 }
 
 TEST_F (OAuthClientTest, InvalidConfigsAre400) {

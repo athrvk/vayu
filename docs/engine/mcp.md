@@ -1329,7 +1329,7 @@ Notes:
   and whether it has expired, and `clear_oauth2_token` drops one. The config is
   the same block a saved request's `auth` carries, so it can be copied out of
   `get_request` verbatim; the **cache key is the engine's**
-  (`accessTokenUrl` + `clientId` + `credentialsId` + username + the extra
+  (`accessTokenUrl` + `clientId` + `credentialsId` + `grantType` + username + the extra
   parameter rows the engine would send, a credential-named row such as
   `client_assertion` by its name alone, so the key never carries a secret),
   so configs differing only in scope
@@ -1365,7 +1365,7 @@ Notes:
   lie under an allowed folder, and the config then carries a path rather than
   a secret), or skip the tool and `run_request` the saved request, which
   composes the reference against its own environment and collection and
-  acquires the token as part of the send. The cache key's fourth slot is the
+  acquires the token as part of the send. The cache key's fifth slot is the
   grant's identity: the username for `password`, the `subject` for `jwt_bearer`.
   A read of a saved `jwt_bearer` config shows a `privateKey` that is one
   reference as written, since it names where the key lives without being it,
