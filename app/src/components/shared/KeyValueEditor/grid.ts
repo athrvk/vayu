@@ -30,9 +30,13 @@ export const KEY_VALUE_GRID_WITH_FILES =
 export const KEY_VALUE_GRID_WITH_EXTRA =
 	"grid-cols-[var(--spacing-target)_1fr_1fr_7rem_var(--spacing-target)_28px]";
 
-/** Both the toggle and a per-row control column. */
+/**
+ * Both the toggle and a per-row control column. The extra track is a share of
+ * the row, not a fixed width: at the default window the request pane is about
+ * 530px and a fixed 14rem left key and value 65px each (#3690).
+ */
 export const KEY_VALUE_GRID_WITH_FILES_AND_EXTRA =
-	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_14rem_var(--spacing-target)_28px]";
+	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_minmax(6rem,0.6fr)_var(--spacing-target)_28px]";
 
 /**
  * The extra column is opt-in, so a table that passes no `rowExtra` keeps the
