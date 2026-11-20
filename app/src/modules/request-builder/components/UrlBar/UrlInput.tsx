@@ -13,10 +13,10 @@
  */
 
 import { useCallback, useEffect } from "react";
-import { detectCommand, importCommand } from "@/services/curl/parseCurl";
+import { detectCommand, readCommand } from "@/services/curl/parseCurl";
 import { useTabsStore, useToastStore } from "@/stores";
 import { focusRequestUrl } from "@/components/layout/region-focus";
-import { droppedFlagsNotice } from "../../utils/paste-disclosure";
+import { droppedFlagsNotice, unreadableCommandNotice } from "../../utils/paste-disclosure";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
 import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
@@ -74,11 +74,19 @@ export default function UrlInput({ className }: UrlInputProps) {
 		if (takeNavIntent("focusUrl", request.id)) focusRequestUrl();
 	}, [focusRequested, request.id, takeNavIntent]);
 
-	/** Replace the request with what a curl/wget command describes. */
+	/**
+	 * Replace the request with what a curl/wget command describes. A command that
+	 * cannot be read leaves the request as it was and says why (#3685): the
+	 * paste's default is already prevented, so silence is a vanished paste.
+	 */
 	const importIntoRequest = useCallback(
 		(text: string) => {
-			const imported = importCommand(text);
-			if (!imported) return;
+			const reading = readCommand(text);
+			if (!reading.ok) {
+				showToast(unreadableCommandNotice(reading.reason));
+				return;
+			}
+			const imported = reading.command;
 			// Request-shape replacement; identity & scripts are preserved.
 			setRequest(imported.request);
 			// And what it could not carry, said out loud rather than eaten

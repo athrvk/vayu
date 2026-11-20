@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DroppedFlag } from "@/services/curl/parseCurl";
-import { droppedFlagsNotice } from "./paste-disclosure";
+import { droppedFlagsNotice, unreadableCommandNotice } from "./paste-disclosure";
 
 const reveal = vi.hoisted(() => vi.fn());
 vi.mock("@/modules/settings/reveal", () => ({ revealSetting: reveal }));
@@ -57,5 +57,23 @@ describe("the paste disclosure notice", () => {
 		// Named, not actioned. An "Open settings" that lands on a screen with no
 		// answer for `--retry` is a pointer to nowhere.
 		expect(droppedFlagsNotice([HOMELESS])?.action).toBeUndefined();
+	});
+});
+
+describe("the unreadable command notice (#3685)", () => {
+	it.each([
+		["unterminated-quote", "You opened a quote and never closed it"],
+		["missing-url", "The command has no URL"],
+		["not-a-command", "The text is not a cURL or wget command"],
+		["unreadable", "Vayu couldn't parse the command"],
+	] as const)("names %s as the reason and says the request is untouched", (reason, cause) => {
+		const notice = unreadableCommandNotice(reason);
+
+		expect(notice.message).toBe(`${cause}, so the request was left as it was.`);
+		expect(notice.title).toBe("Couldn't import the command");
+	});
+
+	it("is a warning, which the severity floor must not hide", () => {
+		expect(unreadableCommandNotice("missing-url").variant).toBe("warning");
 	});
 });

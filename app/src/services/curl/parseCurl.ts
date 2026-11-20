@@ -40,7 +40,7 @@ import {
 	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
 } from "@/constants/request";
-import { tokenize } from "./tokenize";
+import { tokenize, UnterminatedQuoteError } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
 import { detectCommand } from "./detect-command";
@@ -209,27 +209,45 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 	"--directory-prefix": { what: "chose a download directory" },
 };
 
+/** Why a pasted command could not be imported (#3685). */
+export type CommandFailure = "not-a-command" | "unterminated-quote" | "missing-url" | "unreadable";
+
+export type CommandReading =
+	{ ok: true; command: CommandImport } | { ok: false; reason: CommandFailure };
+
 /**
  * Parse a pasted curl/wget command into a request-shape partial and the ledger
- * of what it could not carry.
+ * of what it could not carry, or say why it cannot be imported.
  *
- * Returns null when the text isn't a recognized command or parsing fails -
- * never throws to the caller.
+ * Never throws to the caller. An unterminated quote and a missing URL are
+ * named; any other throw from the parser (a lone surrogate reaching
+ * `encodeURIComponent`, say) is `unreadable`, so a caller that does not guard
+ * the call (`ImportModal`) is as safe as one that does.
  */
-export function importCommand(text: string): CommandImport | null {
+export function readCommand(text: string): CommandReading {
 	const kind = detectCommand(text);
-	if (!kind) return null;
+	if (!kind) return { ok: false, reason: "not-a-command" };
 
 	try {
-		const argv = tokenize(text);
 		// Drop the leading program name (curl / wget).
-		const args = argv.slice(1);
+		const args = tokenize(text).slice(1);
 		const parsed = kind === "curl" ? parseCurl(args) : parseWget(args);
-		if (!parsed.request.url) return null;
-		return parsed;
-	} catch {
-		return null;
+		if (!parsed.request.url) return { ok: false, reason: "missing-url" };
+		return { ok: true, command: parsed };
+	} catch (error) {
+		if (error instanceof UnterminatedQuoteError)
+			return { ok: false, reason: "unterminated-quote" };
+		return { ok: false, reason: "unreadable" };
 	}
+}
+
+/**
+ * `readCommand` for a caller that only needs to know whether there is an
+ * import: null for every failure, whatever the reason.
+ */
+export function importCommand(text: string): CommandImport | null {
+	const reading = readCommand(text);
+	return reading.ok ? reading.command : null;
 }
 
 /**
