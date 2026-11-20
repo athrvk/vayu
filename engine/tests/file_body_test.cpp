@@ -1670,7 +1670,7 @@ TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendP
 // `{{variable}}`, as a buffered send answers them. Mutation check: wrap the
 // refusal in `execute_exchange` as `InternalError` again and each reads it.
 TEST_F (StoredTrustTest, AFilePartWithNoFileOrAnUnresolvedPathIsAnUnsendableFile) {
-    for (const std::string src : { std::string{}, std::string{ "{{fixtures}}/a.bin" } }) {
+    for (const std::string& src : { std::string{}, std::string{ "{{fixtures}}/a.bin" } }) {
         const json body = { { "mode", "form-data" },
             { "fields",
             json::array ({ { { "key", "upload" }, { "type", "file" }, { "src", src } } }) } };
