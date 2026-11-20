@@ -449,9 +449,8 @@ function CachedTokenRow({
 			below={
 				<>
 					{/* A cached token survives edits that break the config - the cache key
-					    omits grantType, so switching Client Credentials → Authorization Code
-					    keeps the token on screen while the empty Authorization URL disables
-					    the action. The summary slot is taken by the token, so the reason goes
+					    omits the Authorization URL and the scope, so clearing either keeps the
+					    token on screen while the missing field disables the action. The summary slot is taken by the token, so the reason goes
 					    below rather than nowhere. */}
 					{incomplete && token && <MissingFieldsNote missingFields={missingFields} />}
 

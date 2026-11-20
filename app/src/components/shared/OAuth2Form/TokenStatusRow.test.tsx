@@ -144,9 +144,8 @@ describe("TokenStatusRow with an incomplete config", () => {
 	});
 
 	it("still gives the reason when a stale token occupies the summary line", () => {
-		// The cache key omits grantType, so a token fetched under Client
-		// Credentials is still on screen after a switch to Authorization Code -
-		// the summary line shows it, and the reason the button is dead has to
+		// The cache key omits the Authorization URL, so a token fetched
+		// before it was cleared is still on screen - the summary line shows it, and the reason the button is dead has to
 		// land somewhere else rather than nowhere.
 		statusQuery.data = {
 			found: true,
