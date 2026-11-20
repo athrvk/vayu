@@ -7314,7 +7314,7 @@ post-request script. A load run and a stream record no hops.
 ### OAuth 2.0 token cache
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
-deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
+deterministic `cacheKey` = `trim(accessTokenUrl) \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant` (the `subject` for a `jwt_bearer` grant, so two
 subjects of one client hold two tokens; the key never reads `privateKey`,
 `privateKeyFile`, the claims or the algorithm), then one segment per extra parameter list that has
