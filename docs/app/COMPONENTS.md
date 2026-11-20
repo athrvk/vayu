@@ -3673,7 +3673,8 @@ module for its cell input is the same inversion one level down (issue #567).
 
 `VariableSupport` (in `types/ui.ts`) is the variable slice of the request-builder
 context - `resolveField`, `getAllVariables`, `getVariableOrigins`,
-`updateVariable`, `writableScopes` - as a plain object a caller hands in, plus
+`updateVariable` (an edit passes the shown definition's `sourceId` as a fourth
+argument, a create none, #3683), `writableScopes` - as a plain object a caller hands in, plus
 the optional `dataColumns` (the declared data contract in scope, issue #600).
 `dataColumns` is optional *within* a scope rather than with it: absent means the
 chain declares no contract, which is every workspace that has not opened the

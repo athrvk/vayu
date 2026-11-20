@@ -48,13 +48,20 @@ export interface EditableVariableProps {
 	 */
 	deferred?: boolean;
 	/** Callback when variable value changes */
-	onValueChange?: (name: string, value: string, scope: RequestBuilderVariableScope) => void;
+	onValueChange?: (
+		name: string,
+		value: string,
+		scope: RequestBuilderVariableScope,
+		sourceId?: string
+	) => void;
 	/** Whether editing is disabled */
 	disabled?: boolean;
 	/** True when the value is a secret, so hover must not print it. */
 	secret?: boolean;
 	/** The environment or collection it came from. Absent for globals. */
 	sourceName?: string;
+	/** Its id: where an edit of this token is written (#3683). Absent for globals. */
+	sourceId?: string;
 	/**
 	 * The scope this token belongs to. Required, not optional as it is further
 	 * up: a token only renders where there *is* a scope, so the popover always
@@ -114,17 +121,25 @@ export default function EditableVariable({
 	disabled = false,
 	secret = false,
 	sourceName,
+	sourceId,
 	variables,
 	tabIndex,
 }: EditableVariableProps) {
 	const { getVariableOrigins, writableScopes } = variables;
 	const origins = getVariableOrigins(name);
 
-	const varInfo = resolved ? { value, scope: scope as VariableScope, secret, sourceName } : null;
+	const varInfo = resolved
+		? { value, scope: scope as VariableScope, secret, sourceName, sourceId }
+		: null;
 
 	const handleValueChange = onValueChange
-		? (varName: string, varValue: string, varScope: VariableScope) => {
-				onValueChange(varName, varValue, varScope as RequestBuilderVariableScope);
+		? (varName: string, varValue: string, varScope: VariableScope, varSourceId?: string) => {
+				onValueChange(
+					varName,
+					varValue,
+					varScope as RequestBuilderVariableScope,
+					varSourceId
+				);
 			}
 		: undefined;
 

@@ -607,11 +607,22 @@ say *which* environment rather than just "Environment".
 
 **An edit writes back to that source, never to one re-derived.** The context bar
 commits against `sourceId`, so the definition that receives the value is the one
-the bar displayed. It used to walk the collection chain itself for the first
-definition with a truthy `enabled`, which disagrees with the resolver's
-`isEnabledDefinition` on every definition where `enabled` is *absent* (D17 counts
-absent as enabled) - so a leaf definition without the key displayed while an
-ancestor's took the write. Any second implementation of "which definition wins"
+the bar displayed. A token's popover does the same: its edit passes the
+`sourceId` of the definition it showed to `updateVariable`, and
+`useVariableWriter` writes to the collection or environment with that id, keeping
+the definition's `secret`, `type` and `createdAt` (a write still sets
+`enabled: true`). It used to write to the request's own collection whatever the winner was,
+so editing a value a chain's root defined put a copy in the leaf and left the root
+untouched (#3683). A `sourceId` naming a collection or environment that no longer
+exists is a no-op, never a fall back to the request's collection; only a *create*,
+which has no definition and so no `sourceId`, lands in the request's own
+collection or the active environment. Both writers name their target through
+`lib/variable-target.ts`'s `variableTargetOf`.
+
+The bar once walked the collection chain itself for the first definition with a
+truthy `enabled`, which disagrees with the resolver's `isEnabledDefinition` on
+every definition where `enabled` is *absent* (D17 counts absent as enabled) - so
+a leaf definition without the key displayed while an ancestor's took the write. Any second implementation of "which definition wins"
 can drift from this one; there is only meant to be the one, and `sourceId` is how
 it is carried.
 

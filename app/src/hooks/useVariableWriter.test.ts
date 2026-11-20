@@ -229,3 +229,86 @@ describe("writing a variable leaves row ordering alone", () => {
 		expect(mutateGlobals.mock.calls[0][0].variables.token).not.toHaveProperty("createdAt");
 	});
 });
+
+/*
+ * An edit writes to the definition the popover displayed (#3683). The request's
+ * own collection is only where a *create* lands: with a chain root that defines
+ * the name and a leaf that does not, editing from the leaf used to write a copy
+ * of the root's value into the leaf and leave the root's untouched.
+ */
+describe("editing a definition from a collection chain", () => {
+	const chain = {
+		cols: [
+			{
+				id: "root",
+				name: "Root",
+				variables: {
+					baseUrl: { value: "https://old", enabled: true, secret: true, createdAt: 7 },
+				},
+			},
+			{ id: "leaf", name: "Leaf", variables: {} },
+		],
+		collectionId: "leaf",
+	};
+
+	it("writes to the collection the sourceId names, keeping its flags", () => {
+		const r = setup(chain);
+		r.current.updateVariable("baseUrl", "https://new", "collection", "root");
+		expect(mutateCollection).toHaveBeenCalledTimes(1);
+		expect(mutateCollection).toHaveBeenCalledWith({
+			id: "root",
+			variables: {
+				baseUrl: { value: "https://new", enabled: true, secret: true, createdAt: 7 },
+			},
+		});
+	});
+
+	it("never touches the request's own collection", () => {
+		const r = setup(chain);
+		r.current.updateVariable("baseUrl", "https://new", "collection", "root");
+		expect(mutateCollection).not.toHaveBeenCalledWith(expect.objectContaining({ id: "leaf" }));
+	});
+
+	it("is a no-op when the source collection is gone, not a write to the leaf", () => {
+		const r = setup(chain);
+		r.current.updateVariable("baseUrl", "https://new", "collection", "deleted");
+		expect(mutateCollection).not.toHaveBeenCalled();
+	});
+
+	it("still creates in the request's own collection when no sourceId is given", () => {
+		const r = setup(chain);
+		r.current.updateVariable("fresh", "v", "collection");
+		expect(mutateCollection).toHaveBeenCalledWith({
+			id: "leaf",
+			variables: { fresh: expect.objectContaining({ value: "v", enabled: true }) },
+		});
+	});
+});
+
+describe("editing an environment definition", () => {
+	const envs = [
+		{ id: "e1", name: "Staging", variables: { host: { value: "a", enabled: true } } },
+		{ id: "e2", name: "Prod", variables: { host: { value: "b", enabled: true } } },
+	];
+
+	it("writes to the environment the sourceId names", () => {
+		const r = setup({ envs, activeEnvironmentId: "e1" });
+		r.current.updateVariable("host", "c", "environment", "e2");
+		expect(mutateEnvironment).toHaveBeenCalledWith({
+			id: "e2",
+			variables: { host: { value: "c", enabled: true } },
+		});
+	});
+
+	it("is a no-op when the source environment is gone", () => {
+		const r = setup({ envs, activeEnvironmentId: "e1" });
+		r.current.updateVariable("host", "c", "environment", "deleted");
+		expect(mutateEnvironment).not.toHaveBeenCalled();
+	});
+
+	it("creates in the active environment when no sourceId is given", () => {
+		const r = setup({ envs, activeEnvironmentId: "e1" });
+		r.current.updateVariable("fresh", "v", "environment");
+		expect(mutateEnvironment).toHaveBeenCalledWith(expect.objectContaining({ id: "e1" }));
+	});
+});

@@ -60,8 +60,12 @@ export interface VariableSupport {
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	/** Every definition of a name, winner and losers alike. Display-only. */
 	getVariableOrigins: (name: string) => VariableOrigin[];
-	/** Write a new value for a name, from a token's edit popover. */
-	updateVariable: (name: string, value: string, scope: VariableScope) => void;
+	/**
+	 * Write a new value for a name, from a token's edit popover. An edit passes
+	 * the `sourceId` of the definition it displayed so the write lands there, not
+	 * in the field's own collection; a create passes none (#3683).
+	 */
+	updateVariable: (name: string, value: string, scope: VariableScope, sourceId?: string) => void;
 	/**
 	 * The scopes `updateVariable` can actually write to right now, so the
 	 * popover's scope picker cannot offer a target that does not exist.

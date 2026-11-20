@@ -952,7 +952,12 @@ describe("an Enter that only commits an IME buffer", () => {
 		expect(onValueChange).not.toHaveBeenCalled();
 
 		fireEvent.keyDown(field, { key: "Enter" });
-		expect(onValueChange).toHaveBeenCalledWith("merchantId", "mrc_8813", "environment");
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"mrc_8813",
+			"environment",
+			undefined
+		);
 	});
 });
 
@@ -1005,5 +1010,61 @@ describe("the commit key never reaches what closing refocuses", () => {
 
 		const reopened = within(open()).getByLabelText("Value of merchantId");
 		expect(fireEvent.keyDown(reopened, { key: "Escape" })).toBe(false);
+	});
+});
+
+/*
+ * An edit writes to the definition the popover displayed, so it carries that
+ * definition's `sourceId`; a create has no definition and carries none (#3683).
+ * Without it the caller can only guess a collection, and a variable a chain's
+ * root defines gets a copy written into the request's own collection.
+ */
+describe("which definition an edit names", () => {
+	const winner = {
+		value: "mrc_8813",
+		scope: "collection",
+		sourceName: "Root",
+		sourceId: "col-root",
+	};
+
+	it.each(["manual", "auto"] as const)("passes the sourceId on a %s-mode edit", (saveMode) => {
+		const { onValueChange } = renderPopover({
+			varInfo: { ...winner, scope: "collection" },
+			saveMode,
+		});
+		const field = within(open()).getByLabelText("Value of merchantId");
+		fireEvent.change(field, { target: { value: "mrc_9000" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith(
+			"merchantId",
+			"mrc_9000",
+			"collection",
+			"col-root"
+		);
+	});
+
+	it("passes no sourceId for a global, which has none", () => {
+		const { onValueChange } = renderPopover({
+			varInfo: { value: "mrc_8813", scope: "global" },
+			saveMode: "manual",
+		});
+		const field = within(open()).getByLabelText("Value of merchantId");
+		fireEvent.keyDown(field, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "mrc_8813", "global", undefined);
+	});
+
+	it("passes none on a create, even though a definition elsewhere has one", () => {
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["collection"],
+		});
+		const panel = open();
+		fireEvent.change(within(panel).getByLabelText(/value for new variable/i), {
+			target: { value: "abc" },
+		});
+		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
+		expect(onValueChange).toHaveBeenCalledTimes(1);
+		expect(onValueChange.mock.calls[0]).toEqual(["merchantId", "abc", "collection"]);
 	});
 });
