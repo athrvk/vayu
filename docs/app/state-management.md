@@ -1313,7 +1313,7 @@ each collection-run step. A row is a discriminated union on `kind`: `send`,
 **State:**
 ```typescript
 {
-  rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and its append time `at`
+  rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and a time `at`, see below
   retainedBytes: number,     // estimateConsoleRowBytes summed over rows
   evictedCount: number,      // rows the bounds dropped since the last clear
   runKeys: Set<string>,      // run identity of each step row and streamed Send row held
@@ -1328,6 +1328,13 @@ useConsoleStore.getState().clear();      // empties the ring; History is untouch
 const rows = useConsoleStore(selectConsoleRows);
 const dropped = useConsoleStore(selectConsoleEvictedCount);
 ```
+
+**A row's time.** `at` is when the row's event began, display only: rows stay
+in append order, which is not time order. A `scriptRequest` row carries the
+engine's `startedAt` (#3680), so a three-second token fetch is listed three
+seconds before the Send that waited on it. Any other row takes the time of the
+append, except a `line`, which is untimed and takes the time of the row before
+it in the same append (the append time when it is the first).
 
 **Who appends.** `modules/console/console-rows.ts` builds every row the ring is
 handed. `sendConsoleRows` is the one builder both Send completions call: the
