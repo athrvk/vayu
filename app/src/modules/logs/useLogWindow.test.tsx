@@ -13,7 +13,7 @@
  * as the tail appends, the store trims and each sentinel is reached.
  *
  * Mutation checks (revert, confirm red, restore): drop the clamp on a first
- * row the store has dropped and the trim case reds; drop the cap from
+ * row the store has dropped and the trim case reds; drop `droppedNewest` and the newest-end case lands on the oldest rows; drop the cap from
  * `grownUp` or `grownDown` and its sentinel case mounts past
  * `LOG_WINDOW_MAX_ROWS`; re-anchor only on a new generation and the Follow off,
  * trim and bottom sentinel cases lose the reader's rows.
@@ -121,6 +121,18 @@ describe("useLogWindow", () => {
 		});
 		expect(span(view.result.current.shown)).toEqual(["line 150", "line 349"]);
 		expect(view.result.current.hasAbove).toBe(false);
+	});
+
+	it("lands on the newest rows when the store drops the reader's rows off the newest end", () => {
+		const records = lines(0, 1_000);
+		const view = renderWindow({ records, follow: true, generation: 1 });
+		view.rerender({ records, follow: false, generation: 1 });
+		expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+
+		// Search older: a page prepended, the newest dropped to hold the bound.
+		view.rerender({ records: lines(-300, 700), follow: false, generation: 1 });
+		expect(span(view.result.current.shown)).toEqual(["line 500", "line 699"]);
+		expect(view.result.current.hasBelow).toBe(false);
 	});
 
 	it("grows a step older at the top sentinel, and past the cap gives up the newest rows", () => {

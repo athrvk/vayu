@@ -49,14 +49,25 @@ function initialAnchor(generation: number): Anchor {
 	return { generation, first: undefined, count: LOG_WINDOW_STEP };
 }
 
+/**
+ * Whether the store dropped @p entry off the newest end (Search older, at the
+ * bound) rather than the oldest (following). `ts` is ISO UTC, so strings order;
+ * a line without one is taken as dropped from the oldest.
+ */
+function droppedNewest(records: readonly LogEntry[], entry: LogEntry): boolean {
+	const newest = records[records.length - 1];
+	return !!newest && "ts" in entry && "ts" in newest && entry.ts > newest.ts;
+}
+
 function boundsOf(records: readonly LogEntry[], anchor: Anchor, follow: boolean): Bounds {
 	const length = records.length;
 	if (follow || anchor.first === undefined) {
 		return { start: Math.max(0, length - anchor.count), end: length };
 	}
-	// A first row the store has dropped leaves the window at the oldest held.
-	const start = Math.max(0, records.indexOf(anchor.first));
-	return { start, end: Math.min(length, start + anchor.count) };
+	const at = records.indexOf(anchor.first);
+	// A first row the store has dropped leaves the window at the end it was dropped from.
+	const start = at !== -1 ? at : droppedNewest(records, anchor.first) ? length - anchor.count : 0;
+	return { start: Math.max(0, start), end: Math.min(length, start + anchor.count) };
 }
 
 /** The top sentinel reached: a step older, giving up the newest rows past the cap. */
