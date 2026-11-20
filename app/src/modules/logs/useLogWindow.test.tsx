@@ -15,7 +15,7 @@
  * Mutation checks (revert, confirm red, restore): drop the clamp on a first
  * row the store has dropped and the trim case reds; drop `droppedNewest` and the newest-end case lands on the oldest rows; drop the cap from
  * `grownUp` or `grownDown` and its sentinel case mounts past
- * `LOG_WINDOW_MAX_ROWS`; re-anchor only on a new generation and the Follow off,
+ * `LOG_WINDOW_MAX_ROWS`; drop the `beforeGrowUp` call and the "tells the caller" case reds; re-anchor only on a new generation and the Follow off,
  * trim and bottom sentinel cases lose the reader's rows.
  */
 
@@ -42,9 +42,9 @@ interface Props {
 	generation: number;
 }
 
-function renderWindow(initial: Props) {
+function renderWindow(initial: Props, beforeGrowUp?: () => void) {
 	return renderHook(
-		(props: Props) => useLogWindow(props.records, props.follow, props.generation),
+		(props: Props) => useLogWindow(props.records, props.follow, props.generation, beforeGrowUp),
 		{
 			initialProps: initial,
 		}
@@ -150,6 +150,21 @@ describe("useLogWindow", () => {
 		expect(view.result.current.shown).toHaveLength(LOG_WINDOW_MAX_ROWS);
 		expect(span(view.result.current.shown)).toEqual(["line 1", "line 600"]);
 		expect(view.result.current.hasBelow).toBe(true);
+	});
+
+	it("tells the caller before the top sentinel grows the window, and not for the bottom one", () => {
+		// The caller holds the reader's place across a growth above them (#3675).
+		const beforeGrowUp = vi.fn();
+		const records = lines(0, 1_000);
+		const view = renderWindow({ records, follow: false, generation: 1 }, beforeGrowUp);
+		const { top, bottom } = attach(view);
+
+		act(() => observer.reach(bottom));
+		expect(beforeGrowUp).not.toHaveBeenCalled();
+
+		act(() => observer.reach(top));
+		expect(beforeGrowUp).toHaveBeenCalledTimes(1);
+		expect(view.result.current.shown).toHaveLength(2 * LOG_WINDOW_STEP);
 	});
 
 	it("mounts the next step at the bottom sentinel, and past the cap gives up the oldest rows", () => {

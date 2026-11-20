@@ -22,7 +22,10 @@
  * cases fail; build the Send row's exchange without `maskSensitiveHeaders` in
  * `console-rows.ts` and the cURL and expansion cases fail, the token in the
  * copy and in the Headers tab; do the same to the step's stored exchange in
- * `StepRow` and "opens to the stored exchange" fails; drop the `isExpanded`
+ * `StepRow` and "opens to the stored exchange" fails; draw `EvictedNotice` whatever
+ * `hasMore` says and "above the oldest row held" fails; drop the `useHoldPlace`
+ * hook from `ConsoleList` and the reader's place case reads a `scrollTop` of 0;
+ * drop the `isExpanded`
  * gate on the report query in `StepRow` and "asks for the report only once the
  * row is open" fails.
  */
@@ -35,6 +38,8 @@ import { useScenarioRunStore, useTabsStore, useToastStore } from "@/stores";
 import { useConsoleStore, type ConsoleRowInput } from "@/stores/console-store";
 import type { RunReport } from "@/types";
 import type { ResponseState } from "@/modules/request-builder/types";
+import { makeScrollable, stubRowLayout } from "@/test/row-layout.testkit";
+import { stubSentinelObserver } from "@/test/sentinel-observer.testkit";
 import { sendConsoleRows } from "./console-rows";
 import { ConsoleTab } from "./ConsoleTab";
 
@@ -196,6 +201,28 @@ describe("the Console's list", () => {
 	});
 });
 
+describe("growing the window above the reader", () => {
+	it("keeps the reader's place, so the next scroll up grows the window again", () => {
+		const observer = stubSentinelObserver();
+		stubRowLayout(20);
+		append(Array.from({ length: 3 * GROWING_WINDOW_STEP }, (_, i) => line(`quiet ${i}`)));
+		render(<ConsoleTab />);
+		const list = screen.getByRole("list", { name: "Console rows" });
+		const scroller = list.parentElement as HTMLElement;
+		makeScrollable(scroller, 0);
+
+		act(() => observer.reach(list.previousElementSibling as Element));
+		expect(listedRows()).toHaveLength(2 * GROWING_WINDOW_STEP);
+		expect(scroller.scrollTop).toBe(GROWING_WINDOW_STEP * 20);
+
+		scroller.scrollTop = 0;
+		act(() => observer.reach(list.previousElementSibling as Element));
+		expect(listedRows()).toHaveLength(3 * GROWING_WINDOW_STEP);
+		expect(scroller.scrollTop).toBe(GROWING_WINDOW_STEP * 20);
+		expect(screen.getByText("quiet 0")).toBeInTheDocument();
+	});
+});
+
 describe("the Console's filters, over rows not yet drawn", () => {
 	it("narrows by type", () => {
 		append([scriptRequest("http://localhost:4000/token"), ...filler()]);
@@ -284,6 +311,20 @@ describe("Clear and the dropped rows", () => {
 			notice.compareDocumentPosition(screen.getByText("kept")) &
 				Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
+	});
+
+	it("says it above the oldest row held, not above the window", () => {
+		const observer = stubSentinelObserver();
+		append([line("the oldest line"), ...filler()]);
+		act(() => useConsoleStore.setState({ evictedCount: 3 }));
+		render(<ConsoleTab />);
+		const list = screen.getByRole("list", { name: "Console rows" });
+		expect(screen.queryByText(/older rows? dropped/)).toBeNull();
+
+		act(() => observer.reach(list.previousElementSibling as Element));
+
+		expect(screen.getByText("the oldest line")).toBeInTheDocument();
+		expect(screen.getByText(/^3 older rows dropped/)).toBeInTheDocument();
 	});
 
 	it("says nothing about dropped rows when none were", () => {

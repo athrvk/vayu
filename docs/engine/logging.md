@@ -276,7 +276,11 @@ replacing what the table held.
 The tab holds at most 10,000 lines or 16 MiB, whichever comes first, and
 mounts at most 600 of them at a time, whatever it holds: the rows you are
 reading stay put while lines arrive below, and those mount as you scroll to
-them. Following drops the oldest. **Search older** pages back through the files, says how far
+them. Scrolling up through the lines held mounts a step more at a time without
+moving the line you are reading (#3675), so a steady scroll reaches the oldest
+line held; the bar below the header (**Search older**, "Searched back to ...",
+or "Reached the start of the logs.") is drawn there, above that line, and
+nowhere else. Following drops the oldest. **Search older** pages back through the files, says how far
 it has looked ("Searched back to ..."), turns Follow off and drops the newest;
 having dropped any, the tab stops appending the tail (it would sit after a
 gap), and Follow reads the newest lines again. A jump is detached the same
