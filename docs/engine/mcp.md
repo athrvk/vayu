@@ -3378,7 +3378,7 @@ persisted for the service the next first request builds.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 82 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 83 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside the
 lifecycle's service factory (reached only by a listener's first request, after
 the enabled check) and inside the two IPC handlers that need the tool catalog. The main process is unbundled, so a static import here is
