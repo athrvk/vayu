@@ -43,7 +43,6 @@
  */
 
 import { create } from "zustand";
-import { GROWING_WINDOW_STEP } from "@/hooks/useGrowingWindow";
 import type {
 	LogBatch,
 	LogCursor,
@@ -55,6 +54,7 @@ import type {
 } from "@/types/electron";
 import { POSITION_KEY, entryBytes, entryLine, isUnparsedEntry } from "./log-entry";
 import { parseSearchInput } from "./parse-search";
+import { LOG_WINDOW_STEP } from "./useLogWindow";
 
 /** The most lines the renderer holds. */
 export const LOG_MAX_RECORDS = 10_000;
@@ -63,10 +63,12 @@ export const LOG_MAX_BYTES = 16 * 1024 * 1024;
 /** Lines a read asks for; main clamps to 1000. */
 const LOG_PAGE_SIZE = 1000;
 /**
- * The page newer a jump reads at once: half the list's window, which renders
- * the newest lines held, so the window still reaches back past the time.
+ * The page newer a jump reads at once. The list's window stays on the lines
+ * before the time and the page lands below it (`useLogWindow`); at half a step,
+ * reaching the window's lower end mounts the whole page beside them, under the
+ * cap.
  */
-const JUMP_NEWER_PAGE_SIZE = GROWING_WINDOW_STEP / 2;
+const JUMP_NEWER_PAGE_SIZE = LOG_WINDOW_STEP / 2;
 
 export type LogLevelName = LogFileRecord["level"];
 
