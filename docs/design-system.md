@@ -1205,8 +1205,16 @@ covers the 125-150% accessibility band the three fixed presets it replaced
 custom property (so `body` + every `font-sans` utility follow); scale sets the
 page zoom factor (Electron `webFrame`, CSS `zoom` fallback in the browser).
 Both live in `appearance-store` (source of truth `constants/appearance.ts`),
-persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
-text stays JetBrains Mono regardless.
+persisted to localStorage, and applied pre-paint in `index.html`.
+
+**User-selectable Code font** (#3692). Settings → Editor → Code font swaps the
+`--font-mono` custom property on `documentElement` (`client-settings-store`),
+and every mono surface follows it: the Monaco editors, and every `font-mono`
+utility. That holds only because `--font-sans` and `--font-mono` are declared in
+the plain `@theme` block of `index.css`, not `@theme inline`: `inline` would
+compile `font-mono` to the literal stack, and the override would reach nothing
+but the rules that write `var(--font-mono)` by hand.
+`app/src/constants/appearance.font-tokens.test.ts` holds the declaration there.
 
 **Reflow guarantee** (#3494). The window's minimum is 1024px and the scale
 slider reaches 200%, so the smallest layout the app promises is **512 CSS px
@@ -1523,7 +1531,8 @@ generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
 these. They live in a plain `@theme` block in `index.css`, deliberately not
 `@theme inline`: `inline` bakes a literal into each generated utility instead
 of a `var()` reference, which would silently disable the Comfortable override
-below.
+below. The two font stacks sit in that block for the same reason (see
+Typography).
 
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|
