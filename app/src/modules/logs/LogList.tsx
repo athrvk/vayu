@@ -32,11 +32,15 @@
  *
  * **A jump is marked and scrolled to** (#3674): the window opens on the time
  * (`useLogWindow`), a rule naming it sits between the last line before it and
- * the first at or after it, and once the first page newer has landed the list
- * scrolls that rule to the middle of its own scroller, once per jump. Not
- * sooner: the lines that page adds change which rows are mounted, and a scroll
- * before it would be to a place that then moves. Resetting the scroller to its
- * end instead would show the newest lines, which is what the jump is not for.
+ * the first at or after it, and once the first page newer has landed
+ * (`jumpPaging`) the list scrolls that rule to the middle of its own scroller,
+ * once per jump (the browser clamps it where too few rows sit below the rule to
+ * fill half the scroller: the end of the logs). Not sooner: the lines that page adds change which rows are mounted, and a scroll
+ * before it would be to a place that then moves. That scroll is the list's own,
+ * so it goes through `scrollOwn` and never reads as the reader reaching the
+ * end: Follow stays off however near the end the time lies. Resetting the
+ * scroller to its end instead would show the newest lines, which is what the
+ * jump is not for.
  *
  * **The pin is `useStickToEnd`** (#3671): it pins again when the rows settle to
  * their real height, and ignores the scroll event its own pin causes, so only
@@ -215,7 +219,7 @@ export function LogList() {
 	const detached = useLogsStore((s) => s.detached);
 	const generation = useLogsStore((s) => s.generation);
 	const jumpTarget = useLogsStore((s) => s.jumpTarget);
-	const loadingNewer = useLogsStore((s) => s.loadingNewer);
+	const jumpPaging = useLogsStore((s) => s.jumpPaging);
 	const status = useLogsStore((s) => s.status);
 	const setFollow = useLogsStore((s) => s.setFollow);
 	const scroller = useRef<HTMLDivElement>(null);
@@ -230,10 +234,11 @@ export function LogList() {
 		follow,
 		generation,
 		holdPlace,
-		jumpTarget
+		jumpTarget,
+		jumpPaging
 	);
 
-	const { onScroll, listRef } = useStickToEnd(scroller, {
+	const { onScroll, listRef, scrollOwn } = useStickToEnd(scroller, {
 		following: follow,
 		onFollowingChange: setFollow,
 		canResume: !detached && !hasBelow,
@@ -242,10 +247,12 @@ export function LogList() {
 
 	// Every commit, so the check sees the marker the moment its page has landed.
 	useLayoutEffect(() => {
-		if (!marker.current || !scroller.current || loadingNewer) return;
+		if (!marker.current || !scroller.current || jumpPaging) return;
 		if (scrolledTo.current === generation) return;
 		scrolledTo.current = generation;
-		scrollWithin(scroller.current, marker.current, { block: "center" });
+		const container = scroller.current;
+		const target = marker.current;
+		scrollOwn(() => scrollWithin(container, target, { block: "center" }));
 	});
 
 	const toggle = useCallback((entry: LogEntry) => {

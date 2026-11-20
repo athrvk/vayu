@@ -28,9 +28,13 @@
  *
  * **A jump opens the window on its time** (`jumpTarget`, #3674), not on the
  * newest rows: a few rows before the first line at or after it, so the line the
- * reader asked for is mounted whatever is newer. Until such a line is held (the
- * page newer is still being read) the window is the newest rows and holds no
- * first row, so the page's arrival moves it onto the time.
+ * reader asked for is mounted whatever is newer. While the jump's first page
+ * newer is being read (`jumpPaging`) the window is unsettled: it shows the time
+ * where a line at or after it is held and the newest rows where not, but holds
+ * no first row and neither sentinel grows it, so the page's arrival opens it on
+ * the time whatever it carries and wherever the reader had reached. Once the
+ * page has landed the window is anchored on that line, or on the newest rows
+ * when none is held.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -56,8 +60,8 @@ interface Anchor {
 interface Bounds {
 	start: number;
 	end: number;
-	/** The window is the newest rows only because the jump's time has no line yet. */
-	awaitsTarget?: boolean;
+	/** The jump's first page newer is still being read: no first row is held yet. */
+	unsettled?: boolean;
 }
 
 function initialAnchor(generation: number): Anchor {
@@ -98,17 +102,15 @@ function boundsOf(
 	records: readonly LogEntry[],
 	anchor: Anchor,
 	follow: boolean,
-	target: string | null
+	target: string | null,
+	paging: boolean
 ): Bounds {
 	const length = records.length;
 	if (follow) return newestBounds(length, anchor.count);
 	if (anchor.first === undefined) {
-		return (
-			boundsAroundTarget(records, anchor.count, target) ?? {
-				...newestBounds(length, anchor.count),
-				awaitsTarget: target !== null,
-			}
-		);
+		const bounds =
+			boundsAroundTarget(records, anchor.count, target) ?? newestBounds(length, anchor.count);
+		return paging ? { ...bounds, unsettled: true } : bounds;
 	}
 	const at = records.indexOf(anchor.first);
 	// A first row the store has dropped leaves the window at the end it was dropped from.
@@ -121,10 +123,11 @@ function grownUp(
 	records: readonly LogEntry[],
 	anchor: Anchor,
 	follow: boolean,
-	target: string | null
+	target: string | null,
+	paging: boolean
 ): Anchor {
-	const { start } = boundsOf(records, anchor, follow, target);
-	if (start === 0) return anchor;
+	const { start, unsettled } = boundsOf(records, anchor, follow, target, paging);
+	if (unsettled || start === 0) return anchor;
 	const top = Math.max(0, start - LOG_WINDOW_STEP);
 	const count = Math.min(LOG_WINDOW_MAX_ROWS, anchor.count + start - top);
 	return { ...anchor, first: records[top], count };
@@ -135,10 +138,11 @@ function grownDown(
 	records: readonly LogEntry[],
 	anchor: Anchor,
 	follow: boolean,
-	target: string | null
+	target: string | null,
+	paging: boolean
 ): Anchor {
-	const { start, end } = boundsOf(records, anchor, follow, target);
-	if (end >= records.length) return anchor;
+	const { start, end, unsettled } = boundsOf(records, anchor, follow, target, paging);
+	if (unsettled || end >= records.length) return anchor;
 	const bottom = Math.min(records.length, end + LOG_WINDOW_STEP);
 	const top = Math.max(start, bottom - LOG_WINDOW_MAX_ROWS);
 	return { ...anchor, first: records[top], count: bottom - top };
@@ -200,6 +204,8 @@ export interface LogWindow {
  * The window over @p records, oldest first; @p generation changes whenever the
  * store replaces the list, and starts the window again: at the newest step, or
  * on @p jumpTarget, the instant a jump landed on, while not following.
+ * @p jumpPaging is the store's "the jump's first page newer is still being
+ * read": the window holds off settling on the time until it is false.
  */
 export function useLogWindow(
 	records: LogEntry[],
@@ -207,27 +213,32 @@ export function useLogWindow(
 	generation: number,
 	/** Called just before the top sentinel grows the window: `useHoldPlace`'s function. */
 	beforeGrowUp?: () => void,
-	jumpTarget: string | null = null
+	jumpTarget: string | null = null,
+	jumpPaging = false
 ): LogWindow {
 	const [anchor, setAnchor] = useState(() => initialAnchor(generation));
 
 	// What the observers' callbacks grow against: they run after the render that armed them.
-	const latest = useRef({ records, follow, jumpTarget });
+	const latest = useRef({ records, follow, jumpTarget, jumpPaging, unsettled: false });
+	const current = anchor.generation === generation ? anchor : initialAnchor(generation);
+	const bounds = boundsOf(records, current, follow, jumpTarget, jumpPaging);
 	useEffect(() => {
-		latest.current = { records, follow, jumpTarget };
+		latest.current = { records, follow, jumpTarget, jumpPaging, unsettled: !!bounds.unsettled };
 	});
 	const growUp = useCallback(() => {
+		// A growth that will not happen must not leave a held place for the next commit.
+		if (latest.current.unsettled) return;
 		beforeGrowUp?.();
 		setAnchor((prev) => {
-			const { records, follow, jumpTarget } = latest.current;
-			return grownUp(records, prev, follow, jumpTarget);
+			const { records, follow, jumpTarget, jumpPaging } = latest.current;
+			return grownUp(records, prev, follow, jumpTarget, jumpPaging);
 		});
 	}, [beforeGrowUp]);
 	const growDown = useCallback(
 		() =>
 			setAnchor((prev) => {
-				const { records, follow, jumpTarget } = latest.current;
-				return grownDown(records, prev, follow, jumpTarget);
+				const { records, follow, jumpTarget, jumpPaging } = latest.current;
+				return grownDown(records, prev, follow, jumpTarget, jumpPaging);
 			}),
 		[]
 	);
@@ -250,16 +261,15 @@ export function useLogWindow(
 		};
 	}
 
-	const current = anchor.generation === generation ? anchor : initialAnchor(generation);
-	const { start, end, awaitsTarget } = boundsOf(records, current, follow, jumpTarget);
+	const { start, end, unsettled = false } = bounds;
 	/*
 	 * Re-anchored during render, as `useGrowingWindow` resets: while following
 	 * the first row moves with every batch, and holding it means the window is
 	 * already anchored on the reader's rows when Follow turns off. Not while a
-	 * jump awaits its time: the row it will open on is not held yet.
+	 * jump's page newer is being read: the rows it will open on are not all held.
 	 */
-	if (current !== anchor || (!awaitsTarget && records[start] !== current.first)) {
-		setAnchor({ ...current, first: awaitsTarget ? undefined : records[start] });
+	if (current !== anchor || (!unsettled && records[start] !== current.first)) {
+		setAnchor({ ...current, first: unsettled ? undefined : records[start] });
 	}
 	const shown = records.slice(start, end);
 	return {

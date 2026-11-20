@@ -28,7 +28,10 @@
  * the `scrollWithin` call in `LogList.tsx` and the jump cases that name the
  * scrolled element red; draw `JumpMarker` at the end of the list whatever
  * `jumpAt` says and the marker-between-lines case reds; drop `jumpTarget` from
- * `NOTHING_LOADED` and the case that reloads after a jump keeps its marker.
+ * `NOTHING_LOADED` and the case that reloads after a jump keeps its marker;
+ * call `scrollWithin` in `LogList.tsx` without `scrollOwn` and the case where
+ * the jump's own scroll lands at the end of a list that reached the tail turns
+ * Follow on.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -84,7 +87,7 @@ const CUT_LINE = `{"ts":"${cutRecord.ts}","level":"info","src":"engine","cat":"h
 const withCutLine = { ...cutRecord, $raw: CUT_LINE };
 
 beforeEach(() => {
-	vi.mocked(scrollWithin).mockClear();
+	vi.mocked(scrollWithin).mockReset();
 	bridge = fakeLogsBridge();
 	openLogsFolder = vi.fn(async () => "");
 	saveFile = vi.fn(async (): Promise<SaveFileReply> => ({
@@ -611,6 +614,36 @@ describe("jump to time", () => {
 		await screen.findByText("line 21");
 
 		expect(scrollWithin).toHaveBeenCalledTimes(2);
+	});
+
+	it("leaves Follow off when its own scroll lands at the end of a list that reached the tail", async () => {
+		await openTab();
+		bridge.answerReads({
+			around: { records: [logRecord(39)], more: true, newer: logCursor(1) },
+			after: { records: [logRecord(41)], more: false },
+		});
+		// The scroll puts the time within a screen of the end, as a short page newer does.
+		// The browser reports a scroll as an event of its own, a frame after the call.
+		vi.mocked(scrollWithin).mockImplementation((container) => {
+			Object.defineProperty(container, "scrollHeight", { configurable: true, value: 1000 });
+			Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+			Object.defineProperty(container, "scrollTop", {
+				configurable: true,
+				writable: true,
+				value: 800,
+			});
+			void Promise.resolve().then(() => fireEvent.scroll(container));
+		});
+
+		await act(() => useLogsStore.getState().jumpTo(logRecord(40).ts));
+		await screen.findByText("line 41");
+		await waitFor(() => expect(scrollWithin).toHaveBeenCalledTimes(1));
+		await act(async () => undefined);
+
+		const state = useLogsStore.getState();
+		expect(state).toMatchObject({ detached: false, newerCursor: null, jumpPaging: false });
+		expect(state.follow).toBe(false);
+		expect(screen.getByRole("switch", { name: "Follow" })).not.toBeChecked();
 	});
 
 	it("draws the rule at the end when no line is at or after the time", async () => {

@@ -18,10 +18,14 @@
  * `LOG_WINDOW_MAX_ROWS`; drop the `beforeGrowUp` call and the "tells the caller" case reds; re-anchor only on a new generation and the Follow off,
  * trim and bottom sentinel cases lose the reader's rows. For a jump (#3674):
  * drop `boundsAroundTarget` from `boundsOf` and the cases that open the window
- * on the time land on the newest rows; hold the first row while the time has no
- * line (`awaitsTarget`) and the case where the page newer arrives stays on the
- * old rows; clamp the start to `records.length - count` no longer and the case
- * near the newest rows mounts a short window.
+ * on the time land on the newest rows; clamp the start to
+ * `records.length - count` no longer and the case near the newest rows mounts a
+ * short window. While the page newer is read (`jumpPaging`): make `unsettled`
+ * `false` in `boundsOf` and the cases that reach the top sentinel, hold a line
+ * timed at the instant, or hold no line after it, stay on the rows they first
+ * showed instead of opening on the time; drop the `unsettled` guard from
+ * `grownUp` and the top sentinel case grows the window; drop it from `growUp`
+ * and the case that counts `beforeGrowUp` calls reds.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,6 +51,8 @@ interface Props {
 	generation: number;
 	/** The instant a jump landed on; none when the list was not replaced by one. */
 	jumpTarget?: string | null;
+	/** The jump's first page newer is still being read; false once it has landed. */
+	jumpPaging?: boolean;
 }
 
 function renderWindow(initial: Props, beforeGrowUp?: () => void) {
@@ -57,7 +63,8 @@ function renderWindow(initial: Props, beforeGrowUp?: () => void) {
 				props.follow,
 				props.generation,
 				beforeGrowUp,
-				props.jumpTarget ?? null
+				props.jumpTarget ?? null,
+				props.jumpPaging ?? false
 			),
 		{
 			initialProps: initial,
@@ -303,25 +310,109 @@ describe("useLogWindow", () => {
 
 		it("sits at the end of the newest rows while no line is at or after the time, then moves onto it", () => {
 			const records = lines(0, 1_000);
-			const view = renderWindow({
-				records,
+			const paging = {
 				follow: false,
 				generation: 1,
 				jumpTarget: at(1_000),
-			});
+				jumpPaging: true,
+			};
+			const view = renderWindow({ records, ...paging });
 			expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
 			expect(view.result.current.jumpAt).toBe(LOG_WINDOW_STEP);
 
 			// The page newer lands below.
 			view.rerender({
 				records: [...records, ...lines(1_000, 1_100)],
-				follow: false,
-				generation: 1,
-				jumpTarget: at(1_000),
+				...paging,
+				jumpPaging: false,
 			});
 
 			expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
 			expect(view.result.current.jumpAt).toBe(100);
+		});
+
+		describe("while the first page newer is being read", () => {
+			const paging = { follow: false, generation: 1, jumpPaging: true };
+
+			it("is not grown by the top sentinel, so the page's arrival still opens it on the time", () => {
+				const records = lines(0, 1_000);
+				const beforeGrowUp = vi.fn();
+				const props = { ...paging, jumpTarget: at(1_000) };
+				const view = renderWindow({ records, ...props }, beforeGrowUp);
+				const { top } = attach(view);
+
+				// The newest rows are what is shown, and their top sentinel is in view.
+				act(() => observer.reach(top));
+				expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+				expect(beforeGrowUp).not.toHaveBeenCalled();
+
+				view.rerender({
+					records: [...records, ...lines(1_000, 1_100)],
+					...props,
+					jumpPaging: false,
+				});
+
+				expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
+				expect(view.result.current.jumpAt).toBe(100);
+			});
+
+			it("is not grown by the bottom sentinel either", () => {
+				const records = lines(0, 1_000);
+				const props = { ...paging, jumpTarget: at(500) };
+				const view = renderWindow({ records, ...props });
+				const { bottom } = attach(view);
+
+				act(() => observer.reach(bottom));
+				view.rerender({
+					records: [...records, ...lines(1_000, 1_100)],
+					...props,
+					jumpPaging: false,
+				});
+
+				expect(span(view.result.current.shown)).toEqual(["line 450", "line 649"]);
+			});
+
+			it("opens on the time the page newer lands beside, though a line at the instant was already held", () => {
+				const records = lines(0, 1_000);
+				const props = { ...paging, jumpTarget: at(990) };
+				const view = renderWindow({ records, ...props });
+				// Shown on the time at once, as the page the jump read held a line for it.
+				expect(span(view.result.current.shown)).toEqual(["line 800", "line 999"]);
+				expect(view.result.current.jumpAt).toBe(190);
+
+				view.rerender({
+					records: [...records, ...lines(1_000, 1_100)],
+					...props,
+					jumpPaging: false,
+				});
+
+				expect(span(view.result.current.shown)).toEqual(["line 900", "line 1099"]);
+				expect(view.result.current.jumpAt).toBe(90);
+			});
+
+			it("settles on the newest rows when the page carries no line to open on, and stays there as a later page lands", () => {
+				const unparsed = (n: number): LogEntry => ({ unparsed: true, raw: `trace ${n}` });
+				const trace = (from: number, to: number) =>
+					Array.from({ length: to - from }, (_, n) => unparsed(from + n));
+				const records = [...lines(0, 1_000), ...trace(0, 50)];
+				const props = { follow: false, generation: 1, jumpTarget: at(1_000) };
+				const view = renderWindow({ records, ...props, jumpPaging: true });
+
+				// The first page newer is 100 lines of a stack trace: none is timed.
+				const landed = [...records, ...trace(50, 150)];
+				view.rerender({ records: landed, ...props, jumpPaging: false });
+				const settled = view.result.current.shown;
+				expect(settled).toHaveLength(LOG_WINDOW_STEP);
+				expect(view.result.current.jumpAt).toBe(LOG_WINDOW_STEP);
+
+				// Search newer: timed lines past the time. The reader's rows do not move under them.
+				view.rerender({
+					records: [...landed, ...lines(1_000, 1_100)],
+					...props,
+					jumpPaging: false,
+				});
+				expect(view.result.current.shown).toEqual(settled);
+			});
 		});
 
 		it("stays on those rows as lines are appended below once it has opened", () => {

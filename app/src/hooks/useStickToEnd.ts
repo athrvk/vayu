@@ -20,7 +20,10 @@
  *   pin causes arrives after the growth and reads a gap the reader never made,
  *   so a scroll that lands on the position we just set is ours and changes
  *   nothing. A tolerance cannot stand in for this: the gap scales with what
- *   arrived, and an expanded row is any height.
+ *   arrived, and an expanded row is any height. A scroll the caller makes
+ *   (a jump centring its marker, #3674) goes through `scrollOwn`, which marks
+ *   its event the same way: where it ends near the end it must not read as the
+ *   reader arriving there and turn Follow on.
  *
  * `following` is the caller's state, because the Logs tab keeps it in a store;
  * the hook asks to change it through `onFollowingChange`. @p canResume lets a
@@ -55,6 +58,8 @@ interface StickToEnd {
 	onScroll: UIEventHandler<HTMLElement>;
 	/** Goes on the element that holds the rows, so a resize of the list pins it again. */
 	listRef: RefCallback<HTMLElement>;
+	/** Runs @p move, a scroll of the scroller, and keeps the scroll event it causes from changing `following`. */
+	scrollOwn: (move: () => void) => void;
 }
 
 export function useStickToEnd(
@@ -67,6 +72,8 @@ export function useStickToEnd(
 	const onChangeRef = useRef(onFollowingChange);
 	/** Where the last pin left `scrollTop`: the scroll event that reports it is ours. */
 	const pinnedTop = useRef<number | null>(null);
+	/** Where the caller's last scroll left `scrollTop`, until the event that reports it. */
+	const ownTop = useRef<number | null>(null);
 	const observer = useRef<ResizeObserver | null>(null);
 	// The caller's ref object lives as long as the component does; holding it once keeps `pin` stable.
 	const scrollerRef = useRef(scroller);
@@ -98,8 +105,18 @@ export function useStickToEnd(
 		[pin]
 	);
 
+	const scrollOwn = useCallback((move: () => void) => {
+		const element = scrollerRef.current.current;
+		if (!element) return;
+		move();
+		ownTop.current = element.scrollTop;
+	}, []);
+
 	const onScroll = useCallback<UIEventHandler<HTMLElement>>((event) => {
 		const element = event.currentTarget;
+		const own = ownTop.current;
+		ownTop.current = null;
+		if (own === element.scrollTop) return;
 		if (followingRef.current && element.scrollTop === pinnedTop.current) return;
 		const gap = element.scrollHeight - element.scrollTop - element.clientHeight;
 		const atEnd = gap <= END_TOLERANCE_PX;
@@ -109,5 +126,5 @@ export function useStickToEnd(
 		onChangeRef.current(next);
 	}, []);
 
-	return { onScroll, listRef };
+	return { onScroll, listRef, scrollOwn };
 }
