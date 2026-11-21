@@ -281,6 +281,12 @@
  * `get_inbox_captures` and `list_request_examples` add 310 B more. The rows
  * measure 161,436 / 158,685 / 236,737 / 232,315 B, and the four caps went to
  * 161,700 / 159,000 / 237,000 / 232,600.
+ *
+ * #3705's `diff_bodies` (a read tool: a description, the two body references
+ * `a` and `b` with read_body's source arguments bare, and an exact output
+ * schema) costs 3,769 B with reveal off and 3,540 B with it on. The rows
+ * measure 165,229 / 162,249 / 240,530 / 235,879 B, and the four caps went to
+ * 165,500 / 162,500 / 240,800 / 236,100.
  */
 
 import { describe, it, expect } from "vitest";
@@ -300,10 +306,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 55, maxBytes: 161_700 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 55, maxBytes: 159_000 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 83, maxBytes: 237_000 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 83, maxBytes: 232_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 165_500 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 162_500 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 240_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 236_100 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
