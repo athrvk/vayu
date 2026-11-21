@@ -2128,6 +2128,13 @@ composed request alone. They live on `SanityResult` only, not on
 `ResponseState`: the one reader is that call site, and a History replay does not
 list a Send. A stream's `202` carries none; its row reads the stored trace.
 
+`runId` (#3679) is the run the engine recorded the buffered Send under, **absent**
+from a `transient` Send and from an engine that predates it (`resultId`, its
+one result row, has no renderer reader). It is on `SanityResult` only, for the
+same reason as `method` and `url`: `handleExecute` passes it to
+`appendSendToConsole`, so the Send's Console row offers "Open run", as a
+stream's row does with the run it finalized. A Send that got no answer has none.
+
 `warnings` lists what the engine did to a design send that the response does not
 show ([#3307](https://github.com/athrvk/vayu/issues/3307)), each as
 `{ code, message }`: a jar cookie libcurl left off the `Cookie` line

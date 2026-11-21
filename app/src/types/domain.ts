@@ -2824,6 +2824,13 @@ export interface SanityResult extends HttpResponse {
 	 */
 	method?: string;
 	url?: string;
+	/**
+	 * The run the engine recorded this Send under (#3679), which the Console's
+	 * "Open run" opens. Present only for a recorded Send: absent for a
+	 * `transient` one, from an engine that predates it, and from a stream's 202
+	 * (whose `runId` `finalizeStreamRun` supplies).
+	 */
+	runId?: string;
 	error?: string;
 	/**
 	 * What checking this response against its declared schema found (issue
