@@ -22,6 +22,7 @@
 import type { KeyValueItem } from "@/types";
 import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
 import type { RequestState } from "../types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { UnreadLine } from "./kv-line";
 import { isNoOpParamsEdit, parseParamsFromText, unreadParamLines } from "./params-format";
 import { isNoOpHeadersEdit, parseHeadersFromText, unreadHeaderLines } from "./headers-format";
@@ -129,7 +130,7 @@ export function unreadLinesNotice(table: BulkTable, unread: readonly UnreadLine[
 		.map(({ lineNumber, text }) => `line ${lineNumber} "${clip(text)}"`);
 	const more = unread.length - named.length;
 	if (more > 0) named.push(`and ${more} more`);
-	const count = `${unread.length} ${unread.length === 1 ? "line" : "lines"}`;
+	const count = `${unread.length} ${pluralize(unread.length, "line")}`;
 	return `${TABLE_LABEL[table]}: ${count} not read: ${named.join(", ")}`;
 }
 
