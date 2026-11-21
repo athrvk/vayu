@@ -342,6 +342,24 @@ export function VariablePopover({
 	// it must not come back in the clear.
 	const [createSecret, setCreateSecret] = useState(false);
 
+	/*
+	 * The create form shares `editValue` with the edit buffer, which the seed
+	 * effect above filled from the definition. When that definition goes (an
+	 * environment switch, a deleted variable) the buffer would carry the old value,
+	 * a secret's included, into a plain field of the create form (#3719). Cleared on
+	 * the set-to-unset edge only: a `varInfo` that stays set must never reset a
+	 * value mid-edit, whatever its object identity does.
+	 */
+	const hadDefinitionRef = useRef(!!varInfo);
+	useEffect(() => {
+		if (!varInfo && hadDefinitionRef.current) {
+			openValueRef.current = "";
+			setEditValue("");
+			setCreateSecret(false);
+		}
+		hadDefinitionRef.current = !!varInfo;
+	}, [varInfo]);
+
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
 			openPopover();
