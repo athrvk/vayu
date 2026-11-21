@@ -42,6 +42,7 @@ import {
 } from "./variable-blobs.js";
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
 import {
+	asOn,
 	collectionScriptInput,
 	elementsInput,
 	storedCollectionAuthInput,
@@ -76,7 +77,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				.optional()
 				.describe("Optional parent collection ID; omit for a top-level collection."),
 			description: z.string().optional(),
-			variables: variablesInput("the new collection"),
+			variables: variablesInput("the new collection", "update_environment"),
 			auth: storedCollectionAuthInput(
 				'Requests below it that store { mode: "inherit" } resolve to this block unless a nearer folder sets one.'
 			),
@@ -151,14 +152,14 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			collectionId: z.string().describe("Collection ID to update."),
 			name: z.string().optional().describe("New display name."),
 			description: z.string().optional().describe("New description."),
-			variables: variablesInput("this collection"),
+			variables: variablesInput("this collection", "update_environment"),
 			removeVariables: removeVariablesInput("this collection"),
 			auth: storedCollectionAuthInput(
 				"Replaces the stored block whole; leave it out to keep it."
 			),
-			elements: elementsInput("this collection"),
-			preRequestScript: collectionScriptInput("pre"),
-			postRequestScript: collectionScriptInput("post"),
+			elements: elementsInput("this collection").describe(asOn("create_collection")),
+			preRequestScript: collectionScriptInput("pre").describe(asOn("create_collection")),
+			postRequestScript: collectionScriptInput("post").describe(asOn("create_collection")),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);

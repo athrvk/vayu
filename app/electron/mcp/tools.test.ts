@@ -6743,10 +6743,16 @@ describe("run_collection", () => {
 			expect(payload).not.toHaveProperty("thresholds");
 		});
 
+		// start_load_run re-describes it as a pointer (#3747), so the two
+		// arguments are distinct wrappers around the one budget schema.
 		test("shares its schema with start_load_run's own thresholds argument", () => {
-			const shapeOf = (name: string) =>
-				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>;
-			expect(shapeOf("run_collection").thresholds).toBe(shapeOf("start_load_run").thresholds);
+			const thresholdsOf = (name: string) =>
+				(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodOptional>)
+					.thresholds;
+			expect(thresholdsOf("run_collection").unwrap()).toBe(
+				thresholdsOf("start_load_run").unwrap()
+			);
+			expect(thresholdsOf("start_load_run").description).toBe("As on `run_collection`.");
 		});
 
 		// Mutation check: drop the populations sentence from `thresholdsInput` and
@@ -6754,7 +6760,7 @@ describe("run_collection", () => {
 		// assertion budget judges the worse of the exact and sampled populations
 		// (#2892).
 		test("describes the assertion budget's two populations (#2892)", () => {
-			const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			const shape = TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
 				string,
 				z.ZodType
 			>;
@@ -9083,8 +9089,9 @@ describe("dispatchTool", () => {
 		}
 	});
 
-	test("start_load_run says the stream budgets need a streaming run (#3234)", () => {
-		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+	// run_collection states the thresholds argument for both tools (#3747).
+	test("thresholds says the stream budgets need a streaming run (#3234)", () => {
+		const shape = TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
 			string,
 			z.ZodType
 		>;

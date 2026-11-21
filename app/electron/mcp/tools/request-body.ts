@@ -13,6 +13,7 @@
 
 import { z } from "zod";
 import { BINARY_FILE_ACCESS_TOKEN } from "../remedy.js";
+import { asOn } from "./as-on.js";
 import { isRecord, str, ToolArgError } from "./kit.js";
 
 /** The body modes whose content is a field list rather than a string. */
@@ -49,28 +50,36 @@ export function bodyPayload(bodyType: string, content: string): Record<string, u
  * the files the user picked, which this server can neither read nor add to
  * (#2356). `unresolved` is declared because a read derives it onto every file
  * reference (`derive_file_trust`), so a reference written back as read is not
- * refused (#3556); `shapeBody` never forwards it.
+ * refused (#3556); `shapeBody` never forwards it. With @p statedOn
+ * (update_request names create_request), the long descriptions point there.
  */
-export const fileRefInput = z
-	.strictObject({
-		src: z
-			.string()
-			.describe(
-				"Absolute path of the file on the user's machine (may contain {{variables}})."
-			),
-		contentType: z
-			.string()
-			.optional()
-			.describe(
-				"Content-Type to send it under, when no Content-Type header is set. Omitted, the engine derives one from the file extension, else application/octet-stream."
-			),
-		fileName: z.string().optional().describe("Display name of the file."),
-		unresolved: z.boolean().optional().describe("As a read returns it; ignored."),
-	})
-	.optional()
-	.describe(
-		`The file a \`bodyType: "binary"\` body sends, instead of \`body\`. Stored as a path: the engine sends it only once ${BINARY_FILE_ACCESS_TOKEN}. Nothing an agent sends can choose a file for the user.`
-	);
+export function fileRefInput(statedOn?: string) {
+	const described = (full: string) => (statedOn ? asOn(statedOn) : full);
+	return z
+		.strictObject({
+			src: z
+				.string()
+				.describe(
+					"Absolute path of the file on the user's machine (may contain {{variables}})."
+				),
+			contentType: z
+				.string()
+				.optional()
+				.describe(
+					described(
+						"Content-Type to send it under, when no Content-Type header is set. Omitted, the engine derives one from the file extension, else application/octet-stream."
+					)
+				),
+			fileName: z.string().optional().describe("Display name of the file."),
+			unresolved: z.boolean().optional().describe("As a read returns it; ignored."),
+		})
+		.optional()
+		.describe(
+			described(
+				`The file a \`bodyType: "binary"\` body sends, instead of \`body\`. Stored as a path: the engine sends it only once ${BINARY_FILE_ACCESS_TOKEN}. Nothing an agent sends can choose a file for the user.`
+			)
+		);
+}
 
 /**
  * `file` on the tools that send an ad-hoc request. Declared only so that it

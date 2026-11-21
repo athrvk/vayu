@@ -27,6 +27,7 @@ import { graphqlSdlSchema } from "./output-schemas.js";
 import { boundText } from "./inline-body-bounds.js";
 import { asMcpSend, composeViaEngine, readAuthArg, resolveEnvironmentId } from "./compose.js";
 import {
+	asOn,
 	authInput,
 	collectionIdInput,
 	environmentIdInput,
@@ -68,7 +69,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				.describe(
 					"The GraphQL endpoint (may contain {{variables}}), for one with no saved request. Exclusive with `requestId`."
 				),
-			collectionId: collectionIdInput,
+			collectionId: collectionIdInput.describe(asOn("run_request")),
 			environmentId: environmentIdInput,
 			headers: requestHeadersInput.describe(
 				"Headers to send with `url`, as `{name, value}` lines or a string map. Inline form only."

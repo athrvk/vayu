@@ -3702,33 +3702,31 @@ a call whose server it cannot reach, and nothing else.
 
 Every session pays for the whole `tools/list` answer before it does anything,
 so its size is held by `tool-list-budget.test.ts`, which builds the real
-registry through the real server (app host) for each writes-off/on and
-reveal-off/on pair. Measured at #2441 (reveal off): 115,370 bytes with writes
-off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
-5% above the measured sizes. #2562's OAuth parameter lists grew the writes-off
-list to 121,210 (reveal off) and 118,484 (reveal on), and those two caps were
-re-set to that plus 5%. The envelope schema on the five paged reads (#2445)
-added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
-194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
-other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
-a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
-under caps of 136,300 / 133,600 and 204,400 / 199,900. `get_safety_config`
-(#2444) added about 370 bytes a row: 136,673 / 133,947 with writes off and
-204,039 / 199,642 with writes on, and the writes-off caps went to 137,100 /
-134,400. Master then drifted past every cap (137,599 / 134,873 and 204,965 /
-200,568), and the paged whole-list reads (#2443) - the envelope schema on
-`list_collections` and `list_requests`, `q` / `limit` / `offset` and `fields`
-on the four lists, and their page and summary sentences - added about 4,590
-bytes a row: 142,190 / 139,464 with writes off and 209,556 / 205,159 with
-writes on, under caps of 143,600 / 140,900 and 211,700 / 207,200.
-The same file fails on a sentence of 150 or more
-characters that more than three descriptions repeat (a rule that long belongs
-in the server instructions, with a one-line pointer in the tool: the
-withholding rules and the error definition moved that way, and
-`VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its deliberate repetition
-passes), and on any `Withheld` or `<redacted>` in a description of a session
-with reveal on. A tool that adds an output schema or a long description
-lands under the caps or raises them in its own diff.
+registry through the real server for each host (the app and the stdio CLI,
+whose remedy wording differs) and each writes-off/on and reveal-off/on pair.
+Each cap is that measurement rounded up to the next 100 bytes. Measured at
+#3747, reveal off / on: on the app host 159,706 / 156,726 bytes with writes
+off and 228,397 / 223,746 with writes on; on the CLI host 159,972 / 156,992
+and 230,169 / 225,518. A change that grows the list re-measures and raises the
+caps in its own diff; one that shrinks it lowers them.
+
+Two shapes keep the list small, and the same file checks both. A tool
+description fails on a sentence of 150 or more characters that more than three
+descriptions repeat: a rule that long belongs in the server instructions, with
+a one-line pointer in the tool (the withholding rules and the error definition
+moved that way, and `VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its
+deliberate repetition passes). An argument description of 80 or more
+characters, anywhere in an input or output schema (nested properties, array
+items, record values and union branches included), is stated on one argument
+only. Every other argument sharing it carries a pointer, `As on <tool>.`
+(`asOn` in `tools/input-schemas.ts`), to the tool whose same-named argument
+says it in full, plus at most what differs on its own tool; the test fails on a
+pointer whose tool is not listed in that session or does not state that
+argument. A repetition kept on purpose is named in the test's
+`SHARED_ARGUMENT_DESCRIPTIONS` with its reason: today only `environmentId`,
+whose default is stated at the argument on every tool that takes it (#2480).
+The file also fails on any `Withheld` or `<redacted>` in a description of a
+session with reveal on.
 
 ## Deferred
 

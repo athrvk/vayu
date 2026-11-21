@@ -66,7 +66,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		inputSchema: {
 			name: z.string().describe("Display name for the environment."),
 			description: z.string().optional().describe("Optional description."),
-			variables: variablesInput("the new environment"),
+			variables: variablesInput("the new environment", "update_environment"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);

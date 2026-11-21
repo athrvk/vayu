@@ -48,6 +48,7 @@ import {
 	describeSpecDiff,
 	describeSync,
 	importDocumentInput,
+	importDocumentWriteInput,
 	importPayload,
 	MAX_SPEC_DIFF_ENTRIES,
 	previewSpecBind,
@@ -404,7 +405,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			idempotentHint: false,
 			openWorldHint: false,
 		},
-		inputSchema: importDocumentInput,
+		inputSchema: importDocumentWriteInput,
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
