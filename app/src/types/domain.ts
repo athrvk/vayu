@@ -2827,8 +2827,8 @@ export interface SanityResult extends HttpResponse {
 	/**
 	 * The run the engine recorded this Send under (#3679), which the Console's
 	 * "Open run" opens. Present only for a recorded Send: absent for a
-	 * `transient` one, from an engine that predates it, and from a stream's 202
-	 * (whose `runId` `finalizeStreamRun` supplies).
+	 * `transient` one and from an engine that predates it. A stream's 202 is not
+	 * a `SanityResult`; its row's run comes from `finalizeStreamRun`.
 	 */
 	runId?: string;
 	error?: string;

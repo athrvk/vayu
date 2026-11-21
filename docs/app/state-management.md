@@ -1316,7 +1316,7 @@ each collection-run step. A row is a discriminated union on `kind`: `send`,
   rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and its append time `at`
   retainedBytes: number,     // estimateConsoleRowBytes summed over rows
   evictedCount: number,      // rows the bounds dropped since the last clear
-  runKeys: Set<string>,      // run identity of each step row and streamed Send row held
+  runKeys: Set<string>,      // run identity of each step row and Send row with a run held
   nextId: number
 }
 ```
@@ -1384,7 +1384,7 @@ writer can store more. `evictedCount` is what lets the list say once that
 older rows were dropped.
 
 **Once per run.** A row with a run identity (a step's run, iteration and
-position; a streamed Send's run) is appended once: a replayed frame or a second
+position; a Send's run) is appended once: a replayed frame or a second
 finalisation of the same run adds nothing while the first is still held. The
 finalisation claim in `execution-events-store` already keeps a stream to one
 append; the key is the ring's own guarantee.
