@@ -76,6 +76,9 @@ function harness(initial: Partial<RequestState> = {}) {
 	const ctx = {
 		request,
 		updateField,
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		setDisabledDefaultHeaders: (names: string[]) => {
 			request = { ...request, disabledDefaultHeaders: names };
 			ctx.request = request;

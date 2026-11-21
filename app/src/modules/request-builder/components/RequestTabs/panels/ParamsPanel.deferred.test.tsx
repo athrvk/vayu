@@ -50,6 +50,9 @@ function panel(url: string, id: string | undefined, client: QueryClient) {
 	const value = {
 		request: { ...createDefaultRequestState(), id, url, params: [] },
 		updateField: () => {},
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		resolveString: resolve,
 		resolveField: fieldResolverOf(resolve),
 		getAllVariables: () => ({}),

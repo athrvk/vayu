@@ -8,8 +8,9 @@
 /**
  * useHeadersManager Hook
  *
- * The Headers tab's two ways of editing the same list: the table and the
- * bulk-edit text.
+ * The Headers tab's table rows, and the same list as bulk-edit text. A bulk
+ * draft's commit is the provider's (`utils/bulk-drafts.ts`, #3666), since Send
+ * and Save commit an open draft too.
  *
  * It used to re-impose three managed system rows on every change and answer
  * "may this row be edited / removed / disabled" for the table. Neither exists
@@ -21,11 +22,7 @@
 import { useCallback, useMemo } from "react";
 import type { KeyValueItem } from "@/types";
 import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
-import {
-	formatHeadersToText,
-	parseHeadersFromText,
-	isNoOpHeadersEdit,
-} from "../utils/headers-format";
+import { formatHeadersToText } from "../utils/headers-format";
 
 interface UseHeadersManagerOptions {
 	headers: KeyValueItem[];
@@ -38,7 +35,6 @@ interface UseHeadersManagerReturn {
 
 	// Handlers
 	handleHeadersChange: (headers: KeyValueItem[]) => void;
-	handleBulkEdit: (text: string) => void;
 
 	// Formatting
 	formatForBulkEdit: () => string;
@@ -53,16 +49,6 @@ export function useHeadersManager({
 	// just removed - so the rule is applied where the rows are rendered.
 	const displayHeaders = useMemo(() => withTrailingBlank(headers), [headers]);
 
-	const handleBulkEdit = useCallback(
-		(text: string) => {
-			// Opening Bulk edit and switching straight back without typing must not
-			// re-enable every row or dirty the request (issue #1480).
-			if (isNoOpHeadersEdit(text, headers)) return;
-			onUpdate(withTrailingBlank(parseHeadersFromText(text)));
-		},
-		[headers, onUpdate]
-	);
-
 	const formatForBulkEdit = useCallback(() => {
 		return formatHeadersToText(displayHeaders);
 	}, [displayHeaders]);
@@ -70,7 +56,6 @@ export function useHeadersManager({
 	return {
 		displayHeaders,
 		handleHeadersChange: onUpdate,
-		handleBulkEdit,
 		formatForBulkEdit,
 	};
 }

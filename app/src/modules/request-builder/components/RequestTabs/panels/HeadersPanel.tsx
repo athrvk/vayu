@@ -120,7 +120,14 @@ function DefaultHeaderRow({
 }
 
 export default function HeadersPanel() {
-	const { request, updateField, setDisabledDefaultHeaders } = useRequestBuilderContext();
+	const {
+		request,
+		updateField,
+		setDisabledDefaultHeaders,
+		bulkDrafts,
+		setBulkDraft,
+		commitBulkDraft,
+	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 
@@ -132,11 +139,10 @@ export default function HeadersPanel() {
 		(newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
 		[updateField]
 	);
-	const { displayHeaders, handleHeadersChange, handleBulkEdit, formatForBulkEdit } =
-		useHeadersManager({
-			headers: request.headers,
-			onUpdate: onHeadersUpdate,
-		});
+	const { displayHeaders, handleHeadersChange, formatForBulkEdit } = useHeadersManager({
+		headers: request.headers,
+		onUpdate: onHeadersUpdate,
+	});
 
 	const disabled = request.disabledDefaultHeaders;
 	// Its own setter, not `updateField`: an opt-out is never saved, so marking
@@ -157,7 +163,9 @@ export default function HeadersPanel() {
 		<BulkEditor
 			label="Headers"
 			format={formatForBulkEdit}
-			onCommit={handleBulkEdit}
+			draft={bulkDrafts.headers ?? null}
+			onDraftChange={(next) => setBulkDraft("headers", next)}
+			onCommit={() => commitBulkDraft("headers")}
 			placeholder={
 				"User-Agent: MyApp/1.0\nAuthorization: Bearer token\nContent-Type: application/json"
 			}

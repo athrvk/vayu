@@ -20,6 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
+import type { BulkDraft, BulkDrafts, BulkTable } from "./utils/bulk-drafts";
 import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-viewer/wire-headers";
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
@@ -628,6 +629,19 @@ export interface RequestBuilderContextValue {
 	setBodyDrafts: (drafts: BodyDrafts) => void;
 	getVariablesDraft: () => VariablesDraft | null;
 	setVariablesDraft: (draft: VariablesDraft) => void;
+
+	/**
+	 * The request on screen's open Bulk edit drafts (#3666), filed under
+	 * `memoryKey` so a draft survives a sub-tab switch, returns with its
+	 * request, and is never seen by another. State, unlike the body drafts:
+	 * the textarea renders from it. Send and Save commit an open draft first
+	 * (`utils/bulk-drafts.ts`).
+	 */
+	bulkDrafts: BulkDrafts;
+	/** Open, edit, or (null) discard `table`'s draft. */
+	setBulkDraft: (table: BulkTable, draft: BulkDraft | null) => void;
+	/** The table toggle: write `table`'s draft into the request and close it. */
+	commitBulkDraft: (table: BulkTable) => void;
 
 	// Response State
 	response: ResponseState | null;

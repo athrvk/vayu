@@ -85,6 +85,9 @@ function WithRow({
 	const value = {
 		request,
 		updateField: () => {},
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		setDisabledDefaultHeaders: () => {},
 		getBodyDrafts: () => emptyDrafts(request.id),
 		setBodyDrafts: () => {},

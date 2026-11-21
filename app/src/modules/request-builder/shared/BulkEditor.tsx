@@ -28,10 +28,13 @@
  * is where a panel used to take both from one place; a shared primitive cannot
  * re-export something from a feature module.
  *
- * The draft text is local state on purpose. Bulk edit is a staging area: you
- * paste a block, fix it up, and it commits when you switch back to the table.
- * Parsing on every keystroke would rewrite the request underneath a
- * half-finished paste.
+ * The draft is a staging area: you paste a block, fix it up, and it commits
+ * when you switch back to the table. Parsing on every keystroke would rewrite
+ * the request underneath a half-finished paste. It is controlled - the caller
+ * holds it, and the request builder holds it per request in its provider
+ * (`utils/bulk-drafts.ts`, #3666), so it survives a sub-tab switch and stays
+ * with the request it was typed in. Send and Save commit an open draft too;
+ * this component only knows about the toggle.
  *
  * **`after` renders in both modes.** "Added by Vayu" and the resolved-URL line
  * used to be part of `children`, so they vanished the moment you switched to
@@ -81,22 +84,23 @@
  * wrong for the one moment - a genuinely empty tab - discovery matters most.
  */
 
-import { useState } from "react";
 import { Edit3, Table2 } from "lucide-react";
 import { Button, Label, Textarea, ToggleGroup, ToggleGroupItem } from "@/components/ui";
+import type { BulkDraft } from "../utils/bulk-drafts";
 
 export interface BulkEditorProps {
 	/** The rows as text, for when the user switches *into* text mode. */
 	format: () => string;
+	/** The open draft, or null on the table. */
+	draft: BulkDraft | null;
+	/** Opens (a fresh draft), edits, or discards (null) the draft. */
+	onDraftChange: (draft: BulkDraft | null) => void;
 	/**
-	 * The edited text, when the user switches back to the table.
-	 *
-	 * Text rather than parsed rows: both callers already own a parser that knows
-	 * their syntax *and* what to do with the result - headers have to re-impose
-	 * the managed system rows, params have to rewrite the URL. Parsing here would
-	 * mean handing the rows straight back for a second pass.
+	 * Switching back to the table: the caller parses `draft.text` and closes the
+	 * draft. Parsing is the caller's because only it knows the syntax and what
+	 * the rows touch besides themselves - params rewrite the URL.
 	 */
-	onCommit: (text: string) => void;
+	onCommit: () => void;
 	/** "Headers" / "Query parameters" - names the textarea. */
 	label: string;
 	placeholder: string;
@@ -121,6 +125,8 @@ export interface BulkEditorProps {
 
 export function BulkEditor({
 	format,
+	draft,
+	onDraftChange,
 	onCommit,
 	label,
 	placeholder,
@@ -129,26 +135,15 @@ export function BulkEditor({
 	tableHeader,
 	after,
 }: BulkEditorProps) {
-	const [isText, setIsText] = useState(false);
-	const [draft, setDraft] = useState("");
-	// What the table held the moment text mode opened, so `isDirty` reads the
-	// draft against the edit's own starting point rather than re-deriving it
-	// from a `format()` call that would recompute against the table's *current*
-	// (unrelated) state on every render.
-	const [opened, setOpened] = useState("");
-
-	const isDirty = isText && draft !== opened;
+	const isText = draft !== null;
+	// Read against the text the draft opened with rather than a `format()` call,
+	// which would recompute against the table's *current* (unrelated) state on
+	// every render.
+	const isDirty = isText && draft.text !== draft.opened;
 
 	const enterText = () => {
 		const text = format();
-		setDraft(text);
-		setOpened(text);
-		setIsText(true);
-	};
-
-	const commitText = () => {
-		onCommit(draft);
-		setIsText(false);
+		onDraftChange({ text, opened: text });
 	};
 
 	// Radix's single-select toggle group reports "" on a click that would
@@ -156,13 +151,13 @@ export function BulkEditor({
 	// mode switch ignores it, since a mode toggle here has no "neither" state.
 	const onModeChange = (next: string) => {
 		if (next === "text" && !isText) enterText();
-		if (next === "table" && isText) commitText();
+		if (next === "table" && isText) onCommit();
 	};
 
 	// Leaves text mode without committing. Only ever shown once the draft has
 	// actually diverged (`isDirty`), so this is never a second, quieter way to
 	// do what the toggle already does.
-	const discard = () => setIsText(false);
+	const discard = () => onDraftChange(null);
 
 	/*
 	 * Derived from the label, so Headers and Query Parameters get different ids.
@@ -202,8 +197,8 @@ export function BulkEditor({
 					<Label htmlFor={fieldId}>{label}</Label>
 					<Textarea
 						id={fieldId}
-						value={draft}
-						onChange={(e) => setDraft(e.target.value)}
+						value={draft.text}
+						onChange={(e) => onDraftChange({ ...draft, text: e.target.value })}
 						placeholder={placeholder}
 						className="font-mono text-xs min-h-[320px]"
 					/>

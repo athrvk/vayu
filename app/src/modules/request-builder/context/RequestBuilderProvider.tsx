@@ -16,9 +16,27 @@
  * - Auto-save with debouncing
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
+import {
+	useState,
+	useCallback,
+	useMemo,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	type ReactNode,
+} from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
+import {
+	NO_BULK_DRAFTS,
+	bulkDraftsPatch,
+	bulkTextPatch,
+	rebasedBulkDrafts,
+	withBulkDraft,
+	type BulkDraft,
+	type BulkDrafts,
+	type BulkTable,
+} from "../utils/bulk-drafts";
 import { UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
 import { createSendTracker, NO_SENDS, type InFlightSends, type SendTicket } from "./send-tracker";
@@ -131,6 +149,18 @@ function withCarriedRowIds(
 		if (rows) carried[field] = carryRowIds(current[field], rows);
 	}
 	return carried;
+}
+
+/** `fields` plus every mergeable field `patch` writes. */
+function withPatchedFields(
+	fields: ReadonlySet<MergeableRequestField>,
+	patch: Partial<RequestState>
+): ReadonlySet<MergeableRequestField> {
+	const next = new Set(fields);
+	for (const field of Object.keys(patch) as MergeableRequestField[]) {
+		if (MERGEABLE_FIELDS.includes(field)) next.add(field);
+	}
+	return next;
 }
 
 function withoutFields(
@@ -585,6 +615,42 @@ export default function RequestBuilderProvider({
 	 * #1505) and need no slot here.
 	 */
 	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
+	/*
+	 * Which builder is on screen, for a save that runs after the provider has
+	 * moved on: `useSaveManager` flushes the previous request's save from a
+	 * passive effect's cleanup, with that request's `handleSave`. A layout
+	 * effect, so the ref is current before any passive cleanup of the same
+	 * commit, however soon the flush reaches `handleSave`.
+	 */
+	const shownMemoryKeyRef = useRef(memoryKey);
+	useLayoutEffect(() => {
+		shownMemoryKeyRef.current = memoryKey;
+	}, [memoryKey]);
+
+	/*
+	 * The Params and Headers Bulk edit drafts (#3666), per builder like the maps
+	 * below and bounded by the same open-tab sweep. Not reset by the request
+	 * change block: filed under `memoryKey`, a draft is only ever read by the
+	 * request it was typed in, and returns with it.
+	 */
+	const [bulkDraftsByKey, setBulkDraftsByKey] = useState<Record<string, BulkDrafts>>({});
+	const bulkDrafts = bulkDraftsByKey[memoryKey] ?? NO_BULK_DRAFTS;
+	const setBulkDrafts = useCallback(
+		(key: string, update: (drafts: BulkDrafts) => BulkDrafts) =>
+			setBulkDraftsByKey((previous) => {
+				const next = update(previous[key] ?? NO_BULK_DRAFTS);
+				if (Object.keys(next).length > 0) return { ...previous, [key]: next };
+				if (!(key in previous)) return previous;
+				const { [key]: _closed, ...rest } = previous;
+				return rest;
+			}),
+		[]
+	);
+	const setBulkDraft = useCallback(
+		(table: BulkTable, draft: BulkDraft | null) =>
+			setBulkDrafts(memoryKey, (drafts) => withBulkDraft(drafts, table, draft)),
+		[memoryKey, setBulkDrafts]
+	);
 
 	// What bounds the row memory below is stated there, which the same sweep
 	// bounds (issue #1271): one rule over every per-builder map the provider
@@ -704,6 +770,7 @@ export default function RequestBuilderProvider({
 				if (tab.type === "request" || tab.type === "run") live.add(tab.entityId);
 			}
 			retainRowIndexes(live);
+			setBulkDraftsByKey((previous) => retainKeys(previous, live));
 		};
 		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
 	}, [retainRowIndexes]);
@@ -1002,6 +1069,27 @@ export default function RequestBuilderProvider({
 		[]
 	);
 
+	/*
+	 * Write the drafts a save is carrying into the request on screen (#3666),
+	 * leaving the textarea open on them: autosave fires on its own timer, often
+	 * mid-typing, and must not close the editor under the caret. No generation
+	 * bump and no dirty flag, because this edit is in the payload the save
+	 * sends; `handleSave` marks it unsaved if that save fails. Skipped once the
+	 * provider shows another request (the goodbye flush of the one left), whose
+	 * state this is not; the draft itself is filed under its own key and is
+	 * still rebased. Answers whether the request on screen took the drafts.
+	 */
+	const adoptSavedDrafts = useCallback(
+		(key: string, patch: Partial<RequestState>): boolean => {
+			setBulkDrafts(key, rebasedBulkDrafts);
+			if (shownMemoryKeyRef.current !== key) return false;
+			setRequestState((prev) => ({ ...prev, ...patch }));
+			setTouchedFields((prev) => withPatchedFields(prev, patch));
+			return true;
+		},
+		[setBulkDrafts]
+	);
+
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
 		if (!onSave) return;
@@ -1010,10 +1098,17 @@ export default function RequestBuilderProvider({
 		// it. The ref holds whatever the newest edit made it, which is the thing
 		// we are comparing against.
 		const savedGeneration = changeToken;
+		// An open Bulk edit draft is saved as if committed (#3666), built into
+		// the snapshot here because `request` will not hold it until a render.
+		const draftPatch = bulkDraftsPatch(request, bulkDrafts);
+		const saving = draftPatch ? { ...request, ...draftPatch } : request;
+		const adoptedDrafts = !!draftPatch && adoptSavedDrafts(memoryKey, draftPatch);
 		// Snapshotting the set (state is already immutable per update, but the
 		// name says what matters): a `setRequest` that lands during the await
 		// cannot silently add to what this save already claims to have sent.
-		const changedFields = touchedFields;
+		const changedFields = draftPatch
+			? withPatchedFields(touchedFields, draftPatch)
+			: touchedFields;
 		// `buildUpdatePayload` sends the whole `elements` array whenever it is
 		// touched (issue #1635), and the engine 400s the *entire* payload on one
 		// element it refuses - a fresh `config: {}`, or a value the schema
@@ -1024,21 +1119,23 @@ export default function RequestBuilderProvider({
 		// a retry against a payload that will not have changed.
 		const elementsHeldBack =
 			changedFields.has("elements") &&
-			hasIncompleteElement(request.elements, elementKinds ?? []);
+			hasIncompleteElement(saving.elements, elementKinds ?? []);
 		const sentFields = elementsHeldBack
 			? withoutFields(changedFields, ["elements"])
 			: changedFields;
 		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
-		const sent = pickFields(request, sentFields);
+		const sent = pickFields(saving, sentFields);
 		setRecentSends((prev) => [...prev, sent].slice(-SENDS_REMEMBERED));
 		try {
-			await onSave(request, sentFields);
+			await onSave(saving, sentFields);
 		} catch (error) {
 			// By identity, not position: a later save may already have appended.
 			setRecentSends((prev) => prev.filter((entry) => entry !== sent));
+			// The request holds the drafts now, and this save did not write them.
+			if (adoptedDrafts) setHasUnsavedChanges(true);
 			// The engine names the element it refused (#3043); the failure itself
 			// still propagates to `useSaveManager` for its toast and Dock status.
-			if (sentFields.has("elements")) refuseElement(error, request.elements);
+			if (sentFields.has("elements")) refuseElement(error, saving.elements);
 			throw error;
 		}
 		// An edit landed, or a foreign write arrived, while this save was in
@@ -1050,10 +1147,21 @@ export default function RequestBuilderProvider({
 		// baseline is left to the merge: the cache's echo of this payload moves
 		// it, recognised through `recentSends` (#3664).
 		const settled = changeTokenRef.current === savedGeneration;
-		if (settled) recordSaved(request, sentFields);
+		if (settled) recordSaved(saving, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
 		if (settled) setHasUnsavedChanges(false);
-	}, [request, changeToken, touchedFields, onSave, elementKinds, refuseElement, recordSaved]);
+	}, [
+		request,
+		bulkDrafts,
+		memoryKey,
+		adoptSavedDrafts,
+		changeToken,
+		touchedFields,
+		onSave,
+		elementKinds,
+		refuseElement,
+		recordSaved,
+	]);
 
 	const {
 		forceSave,
@@ -1087,6 +1195,31 @@ export default function RequestBuilderProvider({
 			markDirty();
 		},
 		[markDirty]
+	);
+
+	/*
+	 * Send's commit (#3666): what is on screen is what is sent, so every open
+	 * draft is written into the request and closed. Returns the request the
+	 * Send carries, built here because `request` will not hold the drafts
+	 * until the next render.
+	 */
+	const commitBulkDraftsForSend = useCallback((): RequestState => {
+		const patch = bulkDraftsPatch(request, bulkDrafts);
+		setBulkDrafts(memoryKey, () => NO_BULK_DRAFTS);
+		if (!patch) return request;
+		setRequest(patch);
+		return { ...request, ...patch };
+	}, [request, bulkDrafts, memoryKey, setBulkDrafts, setRequest]);
+
+	const commitBulkDraft = useCallback(
+		(table: BulkTable) => {
+			const draft = bulkDrafts[table];
+			if (!draft) return;
+			const patch = bulkTextPatch(request, table, draft.text);
+			if (patch) setRequest(patch);
+			setBulkDraft(table, null);
+		},
+		[request, bulkDrafts, setBulkDraft, setRequest]
 	);
 
 	// saveRequest now uses the centralized forceSave
@@ -1208,7 +1341,7 @@ export default function RequestBuilderProvider({
 			// Snapshot the request as it is at Send. If the user switches to another
 			// request before this resolves, the result must land on the request that
 			// actually ran - not on whatever is on screen when it finishes.
-			const executingRequest = request;
+			const executingRequest = commitBulkDraftsForSend();
 			const executingId = executingRequest.id;
 			// What save-as-example records as the request that produced this
 			// response (issue #1763). Taken here, not at Save, so edits made
@@ -1325,7 +1458,7 @@ export default function RequestBuilderProvider({
 			}
 		},
 		[
-			request,
+			commitBulkDraftsForSend,
 			memoryKey,
 			sendTracker,
 			onExecute,
@@ -1356,6 +1489,9 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
+			bulkDrafts,
+			setBulkDraft,
+			commitBulkDraft,
 			response,
 			setResponse,
 			inheritedElements,
@@ -1404,6 +1540,9 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
+			bulkDrafts,
+			setBulkDraft,
+			commitBulkDraft,
 			response,
 			setResponse,
 			inheritedElements,

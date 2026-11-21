@@ -52,6 +52,9 @@ function sendsLine(url: string, overrides: Partial<RequestState> = {}): string {
 			...overrides,
 		},
 		updateField: () => {},
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		resolveString: resolve,
 		resolveField: fieldResolverOf(resolve),
 		getAllVariables: () => ({
