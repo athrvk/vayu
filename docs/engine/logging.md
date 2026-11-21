@@ -250,7 +250,9 @@ shape above. A row opens to the whole record as formatted JSON, and a line that
 is not a record (a crash's stack, a half-written line) is shown raw with an
 "unparsed" marker. Above the table: level, source and component filters, a
 search box (free text, or `field:value`, where a quoted value is exact and a
-bare one a substring: `cat:oauth`, `status:"500"`), **Follow** (on by default,
+bare one a substring: `cat:oauth`, `status:"500"`; a bare `field:value` also
+matches a line whose text holds it as typed, so `localhost:47813` finds the
+lines a free-text search for it would), **Follow** (on by default,
 off when you scroll up, on again by its switch or by scrolling to the end), a
 **Jump to time** control (the platform's own date-time input, landing on the
 lines either side of it), **Export** (the lines held in the table, as JSON
