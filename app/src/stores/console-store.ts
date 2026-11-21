@@ -84,7 +84,7 @@ export interface ConsoleSendRow extends ConsoleRequestSummary {
 	kind: "send";
 	/** The stored request that was sent. */
 	requestId?: string;
-	/** The run the send was filed under, when the app learned it (a stream's). */
+	/** The run the send was filed under, when the app learned it (a stream's, or a recorded buffered Send's). */
 	runId?: string;
 	exchange: ConsoleExchange;
 }
@@ -163,7 +163,7 @@ interface ConsoleStoreState {
 	evictedCount: number;
 	/**
 	 * The run identity of each row that has one (a step's run, iteration and
-	 * position; a streamed Send's run), so a replayed frame or a second
+	 * position; a Send's run), so a replayed frame or a second
 	 * finalisation of one run appends nothing.
 	 */
 	runKeys: ReadonlySet<string>;

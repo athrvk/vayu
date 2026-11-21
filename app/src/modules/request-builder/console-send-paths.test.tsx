@@ -32,6 +32,10 @@
  * thrown error" cases fail; drop `preScriptError` / `postScriptError` from
  * `scriptsFromTrace` (`restore-response.ts`) and only the streamed one does;
  * drop them from `execute-mapping.ts` and only the buffered one does.
+ *
+ * Mutation check for the buffered row's run (#3679): drop `runId: result.runId`
+ * from `handleExecute`'s `appendSendToConsole` call and "carries its run" fails.
+ * The "Open run" button itself is `ConsoleTab.test.tsx`'s.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -192,7 +196,7 @@ function streamEnded(runId: string) {
 	});
 }
 
-/** The rows without what the ring stamps and what only a stream learns. */
+/** The rows without what the ring stamps and what only a stream or a recorded answer learns. */
 const comparable = () =>
 	useConsoleStore.getState().rows.map((row) => {
 		const { id: _id, at: _at, ...rest } = row;
@@ -252,6 +256,22 @@ describe("the session Console's two send paths", () => {
 			requestId: "req_1",
 		});
 		expect(rows[0]).not.toHaveProperty("runId");
+	});
+
+	it("a recorded buffered Send's row carries its run, which the row's Open run opens", async () => {
+		executeRequest.mockResolvedValue({ ...executeAnswer, runId: "run_9", resultId: 4 });
+
+		await sendBuffered();
+
+		expect(useConsoleStore.getState().rows[0]).toMatchObject({ kind: "send", runId: "run_9" });
+	});
+
+	it("a Send that gets no answer has no run to open", async () => {
+		executeRequest.mockReset().mockRejectedValue(new Error("engine is down"));
+
+		await sendBuffered();
+
+		expect(useConsoleStore.getState().rows[0]).not.toHaveProperty("runId");
 	});
 
 	it("lists the method and URL the script retargeted the send to, masked", async () => {

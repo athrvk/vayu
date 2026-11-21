@@ -649,11 +649,14 @@ export default function RequestBuilder() {
 				// replay maps its answer without this. The answer's method and URL
 				// are what was dialled, after any pre-request script retargeted the
 				// send; the composed ones stand in for an engine that predates them.
+				// `runId` is what the engine recorded the Send under (#3679), absent
+				// for a transient one: it is what the row's "Open run" opens.
 				appendSendToConsole({
 					method: result.method ?? composed.method,
 					url: result.url ?? composed.url,
 					response,
 					requestId: fetchedRequest.id,
+					runId: result.runId,
 				});
 				return withLeftOut(response, leftOut);
 			} catch (error) {
