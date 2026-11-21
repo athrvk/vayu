@@ -20,6 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
+import type { BulkDraft, BulkDrafts, BulkTable } from "./utils/bulk-drafts";
 import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-viewer/wire-headers";
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
@@ -629,6 +630,19 @@ export interface RequestBuilderContextValue {
 	getVariablesDraft: () => VariablesDraft | null;
 	setVariablesDraft: (draft: VariablesDraft) => void;
 
+	/**
+	 * The request on screen's open Bulk edit drafts (#3666), filed under
+	 * `memoryKey` so a draft survives a sub-tab switch, returns with its
+	 * request, and is never seen by another. State, unlike the body drafts:
+	 * the textarea renders from it. Send and Save commit an open draft first
+	 * (`utils/bulk-drafts.ts`).
+	 */
+	bulkDrafts: BulkDrafts;
+	/** Open, edit, or (null) discard `table`'s draft. */
+	setBulkDraft: (table: BulkTable, draft: BulkDraft | null) => void;
+	/** The table toggle: write `table`'s draft into the request and close it. */
+	commitBulkDraft: (table: BulkTable) => void;
+
 	// Response State
 	response: ResponseState | null;
 	setResponse: (response: ResponseState | null) => void;
@@ -656,6 +670,15 @@ export interface RequestBuilderContextValue {
 	legacyPostScript?: string;
 
 	// UI State
+	/**
+	 * The identity this builder's per-request memory is filed under: the
+	 * provider's `memoryKey` prop, else the request's id. One provider serves
+	 * every request tab, so a component that holds state of its own - a revealed
+	 * secret, a bulk-edit draft, a notice - keeps it across a request switch
+	 * unless it is keyed on this (#3666). Stable across the edits and saves of
+	 * one request; changes only when a different request is put on screen.
+	 */
+	memoryKey: string;
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;
 	/**

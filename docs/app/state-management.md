@@ -3531,6 +3531,47 @@ body (GraphQL's body is already in the `graphql` bucket). It carries its own
 `requestId` for the drafts' reason, and `ownVariablesDraft` - not a second reset
 in the provider - is what drops one belonging to another request.
 
+### `RequestBuilderContext` - Bulk edit drafts
+
+```typescript
+bulkDrafts: BulkDrafts                       // the request on screen's, per table
+setBulkDraft: (table: BulkTable, draft: BulkDraft | null) => void
+commitBulkDraft: (table: BulkTable) => void  // the Table toggle
+```
+
+The Params and Headers tabs' Bulk edit text (#3666). `BulkEditor` is
+controlled; the provider holds the drafts filed under `memoryKey`, at most one
+per table. State, unlike the body drafts' ref, because the textarea renders
+from it; per key rather than one slot because one provider serves every
+request tab: a draft held in the component was dropped by the Params / Headers
+unmount of a sub-tab switch, and before the panels were keyed it followed the
+user into the next request and committed there. The open-tab sweep that bounds
+the row memory prunes it, and the request-change reset block leaves it alone,
+so a request returns to its own draft, in text mode.
+
+A draft is written into the request by one rule, `utils/bulk-drafts.ts`
+(`bulkTextPatch`, with the Params table's own `queryTablePatch` for the URL and
+the no-op guards of #1480), from four places:
+
+- **The Table toggle** (`commitBulkDraft`): `setRequest` and the draft closes.
+- **Send** (`executeRequest`): every open draft is written and closed, and the
+  request the send carries is built from the snapshot plus that patch, because
+  `request` does not hold it until the next render. What is on screen is what
+  is sent.
+- **Load test** (`startLoadTest`): the same commit as Send
+  (`commitBulkDraftsForSend`), so the test runs on what is on screen.
+- **Save** (`handleSave`, so autosave, the Save chord, the command and the
+  goodbye flush alike): the patch goes into the payload and `changedFields`,
+  and is written into the request on screen without a generation bump, since
+  the save carries it. The draft stays open, rebased onto what was saved,
+  because autosave fires on its own timer and must not close the editor under
+  the caret. When the provider already shows another request (the flush of
+  the one left), only the payload carries it: `shownMemoryKeyRef`, set in a
+  layout effect, keeps the other request's state untouched.
+
+A draft on its own does not mark the request dirty, so it is saved only when
+something saves the request. Not persisted.
+
 ### `RequestBuilderContext` - the headers a setting added
 
 Two settings each own a header row: the body mode's `Content-Type` (written by

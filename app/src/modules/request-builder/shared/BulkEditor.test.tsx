@@ -18,22 +18,31 @@
  * mounted at a time.
  *
  * The behaviour worth pinning is the *staging* one. Bulk edit is a scratch pad:
- * the draft is local, and it commits when you switch back to the table. Parsing
- * on every keystroke would rewrite the request underneath a half-finished
- * paste - which is why `onCommit` fires on the toggle and nowhere else.
+ * the draft is held apart from the rows, and it commits when you switch back to
+ * the table. Parsing on every keystroke would rewrite the request underneath a
+ * half-finished paste - which is why `onCommit` fires on the toggle and nowhere
+ * else. The draft is controlled; here the caller is a `useState`, in the app it
+ * is `RequestBuilderProvider` (#3666).
  */
 
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { BulkEditor } from "./BulkEditor";
+import type { BulkDraft } from "../utils/bulk-drafts";
 
-function setup(format = () => "a: 1\nb: 2") {
-	const onCommit = vi.fn();
-	render(
+function Harness({ format, onCommit }: { format: () => string; onCommit: (text: string) => void }) {
+	const [draft, setDraft] = useState<BulkDraft | null>(null);
+	return (
 		<BulkEditor
 			label="Headers"
 			format={format}
-			onCommit={onCommit}
+			draft={draft}
+			onDraftChange={setDraft}
+			onCommit={() => {
+				onCommit(draft?.text ?? "");
+				setDraft(null);
+			}}
 			placeholder="Name: value"
 			hint={<>Format: Name: value</>}
 			tableHeader={<span>empty hint</span>}
@@ -42,6 +51,11 @@ function setup(format = () => "a: 1\nb: 2") {
 			<div data-testid="table">the table</div>
 		</BulkEditor>
 	);
+}
+
+function setup(format = () => "a: 1\nb: 2") {
+	const onCommit = vi.fn();
+	render(<Harness format={format} onCommit={onCommit} />);
 	return { onCommit };
 }
 
