@@ -24,7 +24,14 @@
  * `logs-store.ts` and the case past the bound offers no Search older; draw
  * `OlderBar` regardless of `hasAbove` and the older bar cases show it above a
  * window that is not at the oldest line held; drop the `beforeGrowUp` call in
- * `useLogWindow.ts` and the reader's place case reads a `scrollTop` of 0.
+ * `useLogWindow.ts` and the reader's place case reads a `scrollTop` of 0; drop
+ * the `scrollWithin` call in `LogList.tsx` and the jump cases that name the
+ * scrolled element red; draw `JumpMarker` at the end of the list whatever
+ * `jumpAt` says and the marker-between-lines case reds; drop `jumpTarget` from
+ * `NOTHING_LOADED` and the case that reloads after a jump keeps its marker;
+ * call `scrollWithin` in `LogList.tsx` without `scrollOwn` and the case where
+ * the jump's own scroll lands at the end of a list that reached the tail turns
+ * Follow on.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,11 +41,15 @@ import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
+import { formatInstant } from "@/lib/time-value";
 import { LogsTab } from "./LogsTab";
 import { LOG_MAX_BYTES, useLogsStore } from "./logs-store";
 import { makeScrollable, stubRowLayout } from "@/test/row-layout.testkit";
 import { stubSentinelObserver } from "@/test/sentinel-observer.testkit";
+import { scrollWithin } from "@/lib/scroll-within";
 import { LOG_WINDOW_MAX_ROWS, LOG_WINDOW_STEP } from "./useLogWindow";
+
+vi.mock("@/lib/scroll-within", () => ({ scrollWithin: vi.fn() }));
 
 const config = vi.hoisted(() => ({ logLevel: "info" as string | undefined }));
 
@@ -76,6 +87,7 @@ const CUT_LINE = `{"ts":"${cutRecord.ts}","level":"info","src":"engine","cat":"h
 const withCutLine = { ...cutRecord, $raw: CUT_LINE };
 
 beforeEach(() => {
+	vi.mocked(scrollWithin).mockReset();
 	bridge = fakeLogsBridge();
 	openLogsFolder = vi.fn(async () => "");
 	saveFile = vi.fn(async (): Promise<SaveFileReply> => ({
@@ -110,8 +122,9 @@ async function openTab(records: LogEntry[] = [request, unparsed], more = false) 
 const lines = (from: number, to: number) =>
 	Array.from({ length: to - from }, (_, n) => logRecord(from + n));
 
-/** How many rows the list has mounted. */
-const mountedRows = () => screen.getByRole("list").querySelectorAll(":scope > li").length;
+/** How many rows the list has mounted, not counting a jump's marker. */
+const mountedRows = () =>
+	screen.getByRole("list").querySelectorAll(":scope > li:not([role='separator'])").length;
 
 /** The list's scroller, laid out as a 1000px list in a 200px box scrolled to @p top. */
 function scrollTo(top: number) {
@@ -470,7 +483,14 @@ describe("jump to time", () => {
 		expect(screen.getByRole("button", { name: "Jump" })).toBeDisabled();
 	});
 
-	/** Jump to 10:00:40 over a log holding lines 39 and 41 either side of it. */
+	/** @p iso as the zone-less local value a `datetime-local` input holds, so no host zone shifts it. */
+	function localInputValue(iso: string): string {
+		const d = new Date(iso);
+		const pad = (n: number) => String(n).padStart(2, "0");
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+	}
+
+	/** Jump to the instant of line 40 over a log holding lines 39 and 41 either side of it. */
 	async function jumpBetween() {
 		await openTab();
 		bridge.answerReads({
@@ -478,7 +498,7 @@ describe("jump to time", () => {
 			after: { records: [logRecord(41)], more: true, cursor: logCursor(2) },
 		});
 		fireEvent.change(screen.getByLabelText("Jump to time"), {
-			target: { value: "2026-11-18T10:00:40" },
+			target: { value: localInputValue(logRecord(40).ts) },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Jump" }));
 		await screen.findByText("line 41");
@@ -524,6 +544,165 @@ describe("jump to time", () => {
 		expect(screen.queryByText("line 0")).toBeNull();
 		// The pages wait below the window until the reader scrolls to them.
 		expect(screen.queryByText("line 201")).toBeNull();
+	});
+
+	/** The text of the line either side of the jump's marker: "none" at an end of the list. */
+	function besideMarker() {
+		const marker = screen.getByRole("separator", { name: /^Jumped to / });
+		const text = (row: Element | null) => row?.textContent ?? "none";
+		return {
+			marker,
+			before: text(marker.previousElementSibling),
+			after: text(marker.nextElementSibling),
+		};
+	}
+
+	it("draws a rule naming the time between the last line before it and the first after it, and scrolls it into view", async () => {
+		await jumpBetween();
+
+		const { marker, before, after } = besideMarker();
+		expect(before).toContain("line 39");
+		expect(after).toContain("line 41");
+		expect(marker).toHaveAccessibleName(`Jumped to ${formatInstant(logRecord(40).ts)}`);
+		const scroller = screen.getByRole("list").parentElement;
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
+		expect(scrollWithin).toHaveBeenCalledWith(scroller, marker, { block: "center" });
+	});
+
+	it("waits for the page after the time before it scrolls, so the place it scrolls to is the one that stays", async () => {
+		await openTab();
+		let release = () => {};
+		const held = new Promise<void>((resolve) => (release = resolve));
+		bridge.logs.read.mockImplementation(async (request) => {
+			if (request.after) await held;
+			const records = request.after ? [logRecord(41)] : [logRecord(39)];
+			return {
+				records,
+				cursor: logCursor(2),
+				more: true,
+				scannedTo: null,
+				newer: logCursor(1),
+			};
+		});
+
+		act(() => {
+			void useLogsStore.getState().jumpTo(logRecord(40).ts);
+		});
+		expect(await screen.findByText("line 39")).toBeInTheDocument();
+		expect(screen.queryByText("line 41")).toBeNull();
+		expect(scrollWithin).not.toHaveBeenCalled();
+
+		await act(async () => release());
+		await screen.findByText("line 41");
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
+	});
+
+	it("scrolls once per jump: Search newer and the next jump are each their own", async () => {
+		await jumpBetween();
+		bridge.answerReads({
+			after: { records: [logRecord(42)], more: true, cursor: logCursor(3) },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Search newer" }));
+		await screen.findByText("line 42");
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
+
+		bridge.answerReads({
+			around: { records: [logRecord(19)], more: true, newer: logCursor(1) },
+			after: { records: [logRecord(21)], more: true, cursor: logCursor(2) },
+		});
+		await act(() => useLogsStore.getState().jumpTo(logRecord(20).ts));
+		await screen.findByText("line 21");
+
+		expect(scrollWithin).toHaveBeenCalledTimes(2);
+	});
+
+	it("leaves Follow off when its own scroll lands at the end of a list that reached the tail", async () => {
+		await openTab();
+		bridge.answerReads({
+			around: { records: [logRecord(39)], more: true, newer: logCursor(1) },
+			after: { records: [logRecord(41)], more: false },
+		});
+		// The scroll puts the time within a screen of the end, as a short page newer does.
+		// The browser reports a scroll as an event of its own, a frame after the call.
+		vi.mocked(scrollWithin).mockImplementation((container) => {
+			Object.defineProperty(container, "scrollHeight", { configurable: true, value: 1000 });
+			Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+			Object.defineProperty(container, "scrollTop", {
+				configurable: true,
+				writable: true,
+				value: 800,
+			});
+			void Promise.resolve().then(() => fireEvent.scroll(container));
+		});
+
+		await act(() => useLogsStore.getState().jumpTo(logRecord(40).ts));
+		await screen.findByText("line 41");
+		await waitFor(() => expect(scrollWithin).toHaveBeenCalledTimes(1));
+		await act(async () => undefined);
+
+		const state = useLogsStore.getState();
+		expect(state).toMatchObject({ detached: false, newerCursor: null, jumpPaging: false });
+		expect(state.follow).toBe(false);
+		expect(screen.getByRole("switch", { name: "Follow" })).not.toBeChecked();
+	});
+
+	it("draws the rule at the end when no line is at or after the time", async () => {
+		await openTab();
+		bridge.answerReads({ around: { records: [logRecord(39)], more: true } });
+
+		await act(() => useLogsStore.getState().jumpTo(logRecord(45).ts));
+
+		const { marker, before, after } = besideMarker();
+		expect(before).toContain("line 39");
+		expect(after).toBe("none");
+		expect(scrollWithin).toHaveBeenCalledWith(expect.anything(), marker, { block: "center" });
+	});
+
+	it("draws the rule above every line when none is before the time", async () => {
+		await openTab();
+		bridge.answerReads({
+			around: { records: [], more: false, newer: logCursor(1) },
+			after: { records: [logRecord(41)], more: false },
+		});
+
+		await act(() => useLogsStore.getState().jumpTo(logRecord(40).ts));
+
+		const { before, after } = besideMarker();
+		expect(before).toBe("none");
+		expect(after).toContain("line 41");
+	});
+
+	it("draws no rule once something else replaces the list", async () => {
+		await jumpBetween();
+		expect(screen.getByRole("separator", { name: /^Jumped to / })).toBeInTheDocument();
+
+		bridge.answer({ records: [logRecord(50)] });
+		await act(() => useLogsStore.getState().reload());
+
+		expect(screen.queryByRole("separator")).toBeNull();
+		expect(useLogsStore.getState().jumpTarget).toBeNull();
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
+	});
+
+	it("opens the window on the time, whatever is newer than it", async () => {
+		stubSentinelObserver();
+		await openTab();
+		bridge.answerReads({
+			around: { records: lines(0, 100), more: true, newer: logCursor(1) },
+			after: {
+				records: lines(100, 100 + LOG_WINDOW_STEP + 50),
+				more: true,
+				cursor: logCursor(2),
+			},
+		});
+
+		await act(() => useLogsStore.getState().jumpTo(logRecord(100).ts));
+		await screen.findByText("line 100");
+
+		expect(screen.getByText("line 99")).toBeInTheDocument();
+		const { before, after } = besideMarker();
+		expect(before).toContain("line 99");
+		expect(after).toContain("line 100");
 	});
 
 	it("pages newer from Search newer, and follows the tail again once it reaches the end", async () => {

@@ -20,7 +20,10 @@
  * Mutation checks (revert, confirm red, restore): drop the observer's `pin()`
  * and the "settles after the pin" case reds on the `scrollTop`; drop the
  * `pinnedTop` comparison in `onScroll` and the same case reds on "following"
- * (the pin's own scroll event reads a gap of 66px).
+ * (the pin's own scroll event reads a gap of 66px). For the caller's own scroll
+ * (#3674): hand `scrollOwn`'s `move` straight to the caller without recording its
+ * position and the "caller's scroll" case reds on "following"; drop the
+ * `ownTop` clear in `onScroll` and the "only the one event" case reds.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,10 +39,13 @@ interface HarnessProps {
 	showList?: boolean;
 }
 
+/** What the "move" button scrolls the scroller with: the caller's own scroll. */
+let callerMove: () => void = () => {};
+
 function Harness({ rows, canResume, showList = true }: HarnessProps) {
 	const scroller = useRef<HTMLDivElement>(null);
 	const [following, setFollowing] = useState(true);
-	const { onScroll, listRef } = useStickToEnd(scroller, {
+	const { onScroll, listRef, scrollOwn } = useStickToEnd(scroller, {
 		following,
 		onFollowingChange: setFollowing,
 		canResume,
@@ -47,6 +53,9 @@ function Harness({ rows, canResume, showList = true }: HarnessProps) {
 	});
 	return (
 		<div ref={scroller} onScroll={onScroll} data-testid="scroller" data-following={following}>
+			<button type="button" onClick={() => scrollOwn(() => callerMove())}>
+				move
+			</button>
 			{showList && (
 				<ul ref={listRef}>
 					{rows.map((row) => (
@@ -127,6 +136,15 @@ function readerScrollsTo(to: number) {
 	fireEvent.scroll(scroller());
 }
 
+/** The caller scrolls to @p to through `scrollOwn`; the browser reports it as a scroll event a frame later. */
+function callerScrollsTo(to: number) {
+	callerMove = () => {
+		top = to;
+	};
+	fireEvent.click(screen.getByRole("button", { name: "move" }));
+	fireEvent.scroll(scroller());
+}
+
 const resize = () => act(() => observers[observers.length - 1]!.fire());
 
 describe("useStickToEnd", () => {
@@ -202,6 +220,28 @@ describe("useStickToEnd", () => {
 		readerScrollsTo(300);
 		readerScrollsTo(900);
 		expect(isFollowing()).toBe(false);
+	});
+
+	it("does not read the caller's own scroll to the end as the reader arriving there", () => {
+		mount({ rows: [1, 2, 3] }, 1000);
+		readerScrollsTo(300);
+		expect(isFollowing()).toBe(false);
+
+		callerScrollsTo(900 - END_TOLERANCE_PX);
+
+		expect(isFollowing()).toBe(false);
+	});
+
+	it("ignores only the one event of the caller's scroll: the reader arriving at the same place later follows", () => {
+		mount({ rows: [1, 2, 3] }, 1000);
+		readerScrollsTo(300);
+		callerScrollsTo(900 - END_TOLERANCE_PX);
+		readerScrollsTo(300);
+		expect(isFollowing()).toBe(false);
+
+		readerScrollsTo(900 - END_TOLERANCE_PX);
+
+		expect(isFollowing()).toBe(true);
 	});
 
 	it("does not pin on a resize while the reader is scrolled away", () => {

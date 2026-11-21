@@ -36,7 +36,13 @@
  * line once a later trim drops only another file's lines; drop `notHeld`
  * from `prependOlder` and it holds a line twice; end `loadOlder` instead of
  * reading again when a trim overtakes its page and the in-flight cases leave
- * the page unread until a second click.
+ * the page unread until a second click. Jump target (#3674): drop `jumpTarget`
+ * from `jumpTo`'s `show` and the first case reds; drop it from `NOTHING_LOADED`
+ * and the replacement and `stop()` cases keep a time the new list was not
+ * jumped to. Jump paging (#3674): leave `jumpPaging` set in `show` and the
+ * "no page newer" case reds; clear it nowhere in `pageNewer` and the first
+ * case's `false` reds; leave it out of `NOTHING_LOADED` and the replacement
+ * case reds.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -687,6 +693,118 @@ describe("jump to time", () => {
 
 		bridge.push(span(200, 2));
 		expect(state().records).toHaveLength(3);
+	});
+
+	it("records the time the list was jumped to, until anything else replaces the list", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		expect(state().jumpTarget).toBeNull();
+		const generation = state().generation;
+
+		await state().jumpTo("2026-11-18T10:05:00.000Z");
+		expect(state().jumpTarget).toBe("2026-11-18T10:05:00.000Z");
+		expect(state().generation).toBe(generation + 1);
+
+		await state().reload();
+		expect(state().jumpTarget).toBeNull();
+
+		await state().jumpTo("2026-11-18T10:06:00.000Z");
+		state().stop();
+		expect(state().jumpTarget).toBeNull();
+	});
+
+	it("keeps the time through the pages newer and keeps the old one when the read fails", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		bridge.answerReads({
+			around: { records: span(8, 2), more: true, newer: logCursor(10) },
+			after: { records: span(11, 2), more: true, cursor: logCursor(20) },
+		});
+		await state().jumpTo(logRecord(10).ts);
+		await state().loadNewer();
+		expect(state().jumpTarget).toBe(logRecord(10).ts);
+
+		bridge.logs.read.mockRejectedValue(new Error("disk"));
+		await state().jumpTo(logRecord(30).ts);
+		expect(state().status).toBe("error");
+		expect(state().jumpTarget).toBe(logRecord(10).ts);
+	});
+
+	it("holds jumpPaging from the jump's list until its first page newer lands, and not for later pages", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		let release = () => {};
+		const held = new Promise<void>((resolve) => (release = resolve));
+		bridge.logs.read.mockImplementation(async (request) => {
+			if (request.after) await held;
+			return {
+				records: request.after ? span(11, 2) : span(8, 2),
+				cursor: logCursor(20),
+				more: true,
+				scannedTo: null,
+				newer: logCursor(10),
+			};
+		});
+
+		const jumping = state().jumpTo(logRecord(10).ts);
+		await waitFor(() => expect(state().jumpPaging).toBe(true));
+		expect(state().records).toHaveLength(2);
+
+		release();
+		await jumping;
+		expect(state().jumpPaging).toBe(false);
+
+		await state().loadNewer();
+		expect(state().jumpPaging).toBe(false);
+	});
+
+	it("does not hold jumpPaging for a jump with no page newer, or one whose page fails", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		bridge.answerReads({ around: { records: span(8, 2), more: false } });
+		await state().jumpTo(logRecord(10).ts);
+		expect(state().jumpPaging).toBe(false);
+
+		bridge.logs.read.mockImplementation(async (request) => {
+			if (request.after) throw new Error("disk");
+			return {
+				records: span(8, 2),
+				cursor: logCursor(1),
+				more: true,
+				scannedTo: null,
+				newer: logCursor(10),
+			};
+		});
+		await state().jumpTo(logRecord(10).ts);
+		expect(state()).toMatchObject({ jumpPaging: false, loadingNewer: false, status: "ready" });
+		expect(state().error).toContain("disk");
+	});
+
+	it("clears jumpPaging when anything else replaces the list", async () => {
+		bridge.answer({ records: span(0, 2) });
+		await state().start();
+		let release = () => {};
+		const held = new Promise<void>((resolve) => (release = resolve));
+		bridge.logs.read.mockImplementation(async (request) => {
+			if (request.after) await held;
+			return {
+				records: span(8, 2),
+				cursor: logCursor(1),
+				more: true,
+				scannedTo: null,
+				newer: logCursor(10),
+			};
+		});
+		const jumping = state().jumpTo(logRecord(10).ts);
+		await waitFor(() => expect(state().jumpPaging).toBe(true));
+
+		bridge.answer({ records: span(50, 1) });
+		await state().reload();
+		release();
+		await jumping;
+
+		expect(state().jumpPaging).toBe(false);
+		expect(state().jumpTarget).toBeNull();
 	});
 
 	it("puts the lines after the time in the list: a page newer read at once from the cut", async () => {
