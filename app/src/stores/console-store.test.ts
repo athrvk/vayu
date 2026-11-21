@@ -13,10 +13,11 @@
  * CONSOLE_MAX_ROWS rows" and "holds at most CONSOLE_MAX_BYTES" fail, the row
  * count growing past the bound; drop its `rows.length - dropped > 1` guard and
  * "keeps the newest row" fails; drop `withBodiesCut` and "cuts a body" fails;
- * drop the `runKeys.has` skip and "appends a step frame once" fails.
+ * drop the `runKeys.has` skip and "appends a step frame once" fails; stamp
+ * every row with `appendedAt` and the "row time" cases fail.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	CONSOLE_BODY_MAX_CHARS,
 	CONSOLE_MAX_BYTES,
@@ -173,6 +174,57 @@ describe("run identity", () => {
 		append([step(0, 0)]);
 
 		expect(last()).toMatchObject({ kind: "step", stepIndex: 0 });
+	});
+});
+
+describe("a row's time (#3680)", () => {
+	const APPENDED_AT = 1_700_000_100_000;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(APPENDED_AT);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const times = () => state().rows.map((row) => row.at);
+
+	it("is the append time for a row that brings none", () => {
+		append([send("a"), step(0, 0)]);
+
+		expect(times()).toEqual([APPENDED_AT, APPENDED_AT]);
+	});
+
+	it("is the time the row carries", () => {
+		append([send("a"), { ...send("b"), at: APPENDED_AT - 3_000 }]);
+
+		expect(times()).toEqual([APPENDED_AT, APPENDED_AT - 3_000]);
+	});
+
+	it("is, for a line, the time of the row before it in the batch", () => {
+		append([
+			line("first"),
+			{ ...send("a"), at: APPENDED_AT - 3_000 },
+			line("after the timed row"),
+			send("b"),
+			line("after the untimed row"),
+		]);
+
+		expect(times()).toEqual([
+			APPENDED_AT,
+			APPENDED_AT - 3_000,
+			APPENDED_AT - 3_000,
+			APPENDED_AT,
+			APPENDED_AT,
+		]);
+	});
+
+	it("does not carry a line's time across appends", () => {
+		append([{ ...send("a"), at: APPENDED_AT - 3_000 }]);
+		append([line("next batch")]);
+
+		expect(last().at).toBe(APPENDED_AT);
 	});
 });
 
