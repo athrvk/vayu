@@ -3721,6 +3721,12 @@ under caps of 136,300 / 133,600 and 204,400 / 199,900. `get_safety_config`
 on the four lists, and their page and summary sentences - added about 4,590
 bytes a row: 142,190 / 139,464 with writes off and 209,556 / 205,159 with
 writes on, under caps of 143,600 / 140,900 and 211,700 / 207,200.
+The server strips the `$schema` key the SDK writes on every input and output
+schema when its value is the 2020-12 URI (#3748): the MCP specification
+("JSON Schema Usage" > "Schema Dialect") makes 2020-12 the default for a schema
+with no `$schema`, so the key says nothing and costs about 57 bytes a schema
+(5,415 with writes off, 7,068 with writes on). A schema that names another
+dialect keeps it.
 The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
