@@ -152,7 +152,7 @@ export function createMcpLifecycle<S extends McpLifecycleService>(
 		const failure = classifyStartError(error, endpoint);
 		deps.log("error", "Failed to start MCP server (continuing without it)", {
 			error: String(error),
-			code: failure.code,
+			errorCode: failure.code,
 		});
 		if (isCurrent(owner)) {
 			state = { kind: "failed", error: failure, port: endpoint?.port ?? null };
