@@ -196,7 +196,7 @@ function streamEnded(runId: string) {
 	});
 }
 
-/** The rows without what the ring stamps and what only a stream learns. */
+/** The rows without what the ring stamps and what only a stream or a recorded answer learns. */
 const comparable = () =>
 	useConsoleStore.getState().rows.map((row) => {
 		const { id: _id, at: _at, ...rest } = row;
