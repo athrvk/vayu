@@ -945,7 +945,7 @@ std::optional<std::size_t> record) {
 // written whatever `scriptEnableConsole` says, since the file is where a failed
 // token fetch has to be found when a load test turned the console off, and a
 // cancelled send (the enclosing exchange ended) is a debug line, not a failure.
-// No `runId`: the script context does not carry one.
+// A load run (`record_send_requests` off) writes none, as it records none. No `runId`: the script context does not carry one.
 void log_send_outcome (HttpMethod method,
 const std::string& script_url,
 const Result<Response>& sent,
@@ -1131,7 +1131,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     std::chrono::steady_clock::now () - started);
     const auto record = record_send_exchange (*data, request, sent, started_at.count ());
     log_send_request (*data, request.method, script_url, sent, elapsed, record);
-    log_send_outcome (request.method, script_url, sent, elapsed);
+    if (data->record_send_requests) {
+        log_send_outcome (request.method, script_url, sent, elapsed);
+    }
 
     const auto error_code =
     sent.is_error () ? sent.error ().code : sent.value ().error_code;

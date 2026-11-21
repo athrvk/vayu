@@ -1708,8 +1708,8 @@ std::vector<nlohmann::json> send_log_records (const vayu::tests::LogCapture& cap
 TEST_F (SendRequestTest, AFailedRequestLeavesOneWarningInTheLogFile) {
     const vayu::tests::LogCapture capture;
 
-    auto result =
-    run ("pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
+    auto result = run_recorded (
+    "pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
 
     ASSERT_TRUE (result.success) << result.error_message;
     const auto records = send_log_records (capture);
@@ -1734,8 +1734,9 @@ TEST_F (SendRequestTest, AFailedRequestLeavesOneWarningInTheLogFile) {
 TEST_F (SendRequestTest, TheLogRecordIsWrittenWithTheConsoleOff) {
     const vayu::tests::LogCapture capture;
     ScriptConfig config;
-    config.allow_send_request = true;
-    config.enable_console     = false;
+    config.allow_send_request   = true;
+    config.record_send_requests = true;
+    config.enable_console       = false;
     ScriptEngine engine (config);
     response.status_code = 200;
     auto ctx             = ScriptContext::for_test (request, response);
@@ -1761,8 +1762,8 @@ TEST_F (SendRequestTest, ASuccessfulRequestLeavesOneDebugLineWithTheMaskedUrl) {
     std::string with_userinfo = server.url ("/token");
     with_userinfo.insert (std::string ("http://").size (), "user:hunter2@");
 
-    auto result =
-    run ("pm.sendRequest('" + with_userinfo + "?api_key=S3CRET', function () {});");
+    auto result = run_recorded (
+    "pm.sendRequest('" + with_userinfo + "?api_key=S3CRET', function () {});");
 
     ASSERT_TRUE (result.success) << result.error_message;
     const auto records = send_log_records (capture);
@@ -1784,20 +1785,40 @@ TEST_F (SendRequestTest, ACancelledRequestIsNotAWarning) {
     SendRequestServer server;
     const std::atomic<bool> cancelled{ true };
     ScriptConfig config;
-    config.allow_send_request = true;
+    config.allow_send_request   = true;
+    config.record_send_requests = true;
     ScriptEngine engine (config);
     response.status_code = 200;
     auto ctx             = ScriptContext::for_test (request, response);
     ctx.environment      = &env;
     ctx.cancel           = &cancelled;
 
-    engine.execute ("pm.sendRequest('" + server.url ("/token") + "', function () {});", ctx);
+    const auto result = engine.execute (
+    "pm.sendRequest('" + server.url ("/token") + "', function () {});", ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
 
     const auto records = send_log_records (capture);
     ASSERT_EQ (records.size (), 1U);
     EXPECT_EQ (records.front ().at ("level"), "debug");
     EXPECT_EQ (records.front ().at ("msg"), "pm.sendRequest cancelled");
     EXPECT_EQ (records.front ().at ("errorCode"), "CANCELLED");
+}
+
+// A load run records no script requests (`record_send_requests` off), and a
+// line per call under load would fill the log file the record exists to keep
+// readable. Mutation check: drop the `record_send_requests` guard around
+// `log_send_outcome`.
+TEST_F (SendRequestTest, ALoadRunWritesNoOutcomeRecord) {
+    const vayu::tests::LogCapture capture;
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/token") + "', function () {});");
+    ASSERT_TRUE (result.success) << result.error_message;
+    auto refused =
+    run ("pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
+    ASSERT_TRUE (refused.success) << refused.error_message;
+
+    EXPECT_TRUE (send_log_records (capture).empty ());
 }
 
 // ============================================================================
