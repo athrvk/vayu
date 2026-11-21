@@ -1100,6 +1100,13 @@ export default function RequestBuilderProvider({
 		// it. The ref holds whatever the newest edit made it, which is the thing
 		// we are comparing against.
 		const savedGeneration = changeToken;
+		// What this save records about itself (the values it sent, the fields it
+		// settled, the dirty flag) is its request's state, and the provider may
+		// show another by the time it is written: the goodbye flush starts after
+		// the switch, and any save can settle after one (#3730). An id-less request
+		// given its id by this save reads as not shown either, at no cost: the new
+		// id resets the provider (`lastReset`) to the request this save stored.
+		const isShown = () => shownMemoryKeyRef.current === memoryKey;
 		// An open Bulk edit draft is saved as if committed (#3666), built into
 		// the snapshot here because `request` will not hold it until a render.
 		const draftPatch = bulkDraftsPatch(request, bulkDrafts);
@@ -1127,14 +1134,14 @@ export default function RequestBuilderProvider({
 			: changedFields;
 		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
 		const sent = pickFields(saving, sentFields);
-		setRecentSends((prev) => [...prev, sent].slice(-SENDS_REMEMBERED));
+		if (isShown()) setRecentSends((prev) => [...prev, sent].slice(-SENDS_REMEMBERED));
 		try {
 			await onSave(saving, sentFields);
 		} catch (error) {
 			// By identity, not position: a later save may already have appended.
 			setRecentSends((prev) => prev.filter((entry) => entry !== sent));
 			// The request holds the drafts now, and this save did not write them.
-			if (adoptedDrafts) setHasUnsavedChanges(true);
+			if (adoptedDrafts && isShown()) setHasUnsavedChanges(true);
 			// The engine names the element it refused (#3043); the failure itself
 			// still propagates to `useSaveManager` for its toast and Dock status.
 			if (sentFields.has("elements")) refuseElement(error, saving.elements);
@@ -1147,8 +1154,10 @@ export default function RequestBuilderProvider({
 		// fields this save carried stay touched, since a fresh edit to one of
 		// them since the snapshot above would otherwise be forgotten, and their
 		// baseline is left to the merge: the cache's echo of this payload moves
-		// it, recognised through `recentSends` (#3664).
-		const settled = changeTokenRef.current === savedGeneration;
+		// it, recognised through `recentSends` (#3664). A switch also moves the
+		// generation (the reset's new `baseline`), but which request is shown is
+		// asked outright rather than inferred from that.
+		const settled = isShown() && changeTokenRef.current === savedGeneration;
 		if (settled) recordSaved(saving, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
 		if (settled) setHasUnsavedChanges(false);
