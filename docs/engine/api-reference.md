@@ -6852,6 +6852,37 @@ and `%20` are kept, so a signature over the path or a copied capture URL still
 matches the request received. Neither is classified: a byte in either that is
 not UTF-8 is answered as U+FFFD.
 
+### GET /inbox/:inboxId/requests/:captureId
+
+One capture of an inbox by its `id`, without paging the list to find it. The
+answer is the bare object a [list](#get-inboxinboxidrequests) `data[]` entry
+carries, `bodyEncoding` included and with no envelope; both are built by the
+same function, so the two cannot disagree. Reads only.
+
+`captureId` is digits only; anything else matches no route. A **404** answers
+an unknown inbox (`Inbox not found`) and a capture that is not in that inbox
+(`Capture not found`): an id that belongs to another inbox, one the ring bound
+has since evicted, `0`, and one too large for the table to have assigned are
+all the same answer.
+
+**Response:**
+```json
+{
+  "id": 12,
+  "inboxId": "inbox_2f1c...",
+  "receivedAt": 1767225600000,
+  "method": "POST",
+  "path": "/hooks/order",
+  "query": "attempt=2",
+  "headers": { "Content-Type": "application/json" },
+  "body": "{\"id\":7}",
+  "bodyEncoding": "utf8",
+  "bodyBytes": 8,
+  "bodyTruncated": false,
+  "remoteAddr": "127.0.0.1"
+}
+```
+
 ### DELETE /inbox/:inboxId/requests
 
 Clear the captures, keeping the listener: `{"inboxId": "...", "cleared": 12}`.
