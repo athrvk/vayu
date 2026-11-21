@@ -8962,7 +8962,8 @@ run-shaped way of stating the same field, not a second store.
     "tlsMs": 45.1,
     "firstByteMs": 180.2,
     "downloadMs": 2.7,
-    "engineMs": 3.4
+    "engineMs": 3.4,
+    "scriptMs": 118.6
   },
   "testResults": [
     {
@@ -9606,7 +9607,7 @@ same way. The app's Timing tab says so when the response's `redirects` is
 non-empty.
 
 **`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
-the ninth key and the only one a buffered `/execute` alone carries. It is the
+the ninth key and, with `scriptMs` below, one of two a buffered `/execute` alone carries. It is the
 time from the handler receiving the request to the answer being assembled,
 less the transfer (`wireMs`), the pre- and post-request scripts
 (`pm.sendRequest` inside them included) and the time spent waiting on an
@@ -9624,6 +9625,19 @@ on the trace as a flat `engineMs`, so a restored response shows what the live
 one did. It is absent - not `0` - from a streaming send (the route answers
 `202` before any exchange finishes), from the auth-failure reply (no exchange
 ran), and from rows stored before this key existed.
+
+**`timing.scriptMs` is the time the exchange's scripts took**
+([#3676](https://github.com/athrvk/vayu/issues/3676)), the tenth key and the
+other half of what `engineMs` leaves out: the pre-request and test scripts
+together, `pm.sendRequest` inside them included, which is the `script_ms` the
+`engineMs` subtraction already used. It is `0` for a send with no script, and
+it is **not** part of `totalMs`, `wireMs` or `engineMs`: the three are the
+transfer and Vayu's own work, and `scriptMs` is the user's code beside them.
+Like `engineMs` it is taken once before the write, returned in the live body
+and stored flat on the trace as `scriptMs`, and it is absent - not `0` - from a
+streaming send, from the auth-failure reply and from rows stored before this
+key existed. A collection run's step row stores the same flat `scriptMs`
+(absent for a step whose data row could not bind, where no exchange ran).
 
 **Variables the scripts and extractors wrote are persisted, and only those.**
 After the post-request elements run, the engine writes back the three variable

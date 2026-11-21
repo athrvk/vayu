@@ -6,12 +6,13 @@
  */
 
 /**
- * Both response funnels carry `engineMs` (issue #2132).
+ * Both response funnels carry `engineMs` (issue #2132) and `scriptMs` (#3676).
  *
- * What is specific here is the nesting: the live `/execute` body carries it as
- * `timing.engineMs` while the stored design trace holds it flat as
- * `trace.engineMs`. The two funnels must still agree on `timing.engineMs`, and
- * on its absence - a stream, an auth failure and an old row store none.
+ * What is specific here is the nesting: the live `/execute` body carries each as
+ * `timing.<key>` while the stored design trace holds it flat as `trace.<key>`.
+ * The two funnels must still agree on `timing.<key>`, and on its absence - a
+ * stream, an auth failure and an old row store none. `scriptMs` of 0 is a
+ * measurement (a send with no script) and must survive both.
  */
 
 import { describe, expect, it } from "vitest";
@@ -22,7 +23,7 @@ import { responseFromRunResult, type RunResultSample } from "./restore-response"
 
 const PHASES = { dnsMs: 1, connectMs: 2, tlsMs: 3, firstByteMs: 40, downloadMs: 4 };
 
-const executeResult = (engineMs?: number): SanityResult =>
+const executeResult = (engineMs?: number, scriptMs?: number): SanityResult =>
 	({
 		status: 200,
 		statusText: "OK",
@@ -36,10 +37,11 @@ const executeResult = (engineMs?: number): SanityResult =>
 			queueWaitMs: 0.4,
 			...PHASES,
 			...(engineMs === undefined ? {} : { engineMs }),
+			...(scriptMs === undefined ? {} : { scriptMs }),
 		},
 	}) as unknown as SanityResult;
 
-const runResult = (engineMs?: number): RunResultSample =>
+const runResult = (engineMs?: number, scriptMs?: number): RunResultSample =>
 	({
 		timestamp: 1_700_000_000_000,
 		statusCode: 200,
@@ -57,6 +59,7 @@ const runResult = (engineMs?: number): RunResultSample =>
 			queueWaitMs: 0.4,
 			...PHASES,
 			...(engineMs === undefined ? {} : { engineMs }),
+			...(scriptMs === undefined ? {} : { scriptMs }),
 		},
 	}) as unknown as RunResultSample;
 
@@ -75,5 +78,21 @@ describe("funnel parity", () => {
 
 		expect(live.timing).not.toHaveProperty("engineMs");
 		expect(restored?.timing).not.toHaveProperty("engineMs");
+	});
+
+	it.each([3070, 0])("reports scriptMs %s the same live and restored", (scriptMs) => {
+		const live = responseFromExecuteResult(executeResult(3.4, scriptMs));
+		const restored = responseFromRunResult(runResult(3.4, scriptMs));
+
+		expect(live.timing?.scriptMs).toBe(scriptMs);
+		expect(restored?.timing?.scriptMs).toBe(scriptMs);
+	});
+
+	it("leaves scriptMs absent in both when none was reported", () => {
+		const live = responseFromExecuteResult(executeResult(3.4));
+		const restored = responseFromRunResult(runResult(3.4));
+
+		expect(live.timing).not.toHaveProperty("scriptMs");
+		expect(restored?.timing).not.toHaveProperty("scriptMs");
 	});
 });

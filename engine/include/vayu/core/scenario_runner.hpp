@@ -170,6 +170,11 @@ struct StepRecord {
     /// staying in the run. Empty for a step with no elements, and for one
     /// whose data row could not bind - no exchange ran, so nothing did either.
     std::vector<vayu::core::ElementOutcome> elements;
+    /// Time this step's pre-request script, test script and their
+    /// `pm.sendRequest` calls took (`ExchangeOutcome::script_ms`, #3676), which
+    /// the trace stores as `scriptMs`. 0 for a step with no script; absent for
+    /// a row that could not bind, where no exchange ran.
+    std::optional<double> script_ms;
     /// The design-mode trace (`build_result_trace`) plus this step's identity.
     nlohmann::json trace;
 };

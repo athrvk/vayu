@@ -353,6 +353,46 @@ TEST_F (RecordDesignResultTest, AnUnmeasuredRecordStoresNoEngineCost) {
     EXPECT_FALSE (json::parse (results[0].trace_data).contains ("engineMs"));
 }
 
+// `scriptMs` (#3676) rides the trace flat beside `engineMs`, and a zero is a
+// stored figure (a send with no script), not an absent one. Absent when the
+// caller measured none.
+TEST_F (RecordDesignResultTest, AMeasuredScriptTimeIsStoredFlatOnTheTrace) {
+    const auto id = seed_running_run ("run_script_time");
+
+    record_design_result (*db_, id, sent_request (), ok_response (), nullptr,
+    std::nullopt, nlohmann::json::object (), nlohmann::json::array (), 12.5, 340.25);
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    const auto trace = json::parse (results[0].trace_data);
+    ASSERT_TRUE (trace.contains ("scriptMs")) << trace.dump (2);
+    EXPECT_DOUBLE_EQ (trace["scriptMs"].get<double> (), 340.25);
+    EXPECT_FALSE (trace["response"].contains ("scriptMs")) << trace.dump (2);
+}
+
+TEST_F (RecordDesignResultTest, AZeroScriptTimeIsStoredNotOmitted) {
+    const auto id = seed_running_run ("run_zero_script_time");
+
+    record_design_result (*db_, id, sent_request (), ok_response (), nullptr,
+    std::nullopt, nlohmann::json::object (), nlohmann::json::array (), 12.5, 0.0);
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    const auto trace = json::parse (results[0].trace_data);
+    ASSERT_TRUE (trace.contains ("scriptMs")) << trace.dump (2);
+    EXPECT_DOUBLE_EQ (trace["scriptMs"].get<double> (), 0.0);
+}
+
+TEST_F (RecordDesignResultTest, AnUnmeasuredRecordStoresNoScriptTime) {
+    const auto id = seed_running_run ("run_no_script_time");
+
+    record_design_result (*db_, id, sent_request (), ok_response ());
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    EXPECT_FALSE (json::parse (results[0].trace_data).contains ("scriptMs"));
+}
+
 // The non-streaming path, unchanged by issue #573: no `events` node, and the
 // terminal status still comes from the response alone. This is the golden half
 // of the streaming work - a stream-shaped trace on an ordinary send would break

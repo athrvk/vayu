@@ -38,7 +38,10 @@ vi.mock("../../context", () => ({
 	useRequestBuilderContext: () => state,
 }));
 
-const response = (engineMs?: number): ResponseState => ({
+const response = (
+	engineMs?: number,
+	extra: { wireMs?: number; scriptMs?: number } = {}
+): ResponseState => ({
 	status: 200,
 	statusText: "OK",
 	headers: {},
@@ -54,6 +57,7 @@ const response = (engineMs?: number): ResponseState => ({
 		firstByteMs: 100,
 		downloadMs: 1,
 		...(engineMs === undefined ? {} : { engineMs }),
+		...extra,
 	},
 });
 
@@ -81,5 +85,26 @@ describe("the response pane's Vayu figure", () => {
 		renderViewer();
 
 		expect(screen.queryByText(/in Vayu/)).toBeNull();
+	});
+
+	it("shows the scripts figure when timing.scriptMs exceeds timing.wireMs (#3676)", () => {
+		state.response = response(undefined, { wireMs: 100, scriptMs: 3070 });
+		renderViewer();
+
+		expect(screen.getByText("- 3.07 s in scripts")).toBeInTheDocument();
+	});
+
+	it("shows no scripts figure when the wire is the larger", () => {
+		state.response = response(undefined, { wireMs: 100, scriptMs: 40 });
+		renderViewer();
+
+		expect(screen.queryByText(/in scripts/)).toBeNull();
+	});
+
+	it("shows no scripts figure without a wireMs to compare against", () => {
+		state.response = response(undefined, { scriptMs: 3070 });
+		renderViewer();
+
+		expect(screen.queryByText(/in scripts/)).toBeNull();
 	});
 });

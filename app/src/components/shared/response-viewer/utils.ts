@@ -193,6 +193,16 @@ export const ENGINE_COST_TIP =
 	"Time Vayu's engine spent on this send: building the request, auth, cookies and " +
 	"assembling the answer. It leaves out the network transfer, your scripts and rendering.";
 
+/**
+ * What `timing.scriptMs` counts, worded for the status bar's hover and the
+ * Timing tab's tip (#3676). The other half of what `ENGINE_COST_TIP` says the
+ * engine's figure leaves out, so the two must keep naming the same boundary:
+ * scripts are here, never in "Vayu", and neither is added to the total.
+ */
+export const SCRIPT_TIME_TIP =
+	"Time your pre-request and test scripts took on this send, including any " +
+	"pm.sendRequest calls. It is counted apart from the network transfer, Vayu's own time and the total.";
+
 /** A figure the engine reported: absent, NaN and negative all mean "nothing to show". */
 export const isReportedMs = (ms: number | undefined): ms is number =>
 	typeof ms === "number" && Number.isFinite(ms) && ms >= 0;

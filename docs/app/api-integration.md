@@ -1992,7 +1992,7 @@ replay puts the run's recorded list back on its seeded rows.
   bodyCapped: false,
   headerLines: [{ name: "Content-Type", value: "application/json" }],
   redirects: [],
-  timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
+  timing: { totalMs: 150, engineMs: 3.4, scriptMs: 118.6, dnsMs: 10, connectMs: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre", scope: "collection" },
     { name: "Status 200", passed: true, source: "test", scope: "request" }
@@ -2184,6 +2184,17 @@ existed carry none - and the stored trace holds it **flat** as
 beside the elapsed time and the Timing tab as its **Vayu** stat; neither shows a
 figure that is absent, and `queueWaitMs` (the sliver before libcurl) is never
 presented as it. `engine-ms-funnels.test.ts` holds the two funnels together.
+
+`timing.scriptMs` is the other half of what `engineMs` leaves out: the time the
+pre-request and test scripts took, `pm.sendRequest` inside them included (issue
+#3676). It is **not** folded into `totalMs`, `wireMs` or `engineMs`. `0` means a
+send with no script, and it is absent in the same cases as `engineMs`. The stored
+trace holds it flat as `trace.scriptMs` (a collection run's step trace too), and
+`timingFromTrace` copies it across like `engineMs`. The Timing tab always shows
+it as its **Scripts** stat when reported, a zero included; `ResponseStatusBar`
+draws "in scripts" beside the elapsed time only when `scriptMs` exceeds `wireMs`
+(both reported, so a response with no `wireMs` shows none), because that is when
+the user's code, not the network, is what made the send slow.
 
 `bodyCapped` says the engine stopped **reading** this response at
 `maxDesignResponseBodyBytes` (Settings → Limits, default 32MB), so `body`,
