@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
+import { SCRIPT_TIME_TIP } from "@/components/shared/response-viewer/utils";
 import type { RedirectHop } from "@/types/domain";
 import ResponseTimingTab from "./ResponseTimingTab";
 import type { ResponseTiming } from "../../types";
@@ -123,6 +124,46 @@ describe("ResponseTimingTab", () => {
 		expect(screen.getByText("0.2")).toBeInTheDocument();
 		expect(screen.getByText("Vayu")).toBeInTheDocument();
 		expect(screen.getByText("0.4")).toBeInTheDocument();
+	});
+
+	describe("the Scripts stat (#3676)", () => {
+		it("shows scripts between Vayu and Total, even when they are shorter than the wire", () => {
+			renderTab({ timing: { ...sample, engineMs: 0.4, scriptMs: 118.6 } });
+
+			const labels = ["Vayu", "Scripts", "Total"].map((l) => screen.getByText(l));
+			labels.slice(1).forEach((el, i) => {
+				expect(
+					labels[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING
+				).toBeTruthy();
+			});
+			expect(screen.getByText("119")).toBeInTheDocument();
+		});
+
+		it("shows a zero, which is a send with no script", () => {
+			renderTab({ timing: { ...sample, scriptMs: 0 } });
+
+			expect(screen.getByText("Scripts")).toBeInTheDocument();
+			expect(screen.getByText("0")).toBeInTheDocument();
+		});
+
+		it("is absent when the engine reported none", () => {
+			renderTab({ timing: sample });
+
+			expect(screen.queryByText("Scripts")).not.toBeInTheDocument();
+		});
+
+		it("leaves the phase shares alone", () => {
+			renderTab({ timing: { ...sample, scriptMs: 5000 } });
+
+			// Same 51% as the sample without scripts: they are not a network phase.
+			expect(screen.getByText("51%")).toBeInTheDocument();
+		});
+
+		it("explains itself on hover", async () => {
+			renderTab({ timing: { ...sample, scriptMs: 12 } });
+
+			expect(await tipFor("Scripts")).toBe(SCRIPT_TIME_TIP);
+		});
 	});
 
 	it("handles all-zero phases without dividing by zero", () => {

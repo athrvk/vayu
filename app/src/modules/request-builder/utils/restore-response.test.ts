@@ -582,6 +582,19 @@ describe("timingFromTrace", () => {
 		expect(timingFromTrace(odd, 14)).not.toHaveProperty("engineMs");
 	});
 
+	it("maps the flat trace.scriptMs onto timing.scriptMs, a zero included (#3676)", () => {
+		expect(timingFromTrace({ firstByteMs: 12, scriptMs: 118.6 }, 14)?.scriptMs).toBe(118.6);
+		expect(timingFromTrace({ firstByteMs: 12, scriptMs: 0 }, 14)?.scriptMs).toBe(0);
+	});
+
+	it("leaves scriptMs unset on a row that stored none, and ignores a non-number", () => {
+		expect(timingFromTrace({ firstByteMs: 12 }, 14)).not.toHaveProperty("scriptMs");
+		const odd = { firstByteMs: 12, scriptMs: "3" } as unknown as Parameters<
+			typeof timingFromTrace
+		>[0];
+		expect(timingFromTrace(odd, 14)).not.toHaveProperty("scriptMs");
+	});
+
 	it("is undefined when no phase was stored, so no empty Timing tab appears", () => {
 		expect(timingFromTrace({}, 90)).toBeUndefined();
 		expect(timingFromTrace({ isSlow: true, thresholdMs: 500 }, 90)).toBeUndefined();

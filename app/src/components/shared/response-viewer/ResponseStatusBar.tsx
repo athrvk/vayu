@@ -27,7 +27,13 @@ import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { TimeRow } from "@/lib/time-value";
-import { ENGINE_COST_TIP, formatResponseTime, isReportedMs, responseSizeTip } from "./utils";
+import {
+	ENGINE_COST_TIP,
+	SCRIPT_TIME_TIP,
+	formatResponseTime,
+	isReportedMs,
+	responseSizeTip,
+} from "./utils";
 import { HttpVersionDowngradeNote } from "./HttpVersionDowngradeNote";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
@@ -52,6 +58,15 @@ export interface ResponseStatusBarProps {
 	 * it needs `time` to be present too.
 	 */
 	engineMs?: number;
+	/**
+	 * The scripts' share of the send (#3676), in ms - `timing.scriptMs`, which is
+	 * outside `time`'s arithmetic and outside `engineMs`. The bar draws it only
+	 * when it exceeds `wireMs`, i.e. when scripts, not the network, are what made
+	 * the send slow; the Timing tab shows it every time it is reported.
+	 */
+	scriptMs?: number;
+	/** `timing.wireMs`, the bar of comparison for `scriptMs`. Absent: no script figure is drawn. */
+	wireMs?: number;
 	/**
 	 * The protocol this exchange negotiated - a display string ("HTTP/1.1"),
 	 * not the request-side `HttpVersion` union. Only read when
@@ -108,6 +123,11 @@ export interface ResponseStatusBarProps {
 	className?: string;
 }
 
+/** Scripts are worth a place on the bar only once they outweigh the transfer. */
+function scriptsDominate(scriptMs?: number, wireMs?: number): scriptMs is number {
+	return isReportedMs(scriptMs) && isReportedMs(wireMs) && scriptMs > wireMs;
+}
+
 export function ResponseStatusBar({
 	status,
 	statusText,
@@ -115,6 +135,8 @@ export function ResponseStatusBar({
 	size,
 	headers,
 	engineMs,
+	scriptMs,
+	wireMs,
 	httpVersion,
 	httpVersionDowngraded,
 	clientCertificate,
@@ -227,6 +249,11 @@ export function ResponseStatusBar({
 					{isReportedMs(engineMs) && (
 						<span className="tabular-nums" title={ENGINE_COST_TIP}>
 							- {formatResponseTime(engineMs)} in Vayu
+						</span>
+					)}
+					{scriptsDominate(scriptMs, wireMs) && (
+						<span className="tabular-nums" title={SCRIPT_TIME_TIP}>
+							- {formatResponseTime(scriptMs)} in scripts
 						</span>
 					)}
 				</div>

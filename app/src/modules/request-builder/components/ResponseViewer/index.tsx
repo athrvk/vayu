@@ -648,6 +648,8 @@ export default function ResponseViewer() {
 				size={shown === streamedResponse ? undefined : shown.size}
 				headers={shown.headers}
 				engineMs={shown.timing?.engineMs}
+				scriptMs={shown.timing?.scriptMs}
+				wireMs={shown.timing?.wireMs}
 				httpVersion={shown.httpVersion}
 				httpVersionDowngraded={shown.httpVersionDowngraded}
 				clientCertificate={shown.clientCertificate}

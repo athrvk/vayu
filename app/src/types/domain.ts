@@ -1640,6 +1640,8 @@ export interface RunResultTrace {
 	queueWaitMs?: number;
 	/** Design-mode writer only, flat; see {@link ResponseTiming.engineMs}. */
 	engineMs?: number;
+	/** Design-mode and collection-run step writers, flat; see {@link ResponseTiming.scriptMs}. */
+	scriptMs?: number;
 	dnsMs?: number;
 	connectMs?: number;
 	tlsMs?: number;
@@ -2559,12 +2561,19 @@ export interface MonitorSample {
  * `totalMs`' arithmetic, and distinct from `queueWaitMs`, which is the sliver
  * before libcurl. Absent for a stream, an auth-failure reply and rows stored
  * before the key existed.
+ *
+ * `scriptMs` is the time the exchange's scripts took (#3676): the pre-request
+ * and test scripts, `pm.sendRequest` inside them included. It is the other half
+ * of what `engineMs` leaves out, and it is not part of `totalMs`, `wireMs` or
+ * `engineMs` either. `0` for a send with no script; absent in the same cases as
+ * `engineMs`.
  */
 export interface ResponseTiming {
 	totalMs: number;
 	wireMs?: number;
 	queueWaitMs?: number;
 	engineMs?: number;
+	scriptMs?: number;
 	dnsMs: number;
 	connectMs: number;
 	tlsMs: number;

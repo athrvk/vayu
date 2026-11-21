@@ -11,7 +11,7 @@
  * Per-request timing breakdown for a single (design-mode) response. The five
  * network phases (DNS → Connect → TLS → TTFB → Download) are sequential, so
  * they render as one continuous timeline track with proportional segments,
- * followed by a precise legend and a Wire · Queue · Vayu · Total summary.
+ * followed by a precise legend and a Wire · Queue · Vayu · Scripts · Total summary.
  *
  * **Every phase is a fixed categorical hue**, and the list of them - label,
  * hue, tooltip, the field each one reads - now comes from `TIMING_PHASES` in
@@ -38,6 +38,7 @@
 import { type ReactNode } from "react";
 import {
 	ENGINE_COST_TIP,
+	SCRIPT_TIME_TIP,
 	formatDuration,
 	formatPhaseDuration,
 	isReportedMs,
@@ -145,7 +146,7 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 				))}
 			</div>
 
-			{/* Summary: wire vs generator-side overhead vs Vayu's own cost vs perceived total. */}
+			{/* Summary: wire vs generator-side overhead vs Vayu's own cost vs scripts vs perceived total. */}
 			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat
@@ -163,6 +164,9 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 				)}
 				{isReportedMs(timing.engineMs) && (
 					<TimingStat label="Vayu" value={timing.engineMs} tip={ENGINE_COST_TIP} />
+				)}
+				{isReportedMs(timing.scriptMs) && (
+					<TimingStat label="Scripts" value={timing.scriptMs} tip={SCRIPT_TIME_TIP} />
 				)}
 				<TimingStat
 					label="Total"
