@@ -31,6 +31,7 @@ import {
 	NO_BULK_DRAFTS,
 	bulkDraftsPatch,
 	bulkTextPatch,
+	unreadLineNotices,
 	rebasedBulkDrafts,
 	withBulkDraft,
 	type BulkDraft,
@@ -59,6 +60,7 @@ import {
 	useExecutionEventsStore,
 	useBoundRowStore,
 	useTabsStore,
+	useToastStore,
 	type Tab,
 } from "@/stores";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
@@ -1198,6 +1200,20 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
+	 * A commit that left lines out says so (#3694) - the rows that did parse are
+	 * already written, so this is a notice, never a refusal. Send and the Table
+	 * toggle report; a Save keeps the editor open on the same text and autosave
+	 * would repeat the notice on every pass, so neither does.
+	 */
+	const showToast = useToastStore((s) => s.showToast);
+	const reportUnreadLines = useCallback(
+		(drafts: BulkDrafts) => {
+			for (const message of unreadLineNotices(drafts)) showToast(message, "warning");
+		},
+		[showToast]
+	);
+
+	/*
 	 * Send's commit (#3666): what is on screen is what is sent, so every open
 	 * draft is written into the request and closed. Returns the request the
 	 * Send carries, built here because `request` will not hold the drafts
@@ -1205,11 +1221,12 @@ export default function RequestBuilderProvider({
 	 */
 	const commitBulkDraftsForSend = useCallback((): RequestState => {
 		const patch = bulkDraftsPatch(request, bulkDrafts);
+		reportUnreadLines(bulkDrafts);
 		setBulkDrafts(memoryKey, () => NO_BULK_DRAFTS);
 		if (!patch) return request;
 		setRequest(patch);
 		return { ...request, ...patch };
-	}, [request, bulkDrafts, memoryKey, setBulkDrafts, setRequest]);
+	}, [request, bulkDrafts, memoryKey, setBulkDrafts, setRequest, reportUnreadLines]);
 
 	const commitBulkDraft = useCallback(
 		(table: BulkTable) => {
@@ -1217,9 +1234,10 @@ export default function RequestBuilderProvider({
 			if (!draft) return;
 			const patch = bulkTextPatch(request, table, draft.text);
 			if (patch) setRequest(patch);
+			reportUnreadLines({ [table]: draft });
 			setBulkDraft(table, null);
 		},
-		[request, bulkDrafts, setBulkDraft, setRequest]
+		[request, bulkDrafts, setBulkDraft, setRequest, reportUnreadLines]
 	);
 
 	// saveRequest now uses the centralized forceSave

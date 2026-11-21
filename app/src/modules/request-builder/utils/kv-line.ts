@@ -125,3 +125,53 @@ export function splitKeyValueLine(
 	const key = line.trim();
 	return key ? { key, value: "", valueless: true } : null;
 }
+
+type SplitLine = { key: string; value: string; valueless?: true };
+
+/** One non-blank line of bulk-edit text, read the way the parsers read it. */
+export interface ScannedLine {
+	/** 1-based, counted over the original text, blank lines included. */
+	lineNumber: number;
+	text: string;
+	enabled: boolean;
+	/** Null when the line names no key: the parsers drop it. */
+	parsed: SplitLine | null;
+}
+
+/** A line the parsers drop, for the notice that says so (#3694). */
+export interface UnreadLine {
+	lineNumber: number;
+	text: string;
+}
+
+/**
+ * Every non-blank line of `text`, disabled marker stripped and then split. The
+ * parsers and the unread-line report both read through this, so what is
+ * reported can never differ from what is dropped. A blank line is nothing the
+ * user meant as a row, so it is not scanned at all.
+ */
+export function scanKeyValueLines(
+	text: string,
+	tiers: SeparatorTiers,
+	options?: SplitOptions
+): ScannedLine[] {
+	const scanned: ScannedLine[] = [];
+	text.split("\n").forEach((line, index) => {
+		if (!line.trim()) return;
+		const { enabled, rest } = stripDisabledMarker(line);
+		scanned.push({
+			lineNumber: index + 1,
+			text: line.trim(),
+			enabled,
+			parsed: splitKeyValueLine(rest, tiers, options),
+		});
+	});
+	return scanned;
+}
+
+/** The scanned lines the parser drops. */
+export function unreadLinesOf(scanned: readonly ScannedLine[]): UnreadLine[] {
+	return scanned
+		.filter((line) => !line.parsed)
+		.map(({ lineNumber, text }) => ({ lineNumber, text }));
+}

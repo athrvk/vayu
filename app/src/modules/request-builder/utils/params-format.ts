@@ -14,7 +14,13 @@
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import { carryIds } from "@/components/shared/KeyValueEditor/key-value";
-import { splitKeyValueLine, stripDisabledMarker, PARAM_SEPARATORS } from "./kv-line";
+import {
+	scanKeyValueLines,
+	unreadLinesOf,
+	PARAM_SEPARATORS,
+	type ScannedLine,
+	type UnreadLine,
+} from "./kv-line";
 import { queryRowsOf } from "./path-variables";
 import { writesBareKey } from "./url";
 
@@ -41,6 +47,17 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
 	);
 };
 
+/** Every non-blank line, read by the one rule the parser and the unread report share. */
+const scanParamLines = (text: string): ScannedLine[] =>
+	scanKeyValueLines(text, PARAM_SEPARATORS, { allowBareKey: true });
+
+/**
+ * The lines `parseParamsFromText` drops, with their 1-based line numbers (blank
+ * lines count but are not reported), so a commit can say what it did not read
+ * (#3694). `=novalue` names no key; a bare word is a valueless param, not unread.
+ */
+export const unreadParamLines = (text: string): UnreadLine[] => unreadLinesOf(scanParamLines(text));
+
 /**
  * Parse text format to params array
  * Format: "key=value" (one per line); "key: value" is accepted when the line
@@ -66,14 +83,10 @@ export const parseParamsFromText = (
 	text: string,
 	previous: readonly KeyValueItem[] = []
 ): KeyValueItem[] => {
-	const lines = text.split("\n").filter((line) => line.trim());
 	const params: KeyValueItem[] = [];
 
-	lines.forEach((line) => {
-		const { enabled, rest } = stripDisabledMarker(line);
-		const parsed = splitKeyValueLine(rest, PARAM_SEPARATORS, { allowBareKey: true });
-		if (!parsed) return;
-
+	for (const { parsed, enabled } of scanParamLines(text)) {
+		if (!parsed) continue;
 		params.push({
 			id: generateId(),
 			key: parsed.key,
@@ -81,7 +94,7 @@ export const parseParamsFromText = (
 			enabled,
 			...(parsed.valueless && { valueless: parsed.valueless }),
 		});
-	});
+	}
 
 	// The `//` marker is not part of what a line restates: toggling a row off
 	// in the text keeps its id.

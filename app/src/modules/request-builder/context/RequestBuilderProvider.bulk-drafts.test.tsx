@@ -29,14 +29,16 @@
  * draft to the second request" goes red; drop the `shownMemoryKeyRef` guard in
  * `adoptSavedDrafts` and the goodbye-flush case writes A's rows into B; drop
  * the `setHasUnsavedChanges(true)` in `handleSave`'s catch and the failed-save
- * case reads clean.
+ * case reads clean. Drop the `reportUnreadLines` call in `commitBulkDraft` and
+ * "names the line it did not read" goes red; in `commitBulkDraftsForSend` and the
+ * Send case does.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { TooltipProvider } from "@/components/ui";
-import { useClientSettingsStore } from "@/stores";
+import { useClientSettingsStore, useToastStore } from "@/stores";
 import { resetSaveStoreForTests } from "@/stores/save-store";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { fieldResolverOf } from "@/test/variable-support";
@@ -149,6 +151,8 @@ const paramsText = () => screen.queryByRole("textbox", { name: "Query parameters
 const openBulkEdit = () => fireEvent.click(screen.getByRole("radio", { name: /Bulk edit/ }));
 const typeDraft = (label: string, value: string) =>
 	fireEvent.change(screen.getByRole("textbox", { name: label }), { target: { value } });
+const openTable = () => fireEvent.click(screen.getByRole("radio", { name: /Table/ }));
+const toastMessages = () => useToastStore.getState().toasts.map((t) => t.message);
 const click = (label: string) => act(() => screen.getByText(label).click());
 /** Radix activates a trigger on `mousedown`; `click` alone never switches. */
 const openTab = (name: RegExp) =>
@@ -157,6 +161,7 @@ const openTab = (name: RegExp) =>
 beforeEach(() => {
 	resetSaveStoreForTests();
 	useTabSelectionStore.getState().clearAll();
+	useToastStore.setState({ toasts: [] });
 	useClientSettingsStore.setState({ autoSave: { enabled: false, delayMs: 5000 } });
 	onSave = vi.fn<OnSave>().mockResolvedValue(undefined);
 	onExecute = vi.fn<OnExecute>().mockResolvedValue(null);
@@ -328,5 +333,71 @@ describe("Save with a draft open", () => {
 		expect(probed("param-keys")).toBe("b");
 		expect(probed("url")).toBe("https://b.test/y?b=2");
 		expect(probed("dirty")).toBe("false");
+	});
+});
+
+describe("a draft with a line the parser cannot read (#3694)", () => {
+	it("names the line on Table and still commits the rest", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openBulkEdit();
+		typeDraft("Query parameters", "a=1\n=novalue\nb=2");
+
+		openTable();
+
+		expect(await screen.findByRole("radio", { name: /Table/ })).toBeChecked();
+		expect(probed("param-keys")).toBe("a,b");
+		expect(toastMessages()).toEqual(['Params: 1 line not read: line 2 "=novalue"']);
+		expect(useToastStore.getState().toasts[0].variant).toBe("warning");
+	});
+
+	it("names a headers line with no separator, and keeps the rows that parsed", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openTab(/^Headers/);
+		openBulkEdit();
+		typeDraft("Headers", "X-A: 1\nnocolon\nX-Trace: on");
+
+		openTable();
+
+		expect(await screen.findByRole("radio", { name: /Table/ })).toBeChecked();
+		expect(screen.getByDisplayValue("X-Trace")).toBeInTheDocument();
+		expect(toastMessages()).toEqual(['Headers: 1 line not read: line 2 "nocolon"']);
+	});
+
+	it("still says so when the line was the only edit and no row changed", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openBulkEdit();
+		typeDraft("Query parameters", "a=1\n=novalue");
+
+		openTable();
+
+		expect(await screen.findByRole("radio", { name: /Table/ })).toBeChecked();
+		expect(probed("dirty")).toBe("false");
+		expect(toastMessages()).toEqual(['Params: 1 line not read: line 2 "=novalue"']);
+	});
+
+	it("shows no notice for a clean round trip or for valid and blank lines", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openBulkEdit();
+		openTable();
+		expect(await screen.findByRole("radio", { name: /Table/ })).toBeChecked();
+
+		openBulkEdit();
+		typeDraft("Query parameters", "a=1\n\n   \nb=2\n");
+		openTable();
+
+		expect(await screen.findByRole("radio", { name: /Table/ })).toBeChecked();
+		expect(probed("param-keys")).toBe("a,b");
+		expect(toastMessages()).toEqual([]);
+	});
+
+	it("names the line on Send too, once, and sends the rest", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openBulkEdit();
+		typeDraft("Query parameters", "a=1\n=novalue\nb=2");
+
+		await click("send");
+
+		expect(onExecute.mock.calls[0][0].params.map((p) => p.key)).toEqual(["a", "b"]);
+		expect(toastMessages()).toEqual(['Params: 1 line not read: line 2 "=novalue"']);
 	});
 });

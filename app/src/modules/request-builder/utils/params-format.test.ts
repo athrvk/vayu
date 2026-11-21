@@ -27,7 +27,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatParamsToText, parseParamsFromText, isNoOpParamsEdit } from "./params-format";
+import {
+	formatParamsToText,
+	parseParamsFromText,
+	isNoOpParamsEdit,
+	unreadParamLines,
+} from "./params-format";
 import type { KeyValueItem } from "@/types";
 
 const pairs = (text: string) => parseParamsFromText(text).map(({ key, value }) => ({ key, value }));
@@ -222,5 +227,33 @@ describe("a bulk commit keeps the ids of unchanged rows", () => {
 		expect(parsed.map((p) => p.id).slice(0, 3)).toEqual(["1", "2", "3"]);
 		expect(["1", "2", "3"]).not.toContain(parsed[3].id);
 		expect(["1", "2", "3"]).not.toContain(parsed[4].id);
+	});
+});
+
+describe("unreadParamLines (#3694)", () => {
+	it("names a line with an empty key and the line it sits on, while the rest still parse", () => {
+		const text = "a=1\n=novalue\nb=2";
+		expect(unreadParamLines(text)).toEqual([{ lineNumber: 2, text: "=novalue" }]);
+		expect(pairs(text)).toEqual([
+			{ key: "a", value: "1" },
+			{ key: "b", value: "2" },
+		]);
+	});
+
+	it("counts blank lines in the number but does not report them", () => {
+		expect(unreadParamLines("a=1\n\n\n: orphaned")).toEqual([
+			{ lineNumber: 4, text: ": orphaned" },
+		]);
+	});
+
+	it("does not call a bare word unread: it is a valueless param", () => {
+		expect(unreadParamLines("page\nfilter:status=open\n// debug")).toEqual([]);
+	});
+
+	it("reads a disabled line by the parser's rule: marker stripped, then split", () => {
+		expect(unreadParamLines("// =novalue\n//")).toEqual([
+			{ lineNumber: 1, text: "// =novalue" },
+			{ lineNumber: 2, text: "//" },
+		]);
 	});
 });

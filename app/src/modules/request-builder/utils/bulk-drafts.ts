@@ -22,8 +22,9 @@
 import type { KeyValueItem } from "@/types";
 import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
 import type { RequestState } from "../types";
-import { isNoOpParamsEdit, parseParamsFromText } from "./params-format";
-import { isNoOpHeadersEdit, parseHeadersFromText } from "./headers-format";
+import type { UnreadLine } from "./kv-line";
+import { isNoOpParamsEdit, parseParamsFromText, unreadParamLines } from "./params-format";
+import { isNoOpHeadersEdit, parseHeadersFromText, unreadHeaderLines } from "./headers-format";
 import { buildUrlWithParams } from "./url";
 import { isPathRow, pathRowsOf } from "./path-variables";
 
@@ -104,6 +105,51 @@ export function bulkDraftsPatch(
 		if (tablePatch) patch = { ...(patch ?? {}), ...tablePatch };
 	}
 	return patch;
+}
+
+const TABLE_LABEL: Readonly<Record<BulkTable, string>> = { params: "Params", headers: "Headers" };
+
+/** Lines named in one notice; the rest are counted. */
+const UNREAD_LINES_NAMED = 3;
+/** Characters of a line's text shown before it is cut. */
+const UNREAD_TEXT_MAX = 40;
+
+const clip = (text: string): string =>
+	text.length > UNREAD_TEXT_MAX ? `${text.slice(0, UNREAD_TEXT_MAX)}…` : text;
+
+/**
+ * The sentence for a table's unread lines, or null when there are none:
+ * `Headers: 2 lines not read: line 3 "nocolon", line 5 "=novalue"`. Plain
+ * quotes, not code style, because a toast renders text and nothing else.
+ */
+export function unreadLinesNotice(table: BulkTable, unread: readonly UnreadLine[]): string | null {
+	if (unread.length === 0) return null;
+	const named = unread
+		.slice(0, UNREAD_LINES_NAMED)
+		.map(({ lineNumber, text }) => `line ${lineNumber} "${clip(text)}"`);
+	const more = unread.length - named.length;
+	if (more > 0) named.push(`and ${more} more`);
+	const count = `${unread.length} ${unread.length === 1 ? "line" : "lines"}`;
+	return `${TABLE_LABEL[table]}: ${count} not read: ${named.join(", ")}`;
+}
+
+/**
+ * One notice per open draft whose text holds a line the parser drops (#3694).
+ * Independent of `bulkTextPatch`: a commit that changes no row (the unreadable
+ * line was the only edit) is still a commit that did not read a line, so the
+ * no-op guard does not silence it. A clean round trip has no unread line.
+ */
+export function unreadLineNotices(drafts: BulkDrafts): string[] {
+	const notices: string[] = [];
+	for (const table of BULK_TABLES) {
+		const draft = drafts[table];
+		if (!draft) continue;
+		const unread =
+			table === "params" ? unreadParamLines(draft.text) : unreadHeaderLines(draft.text);
+		const notice = unreadLinesNotice(table, unread);
+		if (notice) notices.push(notice);
+	}
+	return notices;
 }
 
 /** `drafts` with `table`'s draft replaced, or closed when `draft` is null. */
