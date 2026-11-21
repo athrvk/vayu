@@ -32,12 +32,8 @@ import { Eyebrow } from "@/components/ui";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { KeyValueItem } from "@/types";
-import {
-	formatParamsToText,
-	parseParamsFromText,
-	isNoOpParamsEdit,
-} from "../../../utils/params-format";
-import { buildUrlWithParams } from "../../../utils/url";
+import { formatParamsToText } from "../../../utils/params-format";
+import { bulkTextPatch, queryTablePatch } from "../../../utils/bulk-drafts";
 import { resolveAuthForSend } from "../../../utils/auth-resolution";
 import { displayPathRows, isPathRow, pathRowsOf, queryRowsOf } from "../../../utils/path-variables";
 import {
@@ -77,7 +73,16 @@ const PATH_KEY_LOCKED = (_item: KeyValueItem, field: keyof KeyValueItem) => fiel
 const PATH_NOT_REMOVABLE = () => false;
 
 export default function ParamsPanel() {
-	const { request, updateField, resolveString, getAllVariables } = useRequestBuilderContext();
+	const {
+		request,
+		updateField,
+		resolveString,
+		getAllVariables,
+		bulkDrafts,
+		setBulkDraft,
+		commitBulkDraft,
+	} = useRequestBuilderContext();
+	const draft = bulkDrafts.params ?? null;
 	const variables = useVariableSupport();
 
 	// Derived, never written by rendering: a `:name` no stored row answers
@@ -102,25 +107,12 @@ export default function ParamsPanel() {
 		};
 	}, [request.params, request.url, request.disableUrlEncoding]);
 
-	// The query table's rows, written back beside the path rows it never shows,
-	// and the URL's query rebuilt from them. `buildUrlWithParams` skips path
-	// rows itself, so the `:name` segments are left as they are.
+	// The same rule a params draft commits by (`queryTablePatch`).
 	const handleParamsChange = useCallback(
 		(newParams: KeyValueItem[]) => {
-			const { params: before, url, disableUrlEncoding } = latest.current;
-			const queryParams = newParams.filter((param) => !isPathRow(param));
-			const params = [...queryParams, ...pathRowsOf(before)];
-
+			const { params, url } = queryTablePatch(latest.current, newParams);
 			updateField("params", params);
-			// A request sent unencoded (issue #1765) keeps its rows as typed in
-			// the URL too, or the table would encode what the engine then sends
-			// raw. The rows before this change tell an edited row from one
-			// carried over (issue #1771): only the latter may keep a pair it
-			// matches decoded.
-			updateField(
-				"url",
-				buildUrlWithParams(url, params, { encode: !disableUrlEncoding }, before)
-			);
+			updateField("url", url);
 		},
 		[updateField]
 	);
@@ -158,11 +150,14 @@ export default function ParamsPanel() {
 	// So is an OAuth 2.0 token placed there (drawn as a stand-in, as the token is
 	// fetched at send) and a GraphQL GET's document, which travels as query
 	// parameters (#3437); the method and the body are what tell those apart.
+	//
+	// An open draft is what Send would commit, so the line describes it.
 	const ancestors = useCollectionAncestors(request.collectionId);
 	const auth = resolveAuthForSend(request.auth, ancestors);
+	const drafted = draft ? bulkTextPatch(request, "params", draft.text) : null;
 	const sends = {
-		url: request.url,
-		params: request.params,
+		url: drafted?.url ?? request.url,
+		params: drafted?.params ?? request.params,
 		disableUrlEncoding: request.disableUrlEncoding,
 		auth,
 		method: request.method,
@@ -204,14 +199,9 @@ export default function ParamsPanel() {
 		<BulkEditor
 			label="Query parameters"
 			format={() => formatParamsToText(request.params)}
-			// Parsed here rather than in BulkEditor, because applying params also
-			// means rewriting the URL - a params rule, not a bulk-edit one. A commit
-			// that changes nothing is skipped outright, so opening the editor and
-			// switching straight back cannot re-enable a disabled row (issue #1480).
-			onCommit={(text) => {
-				if (isNoOpParamsEdit(text, request.params)) return;
-				handleParamsChange(parseParamsFromText(text, request.params));
-			}}
+			draft={draft}
+			onDraftChange={(next) => setBulkDraft("params", next)}
+			onCommit={() => commitBulkDraft("params")}
 			placeholder={"page=1\nlimit=10\nsort=name"}
 			hint={
 				/* Params keep `=` alone - a query string is written `k=v`, and a

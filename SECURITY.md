@@ -279,8 +279,8 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   it carries none, so an agent cannot send a stored credential to a host of its
   choosing, and the answer names what was not carried; run output (reports,
   samples, run rows, inbox captures, the run resources and prompts, and the
-  stored bodies `read_body` pages, a saved example's included, masked whole
-  before a page is cut) reads `<redacted>` in place of a secret variable's
+  stored bodies `read_body` pages and `diff_bodies` compares, a saved
+  example's included, masked whole before a page is cut or a diff is taken) reads `<redacted>` in place of a secret variable's
   value and a credential header's value; and `secret: false` over a stored secret is refused. Reveal in Settings
   lifts all of it.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can

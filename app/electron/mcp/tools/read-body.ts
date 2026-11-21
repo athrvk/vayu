@@ -18,6 +18,7 @@
  */
 
 import type { EngineClient } from "../engine-client.js";
+import type { NotFoundDeclaration } from "./contract.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
 import { MAX_INLINE_BODY_BYTES, utf8CharStart } from "./inline-body-bounds.js";
 import { isRecord, optionalOffset, optionalPositiveInt, str, ToolArgError } from "./kit.js";
@@ -128,6 +129,14 @@ export function readBodySource(args: Record<string, unknown>): BodySource {
 		...(scriptRequest === undefined ? {} : { scriptRequest }),
 	};
 }
+
+/** What a source's ids name, for the engine's 404 on a fetch. */
+export const BODY_SOURCE_NOT_FOUND: readonly NotFoundDeclaration[] = [
+	{ ...ID_KINDS.run, idArg: "runId" },
+	{ ...ID_KINDS.result, idArg: "resultId" },
+	{ ...ID_KINDS.inbox, idArg: "inboxId" },
+	{ ...ID_KINDS.request, idArg: "requestId" },
+];
 
 // --- Fetching -----------------------------------------------------------------
 
@@ -288,14 +297,14 @@ export function readBodyView(args: Record<string, unknown>): BodyView {
 type BodyEncoding = "utf8" | "base64";
 
 /** A body as the bytes offsets count: a base64 one decoded, a text one as UTF-8. */
-interface BodyContent {
+export interface BodyContent {
 	bytes: Buffer;
 	encoding: BodyEncoding;
 	/** The store holds only a prefix of what was sent or received. */
 	storedTruncated: boolean;
 }
 
-function contentOf(node: Record<string, unknown>): BodyContent {
+export function contentOf(node: Record<string, unknown>): BodyContent {
 	const encoding: BodyEncoding = node.bodyEncoding === "base64" ? "base64" : "utf8";
 	const body = typeof node.body === "string" ? node.body : "";
 	return {
@@ -437,7 +446,7 @@ function matchesOf(content: BodyContent, needle: string, from: number): Page {
 // --- JSON pointer -------------------------------------------------------------
 
 /** A number as the body wrote it, so a 20-digit id is not re-serialized as a double. */
-class NumberText {
+export class NumberText {
 	constructor(readonly source: string) {}
 }
 
@@ -447,20 +456,35 @@ type SourceReviver = (key: string, value: unknown, context?: { source?: string }
 const keepNumberText: SourceReviver = (_key, value, context) =>
 	typeof value === "number" ? new NumberText(context?.source ?? JSON.stringify(value)) : value;
 
-function parseBody(content: BodyContent): unknown {
+/**
+ * A text body's parse, each number a {@link NumberText}; undefined when it is
+ * not JSON. The parse is not the wire bytes: a repeated key keeps its last value.
+ */
+export function parseJsonBody(content: BodyContent): { value: unknown } | undefined {
 	try {
-		return JSON.parse(content.bytes.toString("utf8"), keepNumberText);
+		return { value: JSON.parse(content.bytes.toString("utf8"), keepNumberText) };
 	} catch {
-		const prefix = content.storedTruncated ? " (the store holds only a prefix of it)" : "";
-		throw new ToolArgError(
-			`"pointer" reads a JSON body, and this one does not parse${prefix}; read it by "offset" instead.`
-		);
+		return undefined;
 	}
+}
+
+function parseBody(content: BodyContent): unknown {
+	const parsed = parseJsonBody(content);
+	if (parsed !== undefined) return parsed.value;
+	const prefix = content.storedTruncated ? " (the store holds only a prefix of it)" : "";
+	throw new ToolArgError(
+		`"pointer" reads a JSON body, and this one does not parse${prefix}; read it by "offset" instead.`
+	);
 }
 
 /** RFC 6901 section 4: `~1` before `~0`, so `~01` reads as `~1`. */
 function unescapeToken(token: string): string {
 	return token.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+/** {@link unescapeToken}'s inverse: `~` before `/`, so a key `~1` is written `~01`. */
+export function escapeToken(key: string): string {
+	return key.replace(/~/g, "~0").replace(/\//g, "~1");
 }
 
 const ARRAY_INDEX = /^(0|[1-9][0-9]*)$/;
@@ -493,7 +517,7 @@ function resolvePointer(doc: unknown, pointer: string): unknown {
 }
 
 /** @p value as compact JSON, each object's keys sorted, each number as the body wrote it. */
-function serializeSorted(value: unknown): string {
+export function serializeSorted(value: unknown): string {
 	if (value instanceof NumberText) return value.source;
 	if (Array.isArray(value)) return `[${value.map(serializeSorted).join(",")}]`;
 	if (isRecord(value)) {

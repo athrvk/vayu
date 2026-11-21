@@ -18,6 +18,7 @@ import { formatBytes, formatNumber } from "@/lib/format-number";
 import { revealSettingsCategory } from "@/lib/commands/reveal-settings";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useConfigQuery } from "@/queries";
+import { useEngineStore } from "@/stores/engine-store";
 import { useLogsStore } from "./logs-store";
 
 /** The engine's `logLevel` entry, which also sets the app's and the CLI's files. */
@@ -49,9 +50,15 @@ function DroppedCount() {
 function LogLevelHint() {
 	const { data: config } = useConfigQuery();
 	const level = config?.entries?.find((entry) => entry.key === LOG_LEVEL_KEY)?.value;
+	// The saved value is what the next start writes at; until then the files
+	// keep the level the engine started with (#3681).
+	const pending = useEngineStore((s) => s.restartRequiredKeys.includes(LOG_LEVEL_KEY));
 	return (
 		<span>
-			{level !== undefined && `Log level: ${level}. `}
+			{level !== undefined &&
+				(pending
+					? `Log level: ${level} after the restart; the running engine keeps its current level until then. `
+					: `Log level: ${level}. `)}
 			Requests answered 2xx and database writes are logged at debug. Change the level in{" "}
 			<Button
 				type="button"

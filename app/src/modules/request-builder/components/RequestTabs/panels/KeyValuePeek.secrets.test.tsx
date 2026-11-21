@@ -82,6 +82,9 @@ function mount(panel: ReactElement, request: Partial<RequestState>) {
 	const value = {
 		request: { ...createDefaultRequestState(), ...request },
 		updateField: () => {},
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		setDisabledDefaultHeaders: () => {},
 		getBodyDrafts: () => emptyDrafts("req_secret_peek"),
 		setBodyDrafts: () => {},

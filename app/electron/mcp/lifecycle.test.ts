@@ -15,6 +15,7 @@
 import http from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_MCP_SAFETY_CONFIG, type McpSafetyConfig } from "./config.js";
+import { isSecretFieldName } from "../log.js";
 import { freePort } from "./free-port.testkit.js";
 import { McpListener, type McpRequestHandler } from "./listener.js";
 import { buildMcpStatus } from "./status.js";
@@ -293,6 +294,22 @@ describe("createMcpLifecycle", () => {
 		await lifecycle.stop();
 
 		expect(lifecycle.startError()).toBeNull();
+	});
+
+	// #3682: `code` is in the log redaction set, so the record names it `errorCode`.
+	// Mutation check: log it as `code` and both assertions fail.
+	it("logs the bind failure's code under a name redaction keeps", async () => {
+		const { h, lifecycle } = harness();
+		h.configure = (l) =>
+			(l.startFailure = Object.assign(new Error("listen EADDRINUSE"), {
+				code: "EADDRINUSE",
+			}));
+
+		await lifecycle.start();
+
+		const fields = h.log.mock.calls.find(([level]) => level === "error")?.[2] ?? {};
+		expect(fields).toMatchObject({ errorCode: "EADDRINUSE" });
+		expect(Object.keys(fields).filter(isSecretFieldName)).toEqual([]);
 	});
 
 	// `buildMcpStatus` derives `starting` from "no listener and no failure", so

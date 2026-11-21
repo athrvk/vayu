@@ -21604,6 +21604,16 @@ describe("every structured read answers structuredContent its outputSchema accep
 			},
 		},
 		{
+			tool: "diff_bodies",
+			has: ["kind", "equal", "a", "b", "differenceCount", "differences", "omitted"],
+			args: { a: { runId: "run_1", resultId: 1 }, b: { runId: "run_1", resultId: 2 } },
+			client: {
+				getRunResult: vi.fn((_run: string, id: number) =>
+					Promise.resolve({ id, trace: { response: { body: `{"id":${id}}` } } })
+				),
+			},
+		},
+		{
 			tool: "get_globals",
 			args: {},
 			has: ["id", "variables", "updatedAt"],

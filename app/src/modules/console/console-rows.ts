@@ -149,6 +149,9 @@ function scriptRequestRow(
 	const { record } = row;
 	return {
 		kind: "scriptRequest",
+		// The call's start, not the Send's finish (#3680).
+		...(typeof record.startedAt === "number" &&
+			Number.isFinite(record.startedAt) && { at: record.startedAt }),
 		source: row.source,
 		...(row.scope && { scope: row.scope }),
 		...(requestId && { requestId }),

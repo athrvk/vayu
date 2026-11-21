@@ -30,17 +30,39 @@
  * Growing the window upward keeps the reader's place (`useHoldPlace`), so a
  * steady scroll up reaches it.
  *
+ * **A jump is marked and scrolled to** (#3674): the window opens on the time
+ * (`useLogWindow`), a rule naming it sits between the last line before it and
+ * the first at or after it, and once the first page newer has landed
+ * (`jumpPaging`) the list scrolls that rule to the middle of its own scroller,
+ * once per jump (the browser clamps it where too few rows sit below the rule to
+ * fill half the scroller: the end of the logs). Not sooner: the lines that page adds change which rows are mounted, and a scroll
+ * before it would be to a place that then moves. That scroll is the list's own,
+ * so it goes through `scrollOwn` and never reads as the reader reaching the
+ * end: Follow stays off however near the end the time lies. Resetting the
+ * scroller to its end instead would show the newest lines, which is what the
+ * jump is not for.
+ *
  * **The pin is `useStickToEnd`** (#3671): it pins again when the rows settle to
  * their real height, and ignores the scroll event its own pin causes, so only
  * the reader's scrolls turn Follow off.
  */
 
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import {
+	Fragment,
+	type ReactNode,
+	type Ref,
+	useCallback,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { useHoldPlace } from "@/hooks/useHoldPlace";
 import { useStickToEnd } from "@/hooks/useStickToEnd";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button, Eyebrow } from "@/components/ui";
+import { formatInstant } from "@/lib/time-value";
+import { scrollWithin } from "@/lib/scroll-within";
 import { cn } from "@/lib/utils";
 import type { LogEntry } from "@/types/electron";
 import { LOG_COLUMNS } from "./log-columns";
@@ -159,6 +181,24 @@ function NewerBar() {
 	);
 }
 
+/** The rule a jump draws between the lines before its time and the lines at or after it. */
+function JumpMarker({ target, markerRef }: { target: string; markerRef: Ref<HTMLLIElement> }) {
+	return (
+		<li
+			ref={markerRef}
+			role="separator"
+			aria-label={`Jumped to ${formatInstant(target)}`}
+			className="flex items-center gap-2 px-3 py-1 text-xs text-primary"
+		>
+			<span aria-hidden="true" className="h-px flex-1 bg-primary" />
+			<span>
+				Jumped to <TimeValue value={target} style="datetime" />
+			</span>
+			<span aria-hidden="true" className="h-px flex-1 bg-primary" />
+		</li>
+	);
+}
+
 function LoadError() {
 	const error = useLogsStore((s) => s.error);
 	const reload = useLogsStore((s) => s.reload);
@@ -178,24 +218,41 @@ export function LogList() {
 	const follow = useLogsStore((s) => s.follow);
 	const detached = useLogsStore((s) => s.detached);
 	const generation = useLogsStore((s) => s.generation);
+	const jumpTarget = useLogsStore((s) => s.jumpTarget);
+	const jumpPaging = useLogsStore((s) => s.jumpPaging);
 	const status = useLogsStore((s) => s.status);
 	const setFollow = useLogsStore((s) => s.setFollow);
 	const scroller = useRef<HTMLDivElement>(null);
+	const marker = useRef<HTMLLIElement>(null);
+	/** The generation whose jump the scroller has been taken to. */
+	const scrolledTo = useRef<number | null>(null);
 	const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
 	// Before the follow pin below: an effect that pins the newest line must win.
 	const holdPlace = useHoldPlace(scroller);
-	const { shown, hasAbove, hasBelow, topSentinelRef, bottomSentinelRef } = useLogWindow(
+	const { shown, hasAbove, hasBelow, jumpAt, topSentinelRef, bottomSentinelRef } = useLogWindow(
 		records,
 		follow,
 		generation,
-		holdPlace
+		holdPlace,
+		jumpTarget,
+		jumpPaging
 	);
 
-	const { onScroll, listRef } = useStickToEnd(scroller, {
+	const { onScroll, listRef, scrollOwn } = useStickToEnd(scroller, {
 		following: follow,
 		onFollowingChange: setFollow,
 		canResume: !detached && !hasBelow,
 		rows: records,
+	});
+
+	// Every commit, so the check sees the marker the moment its page has landed.
+	useLayoutEffect(() => {
+		if (!marker.current || !scroller.current || jumpPaging) return;
+		if (scrolledTo.current === generation) return;
+		scrolledTo.current = generation;
+		const container = scroller.current;
+		const target = marker.current;
+		scrollOwn(() => scrollWithin(container, target, { block: "center" }));
 	});
 
 	const toggle = useCallback((entry: LogEntry) => {
@@ -206,6 +263,11 @@ export function LogList() {
 			return next;
 		});
 	}, []);
+
+	const jumpMarker =
+		jumpTarget !== null && jumpAt !== null ? (
+			<JumpMarker target={jumpTarget} markerRef={marker} />
+		) : null;
 
 	return (
 		<div
@@ -225,14 +287,17 @@ export function LogList() {
 				/>
 			) : (
 				<ul ref={listRef}>
-					{shown.map((entry) => (
-						<LogRow
-							key={entryKey(entry)}
-							entry={entry}
-							expanded={opened.has(entryKey(entry))}
-							onToggle={toggle}
-						/>
+					{shown.map((entry, index) => (
+						<Fragment key={entryKey(entry)}>
+							{index === jumpAt && jumpMarker}
+							<LogRow
+								entry={entry}
+								expanded={opened.has(entryKey(entry))}
+								onToggle={toggle}
+							/>
+						</Fragment>
 					))}
+					{jumpAt === shown.length && jumpMarker}
 				</ul>
 			)}
 			{hasBelow && <div ref={bottomSentinelRef} aria-hidden="true" />}

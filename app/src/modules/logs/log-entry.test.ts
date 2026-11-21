@@ -8,11 +8,12 @@
 /**
  * The line position the reader attaches (#3652) is not a field: the table's
  * text, the opened row's JSON, Copy line and Export leave it out, and the byte
- * estimate counts it.
+ * estimate counts it. `firstAtOrAfter` is where a jump's time falls among lines.
  *
  * Mutation checks: drop `POSITION_KEY` from `READER_KEYS` and the hiding cases
  * draw, show and export it; count an unparsed line as its raw text alone in
- * `entryBytes` and the unparsed estimate case reds.
+ * `entryBytes` and the unparsed estimate case reds; compare with `>` in
+ * `firstAtOrAfter` and the exact-time case lands a line late.
  */
 
 import { describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ import {
 	entryBytes,
 	entryLine,
 	exportLine,
+	firstAtOrAfter,
 	fieldsText,
 	recordJson,
 } from "./log-entry";
@@ -80,5 +82,31 @@ describe("entryBytes", () => {
 		const line: UnparsedLogLine = { unparsed: true, raw: "SEGFAULT", [POSITION_KEY]: position };
 		expect(entryBytes(line)).toBe(2 * ("SEGFAULT".length + JSON.stringify(position).length));
 		expect(entryBytes({ unparsed: true, raw: "SEGFAULT" })).toBe(2 * "SEGFAULT".length);
+	});
+});
+
+describe("firstAtOrAfter", () => {
+	const at = (second: number): LogFileRecord => ({
+		...fields,
+		ts: `2026-11-18T10:00:0${second}.000Z`,
+	});
+	const unparsed: UnparsedLogLine = { unparsed: true, raw: "SEGFAULT" };
+
+	it("is the first line timed at the instant or after it", () => {
+		const lines = [at(1), at(3), at(5)];
+
+		expect(firstAtOrAfter(lines, "2026-11-18T10:00:03.000Z")).toBe(1);
+		expect(firstAtOrAfter(lines, "2026-11-18T10:00:03.001Z")).toBe(2);
+		expect(firstAtOrAfter(lines, "2026-11-18T09:00:00.000Z")).toBe(0);
+	});
+
+	it("is the length when no line is, and for no lines", () => {
+		expect(firstAtOrAfter([at(1), at(3)], "2026-11-18T10:00:04.000Z")).toBe(2);
+		expect(firstAtOrAfter([], "2026-11-18T10:00:04.000Z")).toBe(0);
+	});
+
+	it("passes a line with no time, which is neither before nor after", () => {
+		expect(firstAtOrAfter([at(1), unparsed, at(5)], "2026-11-18T10:00:03.000Z")).toBe(2);
+		expect(firstAtOrAfter([unparsed], "2026-11-18T10:00:03.000Z")).toBe(1);
 	});
 });

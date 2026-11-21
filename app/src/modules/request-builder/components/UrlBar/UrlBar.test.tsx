@@ -49,6 +49,7 @@ interface CtxOverrides {
 function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBuilderContextValue {
 	return {
 		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
+		memoryKey: "req_test",
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
 		setDisabledDefaultHeaders: vi.fn(),
@@ -63,6 +64,9 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		setBodyDrafts: vi.fn(),
 		getVariablesDraft: () => null,
 		setVariablesDraft: vi.fn(),
+		bulkDrafts: {},
+		setBulkDraft: vi.fn(),
+		commitBulkDraft: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

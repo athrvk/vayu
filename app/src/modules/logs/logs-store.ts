@@ -30,10 +30,13 @@
  * there.
  *
  * **Jump to time** is detached too, and pages newer from the time it landed
- * on: one page at once, then one per "Search newer". Paging newer drops the
- * oldest, as following does; the page that reaches the end of the logs
- * attaches the tail again, which it restarted before reading so that nothing
- * written in between is lost.
+ * on: one page at once, then one per "Search newer". It records the time as
+ * `jumpTarget`, which every other replacement of the list clears, so the list
+ * can open on it, and holds `jumpPaging` until that first page newer has
+ * landed, so the list does not settle on rows the page is about to change.
+ * Paging newer drops the oldest, as following does; the page that reaches the
+ * end of the logs attaches the tail again, which it restarted before reading so
+ * that nothing written in between is lost.
  *
  * **A tail started before a read can repeat it.** The tail delivers what is
  * appended after it started and the read runs to the files' ends after that, so
@@ -63,10 +66,9 @@ export const LOG_MAX_BYTES = 16 * 1024 * 1024;
 /** Lines a read asks for; main clamps to 1000. */
 const LOG_PAGE_SIZE = 1000;
 /**
- * The page newer a jump reads at once. The list's window stays on the lines
- * before the time and the page lands below it (`useLogWindow`); at half a step,
- * reaching the window's lower end mounts the whole page beside them, under the
- * cap.
+ * The page newer a jump reads at once. The list's window opens a few lines
+ * before the time (`useLogWindow`), and the page lands below it; at half a
+ * step, it mounts whole beside them, under the cap.
  */
 const JUMP_NEWER_PAGE_SIZE = LOG_WINDOW_STEP / 2;
 
@@ -298,6 +300,18 @@ interface LogsData {
 	knownCategories: string[];
 	/** Changes whenever the list is replaced, so a window over it starts again. */
 	generation: number;
+	/**
+	 * The instant the list was last replaced by a jump to, an ISO string; null for
+	 * every other replacement. The list opens its window on it and marks it
+	 * (`useLogWindow`, `LogList`).
+	 */
+	jumpTarget: string | null;
+	/**
+	 * A jump's first page newer is still being read. True from the jump's list
+	 * until that page has landed, failed or been set aside, so the window over
+	 * the list waits for the page before it settles on the time (`useLogWindow`).
+	 */
+	jumpPaging: boolean;
 }
 
 interface LogsActions {
@@ -331,6 +345,8 @@ const NOTHING_LOADED = {
 	detached: false,
 	newerCursor: null,
 	newerScannedTo: null,
+	jumpTarget: null,
+	jumpPaging: false,
 	status: "idle",
 	loadingOlder: false,
 	loadingNewer: false,
@@ -362,7 +378,8 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 	function show(
 		result: LogReadResult,
 		late: LogEntry[],
-		attach: Pick<LogsData, "follow" | "detached"> & Partial<Pick<LogsData, "newerCursor">>
+		attach: Pick<LogsData, "follow" | "detached"> &
+			Partial<Pick<LogsData, "newerCursor" | "jumpTarget" | "jumpPaging">>
 	): void {
 		const kept = appendNewest(
 			{ records: result.records, bytes: totalBytes(result.records), cursor: result.cursor },
@@ -429,7 +446,13 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			const result = await logs.read({ around: ts, filter, limit: LOG_PAGE_SIZE });
 			if (id !== loadId) return;
 			newer = result.newer;
-			show(result, [], { follow: false, detached: true, newerCursor: newer ?? null });
+			show(result, [], {
+				follow: false,
+				detached: true,
+				newerCursor: newer ?? null,
+				jumpTarget: ts,
+				jumpPaging: newer !== undefined,
+			});
 		} catch (error) {
 			if (id === loadId) fail(error);
 		}
@@ -461,7 +484,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		} catch (error) {
 			if (id !== loadId) return;
 			buffered = null;
-			set({ loadingNewer: false, error: describeFailure(error) });
+			set({ loadingNewer: false, jumpPaging: false, error: describeFailure(error) });
 		}
 	}
 
@@ -469,7 +492,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 		const state = get();
 		// Paging older dropped the newest lines meanwhile: this page would sit after the hole.
 		if (state.newerCursor !== after) {
-			set({ loadingNewer: false });
+			set({ loadingNewer: false, jumpPaging: false });
 			return;
 		}
 		const added = late.length > 0 ? [...result.records, ...late] : result.records;
@@ -479,6 +502,7 @@ export const useLogsStore = create<LogsState>()((set, get) => {
 			newerCursor: result.more ? result.cursor : null,
 			newerScannedTo: result.scannedTo ?? state.newerScannedTo,
 			loadingNewer: false,
+			jumpPaging: false,
 			knownCategories: withCategories(state.knownCategories, added),
 		});
 		if (!result.more) overlapping = result.records;

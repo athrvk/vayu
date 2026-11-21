@@ -32,6 +32,9 @@ function renderPanel(url: string, params: KeyValueItem[]) {
 	const value = {
 		request: { ...createDefaultRequestState(), id: "req_1", url, params },
 		updateField,
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		resolveString: (s: string) => s,
 		resolveField: fieldResolverOf((s: string) => s),
 		getAllVariables: () => ({}),

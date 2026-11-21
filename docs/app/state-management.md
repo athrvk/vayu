@@ -1313,10 +1313,10 @@ each collection-run step. A row is a discriminated union on `kind`: `send`,
 **State:**
 ```typescript
 {
-  rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and its append time `at`
+  rows: ConsoleRow[],        // oldest first; each row has a session-unique `id` and a time `at`, see below
   retainedBytes: number,     // estimateConsoleRowBytes summed over rows
   evictedCount: number,      // rows the bounds dropped since the last clear
-  runKeys: Set<string>,      // run identity of each step row and streamed Send row held
+  runKeys: Set<string>,      // run identity of each step row and Send row with a run held
   nextId: number
 }
 ```
@@ -1328,6 +1328,13 @@ useConsoleStore.getState().clear();      // empties the ring; History is untouch
 const rows = useConsoleStore(selectConsoleRows);
 const dropped = useConsoleStore(selectConsoleEvictedCount);
 ```
+
+**A row's time.** `at` is when the row's event began, display only: rows stay
+in append order, which is not time order. A `scriptRequest` row carries the
+engine's `startedAt` (#3680), so a three-second token fetch is listed three
+seconds before the Send that waited on it. Any other row takes the time of the
+append, except a `line`, which is untimed and takes the time of the row before
+it in the same append (the append time when it is the first).
 
 **Who appends.** `modules/console/console-rows.ts` builds every row the ring is
 handed. `sendConsoleRows` is the one builder both Send completions call: the
@@ -1384,7 +1391,7 @@ writer can store more. `evictedCount` is what lets the list say once that
 older rows were dropped.
 
 **Once per run.** A row with a run identity (a step's run, iteration and
-position; a streamed Send's run) is appended once: a replayed frame or a second
+position; a Send's run) is appended once: a replayed frame or a second
 finalisation of the same run adds nothing while the first is still held. The
 finalisation claim in `execution-events-store` already keeps a stream to one
 append; the key is the ring's own guarantee.
@@ -2300,7 +2307,9 @@ UI-only, in memory: the log lines the bottom panel's Logs tab holds (#3635), the
   loadingNewer: boolean,
   error: string | null,
   knownCategories: string[],      // the component filter's options
-  generation: number              // bumps when the list is replaced
+  generation: number,             // bumps when the list is replaced
+  jumpTarget: string | null,      // the ISO time a jump landed on; null for any other replacement
+  jumpPaging: boolean             // a jump's first page newer is still being read
 }
 ```
 
@@ -2312,7 +2321,7 @@ const { records, follow, controls, start, stop, setControls, setFollow, loadOlde
 
 **Filters are evaluated in main, never here.** `setControls` rebuilds the filter (`buildLogFilter`, with the search box read by `parseSearchInput` in `modules/logs/parse-search.ts`, a renderer copy of the reader's own that `electron/log-search.conformance.test.ts` holds equal) and, when it differs, restarts the tail with it and replaces the held lines with a fresh read. The tail starts before the read, so a line written while the read answers waits in a buffer and is merged in once, never lost or doubled. The read then runs to the files' ends, past where the tail started, so the tail's first batches after it can repeat the read's newest lines: each batch is checked against the read that attached the tail (`pastOverlap`), and the first batch that repeats none of it ends the check. A fresh read and the page newer that reaches the end of the logs both attach this way.
 
-**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB by `entryBytes`: two bytes per UTF-16 unit, as `estimateResponseBytes` counts a body, of the record serialised with the raw line and the position it carries, so its parsed fields, that line and the position all count; an unparsed line counts as its raw text and its position), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason, and pages newer from where it landed: the `around` read's `newer` cursor feeds one `after` read of 100 lines at once (half a step of the list's window, which stays on the lines before the time with the page below it, so reaching its lower end mounts the whole page beside them, under the cap; `useLogWindow`), then one per "Search newer" (`loadNewer`, 1,000). Paging newer drops the oldest. Each page newer restarts the tail before it reads, as a fresh read does, so the page that reaches the end of the logs (`more: false`) appends what the tail delivered meanwhile, once, and attaches: `detached` false, `newerCursor` null, Follow left off until the reader scrolls to the end. Paging older that drops the newest ends paging newer (`newerCursor` null), and a page newer still in flight then lands nowhere, since it would sit after the hole. Whatever drops the oldest (the tail, a page newer, a read over the byte budget) rebuilds the older cursor from the `$pos` every delivered line carries (`cursorAfterTrim`, #3652): per file, the latest of the start of its oldest held line, the end of its newest dropped line and the file's entry in the cursor before; files are matched by `id` (by `name` where it is empty), and an entry at offset 0 is left out. Each file's minimum is taken over every held line, not read off the first, because held order is not time order across files: a tail batch is sorted per poll, and a lagging file's lines arrive late. Nor is it file order within one file: a batch is sorted by `ts`, which engine threads can write out of order, so a trim can drop a line that lies after one it keeps (#3658). The cursor then sits past that held line, and stays there through a later trim that drops nothing of that file until a page older reads the line, which is why the entry before counts toward the maximum (a page older, and the read before any trim, leave it at or below every held start). The page merge refuses every line whose place (`$pos` file and `start`) is already held (`notHeld`); by place rather than by text, so two lines that read alike, an unparsed line repeated, are both kept. `more` is then true whenever an entry remains and `scannedTo` is cleared, so "Search older" reads every dropped line and the lines before them, none skipped or repeated, a line a burst left out included. The trim always makes a new cursor object, and a page older still in flight (requested against the old one) would sit behind the lines just dropped, so `loadOlder` reads it again from the new cursor, as often as a trim overtakes it, and the one click lands its page (#3658). There is no cap on those passes: each is a whole read, a cap would only bring back the discarded click, and `stop()` or a filter change ends the loop through `loadId`. A line without a `$pos` (only a fixture built outside the reader) cannot be placed, and a trim over one ends paging older (`cursor` null, `more` false) rather than guess. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
+**The bound** is `LOG_MAX_RECORDS` lines (10,000) or `LOG_MAX_BYTES` (16 MiB by `entryBytes`: two bytes per UTF-16 unit, as `estimateResponseBytes` counts a body, of the record serialised with the raw line and the position it carries, so its parsed fields, that line and the position all count; an unparsed line counts as its raw text and its position), whichever comes first. Following drops the oldest. "Search older" (`loadOlder`) turns follow off and drops the newest, and having dropped any the list is `detached`: later tail batches are not appended, since they would sit after a hole, and `setFollow(true)` reads the newest lines afresh instead. `jumpTo` is detached the same way, for the same reason, and pages newer from where it landed: the `around` read's `newer` cursor feeds one `after` read of 100 lines at once (half a step of the list's window, which opens a few lines before the time with the page below it, so the whole page mounts beside them, under the cap; `useLogWindow`), then one per "Search newer" (`loadNewer`, 1,000). `jumpPaging` is true from the jump's list until that first page has landed, failed or been set aside, and the window and the scroll to the time wait for it (a window settled earlier would be anchored before the page's rows exist). Paging newer drops the oldest. Each page newer restarts the tail before it reads, as a fresh read does, so the page that reaches the end of the logs (`more: false`) appends what the tail delivered meanwhile, once, and attaches: `detached` false, `newerCursor` null, Follow left off until the reader scrolls to the end. Paging older that drops the newest ends paging newer (`newerCursor` null), and a page newer still in flight then lands nowhere, since it would sit after the hole. Whatever drops the oldest (the tail, a page newer, a read over the byte budget) rebuilds the older cursor from the `$pos` every delivered line carries (`cursorAfterTrim`, #3652): per file, the latest of the start of its oldest held line, the end of its newest dropped line and the file's entry in the cursor before; files are matched by `id` (by `name` where it is empty), and an entry at offset 0 is left out. Each file's minimum is taken over every held line, not read off the first, because held order is not time order across files: a tail batch is sorted per poll, and a lagging file's lines arrive late. Nor is it file order within one file: a batch is sorted by `ts`, which engine threads can write out of order, so a trim can drop a line that lies after one it keeps (#3658). The cursor then sits past that held line, and stays there through a later trim that drops nothing of that file until a page older reads the line, which is why the entry before counts toward the maximum (a page older, and the read before any trim, leave it at or below every held start). The page merge refuses every line whose place (`$pos` file and `start`) is already held (`notHeld`); by place rather than by text, so two lines that read alike, an unparsed line repeated, are both kept. `more` is then true whenever an entry remains and `scannedTo` is cleared, so "Search older" reads every dropped line and the lines before them, none skipped or repeated, a line a burst left out included. The trim always makes a new cursor object, and a page older still in flight (requested against the old one) would sit behind the lines just dropped, so `loadOlder` reads it again from the new cursor, as often as a trim overtakes it, and the one click lands its page (#3658). There is no cap on those passes: each is a whole read, a cap would only bring back the discarded click, and `stop()` or a filter change ends the loop through `loadId`. A line without a `$pos` (only a fixture built outside the reader) cannot be placed, and a trim over one ends paging older (`cursor` null, `more` false) rather than guess. A single line over the byte budget is kept, alone, as a response over the response cache's budget is.
 
 **Every async step checks `loadId` before it writes**, and `stop()` bumps it, so a read that answers after a filter change or after the tab closed lands nowhere. `loadId`, the tail's buffer and the unsubscribe are module variables, not state: nothing renders from them.
 
@@ -3521,6 +3530,47 @@ It is beside the mode drafts rather than inside them because it is not a mode's
 body (GraphQL's body is already in the `graphql` bucket). It carries its own
 `requestId` for the drafts' reason, and `ownVariablesDraft` - not a second reset
 in the provider - is what drops one belonging to another request.
+
+### `RequestBuilderContext` - Bulk edit drafts
+
+```typescript
+bulkDrafts: BulkDrafts                       // the request on screen's, per table
+setBulkDraft: (table: BulkTable, draft: BulkDraft | null) => void
+commitBulkDraft: (table: BulkTable) => void  // the Table toggle
+```
+
+The Params and Headers tabs' Bulk edit text (#3666). `BulkEditor` is
+controlled; the provider holds the drafts filed under `memoryKey`, at most one
+per table. State, unlike the body drafts' ref, because the textarea renders
+from it; per key rather than one slot because one provider serves every
+request tab: a draft held in the component was dropped by the Params / Headers
+unmount of a sub-tab switch, and before the panels were keyed it followed the
+user into the next request and committed there. The open-tab sweep that bounds
+the row memory prunes it, and the request-change reset block leaves it alone,
+so a request returns to its own draft, in text mode.
+
+A draft is written into the request by one rule, `utils/bulk-drafts.ts`
+(`bulkTextPatch`, with the Params table's own `queryTablePatch` for the URL and
+the no-op guards of #1480), from four places:
+
+- **The Table toggle** (`commitBulkDraft`): `setRequest` and the draft closes.
+- **Send** (`executeRequest`): every open draft is written and closed, and the
+  request the send carries is built from the snapshot plus that patch, because
+  `request` does not hold it until the next render. What is on screen is what
+  is sent.
+- **Load test** (`startLoadTest`): the same commit as Send
+  (`commitBulkDraftsForSend`), so the test runs on what is on screen.
+- **Save** (`handleSave`, so autosave, the Save chord, the command and the
+  goodbye flush alike): the patch goes into the payload and `changedFields`,
+  and is written into the request on screen without a generation bump, since
+  the save carries it. The draft stays open, rebased onto what was saved,
+  because autosave fires on its own timer and must not close the editor under
+  the caret. When the provider already shows another request (the flush of
+  the one left), only the payload carries it: `shownMemoryKeyRef`, set in a
+  layout effect, keeps the other request's state untouched.
+
+A draft on its own does not mark the request dirty, so it is saved only when
+something saves the request. Not persisted.
 
 ### `RequestBuilderContext` - the headers a setting added
 

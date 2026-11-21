@@ -84,7 +84,7 @@ export interface ConsoleSendRow extends ConsoleRequestSummary {
 	kind: "send";
 	/** The stored request that was sent. */
 	requestId?: string;
-	/** The run the send was filed under, when the app learned it (a stream's). */
+	/** The run the send was filed under, when the app learned it (a stream's, or a recorded buffered Send's). */
 	runId?: string;
 	exchange: ConsoleExchange;
 }
@@ -134,11 +134,22 @@ export interface ConsoleStepRow {
 	requestId?: string;
 }
 
-/** What a writer hands {@link ConsoleStoreState.append}: a row without the ring's own fields. */
-export type ConsoleRowInput =
-	ConsoleSendRow | ConsoleScriptRequestRow | ConsoleLineRow | ConsoleStepRow;
+/**
+ * What a writer hands {@link ConsoleStoreState.append}: a row without the
+ * ring's own `id`. `at` is the time the row's event began, when the writer
+ * knows it (a script request's `startedAt`); without one the ring stamps the
+ * append time, and a `line` takes the time of the row before it.
+ */
+export type ConsoleRowInput = (
+	ConsoleSendRow | ConsoleScriptRequestRow | ConsoleLineRow | ConsoleStepRow
+) & { at?: number };
 
-/** A row in the ring: `id` is unique for the session, `at` is when it was appended (epoch ms). */
+/**
+ * A row in the ring: `id` is unique for the session, `at` is when it happened
+ * (epoch ms). Display only: rows stay in append order, so `at` is not
+ * monotonic, since a script request began before the Send that is listed after
+ * it was appended.
+ */
 export type ConsoleRow = ConsoleRowInput & { id: number; at: number };
 
 export type ConsoleRowKind = ConsoleRow["kind"];
@@ -152,7 +163,7 @@ interface ConsoleStoreState {
 	evictedCount: number;
 	/**
 	 * The run identity of each row that has one (a step's run, iteration and
-	 * position; a streamed Send's run), so a replayed frame or a second
+	 * position; a Send's run), so a replayed frame or a second
 	 * finalisation of one run appends nothing.
 	 */
 	runKeys: ReadonlySet<string>;
@@ -252,11 +263,12 @@ type RingState = Pick<
  * one row is what keeps the newest, even when it alone is over the budget.
  */
 function withAppended(state: RingState, inputs: readonly ConsoleRowInput[]): RingState {
-	const at = Date.now();
+	const appendedAt = Date.now();
 	const runKeys = new Set(state.runKeys);
 	const rows = [...state.rows];
 	let bytes = state.retainedBytes;
 	let nextId = state.nextId;
+	let previousAt = appendedAt;
 	for (const input of inputs) {
 		const key = runKeyOf(input);
 		if (key !== undefined) {
@@ -264,6 +276,8 @@ function withAppended(state: RingState, inputs: readonly ConsoleRowInput[]): Rin
 			runKeys.add(key);
 		}
 		const row = withBodiesCut(input);
+		const at = input.at ?? (input.kind === "line" ? previousAt : appendedAt);
+		previousAt = at;
 		rows.push({ ...row, id: nextId++, at });
 		bytes += estimateConsoleRowBytes(row);
 	}

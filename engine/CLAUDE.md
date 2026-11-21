@@ -377,6 +377,13 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   line per frame. The per-run JSON `"verbose"` key (`run_manager.cpp`'s
   `configure_event_loop`, a caller opting one load run into curl debug frames
   on the event-loop path) is a different switch and is untouched.
+  **A send the engine makes for a person or a script gets one outcome record**
+  (#3677), which the request line cannot give: `vayu::http::describe_send_outcome`
+  (`http/send_log.hpp`) builds it, `record_design_result` writes it as `cat:
+  "http"` once per design Send whichever path it ends in, and
+  `js_pm_send_request` writes it as `cat: "script"` outside its console guard -
+  `warn` when the send failed, `debug` when it completed or was cancelled
+  (`tests/send_log_test.cpp`, `tests/script_send_request_test.cpp`).
 - **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In
   the cloud dev environment a port fetched by `vcpkg_from_github` fails on a
   cold cache with `curl operation failed with response code 403` (the egress

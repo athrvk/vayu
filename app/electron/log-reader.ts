@@ -548,6 +548,21 @@ function nonEmptySet(values: readonly string[] | undefined): ReadonlySet<string>
 	return values && values.length > 0 ? new Set(values) : null;
 }
 
+interface CompiledTerm extends LogFieldTerm {
+	/** The value folded for a substring match. */
+	folded: string;
+	/** The token as typed, folded, for a term that may also match as text; `null` when exact. */
+	typed: string | null;
+}
+
+/** A term matches by its field, or (unless exact) by the text it was typed as. */
+function matchesTerm(entry: LogFileRecord, term: CompiledTerm): boolean {
+	if (term.typed !== null && recordHasText(entry, term.typed)) return true;
+	if (!Object.prototype.hasOwnProperty.call(entry, term.field)) return false;
+	const value = fieldText(entry[term.field]);
+	return term.exact ? value === term.value : value.toLowerCase().includes(term.folded);
+}
+
 /** The one evaluator: a read and a tail with the same filter keep the same lines. */
 export function compileLogFilter(filter: LogFilter): (entry: LogEntry) => boolean {
 	const floor = LEVEL_ORDER[filter.minLevel ?? "debug"];
@@ -558,6 +573,10 @@ export function compileLogFilter(filter: LogFilter): (entry: LogEntry) => boolea
 	const terms = (filter.terms ?? []).map((term) => ({
 		...term,
 		folded: term.value.toLowerCase(),
+		// A bare `host:port` parses as a term (`localhost` = `47813`), so it also
+		// matches the text as typed (#3678). A quoted term is an explicit field
+		// match and has no such reading.
+		typed: term.exact ? null : `${term.field}:${term.value}`.toLowerCase(),
 	}));
 	const structured = floor > 0 || sources !== null || categories !== null || terms.length > 0;
 
@@ -569,11 +588,7 @@ export function compileLogFilter(filter: LogFilter): (entry: LogEntry) => boolea
 		if (sources && !sources.has(entry.src)) return false;
 		if (categories && !categories.has(entry.cat)) return false;
 		if (text !== null && !recordHasText(entry, text)) return false;
-		return terms.every((term) => {
-			if (!Object.prototype.hasOwnProperty.call(entry, term.field)) return false;
-			const value = fieldText(entry[term.field]);
-			return term.exact ? value === term.value : value.toLowerCase().includes(term.folded);
-		});
+		return terms.every((term) => matchesTerm(entry, term));
 	};
 }
 

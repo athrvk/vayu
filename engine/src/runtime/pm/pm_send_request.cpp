@@ -36,7 +36,9 @@
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/send_log.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::runtime::pm_detail {
 
@@ -938,6 +940,38 @@ std::optional<std::size_t> record) {
     }
 }
 
+// One record in the log file for how the call ended (#3677): a warning for a
+// failed send, a debug line otherwise. Unlike the console line above it is
+// written whatever `scriptEnableConsole` says, since the file is where a failed
+// token fetch has to be found when a load test turned the console off, and a
+// cancelled send (the enclosing exchange ended) is a debug line, not a failure.
+// A load run (`record_send_requests` off) writes none, as it records none. No `runId`: the script context does not carry one.
+void log_send_outcome (HttpMethod method,
+const std::string& script_url,
+const Result<Response>& sent,
+std::chrono::milliseconds elapsed) {
+    vayu::http::SendOutcome outcome;
+    outcome.subject    = "pm.sendRequest";
+    outcome.method     = vayu::to_string (method);
+    outcome.url        = script_url;
+    outcome.elapsed_ms = static_cast<double> (elapsed.count ());
+    if (sent.is_error ()) {
+        outcome.error_code    = sent.error ().code;
+        outcome.error_message = sent.error ().message;
+    } else {
+        const Response& response = sent.value ();
+        outcome.status_code      = response.status_code;
+        outcome.error_code       = response.error_code;
+        outcome.error_message    = response.error_message;
+    }
+    const auto record = vayu::http::describe_send_outcome (outcome);
+    if (record.failed) {
+        vayu::utils::log_warning ("script", record.msg, record.fields);
+        return;
+    }
+    vayu::utils::log_debug ("script", record.msg, record.fields);
+}
+
 } // namespace
 
 /**
@@ -1097,6 +1131,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     std::chrono::steady_clock::now () - started);
     const auto record = record_send_exchange (*data, request, sent, started_at.count ());
     log_send_request (*data, request.method, script_url, sent, elapsed, record);
+    if (data->record_send_requests) {
+        log_send_outcome (request.method, script_url, sent, elapsed);
+    }
 
     const auto error_code =
     sent.is_error () ? sent.error ().code : sent.value ().error_code;

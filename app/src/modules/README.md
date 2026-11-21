@@ -165,6 +165,9 @@ its tab is on screen.
   requests and console lines, with type, level and text filters, Clear and Copy as cURL. The
   module also builds the rows both Send completions append (`appendSendToConsole`) and a
   collection run's step row (`step-row.ts`, imported by its own path from the run service).
+- **A Send row offers "Open run" when it knows its run**: a recorded buffered Send's `/execute`
+  answer carries `runId` (#3679), a stream's comes from its finalized run, and a transient or
+  unanswered Send has none.
 - **A step row reads its exchange from History.** A `step` frame is constant-size, so the row's
   expansion asks for the run's report (`useRunReportQuery`, the query History's run view reads)
   only while it is open.

@@ -20,7 +20,8 @@
  * engine masked" fails; build
  * the rows in `consoleRows` order without the pre/post split and "lists a Send's
  * rows in execution order" fails; drop either `scriptErrorRow` call in
- * `sendConsoleRows` and the matching "a script that threw" case fails.
+ * `sendConsoleRows` and the matching "a script that threw" case fails; drop
+ * the `at` spread in `scriptRequestRow` and "is the time the call began" fails.
  */
 
 import { describe, expect, it } from "vitest";
@@ -121,6 +122,37 @@ describe("sendConsoleRows", () => {
 		expect(pre.exchange.requestHeaders).toEqual({ Authorization: "<redacted>" });
 		expect(pre.exchange.requestBody).toEqual({ text: "client_id=x" });
 		expect(pre.exchange.timing).toMatchObject({ totalMs: 9, dnsMs: 1 });
+	});
+
+	describe("a script request's time (#3680)", () => {
+		const timeOf = (startedAt: number | undefined) => {
+			const rows = sendConsoleRows(
+				send({
+					response: response({
+						scriptRequests: [
+							{ ...record("pre", "http://localhost:4000/t"), startedAt },
+						],
+					}),
+				})
+			);
+			return rows.find((row) => row.kind === "scriptRequest")?.at;
+		};
+
+		it("is the time the call began", () => {
+			expect(timeOf(1_700_000_000_000)).toBe(1_700_000_000_000);
+		});
+
+		it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY])(
+			"is left to the ring when startedAt is %s",
+			(startedAt) => {
+				expect(timeOf(startedAt)).toBeUndefined();
+			}
+		);
+
+		it("leaves the Send to the ring's append time", () => {
+			const rows = sendConsoleRows(send());
+			expect(rows.map((row) => row.at)).toEqual([undefined]);
+		});
 	});
 
 	describe("a script that threw (#3673)", () => {

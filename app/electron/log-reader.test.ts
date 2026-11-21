@@ -1029,6 +1029,59 @@ describe("the filter", () => {
 		expect(keeps({ terms: [{ field: "missing", value: "x", exact: false }] })).toBe(false);
 	});
 
+	it("also matches a bare term as the text it was typed as, so host:port finds a URL (#3678)", () => {
+		const withUrl = record({ url: "http://localhost:47813/x" });
+		const hostPort = { field: "localhost", value: "47813", exact: false };
+		expect(keeps({ terms: [hostPort] }, withUrl)).toBe(true);
+		expect(keeps({ terms: [{ ...hostPort, value: "47814" }] }, withUrl)).toBe(false);
+		expect(
+			keeps({ terms: [{ field: "LOCALHOST", value: "47813", exact: false }] }, withUrl)
+		).toBe(true);
+		expect(keeps({ terms: [hostPort] })).toBe(false);
+		// A quoted term stays an exact field match.
+		expect(keeps({ terms: [{ ...hostPort, exact: true }] }, withUrl)).toBe(false);
+	});
+
+	it("keeps a bare term narrowing by its field when the text does not hold it", () => {
+		expect(keeps({ terms: [{ field: "status", value: "500", exact: false }] })).toBe(true);
+		expect(
+			keeps(
+				{ terms: [{ field: "status", value: "500", exact: false }] },
+				record({ status: 200 })
+			)
+		).toBe(false);
+		expect(
+			keeps(
+				{ terms: [{ field: "cat", value: "oauth", exact: false }] },
+				record({ cat: "http" })
+			)
+		).toBe(false);
+		// The text alternative is the same text free text searches: `cat` is not in it.
+		expect(
+			keeps(
+				{ terms: [{ field: "cat", value: "oauth", exact: false }] },
+				record({ cat: "oauth" })
+			)
+		).toBe(true);
+	});
+
+	it("finds the same lines for host:port, the quoted phrase and the host alone", () => {
+		const lines = [
+			record({ url: "http://localhost:47813/x" }),
+			record({ message: "listening on localhost:47813" }),
+			record({ message: "unrelated" }),
+		] as LogEntry[];
+		const linesFor = (input: string) => {
+			const { text, terms } = parseSearchInput(input);
+			return lines.filter(compileLogFilter({ text, terms }));
+		};
+
+		const expected = lines.slice(0, 2);
+		expect(linesFor("localhost:47813")).toEqual(expected);
+		expect(linesFor(`"localhost:47813"`)).toEqual(expected);
+		expect(linesFor("localhost")).toEqual(expected);
+	});
+
 	it("ANDs its terms and its constraints", () => {
 		const status = { field: "status", value: "500", exact: true };
 		expect(keeps({ terms: [status, { field: "cat", value: "oauth", exact: false }] })).toBe(

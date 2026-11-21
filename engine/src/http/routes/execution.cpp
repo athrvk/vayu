@@ -45,6 +45,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/send_log.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/target_policy.hpp"
@@ -1244,12 +1245,39 @@ size_t max_trace_body_bytes) {
 }
 
 /**
+ * One log record for how a design Send ended (#3677): a warning when it failed,
+ * a debug line otherwise. The request is the one that was sent, so its URL is
+ * final and resolved; a Send that failed before anything went out reports the
+ * request as composed and status 0.
+ */
+void log_design_outcome (const std::optional<std::string>& run_id,
+const vayu::Request& request,
+const vayu::Response& response) {
+    const auto record = vayu::http::describe_send_outcome ({ .subject = "Send",
+    .method        = vayu::to_string (request.method),
+    .url           = request.url,
+    .status_code   = response.status_code,
+    .elapsed_ms    = response.timing.total_ms,
+    .error_code    = response.error_code,
+    .error_message = response.error_message,
+    .run_id = run_id ? std::optional<std::string_view>{ *run_id } : std::nullopt });
+    if (record.failed) {
+        vayu::utils::log_warning ("http", record.msg, record.fields);
+        return;
+    }
+    vayu::utils::log_debug ("http", record.msg, record.fields);
+}
+
+/**
  * @brief Record a finished design execution against its run row.
  *
  * Declared in routes.hpp. Every `POST /execute` call site - the auth-failure
  * path, the completed-exchange path and the streaming worker's completion
  * callback - goes through here, so "transient leaves no trace" is decided in
- * exactly one place rather than guarded three times at the call sites.
+ * exactly one place rather than guarded three times at the call sites. The
+ * Send's outcome record (`log_design_outcome`) is written here for the same
+ * reason, before that rule applies: a transient Send is logged too, without a
+ * `runId`.
  *
  * Non-static: transient_execute_test.cpp drives it against a real database,
  * the suite having no in-process HTTP route harness.
@@ -1264,6 +1292,7 @@ const nlohmann::json& scripts,
 const nlohmann::json& elements,
 std::optional<double> engine_ms,
 std::optional<double> script_ms) {
+    log_design_outcome (run_id, request, response);
     if (!run_id) {
         return std::nullopt;
     }

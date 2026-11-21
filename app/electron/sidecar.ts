@@ -1106,7 +1106,7 @@ export class EngineSidecar {
 		let failure: SpawnFailure | null = null;
 
 		child.on("exit", (code, signal) => {
-			appLogger().info("sidecar", "Engine exited", { code, signal });
+			appLogger().info("sidecar", "Engine exited", { exitCode: code, signal });
 			failure = { kind: "exit", code, signal, stderr: [...stderrTail] };
 			this.childLeft(child, {
 				kind: "crashed",

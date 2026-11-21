@@ -66,6 +66,9 @@ function contextValue(resolveString: (input: string) => string, url: string, id:
 	return {
 		request,
 		updateField: vi.fn(),
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		resolveString,
 		resolveField: fieldResolverOf(resolveString),
 		getAllVariables: () => ({}),

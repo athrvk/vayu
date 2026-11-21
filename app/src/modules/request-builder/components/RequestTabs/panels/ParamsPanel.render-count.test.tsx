@@ -75,6 +75,9 @@ function Harness() {
 	const value = {
 		request,
 		updateField,
+		bulkDrafts: {},
+		setBulkDraft: () => {},
+		commitBulkDraft: () => {},
 		resolveString,
 		resolveField: fieldResolverOf(resolveString),
 		getAllVariables,

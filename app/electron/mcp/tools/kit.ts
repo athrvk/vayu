@@ -100,7 +100,7 @@ export function errorResult(message: string, failureClass: FailureClass): ToolRe
 }
 
 /** An error result for a {@link Failure} built elsewhere, its marker intact. */
-function failureResult(failure: Failure): ToolResult {
+export function failureResult(failure: Failure): ToolResult {
 	const result: ToolResult = {
 		content: [{ type: "text", text: failure.message }],
 		isError: true,

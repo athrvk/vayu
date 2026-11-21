@@ -138,6 +138,7 @@ const NO_NAMES: readonly string[] = [];
 export default function BodyPanel() {
 	const {
 		request,
+		memoryKey,
 		setRequest,
 		updateField,
 		resolveString,
@@ -174,6 +175,20 @@ export default function BodyPanel() {
 	 * dismissing the notice, unmounting the panel, and a reload.
 	 */
 	const [addedContentType, setAddedContentType] = useState<string | null>(null);
+
+	/*
+	 * Force-mounted, so a request switch does not remount this panel and the two
+	 * pieces of view state above would follow the user to the next request (#3666):
+	 * the notice would state something untrue about it and its Undo would remove
+	 * that request's own Content-Type row. Reset during render, like the provider's
+	 * own per-request reset, so the stale notice never paints.
+	 */
+	const [stateFor, setStateFor] = useState(memoryKey);
+	if (stateFor !== memoryKey) {
+		setStateFor(memoryKey);
+		setShowResolved(false);
+		setAddedContentType(null);
+	}
 
 	/*
 	 * What GraphQL introspection needs, unresolved: since #228 it composes
