@@ -1115,6 +1115,84 @@ describe("which definition an edit names", () => {
 });
 
 /*
+ * The create form shares the edit buffer, so a definition that disappears under
+ * an open token (environment switched, variable deleted) must not leave its
+ * value, a secret's above all, prefilled in the create form's plain field (#3719).
+ */
+describe("a token that loses its definition", () => {
+	const SECRET = { value: "sk_live_abcdef", scope: "environment", secret: true } as const;
+	const MARK = "Mark as secret (masks value in UI)";
+
+	function renderWith(props: Partial<React.ComponentProps<typeof VariablePopover>>) {
+		return (
+			<TooltipProvider>
+				<VariablePopover
+					name="merchantId"
+					varInfo={SECRET}
+					resolved
+					onValueChange={vi.fn()}
+					writableScopes={["global", "environment"]}
+					trigger={<span>{"{{merchantId}}"}</span>}
+					{...props}
+				/>
+			</TooltipProvider>
+		);
+	}
+
+	const gone = { varInfo: null, resolved: false } as const;
+
+	it("opens the create form empty and unmasked-by-mark, never prefilled with the old secret", () => {
+		const { rerender } = render(renderWith({}));
+		rerender(renderWith(gone));
+
+		const panel = open();
+		const field = within(panel).getByLabelText(/value for new variable/i);
+		expect(field).toHaveValue("");
+		expect(field).not.toHaveAttribute("type", "password");
+		expect(within(panel).getByRole("button", { name: MARK })).toBeInTheDocument();
+		expect(document.body.innerHTML).not.toContain("sk_live_abcdef");
+	});
+
+	it("drops the secret mark chosen for the previous definition's create too", () => {
+		const { rerender } = render(renderWith(gone));
+		fireEvent.click(within(open()).getByRole("button", { name: MARK }));
+		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+		rerender(renderWith({}));
+		rerender(renderWith(gone));
+
+		const panel = open();
+		expect(within(panel).getByRole("button", { name: MARK })).toBeInTheDocument();
+		expect(within(panel).getByLabelText(/value for new variable/i)).not.toHaveAttribute(
+			"type",
+			"password"
+		);
+	});
+
+	it("clears the buffer of a popover that is already open", () => {
+		const { rerender } = render(renderWith({ defaultOpen: true }));
+		rerender(renderWith({ defaultOpen: true, ...gone }));
+
+		expect(
+			within(screen.getByRole("dialog")).getByLabelText(/value for new variable/i)
+		).toHaveValue("");
+	});
+
+	it("does not reset what is being typed while the definition stays", () => {
+		const { rerender } = render(renderWith({ varInfo: { value: "a", scope: "environment" } }));
+		const panel = open();
+		const field = within(panel).getByLabelText(/value of merchantId/i);
+		fireEvent.change(field, { target: { value: "typed" } });
+
+		// A fresh object with the same contents: the resolver's usual re-render.
+		rerender(renderWith({ varInfo: { value: "a", scope: "environment" } }));
+		expect(
+			within(screen.getByRole("dialog")).getByLabelText(/value of merchantId/i)
+		).toHaveValue("typed");
+	});
+});
+
+/*
  * A create can mark the new entry secret: a token naming a signing key or an
  * API credential would otherwise be defined in the clear and then need a trip to
  * the Variables editor to hide it. The flag is create-only; an edit never offers it.
