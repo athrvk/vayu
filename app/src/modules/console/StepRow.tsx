@@ -177,6 +177,7 @@ export const StepRow = memo(function StepRow({ row, isExpanded, onToggle }: Step
 				)
 			}
 			phases={phasesFromTrace(result?.trace)}
+			scriptMs={result?.trace?.scriptMs}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(row.id)}
 			actions={<OpenRunButton runId={row.runId} />}

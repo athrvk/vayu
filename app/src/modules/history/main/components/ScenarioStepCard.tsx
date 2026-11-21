@@ -261,6 +261,7 @@ function ScenarioStepCard({
 				)
 			}
 			phases={phases}
+			scriptMs={step.result?.trace?.scriptMs}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(step)}
 			// No per-row border: `ScenarioRunView` wraps the step list in a
