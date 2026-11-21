@@ -914,8 +914,9 @@ refuses the send:
 On `POST /execute` a refusal is the pre-send gate's shape: `200` with
 `statusCode: 0`, `errorCode: UNSENDABLE_FILE` (#3693; a trace stored before it
 reads `INTERNAL_ERROR`) and the message above in `errorMessage`. A streaming
-execute (`stream: true`) answers `400` with code
-`unsendable_file`. `POST /runs` checks every file the run can send before the
+execute (`stream: true`) has no response to carry the code, so it answers `400`
+with the rule code `unsendable_file`, which the app shows as `UNSENDABLE_FILE`
+(`responseCodeOfFailure`, `execute-mapping.ts`). `POST /runs` checks every file the run can send before the
 run row exists and answers `400` with code `unsendable_file`; for a path a data
 row binds, each distinct bound path is checked and the message starts with
 `data row N:` (a scenario's with `Step N ('name'):` too). A path that changes

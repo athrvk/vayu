@@ -36,6 +36,10 @@
  * Mutation check for the buffered row's run (#3679): drop `runId: result.runId`
  * from `handleExecute`'s `appendSendToConsole` call and "carries its run" fails.
  * The "Open run" button itself is `ConsoleTab.test.tsx`'s.
+ *
+ * Mutation check for a refused stream (#3693): drop the `appendSendToConsole`
+ * call from `handleExecuteStream`'s catch and "a stream the engine refused is
+ * listed" fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -45,12 +49,14 @@ import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore, useConsoleStore } from "@/stores";
 import { useExecutionEventsStore } from "@/stores/execution-events-store";
 import { filterConsoleRows, NO_CONSOLE_FILTER } from "@/modules/console/console-filter";
+import { ApiError } from "@/services/http-client";
 import type { RunReport, SanityResult } from "@/types";
-import type { RequestState, ResponseState } from "./types";
+import type { RequestState, ResponseState, StreamStartResult } from "./types";
 
 const composeRequest = vi.fn();
 const executeRequest = vi.fn();
 const getRunReport = vi.fn();
+const executeStreamRequest = vi.fn();
 
 const requestQuery = {
 	get data() {
@@ -97,7 +103,7 @@ vi.mock("@/hooks", () => ({
 }));
 
 vi.mock("@/services", () => ({
-	apiService: { getRunReport, startLoadTest: vi.fn(), executeStreamRequest: vi.fn() },
+	apiService: { getRunReport, startLoadTest: vi.fn(), executeStreamRequest },
 	loadTestService: { startMonitoring: vi.fn() },
 }));
 
@@ -185,6 +191,16 @@ async function sendBuffered() {
 	});
 }
 
+async function sendStream() {
+	renderBuilder();
+	const initial = providerProps.initialRequest as RequestState;
+	await act(async () => {
+		await (
+			providerProps.onExecuteStream as (r: RequestState) => Promise<StreamStartResult | null>
+		)({ ...initial, disabledDefaultHeaders: [] });
+	});
+}
+
 /** The store as a finished stream of `req_1` leaves it, ready to be claimed once. */
 function streamEnded(runId: string) {
 	useExecutionEventsStore.setState({
@@ -229,6 +245,7 @@ beforeEach(() => {
 	composeRequest.mockReset().mockResolvedValue({ method: METHOD, url: URL, headers: [] });
 	executeRequest.mockReset().mockResolvedValue(executeAnswer);
 	getRunReport.mockReset().mockResolvedValue(storedReport);
+	executeStreamRequest.mockReset();
 	providerProps = {};
 	useConsoleStore.getState().clear();
 	useExecutionEventsStore.getState().clear();
@@ -317,6 +334,27 @@ describe("the session Console's two send paths", () => {
 			errorCode: "ENGINE_ERROR",
 			errorMessage: "engine is down",
 		});
+	});
+
+	it("a stream the engine refused is listed with its error, as a Send with no answer is", async () => {
+		executeStreamRequest.mockRejectedValue(
+			new ApiError(400, "unsendable_file", "Form field 'upload' has no file selected")
+		);
+
+		await sendStream();
+
+		const rows = useConsoleStore.getState().rows;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			kind: "send",
+			method: "POST",
+			url: "https://api.test/token",
+			status: 0,
+			errorCode: "UNSENDABLE_FILE",
+			errorMessage: "Form field 'upload' has no file selected",
+			requestId: "req_1",
+		});
+		expect(rows[0]).not.toHaveProperty("runId");
 	});
 
 	it("a finished stream appends its rows, under its run", async () => {

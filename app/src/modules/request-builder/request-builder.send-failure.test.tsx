@@ -20,12 +20,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
+import ClientErrorView from "./components/ResponseViewer/ClientErrorView";
 import type { LoadTestConfig } from "@/types";
 import type { RequestState, ResponseState, StreamStartResult } from "./types";
 
@@ -181,6 +182,33 @@ describe("a send the engine never answered", () => {
 		expect((await stream()) as { response: ResponseState }).toMatchObject({
 			response: { errorCode: "VARIABLE_UNRESOLVED" },
 		});
+	});
+});
+
+/**
+ * A stream refused over a file answers `400` under the rule's own code
+ * (`unsendable_file`), and the pane titles the response code, so the pair has to
+ * meet (#3693). Mutation check: drop `responseCodeOfFailure` from the stream's
+ * failure path and the pane falls back to "Couldn't get a response".
+ */
+describe("a stream the engine refused over a file", () => {
+	const REFUSAL = "Form field 'upload' has no file selected - choose one in the Body tab.";
+
+	it("lands as UNSENDABLE_FILE and the pane names the file", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.test/u" });
+		executeStreamRequest.mockRejectedValue(new ApiError(400, "unsendable_file", REFUSAL));
+		renderBuilder();
+
+		const result = await stream();
+
+		expect(!result.ok && result.response.errorCode).toBe("UNSENDABLE_FILE");
+		const { response } = result as { response: ResponseState };
+		render(
+			<ClientErrorView errorCode={response.errorCode} errorMessage={response.errorMessage} />
+		);
+		expect(screen.getByText("Couldn't send a file in this request")).toBeInTheDocument();
+		expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
 	});
 });
 
