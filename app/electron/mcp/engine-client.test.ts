@@ -633,6 +633,17 @@ describe("EngineClient run housekeeping", () => {
 		]);
 	});
 
+	it("reads one inbox capture under its inbox (#3723)", async () => {
+		const { fetchImpl, calls } = recordingFetch();
+		await client(fetchImpl).getInboxCapture("inbox/1", 7);
+		expect(calls).toEqual([
+			expect.objectContaining({
+				url: "http://127.0.0.1:9876/inbox/inbox%2F1/requests/7",
+				method: "GET",
+			}),
+		]);
+	});
+
 	it("folds a whole series with maxPoints alone, never beside limit or offset (#3560)", async () => {
 		const { fetchImpl, calls } = recordingFetch();
 		const engine = client(fetchImpl);

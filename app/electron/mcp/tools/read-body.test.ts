@@ -368,32 +368,22 @@ describe("read_body sources", () => {
 		expect(textOf(result)).toContain("get_run_samples");
 	});
 
-	test("an inbox capture, found on a later page of the inbox's list", async () => {
-		const capture = (id: number, body: string) => ({
-			id,
+	test("an inbox capture, read by id in one engine call (#3723)", async () => {
+		const getInboxCapture = vi.fn().mockResolvedValue({
+			id: 7,
 			method: "POST",
-			body,
+			body: `webhook ${SECRET}`,
 			bodyEncoding: "utf8",
 		});
-		const getInboxCaptures = vi.fn((_inbox: string, _limit: number, offset: number) =>
-			Promise.resolve(
-				offset === 0
-					? {
-							data: [capture(9, "newest"), capture(8, "older")],
-							pagination: { total: 3, hasMore: true },
-						}
-					: {
-							data: [capture(7, `webhook ${SECRET}`)],
-							pagination: { total: 3, hasMore: false },
-						}
-			)
-		);
+		const getInboxCaptures = vi.fn();
 		const page = await readBody(
 			{ inboxId: "inbox_1", captureId: 7 },
-			engineWith({ getInboxCaptures })
+			engineWith({ getInboxCapture, getInboxCaptures })
 		);
 		expect(page.text).toBe(`webhook ${REDACTED_MARKER}`);
-		expect(getInboxCaptures.mock.calls.map((call) => call[2])).toEqual([0, 2]);
+		expect(getInboxCapture).toHaveBeenCalledTimes(1);
+		expect(getInboxCapture).toHaveBeenCalledWith("inbox_1", 7, undefined);
+		expect(getInboxCaptures).not.toHaveBeenCalled();
 	});
 
 	test("a saved example", async () => {
@@ -443,31 +433,38 @@ describe("read_body unknown ids", () => {
 		);
 	});
 
-	test("an example the request does not hold, and a capture the inbox does not", async () => {
+	test.each([
+		["Inbox not found", 'No inbox with id "inbox_1"'],
+		["Capture not found", 'No capture with id "5"'],
+	])("an engine 404 %s on a capture names the id", async (message, words) => {
 		const engine = engineWith({
-			listRequestExamples: vi.fn().mockResolvedValue([{ id: "exa_1", body: "x" }]),
-			getInboxCaptures: vi.fn().mockResolvedValue({
-				data: [{ id: 1, body: "x" }],
-				pagination: { hasMore: false },
-			}),
+			getInboxCapture: vi.fn().mockRejectedValue(notFound(message)),
 		});
-		const example = await dispatchTool(
-			"read_body",
-			{ requestId: "req_1", exampleId: "exa_9" },
-			ctxWith(engine)
-		);
-		expect(textOf(example)).toContain('No example with id "exa_9"');
-		const capture = await dispatchTool(
+		const result = await dispatchTool(
 			"read_body",
 			{ inboxId: "inbox_1", captureId: 5 },
 			ctxWith(engine)
 		);
-		expect(textOf(capture)).toContain('No capture with id "5"');
-		for (const result of [example, capture]) {
-			expect((result.structuredContent as { error: { class: string } }).error.class).toBe(
-				"not_found"
-			);
-		}
+		expect(result.isError).toBe(true);
+		expect(textOf(result)).toContain(words);
+		expect((result.structuredContent as { error: { class: string } }).error.class).toBe(
+			"not_found"
+		);
+	});
+
+	test("an example the request does not hold is the tool's own not_found", async () => {
+		const engine = engineWith({
+			listRequestExamples: vi.fn().mockResolvedValue([{ id: "exa_1", body: "x" }]),
+		});
+		const result = await dispatchTool(
+			"read_body",
+			{ requestId: "req_1", exampleId: "exa_9" },
+			ctxWith(engine)
+		);
+		expect(textOf(result)).toContain('No example with id "exa_9"');
+		expect((result.structuredContent as { error: { class: string } }).error.class).toBe(
+			"not_found"
+		);
 	});
 });
 

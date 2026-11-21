@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -43,6 +44,11 @@ InboxManager& manager,
 const std::string& inbox_id,
 int64_t limit,
 int64_t offset);
+// Defined in inbox.cpp; the testable core of GET /inbox/:id/requests/:captureId.
+std::pair<int, nlohmann::json> inbox_capture_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+std::string_view capture_id);
 // Defined in inbox.cpp; the wire shape every inbox route answers with.
 nlohmann::json inbox_json (vayu::db::Database& db, vayu::http::InboxInfo info);
 // Defined in inbox.cpp; the testable core of PUT /inbox/:id (issue #1454).
@@ -1541,6 +1547,33 @@ TEST_F (InboxStorageTest, AnEmptyBodyReadsBackEmpty) {
     EXPECT_TRUE (captures.front ().body.empty ());
 }
 
+TEST_F (InboxStorageTest, OneCaptureReadsByIdAndOnlyWithinItsInbox) {
+    append ("inbox_a", "first", 100);
+    const int wanted = append ("inbox_a", "second", 100);
+    const int other  = append ("inbox_b", "elsewhere", 100);
+
+    const auto found = db_->get_inbox_request ("inbox_a", wanted);
+    ASSERT_HAS_VALUE (found);
+    EXPECT_EQ (found->id, wanted);
+    EXPECT_EQ (found->body, "second");
+
+    // Another inbox's id, an unassigned id and an inbox with no captures are
+    // each absent rather than a neighbour's row.
+    EXPECT_FALSE (db_->get_inbox_request ("inbox_a", other).has_value ());
+    EXPECT_FALSE (db_->get_inbox_request ("inbox_b", wanted).has_value ());
+    EXPECT_FALSE (db_->get_inbox_request ("inbox_a", other + 100).has_value ());
+    EXPECT_FALSE (db_->get_inbox_request ("inbox_none", wanted).has_value ());
+}
+
+TEST_F (InboxStorageTest, AZeroByteBodyReadsBackWholeByIdToo) {
+    const std::string embedded ("a\0b", 3);
+    const int id = append ("inbox_a", embedded, 100);
+
+    const auto found = db_->get_inbox_request ("inbox_a", id);
+    ASSERT_HAS_VALUE (found);
+    EXPECT_EQ (found->body, embedded);
+}
+
 TEST_F (InboxStorageTest, ClearingIsPerInboxAndStartupClearsEverything) {
     append ("inbox_a", "a", 100);
     append ("inbox_a", "a", 100);
@@ -1585,6 +1618,94 @@ TEST_F (InboxStorageTest, TheCaptureListCoreAnswers404ForAnUnknownInboxAndPages)
     ASSERT_EQ (page2["data"].size (), 1u);
     EXPECT_EQ (page2["data"][0]["body"], "body0");
     EXPECT_FALSE (page2["pagination"]["hasMore"].get<bool> ());
+}
+
+TEST_F (InboxStorageTest, TheCaptureCoreAnswersTheListEntryItselfWithNoEnvelope) {
+    InboxManager manager;
+    auto started = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (started.ok) << started.error_message;
+    const std::string inbox_id = started.info.inbox_id;
+    append (inbox_id, "older", 100);
+    const int id = append (inbox_id, "newer", 100);
+
+    const auto [status, body] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, inbox_id, std::to_string (id));
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["id"], id);
+    EXPECT_EQ (body["body"], "newer");
+
+    const auto [list_status, list] =
+    vayu::http::routes::inbox_captures_response (*db_, manager, inbox_id, 10, 0);
+    ASSERT_EQ (list_status, 200);
+    EXPECT_EQ (body, list["data"][0]);
+}
+
+TEST_F (InboxStorageTest, TheCaptureCoreSendsANonTextBodyAsBase64LikeTheList) {
+    InboxManager manager;
+    auto started = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (started.ok) << started.error_message;
+    const int id = append (started.info.inbox_id, std::string ("\xC0\xFF"), 100);
+
+    const auto [status, body] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, started.info.inbox_id, std::to_string (id));
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["body"], "wP8=");
+    EXPECT_EQ (body["bodyEncoding"], "base64");
+    EXPECT_EQ (body["bodyBytes"], 2);
+}
+
+TEST_F (InboxStorageTest, TheCaptureCoreAnswers404ForAnUnknownInboxOrCapture) {
+    InboxManager manager;
+    auto started = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (started.ok) << started.error_message;
+    const std::string inbox_id = started.info.inbox_id;
+    const int id               = append (inbox_id, "x", 100);
+
+    auto [no_inbox_status, no_inbox] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, "inbox_nope", std::to_string (id));
+    EXPECT_EQ (no_inbox_status, 404);
+    EXPECT_EQ (no_inbox["error"]["code"], "not_found");
+    EXPECT_EQ (no_inbox["error"]["message"], "Inbox not found");
+
+    auto [no_capture_status, no_capture] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, inbox_id, std::to_string (id + 1));
+    EXPECT_EQ (no_capture_status, 404);
+    EXPECT_EQ (no_capture["error"]["message"], "Capture not found");
+}
+
+TEST_F (InboxStorageTest, TheCaptureCoreRefusesAnIdThatIsNotACaptureIdWith404) {
+    InboxManager manager;
+    auto started = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (started.ok) << started.error_message;
+    append (started.info.inbox_id, "x", 100);
+
+    // Zero, negative, past `int`, empty and trailing text: none is an id the
+    // table assigned, and none may be read as a nearby one ("1x" as 1).
+    for (const std::string_view text : { "0", "-1", "99999999999999999999", "", "1x" }) {
+        auto [status, body] = vayu::http::routes::inbox_capture_response (
+        *db_, manager, started.info.inbox_id, text);
+        EXPECT_EQ (status, 404) << "id '" << text << "'";
+        EXPECT_EQ (body["error"]["message"], "Capture not found") << "id '" << text << "'";
+    }
+}
+
+TEST_F (InboxStorageTest, TheCaptureCoreDoesNotReadAnotherInboxsCapture) {
+    InboxManager manager;
+    auto first  = manager.start (*db_, InboxStartRequest{});
+    auto second = manager.start (*db_, InboxStartRequest{});
+    ASSERT_TRUE (first.ok) << first.error_message;
+    ASSERT_TRUE (second.ok) << second.error_message;
+    const int theirs = append (second.info.inbox_id, "private", 100);
+
+    auto [status, body] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, first.info.inbox_id, std::to_string (theirs));
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body["error"]["message"], "Capture not found");
+
+    auto [own_status, own] = vayu::http::routes::inbox_capture_response (
+    *db_, manager, second.info.inbox_id, std::to_string (theirs));
+    EXPECT_EQ (own_status, 200);
+    EXPECT_EQ (own["body"], "private");
 }
 
 /*
@@ -1830,6 +1951,24 @@ TEST_F (InboxRouteTest, ABodyWithAZeroByteListsAsAllItsBytes) {
     EXPECT_EQ (*decoded, sent);
     EXPECT_EQ (data[0]["bodyBytes"], 7);
     EXPECT_FALSE (data[0]["bodyTruncated"].get<bool> ());
+}
+
+TEST_F (InboxRouteTest, OneCaptureReadsByIdAsTheBareListEntry) {
+    deliver ("one");
+    const auto listed =
+    json::parse (management ().Get ("/inbox/" + inbox_id_ + "/requests")->body);
+    const auto entry = listed.at ("data").at (0);
+
+    auto read = management ().Get ("/inbox/" + inbox_id_ + "/requests/" +
+    std::to_string (entry.at ("id").get<int> ()));
+    ASSERT_TRUE (read);
+    ASSERT_EQ (read->status, 200) << read->body;
+    EXPECT_EQ (json::parse (read->body), entry);
+
+    auto unknown = management ().Get ("/inbox/" + inbox_id_ + "/requests/999999");
+    ASSERT_TRUE (unknown);
+    EXPECT_EQ (unknown->status, 404);
+    EXPECT_EQ (json::parse (unknown->body).at ("error").at ("message"), "Capture not found");
 }
 
 TEST_F (InboxRouteTest, AGarbledLiveResumePointIsRefusedAsACaptureId) {

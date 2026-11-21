@@ -1074,6 +1074,27 @@ int64_t offset) {
 }
 
 /**
+ * Testable core of `GET /inbox/:id/requests/:captureId`: the one capture, as
+ * the list's `data[]` entry carries it. A capture of another inbox is as
+ * unknown as one that never existed (`Database::get_inbox_request` matches
+ * both ids), and so is an id past `int`, which SQLite never assigned here.
+ */
+std::pair<int, nlohmann::json> inbox_capture_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+std::string_view capture_id) {
+    if (!manager.get (inbox_id)) {
+        return { 404, error_body (404, "Inbox not found") };
+    }
+    const auto id = vayu::utils::parse_number<int> (capture_id);
+    auto capture  = id ? db.get_inbox_request (inbox_id, *id) : std::nullopt;
+    if (!capture) {
+        return { 404, error_body (404, "Capture not found") };
+    }
+    return { 200, inbox_capture_json (*capture) };
+}
+
+/**
  * Testable core of `PUT /inbox/:id`: the read, the merge and the write are one
  * lock scope inside `InboxManager::update_response`, the same window issue
  * #1440 closed for the database-backed resources - closed here in the manager
@@ -1256,6 +1277,25 @@ httplib::Response& res) {
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "inbox", "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_get_inbox_request (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    try {
+        auto [status, body] = inbox_capture_response (
+        ctx.db, ctx.inbox_manager, inbox_id, req.matches[2].str ());
+        res.status = status;
+        // `replace` for the same reason as the list: a path or query the sender
+        // sent as bytes must not turn the read into a 500.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("inbox",
+        "GET /inbox/:id/requests/:captureId - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1478,6 +1518,17 @@ void register_inbox_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/inbox/([^/]+)/requests)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_list_inbox_requests (ctx, req, res);
+    });
+
+    /**
+     * GET /inbox/:id/requests/:captureId
+     * One capture by id, the bare object a list entry carries. `\d+` keeps a
+     * non-numeric id out of the handler; an id too long for `int` is the
+     * core's 404.
+     */
+    ctx.server.Get (R"(/inbox/([^/]+)/requests/(\d+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_get_inbox_request (ctx, req, res);
     });
 
     /** DELETE /inbox/:id/requests - clear the captures, keep the listener. */

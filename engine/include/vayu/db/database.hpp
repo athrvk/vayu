@@ -1213,6 +1213,9 @@ class Database {
     std::vector<InboxRequest>
     get_inbox_requests_paginated (const std::string& inbox_id, int64_t limit, int64_t offset);
     int64_t count_inbox_requests (const std::string& inbox_id);
+    /// One capture by id, matched on the inbox as well: an id belonging to
+    /// another inbox is absent, the way `get_result` treats another run's.
+    std::optional<InboxRequest> get_inbox_request (const std::string& inbox_id, int capture_id);
     /// Captures with `id` greater than @p last_id, oldest first (the live poll).
     std::vector<InboxRequest>
     get_inbox_requests_since (const std::string& inbox_id, int64_t last_id);

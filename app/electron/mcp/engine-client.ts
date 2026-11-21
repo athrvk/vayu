@@ -1515,8 +1515,7 @@ export class EngineClient {
 
 	/**
 	 * One inbox's captures, newest first: `GET /inbox/:id/requests?limit=&offset=`
-	 * in the `{data, pagination}` envelope. The rows are the whole captures -
-	 * the engine has no per-capture detail route, so a list read is a full read.
+	 * in the `{data, pagination}` envelope. The rows are the whole captures.
 	 *
 	 * The engine clamps `limit` to the inbox's own retention silently; the tool
 	 * over this refuses above its bound instead, for the #319 reason.
@@ -1531,6 +1530,20 @@ export class EngineClient {
 		return this.request(
 			"GET",
 			`/inbox/${encodeURIComponent(inboxId)}/requests?${params.toString()}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
+	 * One capture of an inbox (`GET /inbox/:id/requests/:captureId`, #3723): the
+	 * bare object a list row carries, whole. An unknown inbox, and a capture that
+	 * is not that inbox's, is a 404.
+	 */
+	getInboxCapture(inboxId: string, captureId: number, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/inbox/${encodeURIComponent(inboxId)}/requests/${captureId}`,
 			undefined,
 			signal
 		);

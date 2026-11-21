@@ -22,7 +22,6 @@ import type { NotFoundDeclaration } from "./contract.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
 import { MAX_INLINE_BODY_BYTES, utf8CharStart } from "./inline-body-bounds.js";
 import { isRecord, optionalOffset, optionalPositiveInt, str, ToolArgError } from "./kit.js";
-import { MAX_INBOX_CAPTURE_LIMIT } from "./webhook-inbox.js";
 
 /** How many matches one `find` page lists; `matchCount` counts them all. */
 export const MAX_FIND_MATCHES = 20;
@@ -135,20 +134,22 @@ export const BODY_SOURCE_NOT_FOUND: readonly NotFoundDeclaration[] = [
 	{ ...ID_KINDS.run, idArg: "runId" },
 	{ ...ID_KINDS.result, idArg: "resultId" },
 	{ ...ID_KINDS.inbox, idArg: "inboxId" },
+	{ ...ID_KINDS.capture, idArg: "captureId" },
 	{ ...ID_KINDS.request, idArg: "requestId" },
 ];
 
 // --- Fetching -----------------------------------------------------------------
 
-type BodyClient = Pick<EngineClient, "getRunResult" | "getInboxCaptures" | "listRequestExamples">;
+type BodyClient = Pick<EngineClient, "getRunResult" | "getInboxCapture" | "listRequestExamples">;
 
 /**
  * The stored record holding the body @p source names, as the engine stores it:
  * a run's result row with its trace, one inbox capture, one saved example.
- * The engine reads one result by id; a capture and an example have no by-id
- * route, so they are found in the lists their own tools read, whose bodies the
- * engine sends whole. An id the list does not hold throws a `not_found`
- * {@link ToolArgError}; an engine failure is rethrown as it came.
+ * The engine reads a result and a capture by id, and its 404 for an id it does
+ * not hold is mapped by {@link BODY_SOURCE_NOT_FOUND}. An example has no by-id
+ * route, so it is found in the list its own tool reads, whose bodies the engine
+ * sends whole; an id that list does not hold throws a `not_found`
+ * {@link ToolArgError}. Any other engine failure is rethrown as it came.
  */
 export async function fetchBodyRecord(
 	source: BodySource,
@@ -166,36 +167,7 @@ export async function fetchBodyRecord(
 		if (found !== undefined) return found;
 		throw new ToolArgError(unknownIdText(ID_KINDS.example, source.exampleId), "not_found");
 	}
-	return findCapture(client, source, signal);
-}
-
-/** One capture of an inbox, read a page of the newest-first list at a time. */
-async function findCapture(
-	client: BodyClient,
-	{ inboxId, captureId }: Extract<BodySource, { kind: "capture" }>,
-	signal?: AbortSignal
-): Promise<unknown> {
-	let offset = 0;
-	for (;;) {
-		const page = await client.getInboxCaptures(
-			inboxId,
-			MAX_INBOX_CAPTURE_LIMIT,
-			offset,
-			signal
-		);
-		const rows = isRecord(page) && Array.isArray(page.data) ? page.data : [];
-		const found = rows.find((row) => isRecord(row) && row.id === captureId);
-		if (found !== undefined) return found;
-		const more =
-			isRecord(page) && isRecord(page.pagination) && page.pagination.hasMore === true;
-		// The engine clamps a page to the inbox's retention, so step by what came back.
-		if (!more || rows.length === 0) break;
-		offset += rows.length;
-	}
-	throw new ToolArgError(
-		`${unknownIdText(ID_KINDS.capture, String(captureId))} get_inbox_captures lists inbox "${inboxId}"'s captures.`,
-		"not_found"
-	);
+	return client.getInboxCapture(source.inboxId, source.captureId, signal);
 }
 
 // --- The node a body sits on --------------------------------------------------

@@ -715,6 +715,18 @@ int64_t Database::count_inbox_requests (const std::string& inbox_id) {
     where (c (&InboxRequest::inbox_id) == inbox_id));
 }
 
+std::optional<InboxRequest>
+Database::get_inbox_request (const std::string& inbox_id, int capture_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<InboxRequest> (
+    where (c (&InboxRequest::id) == capture_id && c (&InboxRequest::inbox_id) == inbox_id),
+    sqlite_orm::limit (1));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    return std::move (rows.front ());
+}
+
 std::vector<InboxRequest>
 Database::get_inbox_requests_since (const std::string& inbox_id, int64_t last_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
