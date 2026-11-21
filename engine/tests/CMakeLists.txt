@@ -167,6 +167,7 @@ add_executable(vayu_tests
     execute_transport_failure_test.cpp
     execute_disconnect_test.cpp
     execute_result_handle_test.cpp
+    send_log_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
@@ -434,6 +435,7 @@ set(vayu_scratch_database_suites
     ExecuteGlobalsTest
     ExecuteTransportFailureTest
     ExecuteDisconnectTest
+    SendLogRouteTest
     ExecuteResultHandleTest
     ExecuteByteRowTest
     CustomCaVerificationTest

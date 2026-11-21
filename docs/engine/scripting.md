@@ -2298,7 +2298,13 @@ stays, and a key that `auth` appends is never shown. Only a request
 that was sent has a line: a call refused before it goes out (the cap, a bad
 option, the capability being off) throws and writes none. The line counts
 against the [console caps](#console-output) like any other, and with
-`scriptEnableConsole` off it is not written; the record below still is.
+`scriptEnableConsole` off it is not written; the record below still is, and so
+is a line in the engine's [log file](logging.md) (#3677), which the Logs tab
+shows: `cat: "script"`, `warn` when the call failed (method, URL with its
+credentials and query stripped, `errorCode`, the transport's message, `ms`) and
+`debug` when it did not, so a failed token fetch is found at the default
+`info` level with `cat:script`. A call cancelled with the enclosing exchange is
+`debug`; the record carries no `runId`, which the script context does not hold.
 
 **The exchange itself is recorded beside the line** (#3633). On a Send and in
 a sequential collection run, its setup and teardown scripts included, every

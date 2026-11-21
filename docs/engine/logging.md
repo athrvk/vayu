@@ -51,6 +51,31 @@ something a quiet run should hide. `install_request_logger`
 (`http/request_log.cpp`) is the one place this decision is made, for both
 the management server and an inbox listener.
 
+One outcome record per send the engine makes for a person or a script
+(issue #3677), because the request line records the call *into* the engine and
+nothing recorded what the engine's own sends did. A failed one is a `warn`, so
+the default `info` floor keeps it; one that completed is a `debug` line:
+
+| Send | `cat` | Written by | Fields |
+|------|-------|------------|--------|
+| A design Send (`POST /execute`) | `http` | `record_design_result`, once per Send whichever way it ends: the exchange, a failed build (an OAuth 2.0 token not acquired) and a stream's worker when it finishes, and for a transient Send too | `method`, `url`, `ms`, `status`, `errorCode`, `error`, `runId` |
+| `pm.sendRequest` | `script` | `js_pm_send_request`, whatever `scriptEnableConsole` says | the same, with no `runId` (the script context does not carry one) |
+
+`msg` is the fixed sentence `Send failed`, `Send completed` or `Send cancelled`
+(`pm.sendRequest ...` for a script), never `POST /path` text. `status` is
+absent when no answer came back; `errorCode` is the `err.code` a script's
+callback reads (`CONNECTION_FAILED`, `TIMEOUT`, ...) and `error` the
+transport's own message, bounded like a script's text
+([below](#text-a-script-authored)); `url` is stripped to scheme, host and path
+like any `url` field, so `?api_key=...` never lands. A 4xx or 5xx answer is an
+answer, not a failure, so it is a `debug` line with its `status`. A send that
+was cancelled (the caller hung up, a Stop, the enclosing exchange ending) is a
+`debug` line too, naming `CANCELLED`. A request refused before anything was sent
+(a 400 from `POST /execute`) has no outcome record; its request line says it.
+`runId` is present only for a recorded Send and is simply absent for a
+transient one. `vayu::http::describe_send_outcome` (`http/send_log.hpp`) builds
+both records, so the two cannot drift.
+
 ## Categories
 
 Engine: `startup`, `config`, `http`, `db`, `run`, `script`, `inbox`, `mock`,
@@ -137,10 +162,12 @@ must not throw it.
 `<data-dir>/logs/cli_<stamp>.log` (`vayu-cli`, its own default data directory
 when `--data-dir` names none). One file per process start; `logLevel`
 (Settings, Observability, restart-required) is the daemon's floor, defaulting
-to `info`: a 2xx request line and every database write are `debug`, so a long
-session would otherwise fill the file with them. Set `logLevel` to `debug`
-for a bug report. The lines startup writes before the database opens, and an
-unparsable `logLevel`, take the same default; `vayu-cli` reads no config and
+to `info`: a 2xx request line, every database write and a send that
+completed (a design Send or a `pm.sendRequest`) are `debug`, so a long
+session would otherwise fill the file with them; a send that failed is a
+`warn` and is kept. Set `logLevel` to `debug` for a bug report. The lines
+startup writes before the database opens, and an unparsable `logLevel`, take
+the same default; `vayu-cli` reads no config and
 always writes at it. `maxLogFileBytes` rotates the open file once to `.1`
 when it would cross the cap (0 = unlimited); the newest 10 per-prefix files
 survive a start, oldest deleted first along with their `.1`.
