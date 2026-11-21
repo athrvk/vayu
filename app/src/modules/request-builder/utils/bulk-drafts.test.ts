@@ -21,7 +21,13 @@ import type { KeyValueItem } from "@/types";
 import { createDefaultRequestState } from "./request-state";
 import { formatHeadersToText } from "./headers-format";
 import { formatParamsToText } from "./params-format";
-import { bulkDraftsPatch, bulkTextPatch, queryTablePatch } from "./bulk-drafts";
+import {
+	bulkDraftsPatch,
+	bulkTextPatch,
+	queryTablePatch,
+	unreadLineNotices,
+	unreadLinesNotice,
+} from "./bulk-drafts";
 
 const headers: KeyValueItem[] = [
 	{ id: "1", key: "Accept", value: "*/*", enabled: true },
@@ -88,5 +94,66 @@ describe("every open draft at once", () => {
 				headers: { text: formatHeadersToText(headers), opened: "" },
 			})
 		).toBeNull();
+	});
+});
+
+describe("unreadLinesNotice (#3694)", () => {
+	it("names each line, singular for one", () => {
+		expect(unreadLinesNotice("headers", [{ lineNumber: 3, text: "nocolon" }])).toBe(
+			'Headers: 1 line not read: line 3 "nocolon"'
+		);
+		expect(
+			unreadLinesNotice("params", [
+				{ lineNumber: 3, text: "nocolon" },
+				{ lineNumber: 5, text: "=novalue" },
+			])
+		).toBe('Params: 2 lines not read: line 3 "nocolon", line 5 "=novalue"');
+	});
+
+	it("names at most three lines and counts the rest", () => {
+		const unread = [1, 2, 3, 4, 5].map((lineNumber) => ({ lineNumber, text: "x" }));
+		expect(unreadLinesNotice("params", unread)).toBe(
+			'Params: 5 lines not read: line 1 "x", line 2 "x", line 3 "x", and 2 more'
+		);
+	});
+
+	it("cuts a long line's text", () => {
+		const notice = unreadLinesNotice("headers", [{ lineNumber: 1, text: "y".repeat(200) }]);
+		expect(notice).toBe(`Headers: 1 line not read: line 1 "${"y".repeat(40)}…"`);
+	});
+
+	it("is null when nothing was left out", () => {
+		expect(unreadLinesNotice("headers", [])).toBeNull();
+	});
+});
+
+describe("unreadLineNotices (#3694)", () => {
+	const draft = (text: string) => ({ text, opened: "" });
+
+	it("says nothing for a clean round trip of the rows the table holds", () => {
+		expect(
+			unreadLineNotices({
+				headers: draft(formatHeadersToText(headers)),
+				params: draft(formatParamsToText(params)),
+			})
+		).toEqual([]);
+	});
+
+	it("speaks for a draft the no-op guard commits nothing for", () => {
+		const text = `${formatHeadersToText(headers)}\nnocolon`;
+		expect(bulkTextPatch(request, "headers", text)).toBeNull();
+		expect(unreadLineNotices({ headers: draft(text) })).toEqual([
+			'Headers: 1 line not read: line 3 "nocolon"',
+		]);
+	});
+
+	it("reports each open table on its own, in table order", () => {
+		expect(unreadLineNotices({ headers: draft("nocolon"), params: draft("=novalue") })).toEqual(
+			[
+				'Params: 1 line not read: line 1 "=novalue"',
+				'Headers: 1 line not read: line 1 "nocolon"',
+			]
+		);
+		expect(unreadLineNotices({})).toEqual([]);
 	});
 });

@@ -20,7 +20,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatHeadersToText, parseHeadersFromText, isNoOpHeadersEdit } from "./headers-format";
+import {
+	formatHeadersToText,
+	parseHeadersFromText,
+	isNoOpHeadersEdit,
+	unreadHeaderLines,
+} from "./headers-format";
 import type { KeyValueItem } from "@/types";
 
 /** The parsed shape, minus the generated id that varies per call. */
@@ -242,5 +247,35 @@ describe("isNoOpHeadersEdit", () => {
 
 	it("is false when a value actually changed", () => {
 		expect(isNoOpHeadersEdit("Accept: text/html\n// X-Off: 2", rows)).toBe(false);
+	});
+});
+
+describe("unreadHeaderLines (#3694)", () => {
+	it("names a line with no separator and the line it sits on, while the rest still parse", () => {
+		const text = "A: 1\nnocolon\nB: 2";
+		expect(unreadHeaderLines(text)).toEqual([{ lineNumber: 2, text: "nocolon" }]);
+		expect(pairs(text)).toEqual([
+			{ key: "A", value: "1" },
+			{ key: "B", value: "2" },
+		]);
+	});
+
+	it("counts blank lines in the number but does not report them", () => {
+		expect(unreadHeaderLines("A: 1\n\n   \nnocolon\n: orphaned")).toEqual([
+			{ lineNumber: 4, text: "nocolon" },
+			{ lineNumber: 5, text: ": orphaned" },
+		]);
+	});
+
+	it("reads a disabled line by the parser's rule: marker stripped, then split", () => {
+		expect(unreadHeaderLines("// A: 1\n// nocolon\n//")).toEqual([
+			{ lineNumber: 2, text: "// nocolon" },
+			{ lineNumber: 3, text: "//" },
+		]);
+	});
+
+	it("reports nothing for valid and blank lines", () => {
+		expect(unreadHeaderLines("A: 1\n\n// B=2\n")).toEqual([]);
+		expect(unreadHeaderLines("")).toEqual([]);
 	});
 });

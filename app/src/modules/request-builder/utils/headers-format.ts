@@ -30,7 +30,13 @@
 
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
-import { splitKeyValueLine, stripDisabledMarker, HEADER_SEPARATORS } from "./kv-line";
+import {
+	scanKeyValueLines,
+	unreadLinesOf,
+	HEADER_SEPARATORS,
+	type ScannedLine,
+	type UnreadLine,
+} from "./kv-line";
 
 /**
  * Format headers array to text format for bulk edit
@@ -49,18 +55,17 @@ export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 };
 
 /**
- * Split one line at whichever of `:` or `=` comes first.
+ * Read every non-blank line, splitting at whichever of `:` or `=` comes first.
  *
  * A header name may contain neither, so the earliest of the two is always the
  * separator - which is why this cannot simply be shared with the params parser,
  * whose keys *may* contain a colon. See `kv-line.ts` for the rule both follow.
  *
- * Returns null when the line carries neither, or when the separator is the first
+ * A line is unparsed when it carries neither, or when the separator is the first
  * character - `: value` names no header, and writing an empty key into the table
  * would produce a row the user cannot identify.
  */
-const splitHeaderLine = (line: string): { key: string; value: string } | null =>
-	splitKeyValueLine(line, HEADER_SEPARATORS);
+const scanHeaderLines = (text: string): ScannedLine[] => scanKeyValueLines(text, HEADER_SEPARATORS);
 
 /**
  * Parse text format to headers array
@@ -76,24 +81,28 @@ const splitHeaderLine = (line: string): { key: string; value: string } | null =>
  * @returns Array of KeyValueItem
  */
 export const parseHeadersFromText = (text: string): KeyValueItem[] => {
-	const lines = text.split("\n").filter((line) => line.trim());
 	const headers: KeyValueItem[] = [];
 
-	lines.forEach((line) => {
-		const { enabled, rest } = stripDisabledMarker(line);
-		const parsed = splitHeaderLine(rest);
-		if (!parsed) return;
-
+	for (const { parsed, enabled } of scanHeaderLines(text)) {
+		if (!parsed) continue;
 		headers.push({
 			id: generateId(),
 			key: parsed.key,
 			value: parsed.value,
 			enabled,
 		});
-	});
+	}
 
 	return headers;
 };
+
+/**
+ * The lines `parseHeadersFromText` drops, with their 1-based line numbers (blank
+ * lines count but are not reported), so a commit can say what it did not read
+ * (#3694).
+ */
+export const unreadHeaderLines = (text: string): UnreadLine[] =>
+	unreadLinesOf(scanHeaderLines(text));
 
 /**
  * Whether committing `text` would change nothing about `headers` (issue
