@@ -1374,6 +1374,37 @@ TEST_F (ScenarioRunnerTest, AStepsTraceCarriesItsScriptRequests) {
     EXPECT_EQ (scripts["consoleLogs"][1]["scriptRequest"], 1);
 }
 
+// A step's trace carries the time its scripts took, `pm.sendRequest` included
+// (#3676), flat beside `engineMs`'s design-mode sibling keys; a scriptless step
+// stores a figure too, because "ran no script" is a reading. The pre-request
+// script spins and the test script waits on the mock's `/slow` (at least
+// 120ms), so the sum has a floor no runner can undercut; no upper bound is
+// asserted. Mutation checks: stop accumulating `script_ms` in
+// `execute_exchange` and the scripted step reads 0; drop the `scriptMs` write
+// in `store_step_record` and both steps lose the key.
+TEST_F (ScenarioRunnerTest, AStepsTraceCarriesTheTimeItsScriptsTook) {
+    constexpr int PRE_SPIN_MS        = 150;
+    constexpr int SLOW_ROUTE_MS      = 120;
+    constexpr double SCRIPT_FLOOR_MS = (PRE_SPIN_MS + SLOW_ROUTE_MS) * 0.9;
+    allow_script_requests_           = true;
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    "var t0 = Date.now(); while (Date.now() - t0 < " + std::to_string (PRE_SPIN_MS) + ") {}",
+    "pm.sendRequest('" + server_->url ("/slow") + "', function () {});");
+    seed_request ("req_b", 1, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    ASSERT_TRUE (traces[0].contains ("scriptMs")) << traces[0].dump (2);
+    EXPECT_GE (traces[0]["scriptMs"].get<double> (), SCRIPT_FLOOR_MS);
+    ASSERT_TRUE (traces[1].contains ("scriptMs")) << traces[1].dump (2);
+    ASSERT_TRUE (traces[1]["scriptMs"].is_number ()) << traces[1].dump (2);
+    EXPECT_GE (traces[1]["scriptMs"].get<double> (), 0.0);
+}
+
 // A folder sits between the collection and the request: its results carry
 // `folder`, and a throw there is named as the folder's.
 TEST_F (ScenarioRunnerTest, AFolderLevelScriptIsReportedAsTheFolders) {
@@ -4387,6 +4418,8 @@ TEST_F (ScenarioRunnerTest, ATokenNamingAnAbsentColumnErrorsTheStepWithoutSendin
     EXPECT_FALSE (trace.contains ("response"));
     EXPECT_NE (
     trace["request"]["url"].get<std::string> ().find ("{{data.absent}}"), std::string::npos);
+    // No exchange ran, so there is no script time to report, not a zero (#3676).
+    EXPECT_FALSE (trace.contains ("scriptMs")) << trace.dump (2);
 }
 
 // A credentials file behind basic auth, end to end. The plan deliberately does

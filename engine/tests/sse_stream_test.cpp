@@ -2850,6 +2850,98 @@ TEST_F (StreamExecuteTest, AnAuthFailureReplyCarriesNoEngineMs) {
     EXPECT_FALSE (latest_design_trace ().contains ("engineMs"));
 }
 
+// ---------------------------------------------------------------------------
+// `timing.scriptMs` (#3676): the script time `engineMs` leaves out
+//
+// `exchange.script_ms`, taken once beside `engineMs` and stored flat on the
+// trace. Only a lower bound is asserted for a slow script: an upper one is the
+// side a loaded runner breaks. Mutation checks: stop accumulating `script_ms`
+// in `execute_exchange` (request_exchange.cpp) and the two slow-script cases
+// red; write a different value to the trace than to the body in
+// `run_buffered_execution` and the parity case reds; drop the `scriptMs` key
+// from the body or from `record_design_result` and the presence and parity
+// cases red.
+// ---------------------------------------------------------------------------
+
+/// The share of an injected script delay `scriptMs` must show: the script
+/// spins for at least the delay, so anything under it lost time.
+constexpr double SCRIPT_MS_FLOOR = SLOW_SCRIPT_MS * 0.9;
+
+TEST_F (StreamExecuteTest, ABufferedSendReportsAScriptTimeInTheTimingNode) {
+    serve (1);
+    const auto body = send_buffered (json::object ());
+
+    ASSERT_TRUE (body["timing"].contains ("scriptMs")) << body["timing"].dump (2);
+    ASSERT_TRUE (body["timing"]["scriptMs"].is_number ()) << body["timing"].dump (2);
+    EXPECT_GE (body["timing"]["scriptMs"].get<double> (), 0.0);
+}
+
+TEST_F (StreamExecuteTest, ASlowPreRequestScriptShowsAsScriptTime) {
+    serve (1);
+    const auto body = send_buffered (
+    json{ { "elements", script_elements (busy_script (SLOW_SCRIPT_MS)) } });
+
+    EXPECT_GE (body["timing"]["scriptMs"].get<double> (), SCRIPT_MS_FLOOR)
+    << body["timing"].dump (2);
+    EXPECT_LT (body["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << body["timing"].dump (2);
+}
+
+TEST_F (StreamExecuteTest, ASlowPostRequestScriptShowsAsScriptTime) {
+    serve (1);
+    const auto body = send_buffered (
+    json{ { "elements", script_elements ("", busy_script (SLOW_SCRIPT_MS)) } });
+
+    EXPECT_GE (body["timing"]["scriptMs"].get<double> (), SCRIPT_MS_FLOOR)
+    << body["timing"].dump (2);
+    EXPECT_LT (body["timing"]["engineMs"].get<double> (), SLOW_SCRIPT_MS / 2.0)
+    << body["timing"].dump (2);
+}
+
+// One reading, taken before the write, so the stored trace and the live body
+// cannot disagree; flat on the trace beside `engineMs`, never inside a node.
+TEST_F (StreamExecuteTest, TheStoredTraceCarriesTheScriptMsTheLiveBodyReturned) {
+    serve (1);
+    const auto body =
+    send_buffered (json{ { "elements", script_elements (busy_script (50)) } });
+    const auto trace = latest_design_trace ();
+
+    ASSERT_TRUE (trace.contains ("scriptMs")) << trace.dump (2);
+    EXPECT_EQ (trace["scriptMs"], body["timing"]["scriptMs"]);
+    EXPECT_TRUE (trace.contains ("engineMs")) << trace.dump (2);
+}
+
+// A streaming send answers 202 with no exchange finished, and the auth-failure
+// reply returns before any ran: neither has a figure, so neither stores one.
+TEST_F (StreamExecuteTest, AStreamingSendCarriesNoScriptMs) {
+    serve (1);
+    json payload = { { "method", "GET" }, { "url", origin_->url ("/scripted") },
+        { "stream", true } };
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    auto response = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (response);
+    ASSERT_EQ (response->status, 202) << response->body;
+    const auto accepted = json::parse (response->body);
+    EXPECT_FALSE (accepted.contains ("timing")) << accepted.dump (2);
+
+    const auto trace = trace_for (accepted.value ("runId", std::string ()));
+    EXPECT_FALSE (trace.contains ("scriptMs")) << trace.dump (2);
+}
+
+TEST_F (StreamExecuteTest, AnAuthFailureReplyCarriesNoScriptMs) {
+    serve (1);
+    const auto body = send_buffered (json{ { "auth",
+    { { "mode", "oauth2" }, { "autoFetchToken", false },
+    { "accessTokenUrl", origin_->url ("/token") } } } });
+    ASSERT_TRUE (body.contains ("authErrorCode")) << body.dump (2);
+
+    if (body.contains ("timing")) {
+        EXPECT_FALSE (body["timing"].contains ("scriptMs")) << body.dump (2);
+    }
+    EXPECT_FALSE (latest_design_trace ().contains ("scriptMs"));
+}
+
 // The relay's `event: complete` is the app's one cue to read the report, so it
 // must mean the run row and trace are stored (#3239). The post-request script
 // spins so that the window between the transfer's end and the row write is

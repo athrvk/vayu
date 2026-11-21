@@ -1262,7 +1262,8 @@ const StreamRecord* stream,
 const std::optional<vayu::core::ValidationVerdict>& validation,
 const nlohmann::json& scripts,
 const nlohmann::json& elements,
-std::optional<double> engine_ms) {
+std::optional<double> engine_ms,
+std::optional<double> script_ms) {
     if (!run_id) {
         return std::nullopt;
     }
@@ -1286,6 +1287,9 @@ std::optional<double> engine_ms) {
         nlohmann::json trace = build_result_trace (request, response);
         if (engine_ms) {
             trace["engineMs"] = *engine_ms;
+        }
+        if (script_ms) {
+            trace["scriptMs"] = *script_ms;
         }
         const auto max_trace_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxTraceBodyBytes",
@@ -2609,6 +2613,9 @@ std::chrono::steady_clock::time_point handler_start) {
     // The build's acquisition or the late one's (#2521): a send has one.
     const double engine_ms = engine_cost_ms (handler_start, exchange.response,
     exchange.script_ms, send.auth_fetch_ms + exchange.auth_fetch_ms);
+    // The script time `engineMs` leaves out, reported on its own (#3676): the
+    // same reading, so the two never disagree about where the time went.
+    const double script_ms = exchange.script_ms;
 
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
@@ -2616,7 +2623,7 @@ std::chrono::steady_clock::time_point handler_start) {
     stop_if_caller_left (ctx.db, send);
     const auto result_id = record_design_result (ctx.db, send.run_id,
     exchange.request, exchange.response,
-    /*send.stream=*/nullptr, validation, scripts, elements, engine_ms);
+    /*send.stream=*/nullptr, validation, scripts, elements, engine_ms, script_ms);
 
     persist_send_variables (ctx.db, scopes, send.persist_variables);
 
@@ -2626,6 +2633,7 @@ std::chrono::steady_clock::time_point handler_start) {
     nlohmann::json body = build_response_json (
     exchange.response, send.include_parsed_body, scripts, validation, elements);
     body["timing"]["engineMs"] = engine_ms;
+    body["timing"]["scriptMs"] = script_ms;
     add_result_handle (body, send.run_id, result_id);
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);

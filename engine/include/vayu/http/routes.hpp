@@ -2112,7 +2112,11 @@ const nlohmann::json& elements = nlohmann::json::array (),
 /// `timing.engineMs` of the live body (issue #2132), stored flat on the trace
 /// beside `totalMs` so a restored response shows the figure the live one did.
 /// Absent for a send that measured none: a stream, the auth-failure reply.
-std::optional<double> engine_ms = std::nullopt);
+std::optional<double> engine_ms = std::nullopt,
+/// `timing.scriptMs` of the live body (#3676), stored flat beside `engineMs`:
+/// the pre-request, test and `pm.sendRequest` time `engineMs` leaves out.
+/// Absent where `engine_ms` is.
+std::optional<double> script_ms = std::nullopt);
 
 /** Where one `GET /runs/:id/live` stream has got to between polls. */
 struct LiveMetricsCursor {

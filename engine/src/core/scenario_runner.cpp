@@ -863,6 +863,9 @@ ScenarioSummaryInputs& summary) {
     // `step.before` and `step.after`'s outcomes (issue #1514); the caller
     // (`run_iteration`) appends `step.between`'s onto this same vector.
     record.elements = exchange.element_outcomes;
+    if (data_bind_error.empty ()) {
+        record.script_ms = exchange.script_ms;
+    }
 
     // What the contract says about what came back (issue #681).
     // Only for a step that sent: a skipped step and one whose data
@@ -1008,6 +1011,9 @@ ScenarioStepStore& store) {
         record.trace.erase ("response");
     }
     stamp_step_identity (record.trace, record);
+    if (record.script_ms) {
+        record.trace["scriptMs"] = *record.script_ms;
+    }
     vayu::json::cap_trace_bodies (record.trace, ctx.max_trace_body_bytes);
     // A streaming step's events (#3235), parsed back out of the body the way
     // a load sample's are (`GET /runs/:id/samples`), into the `events` node a

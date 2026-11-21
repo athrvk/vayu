@@ -760,7 +760,8 @@ struct ExchangeOutcome {
     /// Wall time spent inside the pre- and post-request script runs together
     /// (issue #2132), `pm.sendRequest` included. Read by `POST /execute`, which
     /// subtracts it from the handler's elapsed time to report `timing.engineMs`
-    /// as Vayu's own cost; a collection run does not read it.
+    /// as Vayu's own cost and reports it as `timing.scriptMs` (#3676), and by a
+    /// collection run's step trace (`scriptMs`).
     double script_ms = 0.0;
     /// What @ref ExchangeInputs::late_auth waited on an OAuth 2.0 token
     /// endpoint for (`AuthApplyResult::token_fetch_ms`), zero for a cached
