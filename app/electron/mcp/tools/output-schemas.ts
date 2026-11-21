@@ -280,6 +280,39 @@ export const bodyPageSchema = z.object({
 	storedTruncated: optBool,
 });
 
+const diffSideSchema = z.object({
+	totalBytes: z.number(),
+	encoding: z.enum(["utf8", "base64"]),
+	storedTruncated: optBool,
+});
+
+/**
+ * `diff_bodies`: the difference between two stored bodies, held exactly. A
+ * JSON difference has a `pointer`, a text one a `line`; a binary pair carries
+ * no list, only `equal` and the two sides.
+ */
+export const bodyDiffSchema = z.object({
+	kind: z.enum(["json", "text", "binary"]),
+	equal: z.boolean(),
+	a: diffSideSchema,
+	b: diffSideSchema,
+	coarse: optBool,
+	differenceCount: optNum,
+	differences: z
+		.array(
+			z.object({
+				op: z.enum(["changed", "added", "removed"]),
+				pointer: optStr,
+				line: optNum,
+				old: optStr,
+				new: optStr,
+				truncated: optBool,
+			})
+		)
+		.optional(),
+	omitted: optNum,
+});
+
 export const globalsSchema = z.looseObject({
 	id: optStr,
 	variables: z.unknown().optional(),
