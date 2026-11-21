@@ -173,9 +173,11 @@ describe("a goodbye flush of A that settles after the switch to B", () => {
 
 		expect(probed("name")).toBe("B");
 		expect(probed("dirty")).toBe("false");
-		// Untouched in B, so an outside write is adopted silently.
-		deliverB("theirs");
-		expect(probed("name")).toBe("theirs");
+		// Untouched in B, so an outside write is adopted silently. A's saved
+		// value is the probe: had A's save moved B's baseline to it, the write
+		// below would read as no change and B's name would stay "B".
+		deliverB("sent by A");
+		expect(probed("name")).toBe("sent by A");
 		expect(probed("conflicts")).toBe("{}");
 	});
 
