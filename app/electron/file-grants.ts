@@ -138,7 +138,7 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 		}
 		deps.log("The engine refused to record a picked file", {
 			status: result.status,
-			code: result.code,
+			errorCode: result.code,
 		});
 		return false;
 	}

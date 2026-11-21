@@ -18,6 +18,7 @@ import {
 	registerFilePickedIpc,
 } from "./file-grants";
 import type { EngineWrite, FileTrustRow } from "./file-trust-client";
+import { isSecretFieldName } from "./log";
 
 const posixAbsolute = (p: string) => p.startsWith("/");
 const windowsAbsolute = (p: string) => /^[A-Za-z]:[\\/]/.test(p);
@@ -127,6 +128,19 @@ describe("createFileGrants", () => {
 			"The engine refused to record a picked file",
 			expect.objectContaining({ status: 400 })
 		);
+	});
+
+	// #3682: `code` is in the log redaction set, so the record names it `errorCode`.
+	// Mutation check: log it as `code` and both assertions fail.
+	it("logs the engine's refusal code under a name redaction keeps", async () => {
+		const { grants, state, log } = fakeEngine();
+		state.refuse = 400;
+
+		await grants.record("/data/dir");
+
+		const fields = log.mock.calls[0][1] as Record<string, unknown>;
+		expect(fields).toMatchObject({ errorCode: "bad_request" });
+		expect(Object.keys(fields).filter(isSecretFieldName)).toEqual([]);
 	});
 
 	it("re-reads the grants after an engine start", async () => {

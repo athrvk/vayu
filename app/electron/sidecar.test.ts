@@ -66,6 +66,7 @@ vi.mock("child_process", async (importOriginal) => ({
 }));
 
 import { execSync, spawn } from "child_process";
+import { appLogger } from "./app-log";
 import {
 	EngineSidecar,
 	EngineNotReadyError,
@@ -1707,6 +1708,28 @@ describe("EngineSidecar - lifecycle", () => {
 		});
 		expect(kinds).toEqual(["crashed"]);
 		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	// #3682: the log redaction set blanks a field named `code`, so the exit
+	// status is logged as `exitCode`. The record goes through the real logger and
+	// its console sink, so the redaction is the real one.
+	// Mutation check: log `{ code, signal }` and the line reads `code=<redacted>`.
+	it("logs the engine's exit status where redaction leaves it readable", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+		appLogger().applyFloor("debug");
+		const written: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+			written.push(String(chunk));
+			return true;
+		});
+
+		state.spawned[0].emit("exit", 3, null);
+
+		const line = written.find((entry) => entry.includes("Engine exited"));
+		expect(line).toContain("exitCode=3");
+		expect(line).not.toContain("<redacted>");
 	});
 
 	it("publishes a crash for a child error after ready", async () => {
