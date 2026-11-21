@@ -307,7 +307,9 @@ TEST_F (SendLogRouteTest, AStreamIsLoggedOnceWhenItEnds) {
     const auto response = client.Post ("/execute", payload.dump (), "application/json");
     ASSERT_TRUE (response) << httplib::to_string (response.error ());
     ASSERT_EQ (response->status, 202) << response->body;
-    const auto run_id = json::parse (response->body).value ("runId", std::string ());
+    const json answer = json::parse (response->body);
+    ASSERT_TRUE (answer.contains ("runId")) << response->body;
+    const std::string run_id = answer.at ("runId").get<std::string> ();
     ASSERT_FALSE (run_id.empty ());
     ASSERT_TRUE (
     wait_until ([&upstream] { return upstream.live_connection_count () > 0; }))
