@@ -32,6 +32,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { render } from "@/test/render-with-tooltips";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore, useToastStore } from "@/stores";
+import { useEngineStore } from "@/stores/engine-store";
 import type { LogEntry, LogFileRecord, SaveFileReply } from "@/types/electron";
 import { fakeLogsBridge, logCursor, logRecord, type FakeLogsBridge } from "./logs-bridge.testkit";
 import { LogsTab } from "./LogsTab";
@@ -733,6 +734,22 @@ describe("the log level hint", () => {
 			screen.getByText(/Requests answered 2xx and database writes are logged at debug/)
 		).toBeInTheDocument();
 		expect(screen.getByText(/it applies after a restart/)).toBeInTheDocument();
+	});
+
+	it("does not name the saved level as the one in force while a restart is pending", async () => {
+		useEngineStore.getState().addRestartRequiredKey("logLevel");
+		try {
+			await openTab();
+
+			expect(
+				screen.getByText(
+					/Log level: info after the restart; the running engine keeps its current level/
+				)
+			).toBeInTheDocument();
+			expect(screen.queryByText(/Log level: info\./)).toBeNull();
+		} finally {
+			useEngineStore.getState().clearRestartRequired();
+		}
 	});
 
 	it("leaves the level out until the config has answered, and keeps the rest", async () => {

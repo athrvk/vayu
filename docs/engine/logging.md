@@ -302,7 +302,9 @@ them. The
 footer names the engine's `logLevel` and says requests answered 2xx and
 database writes are written at `debug`, which a default install does not keep,
 with a link to Settings › Observability, where the level changes and applies
-after a restart. Outside Electron (the renderer under plain vite) the tab says
+after a restart. While a saved `logLevel` awaits that restart the footer says
+the saved level applies after it and the running engine keeps its current one,
+since the files are still written at the level the engine started with. Outside Electron (the renderer under plain vite) the tab says
 the logs are available in the desktop app.
 
 ## Reading the files
