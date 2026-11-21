@@ -37,6 +37,7 @@ import { wireRequestHeadersField } from "@/components/shared/response-viewer/wir
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
 import { receivedWarnings } from "@/lib/exchange-warnings";
+import { ApiError } from "@/services/http-client";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { decodeResponseBody } from "./response-bytes";
 
@@ -291,6 +292,29 @@ export function authProvenance(
 			source.authHeaders.length > 0 && { authHeaders: source.authHeaders }),
 		...(source.authQueryParam && { authQueryParam: source.authQueryParam }),
 	};
+}
+
+/**
+ * The response codes a refusal's rule code stands for. A buffered send answers
+ * a refused file as a response carrying `UNSENDABLE_FILE`; a streaming one has
+ * no response yet, so the engine refuses it with a `400` under the rule's own
+ * code (`unsendable_file`, documented in `docs/engine/api-reference.md`) and
+ * `ClientErrorView` only knows the response spelling (#3693).
+ */
+const RESPONSE_CODE_OF_RULE: Readonly<Record<string, string>> = {
+	unsendable_file: "UNSENDABLE_FILE",
+};
+
+/**
+ * The `errorCode` the pane shows for a Send that failed before it had a
+ * response: Vayu's own `ENGINE_ERROR` when the engine never answered, the
+ * engine's code when it refused, spelled as a response carries it. The one
+ * place a refusal's code becomes a response's, for the buffered and the
+ * streaming Send alike.
+ */
+export function responseCodeOfFailure(error: unknown): string {
+	if (!(error instanceof ApiError)) return "ENGINE_ERROR";
+	return RESPONSE_CODE_OF_RULE[error.errorCode] ?? error.errorCode;
 }
 
 /**
