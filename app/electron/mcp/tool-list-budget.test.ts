@@ -287,12 +287,18 @@
  * schema) costs 3,769 B with reveal off and 3,540 B with it on. The rows
  * measure 165,229 / 162,249 / 240,530 / 235,879 B, and the four caps went to
  * 165,500 / 162,500 / 240,800 / 236,100.
+ *
+ * #3748 strips the redundant 2020-12 `$schema` from every input and output
+ * schema (57 B each: 5,415 B with writes off, 7,068 B with writes on), taking
+ * the rows to 159,814 / 156,834 / 233,462 / 228,811 B, and the four caps went
+ * to 160,100 / 157,100 / 233,800 / 229,100.
  */
 
 import { describe, it, expect } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { resolveSafetyConfig } from "./config.js";
-import { createMcpServer } from "./server.js";
+import { createMcpServer, stripDefaultSchemaDialect } from "./server.js";
+import type { McpHost } from "./tools/contract.js";
 import { TOOLS, isListed } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -306,24 +312,27 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 165_500 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 162_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 240_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 236_100 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 160_100 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 157_100 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 233_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 229_100 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
 const LONG_SENTENCE_CHARS = 150;
 const MAX_TOOLS_PER_LONG_SENTENCE = 3;
 
-/** `tools/list` as an app-host session under @p safety answers it. */
-async function listTools(safety: Pick<Budget, "allowWrites" | "revealSecretsToAgents">) {
+/** `tools/list` as a session on @p host (the app's, unless named) under @p safety answers it. */
+async function listTools(
+	safety: Pick<Budget, "allowWrites" | "revealSecretsToAgents">,
+	host: McpHost = "app"
+) {
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 	const config = resolveSafetyConfig(safety);
 	const server = createMcpServer({ name: "vayu", version: "test" }, () => ({
 		client: {} as EngineClient,
 		config,
-		host: "app",
+		host,
 	}));
 	await server.connect(serverTransport);
 	const client = new Client({ name: "test-client", version: "1.0.0" });
@@ -396,5 +405,92 @@ describe("tools/list while reveal is on", () => {
 			.filter((tool) => /Withheld|<redacted>/.test(tool.description ?? ""))
 			.map((tool) => tool.name);
 		expect(offenders).toEqual([]);
+	});
+});
+
+describe("tools/list schema dialect (#3748)", () => {
+	const DIALECT_2020_12 = "https://json-schema.org/draft/2020-12/schema";
+
+	describe.each<McpHost>(["app", "cli"])("on the %s host", (host) => {
+		it.each([false, true])(
+			"names no dialect on any tool schema, writes %s",
+			async (allowWrites) => {
+				const { tools } = await listTools(
+					{ allowWrites, revealSecretsToAgents: false },
+					host
+				);
+				const schemas = tools.flatMap((tool) =>
+					[tool.inputSchema, tool.outputSchema].filter((schema) => schema !== undefined)
+				);
+				// A scan over no schemas would pass forever; every tool has an input schema.
+				expect(schemas.length).toBeGreaterThan(tools.length);
+				expect(schemas.filter((schema) => "$schema" in schema)).toEqual([]);
+			}
+		);
+	});
+
+	describe("stripDefaultSchemaDialect", () => {
+		const otherDialect = "http://json-schema.org/draft-07/schema#";
+
+		it("drops the 2020-12 key from input and output schemas, and only that key", () => {
+			const out = stripDefaultSchemaDialect({
+				tools: [
+					{
+						name: "t",
+						inputSchema: { $schema: DIALECT_2020_12, type: "object" },
+						outputSchema: { $schema: DIALECT_2020_12, type: "object" },
+					},
+				],
+			});
+			expect(out).toEqual({
+				tools: [
+					{
+						name: "t",
+						inputSchema: { type: "object" },
+						outputSchema: { type: "object" },
+					},
+				],
+			});
+		});
+
+		it("keeps a schema that declares another dialect", () => {
+			const tool = {
+				name: "t",
+				inputSchema: { $schema: otherDialect, type: "object" },
+				outputSchema: { $schema: DIALECT_2020_12, type: "object" },
+			};
+			const [out] = stripDefaultSchemaDialect({ tools: [tool] }).tools;
+			expect(out.inputSchema).toEqual({ $schema: otherDialect, type: "object" });
+			expect(out.outputSchema).toEqual({ type: "object" });
+		});
+
+		it("accepts a tool without an outputSchema, and an answer without tools", () => {
+			const [out] = stripDefaultSchemaDialect({
+				tools: [{ name: "t", inputSchema: { $schema: DIALECT_2020_12 } }],
+			}).tools;
+			expect(out).toEqual({ name: "t", inputSchema: {} });
+			expect("outputSchema" in out).toBe(false);
+			expect(stripDefaultSchemaDialect({ nextCursor: "c" })).toEqual({ nextCursor: "c" });
+		});
+
+		it("leaves a property named $schema alone", () => {
+			const inputSchema = {
+				$schema: DIALECT_2020_12,
+				properties: { $schema: { $schema: DIALECT_2020_12, type: "string" } },
+			};
+			const [out] = stripDefaultSchemaDialect({ tools: [{ name: "t", inputSchema }] }).tools;
+			expect(out.inputSchema).toEqual({
+				properties: { $schema: { $schema: DIALECT_2020_12, type: "string" } },
+			});
+		});
+
+		it("does not mutate its input", () => {
+			const answer = {
+				tools: [{ name: "t", inputSchema: { $schema: DIALECT_2020_12, type: "object" } }],
+			};
+			const before = structuredClone(answer);
+			stripDefaultSchemaDialect(answer);
+			expect(answer).toEqual(before);
+		});
 	});
 });

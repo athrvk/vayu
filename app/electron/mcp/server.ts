@@ -317,7 +317,7 @@ export function createMcpServer(
 	}
 
 	const { list: sdkListTools, call: sdkCallTool } = takeToolHandlers();
-	resolveRemedyInToolList(mcp, baseCtx.host, sdkListTools);
+	finishToolList(mcp, baseCtx.host, sdkListTools);
 	answerToolCalls(mcp, baseCtx, sdkCallTool);
 
 	registerResources(mcp, baseCtx);
@@ -461,15 +461,60 @@ function captureToolHandlers(mcp: McpServer): () => ToolHandlers {
 	};
 }
 
+/** The dialect MCP assumes for a schema that names none. */
+const DEFAULT_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
+
+type SchemaObject = Record<string, unknown>;
+
+function isSchemaObject(value: unknown): value is SchemaObject {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** @p schema without a top-level `$schema` that names the default dialect; any other schema as is. */
+function withoutDefaultDialect(schema: unknown): unknown {
+	if (!isSchemaObject(schema) || schema.$schema !== DEFAULT_SCHEMA_DIALECT) return schema;
+	const { $schema: _dialect, ...rest } = schema;
+	return rest;
+}
+
 /**
- * Fill every remedy token in the `tools/list` answer with the host's wording.
+ * Drop the redundant `$schema` from each tool's `inputSchema` and `outputSchema`
+ * in a `tools/list` answer (57 B per schema, #3748).
+ *
+ * The MCP specification (revision 2026-07-28, "JSON Schema Usage" > "Schema
+ * Dialect", rule 1) says "When a schema does not include a `$schema` field, it
+ * defaults to JSON Schema 2020-12", and its Implementation Requirements make
+ * clients and servers MUST support that dialect, so the key restates the
+ * default. The server SDK (v2) writes it at list time
+ * (`JSON_SCHEMA_CONVERSION_TARGET` is draft-2020-12), which is why registration
+ * cannot remove it. Only the top-level key whose value is exactly the 2020-12
+ * URI goes: a schema that declares another dialect keeps it, and a nested
+ * `$schema` (a property named so) is untouched. The answer is not mutated.
+ */
+export function stripDefaultSchemaDialect<T>(answer: T): T {
+	if (!isSchemaObject(answer) || !Array.isArray(answer.tools)) return answer;
+	const tools = answer.tools.map((tool: unknown) => {
+		if (!isSchemaObject(tool)) return tool;
+		const stripped: SchemaObject = { ...tool };
+		for (const key of ["inputSchema", "outputSchema"]) {
+			if (key in stripped) stripped[key] = withoutDefaultDialect(stripped[key]);
+		}
+		return stripped;
+	});
+	return { ...answer, tools } as T;
+}
+
+/**
+ * Finish the SDK's `tools/list` answer: fill every remedy token with the host's
+ * wording and drop the redundant `$schema` from each tool's schemas.
  *
  * The SDK converts each tool's Zod schema to JSON Schema only when it answers
- * the list, so a token in a parameter's description is out of reach of
- * anything done at registration. Resolving the answer covers a tool's
- * description, its parameters' and its output schema in one place.
+ * the list, so a token in a parameter's description, and the `$schema` it
+ * writes, are out of reach of anything done at registration. Rewriting the
+ * answer covers a tool's description, its parameters' and its output schema in
+ * one place.
  */
-function resolveRemedyInToolList(
+function finishToolList(
 	mcp: McpServer,
 	host: McpHost,
 	sdkListTools: ToolHandler | undefined
@@ -479,7 +524,7 @@ function resolveRemedyInToolList(
 		setRequestHandler: (method: string, handler: ToolHandler) => void;
 	};
 	server.setRequestHandler("tools/list", async (request, callCtx) =>
-		resolveRemedyTokens(await sdkListTools(request, callCtx), host)
+		stripDefaultSchemaDialect(resolveRemedyTokens(await sdkListTools(request, callCtx), host))
 	);
 }
 
