@@ -23,7 +23,8 @@
  *
  * Mutation checks, each reverted: make `executeRequest` snapshot `request`
  * instead of `commitBulkDraftsForSend()` and "sends the drafted rows" goes
- * red; drop the `bulkDraftsPatch` in `handleSave` and both save cases go red;
+ * red; make `startLoadTest` pass `request` instead of `commitBulkDraftsForSend()`
+ * and "starts the load test on the drafted rows" goes red; drop the `bulkDraftsPatch` in `handleSave` and both save cases go red;
  * file the drafts under one key instead of `memoryKey` and "never shows the
  * draft to the second request" goes red; drop the `shownMemoryKeyRef` guard in
  * `adoptSavedDrafts` and the goodbye-flush case writes A's rows into B; drop
@@ -84,6 +85,7 @@ type OnSave = (
 	changedFields: ReadonlySet<MergeableRequestField>
 ) => Promise<void>;
 type OnExecute = (request: RequestState) => Promise<ResponseState | null>;
+type OnStartLoadTest = (request: RequestState) => void;
 
 const row = (id: string, key: string, value: string) => ({ id, key, value, enabled: true });
 
@@ -102,7 +104,7 @@ const REQUEST_B: Partial<RequestState> = {
 };
 
 function Probe() {
-	const { request, hasUnsavedChanges, updateField, executeRequest, saveRequest } =
+	const { request, hasUnsavedChanges, updateField, executeRequest, saveRequest, startLoadTest } =
 		useRequestBuilderContext();
 	return (
 		<>
@@ -113,6 +115,7 @@ function Probe() {
 			</dl>
 			<button onClick={() => void executeRequest()}>send</button>
 			<button onClick={() => void saveRequest()}>save</button>
+			<button onClick={() => startLoadTest()}>load test</button>
 			<button onClick={() => updateField("name", "renamed")}>rename</button>
 		</>
 	);
@@ -121,6 +124,7 @@ const probed = (testId: string) => screen.getByTestId(testId).textContent;
 
 let onSave: ReturnType<typeof vi.fn<OnSave>>;
 let onExecute: ReturnType<typeof vi.fn<OnExecute>>;
+let onStartLoadTest: ReturnType<typeof vi.fn<OnStartLoadTest>>;
 
 function Harness({ initialRequest }: { initialRequest: Partial<RequestState> }) {
 	return (
@@ -131,6 +135,7 @@ function Harness({ initialRequest }: { initialRequest: Partial<RequestState> }) 
 					collectionId="col_1"
 					onSave={onSave}
 					onExecute={onExecute}
+					onStartLoadTest={onStartLoadTest}
 				>
 					<Probe />
 					<RequestTabs />
@@ -155,6 +160,7 @@ beforeEach(() => {
 	useClientSettingsStore.setState({ autoSave: { enabled: false, delayMs: 5000 } });
 	onSave = vi.fn<OnSave>().mockResolvedValue(undefined);
 	onExecute = vi.fn<OnExecute>().mockResolvedValue(null);
+	onStartLoadTest = vi.fn<OnStartLoadTest>();
 });
 
 afterEach(() => {
@@ -233,6 +239,23 @@ describe("Send with a draft open", () => {
 
 		const sent = onExecute.mock.calls[0][0];
 		expect(sent.headers.filter((h) => h.key).map((h) => h.key)).toEqual(["X-A", "X-Trace"]);
+	});
+});
+
+describe("Load test with a draft open", () => {
+	it("starts the load test on the drafted rows, and the table then shows them", async () => {
+		render(<Harness initialRequest={REQUEST_A} />);
+		openBulkEdit();
+		typeDraft("Query parameters", "a=1\nb=2");
+
+		await click("load test");
+
+		expect(onStartLoadTest).toHaveBeenCalledTimes(1);
+		const started = onStartLoadTest.mock.calls[0][0];
+		expect(started.params.map((p) => p.key)).toEqual(["a", "b"]);
+		expect(started.url).toBe("https://a.test/x?a=1&b=2");
+		expect(paramsText()).toBeNull();
+		expect(probed("param-keys")).toBe("a,b");
 	});
 });
 

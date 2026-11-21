@@ -1468,12 +1468,12 @@ export default function RequestBuilderProvider({
 		]
 	);
 
-	// Start load test
+	// Start load test: carries an open Bulk edit draft like Send does (#3666).
 	const startLoadTest = useCallback(() => {
 		if (onStartLoadTest) {
-			onStartLoadTest(request);
+			onStartLoadTest(commitBulkDraftsForSend());
 		}
-	}, [request, onStartLoadTest]);
+	}, [commitBulkDraftsForSend, onStartLoadTest]);
 
 	// Context value
 	const contextValue = useMemo<RequestBuilderContextValue>(

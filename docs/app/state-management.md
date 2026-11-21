@@ -3542,13 +3542,15 @@ so a request returns to its own draft, in text mode.
 
 A draft is written into the request by one rule, `utils/bulk-drafts.ts`
 (`bulkTextPatch`, with the Params table's own `queryTablePatch` for the URL and
-the no-op guards of #1480), from three places:
+the no-op guards of #1480), from four places:
 
 - **The Table toggle** (`commitBulkDraft`): `setRequest` and the draft closes.
 - **Send** (`executeRequest`): every open draft is written and closed, and the
   request the send carries is built from the snapshot plus that patch, because
   `request` does not hold it until the next render. What is on screen is what
   is sent.
+- **Load test** (`startLoadTest`): the same commit as Send
+  (`commitBulkDraftsForSend`), so the test runs on what is on screen.
 - **Save** (`handleSave`, so autosave, the Save chord, the command and the
   goodbye flush alike): the patch goes into the payload and `changedFields`,
   and is written into the request on screen without a generation bump, since
