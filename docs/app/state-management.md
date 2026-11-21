@@ -3534,12 +3534,11 @@ The Params and Headers tabs' Bulk edit text (#3666). `BulkEditor` is
 controlled; the provider holds the drafts filed under `memoryKey`, at most one
 per table. State, unlike the body drafts' ref, because the textarea renders
 from it; per key rather than one slot because one provider serves every
-request tab: a draft
-held in the component was dropped by the Params / Headers unmount of a sub-tab
-switch, and before the panels were keyed it followed the user into the next
-request and committed there. The open-tab sweep that bounds the row memory
-prunes it, and the request-change reset block leaves it alone, so a request
-returns to its own draft, in text mode.
+request tab: a draft held in the component was dropped by the Params / Headers
+unmount of a sub-tab switch, and before the panels were keyed it followed the
+user into the next request and committed there. The open-tab sweep that bounds
+the row memory prunes it, and the request-change reset block leaves it alone,
+so a request returns to its own draft, in text mode.
 
 A draft is written into the request by one rule, `utils/bulk-drafts.ts`
 (`bulkTextPatch`, with the Params table's own `queryTablePatch` for the URL and
