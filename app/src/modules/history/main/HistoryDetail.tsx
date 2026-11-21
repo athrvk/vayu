@@ -181,7 +181,7 @@ export default function HistoryDetail() {
 			return (
 				<ErrorState
 					title="This run no longer exists"
-					detail="It was deleted from History. Nothing here can be recovered - closing the tab is safe."
+					detail="It was deleted, or History's retention removed it - History keeps only the newest Send runs. Nothing here can be recovered - closing the tab is safe."
 					action={
 						activeTab ? (
 							<Button

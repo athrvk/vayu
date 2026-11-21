@@ -154,6 +154,10 @@ describe("HistoryDetail error", () => {
 		render(<HistoryDetail />);
 
 		expect(screen.getByText(/this run no longer exists/i)).toBeTruthy();
+		// A run absent from History may have been pruned rather than deleted:
+		// History keeps only the newest Send runs, so the pane names both causes.
+		expect(screen.getByText(/deleted, or History's retention removed it/i)).toBeTruthy();
+		expect(screen.getByText(/keeps only the newest Send runs/i)).toBeTruthy();
 		expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: /close tab/i }));

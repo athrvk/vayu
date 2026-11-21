@@ -49,8 +49,8 @@ function EvictedNotice({ count }: { count: number }) {
 	return (
 		<p className="px-4 py-1.5 text-xs text-muted-foreground">
 			{formatNumber(count)} older {pluralize(count, "row")} dropped: the console keeps the
-			newest {formatNumber(CONSOLE_MAX_ROWS)} rows or {formatBytes(CONSOLE_MAX_BYTES)}. Sends
-			and collection runs stay in History.
+			newest {formatNumber(CONSOLE_MAX_ROWS)} rows or {formatBytes(CONSOLE_MAX_BYTES)}.
+			History keeps each run, up to its own retention limit.
 		</p>
 	);
 }
