@@ -80,8 +80,9 @@ constexpr int RETAINED_FILES = 10;
 constexpr int DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 /// Default value of the `logLevel` config entry, and the level
 /// `Logger::default_file_level` derives the logger's own from. `info`, not
-/// `debug`: every 2xx request line and every database write is a debug record,
-/// which fills a long session's file; `debug` is one `logLevel` entry away.
+/// `debug`: every 2xx request line, every database write and every send that
+/// completed (a design Send, a `pm.sendRequest`) is a debug record, which fills
+/// a long session's file; `debug` is one `logLevel` entry away.
 constexpr const char* DEFAULT_LEVEL = "info";
 } // namespace logging
 

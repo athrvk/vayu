@@ -2076,7 +2076,9 @@ struct StreamRecord {
  *
  * Writes the result trace, moves the run to its terminal status, and trims the
  * run history. Logs on failure rather than throwing: a storage problem must not
- * turn a request the user already sent into an error.
+ * turn a request the user already sent into an error. Also logs the Send's own
+ * outcome (#3677) - `warn` for a failed Send, `debug` otherwise, category
+ * `http`, one record per call - whether or not the send is transient.
  *
  * @param run_id `std::nullopt` for a **transient** execution (issue #382),
  *        which records nothing at all - the single choke point that rule lives

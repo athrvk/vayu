@@ -36,6 +36,7 @@
 
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
+#include "log_capture.hpp"
 #include "mcp_port_stand_in.hpp"
 #include "optional_assert.hpp"
 #include "source_scan.hpp"
@@ -1683,6 +1684,120 @@ TEST_F (SendRequestTest, TheLoggedUrlRedactsCredentialsAndKeepsTheRest) {
     << lines[0].message;
     EXPECT_EQ (lines[1].message.find ("AUTHKEY"), std::string::npos) << lines[1].message;
     EXPECT_EQ (lines[1].message.find ("sig="), std::string::npos) << lines[1].message;
+}
+
+// ============================================================================
+// Each call leaves a line in the log file (#3677)
+// ============================================================================
+
+// The `script` records pm.sendRequest wrote, in order.
+std::vector<nlohmann::json> send_log_records (const vayu::tests::LogCapture& capture) {
+    std::vector<nlohmann::json> out;
+    for (auto& record : capture.with_msg_prefix ("pm.sendRequest ")) {
+        if (record.at ("cat") == "script") {
+            out.push_back (std::move (record));
+        }
+    }
+    return out;
+}
+
+// The case the record exists for: a token fetch that fails and a callback that
+// returns on `err` leave nothing else behind. A warning, so the default `info`
+// floor keeps it. Mutation check: delete the `log_send_outcome` call in
+// `js_pm_send_request`.
+TEST_F (SendRequestTest, AFailedRequestLeavesOneWarningInTheLogFile) {
+    const vayu::tests::LogCapture capture;
+
+    auto result =
+    run ("pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const auto records = send_log_records (capture);
+    ASSERT_EQ (records.size (), 1U);
+    const auto& record = records.front ();
+    EXPECT_EQ (record.at ("level"), "warn");
+    EXPECT_EQ (record.at ("msg"), "pm.sendRequest failed");
+    EXPECT_EQ (record.at ("method"), "GET");
+    EXPECT_EQ (record.at ("url"), REFUSED_URL);
+    EXPECT_EQ (record.at ("errorCode"), "CONNECTION_FAILED");
+    EXPECT_FALSE (record.at ("error").get<std::string> ().empty ());
+    EXPECT_FALSE (record.contains ("status"));
+    EXPECT_FALSE (record.contains ("runId"))
+    << "the script context carries no run to name";
+    EXPECT_TRUE (vayu::tests::validates_against_log_schema (record)) << record.dump ();
+}
+
+// The Console is gated on `scriptEnableConsole` and the file is not: a load
+// test turns the console off, which is when a failed token fetch is hardest to
+// find. Mutation check: move the `log_send_outcome` call inside
+// `log_send_request`, past its `console_enabled` guard.
+TEST_F (SendRequestTest, TheLogRecordIsWrittenWithTheConsoleOff) {
+    const vayu::tests::LogCapture capture;
+    ScriptConfig config;
+    config.allow_send_request = true;
+    config.enable_console     = false;
+    ScriptEngine engine (config);
+    response.status_code = 200;
+    auto ctx             = ScriptContext::for_test (request, response);
+    ctx.environment      = &env;
+
+    auto result = engine.execute (
+    "pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+    const auto records = send_log_records (capture);
+    ASSERT_EQ (records.size (), 1U);
+    EXPECT_EQ (records.front ().at ("level"), "warn");
+}
+
+// A 4xx or 5xx is an answer, so a healthy call is one debug line with the
+// status and the URL stripped of its credentials by the logger. Mutation check:
+// make the outcome `failed` on `status_code >= 400`, or log the success at
+// `warn`.
+TEST_F (SendRequestTest, ASuccessfulRequestLeavesOneDebugLineWithTheMaskedUrl) {
+    const vayu::tests::LogCapture capture;
+    SendRequestServer server;
+    std::string with_userinfo = server.url ("/token");
+    with_userinfo.insert (std::string ("http://").size (), "user:hunter2@");
+
+    auto result =
+    run ("pm.sendRequest('" + with_userinfo + "?api_key=S3CRET', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const auto records = send_log_records (capture);
+    ASSERT_EQ (records.size (), 1U);
+    const auto& record = records.front ();
+    EXPECT_EQ (record.at ("level"), "debug");
+    EXPECT_EQ (record.at ("msg"), "pm.sendRequest completed");
+    EXPECT_EQ (record.at ("status"), 200);
+    EXPECT_EQ (record.at ("url"), server.url ("/token"));
+    EXPECT_EQ (record.dump ().find ("hunter2"), std::string::npos) << record.dump ();
+    EXPECT_EQ (record.dump ().find ("S3CRET"), std::string::npos) << record.dump ();
+    EXPECT_FALSE (record.contains ("errorCode"));
+}
+
+// The enclosing exchange ending is not the call failing. Mutation check: treat
+// `Cancelled` as a failure in `describe_send_outcome` and the line is a warning.
+TEST_F (SendRequestTest, ACancelledRequestIsNotAWarning) {
+    const vayu::tests::LogCapture capture;
+    SendRequestServer server;
+    const std::atomic<bool> cancelled{ true };
+    ScriptConfig config;
+    config.allow_send_request = true;
+    ScriptEngine engine (config);
+    response.status_code = 200;
+    auto ctx             = ScriptContext::for_test (request, response);
+    ctx.environment      = &env;
+    ctx.cancel           = &cancelled;
+
+    engine.execute ("pm.sendRequest('" + server.url ("/token") + "', function () {});", ctx);
+
+    const auto records = send_log_records (capture);
+    ASSERT_EQ (records.size (), 1U);
+    EXPECT_EQ (records.front ().at ("level"), "debug");
+    EXPECT_EQ (records.front ().at ("msg"), "pm.sendRequest cancelled");
+    EXPECT_EQ (records.front ().at ("errorCode"), "CANCELLED");
 }
 
 // ============================================================================
