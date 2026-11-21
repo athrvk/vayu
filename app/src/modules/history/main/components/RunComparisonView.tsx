@@ -199,7 +199,7 @@ function ComparisonPanel({
 		return (
 			<ErrorState
 				title="This run no longer exists"
-				detail="It was deleted from History. Pick another run to compare."
+				detail="It was deleted, or History's retention removed it. Pick another run to compare."
 			/>
 		);
 	}

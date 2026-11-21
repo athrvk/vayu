@@ -2755,7 +2755,8 @@ click; refetching either removes it or proves it real.
   forever behind a "Try again" that could not work. Everything else - a 5xx, an
   unreachable engine - is rethrown untouched and keeps the default retry budget.
   `HistoryDetail` renders the two cases differently: "this run no longer exists"
-  with **Close tab**, versus "couldn't load this run" with **Try again**.
+  (deleted, or removed by History's retention, which keeps only the newest Send
+  runs; the 404 cannot tell them apart) with **Close tab**, versus "couldn't load this run" with **Try again**.
   The options carry a function-form `refetchInterval` that polls (3s) only while
   the cached run's status is `running` or `pending`: this object is spread into
   every open tab's query by `tab-descriptors`, and a run opened mid-run (from

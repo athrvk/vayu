@@ -305,7 +305,7 @@ describe("Clear and the dropped rows", () => {
 		render(<ConsoleTab />);
 
 		const notice = screen.getByText(/^3 older rows dropped/);
-		expect(notice).toHaveTextContent("Sends and collection runs stay in History.");
+		expect(notice).toHaveTextContent("History keeps each run, up to its own retention limit.");
 		expect(screen.getAllByText(/older rows? dropped/)).toHaveLength(1);
 		expect(
 			notice.compareDocumentPosition(screen.getByText("kept")) &
