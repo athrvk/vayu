@@ -3567,7 +3567,11 @@ the no-op guards of #1480), from four places:
   because autosave fires on its own timer and must not close the editor under
   the caret. When the provider already shows another request (the flush of
   the one left), only the payload carries it: `shownMemoryKeyRef`, set in a
-  layout effect, keeps the other request's state untouched.
+  layout effect, keeps the other request's state untouched. The same check
+  holds the rest of `handleSave`'s bookkeeping (#3730): a save that runs, or
+  settles, while another request is shown records none of the values it sent
+  (`recentSends`), the fields it settled (`touchedFields`, `baseline`) or the
+  dirty flag, failed or not, so they cannot land in the request now on screen.
 
 A draft on its own does not mark the request dirty, so it is saved only when
 something saves the request. Not persisted.
@@ -3940,7 +3944,10 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
     save, so without this rule the echo read as a conflict whose "Take theirs"
     would revert the typing. `handleSave` appends the sent values to
     `recentSends` before it awaits `onSave` and keeps them after, since the
-    cache write can land on either side of the resolve; the merge receives the
+    cache write can land on either side of the resolve. Only while its own
+    request is on screen (`shownMemoryKeyRef`, #3730): a goodbye flush starts
+    after the switch, and its values in the next request's list would read an
+    outside write of them there as an echo. The merge receives the
     list as `options.sent`, moves `baseline` to the echo, raises nothing, and
     leaves the field touched, so the next save sends the newer draft. Two
     saves, not one, because `useSaveManager` starts a queued save in the

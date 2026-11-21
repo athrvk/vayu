@@ -385,6 +385,41 @@ describe("the echo of a save an edit raced (#3664)", () => {
 		expect(shown("conflicts")).toBe(JSON.stringify({ url: "https://ab" }));
 	});
 
+	/*
+	 * An id landing before the resolve changes `memoryKey` under the save's own
+	 * request (the unsaved key, then the id), so the shown-request guard in
+	 * `handleSave` (#3730) skips its bookkeeping and the id's reset is what
+	 * settles it. Mutation check: drop the reset's `setHasUnsavedChanges(false)`
+	 * and the "before" case is left dirty.
+	 */
+	it.each(["before", "after"])(
+		"ends clean when the first save gives an id-less request its id %s it resolves",
+		async (order) => {
+			const saves = heldSave();
+			const { rerender } = render(
+				<EchoHarness stored={{ url: "https://a" }} onSave={saves.onSave} />
+			);
+			click("type ab");
+			save();
+			const assignId = (url: string) =>
+				act(() =>
+					rerender(<EchoHarness stored={{ id: "req_new", url }} onSave={saves.onSave} />)
+				);
+
+			if (order === "after") await saves.finish();
+			assignId("https://ab");
+			if (order === "before") await saves.finish();
+
+			expect(shown("url")).toBe("https://ab");
+			expect(shown("conflicts")).toBe("{}");
+			expect(managerOptions.hasChanges).toBe(false);
+			// Nothing left touched, so the next outside write is adopted silently.
+			assignId("https://other");
+			expect(shown("url")).toBe("https://other");
+			expect(shown("conflicts")).toBe("{}");
+		}
+	);
+
 	it("recognises a table's echo by its stored rows, not its ids", async () => {
 		const saves = heldSave();
 		const stored = (value: string, idPrefix: string) => ({
