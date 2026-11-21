@@ -31,7 +31,7 @@ import type { ToolContext } from "./contract.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
-import { asOn } from "./input-schemas.js";
+import { asOn } from "./as-on.js";
 import { refuseRedactedVariable } from "./redacted-input.js";
 
 /** The description of a member a read returns and a write does not store. */

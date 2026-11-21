@@ -13,7 +13,7 @@
 
 import { z } from "zod";
 import { BINARY_FILE_ACCESS_TOKEN } from "../remedy.js";
-import { asOn } from "./input-schemas.js";
+import { asOn } from "./as-on.js";
 import { isRecord, str, ToolArgError } from "./kit.js";
 
 /** The body modes whose content is a field list rather than a string. */

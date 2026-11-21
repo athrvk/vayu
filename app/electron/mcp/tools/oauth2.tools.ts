@@ -23,7 +23,7 @@ import {
 	str,
 	writesDisabled,
 } from "./kit.js";
-import { asOn } from "./input-schemas.js";
+import { asOn } from "./as-on.js";
 import { oauthStatusSchema } from "./output-schemas.js";
 import {
 	OAUTH2_INTERACTIVE_REFUSAL,

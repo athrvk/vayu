@@ -16,7 +16,7 @@ import type { EngineClient } from "../engine-client.js";
 import { PROXY_SETTINGS_TOKEN, SPEC_SYNC_TOKEN, resolveRemedyTokens } from "../remedy.js";
 import { specDiffRequestsToRead, type StoredAuthByRequest } from "../withhold.js";
 import type { McpHost, ToolContext } from "./contract.js";
-import { asOn } from "./input-schemas.js";
+import { asOn } from "./as-on.js";
 import { bool, isRecord, requireStr, str } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
 import { collectionSubtree, readCollectionRows } from "./cascade.js";
