@@ -16,6 +16,7 @@ import type { EngineClient } from "../engine-client.js";
 import { PROXY_SETTINGS_TOKEN, SPEC_SYNC_TOKEN, resolveRemedyTokens } from "../remedy.js";
 import { specDiffRequestsToRead, type StoredAuthByRequest } from "../withhold.js";
 import type { McpHost, ToolContext } from "./contract.js";
+import { asOn } from "./input-schemas.js";
 import { bool, isRecord, requireStr, str } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
 import { collectionSubtree, readCollectionRows } from "./cascade.js";
@@ -327,8 +328,9 @@ export function describeImport(answer: unknown): string {
 }
 
 /**
- * What import_document and preview_import take: one schema, so a preview is
- * always asked the question the import will be.
+ * What preview_import takes, and import_document through
+ * {@link importDocumentWriteInput}: one set of schemas, so a preview is always
+ * asked the question the import will be.
  */
 export const importDocumentInput = {
 	content: z
@@ -358,6 +360,15 @@ export const importDocumentInput = {
 		.string()
 		.optional()
 		.describe("What the file is called, for the result's `meta` only. Never stored."),
+};
+
+/** {@link importDocumentInput} on import_document, its long descriptions pointing at preview_import's. */
+export const importDocumentWriteInput = {
+	...importDocumentInput,
+	content: importDocumentInput.content.describe(asOn("preview_import")),
+	importEnvironments: importDocumentInput.importEnvironments.describe(asOn("preview_import")),
+	importScripts: importDocumentInput.importScripts.describe(asOn("preview_import")),
+	sourceUrl: importDocumentInput.sourceUrl.describe(asOn("preview_import")),
 };
 
 /**

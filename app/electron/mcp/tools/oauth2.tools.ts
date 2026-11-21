@@ -23,6 +23,7 @@ import {
 	str,
 	writesDisabled,
 } from "./kit.js";
+import { asOn } from "./input-schemas.js";
 import { oauthStatusSchema } from "./output-schemas.js";
 import {
 	OAUTH2_INTERACTIVE_REFUSAL,
@@ -121,7 +122,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: { cacheKey: oauth2CacheKeyInput },
+		inputSchema: { cacheKey: oauth2CacheKeyInput.describe(asOn("get_oauth2_token_status")) },
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
