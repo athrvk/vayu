@@ -276,8 +276,13 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   it was read keeps the credentials the read hid (removing the parameter or the
   userinfo deletes one), as does a header row written back withheld, but only
   while the write keeps the request's scheme, host and port: a write that moves
-  it carries none, so an agent cannot send a stored credential to a host of its
-  choosing, and the answer names what was not carried; run output (reports,
+  it carries none of the URL's credentials, and is refused, with nothing
+  written, while a stored credential header row or `auth` block is neither
+  rewritten nor cleared in the same call, so an agent cannot send a stored
+  credential to a host of its choosing (a
+  `{{variable}}` host is compared as written, so changing the variable's value
+  is a write to the variable, which an agent with writes on is already
+  trusted with); run output (reports,
   samples, run rows, inbox captures, the run resources and prompts, and the
   stored bodies `read_body` pages and `diff_bodies` compares, a saved
   example's included, masked whole before a page is cut or a diff is taken) reads `<redacted>` in place of a secret variable's

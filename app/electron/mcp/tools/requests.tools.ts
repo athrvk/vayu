@@ -12,6 +12,8 @@
 
 import { z } from "zod";
 import {
+	authCredentialValues,
+	originChanged,
 	restoreWithheldRequestUrl,
 	secretsShape,
 	withholdRequestUrl,
@@ -27,9 +29,11 @@ import {
 	elementsArg,
 	engineErrorResult,
 	errorResult,
+	isRecord,
 	mergeAndWrite,
 	requireStr,
 	str,
+	ToolArgError,
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
@@ -46,13 +50,13 @@ import {
 	storedScriptInput,
 } from "./input-schemas.js";
 import {
-	carryHeaderRows,
+	credentialRowsKept,
 	droppedHeadersCaveat,
 	droppedWithheldHeaders,
 	keepsStoredValue,
 	newHeaderRows,
 	readHeaderRows,
-	uncarriedHeadersCaveat,
+	restoreWithheldHeaderRows,
 	type HeaderRowArg,
 } from "./header-rows.js";
 import { refuseRedactedHeaders, refuseRedactedUrl } from "./redacted-input.js";
@@ -374,6 +378,42 @@ function refuseRedactedCredentials(
 	if (headers !== undefined) refuseRedactedHeaders(ctx, headers, auth);
 }
 
+/**
+ * Refuse a write that moves @p stored to another origin while a credential
+ * stored on it would go with it (#3654): a credential header row the call leaves
+ * holding its stored value, or an `auth` block the call does not replace. A stored
+ * credential belongs to the address it was stored for, and the call has to say
+ * what the new one gets. A URL's userinfo and query credentials are not judged
+ * here: the merge leaves them empty and names them in the answer instead.
+ */
+function refuseStoredCredentialsToNewOrigin(
+	stored: Record<string, unknown>,
+	payload: Record<string, unknown>,
+	edits: StoredEdits
+): void {
+	if (typeof payload.url !== "string" || !originChanged(stored.url, payload.url)) return;
+	const followers: string[] = [];
+	const rows = credentialRowsKept(stored.headers, stored.auth, edits.headers);
+	if (rows.length > 0) {
+		followers.push(
+			`the ${rows.map((name) => `"${name}"`).join(", ")} header row${rows.length > 1 ? "s" : ""}`
+		);
+	}
+	if (payload.auth === undefined && authCredentialValues(stored.auth).length > 0) {
+		followers.push(`the "${storedAuthMode(stored.auth)}" auth`);
+	}
+	if (followers.length === 0) return;
+	throw new ToolArgError(
+		`Nothing was written: "url" moves this request to another origin (scheme, host or port), and ${followers.join(" and ")} stored on it would be sent there. In the same call, supply them for the new origin (pass "headers" with a real value for each row, and "auth" with the real credentials) or clear them (pass "auth" as {"mode": "none"}, and leave the rows out of "headers").`,
+		"input"
+	);
+}
+
+function storedAuthMode(auth: unknown): string {
+	const mode = isRecord(auth) ? auth.mode : undefined;
+	return typeof mode === "string" ? mode : "unknown";
+}
+
 /** The `update_request` edits that may need the stored row to be written. */
 interface StoredEdits {
 	scripts: ReturnType<typeof readScriptEdits>;
@@ -410,6 +450,7 @@ async function writeRequestEdits(
 		merge: (stored) => {
 			// The stored auth can name a credential header or query key the call's own does not.
 			refuseRedactedCredentials(ctx, payload.url, edits.headers, payload.auth ?? stored.auth);
+			if (!reveal) refuseStoredCredentialsToNewOrigin(stored, payload, edits);
 			const merged = mergeRequestEdits(stored, payload, edits, reveal);
 			caveat = merged.caveat;
 			return merged.body;
@@ -446,19 +487,14 @@ function mergeRequestEdits(
 ): { body: Record<string, unknown>; caveat: string } {
 	const body: Record<string, unknown> = { ...payload };
 	const notes: string[] = [];
-	let originChanged = false;
 	if (typeof payload.url === "string" && !reveal) {
 		const restored = restoreWithheldRequestUrl(stored.url, payload.url, stored.auth);
 		body.url = restored.url;
-		originChanged = restored.originChanged;
 		notes.push(keptUrlSlotsCaveat(restored.kept), uncarriedUrlSlotsCaveat(restored.notCarried));
 	}
 	if (edits.headers !== undefined) {
-		const carried = carryHeaderRows(stored.headers, edits.headers, originChanged);
-		body.headers = carried.rows;
-		notes.push(uncarriedHeadersCaveat(carried.notCarried));
+		body.headers = restoreWithheldHeaderRows(stored.headers, edits.headers);
 		if (!reveal) {
-			// `edits.headers`, not the rows written: a row left out for the host change is named above.
 			notes.push(
 				droppedHeadersCaveat(
 					droppedWithheldHeaders(stored.headers, stored.auth, edits.headers)

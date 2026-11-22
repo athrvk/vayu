@@ -1140,7 +1140,7 @@ describe("data-write tools", () => {
 		});
 	});
 
-	describe("a write that moves the request to another origin (#3564)", () => {
+	describe("a write that moves the request to another origin (#3564, #3654)", () => {
 		const storedRow = {
 			id: "req_1",
 			name: "Get users",
@@ -1151,31 +1151,48 @@ describe("data-write tools", () => {
 			],
 			updatedAt: 7,
 		};
+		/** The stored request with no header or auth credential: only the URL's slots follow a host change. */
+		const urlOnlyRow = { ...storedRow, headers: [storedRow.headers[1]] };
+		const bearerAuth = { mode: "bearer", token: "tok-secret" };
 		const readHeaders = [
 			{ key: "Authorization", enabled: true, valueWithheld: true },
 			{ key: "X-Trace", value: "1", enabled: true },
 		];
-		const update = (args: Record<string, unknown>, reveal = false) => {
+		const moved = "https://evil.example/x";
+		const update = (
+			args: Record<string, unknown>,
+			options: { reveal?: boolean; row?: Record<string, unknown> } = {}
+		) => {
 			const client = fakeClient({
-				getRequest: vi.fn().mockResolvedValue(structuredClone(storedRow)),
+				getRequest: vi.fn().mockResolvedValue(structuredClone(options.row ?? storedRow)),
 			});
 			return dispatchTool(
 				"update_request",
 				{ requestId: "req_1", ...args },
-				ctxWith(client, { allowWrites: true, revealSecretsToAgents: reveal })
+				ctxWith(client, {
+					allowWrites: true,
+					revealSecretsToAgents: options.reveal ?? false,
+				})
 			).then((res) => ({
 				res,
 				payload: (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0]?.[1],
 				notes: res.content.map((c) => c.text).join("\n"),
 			}));
 		};
+		/** The answer is a refusal of class "input" and nothing reached the engine. */
+		const expectRefused = (answer: Awaited<ReturnType<typeof update>>) => {
+			expect(answer.res.isError).toBe(true);
+			expect(answer.res.structuredContent).toMatchObject({ error: { class: "input" } });
+			expect(answer.payload).toBeUndefined();
+		};
 
 		// Mutation check: drop the origin comparison (`originChanged` always false)
 		// and the password and key go to the new host.
 		test("a changed host does not inherit the password or the key, and the answer names them", async () => {
-			const { res, payload, notes } = await update({
-				url: "https://u@evil.example/x?api_key=&page=2",
-			});
+			const { res, payload, notes } = await update(
+				{ url: "https://u@evil.example/x?api_key=&page=2" },
+				{ row: urlOnlyRow }
+			);
 			expect(res.isError).toBeFalsy();
 			expect(payload).toEqual({ url: "https://u@evil.example/x?api_key=&page=2" });
 			expect(notes).toContain(
@@ -1187,86 +1204,258 @@ describe("data-write tools", () => {
 			expect(notes).not.toContain("kept its stored value");
 		});
 
-		// Mutation check: pass `false` for `originChanged` to `carryHeaderRows` in
-		// `mergeRequestEdits` and the PUT carries the Authorization value.
-		test("a changed host leaves a withheld Authorization row out, and the answer names it", async () => {
-			const { res, payload, notes } = await update({
-				url: "https://evil.example/x",
-				headers: readHeaders,
+		// Mutation check: skip `refuseStoredCredentialsToNewOrigin` in `writeRequestEdits`
+		// and the PUT carries the Authorization row to the new host.
+		describe("a stored credential header row", () => {
+			test("a URL-only write to another host is refused, naming the row and the way out", async () => {
+				const answer = await update({ url: moved });
+				expectRefused(answer);
+				expect(answer.notes).toContain('"Authorization" header row');
+				expect(answer.notes).toContain('"mode": "none"');
+				expect(answer.notes).not.toContain('auth" stored');
+				expect(answer.notes).not.toContain("s3cret");
 			});
-			expect(res.isError).toBeFalsy();
-			expect(payload).toEqual({
-				url: "https://evil.example/x",
-				headers: [{ key: "X-Trace", value: "1", enabled: true }],
+
+			test("a row written back withheld is not a rewrite", async () => {
+				expectRefused(await update({ url: moved, headers: readHeaders }));
 			});
-			expect(JSON.stringify(payload)).not.toContain("s3cret");
-			expect(notes).toContain(
-				"Authorization was not carried because the host changed; give it a value."
-			);
-			// Named once, as not carried, and not again as removed unread.
-			expect(notes).not.toContain("cannot read");
+
+			test("a changed port or scheme is a changed origin for a header row too", async () => {
+				for (const url of ["https://bank.example:8443/x", "http://bank.example/x"]) {
+					const answer = await update({ url, headers: readHeaders });
+					expect(answer.res.isError, url).toBe(true);
+					expect(answer.payload, url).toBeUndefined();
+				}
+			});
+
+			test("a disabled stored row follows the request too", async () => {
+				const row = {
+					...storedRow,
+					headers: [{ key: "Authorization", value: "Bearer s3cret", enabled: false }],
+				};
+				const answer = await update({ url: moved }, { row });
+				expectRefused(answer);
+				expect(answer.notes).toContain('"Authorization" header row');
+			});
+
+			test("a repeated name is judged by occurrence: the second row kept is refused", async () => {
+				const row = {
+					...storedRow,
+					headers: [
+						{ key: "Set-Cookie", value: "a=1", enabled: true },
+						{ key: "Set-Cookie", value: "b=2", enabled: true },
+					],
+				};
+				const answer = await update(
+					{
+						url: moved,
+						headers: [
+							{ key: "Set-Cookie", value: "c=3" },
+							{ key: "Set-Cookie", valueWithheld: true },
+						],
+					},
+					{ row }
+				);
+				expectRefused(answer);
+				expect(answer.notes).toContain('"Set-Cookie" header row');
+			});
+
+			test("a repeated name with the second row left out writes the first only", async () => {
+				const row = {
+					...storedRow,
+					headers: [
+						{ key: "Set-Cookie", value: "a=1", enabled: true },
+						{ key: "Set-Cookie", value: "b=2", enabled: true },
+					],
+				};
+				const { res, payload } = await update(
+					{ url: moved, headers: [{ key: "Set-Cookie", value: "c=3" }] },
+					{ row }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload.headers).toEqual([
+					{ key: "Set-Cookie", value: "c=3", enabled: true },
+				]);
+			});
+
+			test("a call that gives every credential row a value of its own writes", async () => {
+				const { res, payload, notes } = await update({
+					url: moved,
+					headers: [{ key: "Authorization", value: "Bearer NEW" }, readHeaders[1]],
+				});
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({
+					url: moved,
+					headers: [
+						{ key: "Authorization", value: "Bearer NEW", enabled: true },
+						{ key: "X-Trace", value: "1", enabled: true },
+					],
+				});
+				expect(notes).not.toContain("was not carried");
+			});
+
+			test("a call that leaves the row out clears it", async () => {
+				const { res, payload } = await update({
+					url: moved,
+					headers: [{ key: "X-Trace", value: "1" }],
+				});
+				expect(res.isError).toBeFalsy();
+				expect(payload.headers).toEqual([{ key: "X-Trace", value: "1", enabled: true }]);
+			});
+
+			test("a kept row that stands for no credential is carried to the new host", async () => {
+				const { res, payload } = await update({
+					url: moved,
+					headers: [
+						{ key: "Authorization", value: "Bearer NEW" },
+						{ key: "X-Trace", valueWithheld: true },
+					],
+				});
+				expect(res.isError).toBeFalsy();
+				expect(payload.headers).toEqual([
+					{ key: "Authorization", value: "Bearer NEW", enabled: true },
+					{ key: "X-Trace", value: "1", enabled: true },
+				]);
+			});
+
+			test("a withheld row with nothing stored behind it is still refused", async () => {
+				expectRefused(
+					await update(
+						{ url: moved, headers: [{ key: "X-Api-Key", valueWithheld: true }] },
+						{ row: urlOnlyRow }
+					)
+				);
+			});
 		});
 
-		test("a changed host still takes an Authorization row the call gives a value", async () => {
-			const { payload, notes } = await update({
-				url: "https://evil.example/x",
-				headers: [{ key: "Authorization", value: "Bearer NEW" }, readHeaders[1]],
+		describe("a stored auth block", () => {
+			const authRow = { ...urlOnlyRow, auth: bearerAuth };
+
+			test("a URL-only write to another host is refused, naming the mode", async () => {
+				const answer = await update({ url: moved }, { row: authRow });
+				expectRefused(answer);
+				expect(answer.notes).toContain('the "bearer" auth');
+				expect(answer.notes).not.toContain("header row");
+				expect(answer.notes).not.toContain("tok-secret");
 			});
-			expect(payload.headers[0]).toEqual({
-				key: "Authorization",
-				value: "Bearer NEW",
-				enabled: true,
+
+			test("one refusal names the rows and the mode together", async () => {
+				const answer = await update(
+					{ url: moved },
+					{ row: { ...storedRow, auth: bearerAuth } }
+				);
+				expectRefused(answer);
+				expect(answer.notes).toContain('"Authorization" header row');
+				expect(answer.notes).toContain('the "bearer" auth');
 			});
-			expect(notes).not.toContain("was not carried");
+
+			test("an auth the call replaces writes", async () => {
+				const auth = { mode: "bearer", token: "{{newToken}}" };
+				const { res, payload } = await update({ url: moved, auth }, { row: authRow });
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({ url: moved, auth });
+			});
+
+			test("auth cleared with mode none writes", async () => {
+				const { res, payload } = await update(
+					{ url: moved, auth: { mode: "none" } },
+					{ row: authRow }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({ url: moved, auth: { mode: "none" } });
+			});
+
+			test("an auth the call replaces does not rewrite a credential header row", async () => {
+				expectRefused(await update({ url: moved, auth: { mode: "none" } }));
+			});
+
+			test.each([
+				["none", { mode: "none" }],
+				["inherit", { mode: "inherit" }],
+				["a bearer token that is a variable", { mode: "bearer", token: "{{apiToken}}" }],
+			])("a stored auth of %s holds no credential to follow", async (_name, auth) => {
+				const { res, payload } = await update(
+					{ url: moved },
+					{ row: { ...urlOnlyRow, auth } }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({ url: moved });
+			});
+
+			test("both rewritten in one call writes", async () => {
+				const { res, payload } = await update(
+					{
+						url: moved,
+						headers: [{ key: "Authorization", value: "Bearer NEW" }],
+						auth: { mode: "none" },
+					},
+					{ row: { ...storedRow, auth: bearerAuth } }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload.auth).toEqual({ mode: "none" });
+				expect(payload.headers).toEqual([
+					{ key: "Authorization", value: "Bearer NEW", enabled: true },
+				]);
+			});
 		});
 
-		test("a changed port or scheme is a changed origin for a header row too", async () => {
-			for (const url of ["https://bank.example:8443/x", "http://bank.example/x"]) {
-				const { payload } = await update({ url, headers: readHeaders });
-				expect(JSON.stringify(payload.headers), url).not.toContain("Authorization");
-			}
-		});
-
-		test("a withheld row with nothing stored behind it is still refused when the host changes", async () => {
-			const { res, payload } = await update({
-				url: "https://evil.example/x",
-				headers: [{ key: "X-Api-Key", valueWithheld: true }],
+		describe("a write the rule does not judge", () => {
+			test("a same-origin edit keeps the password, the key, the row and the auth", async () => {
+				const { res, payload, notes } = await update(
+					{ url: "https://u@BANK.example:443/y?api_key=&page=3" },
+					{ row: { ...storedRow, auth: bearerAuth } }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({
+					url: "https://u:PW@BANK.example:443/y?api_key=S&page=3",
+				});
+				expect(notes).toContain("api_key kept its stored value");
+				expect(notes).not.toContain("was not carried");
 			});
-			expect(res.isError).toBe(true);
-			expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
-			expect(payload).toBeUndefined();
-		});
 
-		test("a same-origin edit keeps the password, the key and the Authorization row", async () => {
-			const { res, payload, notes } = await update({
-				url: "https://u@BANK.example:443/y?api_key=&page=3",
-				headers: readHeaders,
+			test("a same-origin edit with a withheld row keeps its stored value", async () => {
+				const { payload } = await update({
+					url: "https://u@BANK.example:443/y?api_key=&page=3",
+					headers: readHeaders,
+				});
+				expect(payload).toEqual({
+					url: "https://u:PW@BANK.example:443/y?api_key=S&page=3",
+					headers: storedRow.headers,
+				});
 			});
-			expect(res.isError).toBeFalsy();
-			expect(payload).toEqual({
-				url: "https://u:PW@BANK.example:443/y?api_key=S&page=3",
-				headers: storedRow.headers,
-			});
-			expect(notes).toContain("api_key kept its stored value");
-			expect(notes).not.toContain("was not carried");
-		});
 
-		test("a headers-only write has no URL to move and keeps the row", async () => {
-			const { payload, notes } = await update({ headers: readHeaders });
-			expect(payload).toEqual({ headers: storedRow.headers });
-			expect(notes).not.toContain("was not carried");
-		});
-
-		test("with reveal on the URL is written as given and a withheld row keeps its value", async () => {
-			const { payload, notes } = await update(
-				{ url: "https://evil.example/x", headers: readHeaders },
-				true
-			);
-			expect(payload).toEqual({
-				url: "https://evil.example/x",
-				headers: storedRow.headers,
+			test("a headers-only write has no URL to move and keeps the row", async () => {
+				const { payload, notes } = await update({ headers: readHeaders });
+				expect(payload).toEqual({ headers: storedRow.headers });
+				expect(notes).not.toContain("was not carried");
 			});
-			expect(notes).not.toContain("was not carried");
+
+			test("an auth-only write has no URL to move", async () => {
+				const { res, payload } = await update(
+					{ auth: { mode: "none" } },
+					{ row: { ...storedRow, auth: bearerAuth } }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({ auth: { mode: "none" } });
+			});
+
+			test("with reveal on the URL is written as given and a withheld row keeps its value", async () => {
+				const { payload, notes } = await update(
+					{ url: moved, headers: readHeaders },
+					{ reveal: true }
+				);
+				expect(payload).toEqual({ url: moved, headers: storedRow.headers });
+				expect(notes).not.toContain("was not carried");
+			});
+
+			test("with reveal on a URL-only write to another host is not refused", async () => {
+				const { res, payload } = await update(
+					{ url: moved },
+					{ reveal: true, row: { ...storedRow, auth: bearerAuth } }
+				);
+				expect(res.isError).toBeFalsy();
+				expect(payload).toEqual({ url: moved });
+			});
 		});
 	});
 
