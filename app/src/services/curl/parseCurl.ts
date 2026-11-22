@@ -40,6 +40,9 @@ import {
 	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
 } from "@/constants/request";
+import { containsVariableToken } from "@/constants/variables";
+import { bindableStrings } from "@/lib/request-references";
+import { toBodyPayload } from "@/modules/request-builder/utils/execute-mapping";
 import { tokenizeCommand, UnterminatedQuoteError } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
@@ -242,12 +245,44 @@ export function readCommand(text: string): CommandReading {
 		const { tokens, variables } = tokenizeCommand(text);
 		const parsed = kind === "curl" ? parseCurl(tokens.slice(1)) : parseWget(tokens.slice(1));
 		if (!parsed.request.url) return { ok: false, reason: "missing-url" };
-		return { ok: true, command: { ...parsed, variables } };
+		return {
+			ok: true,
+			command: { ...parsed, variables: variablesInRequest(parsed.request, variables) },
+		};
 	} catch (error) {
 		if (error instanceof UnterminatedQuoteError)
 			return { ok: false, reason: "unterminated-quote" };
 		return { ok: false, reason: "unreadable" };
 	}
+}
+
+/**
+ * The tokenizer rewrites every shell variable it meets, including one a skipped
+ * flag read (`-o $OUT`), which never reaches the request. Only a name whose
+ * `{{NAME}}` sits in a string the request carries is one the user has to define.
+ *
+ * `bindableStrings` is the app's enumeration of those strings. A digest or NTLM
+ * login keeps its credentials in `config`, which it leaves to the binder, so
+ * those are added here.
+ */
+function variablesInRequest(request: ParsedRequest, names: string[]): string[] {
+	if (names.length === 0) return names;
+	const strings = bindableStrings(
+		{
+			url: request.url,
+			params: request.params,
+			headers: request.headers,
+			body: toBodyPayload(request),
+			elements: [],
+			resolvedAuth: request.auth,
+		},
+		{ includeFileFields: true }
+	);
+	const { auth } = request;
+	if (auth.mode === "digest" || auth.mode === "ntlm") {
+		strings.push(...Object.values(auth.config).filter((v) => typeof v === "string"));
+	}
+	return names.filter((name) => strings.some((text) => text.includes(`{{${name}}}`)));
 }
 
 /**
@@ -372,6 +407,22 @@ function recordDropped(
 		what: info?.what ?? "was not carried over",
 		...(info?.pointer ? { pointer: info.pointer } : {}),
 	});
+}
+
+/**
+ * `-X` / `--request` / `--method`. The method is the one field with a closed
+ * set of values, so a name the shell would fill in (`-X "$VERB"`) is not
+ * uppercased into a method that does not exist: the flag is disclosed and the
+ * method comes from the rest of the command.
+ */
+function setMethod(b: Builder, flag: string, raw: string): void {
+	if (containsVariableToken(raw)) {
+		recordDropped(b, flag, {
+			what: "set the method from a variable, which an imported request cannot carry",
+		});
+		return;
+	}
+	b.method = raw.toUpperCase() as HttpMethod;
 }
 
 /** Is the value a file reference whose *contents* we cannot read (`@path`)? */
@@ -1006,7 +1057,7 @@ function parseCurl(argv: string[]): ParsedArguments {
 		switch (flag) {
 			case "-X":
 			case "--request":
-				b.method = value().toUpperCase() as HttpMethod;
+				setMethod(b, flag, value());
 				break;
 			case "-I":
 			case "--head":
@@ -1232,7 +1283,7 @@ function parseWget(args: string[]): ParsedArguments {
 
 		switch (flag) {
 			case "--method":
-				b.method = value().toUpperCase() as HttpMethod;
+				setMethod(b, flag, value());
 				break;
 			case "--header":
 				addHeader(b, value());

@@ -182,7 +182,7 @@ describe("pasting a command with shell variables (#3777)", () => {
 		useToastStore.setState({ toasts: [] });
 	});
 
-	it("imports them as {{NAME}} and names them in one notice", () => {
+	it("imports them as {{NAME}}, names them in one toast and the dropped flag in another", () => {
 		const { setRequest } = renderField();
 
 		paste(
@@ -196,10 +196,14 @@ describe("pasting a command with shell variables (#3777)", () => {
 			})
 		);
 		const toasts = useToastStore.getState().toasts;
-		expect(toasts).toHaveLength(1);
+		expect(toasts).toHaveLength(2);
 		expect(toasts[0]).toMatchObject({
-			title: "Imported with variables, minus some flags",
+			title: "Imported with variables",
 			message: expect.stringContaining("{{OPENAI_API_KEY}}"),
+		});
+		expect(toasts[1]).toMatchObject({
+			title: "Imported, minus some flags",
+			message: expect.stringContaining("--retry"),
 		});
 	});
 

@@ -44,7 +44,7 @@ vi.mock("../../context", () => ({
 // Imported after the mocks above are registered.
 const { default: ResponseViewer } = await import("./index");
 
-const OFFER = /Turn on event stream/;
+const OFFER = /Enable event stream/;
 
 function reply(overrides: Partial<ResponseState> = {}): ResponseState {
 	return {

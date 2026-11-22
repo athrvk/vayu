@@ -97,9 +97,10 @@ command (#2250). It is a request, not a collection, so `handlePaste` runs
 answer would be "Unrecognized format". The dialog offers **Open as new request**
 instead, which hands `presetFromCommand` (`curl-request-preset.ts`, the stored
 shapes the builder's save sends) to `useNewRequest`, closes, and toasts
-`pasteNotice` as the URL bar's paste does: the flags the command carried that
-Vayu cannot, and the shell variables (`$API_KEY`, `${API_KEY}`, unquoted or in
-double quotes) the import turned into `{{API_KEY}}` (#3777), in one toast.
+`pasteNotices` as the URL bar's paste does: one toast for the shell variables
+(`$API_KEY`, `${API_KEY}`, unquoted or in double quotes) the import turned into
+`{{API_KEY}}` and that reached the request (#3777), and one for the flags the
+command carried that Vayu cannot - each a single sentence.
 
 `detectBatch(documents, opts, intake)` returns one `BatchEntry` per picked file,
 in pick order, and **every picked file gets a row** - that is the property the

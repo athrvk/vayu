@@ -16,7 +16,7 @@ import { useCallback, useEffect } from "react";
 import { detectCommand, readCommand } from "@/services/curl/parseCurl";
 import { useTabsStore, useToastStore } from "@/stores";
 import { focusRequestUrl } from "@/components/layout/region-focus";
-import { pasteNotice, unreadableCommandNotice } from "../../utils/paste-disclosure";
+import { pasteNotices, unreadableCommandNotice } from "../../utils/paste-disclosure";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
 import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
@@ -92,8 +92,7 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// And what it could not carry, said out loud rather than eaten
 			// (issue #708), with the shell variables it turned into `{{NAME}}`
 			// (#3777). After the import, never instead of it.
-			const notice = pasteNotice(imported);
-			if (notice) showToast(notice);
+			for (const notice of pasteNotices(imported)) showToast(notice);
 		},
 		[setRequest, showToast]
 	);

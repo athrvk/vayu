@@ -507,14 +507,11 @@ export default function ResponseViewer() {
 	const isClientError = shown.status === 0;
 
 	/*
-	 * A buffered reply that is `text/event-stream`: Send waited for it to end
-	 * and the Events tab has nothing, because Event stream is declared on the
-	 * request, never detected from the reply. `events === undefined` and no
-	 * live feed of this request's own separate it from a stream that ran.
-	 * Offered on every surface that mounts this pane with an editable request,
-	 * a History run's detached copy included - its Settings tab has the same
-	 * switch. It renders inside the Body tab's non-error branch, so a client
-	 * error (status 0) never reaches it.
+	 * A buffered reply that is `text/event-stream`: Event stream is declared on
+	 * the request, never detected from the reply, so Send waited for it to end.
+	 * `events === undefined` with no live feed of this request's own separates it
+	 * from a stream that ran. A status 0 never reaches the Body tab branch that
+	 * renders this.
 	 */
 	const offerEventStream =
 		!request.stream &&
@@ -851,7 +848,7 @@ export default function ResponseViewer() {
 													setRequest(streamPatch(request, true))
 												}
 											>
-												Turn on event stream
+												Enable event stream
 											</Button>
 										}
 									>

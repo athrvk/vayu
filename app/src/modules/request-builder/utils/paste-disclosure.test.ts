@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DroppedFlag } from "@/services/curl/parseCurl";
-import { droppedFlagsNotice, pasteNotice, unreadableCommandNotice } from "./paste-disclosure";
+import { droppedFlagsNotice, pasteNotices, unreadableCommandNotice } from "./paste-disclosure";
 
 const reveal = vi.hoisted(() => vi.fn());
 vi.mock("@/modules/settings/reveal", () => ({ revealSetting: reveal }));
@@ -60,42 +60,48 @@ describe("the paste disclosure notice", () => {
 	});
 });
 
-describe("the paste notice (#3777)", () => {
-	it("is absent when the paste dropped nothing and named no variable", () => {
-		expect(pasteNotice({ dropped: [], variables: [] })).toBeNull();
+describe("the paste notices (#3777)", () => {
+	it("are absent when the paste dropped nothing and named no variable", () => {
+		expect(pasteNotices({ dropped: [], variables: [] })).toEqual([]);
 	});
 
-	it("is the dropped-flags notice, unchanged, when no variable was named", () => {
+	it("are the dropped-flags notice, unchanged, when no variable was named", () => {
 		const imported = { dropped: [PROXY, HOMELESS], variables: [] };
 
-		expect(pasteNotice(imported)).toEqual({
-			...droppedFlagsNotice(imported.dropped),
-			action: expect.anything(),
-		});
+		expect(pasteNotices(imported)).toEqual([
+			{ ...droppedFlagsNotice(imported.dropped), action: expect.anything() },
+		]);
 	});
 
-	it("names each variable as the {{token}} it became, in the order given", () => {
-		const notice = pasteNotice({ dropped: [], variables: ["API_KEY", "HOST"] });
+	it("name each variable as the {{token}} it became, in the order given", () => {
+		const notices = pasteNotices({ dropped: [], variables: ["API_KEY", "HOST"] });
 
-		expect(notice).toEqual({
-			title: "Imported with variables",
-			message:
-				"Shell variables became {{API_KEY}}, {{HOST}} - give them values in an environment.",
-			variant: "info",
-		});
+		expect(notices).toEqual([
+			{
+				title: "Imported with variables",
+				message:
+					"Shell variables became {{API_KEY}}, {{HOST}} - give them values in an environment.",
+				variant: "info",
+			},
+		]);
 	});
 
-	it("merges the variables and the dropped flags into one warning with the flags' action", () => {
-		const notice = pasteNotice({ dropped: [PROXY], variables: ["API_KEY"] });
+	it("are two toasts when both apply, each a single sentence, the flags' action on its own", () => {
+		const [variables, flags, ...rest] = pasteNotices({
+			dropped: [PROXY],
+			variables: ["API_KEY"],
+		});
 
-		expect(notice?.title).toBe("Imported with variables, minus some flags");
-		expect(notice?.message).toBe(
-			"Shell variables became {{API_KEY}} - give them values in an environment. " +
-				"-x routed the request through a proxy (Proxy settings)."
-		);
-		expect(notice?.variant).toBe("warning");
-		notice?.action?.onClick();
+		expect(rest).toEqual([]);
+		expect(variables).toMatchObject({ title: "Imported with variables", variant: "info" });
+		expect(variables.action).toBeUndefined();
+		expect(flags).toMatchObject({ title: "Imported, minus some flags", variant: "warning" });
+		expect(flags.message).toBe("-x routed the request through a proxy (Proxy settings).");
+		flags.action?.onClick();
 		expect(reveal).toHaveBeenCalledWith("network_performance", "proxyUrl");
+		for (const notice of [variables, flags]) {
+			expect(notice.message.match(/[.!?](\s|$)/g)).toHaveLength(1);
+		}
 	});
 });
 

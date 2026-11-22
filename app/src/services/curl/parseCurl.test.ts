@@ -1234,6 +1234,70 @@ describe("parseCommand - shell variables (#3777)", () => {
 		expect(imported.request.body).toBe(bash.request.body);
 	});
 
+	test.each([
+		["-o", "curl -o $OUT https://x.test/a", "-o"],
+		["--proxy", "curl --proxy $P https://x.test/a", "--proxy"],
+		["-w", 'curl -w "$FMT" https://x.test/a', "-w"],
+		["wget -O", "wget -O $OUT https://x.test/a", "-O"],
+	])("a variable read by the dropped %s is not named", (_name, command, flag) => {
+		const imported = importCommand(command)!;
+
+		expect(imported.dropped.map((entry) => entry.flag)).toEqual([flag]);
+		expect(JSON.stringify(imported.request)).not.toContain("{{");
+		expect(imported.variables).toEqual([]);
+	});
+
+	test("only the variables that reached the request are named beside a dropped one", () => {
+		const imported = importCommand(`curl -o $OUT https://x.test/a -H "X-Key: $KEY"`)!;
+
+		expect(imported.request.headers).toEqual(kv([{ key: "X-Key", value: "{{KEY}}" }]));
+		expect(imported.variables).toEqual(["KEY"]);
+	});
+
+	test.each([
+		["a form field", `curl https://x.test -F "a=$V"`],
+		["a urlencoded field", `curl https://x.test --data-urlencode "a=$V"`],
+		["a form file path", `curl https://x.test -F "a=@$V"`],
+		["bearer auth", `curl https://x.test --oauth2-bearer $V`],
+		["basic auth", `curl https://x.test -u $V:pw`],
+		["digest auth", `curl https://x.test --digest -u user:$V`],
+		["ntlm auth", `curl https://x.test --ntlm -u $V:pw`],
+		["a binary body's path", `curl https://x.test --data-binary @$V`],
+	])("a variable in %s still counts as reaching the request", (_name, command) => {
+		expect(importCommand(command)!.variables).toEqual(["V"]);
+	});
+
+	describe("a method written as a variable", () => {
+		test.each([
+			["curl -X", `curl -X "$VERB" https://x.test/a`, "-X"],
+			["curl --request=", `curl --request="$VERB" https://x.test/a`, "--request"],
+			["wget --method=", `wget --method="$VERB" https://x.test/a`, "--method"],
+			["a literal {{token}}", `curl -X '{{verb}}' https://x.test/a`, "-X"],
+		])("%s is left out and disclosed, not uppercased", (_name, command, flag) => {
+			const imported = importCommand(command)!;
+
+			expect(imported.request.method).toBe("GET");
+			expect(imported.dropped).toEqual([
+				{ flag, what: expect.stringContaining("method from a variable") },
+			]);
+			expect(imported.variables).toEqual([]);
+		});
+
+		test("the method then follows the body, as with no flag", () => {
+			const imported = importCommand(`curl -X "$VERB" https://x.test/a -d 'a=1'`)!;
+
+			expect(imported.request.method).toBe("POST");
+		});
+
+		test("a method with no variable is still uppercased and applied", () => {
+			const imported = importCommand(`curl -X patch https://x.test/$ID`)!;
+
+			expect(imported.request.method).toBe("PATCH");
+			expect(imported.dropped).toEqual([]);
+			expect(imported.variables).toEqual(["ID"]);
+		});
+	});
+
 	test("the variables travel with a successful reading", () => {
 		const reading = readCommand(`curl https://x.test/$A`);
 

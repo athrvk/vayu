@@ -129,7 +129,7 @@ export interface StreamPatch {
  *
  * The flag and the `Accept: text/event-stream` row are one change (see the
  * "one array, one pass" rule above), so every surface that toggles the setting
- * - the Settings tab's switch and the Body tab's "Turn on Event stream" action
+ * - the Settings tab's switch and the Body tab's "Enable event stream" action
  * - takes this patch rather than setting `stream` alone, which would leave the
  * request without the header a stream server negotiates on.
  */

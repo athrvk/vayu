@@ -82,7 +82,7 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { importCommand, type CommandImport } from "@/services/curl/parseCurl";
-import { pasteNotice } from "@/modules/request-builder/utils/paste-disclosure";
+import { pasteNotices } from "@/modules/request-builder/utils/paste-disclosure";
 import { presetFromCommand } from "./curl-request-preset";
 
 type Tab = "file" | "url" | "paste";
@@ -586,8 +586,7 @@ export function ImportModal() {
 	const openCommandAsRequest = (command: CommandImport): void => {
 		newRequest(presetFromCommand(command.request));
 		handleClose();
-		const notice = pasteNotice(command);
-		if (notice) showToast(notice);
+		for (const notice of pasteNotices(command)) showToast(notice);
 	};
 
 	const handleFetchUrl = async () => {
