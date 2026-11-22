@@ -1983,11 +1983,11 @@ TEST_F (SendRequestTest, ARecordMasksCredentialsAndKeepsTheBodies) {
 
 // A redirect hop's URL reads a withheld query credential as `<redacted>`, the
 // form the record's request URL reads, not as a blank (#3672): the client
-// redacts a hop as it records it, and a blank there would read as "sent
-// empty". libcurl leaves the userinfo out of a hop's URL, so the password is
-// asserted absent rather than marked. Mutation check: drop
-// `redirect_url_mark` from `js_pm_send_request`'s client config and the hop
-// reads `client_secret=&page=2`.
+// records the hop's marked copy (`RedirectHop::display_url`) and the record
+// serializes that one, since a blank would read as "sent empty". libcurl leaves
+// the userinfo out of a hop's URL, so the password is asserted absent rather
+// than marked. Mutation check: have `serialize_redirects` write `hop.url` and
+// the hop reads `client_secret=&page=2`.
 TEST_F (SendRequestTest, ARecordedHopUrlReadsRedactedLikeTheRequestUrl) {
     SendRequestServer server;
     std::string url = server.url ("/hop") + "?client_secret=HOPKEY&page=2";

@@ -37,6 +37,7 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::runtime {
 namespace {
@@ -82,8 +83,8 @@ class ResponseRedirectsBindingTest : public ::testing::Test {
 // every property below reads `undefined`.
 TEST_F (ResponseRedirectsBindingTest, EachHopCarriesItsCodeStatusUrlAndDowngradeFlag) {
     const std::vector<RedirectHop> hops = {
-        { 301, "Moved Permanently", {}, "https://a.test/start", true },
-        { 302, "Found", {}, "http://a.test/next", false },
+        { 301, "Moved Permanently", {}, "https://a.test/start", "https://a.test/start", true },
+        { 302, "Found", {}, "http://a.test/next", "http://a.test/next", false },
     };
 
     const auto result = run (asserting (R"JS(
@@ -102,6 +103,22 @@ TEST_F (ResponseRedirectsBindingTest, EachHopCarriesItsCodeStatusUrlAndDowngrade
     expect_single_pass (result);
 }
 
+// The script reads the blank form, whatever the hop's marked copy says (#3707).
+// Mutation-check: bind `hop.display_url` in `install_response_redirects` and
+// the script reads `<redacted>`.
+TEST_F (ResponseRedirectsBindingTest, AHopUrlReadsBlankWhereTheMarkedCopyReadsRedacted) {
+    const std::vector<RedirectHop> hops = { { 302, "Found", {}, "https://a.test/cb?client_secret=&page=2",
+    "https://a.test/cb?client_secret=<redacted>&page=2", false } };
+
+    const auto result = run (asserting (R"JS(
+        pm.expect(pm.response.redirects[0].url)
+            .to.equal("https://a.test/cb?client_secret=&page=2");
+    )JS"),
+    &hops);
+
+    expect_single_pass (result);
+}
+
 // The headers are the hop's own, in the shape `pm.response.headers` has: a
 // lower-cased key, get()/has() that ignore case, a repeated name folded.
 // Mutation-check: build the object from `response.headers` instead of the hop's
@@ -110,7 +127,7 @@ TEST_F (ResponseRedirectsBindingTest, AHopsHeadersAreItsOwnInTheShapeOfPmRespons
     response.headers                    = { { "x-final", "yes" } };
     const std::vector<RedirectHop> hops = { { 302, "Found",
     { { "Location", "/landing" }, { "Set-Cookie", "a=1" }, { "Set-Cookie", "b=2" } },
-    "https://a.test/login", false } };
+    "https://a.test/login", "https://a.test/login", false } };
 
     const auto result = run (asserting (R"JS(
         var headers = pm.response.redirects[0].headers;
@@ -152,7 +169,8 @@ TEST_F (ResponseRedirectsBindingTest, AnUnrecordedChainIsAbsentNotEmpty) {
 // Contexts are pooled, so the binding is rebuilt per execution: a chain read in
 // one script must not be standing in the next one's `pm.response`.
 TEST_F (ResponseRedirectsBindingTest, AChainDoesNotSurviveIntoTheNextExecution) {
-    const std::vector<RedirectHop> hops = { { 302, "Found", {}, "https://a.test/x", false } };
+    const std::vector<RedirectHop> hops = { { 302, "Found", {},
+    "https://a.test/x", "https://a.test/x", false } };
     expect_single_pass (
     run (asserting ("pm.expect(pm.response.redirects.length).to.equal(1);"), &hops));
 
@@ -258,6 +276,31 @@ TEST_F (ResponseRedirectsExchangeTest, APostScriptReadsTheHopsTheClientFollowed)
     )JS"));
 
     expect_single_pass (outcome.post_script_result);
+}
+
+// One send, two readers of the same hop (#3707): the script reads the blank
+// form, and what the engine serializes (the `/execute` answer and the stored
+// trace) reads `<redacted>`, as the request's own URL does. Mutation-check:
+// bind `hop.display_url` in `install_response_redirects` and the script's
+// assertion fails; have `serialize_redirects` write `hop.url` and the two
+// serialized assertions read `client_secret=`.
+TEST_F (ResponseRedirectsExchangeTest,
+AHopsSecretIsBlankForTheScriptAndMarkedInTheSerializedForms) {
+    const std::string chain = server_->url ("/chain") + "?client_secret=s3cret&page=2";
+
+    const auto outcome = send (chain, asserting (R"JS(
+        pm.expect(pm.response.redirects[0].url).to.include("client_secret=&page=2");
+        pm.expect(pm.response.redirects[0].url).to.not.include("redacted");
+    )JS"));
+
+    expect_single_pass (outcome.post_script_result);
+    const std::string marked = server_->url ("/chain") + "?client_secret=<redacted>&page=2";
+    const auto answer = vayu::json::serialize (outcome.response);
+    ASSERT_EQ (answer["redirects"].size (), 2U);
+    EXPECT_EQ (answer["redirects"][0]["url"], marked);
+    const auto trace =
+    vayu::http::routes::build_result_trace (outcome.request, outcome.response);
+    EXPECT_EQ (trace["response"]["redirects"][0]["url"], marked);
 }
 
 TEST_F (ResponseRedirectsExchangeTest, ASendThatWasNotRedirectedReadsAnEmptyArray) {

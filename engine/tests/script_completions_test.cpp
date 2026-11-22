@@ -1148,7 +1148,7 @@ struct FullyBoundContext {
     /// A recorded redirect chain, which binds pm.response.redirects - absent
     /// without one (#2949).
     std::vector<vayu::RedirectHop> hops = { { 302, "Found", {},
-    "https://api.example.com/a", false } };
+    "https://api.example.com/a", "https://api.example.com/a", false } };
     vayu::runtime::ScriptContext ctx;
 
     FullyBoundContext () {

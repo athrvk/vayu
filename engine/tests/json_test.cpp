@@ -343,16 +343,19 @@ TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {
 // when nothing was followed, on the `headerLines` rule above.
 TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
     Response response;
-    response.status_code = 200;
-    response.redirect_hops = { { 302, "Found",
-                               { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } },
-                               "https://a.test/login", true },
-        { 301, "", {}, "http://a.test/home", false } };
+    response.status_code   = 200;
+    response.redirect_hops = {
+        { 302, "Found", { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } },
+        "https://a.test/login", "https://a.test/login", true },
+        { 301, "", {}, "http://a.test/home", "http://a.test/home", false },
+        { 302, "Found", {},
+        "https://a.test/cb?client_secret=", "https://a.test/cb?client_secret=<redacted>", false }
+    };
 
     auto json = serialize (response);
 
     ASSERT_TRUE (json["redirects"].is_array ());
-    ASSERT_EQ (json["redirects"].size (), 2U);
+    ASSERT_EQ (json["redirects"].size (), 3U);
     EXPECT_EQ (json["redirects"][0],
     (Json{ { "status", 302 }, { "statusText", "Found" },
     { "headerLines",
@@ -363,6 +366,8 @@ TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
     EXPECT_TRUE (json["redirects"][1]["headerLines"].empty ());
     EXPECT_EQ (json["redirects"][1]["url"], "http://a.test/home");
     EXPECT_FALSE (json["redirects"][1]["schemeDowngrade"].get<bool> ());
+    // The marked copy is the one written (#3707); the blank one is the script's.
+    EXPECT_EQ (json["redirects"][2]["url"], "https://a.test/cb?client_secret=<redacted>");
 }
 
 TEST (JsonTest, SerializesNoRedirectHopsAsAnEmptyArray) {

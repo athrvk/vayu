@@ -2229,7 +2229,7 @@ does the same, one row per received line, so a `Set-Cookie` pair stays two rows
 `{ status, statusText, headerLines, url?, schemeDowngrade? }` per 3xx, in arrival
 order. `url` is the request that hop answered (the requested URL for the first hop, the
 previous hop's `Location` resolved against it after that), with the
-values of credential query parameters blanked engine-side; `schemeDowngrade` is
+values of credential query parameters written as `<redacted>` engine-side; `schemeDowngrade` is
 true when that request went over `https` and the next over `http` (issue #2949).
 Both are absent on a hop from an engine or a stored trace from before the
 field, and a reader treats absent as unknown. `headers` and

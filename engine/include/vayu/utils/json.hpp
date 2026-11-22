@@ -281,8 +281,9 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
  */
 [[nodiscard]] Json serialize_header_lines (const std::vector<HeaderLine>& lines);
 
-/// The followed redirect hops as `[{status, statusText, headerLines}]`, in the
-/// order they arrived (issue #2461).
+/// The followed redirect hops as `[{status, statusText, headerLines, url,
+/// schemeDowngrade}]`, in the order they arrived (issue #2461). `url` is the
+/// hop's `display_url`, a withheld credential written as `<redacted>` (#3707).
 [[nodiscard]] Json serialize_redirects (const std::vector<RedirectHop>& hops);
 
 /// `Response::warnings` as `[{code, message}]`, in the order they were found

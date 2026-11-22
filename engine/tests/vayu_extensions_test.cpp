@@ -554,10 +554,10 @@ TEST (VayuExtensions, TheDefaultFormStillBlanksForAnExport) {
 }
 
 // The record masks a URL to the marker, in the request and in a redirect hop.
-// A real hop arrives already redacted by the client (`record_hop`), marked as
-// `pm.sendRequest` asks, and keeps that form here; a blank it arrives with
-// cannot be told from a value sent empty, which is why the client marks it
-// (`SendRequestTest.ARecordedHopUrlReadsRedactedLikeTheRequestUrl` drives a
+// A real hop arrives already marked (`RedirectHop::display_url`, which
+// `serialize_redirects` writes), and keeps that form here; a blank it arrives
+// with cannot be told from a value sent empty, which is why the hop records a
+// marked copy (`SendRequestTest.ARecordedHopUrlReadsRedactedLikeTheRequestUrl` drives a
 // real redirect). An unredacted hop is still masked. Mutation check: drop
 // `CredentialMark::Marker` from `mask_record_node`.
 TEST (VayuExtensions, ARecordsUrlsReadRedactedWhereTheyWereWithheld) {

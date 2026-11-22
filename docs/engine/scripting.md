@@ -694,7 +694,7 @@ Each entry is `{ code, status, url, schemeDowngrade, headers }`:
 |-------|--|
 | `code` | The hop's status, a number (`301`, `302`, ...). Named as `pm.response.code` is. |
 | `status` | The hop's reason phrase, as `pm.response.status` is - the wire phrase, or the registered text for the code on HTTP/2 and later. |
-| `url` | The URL of the request **this hop answered**, so `redirects[0].url` is the URL that was requested and the next entry's is where the first one's `Location` pointed (resolved, when it was relative). The value of the request's auth query parameter is blanked, as it is in the stored trace. |
+| `url` | The URL of the request **this hop answered**, so `redirects[0].url` is the URL that was requested and the next entry's is where the first one's `Location` pointed (resolved, when it was relative). The value of the request's auth query parameter, and of any credential-named one, is **blank** (`?client_secret=&page=2`). The stored trace's `response.redirects[].url` and the `/execute` answer's carry `<redacted>` there instead, as their request `url` does; a script's copy stays blank, the form an export writes. |
 | `schemeDowngrade` | `true` when this hop's request went over `https` and the next one over `http`. The engine withholds `Authorization` and a typed `Cookie` when the scheme, host or port changes, but an API-key *header* is sent on, so this is the one hop a credential can cross in clear text. |
 | `headers` | The hop's own received headers, shaped as `pm.response.headers` is: lower-cased keys, case-insensitive `get()` / `has()` and the other read methods, a repeated name folded with `", "`. A hop's `Set-Cookie` lines therefore join into one string, as they do on `pm.response.headers`. |
 
@@ -709,7 +709,8 @@ made, at most the request's `maxRedirects`.
 
 The same facts are on the run's stored trace as `response.redirects[]`, with
 `status`/`statusText` and `headerLines` in place of the script's
-`code`/`status`/`headers`.
+`code`/`status`/`headers`, and with `<redacted>` where the script's `url` reads
+blank.
 
 ### Reading response headers
 
