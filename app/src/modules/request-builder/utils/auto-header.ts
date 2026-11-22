@@ -38,6 +38,7 @@
  */
 
 import type { AutoHeaderSource, KeyValueEntry, KeyValueItem } from "@/types";
+import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import { generateId } from "@/lib/id";
 
 /** Case-insensitive header-name match, on the trimmed key. */
@@ -114,4 +115,25 @@ export function switchAutoHeader(
 	if (!toAdd) return { headers: next, added: null };
 
 	return { headers: [...next, autoHeaderRow(name, toAdd, source)], added: toAdd };
+}
+
+/** What the Event stream setting changes on a request: the flag and its `Accept` row. */
+export interface StreamPatch {
+	stream: boolean;
+	headers: KeyValueItem[];
+}
+
+/**
+ * The request fields that turning Event stream on or off writes, as one patch
+ * for `setRequest`.
+ *
+ * The flag and the `Accept: text/event-stream` row are one change (see the
+ * "one array, one pass" rule above), so every surface that toggles the setting
+ * - the Settings tab's switch and the Body tab's "Turn on Event stream" action
+ * - takes this patch rather than setting `stream` alone, which would leave the
+ * request without the header a stream server negotiates on.
+ */
+export function streamPatch(request: { headers: KeyValueItem[] }, on: boolean): StreamPatch {
+	const next = switchAutoHeader(ACCEPT_HEADER, on ? SSE_ACCEPT : null, request.headers, "stream");
+	return { stream: on, headers: next.headers };
 }

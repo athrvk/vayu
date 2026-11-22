@@ -66,7 +66,13 @@ import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
 import { useFittedTabs } from "@/components/layout/useFittedTabs";
 import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
-import { contentTypeOf, heldBodySize, receivedBody } from "../../utils/response-bytes";
+import { streamPatch } from "../../utils/auto-header";
+import {
+	contentTypeOf,
+	heldBodySize,
+	isEventStreamType,
+	receivedBody,
+} from "../../utils/response-bytes";
 import { exampleRefusal } from "./save-as-example";
 import { resolveHeaderLines } from "@/lib/header-lines";
 
@@ -200,7 +206,7 @@ function TestsResultChip({ results }: { results: readonly { passed: boolean }[] 
 }
 
 export default function ResponseViewer() {
-	const { request, response, isExecuting } = useRequestBuilderContext();
+	const { request, response, isExecuting, setRequest } = useRequestBuilderContext();
 	const requestId = request.id ?? null;
 
 	/*
@@ -499,6 +505,22 @@ export default function ResponseViewer() {
 	// Client-side error (status 0 means no server response): the Body tab shows
 	// `ClientErrorView`, and every other tab renders from `shown` as usual.
 	const isClientError = shown.status === 0;
+
+	/*
+	 * A buffered reply that is `text/event-stream`: Send waited for it to end
+	 * and the Events tab has nothing, because Event stream is declared on the
+	 * request, never detected from the reply. `events === undefined` and no
+	 * live feed of this request's own separate it from a stream that ran.
+	 * Offered on every surface that mounts this pane with an editable request,
+	 * a History run's detached copy included - its Settings tab has the same
+	 * switch. It renders inside the Body tab's non-error branch, so a client
+	 * error (status 0) never reaches it.
+	 */
+	const offerEventStream =
+		!request.stream &&
+		shown.events === undefined &&
+		!streamIsMine &&
+		isEventStreamType(contentTypeOf(shown.headers));
 
 	/*
 	 * "Save as example" (issue #588) - present only when there is something to
@@ -813,6 +835,29 @@ export default function ResponseViewer() {
 										response was read - Vayu&apos;s engine stops a Send there,
 										so re-sending reads the same amount. Raise Max Send response
 										body in Settings to read more.
+									</Callout>
+								</div>
+							)}
+							{offerEventStream && (
+								<div className="px-4 pt-3 shrink-0">
+									<Callout
+										severity="info"
+										title="Event stream is off"
+										action={
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() =>
+													setRequest(streamPatch(request, true))
+												}
+											>
+												Turn on event stream
+											</Button>
+										}
+									>
+										The server answered text/event-stream, so Send waited for
+										the whole reply. With Event stream on, events arrive live
+										from the next Send.
 									</Callout>
 								</div>
 							)}

@@ -17,6 +17,7 @@ import {
 	decodeResponseBody,
 	extensionForContentType,
 	heldBodySize,
+	isEventStreamType,
 	receivedBody,
 	utf8ByteLength,
 } from "./response-bytes";
@@ -267,5 +268,20 @@ describe("extensionForContentType", () => {
 		["", "bin"],
 	])("%s -> %s", (contentType, extension) => {
 		expect(extensionForContentType(contentType)).toBe(extension);
+	});
+});
+
+describe("isEventStreamType", () => {
+	it.each([
+		["text/event-stream", true],
+		["text/event-stream; charset=utf-8", true],
+		["Text/Event-Stream", true],
+		["  text/event-stream ;charset=UTF-8", true],
+		["application/json", false],
+		["text/plain", false],
+		["text/event-stream-ish", false],
+		["", false],
+	])("reads %j as %s", (contentType, expected) => {
+		expect(isEventStreamType(contentType)).toBe(expected);
 	});
 });

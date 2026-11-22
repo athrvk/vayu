@@ -75,7 +75,7 @@ import {
 	ToggleRow,
 } from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
-import { switchAutoHeader } from "../../../utils/auto-header";
+import { streamPatch } from "../../../utils/auto-header";
 import {
 	automaticHeaderOptions,
 	displayHeaderName,
@@ -152,13 +152,7 @@ export default function SettingsPanel() {
 	 * `utils/auto-header.ts` for why ownership is by marker, not by row id.
 	 */
 	const handleStreamChange = (checked: boolean) => {
-		const next = switchAutoHeader(
-			ACCEPT_HEADER,
-			checked ? SSE_ACCEPT : null,
-			request.headers,
-			"stream"
-		);
-		setRequest({ stream: checked, headers: next.headers });
+		setRequest(streamPatch(request, checked));
 	};
 
 	/** Keep the stored value inside the range the engine clamps to. */
