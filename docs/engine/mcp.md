@@ -3708,9 +3708,9 @@ so its size is held by `tool-list-budget.test.ts`, which builds the real
 registry through the real server for each host (the app and the stdio CLI,
 whose remedy wording differs) and each writes-off/on and reveal-off/on pair.
 Each cap is that measurement rounded up to the next 100 bytes. Measured at
-#3749, reveal off / on: on the app host 153,700 / 150,720 bytes with writes
-off and 220,738 / 216,087 with writes on; on the CLI host 153,966 / 150,986
-and 222,510 / 217,859. A change that grows the list re-measures and raises the
+#3749, reveal off / on: on the app host 152,490 / 149,510 bytes with writes
+off and 219,528 / 214,877 with writes on; on the CLI host 152,756 / 149,776
+and 221,300 / 216,649. A change that grows the list re-measures and raises the
 caps in its own diff; one that shrinks it lowers them.
 
 A tool's result fields are explained on its output schema, one clause per
