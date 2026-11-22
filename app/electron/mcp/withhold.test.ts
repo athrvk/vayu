@@ -1167,6 +1167,15 @@ describe("withholdRunOutput", () => {
 			});
 		});
 
+		// The engine writes the marker into a hop's url itself (#3707), so a hop
+		// that reaches the mask already marked must come out as it went in.
+		test("keeps a hop url the engine already marked", () => {
+			const url = "https://x.test/login?client_secret=<redacted>&page=2";
+			expect(withholdRunOutput({ redirects: [hop(url)] }, rule)).toEqual({
+				redirects: [hop(url)],
+			});
+		});
+
 		test("masks a secret variable's value wherever it sits in the url", () => {
 			const url = "https://x.test/s3cret-value/login?ref=s3cret-value";
 			expect(withholdRunOutput({ redirects: [hop(url)] }, rule)).toEqual({
