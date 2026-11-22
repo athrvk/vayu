@@ -3705,10 +3705,17 @@ so its size is held by `tool-list-budget.test.ts`, which builds the real
 registry through the real server for each host (the app and the stdio CLI,
 whose remedy wording differs) and each writes-off/on and reveal-off/on pair.
 Each cap is that measurement rounded up to the next 100 bytes. Measured at
-#3747, reveal off / on: on the app host 159,706 / 156,726 bytes with writes
-off and 228,397 / 223,746 with writes on; on the CLI host 159,972 / 156,992
-and 230,169 / 225,518. A change that grows the list re-measures and raises the
+#3748, reveal off / on: on the app host 154,291 / 151,311 bytes with writes
+off and 221,329 / 216,678 with writes on; on the CLI host 154,557 / 151,577
+and 223,101 / 218,450. A change that grows the list re-measures and raises the
 caps in its own diff; one that shrinks it lowers them.
+
+The server strips the `$schema` key the SDK writes on every input and output
+schema when its value is the 2020-12 URI (#3748): the MCP specification
+("JSON Schema Usage" > "Schema Dialect") makes 2020-12 the default for a schema
+with no `$schema`, so the key says nothing and costs about 57 bytes a schema
+(5,415 with writes off, 7,068 with writes on, on both hosts). A schema that
+names another dialect keeps it.
 
 Two shapes keep the list small, and the same file checks both. A tool
 description fails on a sentence of 150 or more characters that more than three
