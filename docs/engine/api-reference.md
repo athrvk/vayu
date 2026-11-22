@@ -7348,10 +7348,11 @@ key is part of the URL as sent; the next hop is whatever the response's
 `followRedirects: false` on a request whose key must not leave the origin it was
 sent to; the app says this beside the API Key fields.
 A design send makes the downgrade visible: each entry of the answer's
-`redirects` records the `url` its request went to and `schemeDowngrade`, true
+`redirects` records the `url` its request went to (a withheld credential in it
+reads `<redacted>`) and `schemeDowngrade`, true
 when that request was `https` and the next one `http` (see
 [`redirects`](#post-execute)) and `pm.response.redirects` shows them to a
-post-request script. A load run and a stream record no hops.
+post-request script, with the credential blank. A load run and a stream record no hops.
 (`engine/tests/redirect_credentials_test.cpp`)
 
 ### OAuth 2.0 token cache
@@ -9213,8 +9214,8 @@ reads a record too:
   marker (`user:<redacted>@host`, `?client_secret=<redacted>&page=2`) as the
   summary line's URL is, so a withheld value never reads as one resolved
   empty; a hop's `url` carries no userinfo at all, as in the main trace's
-  `redirects`. An export blanks the same values to `""` instead, and so does
-  the main exchange's own `redirects[].url`. Bodies are not
+  `redirects`, whose `redirects[].url` reads the same marker. An export blanks
+  the same values to `""` instead. Bodies are not
   judged: a token endpoint's answer keeps its token. This is deliberately not
   the main exchange's rule, whose trace stays raw.
 - **Bodies are bounded by `maxTraceBodyBytes`, all of them together**: in
@@ -9326,8 +9327,12 @@ earlier hop - the `302` that answers a login and sets the session cookie - is
 readable nowhere else. `url` is the URL of the request that hop answered: the URL the
 send went to for the first hop, the previous hop's `Location` resolved against it
 for each later one (userinfo is removed), with the value of the request's auth-written query parameter, and
-of any query parameter named like a credential, blanked; `""` when libcurl
-reported none. `schemeDowngrade` is true when that
+of any query parameter named like a credential, written as `<redacted>`
+(`?client_secret=<redacted>&page=2`), the form the answer's own `url` and the
+stored `request.url` read; `""` when libcurl reported none. A script reads the
+same hop through `pm.response.redirects[].url`, where the value is blank
+(`?client_secret=`), and an export blanks it too; only what the engine
+serializes, this answer and the stored trace, carries the marker. `schemeDowngrade` is true when that
 request went over `https` and the next one over `http`: the one hop on which an
 API-key header, which a redirect does not withhold, travels in clear text (see the
 Redirects paragraph under [Authentication](#authentication)). A row stored before these two members

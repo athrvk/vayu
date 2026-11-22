@@ -238,7 +238,7 @@ nlohmann::json get_script_completions () {
     "The redirects this response was reached through, in the order they were "
     "followed, as { code, status, url, schemeDowngrade, headers } entries: the "
     "3xx status and reason phrase, the URL of the request that hop answered "
-    "(an auth query parameter's value blanked), whether its Location left "
+    "(a credential query parameter's value blanked), whether its Location left "
     "https for http, and the hop's own headers (get()/has() as on "
     "pm.response.headers). An empty array means nothing was "
     "redirected.\n\nAbsent - not empty - where the chain was not recorded: a "

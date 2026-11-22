@@ -19,7 +19,6 @@
 #include <optional>
 
 #include "vayu/core/constants.hpp"
-#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/loopback_guard.hpp"
@@ -208,20 +207,6 @@ struct ClientConfig {
      * design stream (#3235).
      */
     const std::atomic<bool>* cancel = nullptr;
-
-    /**
-     * @brief What a withheld credential in a recorded redirect hop's `url`
-     *        reads as (#3672): blank, the default, or `<redacted>`.
-     *
-     * The hop URL is redacted as it is recorded, before any reader sees it, so
-     * no later mask can tell a blanked value from one sent empty. Blank is
-     * every send's whose hops a script or a trace reads
-     * (`pm.response.redirects`, `redirects[].url`). `pm.sendRequest` sets
-     * `Marker`: its hops reach only the script-request record, whose URLs
-     * read `<redacted>` (`mask_script_request_record`).
-     */
-    vayu::core::vayu_ext::CredentialMark redirect_url_mark =
-    vayu::core::vayu_ext::CredentialMark::Blank;
 };
 
 /**

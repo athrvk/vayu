@@ -191,7 +191,7 @@ TEST (ExecutionTrace, AResponseWithNoHeaderLinesStoresNoHeaderLinesKey) {
 TEST (ExecutionTrace, ResponseCarriesTheRedirectHops) {
     auto response          = make_response ();
     response.redirect_hops = { { 302, "Found", { { "Set-Cookie", "hop=1" } },
-    "https://a.test/login", true } };
+    "https://a.test/login", "https://a.test/login", true } };
 
     auto trace = build_result_trace (make_request (), response);
 
@@ -205,6 +205,22 @@ TEST (ExecutionTrace, ResponseCarriesTheRedirectHops) {
     ASSERT_TRUE (hops[0].contains ("schemeDowngrade"));
     EXPECT_EQ (hops[0]["url"], "https://a.test/login");
     EXPECT_TRUE (hops[0]["schemeDowngrade"].get<bool> ());
+}
+
+// The trace stores the hop's marked form, as its own request `url` reads a
+// withheld credential (#3707): the blank copy is the script's. Mutation check:
+// have `serialize_redirects` write `hop.url` and the trace reads
+// `client_secret=`.
+TEST (ExecutionTrace, ARedirectHopUrlReadsTheMarkerNotTheScriptsBlank) {
+    auto response = make_response ();
+    response.redirect_hops = { { 302, "Found", {}, "https://a.test/cb?client_secret=&page=2",
+    "https://a.test/cb?client_secret=<redacted>&page=2", false } };
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_EQ (trace["response"]["redirects"].size (), 1U);
+    EXPECT_EQ (trace["response"]["redirects"][0]["url"],
+    "https://a.test/cb?client_secret=<redacted>&page=2");
 }
 
 // Written only when non-empty, on the `headerLines` rule above: absent is what

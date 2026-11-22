@@ -1109,10 +1109,6 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     client_config.max_response_bytes = data->max_response_bytes;
     // Ends with the enclosing exchange's own send (issue #2683).
     client_config.cancel = data->cancel;
-    // This response's hops reach the script-request record and nothing a
-    // script reads, so a withheld hop credential reads as the record's other
-    // URLs do (#3672).
-    client_config.redirect_url_mark = vayu::core::vayu_ext::CredentialMark::Marker;
     // Staged jar writes ride the next transfer of this execution, and this is
     // it - so a script that sets a cookie and then sends through
     // pm.sendRequest carries it. Drained rather than copied: this transfer's

@@ -225,9 +225,9 @@ CredentialMark mark = CredentialMark::Blank);
  * withheld URL credential reads `<redacted>` as a header's does, where an
  * export blanks it. A hop URL arrives already redacted (`record_hop`), and a
  * value blanked there cannot be told from one sent empty, so the marker in a
- * hop comes from the client (`ClientConfig::redirect_url_mark`, which
- * `pm.sendRequest` sets); this pass keeps it and guards a hop URL that was
- * not redacted. Bodies are not judged.
+ * hop is the one `RedirectHop::display_url` was recorded with and
+ * `serialize_redirects` wrote; this pass keeps it and guards a hop URL that
+ * was not redacted. Bodies are not judged.
  */
 void mask_script_request_record (nlohmann::json& record,
 const std::vector<std::string>& auth_header_names,

@@ -1272,7 +1272,8 @@ stream that produced nothing" - the same absent-not-empty rule
 response only, so a script that is lifted into or out of Postman should not
 depend on this property. Each entry is a followed 3xx response, oldest first:
 `code` (number) and `status` (reason phrase) named as on `pm.response`, `url`
-(the request that hop answered, an auth query parameter's value blanked),
+(the request that hop answered, a credential query parameter's value blank -
+the stored trace's `redirects[].url` reads `<redacted>` there),
 `schemeDowngrade` (`true` for an `https` request redirected to `http`, the one
 hop a header-placed API key crosses in clear text) and `headers`, shaped as
 `pm.response.headers` is.

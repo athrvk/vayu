@@ -859,34 +859,33 @@ TEST_F (HttpClientTest, AQueryParamApiKeyIsMaskedInTheRecordedHopUrl) {
         const auto& hops = result.value ().redirect_hops;
         ASSERT_EQ (hops.size (), 2U) << name;
         EXPECT_EQ (hops[0].url, mock_->url ("/chain") + "?" + encoded + "=&page=2") << name;
+        EXPECT_EQ (hops[0].display_url, mock_->url ("/chain") + "?" + encoded + "=<redacted>&page=2")
+        << name;
     }
 }
 
-// A hop URL's withheld credentials read blank unless the client is told to mark
-// them (#3672): blank is what the trace's `redirects[].url` and
-// `pm.response.redirects` show, `<redacted>` what a `pm.sendRequest` record
-// shows. Mutation check: drop the `mark` argument from `record_hop`'s
-// `redact_url_credentials` call and the marked client's hop reads blank.
-TEST_F (HttpClientTest, AHopUrlIsBlankedByDefaultAndMarkedWhenTheClientAsks) {
+// A hop records its withheld credentials twice (#3707, #3672): `url` blank, the
+// form `pm.response.redirects` and an export read, and `display_url` as
+// `<redacted>`, the form `serialize_redirects` writes. A blanked value cannot be
+// told from one sent empty, so the two are built from the raw URL together.
+// Mutation check: pass `CredentialMark::Blank` for `display_url` in
+// `record_hop` and it reads blank; pass `Marker` for `url` and the script's
+// copy reads `<redacted>`.
+TEST_F (HttpClientTest, AHopRecordsItsUrlBlankAndItsDisplayUrlMarked) {
     Request request;
     request.method = HttpMethod::GET;
     request.url    = mock_->url ("/chain") + "?client_secret=s3cret&page=2";
     request.follow_redirects = true;
 
-    auto blanked = client_->send (request);
-    ASSERT_TRUE (blanked.is_ok ()) << blanked.error ().message;
-    ASSERT_EQ (blanked.value ().redirect_hops.size (), 2U);
-    EXPECT_EQ (blanked.value ().redirect_hops[0].url,
-    mock_->url ("/chain") + "?client_secret=&page=2");
+    auto sent = client_->send (request);
 
-    ClientConfig marking;
-    marking.redirect_url_mark = vayu::core::vayu_ext::CredentialMark::Marker;
-    Client marked_client (marking);
-    auto marked = marked_client.send (request);
-    ASSERT_TRUE (marked.is_ok ()) << marked.error ().message;
-    ASSERT_EQ (marked.value ().redirect_hops.size (), 2U);
-    EXPECT_EQ (marked.value ().redirect_hops[0].url,
-    mock_->url ("/chain") + "?client_secret=<redacted>&page=2");
+    ASSERT_TRUE (sent.is_ok ()) << sent.error ().message;
+    const auto& hops = sent.value ().redirect_hops;
+    ASSERT_EQ (hops.size (), 2U);
+    EXPECT_EQ (hops[0].url, mock_->url ("/chain") + "?client_secret=&page=2");
+    EXPECT_EQ (hops[0].display_url, mock_->url ("/chain") + "?client_secret=<redacted>&page=2");
+    // A hop with nothing withheld reads the same in both forms.
+    EXPECT_EQ (hops[1].url, hops[1].display_url);
 }
 
 // The one hop a header-placed credential can cross in clear text. The target is

@@ -959,8 +959,16 @@ struct RedirectHop {
     std::vector<HeaderLine> header_lines;
     /// The URL of the request this response answered, with the auth query
     /// parameter's value blanked (`Request::auth_query_param`) and libcurl's
-    /// own removal of userinfo. Empty when libcurl reported none.
+    /// own removal of userinfo. Empty when libcurl reported none. The form a
+    /// script reads (`pm.response.redirects[].url`) and an export writes.
     std::string url;
+    /// @ref url with each withheld value written as `<redacted>` instead of
+    /// blanked (#3707): the form `serialize_redirects` writes, so a hop reads
+    /// as the trace's own request `url` does. A blanked value reads as one sent
+    /// empty, which a record of what was sent must not say, so the two are
+    /// built from the raw URL together (`record_hop`) rather than one from the
+    /// other.
+    std::string display_url;
     /// This hop's request went over `https` and the next one over `http`.
     bool scheme_downgrade = false;
 };

@@ -1803,10 +1803,12 @@ JSValue hop_headers_object (JSContext* ctx, const std::vector<HeaderLine>& lines
  *
  * Each entry is `{ code, status, url, schemeDowngrade, headers }`, named as
  * `pm.response` names the same facts: `code` is the number and `status` the
- * reason phrase. `url` is the request that hop answered, with an
- * auth-query parameter's value blanked, and `schemeDowngrade` marks a Location
- * that left `https` for `http`. An empty array is a recorded "nothing was
- * redirected"; absence is "not recorded" - see `ScriptContext::redirect_hops`.
+ * reason phrase. `url` is the request that hop answered, with each
+ * credential query parameter's value blanked (`RedirectHop::url`; the stored
+ * trace's copy reads `<redacted>`, #3707), and `schemeDowngrade` marks a
+ * Location that left `https` for `http`. An empty array is a recorded
+ * "nothing was redirected"; absence is "not recorded" - see
+ * `ScriptContext::redirect_hops`.
  */
 void install_response_redirects (JSContext* ctx,
 JSValue response,
