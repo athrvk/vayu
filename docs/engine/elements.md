@@ -242,7 +242,7 @@ can be a secret and the message reaches whoever reads the run. This differs from
 which stops the step before it is sent: here the request has already been sent and only the
 assertion fails. A single-request load run's `requestElements` resolve against the run's variables
 only and are not handed the bound row (`load_strategy.cpp`), so a `{{data.*}}` there is unanswered
-and fails.
+and fails (#3790).
 
 `assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
 one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
