@@ -26,6 +26,7 @@ import { formatLatency } from "@/lib/format-number";
 
 import { SampledExchange } from "./SampledExchange";
 import { phasesFromTrace } from "./timing-phases";
+import { formatPhaseDuration } from "./utils";
 
 const base = {
 	label: 3,
@@ -172,6 +173,61 @@ describe("SampledExchange", () => {
 		render(<SampledExchange {...base} isExpanded phases={phasesFromTrace({})} />);
 
 		expect(screen.queryByText("Timing breakdown")).toBeNull();
+	});
+
+	describe("the Scripts tile (#3739)", () => {
+		const expanded = (scriptMs: number | undefined, phases = phasesFromTrace({ dnsMs: 1 })) =>
+			render(
+				<TooltipProvider>
+					<SampledExchange {...base} isExpanded phases={phases} scriptMs={scriptMs} />
+				</TooltipProvider>
+			);
+
+		/** The tile's value as the phase tiles print it, so the figure is not hard-coded twice. */
+		const printed = (ms: number) => {
+			const { value, unit } = formatPhaseDuration(ms);
+			return `${value}${unit}`;
+		};
+
+		it("draws a reported script time after the phases", () => {
+			expanded(3010);
+
+			const tile = screen.getByText("Scripts").parentElement!;
+			expect(tile).toHaveTextContent(printed(3010));
+			const text = document.body.textContent ?? "";
+			expect(text.indexOf("DNS")).toBeLessThan(text.indexOf("Scripts"));
+		});
+
+		it("draws a reported zero, which is a script that ran and took no time", () => {
+			expanded(0);
+
+			expect(screen.getByText("Scripts").parentElement).toHaveTextContent(printed(0));
+		});
+
+		it("opens the breakdown for the script time when no phase was reported", () => {
+			expanded(3010, phasesFromTrace({}));
+
+			expect(screen.getByText("Timing breakdown")).toBeInTheDocument();
+			expect(screen.getByText("Scripts")).toBeInTheDocument();
+		});
+
+		it.each([
+			["absent", undefined],
+			["NaN", Number.NaN],
+			["negative", -1],
+		])("draws nothing for a %s script time", (_name, scriptMs) => {
+			expanded(scriptMs, phasesFromTrace({}));
+
+			expect(screen.queryByText("Scripts")).toBeNull();
+			expect(screen.queryByText("Timing breakdown")).toBeNull();
+		});
+
+		it("leaves the phase tiles alone when the script time is not reported", () => {
+			expanded(undefined);
+
+			expect(screen.getByText("Timing breakdown")).toBeInTheDocument();
+			expect(screen.queryByText("Scripts")).toBeNull();
+		});
 	});
 
 	it("squares off the row's own corners", () => {

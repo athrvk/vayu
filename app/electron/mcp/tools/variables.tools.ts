@@ -163,7 +163,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			variables: variablesInput("the globals"),
+			variables: variablesInput("the globals", "update_environment"),
 			removeVariables: removeVariablesInput("the globals"),
 		},
 		handler: async (args, ctx, signal) => {

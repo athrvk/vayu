@@ -27,7 +27,8 @@
  * hook from `ConsoleList` and the reader's place case reads a `scrollTop` of 0;
  * drop the `isExpanded`
  * gate on the report query in `StepRow` and "asks for the report only once the
- * row is open" fails.
+ * row is open" fails; drop `scriptMs=` from the `SampledExchange` in `StepRow` or
+ * `RequestRow` and that row's "script time" cases fail.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -504,6 +505,75 @@ describe("a collection-run step's row", () => {
 		fireEvent.mouseDown(screen.getByRole("tab", { name: "Headers" }));
 		expect(screen.getByRole("tabpanel")).toHaveTextContent("<redacted>");
 		expect(screen.getByRole("tabpanel")).not.toHaveTextContent("stored-secret");
+	});
+
+	describe("script time (#3739)", () => {
+		/** The stored report whose step carries the flat `scriptMs` key, or none. */
+		const reportWithScriptMs = (scriptMs?: number): RunReport => {
+			const stored = storedReport();
+			stored.results![0].trace = {
+				...stored.results![0].trace,
+				...(scriptMs !== undefined && { scriptMs }),
+			};
+			return stored;
+		};
+
+		it.each([
+			["a reported figure", 3010, "3.01s"],
+			["a reported zero", 0, "0ms"],
+		])("draws %s as the Scripts tile", (_name, scriptMs, shown) => {
+			report.answer = { data: reportWithScriptMs(scriptMs) };
+			append([step()]);
+			render(<ConsoleTab />);
+			fireEvent.click(summary());
+
+			expect(screen.getByText("Scripts").parentElement).toHaveTextContent(shown);
+		});
+
+		it("draws none when the stored step reported no script time", () => {
+			report.answer = { data: reportWithScriptMs(undefined) };
+			append([step()]);
+			render(<ConsoleTab />);
+			fireEvent.click(summary());
+
+			expect(screen.queryByText("Scripts")).toBeNull();
+		});
+	});
+
+	describe("a Send row's script time (#3739)", () => {
+		const timing = {
+			totalMs: 12,
+			dnsMs: 1,
+			connectMs: 1,
+			tlsMs: 1,
+			firstByteMs: 1,
+			downloadMs: 1,
+		};
+		const sendWithTiming = (scriptMs?: number): ConsoleRowInput => {
+			const row = send("https://api.test/send");
+			if (row.kind !== "send") throw new Error("send() builds a send row");
+			return { ...row, exchange: { ...row.exchange, timing: { ...timing, scriptMs } } };
+		};
+
+		it.each([
+			["draws the figure the send reported", 3010, "3.01s"],
+			["draws a reported zero", 0, "0ms"],
+		])("%s", (_name, scriptMs, shown) => {
+			append([sendWithTiming(scriptMs)]);
+			render(<ConsoleTab />);
+			fireEvent.click(screen.getByRole("button", { name: /api.test\/send/ }));
+
+			expect(screen.getByText("Scripts").parentElement).toHaveTextContent(shown);
+		});
+
+		it("draws none when the send reported none", () => {
+			append([sendWithTiming(undefined)]);
+			render(<ConsoleTab />);
+			fireEvent.click(screen.getByRole("button", { name: /api.test\/send/ }));
+
+			expect(screen.getByText("Timing breakdown")).toBeInTheDocument();
+			expect(screen.queryByText("Scripts")).toBeNull();
+		});
 	});
 
 	it("matches the stored row on iteration and position, not on name", () => {

@@ -56,6 +56,7 @@ import {
 	resolveLoadShape,
 } from "./compose.js";
 import {
+	asOn,
 	authInput,
 	collectionIdInput,
 	defaultHeaderOptOutsInput,
@@ -126,9 +127,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
-			headers: requestHeadersInput,
+			headers: requestHeadersInput.describe(asOn("run_request")),
 			body: z.string().optional().describe("Request body content."),
-			file: inlineFileInput,
+			file: inlineFileInput.describe(asOn("run_request")),
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
 			// had no way to discover the mode from the schema. The GET transport
@@ -141,7 +142,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the run on the GET an unnamed method defaults to. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. A body that sends a file (`binary`, or a form-data file part) cannot be given here - save it with create_request and load-test the saved request by `requestId`. An xml `body` is stored and sent verbatim as application/xml.'
 				),
-			auth: authInput,
+			auth: authInput.describe(asOn("run_request")),
 			httpVersion: z
 				.enum(HTTP_VERSIONS)
 				.optional()
@@ -263,7 +264,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					`In-flight cap (constant_rps only), 1-${MAX_IN_FLIGHT_BOUND}. Default max(targetRps * 10, 1000).`
 				),
-			thresholds: thresholdsInput,
+			thresholds: thresholdsInput.describe(asOn("run_collection")),
 			// Shaped exactly as the engine's `monitor` block and forwarded
 			// verbatim. The value bounds are deliberately not mirrored here the
 			// way `thresholds`' are: `monitor.series`' ceiling is the
@@ -378,10 +379,10 @@ export const LOAD_TOOLS: McpTool[] = [
 					"Load-test a saved request. It is composed the way the app composes it: {{variables}} resolved, its stored auth applied (inheriting through the collection chain), and its collection-chain + own test scripts run against sampled responses. Any field you also pass explicitly (url, method, headers, body, auth, tests) overrides the saved one. Omit this and `url` is required, for an ad-hoc run."
 				),
 			environmentId: environmentIdInput,
-			collectionId: collectionIdInput,
-			postRequestScript: validationScriptInput,
-			tests: validationScriptAliasInput,
-			disabledDefaultHeaders: defaultHeaderOptOutsInput,
+			collectionId: collectionIdInput.describe(asOn("run_request")),
+			postRequestScript: validationScriptInput.describe(asOn("run_request")),
+			tests: validationScriptAliasInput.describe(asOn("run_request")),
+			disabledDefaultHeaders: defaultHeaderOptOutsInput.describe(asOn("run_request")),
 			// The single-target data set (issue #993). Bounded by the engine's
 			// own `maxScenarioDataRows` / `maxScenarioDataBytes`, whose 400 is
 			// surfaced verbatim rather than re-derived here - the same posture
@@ -394,9 +395,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections with `fields: "full"`. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run, with dataFileName / dataFileHash when given), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
 				),
-			dataFileName: dataFileNameInput,
-			dataFileHash: dataFileHashInput,
-			dataFileCastNumbers: dataFileCastNumbersInput,
+			dataFileName: dataFileNameInput.describe(asOn("run_collection")),
+			dataFileHash: dataFileHashInput.describe(asOn("run_collection")),
+			dataFileCastNumbers: dataFileCastNumbersInput.describe(asOn("run_collection")),
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name
 			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
@@ -411,11 +412,11 @@ export const LOAD_TOOLS: McpTool[] = [
 					collectionId: z
 						.string()
 						.describe("Collection whose saved requests are the sequence."),
-					recursive: scenarioRecursiveInput,
-					data: scenarioDataInput,
-					dataFileName: dataFileNameInput,
-					dataFileHash: dataFileHashInput,
-					dataFileCastNumbers: dataFileCastNumbersInput,
+					recursive: scenarioRecursiveInput.describe(asOn("run_collection")),
+					data: scenarioDataInput.describe(asOn("run_collection")),
+					dataFileName: dataFileNameInput.describe(asOn("run_collection")),
+					dataFileHash: dataFileHashInput.describe(asOn("run_collection")),
+					dataFileCastNumbers: dataFileCastNumbersInput.describe(asOn("run_collection")),
 				})
 				.optional()
 				.describe(
@@ -430,7 +431,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// actually needs them.
 			elements: z
 				.strictObject({
-					timers: elementsTimersInput(),
+					timers: elementsTimersInput().describe(asOn("run_collection")),
 					scripts: z
 						.enum(["asMarked", "allInline", "allDeferred"])
 						.optional()

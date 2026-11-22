@@ -7,291 +7,21 @@
 
 /**
  * @file tool-list-budget.test.ts
- * @brief Holds `tools/list` to a size budget, and to the shape that kept it
- *        there (#2441).
+ * @brief Holds `tools/list` to a size budget, and to the shape that keeps it
+ *        there (#2441, #3747).
  *
  * Every session pays for the whole list before it does anything, and an
- * agent's context is the scarce resource: the list had grown to 137 KB with
- * writes off and 212 KB with them on, with the same withholding,
- * default-header and error-definition sentences repeated in up to eleven
- * descriptions each. Those rules now live once, in the server instructions,
- * and a tool carries a one-line pointer (`withheldPointer`), none when reveal
- * is on. Nothing else re-checked the total, so a description that grows back
- * a paragraph would ship unnoticed.
+ * agent's context is the scarce resource. Each cap is the measured size of the
+ * real registry through the real server, for one host (the remedy wording
+ * differs between the app and the stdio CLI) and one writes/reveal pair,
+ * rounded up to the next 100 B. A change that grows the list re-measures and
+ * moves the caps in its own diff; one that shrinks it lowers them.
  *
- * The caps are the measured size of the real registry through the real server
- * (app host) plus about 5%: 115,370 / 112,644 B with writes off (reveal off /
- * on) and 181,447 / 177,050 B with writes on. Before the fix, at d6c093c
- * (reveal off): 136,705 B with writes off, 211,549 B with writes on.
- * #2562's OAuth parameter lists then took the writes-off rows to 121,210 /
- * 118,484 B, and those two caps were re-set to that plus 5% (127,300 /
- * 124,500); the writes-on rows still fit their original caps.
- *
- * #2540's `dataFileCastNumbers` sentence in `list_runs`, with the descriptions
- * master gained meanwhile, took the writes-on rows to 190,876 B (reveal off)
- * and 186,479 B (reveal on), and their caps went from 186,000 / 190,600 to
- * 191,000 / 186,800 (one measurement plus a few hundred bytes). The
- * descriptions #2629, #2632 and #2640 then added took the reveal-off row to
- * 191,138 B on master itself, and its cap went to 191,500. #2396's
- * `targetRps` / `mode` sentences (a rate is `constant_rps`'s alone, and a
- * rate with no mode selects it) took the reveal-on row to 186,929 B, and its
- * cap went to 187,200.
- *
- * #2445's paged-read envelope schema on the five paged reads added about
- * 2,930 B to every row: 124,128 / 121,402 B writes off and 191,494 / 187,097 B
- * writes on became 127,059 / 124,333 and 194,425 / 190,028, and the caps went
- * to 128,500 / 125,800 and 196,000 / 191,600 (about 1% above each). The loose
- * schemas on the 23 other object-rooted reads (the rest of #2445) added 7,866 B
- * to every row, about 340 B a tool: 134,925 / 132,199 B writes off and
- * 202,291 / 197,894 B writes on, and the caps went to 136,300 / 133,600 and
- * 204,400 / 199,900 (about 1% above each).
- * The write-gate task wording adds to the instructions, not to `tools/list`,
- * so it spends none of this budget. #2444's `get_safety_config` (a description
- * and a small output schema, about 370 B a row) took the rows to 136,673 /
- * 133,947 B writes off and 204,039 / 199,642 B writes on; the writes-off caps
- * went to 137,100 / 134,400 and the writes-on caps still hold. #2451's paged
- * `run_collection_smoke` and the descriptions merged beside it then measured
- * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
- * caps went to 137,900 / 135,200 and 205,300 / 200,900.
- *
- * #2895's `summary.partial` / `summary.summaryMissing` sentence in
- * `get_run_report` and the two keys in its output schema took the rows to
- * 143,949 / 141,223 B writes off and 211,863 / 207,466 B writes on; the caps
- * went to 144,300 / 141,600 and 212,200 / 207,800 (one measurement plus a few
- * hundred bytes).
- *
- * #2443 (the paged whole-list reads) added the envelope schema and the `q` /
- * `limit` / `offset` / `fields` arguments to four tools; the caps sit about 1%
- * above that measurement.
- *
- * #2892's sentence naming the assertion budget's two populations sits in the
- * `thresholds` argument, which `run_collection` and `start_load_run` share, so
- * it is paid twice (188 B each). It took the three rows that were within a few
- * hundred bytes of their caps to 143,732 / 141,006 / 207,249 B (writes off:
- * reveal off / on; writes on: reveal on), and those caps went to 143,900 /
- * 141,200 / 207,500.
- *
- * #2820's `assertionsPassed` / `assertionsFailed` sentence in `list_runs` is
- * paid once per row, 290 B. With the descriptions master gained meanwhile the
- * rows measure 144,608 / 141,882 / 212,522 / 208,125 B (writes off: reveal off
- * / on; writes on: reveal off / on), and the four caps went to 144,900 /
- * 142,200 / 212,800 / 208,400.
- *
- * #2930's `capacity` sentence in `list_runs` is paid once per row, 233 B. The
- * rows measure 144,811 / 142,085 / 212,725 / 208,328 B, 72 to 115 B under the
- * caps above, and the four caps went to 145,100 / 142,400 / 213,000 / 208,600.
- *
- * #2937's `timeout` argument, shared by `create_request` and `update_request`
- * (about 300 B a row, paid twice), and the reworded timeout sentence in
- * `start_load_run` took the writes-on rows to 213,439 / 209,042 B; the writes-on
- * caps went to 213,700 / 209,300 and the writes-off rows are untouched.
- *
- * #2823's `scenario` sentence and #2928's `capacity` sentence in
- * `get_live_metrics`, each paid once per row and each within the margin alone,
- * together took the rows to 145,407 / 142,681 / 213,909 / 209,512 B, and the
- * four caps went to 145,700 / 143,000 / 214,200 / 209,800.
- *
- * #2938's sentence in `get_run_report` (`latency` is absent, not zero, on a
- * crash-reconciled run) and its schema change landed beside #2937 on master,
- * and each passed alone. Together the rows measure 145,176 / 142,450 / 213,678
- * / 209,281 B (writes off: reveal off / on; writes on: reveal off / on), the
- * first two over their caps and the last two within 22 B of theirs; the four
- * caps went to 145,500 / 142,800 / 214,000 / 209,600 (one measurement plus a
- * few hundred bytes). With #2823's, #2928's and #2938's sentences all in, the
- * rows measure 145,407 / 142,681 / 213,909 / 209,512 B and the caps stay at
- * 145,700 / 143,000 / 214,200 / 209,800.
- *
- * #2955's `get_live_metrics` answer, now `{ticks, completed}` (one description
- * sentence and an `outputSchema`, paid once), took the rows to 145,857 /
- * 143,131 / 214,359 / 209,962 B, and the four caps went to 146,200 / 143,500 /
- * 214,700 / 210,300.
- *
- * #2446's renamed `entryId` / `itemId` arguments and their deprecated `id`
- * aliases (three write tools) took the writes-on rows to 214,955 / 210,558 B;
- * those two caps went to 215,300 / 210,900 and the writes-off rows are
- * untouched. #2962 removed the aliases again; the caps only bound growth and
- * stay where they were.
- *
- * #2446's `offset` and `pagination` envelope on `get_mock_activity` (its output
- * schema was a bare `{data}` list) and the `limit` ceiling on
- * `get_live_metrics` took all four rows up by about 800 B: 146,936 / 144,210 /
- * 215,751 / 211,354 B. The caps went to 147,200 / 144,500 / 216,100 / 211,700.
- *
- * #2971's Trash wording (a saved example is a fourth kind `list_trash` lists
- * and `restore_trash_entry` / `purge_trash_entry` act on, and
- * `delete_request_example` says where it goes) took the writes-on rows to
- * 216,547 / 212,150 B. Those two caps went to 216,800 / 212,400; `list_trash`
- * is the one read tool it touched and stays within the writes-off margin, so
- * those caps are untouched.
- *
- * #2973's client-certificate Trash kind (the same three trash tools name it, and
- * `list_trash` and `list_client_certificates` each gained a sentence) took the
- * rows to 147,481 / 144,755 / 217,136 / 212,739 B, and the four caps went to
- * 147,600 / 144,900 / 217,300 / 212,900.
- *
- * #3031's `declined` bucket (a sentence each in `diff_spec` and `sync_spec`, and
- * the key in `diff_spec`'s output schema) took the rows to 147,636 / 144,910 /
- * 217,409 / 213,012 B, and the four caps went to 147,900 / 145,200 / 217,700 /
- * 213,300.
- *
- * #3159's `bodyEncoding` sentence in `get_run_samples` is paid once per row. The
- * rows measure 147,998 / 145,272 / 217,760 / 213,363 B, and the four caps went
- * to 148,300 / 145,600 / 218,100 / 213,700.
- *
- * #3127's two `get_run_report` sentences (an inline script element row's
- * `messages` / `console`, and the sampled-replay `failures` with their
- * `failureCounts`), each paid once, added 256 B to every row (measured on the
- * tree before #3159 landed, so the rows after both are 148,254 / 145,528 /
- * 218,016 / 213,619 B), and the four caps went to 148,400 / 145,700 / 218,200 /
- * 213,800.
- *
- * #3127's clause naming where the sampled replay's console lines are
- * (`testValidation.console`, a scenario step's `tests.console`) added 85 B to
- * every row, taking them to 148,339 / 145,613 / 218,101 / 213,704 B: inside
- * the four caps above, which stay.
- *
- * #3251's sentences on a blank or padded variable name (the shared `variables`
- * and `removeVariables` arguments, and `update_globals`) added 647 B to the
- * writes-on rows, taking them to 218,748 / 214,351 B; those two caps went to
- * 219,000 / 214,600 and the writes-off rows are untouched.
- *
- * #3234's two stream budgets in `thresholdsInput` (two keys and one sentence)
- * sit in the `thresholds` argument that `run_collection` and `start_load_run`
- * share, so they are paid twice (361 B each). The rows measure 149,061 /
- * 146,335 / 219,470 / 215,073 B, and the four caps went to 149,200 / 146,500 /
- * 219,600 / 215,200.
- *
- * #3236's streaming-keys sentence in `get_live_metrics` is paid once per row.
- * The rows measure 149,222 / 146,626 / 219,631 / 215,364 B, and the four caps
- * went to 149,500 / 146,900 / 219,900 / 215,700.
- *
- * #3235's stream caps on a collection run: `run_collection` gains
- * `maxStreamDurationMs` and `maxStreamEvents` (two arguments and a sentence),
- * and `start_load_run`'s three stream arguments say which of them a `scenario`
- * accepts. That is 874 B on every row, taking them to 150,096 / 147,500 /
- * 220,505 / 216,238 B; the four caps went to 150,100 / 147,600 / 220,600 /
- * 216,300, the least that holds them.
- *
- * #3260's `usable` / `problem` clause in `list_client_certificates` (and
- * "offered" for "answered" in `diagnose_connection`) added 76 B to every row,
- * taking them to 150,172 / 147,576 / 220,581 / 216,314 B; the two caps
- * that no longer held (writes off with reveal off, writes on with reveal on)
- * went to 150,200 / 216,400, the other two stay.
- *
- * #3339's `unknownStatus` (a sentence each in `get_run` and `get_run_report`,
- * and the key in both output schemas) added 270 B to every row, taking them to
- * 150,442 / 147,846 / 220,851 / 216,584 B; the four caps went to 150,500 /
- * 147,900 / 220,900 / 216,600.
- *
- * #3422's `headers` on `create_request_example` and `update_request_example`
- * (ordered rows or a map, so an array schema beside the record, paid twice, and
- * a sentence in each description) added 690 B to the writes-on rows, taking them
- * to 221,541 / 217,274 B; those two caps went to 221,600 / 217,300 and the
- * writes-off rows are untouched.
- *
- * #3449's Trash wording (`list_trash` names the purge totals and `parentName`,
- * `restore_trash_entry` the root a 409 names, `delete_collection` the mock it
- * stops) added 73 / 73 / 185 / 185 B, taking the rows to 150,524 / 147,928 /
- * 221,679 / 217,412 B; the four caps went to 150,600 / 148,000 / 221,700 /
- * 217,500.
- *
- * #3458's `assertionsFailed` clause in `list_runs` (a single-request load row
- * carries it alone) is paid once per row, 51 B, which on top of #3449 takes the
- * rows to 150,622 / 148,026 / 221,777 / 217,510 B; the four caps went to
- * 150,700 / 148,100 / 221,800 / 217,600.
- *
- * #3461's clause in `run_request` (an ad-hoc `requestId` scopes the scripts'
- * collection, said in the description and in the argument) added 68 B to every
- * row, which on top of #3449 and #3458 takes them to 150,690 / 148,094 /
- * 221,845 / 217,578 B; only the third cap moved, to 221,900, because the other
- * three still hold their rows.
- *
- * #3550's `headers` rows on `create_request` and `update_request` (the strict
- * row schema with `valueWithheld` beside the map, paid twice) added 621 B to
- * the writes-on rows, taking them to 222,466 / 218,199 B; those two caps went
- * to 222,600 / 218,300 and the writes-off rows are untouched. The example tools'
- * `headers` moving onto that same schema (#3550: the strict row declaring
- * `valueWithheld`, and a description that says what it keeps) added 177 B more,
- * to 222,643 / 218,376 B; the two caps went to 222,700 / 218,400. The row
- * declaring the members a stored row carries (`description`, `source`, `type`,
- * so a row written back as read is not refused), once for each of the four
- * tools that take one, and the sentence saying to write them back as read on
- * the two update tools, added 498 B more, to 223,141 / 218,874 B; the two caps
- * went to 223,200 / 218,900.
- *
- * #3552's `error` clause in `run_collection_smoke` (an engine failure rides the
- * row) added 67 B to every row, taking them to 150,757 / 148,161 / 221,912 /
- * 217,645 B; the four caps went to 150,800 / 148,200 / 223,300 / 219,000 (the writes-on
- * rows had also moved under #3550, so they are re-measured after the merge).
- *
- * #3544's "or collection" on the baseline wording (`set_run_baseline`,
- * `compare_runs` and its prompt's argument, `export_run_report`'s `baseline`,
- * and `list_runs`' `collectionId`) added 43 B to every row, and `set_run_baseline`
- * 37 B more to the writes-on rows. With #3552's clause above, the merged rows
- * measure 150,796 / 148,200 / 223,303 / 219,036 B; the four caps went to
- * 150,900 / 148,300 / 223,400 / 219,100.
- *
- * #3568's `phase` clause in `get_live_metrics` (the five phases and what
- * `backpressure` means in `draining`) is paid once per row, 134 B, taking the
- * merged rows to 150,934 / 148,338 / 223,441 / 219,174 B; the four caps went to
- * 151,000 / 148,400 / 223,500 / 219,200.
- *
- * #3538's `drainCut` clause in `list_runs` and sentence in `get_run_report`
- * (each paid once) took the rows, merged with #3544's and #3568's wording
- * around it, to 151,243 / 148,647 / 223,750 / 219,483 B; the four caps went to
- * 151,300 / 148,700 / 223,800 / 219,500 (one measurement plus a few hundred
- * bytes).
- *
- * #3562's optional `collectionId` on `list_requests` (the scope, and the
- * sentence that a workspace-wide `full` read costs the whole workspace) is paid
- * once per row, 89 B, taking the rows to 151,332 / 148,736 / 223,839 / 219,572
- * B; the four caps went to 151,400 / 148,800 / 223,900 / 219,600.
- *
- * #3556's strict input schemas (an undeclared argument is refused by name,
- * never dropped) put `additionalProperties: false` on every tool's arguments
- * object and on each nested input object, 29 B apiece, and declare the members
- * a read returns on a variable entry and a file reference, so one written back
- * as read is not refused. That added 1,798 B to the writes-off rows and 4,392 B
- * to the writes-on rows, taking them to 153,130 / 150,534 / 228,231 / 223,964
- * B; the four caps went to 153,400 / 150,800 / 228,500 / 224,200.
- *
- * #3560's `maxPoints` on `get_run_timeseries` and `get_run_monitor` and `fields`
- * on the first (two arguments each, a "whole run" sentence in each description)
- * added 1,064 B to every row, taking them to 154,314 / 151,718 / 229,427 /
- * 225,160 B; the four caps went to 154,400 / 151,800 / 229,500 / 225,200. The
- * same change's compact result text (no indent) shrinks what a call returns,
- * not `tools/list`, so it buys none of this back.
- *
- * #3559's `list_element_kinds` and `get_script_api` (two read tools, each with
- * a description, one optional argument and a loose output schema), and the
- * element and script fields that now name them beside their resources, added
- * 2,838 B to the writes-off rows and 3,026 B to the writes-on rows, taking them
- * to 157,152 / 154,556 / 232,453 / 228,186 B; the four caps went to 157,400 /
- * 154,800 / 232,700 / 228,400. #3558's later measurement counts these tools.
- *
- * #3547's `outcome` filter on `list_runs`, #3632's `jwt_bearer` config on
- * `fetch_oauth2_token` and #3633's script request records in `get_run_report`
- * (the three land in the same window, and no row was measured apart from the
- * others) took the rows to 157,510 / 154,914 / 232,811 / 228,544 B, 110 to 144 B
- * over the caps; the four caps went to 157,600 / 155,000 / 232,900 / 228,600.
- *
- * #3704's `read_body` (a read tool: a description, twelve optional arguments
- * and an exact output schema) costs 3,616 B with reveal off and 3,461 B with it
- * on, and the cap sentences that now name it in `run_request`, `get_run_report`,
- * `get_inbox_captures` and `list_request_examples` add 310 B more. The rows
- * measure 161,436 / 158,685 / 236,737 / 232,315 B, and the four caps went to
- * 161,700 / 159,000 / 237,000 / 232,600.
- *
- * #3705's `diff_bodies` (a read tool: a description, the two body references
- * `a` and `b` with read_body's source arguments bare, and an exact output
- * schema) costs 3,769 B with reveal off and 3,540 B with it on. The rows
- * measure 165,229 / 162,249 / 240,530 / 235,879 B, and the four caps went to
- * 165,500 / 162,500 / 240,800 / 236,100.
- *
- * #3748 strips the redundant 2020-12 `$schema` from every input and output
- * schema (57 B each: 5,415 B with writes off, 7,068 B with writes on), taking
- * the rows to 159,814 / 156,834 / 233,462 / 228,811 B, and the four caps went
- * to 160,100 / 157,100 / 233,800 / 229,100.
+ * Two shapes keep the list small, and both are checked here. A rule that tool
+ * descriptions would repeat lives once in the server instructions, and a tool
+ * carries a one-line pointer. A long argument description is stated on one
+ * argument and every other argument sharing it points there (`asOn`), unless
+ * `SHARED_ARGUMENT_DESCRIPTIONS` names it with the reason.
  */
 
 import { describe, it, expect } from "vitest";
@@ -300,9 +30,11 @@ import { resolveSafetyConfig } from "./config.js";
 import { createMcpServer, stripDefaultSchemaDialect } from "./server.js";
 import type { McpHost } from "./tools/contract.js";
 import { TOOLS, isListed } from "./tools.js";
+import { environmentIdInput } from "./tools/input-schemas.js";
 import type { EngineClient } from "./engine-client.js";
 
 interface Budget {
+	host: McpHost;
 	allowWrites: boolean;
 	revealSecretsToAgents: boolean;
 	/** The tools a session under this config lists; a literal, so an empty registry cannot pass. */
@@ -311,22 +43,47 @@ interface Budget {
 	maxBytes: number;
 }
 
+type Session = Pick<Budget, "host" | "allowWrites" | "revealSecretsToAgents">;
+
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 160_100 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 157_100 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 233_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 229_100 },
+	{ host: "app", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 154_300 },
+	{ host: "app", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 151_400 },
+	{ host: "app", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 221_400 },
+	{ host: "app", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 216_700 },
+	{ host: "cli", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 154_600 },
+	{ host: "cli", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 151_600 },
+	{ host: "cli", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 223_200 },
+	{ host: "cli", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 218_500 },
 ];
+
+const HOSTS: McpHost[] = ["app", "cli"];
+const WRITES_AND_REVEAL = [
+	[false, false],
+	[false, true],
+	[true, false],
+	[true, true],
+] as const;
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
 const LONG_SENTENCE_CHARS = 150;
 const MAX_TOOLS_PER_LONG_SENTENCE = 3;
 
-/** `tools/list` as a session on @p host (the app's, unless named) under @p safety answers it. */
-async function listTools(
-	safety: Pick<Budget, "allowWrites" | "revealSecretsToAgents">,
-	host: McpHost = "app"
-) {
+/** An argument description this long is stated on one argument; the others point at it. */
+const LONG_ARGUMENT_CHARS = 80;
+
+/** Argument descriptions repeated on purpose, each with the reason it is. */
+const SHARED_ARGUMENT_DESCRIPTIONS = new Map<string, string>([
+	[
+		environmentIdInput.description ?? "",
+		"#2480: every tool that takes environmentId states the one default at the argument, so a preview and a send cannot come to describe different ones (tools.test.ts pins it)",
+	],
+]);
+
+/** What a pointer description names: the tool whose same-named argument says it in full. */
+const POINTER = /^As on `(\w+)`/;
+
+/** `tools/list` as a session on @p session's host and safety config answers it. */
+async function listTools({ host, ...safety }: Session) {
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 	const config = resolveSafetyConfig(safety);
 	const server = createMcpServer({ name: "vayu", version: "test" }, () => ({
@@ -344,6 +101,8 @@ async function listTools(
 	return { tools, config };
 }
 
+type ListedTool = Awaited<ReturnType<typeof listTools>>["tools"][number];
+
 /** Each sentence of 150+ characters with the names of the tools whose description holds it. */
 function longSentenceUsers(descriptions: [string, string][]): Map<string, string[]> {
 	const users = new Map<string, string[]>();
@@ -357,8 +116,65 @@ function longSentenceUsers(descriptions: [string, string][]): Map<string, string
 	return users;
 }
 
+/** One description inside a tool's input or output schema. */
+interface ArgumentDescription {
+	/** `tool:in.path` or `tool:out.path`; `[]` steps into an item, `{}` into a record value. */
+	where: string;
+	/** The last property name on the path: the argument or member the text describes. */
+	member: string;
+	tool: string;
+	text: string;
+	/** The keywords the walk descended through to reach it. */
+	via: Set<string>;
+}
+
+const BRANCH_KEYWORDS = ["anyOf", "oneOf", "allOf"] as const;
+
+const isSchema = (node: unknown): node is Record<string, unknown> =>
+	typeof node === "object" && node !== null && !Array.isArray(node);
+
+/** Every description in @p node and the schemas nested under it, appended to @p out. */
+function collectDescriptions(
+	node: unknown,
+	at: Omit<ArgumentDescription, "text">,
+	out: ArgumentDescription[]
+): void {
+	if (!isSchema(node)) return;
+	if (typeof node.description === "string") out.push({ ...at, text: node.description });
+	const into = (child: unknown, step: string, member: string, keyword: string) =>
+		collectDescriptions(
+			child,
+			{ ...at, where: at.where + step, member, via: new Set([...at.via, keyword]) },
+			out
+		);
+	if (isSchema(node.properties))
+		for (const [name, child] of Object.entries(node.properties))
+			into(child, `.${name}`, name, "properties");
+	into(node.items, "[]", at.member, "items");
+	into(node.additionalProperties, "{}", at.member, "additionalProperties");
+	for (const keyword of BRANCH_KEYWORDS) {
+		const branches = node[keyword];
+		if (Array.isArray(branches))
+			for (const branch of branches) into(branch, "", at.member, keyword);
+	}
+}
+
+/** Every argument and output-member description @p tool carries. */
+function argumentDescriptions(tool: ListedTool): ArgumentDescription[] {
+	const out: ArgumentDescription[] = [];
+	const root = (side: string) => ({
+		where: `${tool.name}:${side}`,
+		member: "",
+		tool: tool.name,
+		via: new Set<string>(),
+	});
+	collectDescriptions(tool.inputSchema, root("in"), out);
+	collectDescriptions(tool.outputSchema, root("out"), out);
+	return out;
+}
+
 describe.each(BUDGETS)(
-	"tools/list size budget, writes $allowWrites, reveal $revealSecretsToAgents",
+	"tools/list size budget, host $host, writes $allowWrites, reveal $revealSecretsToAgents",
 	(budget) => {
 		it("lists the tools the registry declares for the session", async () => {
 			const { tools, config } = await listTools(budget);
@@ -394,12 +210,94 @@ describe.each(BUDGETS)(
 				);
 			expect(repeated).toEqual([]);
 		});
+
+		it(`states each ${LONG_ARGUMENT_CHARS}+ character argument description on one argument`, async () => {
+			const { tools } = await listTools(budget);
+			const descriptions = tools.flatMap(argumentDescriptions);
+			// A walk that found nothing would pass forever.
+			expect(descriptions.length).toBeGreaterThan(0);
+
+			const holders = new Map<string, string[]>();
+			for (const { where, text } of descriptions) {
+				if (text.length < LONG_ARGUMENT_CHARS || SHARED_ARGUMENT_DESCRIPTIONS.has(text))
+					continue;
+				holders.set(text, [...(holders.get(text) ?? []), where]);
+			}
+			const repeated = [...holders]
+				.filter(([, where]) => where.length > 1)
+				.map(([text, where]) => `${where.length} arguments (${where.join(", ")}): ${text}`);
+			expect(repeated).toEqual([]);
+		});
+
+		it("points every `As on` description at a listed tool stating that member", async () => {
+			const { tools } = await listTools(budget);
+			const descriptions = tools.flatMap(argumentDescriptions);
+			const pointers = descriptions.filter(({ text }) => POINTER.test(text));
+			expect(pointers.length).toBeGreaterThan(0);
+
+			const stated = new Set(
+				descriptions
+					.filter(({ text }) => !POINTER.test(text))
+					.map(({ tool, member }) => `${tool}:${member}`)
+			);
+			const dangling = pointers
+				.filter(({ text, member }) => !stated.has(`${POINTER.exec(text)?.[1]}:${member}`))
+				.map(({ where, text }) => `${where}: ${text}`);
+			expect(dangling).toEqual([]);
+		});
 	}
 );
 
+describe("tools/list budgets", () => {
+	it("hold a row for every host and writes/reveal pair", () => {
+		const key = ({ host, allowWrites, revealSecretsToAgents }: Session) =>
+			`${host} ${allowWrites} ${revealSecretsToAgents}`;
+		const expected = HOSTS.flatMap((host) =>
+			WRITES_AND_REVEAL.map(([allowWrites, revealSecretsToAgents]) =>
+				key({ host, allowWrites, revealSecretsToAgents })
+			)
+		);
+		expect(BUDGETS.map(key).sort()).toEqual(expected.sort());
+	});
+
+	// The CLI's remedy wording is longer than the app's, so measuring the app
+	// twice would pass every CLI cap; the two lists have to differ.
+	it.each(WRITES_AND_REVEAL)(
+		"measure the cli host's own wording, writes %s, reveal %s",
+		async (allowWrites, revealSecretsToAgents) => {
+			const serialized = async (host: McpHost) =>
+				JSON.stringify(
+					(await listTools({ host, allowWrites, revealSecretsToAgents })).tools
+				);
+			expect(await serialized("cli")).not.toBe(await serialized("app"));
+		}
+	);
+
+	// The argument scan checks a fraction of the list if the walk stops at the
+	// top level; each keyword it descends through reaches a description.
+	it.each(["properties", "items", "anyOf", "additionalProperties"])(
+		"walk argument schemas through %s",
+		async (keyword) => {
+			const { tools } = await listTools({
+				host: "app",
+				allowWrites: true,
+				revealSecretsToAgents: false,
+			});
+			const reached = tools
+				.flatMap(argumentDescriptions)
+				.filter(({ via }) => via.has(keyword));
+			expect(reached.length).toBeGreaterThan(0);
+		}
+	);
+});
+
 describe("tools/list while reveal is on", () => {
 	it.each([false, true])("carries no withholding wording, writes %s", async (allowWrites) => {
-		const { tools } = await listTools({ allowWrites, revealSecretsToAgents: true });
+		const { tools } = await listTools({
+			host: "app",
+			allowWrites,
+			revealSecretsToAgents: true,
+		});
 		expect(tools.length).toBeGreaterThan(0);
 		const offenders = tools
 			.filter((tool) => /Withheld|<redacted>/.test(tool.description ?? ""))
@@ -415,10 +313,11 @@ describe("tools/list schema dialect (#3748)", () => {
 		it.each([false, true])(
 			"names no dialect on any tool schema, writes %s",
 			async (allowWrites) => {
-				const { tools } = await listTools(
-					{ allowWrites, revealSecretsToAgents: false },
-					host
-				);
+				const { tools } = await listTools({
+					host,
+					allowWrites,
+					revealSecretsToAgents: false,
+				});
 				const schemas = tools.flatMap((tool) =>
 					[tool.inputSchema, tool.outputSchema].filter((schema) => schema !== undefined)
 				);
