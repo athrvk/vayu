@@ -20,9 +20,13 @@
 
 #include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/http/request_composer.hpp"
 
+#include <algorithm>
 #include <expected>
 #include <format>
+#include <string_view>
+#include <vector>
 
 #include "json_path.hpp"
 #include "user_regex.hpp"
@@ -114,6 +118,115 @@ class AssertStatusElement final : public Element {
 using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 
 // ---------------------------------------------------------------------------
+// Operands written with `{{name}}` tokens (#3779): `assert.contains`'s `text`
+// outside `matches`, and the strings of `assert.jsonpath`'s `expected`. They
+// resolve through `ElementContext::resolve_template` when the assertion
+// applies, the hook `control.if` reads. A token that cannot be answered fails
+// the assertion, because comparing the template as typed would turn a mistyped
+// column name into a verdict about the wrong operand.
+// ---------------------------------------------------------------------------
+
+constexpr std::string_view TOKEN_OPEN = "{{";
+
+/// The names of the tokens @p written holds, each once, in order of appearance.
+std::vector<std::string> token_names (const std::string& written) {
+    const auto split =
+    vayu::http::split_tokens (written, [] (const std::string&) { return true; });
+    std::vector<std::string> names;
+    for (const auto& name : split.names) {
+        if (std::ranges::find (names, name) == names.end ()) {
+            names.push_back (name);
+        }
+    }
+    return names;
+}
+
+/// Whether the step's variables answer the token @p name. Asked of the token
+/// alone: the data-row resolver hands back a whole text unchanged when any one
+/// of its columns is missing, so the whole text cannot say which name failed.
+/// A value that still holds a token counts as unanswered, as in `control.if`'s
+/// `exists`.
+bool token_is_answered (const ElementContext& ctx, const std::string& name) {
+    if (!ctx.resolve_template) {
+        return false;
+    }
+    const std::string token = "{{" + name + "}}";
+    return ctx.resolve_template (token).find (TOKEN_OPEN) == std::string::npos;
+}
+
+/// @p written with its tokens resolved. A token nothing answers is added to
+/// @p unresolved (once) and @p written comes back unchanged, which the caller
+/// must not compare. Text without a token is returned as it stands.
+std::string resolve_operand (const ElementContext& ctx,
+const std::string& written,
+std::vector<std::string>& unresolved) {
+    if (written.find (TOKEN_OPEN) == std::string::npos) {
+        return written;
+    }
+    bool answered = true;
+    for (const auto& name : token_names (written)) {
+        if (token_is_answered (ctx, name)) {
+            continue;
+        }
+        answered = false;
+        if (std::ranges::find (unresolved, name) == unresolved.end ()) {
+            unresolved.push_back (name);
+        }
+    }
+    return answered && ctx.resolve_template ? ctx.resolve_template (written) : written;
+}
+
+/// Every string value of @p value resolved as @ref resolve_operand does, at any
+/// depth. A resolved string stays a string (`"{{n}}"` answering `5` is `"5"`),
+/// and object keys are left as written.
+nlohmann::json resolve_json_strings (const ElementContext& ctx,
+const nlohmann::json& value,
+std::vector<std::string>& unresolved) {
+    if (value.is_string ()) {
+        return resolve_operand (ctx, value.get<std::string> (), unresolved);
+    }
+    if (value.is_array ()) {
+        nlohmann::json out = nlohmann::json::array ();
+        for (const auto& item : value) {
+            out.push_back (resolve_json_strings (ctx, item, unresolved));
+        }
+        return out;
+    }
+    if (value.is_object ()) {
+        nlohmann::json out = nlohmann::json::object ();
+        for (const auto& [key, item] : value.items ()) {
+            out[key] = resolve_json_strings (ctx, item, unresolved);
+        }
+        return out;
+    }
+    return value;
+}
+
+/// Whether any string value of @p value, at any depth, holds a token: decided
+/// when the element is built, so an operand with none costs nothing per apply.
+bool json_holds_token (const nlohmann::json& value) {
+    if (value.is_string ()) {
+        return value.get_ref<const std::string&> ().find (TOKEN_OPEN) != std::string::npos;
+    }
+    if (!value.is_array () && !value.is_object ()) {
+        return false;
+    }
+    return std::ranges::any_of (value, json_holds_token);
+}
+
+/// What an unresolved operand reports: the names only, never a value, since a
+/// resolved variable can be a secret and the message reaches whoever reads the
+/// run.
+std::string unresolved_message (const std::string& operand,
+const std::vector<std::string>& unresolved) {
+    std::string names;
+    for (const auto& name : unresolved) {
+        names += (names.empty () ? "{{" : ", {{") + name + "}}";
+    }
+    return "'" + operand + "' uses " + names + ", which no variable or data column answers";
+}
+
+// ---------------------------------------------------------------------------
 // assert.jsonpath - the same subset `extract.json` reads: one of `expected`
 // (exact match against the first hit), `regex` (the first hit as text) or
 // `exists` (true: at least one hit, false: none); `negate` flips the verdict
@@ -138,6 +251,8 @@ class AssertJsonPathElement final : public Element {
         if (config_.contains ("regex")) {
             regex_ = compile_user_regex (string_member (config_, "regex"));
         }
+        const auto expected = config_.find ("expected");
+        expected_holds_token_ = expected != config_.end () && json_holds_token (*expected);
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -175,10 +290,15 @@ class AssertJsonPathElement final : public Element {
         bool passed;
         std::string failure;
         if (config_.contains ("expected")) {
+            nlohmann::json resolved;
+            const nlohmann::json* expected = expected_operand (ctx, name, resolved);
+            if (expected == nullptr) {
+                return;
+            }
             // Converted first: `ordered_json` object equality is
             // order-sensitive, and `expected` is not compared by key order.
-            passed = !matches.empty () &&
-            nlohmann::json (*matches.front ()) == config_["expected"];
+            passed = !matches.empty () && nlohmann::json (*matches.front ()) == *expected;
+            // The written value: a resolved one may be a secret.
             failure = "expected '" + path_text + "' to " + not_prefix +
             "equal " + config_["expected"].dump ();
             if (!negate) {
@@ -208,9 +328,29 @@ class AssertJsonPathElement final : public Element {
     }
 
     private:
+    /// `expected` as this step reads it: @p storage holds the resolved copy
+    /// when it carries tokens, otherwise the config's own value is returned
+    /// untouched. Null once a token nothing answers has been recorded as the
+    /// assertion's failure.
+    const nlohmann::json* expected_operand (ElementContext& ctx,
+    const std::string& name,
+    nlohmann::json& storage) const {
+        if (!expected_holds_token_) {
+            return &config_.at ("expected");
+        }
+        std::vector<std::string> unresolved;
+        storage = resolve_json_strings (ctx, config_.at ("expected"), unresolved);
+        if (unresolved.empty ()) {
+            return &storage;
+        }
+        record_unrunnable_assertion (ctx, name, unresolved_message ("expected", unresolved));
+        return nullptr;
+    }
+
     nlohmann::json config_;
     std::optional<std::vector<detail::JsonPathStep>> path_;
     OptionalUserRegex regex_;
+    bool expected_holds_token_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -238,17 +378,31 @@ class AssertContainsElement final : public Element {
             return;
         }
         const std::string field = config_.value ("field", element_defaults::RESPONSE_FIELD);
-        const std::string text = config_.value ("text", "");
         const std::string mode =
         config_.value ("mode", element_defaults::ASSERT_CONTAINS_MODE);
+        const bool negate = config_.value ("negate", element_defaults::ASSERT_NEGATE);
+        // The text as written is what the name and the failure quote: the
+        // resolved one may be a secret. `matches` was compiled as a pattern
+        // when the element was built, so its text is never resolved.
+        const std::string written = config_.value ("text", "");
+        const std::string verb    = mode == "equals" ? "equal" :
+        pattern_                                     ? "match" :
+                                                       "contain";
+        const std::string name =
+        field + " " + (negate ? "does not " + verb : verb) + " '" + written + "'";
+        std::vector<std::string> unresolved;
+        const std::string text =
+        pattern_ ? written : resolve_operand (ctx, written, unresolved);
+        if (!unresolved.empty ()) {
+            record_unrunnable_assertion (ctx, name, unresolved_message ("text", unresolved));
+            return;
+        }
         std::string storage;
         const std::string_view subject = response_field_text (ctx, field, storage);
 
         bool passed;
-        std::string verb;
         if (mode == "equals") {
             passed = subject == text;
-            verb   = "equal";
         } else if (const auto& pattern = pattern_) {
             if (!*pattern) {
                 record_unrunnable_assertion (
@@ -256,22 +410,14 @@ class AssertContainsElement final : public Element {
                 return;
             }
             passed = (*pattern)->search (subject);
-            verb   = "match";
         } else {
             passed = subject.find (text) != std::string_view::npos;
-            verb   = "contain";
         }
-        if (config_.value ("negate", element_defaults::ASSERT_NEGATE)) {
+        if (negate) {
             passed = !passed;
         }
-        record_assertion (ctx,
-        field +
-        " " + (config_.value ("negate", element_defaults::ASSERT_NEGATE) ? "does not " + verb : verb) +
-        " '" + text + "'",
-        passed,
-        "expected " + field + " to " +
-        (config_.value ("negate", element_defaults::ASSERT_NEGATE) ? "not " + verb : verb) +
-        " '" + text + "'");
+        record_assertion (ctx, name, passed,
+        "expected " + field + " to " + (negate ? "not " + verb : verb) + " '" + written + "'");
     }
 
     private:
@@ -479,7 +625,14 @@ ElementKind make_assert_jsonpath_kind () {
         { { "path",
           { { "type", "string" }, { "title", "JSONPath" },
           { "description", "A JSONPath ($.a.b, $['a b'], [n], [*], ..name) locating the value to check." } } },
-        { "expected", { { "title", "Expected value" }, { "description", "The exact value the match must equal." } } },
+        { "expected",
+        { { "title", "Expected value" },
+        { "description",
+        "The exact value the match must equal. {{name}} and "
+        "{{data.column}} inside any string of it are replaced with the "
+        "step's variables when the assertion runs, and the result stays "
+        "a string; a name nothing answers fails the assertion. "
+        "'regex' is a pattern and is never resolved." } } },
         { "regex",
         { { "type", "string" }, { "title", "Pattern" },
         { "description",
@@ -525,7 +678,14 @@ ElementKind make_assert_contains_kind () {
           { "description",
           "Which part of the response to check: body, headers, url "
           "or status." } } },
-        { "text", { { "type", "string" }, { "title", "Text" }, { "description", "The text to look for, per the selected mode." } } },
+        { "text",
+        { { "type", "string" }, { "title", "Text" },
+        { "description",
+        "The text to look for, per the selected mode. In 'contains' and "
+        "'equals' mode, {{name}} and {{data.column}} are replaced with the "
+        "step's variables when the assertion runs, and a name nothing "
+        "answers fails the assertion. In 'matches' mode it is a pattern "
+        "and is never resolved." } } },
         { "mode",
         { { "type", "string" }, { "enum", { "contains", "equals", "matches" } },
         { "default", element_defaults::ASSERT_CONTAINS_MODE }, { "title", "Mode" },

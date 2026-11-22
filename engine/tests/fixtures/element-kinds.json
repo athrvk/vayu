@@ -463,7 +463,7 @@
           "type": "boolean"
         },
         "expected": {
-          "description": "The exact value the match must equal.",
+          "description": "The exact value the match must equal. {{name}} and {{data.column}} inside any string of it are replaced with the step's variables when the assertion runs, and the result stays a string; a name nothing answers fails the assertion. 'regex' is a pattern and is never resolved.",
           "title": "Expected value"
         },
         "negate": {
@@ -533,7 +533,7 @@
           "type": "boolean"
         },
         "text": {
-          "description": "The text to look for, per the selected mode.",
+          "description": "The text to look for, per the selected mode. In 'contains' and 'equals' mode, {{name}} and {{data.column}} are replaced with the step's variables when the assertion runs, and a name nothing answers fails the assertion. In 'matches' mode it is a pattern and is never resolved.",
           "title": "Text",
           "type": "string"
         }

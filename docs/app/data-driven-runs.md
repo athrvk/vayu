@@ -247,6 +247,16 @@ the same reason - the token says the value came from the file. A column that is
 legitimately empty for some rows belongs in a script, where `pm.iterationData`
 hands `null` to a branch that can read it.
 
+**An assertion reads the row too** (#3779). An `assert.contains` `text` (in `contains` or `equals`
+mode) and the strings of an `assert.jsonpath` `expected` take `{{data.column}}` and `{{name}}`, resolved
+per row when the assertion runs, so one assertion can check each row's own expected answer. This is a
+different failure from the one above: the request is already sent, so a column the row lacks does not
+stop the step, it fails that assertion, with a message naming the token
+(`'text' uses {{data.exepct}}, which no variable or data column answers`), never comparing the template
+as typed. A `matches` pattern is never resolved, and a failing assertion quotes the text as written, not
+the row's value. In a single-request load test the assertion has no row to read, so it fails the same
+way. See [Elements](../engine/elements.md).
+
 A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as
 that text inside valid JSON rather than ending the string. A token written
