@@ -126,26 +126,6 @@ export function restoreWithheldHeaderRows(stored: unknown, rows: HeaderRowArg[])
 	});
 }
 
-/**
- * {@link restoreWithheldHeaderRows}, for a write that may move the request to
- * another origin (#3564). A stored credential belongs to the address it was
- * stored for, so when @p originChanged a row standing for one is left out of
- * `rows` rather than given its value, and its name is in `notCarried`. A row
- * with no stored row to stand for is refused either way.
- */
-export function carryHeaderRows(
-	stored: unknown,
-	rows: HeaderRowArg[],
-	originChanged: boolean
-): { rows: HeaderRow[]; notCarried: string[] } {
-	const restored = restoreWithheldHeaderRows(stored, rows);
-	if (!originChanged) return { rows: restored, notCarried: [] };
-	return {
-		rows: restored.filter((_, index) => !keepsStoredValue(rows[index])),
-		notCarried: rows.filter(keepsStoredValue).map((row) => row.key),
-	};
-}
-
 /** @p headers as rows for a list with nothing stored behind it, so a withheld row is refused. */
 export function newHeaderRows(headers: unknown): HeaderRow[] {
 	return restoreWithheldHeaderRows(undefined, readHeaderRows(headers));
@@ -189,29 +169,59 @@ export function droppedWithheldHeaders(
 	auth: unknown,
 	written: ReadonlyArray<Pick<HeaderRow, "key">>
 ): string[] {
-	const writtenCount = new Map<string, number>();
+	return withheldRowsAtSlot(stored, auth, written, (row) => row === undefined);
+}
+
+/**
+ * The names of the rows of @p stored whose value the read withheld (under the
+ * stored row's @p auth) and that the write leaves holding it (#3654): with no
+ * @p written list the stored one stays as it is, and with one only a row written
+ * back withheld keeps the stored value. A row given a value, or left out, is
+ * not one: the credential it held is replaced or gone.
+ */
+export function credentialRowsKept(
+	stored: unknown,
+	auth: unknown,
+	written: ReadonlyArray<HeaderRowArg> | undefined
+): string[] {
+	if (written === undefined) {
+		return withheldRowsAtSlot(stored, auth, [], () => true);
+	}
+	return withheldRowsAtSlot(
+		stored,
+		auth,
+		written,
+		(row) => row !== undefined && keepsStoredValue(row)
+	);
+}
+
+/**
+ * The names of the withheld rows of @p stored whose slot, the row of @p written
+ * at the same folded name and occurrence (undefined when there is none), passes
+ * @p atSlot.
+ */
+function withheldRowsAtSlot<Row extends Pick<HeaderRow, "key">>(
+	stored: unknown,
+	auth: unknown,
+	written: ReadonlyArray<Row>,
+	atSlot: (row: Row | undefined) => boolean
+): string[] {
+	const slots = new Map<string, Row[]>();
 	for (const row of written) {
 		const name = foldHeaderName(row.key);
-		writtenCount.set(name, (writtenCount.get(name) ?? 0) + 1);
+		slots.set(name, [...(slots.get(name) ?? []), row]);
 	}
 	const seen = new Map<string, number>();
-	const dropped = new Set<string>();
+	const names = new Set<string>();
 	for (const row of storedRows(stored)) {
 		const name = foldHeaderName(row.key);
 		const occurrence = seen.get(name) ?? 0;
 		seen.set(name, occurrence + 1);
-		if (withholdsHeaderRow(row, auth) && occurrence >= (writtenCount.get(name) ?? 0)) {
-			dropped.add(row.key);
+		if (withholdsHeaderRow(row, auth) && atSlot(slots.get(name)?.[occurrence])) {
+			names.add(row.key);
 		}
 	}
-	return [...dropped];
-}
-
-/** One line per header of @p names, a withheld row left without its stored value because the host changed (#3564). */
-export function uncarriedHeadersCaveat(names: string[]): string {
-	return names
-		.map((name) => `${name} was not carried because the host changed; give it a value.`)
-		.join("\n");
+	return [...names];
 }
 
 /** The caveat line naming @p names, the headers a write removed unread; empty for none. */

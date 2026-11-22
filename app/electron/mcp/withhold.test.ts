@@ -416,7 +416,6 @@ describe("restoreWithheldRequestUrl (#3549)", () => {
 		).toEqual({
 			url: "https://u:PW@h/y?api_key=S&page=3",
 			kept: [{ part: "userinfo" }, { part: "query", name: "api_key" }],
-			originChanged: false,
 			notCarried: [],
 		});
 	});
@@ -469,7 +468,6 @@ describe("restoreWithheldRequestUrl (#3549)", () => {
 		expect(restoreWithheldRequestUrl(stored, "/p?token=", undefined)).toEqual({
 			url: "/p?token=",
 			kept: [],
-			originChanged: false,
 			notCarried: [],
 		});
 	});
@@ -496,7 +494,6 @@ describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () =
 		).toEqual({
 			url: "https://u@evil.example/x?api_key=#token=",
 			kept: [],
-			originChanged: true,
 			notCarried: slots,
 		});
 	});
@@ -515,7 +512,6 @@ describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () =
 		["a variable in the userinfo", "https://{{v}}@bank.example/x?api_key=#token="],
 	])("a write to another origin (%s) carries nothing", (_name, incoming) => {
 		const restored = restoreWithheldRequestUrl(stored, incoming, undefined);
-		expect(restored.originChanged).toBe(true);
 		expect(restored.url).toBe(incoming);
 		expect(restored.kept).toEqual([]);
 	});
@@ -526,7 +522,6 @@ describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () =
 			"https://evil.example/x?page=2&token=",
 			undefined
 		);
-		expect(restored.originChanged).toBe(true);
 		expect(restored.notCarried).toEqual([]);
 	});
 
@@ -538,7 +533,6 @@ describe("restoreWithheldRequestUrl is bound to the stored origin (#3564)", () =
 		["the default port written out", "https://u@bank.example:443/x?api_key=#token="],
 	])("%s keeps every slot", (_name, incoming) => {
 		const restored = restoreWithheldRequestUrl(stored, incoming, undefined);
-		expect(restored.originChanged).toBe(false);
 		expect(restored.notCarried).toEqual([]);
 		expect(restored.kept.map((slot) => slot.part)).toEqual(
 			incoming.includes("https://v@")

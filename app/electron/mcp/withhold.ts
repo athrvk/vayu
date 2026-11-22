@@ -763,8 +763,6 @@ export type KeptUrlSlot = { part: "userinfo" } | { part: "query" | "fragment"; n
 export interface RestoredUrl {
 	url: string;
 	kept: KeptUrlSlot[];
-	/** Whether the incoming URL addresses another origin than the stored one. */
-	originChanged: boolean;
 	/** The slots {@link kept} would have named, left empty because the origin changed. */
 	notCarried: KeptUrlSlot[];
 }
@@ -845,13 +843,13 @@ export function restoreWithheldRequestUrl(
 	auth: unknown
 ): RestoredUrl {
 	if (typeof stored !== "string") {
-		return { url: incoming, kept: [], originChanged: false, notCarried: [] };
+		return { url: incoming, kept: [], notCarried: [] };
 	}
 	const carried = carryWithheldSlots(stored, incoming, apiKeyParamName(auth));
 	if (!originChanged(stored, incoming)) {
-		return { ...carried, originChanged: false, notCarried: [] };
+		return { ...carried, notCarried: [] };
 	}
-	return { url: incoming, kept: [], originChanged: true, notCarried: carried.kept };
+	return { url: incoming, kept: [], notCarried: carried.kept };
 }
 
 /** @p incoming with every withheld slot of @p stored it still holds in the read's form filled in. */
