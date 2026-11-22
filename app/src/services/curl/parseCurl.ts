@@ -40,7 +40,7 @@ import {
 	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
 } from "@/constants/request";
-import { tokenize, UnterminatedQuoteError } from "./tokenize";
+import { tokenizeCommand, UnterminatedQuoteError } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
 import { detectCommand } from "./detect-command";
@@ -107,7 +107,16 @@ export interface CommandImport {
 	request: ParsedRequest;
 	/** Empty when everything the command asked for was carried over. */
 	dropped: DroppedFlag[];
+	/**
+	 * Shell variables the command wrote (`$API_KEY`, `${HOST}`), now `{{API_KEY}}`
+	 * in the request, each once in the order first seen (#3777). Empty when the
+	 * command used none. The user has to give each a value in their environment.
+	 */
+	variables: string[];
 }
+
+/** What a parser reads out of the arguments; the tokenizer supplies `variables`. */
+type ParsedArguments = Omit<CommandImport, "variables">;
 
 /** One thing a pasted command asked for that the import could not carry. */
 export interface DroppedFlag {
@@ -230,10 +239,10 @@ export function readCommand(text: string): CommandReading {
 
 	try {
 		// Drop the leading program name (curl / wget).
-		const args = tokenize(text).slice(1);
-		const parsed = kind === "curl" ? parseCurl(args) : parseWget(args);
+		const { tokens, variables } = tokenizeCommand(text);
+		const parsed = kind === "curl" ? parseCurl(tokens.slice(1)) : parseWget(tokens.slice(1));
 		if (!parsed.request.url) return { ok: false, reason: "missing-url" };
-		return { ok: true, command: parsed };
+		return { ok: true, command: { ...parsed, variables } };
 	} catch (error) {
 		if (error instanceof UnterminatedQuoteError)
 			return { ok: false, reason: "unterminated-quote" };
@@ -672,7 +681,7 @@ function withUploadName(url: string, path: string): string {
 	return url;
 }
 
-function resolve(b: Builder): CommandImport {
+function resolve(b: Builder): ParsedArguments {
 	// --- URL + params -------------------------------------------------------
 	let url = b.url || pickUrl(b);
 	if (b.uploadPath) url = withUploadName(url, b.uploadPath);
@@ -968,7 +977,7 @@ function expandShortCluster(arg: string): string[] | null {
 	return pieces;
 }
 
-function parseCurl(argv: string[]): CommandImport {
+function parseCurl(argv: string[]): ParsedArguments {
 	const b = newBuilder();
 	// Spliced as clusters are met, so a value piece is consumed by its flag and
 	// never read here as a flag of its own.
@@ -1199,7 +1208,7 @@ const WGET_SKIP_WITH_ARG = new Set([
 	"--directory-prefix",
 ]);
 
-function parseWget(args: string[]): CommandImport {
+function parseWget(args: string[]): ParsedArguments {
 	const b = newBuilder();
 	// wget's own default is the opposite of curl's - it follows redirects
 	// unless told not to - so the shared builder's curl-shaped default is

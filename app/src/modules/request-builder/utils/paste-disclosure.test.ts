@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DroppedFlag } from "@/services/curl/parseCurl";
-import { droppedFlagsNotice, unreadableCommandNotice } from "./paste-disclosure";
+import { droppedFlagsNotice, pasteNotice, unreadableCommandNotice } from "./paste-disclosure";
 
 const reveal = vi.hoisted(() => vi.fn());
 vi.mock("@/modules/settings/reveal", () => ({ revealSetting: reveal }));
@@ -57,6 +57,45 @@ describe("the paste disclosure notice", () => {
 		// Named, not actioned. An "Open settings" that lands on a screen with no
 		// answer for `--retry` is a pointer to nowhere.
 		expect(droppedFlagsNotice([HOMELESS])?.action).toBeUndefined();
+	});
+});
+
+describe("the paste notice (#3777)", () => {
+	it("is absent when the paste dropped nothing and named no variable", () => {
+		expect(pasteNotice({ dropped: [], variables: [] })).toBeNull();
+	});
+
+	it("is the dropped-flags notice, unchanged, when no variable was named", () => {
+		const imported = { dropped: [PROXY, HOMELESS], variables: [] };
+
+		expect(pasteNotice(imported)).toEqual({
+			...droppedFlagsNotice(imported.dropped),
+			action: expect.anything(),
+		});
+	});
+
+	it("names each variable as the {{token}} it became, in the order given", () => {
+		const notice = pasteNotice({ dropped: [], variables: ["API_KEY", "HOST"] });
+
+		expect(notice).toEqual({
+			title: "Imported with variables",
+			message:
+				"Shell variables became {{API_KEY}}, {{HOST}} - give them values in an environment.",
+			variant: "info",
+		});
+	});
+
+	it("merges the variables and the dropped flags into one warning with the flags' action", () => {
+		const notice = pasteNotice({ dropped: [PROXY], variables: ["API_KEY"] });
+
+		expect(notice?.title).toBe("Imported with variables, minus some flags");
+		expect(notice?.message).toBe(
+			"Shell variables became {{API_KEY}} - give them values in an environment. " +
+				"-x routed the request through a proxy (Proxy settings)."
+		);
+		expect(notice?.variant).toBe("warning");
+		notice?.action?.onClick();
+		expect(reveal).toHaveBeenCalledWith("network_performance", "proxyUrl");
 	});
 });
 

@@ -82,7 +82,7 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { importCommand, type CommandImport } from "@/services/curl/parseCurl";
-import { droppedFlagsNotice } from "@/modules/request-builder/utils/paste-disclosure";
+import { pasteNotice } from "@/modules/request-builder/utils/paste-disclosure";
 import { presetFromCommand } from "./curl-request-preset";
 
 type Tab = "file" | "url" | "paste";
@@ -582,11 +582,11 @@ export function ImportModal() {
 		await runBatch("paste", at, [{ text: pasteText }]);
 	};
 
-	/** The creation flow the URL bar's paste feeds, and the same disclosure of what it dropped. */
+	/** The creation flow the URL bar's paste feeds, and the same disclosure of what it dropped or renamed. */
 	const openCommandAsRequest = (command: CommandImport): void => {
 		newRequest(presetFromCommand(command.request));
 		handleClose();
-		const notice = droppedFlagsNotice(command.dropped);
+		const notice = pasteNotice(command);
 		if (notice) showToast(notice);
 	};
 

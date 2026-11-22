@@ -176,3 +176,41 @@ describe("pasting a command that cannot be read (#3685)", () => {
 		expect(useToastStore.getState().toasts).toEqual([]);
 	});
 });
+
+describe("pasting a command with shell variables (#3777)", () => {
+	beforeEach(() => {
+		useToastStore.setState({ toasts: [] });
+	});
+
+	it("imports them as {{NAME}} and names them in one notice", () => {
+		const { setRequest } = renderField();
+
+		paste(
+			screen.getByLabelText("Request URL") as HTMLInputElement,
+			`curl https://a.test/x -H "Authorization: Bearer $OPENAI_API_KEY" --retry 3`
+		);
+
+		expect(setRequest).toHaveBeenCalledWith(
+			expect.objectContaining({
+				headers: [expect.objectContaining({ value: "Bearer {{OPENAI_API_KEY}}" })],
+			})
+		);
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0]).toMatchObject({
+			title: "Imported with variables, minus some flags",
+			message: expect.stringContaining("{{OPENAI_API_KEY}}"),
+		});
+	});
+
+	it("keeps a single-quoted $NAME literal and says nothing", () => {
+		const { field, setRequest } = renderField();
+
+		paste(field, "curl https://a.test/x -H 'A: $KEY'");
+
+		expect(setRequest).toHaveBeenCalledWith(
+			expect.objectContaining({ headers: [expect.objectContaining({ value: "$KEY" })] })
+		);
+		expect(useToastStore.getState().toasts).toEqual([]);
+	});
+});

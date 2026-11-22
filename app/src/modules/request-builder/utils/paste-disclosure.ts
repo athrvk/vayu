@@ -24,7 +24,7 @@
  */
 
 import type { ToastOptions } from "@/stores/toast-store";
-import type { CommandFailure, DroppedFlag } from "@/services/curl/parseCurl";
+import type { CommandFailure, CommandImport, DroppedFlag } from "@/services/curl/parseCurl";
 import { revealSetting } from "@/modules/settings/reveal";
 
 const UNREADABLE_COMMAND_REASON: Record<CommandFailure, string> = {
@@ -88,5 +88,42 @@ export function droppedFlagsNotice(dropped: DroppedFlag[]): ToastOptions | null 
 					},
 				}
 			: {}),
+	};
+}
+
+/**
+ * What a paste did to the shell variables it wrote (#3777): they were turned
+ * into `{{NAME}}`, and the request will send the literal text until each one
+ * has a value. A single sentence, because it shares a toast with the dropped
+ * flags.
+ */
+function variablesMessage(variables: string[]): string {
+	const names = variables.map((name) => `{{${name}}}`).join(", ");
+	return `Shell variables became ${names} - give them values in an environment.`;
+}
+
+/**
+ * The one notice a pasted command earns: what it dropped, what became a
+ * variable, or both in a single toast. Null when the paste changed nothing the
+ * user needs to hear about.
+ *
+ * One toast rather than two: a paste is one event. It is a `warning` whenever
+ * flags were dropped (see `droppedFlagsNotice`) and an `info` when only
+ * variables were named, which the request still sends correctly once they have
+ * values.
+ */
+export function pasteNotice(
+	imported: Pick<CommandImport, "dropped" | "variables">
+): ToastOptions | null {
+	const dropped = droppedFlagsNotice(imported.dropped);
+	if (imported.variables.length === 0) return dropped;
+
+	const message = variablesMessage(imported.variables);
+	if (!dropped) return { title: "Imported with variables", message, variant: "info" };
+
+	return {
+		...dropped,
+		title: "Imported with variables, minus some flags",
+		message: `${message} ${dropped.message}`,
 	};
 }

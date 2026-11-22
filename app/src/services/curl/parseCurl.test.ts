@@ -1137,3 +1137,106 @@ describe("parseCommand - curl -H spellings with no value", () => {
 		expect(r.disabledSystemHeaders).toEqual([]);
 	});
 });
+
+describe("parseCommand - shell variables (#3777)", () => {
+	// The quick-start command OpenAI, Anthropic and most API docs open with.
+	const OPENAI = [
+		"curl https://api.openai.com/v1/chat/completions \\",
+		"  -H 'Content-Type: application/json' \\",
+		'  -H "Authorization: Bearer $OPENAI_API_KEY" \\',
+		`  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "$PROMPT"}]}'`,
+	].join("\n");
+
+	test("a double-quoted $NAME in a header becomes {{NAME}} and is named", () => {
+		const imported = importCommand(OPENAI)!;
+
+		expect(imported.request.headers).toEqual(
+			kv([
+				{ key: "Content-Type", value: "application/json" },
+				{ key: "Authorization", value: "Bearer {{OPENAI_API_KEY}}" },
+			])
+		);
+		expect(imported.variables).toEqual(["OPENAI_API_KEY"]);
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test("a single-quoted body keeps its $NAME literal", () => {
+		const imported = importCommand(OPENAI)!;
+
+		expect(imported.request.body).toContain('"content": "$PROMPT"');
+		expect(imported.variables).not.toContain("PROMPT");
+	});
+
+	test("${NAME} in the URL, the body and a header, listed once each in order", () => {
+		const imported = importCommand(
+			`curl "https://\${HOST}/v1/$ID" -H "X-Key: $KEY" -H "X-Again: $KEY" -d "hello $ID from \${HOST}"`
+		)!;
+
+		expect(imported.request.url).toBe("https://{{HOST}}/v1/{{ID}}");
+		expect(imported.request.headers).toEqual(
+			kv([
+				{ key: "X-Key", value: "{{KEY}}" },
+				{ key: "X-Again", value: "{{KEY}}" },
+			])
+		);
+		expect(imported.request.body).toBe("hello {{ID}} from {{HOST}}");
+		expect(imported.variables).toEqual(["HOST", "ID", "KEY"]);
+	});
+
+	test("an unquoted $NAME in the URL's query becomes a param value", () => {
+		const imported = importCommand("curl https://x.test/a?key=$KEY")!;
+
+		expect(imported.request.params).toEqual(kv([{ key: "key", value: "{{KEY}}" }]));
+		expect(imported.variables).toEqual(["KEY"]);
+	});
+
+	test("a wget command reads its variables the same way", () => {
+		const imported = importCommand(
+			`wget --header="Authorization: Bearer $TOKEN" https://x.test/$PATH_PART`
+		)!;
+
+		expect(imported.request.url).toBe("https://x.test/{{PATH_PART}}");
+		expect(imported.request.headers).toEqual(
+			kv([{ key: "Authorization", value: "Bearer {{TOKEN}}" }])
+		);
+		expect(imported.variables).toEqual(["TOKEN", "PATH_PART"]);
+	});
+
+	test.each([
+		["a command substitution", `curl https://x.test -H "A: $(date)"`, "$(date)"],
+		["a positional parameter", `curl https://x.test -H "A: $1"`, "$1"],
+		["an escaped dollar", `curl https://x.test -H "A: \\$KEY"`, "$KEY"],
+		["a single-quoted name", `curl https://x.test -H 'A: $KEY'`, "$KEY"],
+	])("leaves %s in a header as written and names nothing", (_name, command, value) => {
+		const imported = importCommand(command)!;
+
+		expect(imported.request.headers).toEqual(kv([{ key: "A", value }]));
+		expect(imported.variables).toEqual([]);
+	});
+
+	test("a {{$guid}} the command already wrote survives", () => {
+		const imported = importCommand(`curl https://x.test -H "X-Id: {{$guid}}"`)!;
+
+		expect(imported.request.headers).toEqual(kv([{ key: "X-Id", value: "{{$guid}}" }]));
+		expect(imported.variables).toEqual([]);
+	});
+
+	test("a command with no variables names none", () => {
+		expect(importCommand("curl https://x.test")!.variables).toEqual([]);
+	});
+
+	test("Chrome's cmd copy is read as before", () => {
+		const imported = importCommand(chromeCmdCopy)!;
+		const bash = importCommand(chromeBashCopy)!;
+
+		expect(imported.variables).toEqual([]);
+		expect(imported.request.url).toBe(bash.request.url);
+		expect(imported.request.body).toBe(bash.request.body);
+	});
+
+	test("the variables travel with a successful reading", () => {
+		const reading = readCommand(`curl https://x.test/$A`);
+
+		expect(reading).toMatchObject({ ok: true, command: { variables: ["A"] } });
+	});
+});
