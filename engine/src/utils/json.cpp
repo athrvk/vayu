@@ -171,6 +171,12 @@ Json serialize (const Request& request) {
             body_json["mode"]    = "xml";
             body_json["content"] = request.body.content;
             break;
+        // Verbatim for the same reason as `jsonrpc`: a body still holding
+        // `{{tokens}}` is not JSON to re-serialize.
+        case BodyMode::Mcp:
+            body_json["mode"]    = "mcp";
+            body_json["content"] = request.body.content;
+            break;
         default: break;
         }
 
@@ -1118,6 +1124,8 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
                 request.body.mode = BodyMode::JsonRpc;
             } else if (mode == "xml") {
                 request.body.mode = BodyMode::Xml;
+            } else if (mode == "mcp") {
+                request.body.mode = BodyMode::Mcp;
             }
         }
 

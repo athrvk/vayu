@@ -237,7 +237,8 @@ std::string implied_content_type (const Body& body) {
     // one's envelope, and the envelope is what the header describes.
     case BodyMode::Json:
     case BodyMode::GraphQL:
-    case BodyMode::JsonRpc: return "application/json";
+    case BodyMode::JsonRpc:
+    case BodyMode::Mcp: return "application/json";
     case BodyMode::Xml: return "application/xml";
     // `text/plain` is a default, not a claim that every text body is plain
     // text (issue #2464): a typed `Content-Type` row wins (`text/csv`, a JWT's

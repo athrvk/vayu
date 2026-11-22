@@ -737,6 +737,20 @@ TEST (ScenarioDataJsonBodyTest, ABoundJsonRpcCallStillGetsItsEnvelope) {
     EXPECT_EQ (wire.at ("params").at ("t").get<std::string> (), R"(a"b)");
 }
 
+// An `mcp` body is a JSON document like `json` and `jsonrpc`: a cell carrying
+// a quote binds escaped, so the call stays parseable.
+TEST (ScenarioDataJsonBodyTest, ABoundMcpCallIsEscapedAsAJsonDocument) {
+    auto request      = request_with_url ("https://api.test/");
+    request.body.mode = vayu::BodyMode::Mcp;
+    request.body.content = R"({"method":"tools/call","params":{"t":"{{data.t}}"}})";
+
+    ASSERT_TRUE (bind_data_row (request, json{ { "t", R"(a"b)" } }, 0).ok);
+
+    const auto call = json::parse (request.body.content, nullptr, false);
+    ASSERT_FALSE (call.is_discarded ()) << request.body.content;
+    EXPECT_EQ (call.at ("params").at ("t").get<std::string> (), R"(a"b)");
+}
+
 TEST (ScenarioDataJsonBodyTest, ANullCellIsAnErrorNotAnErasedValue) {
     // The missing-column principle, one type down. Render it as "" instead and
     // this body goes out as `{"n": }` - invalid, silently.

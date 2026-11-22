@@ -68,6 +68,7 @@ enum class Loss : std::uint8_t {
     VayuElements,
     ScriptSettings,
     JsonRpcBodies,
+    McpBodies,
     UnsupportedBodies,
     UnsupportedAuth,
     OAuth2Settings,
@@ -99,6 +100,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "vayu_elements", "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" },
 { "script_settings", "Script names and the run-inline setting have no Postman equivalent" },
 { "jsonrpc_bodies", "JSON-RPC bodies were written as the completed frame in raw JSON" },
+{ "mcp_bodies", "MCP bodies were written as raw JSON" },
 { "unsupported_bodies", "Bodies in a mode Postman lacks were left out" },
 { "unsupported_auth", "Auth in a mode Postman lacks was left out" },
 { "oauth2_settings", "Some OAuth 2.0 settings have no Postman equivalent" },
@@ -1120,6 +1122,10 @@ std::optional<json> postman_body (const json& body, Walk& walk) {
         walk.lose (Loss::JsonRpcBodies);
         return std::make_optional (
         raw_body (vayu::http::jsonrpc_wire_body (content), "json"));
+    }
+    if (mode == "mcp") {
+        walk.lose (Loss::McpBodies);
+        return std::make_optional (raw_body (content, "json"));
     }
     if (mode == "graphql") {
         return std::make_optional (graphql_body (content));

@@ -395,6 +395,7 @@ JSValue legacy_request_data (JSContext* ctx, const Body& body) {
     case BodyMode::Text:
     case BodyMode::Xml:
     case BodyMode::JsonRpc:
+    case BodyMode::Mcp:
         if (!body.content.empty ()) {
             return JS_NewStringLen (ctx, body.content.data (), body.content.size ());
         }

@@ -129,8 +129,8 @@ namespace vayu::http {
  * `x-www-form-urlencoded` because its encoding is chosen engine-side, so
  * nothing else can name it; `graphql` and `jsonrpc` because the engine is what
  * writes their envelope (see `graphql_body.hpp`), and a body the engine shaped
- * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`
- * and `json` because the mode *is* the type.
+ * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`,
+ * `json` and `mcp` because the mode *is* the type.
  *
  * **`json` was absent until issue #889, and that was a bug rather than the
  * restraint it read as.** The old rule here - "those clients own the header and

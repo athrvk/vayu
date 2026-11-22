@@ -646,6 +646,7 @@ so a body that round-trips through storage sends the same bytes.
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
+| `mcp` | `content` (string) | `content`, verbatim: one MCP JSON-RPC call, sent as JSON |
 | `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
@@ -678,7 +679,7 @@ The Content-Type rules follow from the encoding:
   created any other way - MCP `create_request`, an import, a payload posted
   straight to `/execute` - sent the wrong type. A declared header still wins, so
   `application/vnd.api+json` reaches the server unchanged.
-- `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
+- `graphql`, `jsonrpc` and `mcp` set `Content-Type: application/json` under the same
   rule - a Content-Type the caller wrote wins. `graphql` only on the method
   that carries a body at all: a GraphQL `GET` has no body and derives no
   Content-Type, since there is nothing to describe (see below).
@@ -5126,6 +5127,7 @@ was before these rules.
 | `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
 | `script_settings` | A script with a name or the load-test `inline` setting |
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
+| `mcp_bodies` | An MCP body (Postman has no such mode), written as a raw JSON body holding its content as stored |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
 | `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, an empty header prefix, or the `jwt_bearer` grant (Postman has no RFC 7523 grant: the block is written with its endpoints, client id and scope and no `grant_type`, and the subject, claims and key are not written) (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
@@ -10889,7 +10891,7 @@ Write `"n":"{{data.n}}"` instead and the number arrives quoted; that is the
 knob, not a bug.
 
 **A value cannot break the document it lands in.** For a body whose text is a
-JSON document - `json`, `jsonrpc`, and a `graphql` body written as the
+JSON document - `json`, `jsonrpc`, `mcp`, and a `graphql` body written as the
 `{"query": ...}` envelope - a token inside a string literal binds **escaped**,
 so a cell carrying `"`, `\` or a newline arrives as its own text inside valid
 JSON rather than ending the string early. A token outside a string literal is

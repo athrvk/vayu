@@ -826,7 +826,7 @@ query row's boolean `equals`.
 **body** - discriminated union:
 ```json
 {"mode":"none"}
-{"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
+{"mode":"json"|"text"|"graphql"|"jsonrpc"|"mcp"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 {"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```

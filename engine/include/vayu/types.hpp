@@ -319,7 +319,8 @@ enum class BodyMode : std::uint8_t {
     Binary,
     GraphQL,
     JsonRpc,
-    Xml
+    Xml,
+    Mcp
 };
 
 /**

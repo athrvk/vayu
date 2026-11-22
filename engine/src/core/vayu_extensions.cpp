@@ -130,7 +130,7 @@ std::to_array<std::string_view> ({ "api-key", "secret", "auth_token", "signature
 
 /// Vayu's body modes (`RequestBody["mode"]` in the app's `domain.ts`).
 constexpr auto BODY_MODES = std::to_array<std::string_view> ({ "none", "json", "text",
-"graphql", "jsonrpc", "xml", "form-data", "x-www-form-urlencoded", "binary" });
+"graphql", "jsonrpc", "mcp", "xml", "form-data", "x-www-form-urlencoded", "binary" });
 
 /// The `httpVersion` values the request routes accept.
 constexpr auto HTTP_VERSIONS =
