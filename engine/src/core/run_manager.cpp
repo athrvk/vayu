@@ -225,6 +225,9 @@ RecordFailure&& record_failure) {
 }
 
 /// The response a recorded sample stands for, as a script reads it.
+/// `body_truncated` stays false: the reservoir copies `Response::body`, which
+/// the byte cap has already ended the transfer over if it was ever exceeded.
+/// `CapturedExchange` is the path that truncates, and it is not this one.
 vayu::Response sample_response (const ResponseSample& sample) {
     vayu::Response response;
     response.status_code     = sample.status_code;
@@ -232,6 +235,7 @@ vayu::Response sample_response (const ResponseSample& sample) {
     response.body            = sample.body;
     response.headers         = sample.headers;
     response.timing.total_ms = sample.latency_ms;
+    response.stream_events   = sample.stream_events;
     return response;
 }
 
@@ -274,22 +278,11 @@ nlohmann::json& stream_events) {
     *sample.data_row_index < replay.data_rows->size ()) {
         script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
     }
-    // `pm.response.events` for a sampled stream (issue #657). Parsed here, at
-    // the end of the run, rather than copied on the completion path: the body
-    // already is the event list, and the deferred pass is where the expensive
-    // half of sampling belongs. A sample that did not stream sets nothing, so
-    // the script reads `undefined` - the same absent-not-empty rule the live
-    // path keeps.
-    if (sample.stream_events) {
-        stream_events = vayu::http::buffered_stream_events_node (sample.body,
-        replay.sse_limits, static_cast<int64_t> (*sample.stream_events),
-        // A load sample keeps the whole body it captured: the reservoir
-        // copies `Response::body`, which the byte cap has already ended the
-        // transfer over if it was ever exceeded. `CapturedExchange` is the
-        // path that truncates, and it is not this one.
-        true);
-        script_ctx.response_events = &stream_events;
-    }
+    // `pm.response.events` for a sampled stream (issue #657), parsed here at
+    // the end of the run rather than copied on the completion path: the body
+    // already is the event list.
+    vayu::http::bind_buffered_stream_events (
+    script_ctx, response, replay.sse_limits, stream_events);
     return script_ctx;
 }
 

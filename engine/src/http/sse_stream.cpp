@@ -33,6 +33,7 @@
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -317,6 +318,18 @@ bool body_complete) {
     node["eventsTruncated"] =
     !body_complete || std::cmp_greater (total_events, node["items"].size ());
     return node;
+}
+
+void bind_buffered_stream_events (vayu::runtime::ScriptContext& script_ctx,
+const vayu::Response& response,
+const SseLimits& limits,
+nlohmann::json& slot) {
+    if (!response.stream_events) {
+        return;
+    }
+    slot = buffered_stream_events_node (response.body, limits,
+    static_cast<int64_t> (*response.stream_events), !response.body_truncated);
+    script_ctx.response_events = &slot;
 }
 
 nlohmann::json stream_trace_node (const SseStreamContext& context) {
