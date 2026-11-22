@@ -164,8 +164,9 @@ const StepDataTemplate& bind_template);
  *                     which case it does neither - issue #1596). A scenario
  *                     claim may answer true and send nothing, a virtual user
  *                     whose steps were all skipped: a pass owed work that
- *                     leaves requests_sent unchanged waits like a deferral
- *                     rather than re-entering at once (#3540)
+ *                     leaves requests_sent unchanged, or moved only by data-bind
+ *                     failures (`bind_failures_submitted`), waits like a
+ *                     deferral rather than re-entering at once (#3540, #3592)
  * @param target_fn    desired in-flight at elapsed_ms
  * @param budget_fn    remaining submission budget (SIZE_MAX for time-bounded)
  * @param should_continue  whether to keep refilling at elapsed_ms

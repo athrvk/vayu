@@ -939,6 +939,11 @@ struct RunContext {
 
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
+    // The part of `requests_sent` that never reached the wire: a data-bind
+    // failure recorded as a completed error in place of a send (#3592). A
+    // refill pass whose only submissions were these did no work that can end
+    // the wait, so `maintain_concurrency` paces it like an empty pass.
+    std::atomic<size_t> bind_failures_submitted{ 0 };
     std::atomic<size_t> requests_expected{ 0 }; // Total expected requests for this run
 
     // Closed-loop concurrency control. The strategy thread is the SOLE producer

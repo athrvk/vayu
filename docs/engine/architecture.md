@@ -1594,7 +1594,12 @@ skipped step to its next send, so a skipped login in front of the request that d
 no wait, and stops after one whole iteration with nothing sent. A refill pass that was owed work
 and left `requests_sent` unchanged then takes the same bounded wait, one 50ms tick or until a
 completion or `should_stop` (#3540): a plan whose every step is skipped iterates about once per
-VU per tick rather than pinning a core.
+VU per tick rather than pinning a core. A submission that failed its data bind is not work either
+(#3592): it is recorded as a completed error at once and counted in `requests_sent` (so `in_flight`
+stays honest) and in `RunContext::bind_failures_submitted`, and a pass whose only submissions were
+those waits the same tick. The run does not fail early: bind failures can be intermittent (a row
+missing for some iterations), each is still an error in the report, and the run's own error-rate
+budget decides its verdict.
 
 **The `target_fn` invariant, restated.** Every mode but `capacity` passes a
 `target_fn` that is a pure function of `elapsed_ms` and constants fixed when the

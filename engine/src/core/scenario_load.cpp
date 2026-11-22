@@ -1006,6 +1006,7 @@ class ScenarioLoadDriver {
                 // honest, and the step's `errors` column in the report's
                 // breakdown is what attributes the failure to a step.
                 context_->requests_sent++;
+                context_->bind_failures_submitted++;
                 finish_step (context_, state_, execution_.plan, vu, step_index,
                 StepSignals{ .no_response = true }, nullptr, {});
                 handle_result (context_, db_,
