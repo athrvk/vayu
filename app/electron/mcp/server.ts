@@ -197,8 +197,10 @@ function revealGateSentence(host: McpHost): string {
 		"`proxyUrl` and write it again). A saved request's or example's header row written back as " +
 		"read, `valueWithheld: true` and no `value`, keeps its stored value; a `headers` map " +
 		"replaces the list, and the result names each unread row it drops. A write that moves a " +
-		"request to another scheme, host or port carries no stored credential of its URL or " +
-		"headers, and the result names each one it did not carry. " +
+		"request to another scheme, host or port carries no stored credential of its URL, and " +
+		"the result names each one it did not carry; one that would leave a stored credential " +
+		"header row or `auth` block on the new origin is refused until the call supplies or " +
+		"clears them. " +
 		"A request that references a secret still sends with it, because the engine resolves " +
 		"it. What a run recorded (run rows, reports, samples, exports, send results, inbox " +
 		"captures, mock activity) reads `<redacted>` in place of every secret variable's " +
