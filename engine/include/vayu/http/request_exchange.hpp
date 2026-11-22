@@ -48,6 +48,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -693,6 +694,12 @@ struct ExchangeInputs {
      *        reads no setting itself.
      */
     size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
+
+    /// What bounds `pm.response.events` when this exchange's send was a bounded
+    /// stream (`Request::stream_bounds`, issue #3769): the run's `sse*`
+    /// settings, which the scenario runner reads once. A design send leaves the
+    /// default; its buffered send is never a stream, so nothing reads it.
+    vayu::http::SseLimits sse_limits;
 
     /// Bound onto `ElementContext::pacing_state` / `rng` / `timers_override`
     /// (issue #1498), for a `timer.pacing` or gaussian `timer.think` element
