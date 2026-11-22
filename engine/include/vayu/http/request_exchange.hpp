@@ -565,6 +565,18 @@ class ScopeOverlay {
 const ScriptVariableScopes& scopes);
 
 /**
+ * `ElementContext::resolve_template` over @p scopes and the bound @p row (null
+ * for none): the run-local scope above the row above the other scopes, the
+ * precedence a script's `pm.variables.replaceIn` gives. A token naming a
+ * missing `data.*` column leaves the whole text as it stands. One copy for the
+ * buffered exchange and the streaming send, which both run elements outside a
+ * load run.
+ */
+[[nodiscard]] std::string resolve_element_template (const std::string& text,
+const ScriptVariableScopes& scopes,
+const nlohmann::json* row);
+
+/**
  * `extract.*`'s write target (issue #1514), addressed by the schema's
  * `scope` value (`"env"` | `"collection"` | `"globals"`). Unrecognised or
  * absent falls back to `"collection"`, the leaf scope a script's own
