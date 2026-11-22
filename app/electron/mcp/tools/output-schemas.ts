@@ -254,6 +254,43 @@ export const runReportSchema = z.looseObject({
 	note: optStr,
 });
 
+/**
+ * `run_request`: the exchange `boundExecuteResponse` leaves, or the events a
+ * streamed send read (`runStreamingRequest`). One loose schema for both, every
+ * member optional, so no answer either path gives today is refused (#3749). The
+ * stream members (`completed`, `capReached`, `events`...) are left undeclared:
+ * the `stream` argument states them, and naming them here again costs every
+ * session bytes for nothing.
+ */
+export const runRequestResultSchema = z.looseObject({
+	body: z.unknown().optional().describe("The parsed body; null when cut, base64 or not JSON."),
+	bodyRaw: optStr.describe("The body as received, in `bodyEncoding`."),
+	bodyEncoding: optStr.describe('"utf8" or "base64".'),
+	bodyTruncated: optBool.describe("`bodyRaw` was cut to the cap for this result."),
+	bodySize: optNum.describe(
+		"The real size, in decoded bytes when base64; under `bodyCapped`, the prefix read."
+	),
+	bodyCapped: optBool.describe("Always present."),
+	rawRequestTruncated: optBool.describe(
+		'`rawRequest`\'s body was cut, headers kept whole; read_body `part: "request"` reads it.'
+	),
+	headers: anyRecord.optional().describe("The final response's headers, folded."),
+	headerLines: anyList.describe(
+		"As received: one `{name, value}` a line, in wire order, each `Set-Cookie` its own row."
+	),
+	redirects: anyList.describe(
+		"Each 3xx followed, in order: `{status, statusText, url, schemeDowngrade, headerLines}` as that hop sent them."
+	),
+	requestHeaders: anyRecord
+		.optional()
+		.describe('Folded: a repeat joined with ", ", `Cookie` with "; ".'),
+	requestHeaderLines: anyList.describe(
+		"As sent: one `{name, value}` a line, in wire order, a repeated name as written."
+	),
+	runId: optStr.describe("Absent, with `resultId`, when nothing was stored."),
+	resultId: optNum,
+});
+
 export const runStatusSchema = z.looseObject({
 	id: nullStr,
 	status: nullStr,

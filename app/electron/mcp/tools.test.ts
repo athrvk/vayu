@@ -116,6 +116,28 @@ function outputMemberDescription(toolName: string, path: string): string {
 }
 
 /**
+ * Every member path @p node declares: dotted names, `[]` stepping into an
+ * array's items, an `anyOf` branch's members read as the node's own.
+ */
+function declaredPaths(node: AdvertisedSchema, prefix = ""): string[] {
+	return Object.entries(declaredMembers(node)).flatMap(([name, member]) => {
+		const path = prefix ? `${prefix}.${name}` : name;
+		const nested = member.items ? declaredPaths(member.items, `${path}[]`) : [];
+		return [path, ...nested, ...declaredPaths(member, path)];
+	});
+}
+
+/** Every member path @p value carries, spelled as {@link declaredPaths} spells them. */
+function presentPaths(value: unknown, prefix = ""): string[] {
+	if (Array.isArray(value)) return value.flatMap((item) => presentPaths(item, `${prefix}[]`));
+	if (!value || typeof value !== "object") return [];
+	return Object.entries(value).flatMap(([name, member]) => {
+		const path = prefix ? `${prefix}.${name}` : name;
+		return [path, ...presentPaths(member, path)];
+	});
+}
+
+/**
  * Default `composeRequest` fake: the engine's identity composition for an
  * inline request with nothing to resolve - the request echoed back with the
  * environmentId attached. Composition *semantics* (variable resolution, the
@@ -7994,8 +8016,8 @@ describe("inline body bounds", () => {
 			const description = descriptionOf(TOOLS.find((t) => t.name === name));
 			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
 		}
-		expect(descriptionOf(TOOLS.find((t) => t.name === "run_request"))).toMatch(/bodyTruncated/);
-		// get_run_report declares its flag on the output schema instead (#3749).
+		// Both declare their flag on the output schema (#3749).
+		expect(outputMemberDescription("run_request", "bodyTruncated")).toMatch(/cut to the cap/);
 		expect(
 			outputMemberDescription("get_run_report", "results[].trace.response.bodyTruncated")
 		).toMatch(/read_body/);
@@ -8006,8 +8028,100 @@ describe("inline body bounds", () => {
 		// re-send would achieve, so the description has to name both and say
 		// which remedy belongs to which.
 		const description = descriptionOf(TOOLS.find((t) => t.name === "run_request"));
-		expect(description).toMatch(/bodyCapped/);
+		expect(description).toMatch(/`bodyCapped` is not `bodyTruncated`/);
 		expect(description).toMatch(/maxDesignResponseBodyBytes/);
+	});
+
+	describe("run_request's output schema (#3749)", () => {
+		const schema = () => TOOLS.find((t) => t.name === "run_request")!.outputSchema!;
+		const base64PastCap = "AAEC".repeat(MAX_INLINE_BODY_BYTES);
+		const exchange = executeAnswer({
+			body: { ok: true },
+			bodyRaw: '{"ok":true}',
+			bodyEncoding: "utf8",
+			bodySize: 11,
+			bodyCapped: false,
+			headerLines: [{ name: "Set-Cookie", value: "a=1" }],
+			requestHeaders: { Accept: "*/*" },
+			requestHeaderLines: [{ name: "Accept", value: "*/*" }],
+			redirects: [
+				{
+					status: 302,
+					statusText: "Found",
+					url: "https://api.example.com/x",
+					schemeDowngrade: false,
+					headerLines: [],
+				},
+			],
+			rawRequest: `POST /x HTTP/1.1\r\nHost: api.example.com\r\n\r\n${huge}`,
+			runId: "run_d",
+			resultId: 7,
+		});
+		const capped = executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyCapped: true });
+		const base64 = executeAnswer({ bodyRaw: base64PastCap, bodyEncoding: "base64" });
+		const streamStarted = { runId: "run_s", eventsUrl: "/runs/run_s/events" };
+		const streamRead = { events: [{ event: "tick" }], completed: true, capReached: false };
+
+		/** Each answer path the handler has, with the call that reaches it. */
+		const sends: [
+			string,
+			Record<string, unknown>,
+			Partial<Record<keyof EngineClient, unknown>>,
+		][] = [
+			["buffered", {}, { executeRequest: vi.fn().mockResolvedValue(exchange) }],
+			[
+				"link-only",
+				{ requestId: "req_1" },
+				{ executeRequest: vi.fn().mockResolvedValue(exchange) },
+			],
+			["body-capped", {}, { executeRequest: vi.fn().mockResolvedValue(capped) }],
+			["base64", {}, { executeRequest: vi.fn().mockResolvedValue(base64) }],
+			["non-object", {}, { executeRequest: vi.fn().mockResolvedValue("not an object") }],
+			[
+				"streamed",
+				{ stream: true },
+				{
+					executeRequest: vi.fn().mockResolvedValue(streamStarted),
+					consumeStreamEvents: vi.fn().mockResolvedValue(streamRead),
+				},
+			],
+			[
+				"stream without a runId",
+				{ stream: true },
+				{ executeRequest: vi.fn().mockResolvedValue({ status: 200 }) },
+			],
+		];
+
+		async function send(args: Record<string, unknown>, client: EngineClient) {
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x", ...args },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			return res;
+		}
+
+		// Mutation check: rename a member in runRequestResultSchema, or drop
+		// `structured: true` from the buffered send, and this fails.
+		test("every answer satisfies it, and every member it declares reaches the agent", async () => {
+			const present = new Set<string>();
+			for (const [name, args, overrides] of sends) {
+				const res = await send(args, fakeClient(overrides));
+				expect(schema().safeParse(res.structuredContent).success, name).toBe(true);
+				for (const path of presentPaths(res.structuredContent)) present.add(path);
+			}
+
+			const declared = declaredPaths(advertisedOutputSchema("run_request"));
+			expect(declared.length).toBeGreaterThan(10);
+			expect(declared.filter((path) => !present.has(path))).toEqual([]);
+		});
+
+		test("the text block is the structured answer, and a link-only send keeps its caveat", async () => {
+			const res = await send({ requestId: "req_1" }, executed(exchange));
+			expect(JSON.parse(firstText(res))).toEqual(res.structuredContent);
+			expect(res.content[1]?.text).toMatch(/sent ad hoc/);
+		});
 	});
 
 	/**
@@ -14397,29 +14511,6 @@ describe("run status reads (#2436)", () => {
 			// Not the top-level marker of an unfinished run.
 			expect(res.structuredContent).not.toHaveProperty("partial");
 		});
-
-		/**
-		 * Every member path @p node declares: dotted names, `[]` stepping into an
-		 * array's items, an `anyOf` branch's members read as the node's own.
-		 */
-		function declaredPaths(node: AdvertisedSchema, prefix = ""): string[] {
-			return Object.entries(declaredMembers(node)).flatMap(([name, member]) => {
-				const path = prefix ? `${prefix}.${name}` : name;
-				const nested = member.items ? declaredPaths(member.items, `${path}[]`) : [];
-				return [path, ...nested, ...declaredPaths(member, path)];
-			});
-		}
-
-		/** Every member path @p value carries, spelled as {@link declaredPaths} spells them. */
-		function presentPaths(value: unknown, prefix = ""): string[] {
-			if (Array.isArray(value))
-				return value.flatMap((item) => presentPaths(item, `${prefix}[]`));
-			if (!value || typeof value !== "object") return [];
-			return Object.entries(value).flatMap(([name, member]) => {
-				const path = prefix ? `${prefix}.${name}` : name;
-				return [path, ...presentPaths(member, path)];
-			});
-		}
 
 		// A body past the per-body cap; two such traces exhaust the report's budget.
 		const pastCap = "x".repeat(MAX_INLINE_BODY_BYTES + 1);
