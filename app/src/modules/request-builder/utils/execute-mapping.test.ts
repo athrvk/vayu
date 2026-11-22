@@ -21,9 +21,11 @@ import {
 	disabledDefaults,
 	execIdentity,
 	protocolSettings,
+	responseCodeOfFailure,
 	responseFromExecuteResult,
 	toBodyPayload,
 } from "./execute-mapping";
+import { ApiError } from "@/services/http-client";
 // The threshold itself, not a second spelling of it: the mapping and the pane
 // share one number and a test that pinned its own would keep passing after a
 // change made the gate unreachable.
@@ -616,5 +618,33 @@ describe("protocolSettings (#1765)", () => {
 		};
 		expect(protocolSettings(request).disabledSystemHeaders).toEqual(["accept"]);
 		expect(disabledDefaults(request)).toEqual({ disabledDefaultHeaders: ["User-Agent"] });
+	});
+});
+
+// A Send that failed before it had a response names its code the way a
+// response does (#3693). A streaming send's refused file arrives as the rule's
+// own `unsendable_file`, which `ClientErrorView` has no title for.
+// Mutation check: drop the `RESPONSE_CODE_OF_RULE` lookup and the first case
+// reads `unsendable_file`; return `error.errorCode` for a plain `Error` and the
+// last one stops saying the engine never answered.
+describe("responseCodeOfFailure", () => {
+	it("spells a refused file as a response carries it", () => {
+		expect(responseCodeOfFailure(new ApiError(400, "unsendable_file", "no file"))).toBe(
+			"UNSENDABLE_FILE"
+		);
+	});
+
+	it("keeps every other code the engine refused with", () => {
+		expect(responseCodeOfFailure(new ApiError(400, "target_not_allowed", "no"))).toBe(
+			"target_not_allowed"
+		);
+		expect(responseCodeOfFailure(new ApiError(400, "VARIABLE_UNRESOLVED", "no"))).toBe(
+			"VARIABLE_UNRESOLVED"
+		);
+	});
+
+	it("reports the engine when it never answered", () => {
+		expect(responseCodeOfFailure(new Error("Failed to fetch"))).toBe("ENGINE_ERROR");
+		expect(responseCodeOfFailure("boom")).toBe("ENGINE_ERROR");
 	});
 });

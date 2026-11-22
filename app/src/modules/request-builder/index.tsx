@@ -54,7 +54,6 @@ import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver, type ColumnAuditRequest } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
-import { ApiError } from "@/services/http-client";
 import { generateCurl } from "@/services/codegen";
 import type {
 	RequestState,
@@ -92,6 +91,7 @@ import {
 	disabledDefaults,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
+	responseCodeOfFailure,
 	toBodyPayload,
 } from "./utils/execute-mapping";
 import type {
@@ -672,7 +672,7 @@ export default function RequestBuilder() {
 					// Compose runs first, so an engine that is down throws here
 					// before any send - a plain Error from the fetch, not an
 					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
-					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
+					errorCode: responseCodeOfFailure(error),
 					errorMessage: errorMsg,
 				};
 				// A Send that never got an answer is still a Send the Console
@@ -758,22 +758,26 @@ export default function RequestBuilder() {
 				console.error("Stream request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
 				showToast(errorMsg, "error");
-				return {
-					ok: false,
-					response: withLeftOut(
-						{
-							status: 0,
-							statusText: "Error",
-							headers: {},
-							body: errorMsg,
-							time: 0,
-							size: 0,
-							errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
-							errorMessage: errorMsg,
-						},
-						leftOut
-					),
+				const failed: ResponseState = {
+					status: 0,
+					statusText: "Error",
+					headers: {},
+					body: errorMsg,
+					time: 0,
+					size: 0,
+					errorCode: responseCodeOfFailure(error),
+					errorMessage: errorMsg,
 				};
+				// A refused stream is a Send the Console lists as a buffered one that
+				// got no answer is (#3634): no stream opens, so `finalizeStreamRun`
+				// never appends it later.
+				appendSendToConsole({
+					method: request.method,
+					url: request.url,
+					response: failed,
+					requestId: fetchedRequest.id,
+				});
+				return { ok: false, response: withLeftOut(failed, leftOut) };
 			}
 		},
 		[

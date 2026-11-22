@@ -433,6 +433,39 @@ TEST_F (DeferredCompositionTest, ADeferredBearerTokenCarryingALineBreakIsRefused
     EXPECT_EQ (echo.requests_seen (), 0) << "the forged line went out";
 }
 
+// The file rule refuses a streaming send before its stream opens, under the
+// rule's code `unsendable_file` in the 400 the app reads (#3693): a form-data
+// file part with no file chosen, and one whose path still holds a
+// `{{variable}}`. The buffered send's answer for the same body is a status-0
+// response, `file_body_test.cpp`'s. Nothing reaches the server and the run row
+// the send opened ends failed, not running. Mutation check: let
+// `refuse_before_stream` (execution.cpp) return its `ResidualRefusal` with an
+// empty code and each case answers the route's default code instead.
+TEST_F (DeferredCompositionTest, AFilePartTheFileRuleRefusesFailsTheStreamUnderUnsendableFile) {
+    const vayu::tests::EchoServer echo;
+    for (const std::string& src : { std::string{}, std::string{ "{{fixtures}}/a.bin" } }) {
+        const json payload = { { "method", "POST" }, { "url", echo.url () },
+            { "stream", true },
+            { "body",
+            { { "mode", "form-data" },
+            { "fields",
+            json::array ({ { { "key", "upload" }, { "type", "file" },
+            { "src", src }, { "enabled", true } } }) } } } };
+
+        const auto [status, refused] = post ("/execute", payload);
+
+        EXPECT_EQ (status, 400) << src << ": " << refused.dump ();
+        EXPECT_EQ (refused.value (json::json_pointer ("/error/code"), std::string ()), "unsendable_file")
+        << src << ": " << refused.dump ();
+        EXPECT_NE (refused.dump ().find ("Form field 'upload'"), std::string::npos)
+        << refused.dump ();
+    }
+    EXPECT_EQ (echo.requests_seen (), 0) << "the send reached the server";
+    for (const auto& run : db_->get_all_runs ()) {
+        EXPECT_EQ (run.status, vayu::RunStatus::Failed) << run.id;
+    }
+}
+
 // A `{{baseUrl}}/...` request, the shape an imported Postman collection stores
 // (#3454): its script edits the query of a URL whose host is still a token,
 // and the token is resolved after the script, against the value it set.
