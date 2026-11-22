@@ -18642,6 +18642,108 @@ describe("secret withholding", () => {
 		expect(body.examples).toEqual(EXAMPLES);
 	});
 
+	/*
+	 * An example body is stored text an agent may read two ways, and both mask it
+	 * (#3724). Mutation check: restore `callEngineStructured` with
+	 * `boundExampleBodies(secretsShape(...)(rows))` in the list handler and the
+	 * first two cases leak the secret.
+	 */
+	describe("list_request_examples masks a body as read_body does (#3724)", () => {
+		const secretExample = (body: string) => ({
+			...EXAMPLES[0],
+			headers: [{ key: "Content-Type", value: "application/json", enabled: true }],
+			body,
+		});
+		const echoBody = () => JSON.stringify({ echoed: RUN_SECRET, region: "eu" });
+		const exampleClient = () =>
+			runClient({
+				listRequestExamples: vi.fn().mockResolvedValue([secretExample(echoBody())]),
+			});
+
+		test("a secret variable's value reads <redacted>, as the same body through read_body", async () => {
+			const client = exampleClient();
+			const listed = await read("list_request_examples", client, undefined, {
+				requestId: "req_1",
+			});
+			for (const leak of RUN_SECRET_CORES) expect(listed.text, leak).not.toContain(leak);
+			const body = JSON.parse(listed.body.examples[0].body);
+			expect(body).toEqual({ echoed: "<redacted>", region: "eu" });
+
+			const paged = await read("read_body", client, undefined, {
+				requestId: "req_1",
+				exampleId: "exa_1",
+			});
+			expect(paged.body.text).toBe(listed.body.examples[0].body);
+		});
+
+		test("the mask runs before the cut, so a secret across the clip is not left as a prefix", async () => {
+			const padded = secretExample(`${"x".repeat(MAX_INLINE_BODY_BYTES - 4)}${RUN_SECRET}`);
+			const client = runClient({ listRequestExamples: vi.fn().mockResolvedValue([padded]) });
+			const { body } = await read("list_request_examples", client, undefined, {
+				requestId: "req_1",
+			});
+			const [row] = body.examples;
+			expect(row.bodyClipped).toBe(true);
+			for (const leak of RUN_SECRET_CORES) expect(row.body, leak).not.toContain(leak);
+			// The marker is cut instead: the unmasked cut would end in "p@ss".
+			expect(row.body).not.toContain("p@");
+			expect(row.body.endsWith("<red")).toBe(true);
+		});
+
+		test("the value reads as stored with reveal on, and no masking lookup is made", async () => {
+			const client = exampleClient();
+			const { body } = await read("list_request_examples", client, REVEAL, {
+				requestId: "req_1",
+			});
+			expect(body.examples[0].body).toBe(echoBody());
+			expect(client.getGlobals).not.toHaveBeenCalled();
+		});
+
+		test("a failed masking lookup refuses the list whole, as read_body refuses", async () => {
+			const client = runClient({
+				getGlobals: vi.fn().mockRejectedValue(new Error("engine hiccup")),
+				listRequestExamples: vi.fn().mockResolvedValue([secretExample(echoBody())]),
+			});
+			for (const [tool, args] of [
+				["list_request_examples", { requestId: "req_1" }],
+				["read_body", { requestId: "req_1", exampleId: "exa_1" }],
+			] as const) {
+				const res = await dispatchTool(tool, args, ctxWith(client));
+				expect(res.isError, tool).toBe(true);
+				const text = firstText(res);
+				expect(text, tool).toMatch(
+					/masking .* could not complete, because the globals lookup/
+				);
+				for (const leak of RUN_SECRET_CORES) expect(text, leak).not.toContain(leak);
+				expect(text, tool).not.toContain("exa_1");
+			}
+		});
+
+		test("an unknown request is still the engine's not_found, naming the id", async () => {
+			const client = runClient({
+				listRequestExamples: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError(
+							"404",
+							404,
+							engineErrorBody("not_found", "Request not found")
+						)
+					),
+			});
+			const res = await dispatchTool(
+				"list_request_examples",
+				{ requestId: "req_9" },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain('No request with id "req_9"');
+			expect((res.structuredContent as { error: { class: string } }).error.class).toBe(
+				"not_found"
+			);
+		});
+	});
+
 	// Writing does not grant reading: a write tool's answer echoes the stored
 	// row, so it is withheld exactly as the read of that row is (#1809).
 	const ECHO_ENVIRONMENT = {
