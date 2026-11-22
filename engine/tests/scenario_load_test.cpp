@@ -4578,6 +4578,33 @@ TEST_F (ScenarioLoadTest, ASkippedStepInFrontOfASendCostsTheVirtualUserNoWait) {
                                 << alone_at_best << " without one, best of three";
 }
 
+// Every submission fails its data bind (the row leaves the header name blank),
+// so nothing goes on the wire and nothing is ever in flight. Each failure is
+// still an error, but a pass whose only submissions were failures waits a
+// controller tick like an empty pass (#3592). Healthy, one user iterates about
+// once per 50 ms: 20 in 1s (a few dozen on a fast runner). Broken, the
+// producer re-enters at once and spins: tens of thousands. Mutation check:
+// drop the `bind_failures_submitted` delta from `refill_toward`'s return in
+// `maintain_concurrency` and the count climbs past the bound.
+TEST_F (ScenarioLoadTest, AnAllBindFailurePlanWaitsATickPerPassInsteadOfSpinning) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].request.headers["{{data.name}}"] = "x";
+    with_data (execution, { json{ { "name", "" } } });
+
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "1s" }, { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_TRUE (server.hits_for ("/s0").empty ())
+    << "a failed bind must send nothing";
+    const size_t errors = context_->metrics_collector->total_errors ();
+    EXPECT_GT (errors, 0u) << "each bind failure still counts as an error";
+    EXPECT_LT (errors, 2000u) << "the producer spun on failures: " << errors << " errors in 1s";
+    EXPECT_EQ (errors, context_->requests_sent.load ())
+    << "the error count must reflect the iterations attempted";
+}
+
 // ============================================================================
 // Cross-VU shared pacing (issue #1570)
 // ============================================================================

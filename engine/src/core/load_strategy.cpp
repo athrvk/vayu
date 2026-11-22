@@ -1134,6 +1134,7 @@ SubmissionRequest& live) {
         // `in_flight()` - sent minus completed - stays honest, which is the
         // same discipline the scenario executor's bind failure keeps.
         context->requests_sent++;
+        context->bind_failures_submitted++;
         handle_result (context, db,
         vayu::Result<vayu::Response> (
         vayu::Error{ vayu::ErrorCode::DataBindingFailed, bound.error }),
@@ -1256,12 +1257,15 @@ std::optional<int64_t> run_end_ms) {
     update_peak (context);
 
     // Answers whether the pass was owed a submission and put none in flight:
-    // a scenario VU whose every step was skipped (#3540). The strategy thread
-    // is `requests_sent`'s only writer, so an unchanged count is exact.
+    // a scenario VU whose every step was skipped (#3540), or whose every
+    // submission failed its data bind (#3592, each still counted as an error).
+    // The strategy thread is `requests_sent`'s and `bind_failures_submitted`'s
+    // only writer, so comparing the two deltas is exact.
     auto refill_toward = [&] (size_t target, size_t at_most) {
         const size_t deficit     = std::min (at_most,
         compute_refill_deficit (target, context->in_flight (), budget_fn ()));
         const size_t sent_before = context->requests_sent.load ();
+        const size_t bind_failed_before = context->bind_failures_submitted.load ();
         for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
             // A false return means the remaining candidates are all deferred
             // or busy; retrying immediately just re-scans the same VUs for
@@ -1271,7 +1275,9 @@ std::optional<int64_t> run_end_ms) {
             }
         }
         update_peak (context);
-        return deficit > 0 && context->requests_sent.load () == sent_before;
+        return deficit > 0 &&
+        context->requests_sent.load () - sent_before ==
+        context->bind_failures_submitted.load () - bind_failed_before;
     };
 
     int64_t el     = 0;
