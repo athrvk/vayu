@@ -8,7 +8,8 @@
 /**
  * @file input-schemas.ts
  * @brief Zod input fragments more than one tool declares, so an argument
- *        reads the same on every tool that takes it.
+ *        means the same on every tool that takes it. A long description is
+ *        stated on one of them and the others point there ({@link asOn}).
  */
 
 import { z } from "zod";
@@ -22,6 +23,10 @@ import {
 	MAX_REDIRECTS_BOUND,
 	MAX_STREAM_BUDGET_MS,
 } from "./compose.js";
+
+import { asOn } from "./as-on.js";
+
+export { asOn };
 
 /** Optional resolution scope shared by the ad-hoc execute/load tools. */
 export const collectionIdInput = z
@@ -84,7 +89,7 @@ export const ENGINE_DEFAULT_HEADERS_POINTER =
  * A request's `headers` argument, on the tools that send one (`run_request`,
  * `start_load_run`, `get_graphql_schema`): the ordered `{name, value}` lines or
  * the single-valued map, both read by `readRequestOverrides`. One fragment so
- * the three say the same thing about repeats.
+ * the three take the same shape; `run_request` states the rule on repeats.
  */
 export const requestHeadersInput = z
 	.union([
@@ -389,13 +394,12 @@ export const thresholdsInput = z
 		streamEventsPerSecondMin: z.number().positive().max(1_000_000_000).optional(),
 		// Not a budget - whether a missed one fails the run, not itself
 		// measured against anything, so it is excluded from the
-		// at-least-one-budget refinement below.
+		// at-least-one-budget refinement below. Kept under 80 characters:
+		// both tools share this object, so a longer one is paid twice (#3747).
 		failRun: z
 			.boolean()
 			.optional()
-			.describe(
-				"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
-			),
+			.describe("When true, a missed budget sets the run's status to failed. Default false."),
 	})
 	// Open, unlike the other input objects (#3556): a
 	// `custom.<name>.<stat>` budget (issue #1500) is a key this schema
@@ -489,6 +493,12 @@ export const elementSchema = z.strictObject({
 		),
 });
 
+/** {@link elementSchema} on the write tools, pointing at `run_request` for `kind` and `config`. */
+const storedElementSchema = elementSchema.extend({
+	kind: elementSchema.shape.kind.describe(asOn("run_request")),
+	config: elementSchema.shape.config.describe(asOn("run_request")),
+});
+
 /**
  * The `elements` argument every write tool that stores them declares -
  * `create_request` / `update_request` / `create_collection` /
@@ -499,7 +509,7 @@ export const elementSchema = z.strictObject({
  */
 export function elementsInput(scope: string) {
 	return z
-		.array(elementSchema)
+		.array(storedElementSchema)
 		.optional()
 		.describe(
 			`The complete elements list for ${scope} (extractors, assertions, timers, scripts…), replacing whatever is stored. Leave it out to keep the stored list, or use \`preRequestScript\`/\`postRequestScript\` for the common case of just a script - passing both here and one of those on the same call is refused, since a caller who states the whole list has already said what belongs in it.`
@@ -693,15 +703,21 @@ export function storedCollectionAuthInput(extra: string) {
  * merge-patch rule matters more for it than for the other four for the same
  * reason - a defaulted `true` on an unrelated update would silently re-enable
  * verification a user turned off, and the request would then fail against the
- * host it was written for.
+ * host it was written for. With @p statedOn (update_request names
+ * create_request), the long descriptions point there instead (#3747); the
+ * pointer on `verifySSL` still says to read the full one before turning it off.
  */
-export function requestSettingsInput() {
+export function requestSettingsInput(statedOn?: string) {
+	const described = (full: string, specific?: string) =>
+		statedOn ? asOn(statedOn, specific) : full;
 	return {
 		followRedirects: z
 			.boolean()
 			.optional()
 			.describe(
-				"Follow 3xx redirects when this request is sent (default true). The request builder's redirect option."
+				described(
+					"Follow 3xx redirects when this request is sent (default true). The request builder's redirect option."
+				)
 			),
 		maxRedirects: z
 			.number()
@@ -720,25 +736,34 @@ export function requestSettingsInput() {
 			.nullable()
 			.optional()
 			.describe(
-				"This request's own timeout in milliseconds (1-86400000), applied to every later send of it. Omit it, or on update_request send null, for none: it then sends with the defaultTimeout setting."
+				described(
+					"This request's own timeout in milliseconds (1-86400000), applied to every later send of it. Omit it, or on update_request send null, for none: it then sends with the defaultTimeout setting."
+				)
 			),
 		httpVersion: z
 			.enum(HTTP_VERSIONS)
 			.optional()
 			.describe(
-				'Protocol to negotiate when this request is sent: "auto" | "http1.1" | "http2" (default "auto").'
+				described(
+					'Protocol to negotiate when this request is sent: "auto" | "http1.1" | "http2" (default "auto").'
+				)
 			),
 		stream: z
 			.boolean()
 			.optional()
 			.describe(
-				"Consume the response as a text/event-stream rather than buffering it (default false). Stored on the request, so a later send - from the app or from run_request - streams without being told to."
+				described(
+					"Consume the response as a text/event-stream rather than buffering it (default false). Stored on the request, so a later send - from the app or from run_request - streams without being told to."
+				)
 			),
 		verifySSL: z
 			.boolean()
 			.optional()
 			.describe(
-				`Verify the server's TLS certificate when this request is sent (default true). Setting it false skips the certificate check entirely, hostname included, so an internal or self-signed host answers instead of failing - and anything on the network path can then read and rewrite the request. It is stored on the request and applies to every later send of it: the app's Send, a load run and a stream alike. Prefer keeping it on and having the user ${TRUST_AUTHORITY_TOKEN}; turn it off only when they have asked for exactly that, and say so in your reply, because the app shows this request as accepting any certificate from then on.`
+				described(
+					`Verify the server's TLS certificate when this request is sent (default true). Setting it false skips the certificate check entirely, hostname included, so an internal or self-signed host answers instead of failing - and anything on the network path can then read and rewrite the request. It is stored on the request and applies to every later send of it: the app's Send, a load run and a stream alike. Prefer keeping it on and having the user ${TRUST_AUTHORITY_TOKEN}; turn it off only when they have asked for exactly that, and say so in your reply, because the app shows this request as accepting any certificate from then on.`,
+					"read it there before turning this off."
+				)
 			),
 	};
 }

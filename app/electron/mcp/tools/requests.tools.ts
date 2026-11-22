@@ -38,6 +38,7 @@ import { fileRefInput, shapeBody } from "./request-body.js";
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
 import {
 	applyRequestSettings,
+	asOn,
 	elementsInput,
 	requestSettingsInput,
 	storedAuthInput,
@@ -83,7 +84,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				"Ordered {key, value, enabled?} rows (repeats and disabled rows kept), or a {name: value} map."
 			),
 			body: z.string().optional().describe("Request body content."),
-			file: fileRefInput,
+			file: fileRefInput(),
 			bodyType: z
 				.string()
 				.optional()
@@ -186,7 +187,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				"Replaces the stored list: ordered {key, value?, enabled?} rows (a row as read with valueWithheld: true keeps its stored value; its description, source and type are stored with it, so write them back as read), or a {name: value} map."
 			),
 			body: z.string().optional().describe("New request body content."),
-			file: fileRefInput,
+			file: fileRefInput("create_request"),
 			bodyType: z
 				.string()
 				.optional()
@@ -200,7 +201,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				"this request",
 				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
 			),
-			...requestSettingsInput(),
+			...requestSettingsInput("create_request"),
 			mockResponseMode: z
 				.enum(["first", "fixed", "random"])
 				.optional()
@@ -214,7 +215,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				.describe(
 					"The example 'fixed' mode names (an id from list_request_examples). Pass null to clear it."
 				),
-			elements: elementsInput("this request"),
+			elements: elementsInput("this request").describe(asOn("create_request")),
 			preRequestScript: storedScriptInput("pre", true),
 			postRequestScript: storedScriptInput("post", true),
 		},
