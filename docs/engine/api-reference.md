@@ -8625,7 +8625,9 @@ runs **once, after the stream has terminated**, and reads the bounded stored
 list as `pm.response.events` with `pm.response.totalEvents` and
 `pm.response.eventsTruncated` beside it - a script runs to completion, its
 timers included, before anything is reported, so a live per-event callback is
-not a feature that was skipped but one the runtime cannot have. See
+not a feature that was skipped but one the runtime cannot have. The same three
+properties reach every run that streams: a collection run's streaming step and
+a load run's post-request script, inline or deferred (issue #3769). See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output

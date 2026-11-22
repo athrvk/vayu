@@ -789,13 +789,18 @@ logged as a warning: it means a client skipped composition.
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
-  body already *is* the `text/event-stream` bytes, and the deferred script
-  replay and `GET /runs/:id/samples` rebuild the list with
-  `buffered_stream_events_node`, bounded by `sseMaxStoredEvents`; the one thing
-  stored beside the body is the wire count (`result_bodies.stream_events`, NULL
-  = not a stream). Scripts run (#575): pre-request before the transfer,
-  post-request after the stream ends with `pm.response.events`, output stored
-  on the trace's `scripts` node because the route already answered `202`.
+  body already *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`
+  rebuilds the list with `buffered_stream_events_node`, bounded by
+  `sseMaxStoredEvents`; the one thing stored beside the body is the wire count
+  (`result_bodies.stream_events`, NULL = not a stream). Scripts run (#575):
+  pre-request before the transfer, post-request after the stream ends with
+  `pm.response.events`, output stored on the trace's `scripts` node because the
+  route already answered `202`. Every other post-request script over a
+  streamed response binds the list through `bind_buffered_stream_events`
+  (`http/sse_stream.hpp`, #3769), which parses only when
+  `Response::stream_events` is set: a sequential run's step
+  (`ExchangeInputs::sse_limits`), a load run's inline `script.post` on either
+  load path (`RunContext::sse_limits`) and the deferred replay.
   **A consumer worker is drained by whoever owns the manager, before the state
   it writes through goes away** (#646): `Server::stop()` calls
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its

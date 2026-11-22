@@ -234,8 +234,7 @@ struct ContextData {
     /// The row `pm.iterationData` reads, or null - see
     /// `ScriptContext::iteration_data`, which owns the rationale.
     const nlohmann::json* iteration_data = nullptr;
-    /// The stream's stored `events` trace node `pm.response.events` reads, or
-    /// null - see `ScriptContext::response_events`, which owns the rationale.
+    /// The stream's `events` node `pm.response.events` reads, or null - see `ScriptContext::response_events`, which owns the rationale.
     const nlohmann::json* response_events = nullptr;
     /// The hops `pm.response.redirects` reads, or null - see
     /// `ScriptContext::redirect_hops`, which owns the rationale.

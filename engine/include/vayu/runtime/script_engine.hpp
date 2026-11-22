@@ -230,13 +230,16 @@ struct ScriptContext {
      * @brief The completed stream's events, read as `pm.response.events`, or
      *        null where the run was not a stream (issue #575).
      *
-     * Points at the very `events` node the run's trace stores
-     * (`vayu::http::stream_trace_node`): `items`, `totalEvents` and
-     * `eventsTruncated`. Sharing the node rather than copying it out is what
-     * makes "the markers a script reads mirror the markers the trace records"
-     * true by construction instead of by a second cap applied here - a script
-     * that refuses to assert over a partial list and a reader looking at the
-     * stored trace must never disagree about whether the list is partial.
+     * An `events` node: `items`, `totalEvents` and `eventsTruncated`. A design
+     * stream points at the very node its trace stores
+     * (`vayu::http::stream_trace_node`); every buffered stream (a collection
+     * run's step, a load run's inline or replayed script) points at one
+     * `vayu::http::bind_buffered_stream_events` built from the body with the
+     * function its stored trace or sample is built with (issue #3769). Either
+     * way the markers come from the stored node's own builder rather than a
+     * second cap applied here - a script that refuses to assert over a partial
+     * list and a reader looking at the stored record must never disagree about
+     * whether the list is partial.
      *
      * Null is the ordinary case and reaches the script as an **absent**
      * `pm.response.events`, not an empty array - the same rule
@@ -244,11 +247,10 @@ struct ScriptContext {
      * stream" is a fact a script may branch on, and an empty array would make
      * it indistinguishable from a stream that produced nothing.
      *
-     * A streaming run's post-request script is the only caller that sets it:
-     * it runs once, after the stream has terminated, over the bounded stored
-     * list. A live per-event callback is not a feature that was skipped: the
-     * transfer has ended before any script runs, so there is nothing to hand
-     * one.
+     * Only a post-request script over a streamed response sets it: it runs
+     * once, after the stream has terminated, over the bounded stored list. A
+     * live per-event callback is not a feature that was skipped: the transfer
+     * has ended before any script runs, so there is nothing to hand one.
      */
     const nlohmann::json* response_events = nullptr;
 

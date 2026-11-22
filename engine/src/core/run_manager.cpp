@@ -1012,8 +1012,8 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     // boolean. A collection run never carries it (the route refuses it there):
     // each streaming step took its caps from the plan (#3235).
     if (config.value ("stream", false)) {
-        stream_bounds =
-        vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
+        stream_bounds = vayu::http::resolve_stream_bounds (
+        config, vayu::http::default_stream_bounds (engine_defaults.sse_limits));
     }
     mc_config.streams = stream_bounds.has_value () || plan_streams (scenario);
     mc_config.max_exemplar_results =
@@ -1021,6 +1021,7 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
     capture_response_bodies = mc_config.capture_response_bodies;
     max_element_body_bytes  = engine_defaults.max_element_body_bytes;
+    sse_limits              = engine_defaults.sse_limits;
 
     // Configure response sampling for script validation. Bounded twice: in
     // count here, and in bytes by the budget below - a retained sample holds a
@@ -1477,10 +1478,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         engine_defaults.max_response_sample_bytes =
         static_cast<size_t> (db.get_config_int ("maxResponseSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES)));
-        // The same two settings the design path's stream reads, so a user who
+        // The same settings the design path's stream reads, so a user who
         // tightened them once has tightened them for both (issue #576).
-        engine_defaults.stream_defaults =
-        vayu::http::default_stream_bounds (vayu::http::read_sse_limits (db));
+        engine_defaults.sse_limits = vayu::http::read_sse_limits (db);
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
