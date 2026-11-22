@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { EngineClient } from "../engine-client.js";
 import { secretsShape, withholdRequestUrl } from "../withhold.js";
 import type { ToolContext } from "./contract.js";
+import { TERMINAL_STATUS_WORDS } from "./run-status.js";
 
 const metricDeltaSchema = z.object({
 	metric: z.string(),
@@ -146,17 +147,110 @@ export const collectionPageSchema = pagedEnvelopeSchema(
 );
 
 /**
- * `get_run_report`: `partial` and `note` appear only while the run is unfinished
- * (or has a status Vayu does not recognise, which adds `unknownStatus` too).
- * `summary.partial` and `summary.summaryMissing` are a different statement, made
- * of a failed run whose counts the engine could not fully record (#2895).
+ * A row's stored trace, as `boundRunReport` leaves it (#767, #769, #2458).
+ * Unioned with anything because the engine hands back a trace it cannot parse
+ * as the stored string (`read_body` names that case), and a declared shape that
+ * refused it would turn the whole report into an error.
+ */
+const reportTraceSchema = z
+	.looseObject({
+		request: z
+			.looseObject({
+				rawRequestTruncated: optBool.describe("Its body half was cut, never the headers."),
+			})
+			.optional()
+			.describe("Its body is cut and flagged as `response`'s is."),
+		response: z
+			.looseObject({
+				bodyTruncated: optBool.describe(
+					"Cut for this result; read_body pages out the rest."
+				),
+				bodyBytes: optNum.describe("The full size, in decoded bytes when base64."),
+				bodyEncoding: optStr.describe(
+					'"base64": decode `body`, never read it as text; a cut keeps whole 4-character groups.'
+				),
+			})
+			.optional(),
+		failures: anyList.describe(
+			"The replay row's distinct failures; its console is `testValidation.console` (a step's: `tests.console`)."
+		),
+		failureCounts: anyList.describe("How often each failed."),
+	})
+	.or(z.unknown())
+	.optional();
+
+/**
+ * `get_run_report`: what each field an agent acts on means, so the tool
+ * description carries only the rules (#3749). Loose and
+ * all-optional: an older engine omits some, and nothing returned today may be
+ * refused. `summary.partial` and `summary.summaryMissing` are a different
+ * statement from the top-level `partial`, made of a failed run whose counts the
+ * engine could not fully record (#2895).
  */
 export const runReportSchema = z.looseObject({
-	metadata: z.looseObject({ runId: optStr, runType: optStr, status: optStr }).optional(),
-	summary: z.looseObject({ partial: optBool, summaryMissing: optBool }).optional(),
-	results: anyList,
+	metadata: z
+		.looseObject({
+			runId: optStr,
+			runType: optStr,
+			status: optStr,
+			endTime: nullNum.describe(`Null until the run is ${TERMINAL_STATUS_WORDS}.`),
+		})
+		.optional(),
+	summary: z
+		.looseObject({
+			partial: optBool.describe(
+				"Final totals not saved: the counts are a floor; latency, peakConcurrency and avgQueueWaitMs are absent. Never false."
+			),
+			summaryMissing: optBool.describe(
+				"No summary saved: the counts are not run totals; latency, peakConcurrency and avgQueueWaitMs are absent. Never false."
+			),
+			drainCut: z
+				.looseObject({ cancelled: optNum })
+				.optional()
+				.describe(
+					'A Stop cut the drain: figures cover only answered requests; the app shows "Not judged".'
+				),
+		})
+		.optional(),
+	warnings: anyList.describe(
+		"`{code, message, ...counts}`: what can skew even clean numbers, e.g. an unresolved `{{token}}`."
+	),
+	slowRequests: z
+		.looseObject({
+			count: optNum.describe("Exact count past the slow threshold."),
+			tracesStored: optNum.describe("Kept as traces; can be below `count`."),
+		})
+		.optional(),
+	coverage: anyRecord
+		.optional()
+		.describe(
+			"Against a bound OpenAPI document: operations hit, responses seen, undeclared statuses. Else absent, never zeros."
+		),
+	elements: anyList.describe(
+		"Element rows (a step's: `scenario.steps[].elements`): a script's `messages` say why it failed, `console` what it logged; `*Dropped` counts the cut."
+	),
+	testValidation: z.looseObject({ console: anyList }).optional(),
+	results: rowsOf(
+		z.looseObject({
+			id: optNum.describe("read_body's `resultId`."),
+			trace: reportTraceSchema,
+			traceOmitted: optBool.describe(
+				"The trace budget ran out: scalars kept, trace dropped."
+			),
+		})
+	),
+	resultsStored: optNum.describe(
+		"Rows stored; above `resultsCap`, `results` is a selection. Absent on an older engine."
+	),
+	resultsCap: optNum.describe(
+		"100, or every stored step for a scenario run; past it, failing rows (outside 2xx/3xx, or 0) are kept first, listed in time order."
+	),
+	tracesOmitted: optNum.describe("Rows carrying `traceOmitted`, past `traceBudgetBytes`."),
+	traceBudgetBytes: optNum,
 	partial: optBool,
-	unknownStatus: optBool,
+	unknownStatus: optBool.describe(
+		"An unrecognised `metadata.status`, which counts as unfinished."
+	),
 	note: optStr,
 });
 

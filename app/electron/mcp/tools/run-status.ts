@@ -49,22 +49,16 @@ export function classifyRunStatus(status: unknown): RunStatusClass {
 	return "unknown";
 }
 
-function orList(items: readonly string[], wrap: (item: string) => string = (item) => item): string {
-	const words = items.map(wrap);
+function orList(words: readonly string[]): string {
 	if (words.length < 2) return words.join("");
 	return `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
 }
-
-const backticked = (item: string): string => `\`${item}\``;
 
 /** "pending, running, completed, failed or stopped", for the tool descriptions. */
 export const RUN_STATUS_WORDS = orList(RUN_STATUSES);
 
 /** "completed, failed or stopped". */
 export const TERMINAL_STATUS_WORDS = orList(TERMINAL_RUN_STATUSES);
-
-/** "`pending` or `running`". */
-export const UNFINISHED_STATUS_WORDS = orList(UNFINISHED_RUN_STATUSES, backticked);
 
 /** How a status the classifier did not recognise is named in a sentence. */
 function unrecognisedStatusLabel(status: unknown): string {
