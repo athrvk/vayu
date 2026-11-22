@@ -78,6 +78,65 @@ function descriptionOf(tool: McpTool | undefined, safety: Partial<McpSafetyConfi
 	return resolveDescription(tool, resolveSafetyConfig(safety));
 }
 
+/** A node of an advertised (JSON Schema) output schema, as far as these tests walk it. */
+interface AdvertisedSchema {
+	description?: string;
+	properties?: Record<string, AdvertisedSchema>;
+	items?: AdvertisedSchema;
+	anyOf?: AdvertisedSchema[];
+}
+
+/** @p toolName's output schema as `tools/list` advertises it. */
+function advertisedOutputSchema(toolName: string): AdvertisedSchema {
+	const outputSchema = TOOLS.find((t) => t.name === toolName)?.outputSchema;
+	if (!outputSchema) throw new Error(`${toolName} declares no output schema`);
+	return z.toJSONSchema(outputSchema, { io: "output" }) as AdvertisedSchema;
+}
+
+/** The members @p node declares: its own, or those of its object-shaped `anyOf` branches. */
+function declaredMembers(node: AdvertisedSchema): Record<string, AdvertisedSchema> {
+	const branches = (node.anyOf ?? []).map((branch) => branch.properties ?? {});
+	return Object.assign({}, node.properties, ...branches);
+}
+
+/**
+ * The description @p toolName's output schema gives the member at @p path:
+ * dotted property names, a `[]` suffix stepping into an array's items. Throws
+ * for a member the schema does not declare, so a renamed field fails here.
+ */
+function outputMemberDescription(toolName: string, path: string): string {
+	let node = advertisedOutputSchema(toolName);
+	for (const step of path.split(".")) {
+		const name = step.replace(/\[\]$/, "");
+		const member = declaredMembers(node)[name];
+		if (!member) throw new Error(`${toolName}'s output schema declares no ${path}`);
+		node = step.endsWith("[]") && member.items ? member.items : member;
+	}
+	return node.description ?? "";
+}
+
+/**
+ * Every member path @p node declares: dotted names, `[]` stepping into an
+ * array's items, an `anyOf` branch's members read as the node's own.
+ */
+function declaredPaths(node: AdvertisedSchema, prefix = ""): string[] {
+	return Object.entries(declaredMembers(node)).flatMap(([name, member]) => {
+		const path = prefix ? `${prefix}.${name}` : name;
+		const nested = member.items ? declaredPaths(member.items, `${path}[]`) : [];
+		return [path, ...nested, ...declaredPaths(member, path)];
+	});
+}
+
+/** Every member path @p value carries, spelled as {@link declaredPaths} spells them. */
+function presentPaths(value: unknown, prefix = ""): string[] {
+	if (Array.isArray(value)) return value.flatMap((item) => presentPaths(item, `${prefix}[]`));
+	if (!value || typeof value !== "object") return [];
+	return Object.entries(value).flatMap(([name, member]) => {
+		const path = prefix ? `${prefix}.${name}` : name;
+		return [path, ...presentPaths(member, path)];
+	});
+}
+
 /**
  * Default `composeRequest` fake: the engine's identity composition for an
  * inline request with nothing to resolve - the request echoed back with the
@@ -8141,12 +8200,16 @@ describe("inline body bounds", () => {
 		expect(rows[1].trace).not.toHaveProperty("response");
 	});
 
-	test("both tool descriptions state the bound", () => {
+	test("both tool descriptions state the bound, and each names its cut flag", () => {
 		for (const name of ["run_request", "get_run_report"]) {
 			const description = descriptionOf(TOOLS.find((t) => t.name === name));
 			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
-			expect(description).toMatch(/bodyTruncated/);
 		}
+		// Both declare their flag on the output schema (#3749).
+		expect(outputMemberDescription("run_request", "bodyTruncated")).toMatch(/cut to the cap/);
+		expect(
+			outputMemberDescription("get_run_report", "results[].trace.response.bodyTruncated")
+		).toMatch(/read_body/);
 	});
 
 	test("run_request's description tells the two body flags apart", () => {
@@ -8154,8 +8217,100 @@ describe("inline body bounds", () => {
 		// re-send would achieve, so the description has to name both and say
 		// which remedy belongs to which.
 		const description = descriptionOf(TOOLS.find((t) => t.name === "run_request"));
-		expect(description).toMatch(/bodyCapped/);
+		expect(description).toMatch(/`bodyCapped` is not `bodyTruncated`/);
 		expect(description).toMatch(/maxDesignResponseBodyBytes/);
+	});
+
+	describe("run_request's output schema (#3749)", () => {
+		const schema = () => TOOLS.find((t) => t.name === "run_request")!.outputSchema!;
+		const base64PastCap = "AAEC".repeat(MAX_INLINE_BODY_BYTES);
+		const exchange = executeAnswer({
+			body: { ok: true },
+			bodyRaw: '{"ok":true}',
+			bodyEncoding: "utf8",
+			bodySize: 11,
+			bodyCapped: false,
+			headerLines: [{ name: "Set-Cookie", value: "a=1" }],
+			requestHeaders: { Accept: "*/*" },
+			requestHeaderLines: [{ name: "Accept", value: "*/*" }],
+			redirects: [
+				{
+					status: 302,
+					statusText: "Found",
+					url: "https://api.example.com/x",
+					schemeDowngrade: false,
+					headerLines: [],
+				},
+			],
+			rawRequest: `POST /x HTTP/1.1\r\nHost: api.example.com\r\n\r\n${huge}`,
+			runId: "run_d",
+			resultId: 7,
+		});
+		const capped = executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyCapped: true });
+		const base64 = executeAnswer({ bodyRaw: base64PastCap, bodyEncoding: "base64" });
+		const streamStarted = { runId: "run_s", eventsUrl: "/runs/run_s/events" };
+		const streamRead = { events: [{ event: "tick" }], completed: true, capReached: false };
+
+		/** Each answer path the handler has, with the call that reaches it. */
+		const sends: [
+			string,
+			Record<string, unknown>,
+			Partial<Record<keyof EngineClient, unknown>>,
+		][] = [
+			["buffered", {}, { executeRequest: vi.fn().mockResolvedValue(exchange) }],
+			[
+				"link-only",
+				{ requestId: "req_1" },
+				{ executeRequest: vi.fn().mockResolvedValue(exchange) },
+			],
+			["body-capped", {}, { executeRequest: vi.fn().mockResolvedValue(capped) }],
+			["base64", {}, { executeRequest: vi.fn().mockResolvedValue(base64) }],
+			["non-object", {}, { executeRequest: vi.fn().mockResolvedValue("not an object") }],
+			[
+				"streamed",
+				{ stream: true },
+				{
+					executeRequest: vi.fn().mockResolvedValue(streamStarted),
+					consumeStreamEvents: vi.fn().mockResolvedValue(streamRead),
+				},
+			],
+			[
+				"stream without a runId",
+				{ stream: true },
+				{ executeRequest: vi.fn().mockResolvedValue({ status: 200 }) },
+			],
+		];
+
+		async function send(args: Record<string, unknown>, client: EngineClient) {
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x", ...args },
+				ctxWith(client, allow)
+			);
+			expect(res.isError).toBeFalsy();
+			return res;
+		}
+
+		// Mutation check: rename a member in runRequestResultSchema, or drop
+		// `structured: true` from the buffered send, and this fails.
+		test("every answer satisfies it, and every member it declares reaches the agent", async () => {
+			const present = new Set<string>();
+			for (const [name, args, overrides] of sends) {
+				const res = await send(args, fakeClient(overrides));
+				expect(schema().safeParse(res.structuredContent).success, name).toBe(true);
+				for (const path of presentPaths(res.structuredContent)) present.add(path);
+			}
+
+			const declared = declaredPaths(advertisedOutputSchema("run_request"));
+			expect(declared.length).toBeGreaterThan(10);
+			expect(declared.filter((path) => !present.has(path))).toEqual([]);
+		});
+
+		test("the text block is the structured answer, and a link-only send keeps its caveat", async () => {
+			const res = await send({ requestId: "req_1" }, executed(exchange));
+			expect(JSON.parse(firstText(res))).toEqual(res.structuredContent);
+			expect(res.content[1]?.text).toMatch(/sent ad hoc/);
+		});
 	});
 
 	/**
@@ -8298,11 +8453,15 @@ describe("inline body bounds", () => {
 			expect(await runReport(reported(report))).toEqual(report);
 		});
 
-		test("the tool description states the total bound and its disclosure", () => {
+		test("the tool description states the total bound and the output schema its disclosure", () => {
 			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
 			expect(description).toContain(String(MAX_REPORT_TRACE_BYTES));
-			expect(description).toMatch(/traceOmitted/);
-			expect(description).toMatch(/tracesOmitted/);
+			expect(outputMemberDescription("get_run_report", "results[].traceOmitted")).toMatch(
+				/trace budget/
+			);
+			expect(outputMemberDescription("get_run_report", "tracesOmitted")).toMatch(
+				/traceOmitted.*traceBudgetBytes/
+			);
 		});
 	});
 });
@@ -14512,12 +14671,16 @@ describe("run status reads (#2436)", () => {
 			expect(description).toContain("metadata.status");
 		});
 
-		test("the description names the summary flags and keeps them apart from the top-level partial (#2895)", () => {
+		test("the description keeps the summary flags apart from the top-level partial, and the schema says what each means (#2895)", () => {
 			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
-			expect(description).toContain("`summary.partial: true`");
-			expect(description).toContain("`summary.summaryMissing: true`");
-			expect(description).toMatch(/neither is the top-level `partial`/);
-			expect(description).toMatch(/absent otherwise, never false/);
+			expect(description).toContain(
+				"Neither `summary.partial` nor `summary.summaryMissing` is the top-level `partial`."
+			);
+			for (const flag of ["summary.partial", "summary.summaryMissing"]) {
+				const meaning = outputMemberDescription("get_run_report", flag);
+				expect(meaning).toMatch(/latency, peakConcurrency and avgQueueWaitMs are absent/);
+				expect(meaning).toMatch(/Never false/);
+			}
 		});
 
 		test("a report's summary flags reach the agent and satisfy the output schema", async () => {
@@ -14536,6 +14699,90 @@ describe("run status reads (#2436)", () => {
 			expect(res.structuredContent).toMatchObject({ summary: { summaryMissing: true } });
 			// Not the top-level marker of an unfinished run.
 			expect(res.structuredContent).not.toHaveProperty("partial");
+		});
+
+		// A body past the per-body cap; two such traces exhaust the report's budget.
+		const pastCap = "x".repeat(MAX_INLINE_BODY_BYTES + 1);
+		const completedRun = {
+			metadata: {
+				runId: "run_1",
+				runType: "design",
+				status: "completed",
+				endTime: 1_700_000,
+			},
+			summary: { totalRequests: 5, drainCut: { cancelled: 2 } },
+			warnings: [
+				{ code: "unresolved_tokens", message: "1 request sent {{token}}", count: 1 },
+			],
+			slowRequests: { count: 3, thresholdMs: 1000, tracesStored: 1, percentage: 60 },
+			coverage: { operations: [{ method: "GET", path: "/x", exercised: true }] },
+			elements: [{ id: "el_1", kind: "script.post", messages: [], console: [] }],
+			testValidation: { samplesTested: 1, console: [{ level: "log", text: "saw 404" }] },
+			results: [
+				{ id: 1, statusCode: 0, trace: { failures: ["expected 404"], failureCounts: [3] } },
+				{
+					id: 2,
+					statusCode: 500,
+					trace: {
+						request: { rawRequest: `POST /x HTTP/1.1\r\nHost: a\r\n\r\n${pastCap}` },
+						response: { body: pastCap },
+					},
+				},
+				{
+					id: 3,
+					statusCode: 200,
+					trace: { response: { body: "AAEC", bodyEncoding: "base64" } },
+				},
+				{ id: 4, statusCode: 200, trace: { response: { body: pastCap } } },
+				{ id: 5, statusCode: 200, trace: { response: { body: pastCap } } },
+			],
+			resultsStored: 5,
+			resultsCap: 100,
+		};
+		const failedLoadRun = (summary: Record<string, unknown>) => ({
+			metadata: { runId: "run_1", runType: "load", status: "failed" },
+			summary: { totalRequests: 10, ...summary },
+			results: [],
+		});
+
+		// Mutation check (#3749): rename a member in runReportSchema, or have the
+		// bounds stop writing one (`traceOmitted`, `bodyTruncated`), and this fails.
+		test("every member the output schema declares reaches the agent, and each report satisfies it (#3749)", async () => {
+			const schema = TOOLS.find((t) => t.name === "get_run_report")!.outputSchema!;
+			const reports = [
+				completedRun,
+				failedLoadRun({ partial: true }),
+				failedLoadRun({ summaryMissing: true }),
+				report("running"),
+				report("archived"),
+			];
+			const present = new Set<string>();
+			for (const engineReport of reports) {
+				const client = fakeClient({
+					getRunReport: vi.fn().mockResolvedValue(engineReport),
+				});
+				const res = await dispatchTool(
+					"get_run_report",
+					{ runId: "run_1" },
+					ctxWith(client)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(schema.safeParse(res.structuredContent).success).toBe(true);
+				for (const path of presentPaths(res.structuredContent)) present.add(path);
+			}
+
+			const declared = declaredPaths(advertisedOutputSchema("get_run_report"));
+			expect(declared.length).toBeGreaterThan(20);
+			expect(declared.filter((path) => !present.has(path))).toEqual([]);
+		});
+
+		test("a trace the engine could not parse still satisfies the output schema", async () => {
+			const schema = TOOLS.find((t) => t.name === "get_run_report")!.outputSchema!;
+			const unparsed = { ...completedRun, results: [{ id: 1, trace: "{not json" }] };
+			const client = fakeClient({ getRunReport: vi.fn().mockResolvedValue(unparsed) });
+			const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+			expect(schema.safeParse(res.structuredContent).success).toBe(true);
+			expect(res.structuredContent).toMatchObject({ results: [{ trace: "{not json" }] });
 		});
 	});
 
@@ -14580,14 +14827,19 @@ describe("run status reads (#2436)", () => {
 			expect(getRunText).toContain(
 				"`status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped)"
 			);
-			const reportText = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
-			expect(reportText).toContain(
-				"is null until it is completed, failed or stopped; while it is `pending` or `running`"
+			expect(getRunText).toContain("`unknownStatus: true`");
+			expect(getRunText).toMatch(/does not recognise counts as unfinished/);
+			// get_run_report states the terminal set in its rule and the field
+			// meanings on its output schema (#3749).
+			expect(descriptionOf(TOOLS.find((t) => t.name === "get_run_report"))).toContain(
+				"Until `metadata.status` is completed, failed or stopped no budget verdict exists"
 			);
-			for (const text of [getRunText, reportText]) {
-				expect(text).toContain("`unknownStatus: true`");
-				expect(text).toMatch(/does not recognise counts as unfinished/);
-			}
+			expect(outputMemberDescription("get_run_report", "metadata.endTime")).toBe(
+				"Null until the run is completed, failed or stopped."
+			);
+			expect(outputMemberDescription("get_run_report", "unknownStatus")).toMatch(
+				/unrecognised `metadata.status`, which counts as unfinished/
+			);
 		});
 	});
 

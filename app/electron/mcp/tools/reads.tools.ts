@@ -65,7 +65,6 @@ import {
 	projectRunStatus,
 	RUN_STATUS_WORDS,
 	TERMINAL_STATUS_WORDS,
-	UNFINISHED_STATUS_WORDS,
 } from "./run-status.js";
 import {
 	fieldsInput,
@@ -448,18 +447,11 @@ export const READ_TOOLS: McpTool[] = [
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
 			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. " +
-			`\`metadata.status\` is the run's state, and \`metadata.endTime\` is null until it is ${TERMINAL_STATUS_WORDS}; while it is ${UNFINISHED_STATUS_WORDS}, the report also carries \`partial: true\` and a \`note\`, \`summary\` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. A status Vayu does not recognise counts as unfinished and adds \`unknownStatus: true\` (else absent). Read get_run(runId) for whether it is done. ` +
-			"A failed load run may carry `summary.partial: true` (the engine stopped before saving the final totals: the counts, `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last saved figures, a floor under the real totals, while `latency`, `peakConcurrency` and `avgQueueWaitMs` are absent, not recorded, never zero) or `summary.summaryMissing: true` (no summary was saved, so the counts are not whole-run totals and `latency`, `peakConcurrency` and `avgQueueWaitMs` are again absent); both are absent otherwise, never false, and neither is the top-level `partial`, which means the run is still going. " +
+			`Until \`metadata.status\` is ${TERMINAL_STATUS_WORDS} no budget verdict exists and zeros are not results; get_run(runId) says when it is done. ` +
+			"Neither `summary.partial` nor `summary.summaryMissing` is the top-level `partial`. " +
 			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
-			'A completed run whose drain a Stop cut carries `summary.drainCut` {cancelled}: its figures cover only the requests that were answered, and the app shows it as "Not judged". ' +
-			"A run may also carry `warnings`, even when it finished and its numbers look fine: a request sent with an unresolved `{{token}}`, a step whose pre-request script load mode never runs, a raised per-host connection limit, or requests re-sent on a new connection after the server dropped a reused one. Each entry carries `code`, a human-readable `message`, and its code's counts. Absent for a run with nothing to report. " +
-			"`slowRequests.count` is the exact number of completions past the threshold; `slowRequests.tracesStored` is how many were kept as sample traces, so it can be smaller than `count`. " +
-			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
-			"An inline script's row in `elements` says why it failed and what it logged: `messages`, `console` and their `*Dropped` counts. " +
-			"Sampled-replay failures are one `results` row: `failures` lists each distinct message once, `failureCounts` how often it failed; its console lines are `testValidation.console` (a scenario step's: `tests.console`). " +
-			"`results` is a selection of the stored rows, not a uniform sample: at most 100 for a single-request run, every stored step for a scenario run. When the run stored more than the cap, rows with a failing status (outside 2xx/3xx, including status 0 for no response) are chosen first, successes fill the remainder, and the chosen rows are listed in time order. `resultsStored` is how many rows the run stored and `resultsCap` the cap applied; `resultsStored > resultsCap` is the only sign that `results` is a selection. Absent on an older engine. " +
-			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. read_body pages out a capped body by \`runId\` and the row's \`id\` as \`resultId\`. A response node with \`bodyEncoding: "base64"\` holds a body that is not UTF-8 text as standard base64 in \`body\`: decode it, never read it as text; its cap and \`bodyBytes\` count decoded bytes, and a cut keeps whole 4-character groups. Without the key the body is text. ` +
-			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. read_body reads an omitted row's bodies the same way.` +
+			"`results` is a selection, not a uniform sample. " +
+			`Trace bodies are capped at ${MAX_INLINE_BODY_BYTES} bytes each and ${MAX_REPORT_TRACE_BYTES} together, non-passing steps kept first; read_body pages out a capped or omitted row's body by \`runId\` and the row's \`id\` as \`resultId\`. What each field means is on the output schema.` +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get run report",

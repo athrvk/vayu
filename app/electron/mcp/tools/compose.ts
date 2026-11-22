@@ -29,12 +29,12 @@ import {
 	engineErrorResult,
 	errorResult,
 	isRecord,
-	jsonResult,
 	num,
 	optionalPositiveInt,
 	requireStr,
 	str,
 	structuredResult,
+	structuredRoot,
 	ToolArgError,
 } from "./kit.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
@@ -320,7 +320,7 @@ export async function runStreamingRequest(
 		// answer to a request we asked to stream. Either way, hand back what it
 		// said rather than reading events for a run that does not exist.
 		const withhold = await runOutputShape(ctx, signal, [payload.auth]);
-		return jsonResult(withhold(started));
+		return structuredResult(structuredRoot(withhold(started)));
 	}
 
 	let consumed;
