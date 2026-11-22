@@ -60,6 +60,7 @@ import { StatusCodeBadge } from "./StatusCodeBadge";
 import TimingPhaseTiles from "./TimingPhaseTiles";
 import { TruncatedText } from "../TruncatedText";
 import type { ResolvedTimingPhase } from "./timing-phases";
+import { isReportedMs } from "./utils";
 
 /**
  * How the row reads at a glance - the icon and the colour it carries.
@@ -128,8 +129,14 @@ export interface SampledExchangeProps {
 	error?: string;
 	/** Exceeded the run's configured slow-request threshold. */
 	isSlow?: boolean;
-	/** From `phasesFromTrace()`. Empty hides the breakdown entirely. */
+	/** From `phasesFromTrace()`. Empty hides the breakdown unless `scriptMs` is reported. */
 	phases?: readonly ResolvedTimingPhase[];
+	/**
+	 * The exchange's script time (`trace.scriptMs`, #3739), drawn as a "Scripts"
+	 * tile in the breakdown. Unlike an empty `phases`, a reported `0` still opens
+	 * the section; absent, NaN or negative draws nothing.
+	 */
+	scriptMs?: number;
 	isExpanded: boolean;
 	onToggle: () => void;
 	/**
@@ -159,6 +166,7 @@ export function SampledExchange({
 	error,
 	isSlow = false,
 	phases = [],
+	scriptMs,
 	isExpanded,
 	onToggle,
 	actions,
@@ -278,12 +286,12 @@ export function SampledExchange({
 
 						{details}
 
-						{phases.length > 0 && (
+						{(phases.length > 0 || isReportedMs(scriptMs)) && (
 							<div className="space-y-1">
 								<p className="text-xs font-medium text-muted-foreground">
 									Timing breakdown
 								</p>
-								<TimingPhaseTiles phases={phases} />
+								<TimingPhaseTiles phases={phases} scriptMs={scriptMs} />
 							</div>
 						)}
 

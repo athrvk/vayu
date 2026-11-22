@@ -74,6 +74,7 @@ export const RequestRow = memo(function RequestRow({ row, isExpanded, onToggle }
 			}
 			error={failureText(row)}
 			phases={phasesFromTrace(row.exchange.timing)}
+			scriptMs={row.exchange.timing?.scriptMs}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(row.id)}
 			actions={
