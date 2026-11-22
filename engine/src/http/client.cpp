@@ -252,7 +252,8 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     // A bounded stream counts what it received before the byte bound is
     // applied, as the event loop's callback does: the events in this chunk
     // are on the wire whether or not the bound keeps their bytes.
-    if (sink->stream.active () && sink->stream.feed (std::string_view (ptr, total_size))) {
+    if (sink->stream.active () &&
+    sink->stream.feed (std::string_view (ptr, total_size), *sink->headers)) {
         sink->stream.mark_cap_reached ();
     }
 
@@ -842,21 +843,21 @@ std::chrono::steady_clock::time_point started) {
 
 /**
  * @brief Whether a bounded stream ended the way one is meant to, once the
- *        server had answered: at a cap, or at a stop (`ClientConfig::cancel`).
+ *        server had answered with one: at a cap, or at a stop
+ *        (`ClientConfig::cancel`).
  *
  * Either is a **success** whatever libcurl calls the abort that delivered it,
  * the event loop's reading of a cap, and a stop is the end a design stream's
  * `POST /runs/:id/stop` names (`SseEndReason::Stopped`), not a failure of the
- * request. Before a status line there is no response to report, and the
- * error branch says why.
+ * request. @p response is reported already, so its `stream_events` says
+ * whether the reply announced `text/event-stream` (#3771); before that there
+ * is no stream to end, and the error branch says why.
  */
-bool stream_ended_by_rule (const StreamTally& stream, const ProgressWatch& watch, CURL* curl) {
-    if (!stream.active () || !(stream.cap_reached () || watch.cancelled)) {
-        return false;
-    }
-    long status = 0;
-    get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
-    return status > 0;
+bool stream_ended_by_rule (const StreamTally& stream,
+const ProgressWatch& watch,
+const Response& response) {
+    return stream.active () && (stream.cap_reached () || watch.cancelled) &&
+    response.stream_events.has_value ();
 }
 
 /**
@@ -868,12 +869,11 @@ bool stream_ended_by_rule (const StreamTally& stream, const ProgressWatch& watch
  * generic CURLE_WRITE_ERROR. So it is recognized here and reported as the
  * condition it is, which `/import/fetch` answers with a 413 rather than a 502.
  * A cancel is this engine's own abort too, and so is a stream's duration cap
- * that passed before the server answered.
+ * that passed before the server answered with an event stream.
  */
 std::optional<Error> engine_abort_error (const BodySink& sink,
 const Headers& headers,
-const ProgressWatch& watch,
-const Request& request) {
+const ProgressWatch& watch) {
     if (watch.cancelled) {
         return Error{ ErrorCode::Cancelled, "Request cancelled" };
     }
@@ -881,11 +881,8 @@ const Request& request) {
         return Error{ ErrorCode::ResponseTooLarge,
             too_large_message (headers, sink.max_bytes) };
     }
-    const auto& bounds = request.stream_bounds;
-    if (sink.stream.cap_reached () && bounds) {
-        return Error{ ErrorCode::Timeout,
-            "No response before the stream's " + std::to_string (bounds->max_duration_ms) +
-            " ms duration cap (maxStreamDurationMs)" };
+    if (sink.stream.cap_reached ()) {
+        return sink.stream.unannounced_cap_error ();
     }
     return std::nullopt;
 }
@@ -1159,13 +1156,12 @@ Result<Response> Client::send (const Request& request) {
     // What a bounded stream delivered, on every path below.
     sink.stream.report (response);
     const bool stream_ended =
-    stream_ended_by_rule (sink.stream, frame.progress_watch, curl);
+    stream_ended_by_rule (sink.stream, frame.progress_watch, response);
 
     // Check for errors
     if (res != CURLE_OK && !keep_truncated_body && !stream_ended) {
         // The handle describes the hop that failed, so the code is that hop's.
-        auto error =
-        engine_abort_error (sink, response.headers, frame.progress_watch, request);
+        auto error = engine_abort_error (sink, response.headers, frame.progress_watch);
         if (!error) {
             error = detail::curl_to_error (
             curl, res, impl_->errors, &request, &frame.peer_check);

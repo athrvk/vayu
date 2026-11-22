@@ -131,7 +131,7 @@ export const TOOLTIPS = {
 	phasePercentiles:
 		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 has a heavy tail an average hides: for TLS or Connect that is connection churn under load, a minority of requests paying a handshake the rest skipped; for TTFB it is the target's own slow tail. Requires the phaseHistograms setting of Vayu's engine.",
 	streamEvents:
-		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended.",
+		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. Only replies that announced text/event-stream are streams: a 429 or a JSON answer counts in the status codes, not here. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended.",
 	streamFirstEvent:
 		"How long each stream took to deliver its first event, counted from submitting the request. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. Only streams that delivered an event are counted.",
 	liveStream:

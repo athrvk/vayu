@@ -1543,7 +1543,11 @@ delivered events the live total counts and the report does not.
 before the completion is handed on, or the tally's destructor does for a
 transfer that is cancelled or discarded unreported, so it counts streaming
 transfers alone (never `activeConnections`, which on a mixed collection also
-counts the ordinary steps) and reads 0 once the run settles. The trailing
+counts the ordinary steps) and reads 0 once the run settles. A streaming
+transfer is on the gauge from submission, before its reply says what it is;
+only a reply whose final hop announced `text/event-stream` is fed to the tally
+and reported as a stream (#3771), so a 429 holds the gauge while in flight and
+adds nothing else. The trailing
 window turns the tally into `eventsPerSecond` beside `currentRps`; and a gate
 frame adds `streamTimeToFirstEvent` from the completed streams' histogram, read
 through a snapshot as `cumulativePhases` is. All four are live only, never

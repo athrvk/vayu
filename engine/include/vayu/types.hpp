@@ -1191,8 +1191,11 @@ struct Response {
      * Optional rather than a zero, and for the reason the report's sections are
      * omitted rather than zeroed: "this was not a stream" and "this stream
      * delivered nothing" are different facts, and a run whose target closed
-     * every connection before the first event is exactly the one where telling
-     * them apart matters.
+     * every stream before the first event is exactly the one where telling
+     * them apart matters. A transfer is a stream only when its final hop
+     * announced `text/event-stream` (#3771): a 429 or a 200 JSON reply to a
+     * streaming request leaves this absent, as does a transfer that never got
+     * an answer.
      *
      * Counted by `SseFrameCounter` on the write callback (through
      * `StreamTally`, on either curl driver), which agrees with `SseParser` on

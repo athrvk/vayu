@@ -58,7 +58,7 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     // stream that ended exactly as asked as a failed one whenever its final
     // chunk also crossed the byte cap.
     const bool stream_cap_hit = data->stream.active () &&
-    data->stream.feed (std::string_view (ptr, total_size));
+    data->stream.feed (std::string_view (ptr, total_size), data->response.headers);
 
     // Bounded buffering. Without this a large or streaming response grows the
     // buffer as concurrency x body-size until allocation fails - and a
@@ -191,8 +191,10 @@ curl_off_t /*ulnow*/) {
     // cap is honoured within about that of its expiry.
     //
     // A non-zero return is the documented abort (CURLE_ABORTED_BY_CALLBACK);
-    // The tally's `cap_reached` is what makes the completion read it as the
-    // stream's intended end rather than as a failure.
+    // the tally's `cap_reached` is what makes the completion read it as the
+    // stream's intended end rather than as a failure. It fires whatever the
+    // reply is, because it is the transfer's bound, but only a reply that
+    // announced an event stream ends as a success (#3771).
     if (data->stream.active () &&
     data->stream.deadline_passed (std::chrono::steady_clock::now ())) {
         data->stream.mark_cap_reached ();

@@ -14127,8 +14127,20 @@ failure.
 Absent for every run that did not stream, and for one started with
 `stream_metrics: false` - not zeroed, because "this run was not a stream" and
 "this stream delivered nothing" are different answers, and a run whose target
-closed every connection before the first event is where telling them apart
+closed every stream before the first event is where telling them apart
 matters.
+
+**A completion is a reply that announced `text/event-stream`** (#3771), on its
+final hop. Asking for a stream does not make the answer one: a `429` or `500`
+in JSON, or a `200` JSON body from a server that ignored the request's
+`stream`, counts in `statusCodes` and the error tallies as it would on any run
+and nowhere in this section. A rate-limited run therefore reports
+`completions` equal to the streams that opened, its `events` percentiles their
+event counts, and a target that never streamed leaves the section absent. A
+transfer that got no answer at all is not a stream either. The duration cap
+still ends such a transfer, as a `timeout` error naming `maxStreamDurationMs`
+rather than a capped success. A stream that announced itself and was then cut
+off still counts, with the events it delivered.
 
 `events` is the **per-completion** distribution, not the run's total: 480
 streams of 40 events each have a p50 of 40, not of 19200. `eventsPerSecond` is
@@ -14136,8 +14148,9 @@ the whole-run rate, derived from the same `testDuration` the report's `rps`
 uses so the two are comparable. Both are reported because one long stream and
 250 short ones can share a rate while being entirely different runs.
 A stream that delivered nothing is a 0 in `events` like any other count
-(#3240), so a run whose target closed every connection before the first
-event reads `min`, `max` and every percentile as 0 beside `totalEvents: 0`.
+(#3240), so a run whose target announced every stream and closed it before
+the first event reads `min`, `max` and every percentile as 0 beside
+`totalEvents: 0`.
 The figures are exact up to 2,046 events per stream and within 0.1% above.
 
 `capped` counts the completions a cap ended rather than the server. In the
