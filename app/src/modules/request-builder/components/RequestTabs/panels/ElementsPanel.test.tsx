@@ -47,7 +47,17 @@ function kindSchema(
 	};
 }
 
+/** A kind whose `text` the engine resolves `{{tokens}}` in (#3779): the list must hand its form the scope. */
+const CONTAINS_KIND: ElementKindSchema = {
+	...kindSchema("assert.contains", "Assert text", "assert"),
+	configSchema: {
+		type: "object",
+		properties: { text: { type: "string", title: "Text" } },
+	},
+};
+
 const KINDS: ElementKindSchema[] = [
+	CONTAINS_KIND,
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("script.pre", "Pre-request script", "script"),
@@ -82,7 +92,12 @@ const updateField = vi.fn();
 
 let ctx: Partial<RequestBuilderContextValue> = {};
 
+// Both paths: the panel takes the hook from the module index, and
+// `useVariableSupport` from the file behind it.
 vi.mock("../../../context", () => ({
+	useRequestBuilderContext: () => ctx,
+}));
+vi.mock("../../../context/RequestBuilderContext", () => ({
 	useRequestBuilderContext: () => ctx,
 }));
 
@@ -159,6 +174,32 @@ describe("ElementsPanel", () => {
 		render(<ElementsPanel />);
 
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
+	});
+
+	// Mutation check: drop `variables={variables}` from `ElementsPanel`'s
+	// `<ElementList>` and the overlay is gone, leaving a plain text box.
+	it("gives a resolved field the request's variable scope (#3779)", () => {
+		setContext({
+			request: {
+				id: "req_1",
+				collectionId: null,
+				elements: [
+					{
+						id: "c1",
+						kind: "assert.contains",
+						enabled: true,
+						config: { text: "{{data.email}}" },
+					},
+				],
+			} as never,
+		});
+
+		render(<ElementsPanel />);
+		expandRow("Assert text");
+
+		expect(document.querySelector("[data-variable-overlay]")?.textContent).toContain(
+			"{{data.email}}"
+		);
 	});
 
 	it("renders the inherited-elements notice above the list", () => {

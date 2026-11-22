@@ -69,7 +69,7 @@ import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
 import { elementReference, type ElementOwner } from "@/lib/agent-reference";
 import { useLayoutStore } from "@/stores";
-import type { ElementDef, ElementKindSchema } from "@/types";
+import type { ElementDef, ElementKindSchema, VariableSupport } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { nextCopyName } from "./duplicate-name";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
@@ -138,6 +138,12 @@ export interface ElementListProps {
 	 * or collapsed; the host drops the entry when the element is edited.
 	 */
 	errors?: ElementErrors;
+	/**
+	 * The variable scope the list is edited in. A host with one passes it so the
+	 * fields the engine resolves `{{tokens}}` in (an assertion's expected text)
+	 * are variable-aware inputs; left out, they are plain text fields.
+	 */
+	variables?: VariableSupport;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -231,6 +237,7 @@ function ElementRow({
 	renderAboveForm,
 	referenceOwner,
 	error,
+	variables,
 }: {
 	element: ElementDef;
 	kinds: ElementKindSchema[];
@@ -249,6 +256,7 @@ function ElementRow({
 	onDuplicate: () => void;
 	renderAboveForm?: (element: ElementDef) => ReactNode;
 	referenceOwner?: ElementOwner;
+	variables?: VariableSupport;
 }) {
 	const schema = kinds.find((k) => k.kind === element.kind);
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
@@ -523,6 +531,7 @@ function ElementRow({
 							// renders there, as it always has.
 							schema={schema?.configSchema}
 							errors={fieldErrors}
+							variables={variables}
 							onChange={(config) => onUpdate({ ...element, config })}
 						/>
 					) : schema ? (
@@ -530,6 +539,8 @@ function ElementRow({
 							schema={schema.configSchema}
 							config={element.config}
 							errors={fieldErrors}
+							kind={element.kind}
+							variables={variables}
 							onChange={(config) => onUpdate({ ...element, config })}
 						/>
 					) : (
@@ -563,6 +574,7 @@ export function ElementList({
 	openIds,
 	onOpenChange,
 	errors,
+	variables,
 }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
@@ -665,6 +677,7 @@ export function ElementList({
 						renderAboveForm={renderAboveForm}
 						referenceOwner={referenceOwner}
 						error={errors?.[element.id]}
+						variables={variables}
 					/>
 				))
 			)}

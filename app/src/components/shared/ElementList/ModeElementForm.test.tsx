@@ -87,7 +87,11 @@ const ASSERT_JSONPATH: ElementConfigSchema = {
 	type: "object",
 	properties: {
 		path: { type: "string", title: "JSONPath" },
-		expected: { title: "Expected value", description: "The exact value the match must equal." },
+		expected: {
+			title: "Expected value",
+			description:
+				"The exact value the match must equal. {{name}} and {{data.column}} inside any string of it are replaced with the step's variables when the assertion runs, and the result stays a string; a name nothing answers fails the assertion. 'regex' is a pattern and is never resolved.",
+		},
 		regex: { type: "string", title: "Pattern" },
 		exists: {
 			type: "boolean",

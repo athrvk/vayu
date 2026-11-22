@@ -142,7 +142,17 @@ const REQUIRED_KIND: ElementKindSchema = {
 	phases: [],
 };
 
+/** A kind whose `text` the engine resolves `{{tokens}}` in (#3779): the list must hand its form the scope. */
+const CONTAINS_KIND: ElementKindSchema = {
+	...kindSchema("assert.contains", "Assert text", "assert"),
+	configSchema: {
+		type: "object",
+		properties: { text: { type: "string", title: "Text" } },
+	},
+};
+
 const KINDS: ElementKindSchema[] = [
+	CONTAINS_KIND,
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("script.pre", "Pre-request script", "script"),
@@ -247,6 +257,28 @@ describe("ElementsTab - what it renders", () => {
 		renderTab(makeCollection([]));
 
 		expect(screen.getByText(/elements run around a send/i)).toBeInTheDocument();
+	});
+});
+
+describe("ElementsTab - a resolved field is variable-aware (#3779)", () => {
+	// Mutation check: drop `variables={variableSupport}` from `ElementsTab`'s
+	// `<ElementList>` and the overlay is gone, leaving a plain text box.
+	it("gives an assertion's resolved text the collection's variable scope", () => {
+		renderTab(
+			makeCollection([
+				{
+					id: "e1",
+					kind: "assert.contains",
+					enabled: true,
+					config: { text: "{{data.email}}" },
+				},
+			])
+		);
+		expandRow("Assert text");
+
+		expect(document.querySelector("[data-variable-overlay]")?.textContent).toContain(
+			"{{data.email}}"
+		);
 	});
 });
 

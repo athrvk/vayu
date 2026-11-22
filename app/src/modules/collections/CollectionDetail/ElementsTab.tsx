@@ -179,6 +179,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 					onChange={setElements}
 					kinds={kindsList}
 					errors={elementErrors}
+					variables={variableSupport}
 					{...openRows}
 					referenceOwner={{ type: "collection", collection }}
 					renderAboveForm={(element) => {
