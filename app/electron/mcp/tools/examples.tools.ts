@@ -16,7 +16,7 @@ import { secretsShape, withholdRowListSecrets, withheldPointer } from "../withho
 import type { McpTool, ToolContext, ToolResult } from "./contract.js";
 import {
 	callEngine,
-	callEngineStructured,
+	callEngineForRunOutput,
 	confirmDestructive,
 	confirmedInput,
 	echoShape,
@@ -61,7 +61,8 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		description: (config) =>
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
 			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them, and read_body (\`requestId\`, \`exampleId\`) pages out either in full. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.` +
-			withheldPointer(config),
+			withheldPointer(config) +
+			(config.revealSecretsToAgents ? "" : " A body's secrets read `<redacted>`."),
 		annotations: {
 			title: "List saved examples",
 			readOnlyHint: true,
@@ -73,10 +74,18 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		outputSchema: requestExamplesSchema,
 		handler: async (args, ctx, signal) => {
 			const requestId = requireStr(args, "requestId");
-			return callEngineStructured(
+			// Headers are withheld first, then every string (a body included) is
+			// masked as a run's output is, and only then bounded: a cut through an
+			// unmasked secret leaves a prefix no secret form matches, which is the
+			// order read_body keeps for the same example (#3724).
+			return callEngineForRunOutput(
 				ctx,
-				() => ctx.client.listRequestExamples(requestId, signal),
-				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))
+				async () =>
+					secretsShape(
+						ctx,
+						withholdRowListSecrets
+					)(await ctx.client.listRequestExamples(requestId, signal)),
+				{ bound: boundExampleBodies, structured: true, signal }
 			);
 		},
 	},
