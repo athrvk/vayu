@@ -1559,7 +1559,7 @@ its streaming steps are counted only in its report.
 deadline; only the flag's spelling is shared, through `read_stream_flag`. A
 sequential collection run's streaming step is the other design-side sender
 (#3235): `Client::send` honours `stream_bounds` with the load path's rules
-(whole-transfer timeout the cap plus the grace, a cap ending it as a success),
+(whole-transfer timeout the cap plus the grace, a cap ending an announced event stream as a success, #3771),
 the runner passes it `RunContext::should_stop` as its cancel, as it does for
 every step (#3397), so a stop ends the stream once answered, its step trace gains the `events` node parsed back from
 the body (`buffered_stream_events_node`), and its completion feeds the run's

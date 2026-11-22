@@ -9897,7 +9897,8 @@ counts, its latency histogram and its status-code distribution like any other
 
 | Ending | Reported as |
 |--------|-------------|
-| A cap in `maxStreamEvents` / `maxStreamDurationMs` | Success, `stream.capped` incremented |
+| A cap in `maxStreamEvents` / `maxStreamDurationMs` on a reply that announced `text/event-stream` | Success, `stream.capped` incremented |
+| The duration cap on a reply that is not an event stream (#3771) | **Error** (`Timeout`), not a stream |
 | The server closing the stream | Success, not counted in `stream.capped` |
 | `maxResponseBodyBytes` exceeded | **Error** - a refusal to buffer, unchanged. The event cap bounds how many events arrive, not how large one is |
 | The whole-transfer timeout | **Error** - it sits a grace period *past* the duration cap, so reaching it means the cap never fired |
@@ -9931,7 +9932,7 @@ own. A step that does not stream ignores them. A top-level `stream` is a `400`
 stored request stream or stop one streaming, so accepting it would let a caller
 believe it did either. A collection **load** run sends a streaming step through
 the same event loop as a streaming single-request run, so the table above
-holds per step: a cap or the server's close ends it as a success, its events
+holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`), its events
 land in the report's `stream` section, its stored exchange keeps its event
 count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
 connect phase - the whole-transfer timeout is the duration cap plus the 5s

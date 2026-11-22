@@ -127,8 +127,10 @@ class StreamTally {
         return now >= deadline_;
     }
 
-    /// Record that a cap ended the transfer: its completion is a **success**,
-    /// whatever libcurl calls the abort that delivered it.
+    /// Record that a cap ended the transfer: when the reply announced an
+    /// event stream its completion is a **success**, whatever libcurl calls
+    /// the abort that delivered it; any other reply ends as
+    /// `unannounced_cap_error` (#3771).
     void mark_cap_reached () {
         cap_reached_ = true;
     }
