@@ -385,9 +385,12 @@ class AssertContainsElement final : public Element {
         // resolved one may be a secret. `matches` was compiled as a pattern
         // when the element was built, so its text is never resolved.
         const std::string written = config_.value ("text", "");
-        const std::string verb    = mode == "equals" ? "equal" :
-        pattern_                                     ? "match" :
-                                                       "contain";
+        std::string verb          = "contain";
+        if (mode == "equals") {
+            verb = "equal";
+        } else if (pattern_) {
+            verb = "match";
+        }
         const std::string name =
         field + " " + (negate ? "does not " + verb : verb) + " '" + written + "'";
         std::vector<std::string> unresolved;
