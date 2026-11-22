@@ -38,6 +38,7 @@ import {
 	ToolArgError,
 } from "./kit.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
+import { boundExecuteResponse } from "./inline-body-bounds.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
 import { selectEnvironment } from "./variable-blobs.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
@@ -320,7 +321,9 @@ export async function runStreamingRequest(
 		// answer to a request we asked to stream. Either way, hand back what it
 		// said rather than reading events for a run that does not exist.
 		const withhold = await runOutputShape(ctx, signal, [payload.auth]);
-		return structuredResult(structuredRoot(withhold(started)));
+		// Masked first, then bounded, as the buffered path does: a buffered answer
+		// can carry a body of any size.
+		return structuredResult(structuredRoot(boundExecuteResponse(withhold(started))));
 	}
 
 	let consumed;
