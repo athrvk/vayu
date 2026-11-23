@@ -8046,7 +8046,12 @@ purpose. At most 8 issuers run at once (`429 mock_issuer_limit_reached`).
   registered client's `redirect_uri` to equal one it registered exactly (else
   `400`, answered in place) and a PKCE `code_challenge`; `/token` takes its id
   with no secret for those two grants and answers any other
-  `400 unauthorized_client`. An issuer keeps its 64 newest registrations.
+  `400 unauthorized_client`. An issuer keeps its 64 newest registrations: the
+  65th forgets the oldest, and from then on that `client_id` is any other id
+  the issuer was not given. With `clients` configured that is `400
+  invalid_client`; with none, it is accepted like any id, so `/authorize`
+  takes any `redirect_uri` and no PKCE for it and `/token` takes it for every
+  grant.
 - `GET /.well-known/oauth-authorization-server` - RFC 8414 metadata at the
   `metadataUrl`: `issuer` (the `issuerUrl` byte for byte, no trailing `/`),
   `authorization_endpoint`, `token_endpoint`, `registration_endpoint`,
@@ -8063,9 +8068,12 @@ purpose. At most 8 issuers run at once (`429 mock_issuer_limit_reached`).
   `resourceScope` is `403` with `Bearer error="insufficient_scope",
   scope="<resourceScope>", resource_metadata="..."`; otherwise `200
   {resource, scope}`.
-- `GET /.well-known/oauth-protected-resource` - RFC 9728 metadata for it:
-  `{resource: "<issuerUrl>/resource", authorization_servers: ["<issuerUrl>"],
-  bearer_methods_supported: ["header"]}`.
+- `GET /.well-known/oauth-protected-resource` and
+  `GET /.well-known/oauth-protected-resource/resource` - RFC 9728 metadata for
+  it, at both section 3.1 locations (the second inserts the resource's path,
+  the form a strict client probes): `{resource: "<issuerUrl>/resource",
+  authorization_servers: ["<issuerUrl>"], bearer_methods_supported:
+  ["header"]}`.
 
 **MCP OAuth discovery against the mock.** Discovery accepts a protected
 resource only for a server URL it covers (same origin, its path a prefix), so

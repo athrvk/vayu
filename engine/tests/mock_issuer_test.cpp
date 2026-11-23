@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <latch>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -878,6 +879,80 @@ TEST_F (MockIssuerTest, RegistrationRefusesBadClientMetadata) {
     EXPECT_FALSE (register_client_for (issuer, "com.example.app:/callback").empty ());
 }
 
+// Issue order, never the key: a millisecond burst ties every clock reading,
+// and the newest entry's random key can sort first.
+//
+// Mutation check: erase `map.begin ()` in `evict_earliest_issued` (what the
+// clock comparison did on a tie) and the newest entry is the one dropped.
+TEST (MockIssuerEviction, DropsTheEarliestIssuedWhateverItsKey) {
+    struct Entry {
+        uint64_t sequence = 0;
+    };
+    std::map<std::string, Entry> map = { { "d", { 1 } }, { "c", { 2 } }, { "b", { 3 } } };
+    map["a"] = Entry{ 4 };
+    vayu::http::detail::evict_earliest_issued (map, 3);
+    EXPECT_EQ (map.size (), 3U);
+    EXPECT_TRUE (map.contains ("a")) << "the entry just issued was evicted";
+    EXPECT_FALSE (map.contains ("d")) << "the earliest-issued entry was kept";
+}
+
+// Past `MAX_REGISTERED_CLIENTS` the first registration is forgotten and the
+// one just made keeps working, bound to its own redirect URI. The clock-tied
+// eviction this replaced needed every registration inside one millisecond to
+// misfire, which a loopback round trip cannot force; the eviction test above
+// holds that case.
+//
+// Mutation check: drop the `evict_earliest_issued` call in `handle_register`
+// and the first client is still admitted.
+TEST_F (MockIssuerTest, RegistrationKeepsTheNewestAndForgetsTheFirst) {
+    MockIssuerManager mgr;
+    // Configured clients make a forgotten registration an unknown client.
+    const auto issuer = mgr.start (
+    json{ { "clients", json::array ({ json{ { "clientId", "known" } } }) } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+
+    constexpr size_t REGISTRATIONS =
+    vayu::core::constants::mock_issuer::MAX_REGISTERED_CLIENTS + 1;
+    std::vector<std::string> ids;
+    std::vector<std::string> redirects;
+    for (size_t i = 0; i < REGISTRATIONS; ++i) {
+        redirects.push_back ("https://app/cb/" + std::to_string (i));
+        ids.push_back (register_client_for (issuer, redirects.back ()));
+        ASSERT_FALSE (ids.back ().empty ()) << "registration " << i;
+    }
+
+    const std::string challenge =
+    vayu::http::pkce::code_challenge (vayu::http::pkce::random_token (32));
+    httplib::Client cli (issuer.issuer_url);
+    const auto authorize = [&] (const std::string& client_id, const std::string& redirect) {
+        return cli.Get ("/authorize?response_type=code&client_id=" + client_id +
+        "&code_challenge=" + challenge +
+        "&code_challenge_method=S256&redirect_uri=" + vayu::utils::url_encode (redirect));
+    };
+
+    const auto newest = authorize (ids.back (), redirects.back ());
+    ASSERT_TRUE (newest != nullptr);
+    ASSERT_EQ (newest->status, 302) << newest->body;
+    EXPECT_EQ (
+    newest->get_header_value ("Location").rfind (redirects.back () + "?code=", 0), 0U)
+    << newest->get_header_value ("Location");
+    const auto elsewhere = authorize (ids.back (), redirects.front ());
+    ASSERT_TRUE (elsewhere != nullptr);
+    EXPECT_EQ (elsewhere->status, 400)
+    << "the newest client is still bound to its own URI";
+
+    const auto first = authorize (ids.front (), redirects.front ());
+    ASSERT_TRUE (first != nullptr);
+    EXPECT_EQ (first->status, 400);
+    EXPECT_EQ (json::parse (first->body).value ("error", ""), "invalid_client")
+    << first->body;
+
+    const auto second = authorize (ids[1], redirects[1]);
+    ASSERT_TRUE (second != nullptr);
+    EXPECT_EQ (second->status, 302)
+    << "only the first registration is forgotten";
+}
+
 TEST_F (MockIssuerTest, RegistrationRefusedModeRefusesEveryRegistration) {
     MockIssuerManager mgr;
     const auto issuer = mgr.start (json{ { "failureMode", "registration_refused" } });
@@ -919,18 +994,26 @@ TEST_F (MockIssuerTest, TheAuthorizeRedirectNamesTheIssuer) {
     issuer.issuer_url + "/other");
 }
 
+// Both RFC 9728 section 3.1 locations: the bare well-known path and the one
+// with the resource's path inserted, which a strict client probes alone.
+//
+// Mutation check: drop the path-inserted route in `serve_issuer_routes` and
+// the second path is a 404.
 TEST_F (MockIssuerTest, ServesProtectedResourceMetadata) {
     MockIssuerManager mgr;
     const auto issuer = mgr.start (json::object ());
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
     httplib::Client cli (issuer.issuer_url);
-    const auto res = cli.Get ("/.well-known/oauth-protected-resource");
-    ASSERT_TRUE (res != nullptr);
-    ASSERT_EQ (res->status, 200);
-    const auto doc = json::parse (res->body);
-    EXPECT_EQ (doc["resource"], issuer.discover_url);
-    EXPECT_EQ (doc["authorization_servers"], json::array ({ issuer.issuer_url }));
-    EXPECT_EQ (doc["bearer_methods_supported"], json::array ({ "header" }));
+    for (const char* path : { "/.well-known/oauth-protected-resource",
+         "/.well-known/oauth-protected-resource/resource" }) {
+        const auto res = cli.Get (path);
+        ASSERT_TRUE (res != nullptr) << path;
+        ASSERT_EQ (res->status, 200) << path;
+        const auto doc = json::parse (res->body);
+        EXPECT_EQ (doc["resource"], issuer.discover_url) << path;
+        EXPECT_EQ (doc["authorization_servers"], json::array ({ issuer.issuer_url })) << path;
+        EXPECT_EQ (doc["bearer_methods_supported"], json::array ({ "header" })) << path;
+    }
 }
 
 TEST_F (MockIssuerTest, TheResourceWithoutARequiredScopeTakesAnyOfItsTokens) {

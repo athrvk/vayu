@@ -9,7 +9,9 @@
 
 #include "vayu/http/listener_registry.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -111,6 +113,20 @@ namespace detail {
 /// the listener serving them. Defined in mock_issuer.cpp so this header stays
 /// clear of httplib.
 struct MockIssuerState;
+
+/**
+ * Erase the earliest-issued entries until @p map holds at most @p cap. An
+ * entry's `sequence` is its issuer's own counter at the moment it was issued,
+ * so the order is total: a clock reading is not, and a millisecond burst tied
+ * on one would fall back to the map's key order, which for a random key can
+ * name the entry just issued. Here so a test can drive that burst.
+ */
+template <typename Map> void evict_earliest_issued (Map& map, size_t cap) {
+    while (map.size () > cap) {
+        map.erase (std::ranges::min_element (
+        map, {}, [] (const auto& entry) { return entry.second.sequence; }));
+    }
+}
 } // namespace detail
 
 /**

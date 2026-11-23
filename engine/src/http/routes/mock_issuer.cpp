@@ -347,22 +347,6 @@ const std::string& description = {}) {
     res.set_content (body.dump (), "application/json");
 }
 
-/// Evict the oldest entries until @p map holds at most @p cap. Codes and
-/// refresh tokens are keyed by a random string, so age is the only ordering
-/// there is - and the bound is what keeps a long-lived daemon's mock issuer
-/// from growing a map per authorize call that never completed.
-template <typename Map> void bound_by_age (Map& map, size_t cap) {
-    while (map.size () > cap) {
-        auto oldest = map.begin ();
-        for (auto it = map.begin (); it != map.end (); ++it) {
-            if (it->second.issued_at < oldest->second.issued_at) {
-                oldest = it;
-            }
-        }
-        map.erase (oldest);
-    }
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -450,6 +434,13 @@ const MockIssuerSettings& current) {
 // Issuer + manager
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// Where the protected resource is served on an issuer's listener.
+constexpr std::string_view RESOURCE_PATH = "/resource";
+
+} // namespace
+
 namespace detail {
 
 struct MockIssuerState {
@@ -465,27 +456,33 @@ struct MockIssuerState {
         std::string code_challenge; // empty = the authorize call used no PKCE
         std::string scope;
         int64_t issued_at = 0;
+        uint64_t sequence = 0;
     };
     struct IssuedRefresh {
         std::string client_id;
         std::string scope;
         std::string subject;
-        int64_t issued_at = 0;
+        uint64_t sequence = 0;
     };
     /// A public client `POST /register` issued: it authenticates by id alone
     /// and may only be redirected to one of its own `redirect_uris`.
     struct RegisteredClient {
         std::vector<std::string> redirect_uris;
-        int64_t issued_at = 0;
+        uint64_t sequence = 0;
     };
 
     // Guards everything the listener threads touch: the settings a PUT can
     // change under them, and the issued-credential and registration maps.
     std::mutex state_mutex;
     MockIssuerSettings settings;
+    // Each map is bounded by `evict_earliest_issued`, which keeps a
+    // long-lived daemon's issuer from growing one per abandoned authorize
+    // call or looping registration.
     std::map<std::string, IssuedCode> codes;
     std::map<std::string, IssuedRefresh> refresh_tokens;
     std::map<std::string, RegisteredClient> registered_clients;
+    /// The last `sequence` handed out, across all three maps.
+    uint64_t issue_sequence = 0;
 
     /// Requested when the issuer stops, before its listener is joined.
     vayu::utils::StopSignal stop_signal;
@@ -508,7 +505,7 @@ struct MockIssuerState {
     }
     /// The protected resource, and so the server URL discovery starts from.
     std::string resource_url () const {
-        return issuer_url + "/resource";
+        return issuer_url + std::string (RESOURCE_PATH);
     }
     std::string resource_metadata_url () const {
         return issuer_url + std::string (oauth_discovery::PROTECTED_RESOURCE_WELL_KNOWN);
@@ -772,8 +769,8 @@ const std::string& scope) {
     if (settings.issue_refresh_tokens) {
         const std::string refresh = pkce::random_token (24);
         issuer.refresh_tokens[refresh] =
-        Issuer::IssuedRefresh{ client_id, scope, subject, now_ms () };
-        bound_by_age (issuer.refresh_tokens, mi::MAX_REFRESH_TOKENS);
+        Issuer::IssuedRefresh{ client_id, scope, subject, ++issuer.issue_sequence };
+        detail::evict_earliest_issued (issuer.refresh_tokens, mi::MAX_REFRESH_TOKENS);
         body["refresh_token"] = refresh;
     }
     return body;
@@ -878,8 +875,8 @@ void handle_authorize (Issuer& issuer, const httplib::Request& req, httplib::Res
 
     const std::string code = pkce::random_token (24);
     issuer.codes[code] = Issuer::IssuedCode{ client_id, redirect_uri, challenge,
-        req.get_param_value ("scope"), now_ms () };
-    bound_by_age (issuer.codes, mi::MAX_PENDING_CODES);
+        req.get_param_value ("scope"), now_ms (), ++issuer.issue_sequence };
+    detail::evict_earliest_issued (issuer.codes, mi::MAX_PENDING_CODES);
     res.set_redirect (authorization_redirect (issuer, redirect_uri, code, state), 302);
 }
 
@@ -973,8 +970,8 @@ void handle_register (Issuer& issuer, const httplib::Request& req, httplib::Resp
     {
         std::lock_guard<std::mutex> lock (issuer.state_mutex);
         issuer.registered_clients[client_id] =
-        Issuer::RegisteredClient{ std::move (*redirect_uris), issued_at };
-        bound_by_age (issuer.registered_clients, mi::MAX_REGISTERED_CLIENTS);
+        Issuer::RegisteredClient{ std::move (*redirect_uris), ++issuer.issue_sequence };
+        detail::evict_earliest_issued (issuer.registered_clients, mi::MAX_REGISTERED_CLIENTS);
     }
     res.status = 201;
     res.set_content (registered.dump (), "application/json");
@@ -1119,9 +1116,14 @@ void serve_issuer_routes (Issuer& issuer) {
     server.Post ("/register", bind (handle_register));
     server.Get (std::string (oauth_discovery::AUTHORIZATION_SERVER_WELL_KNOWN),
     bind (handle_metadata));
-    server.Get (std::string (oauth_discovery::PROTECTED_RESOURCE_WELL_KNOWN),
+    // RFC 9728 section 3.1 inserts the resource's path after the well-known
+    // one; a client that probes only that form never tries the bare path.
+    const std::string resource_metadata =
+    std::string (oauth_discovery::PROTECTED_RESOURCE_WELL_KNOWN);
+    server.Get (resource_metadata, bind (handle_resource_metadata));
+    server.Get (resource_metadata + std::string (RESOURCE_PATH),
     bind (handle_resource_metadata));
-    server.Get ("/resource", bind (handle_resource));
+    server.Get (std::string (RESOURCE_PATH), bind (handle_resource));
 }
 
 } // namespace
