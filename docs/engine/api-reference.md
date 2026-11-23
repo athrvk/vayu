@@ -5725,10 +5725,12 @@ The sections, in order:
    (`eventsPerSecond`, in `events/s`) and `Streams ended at a cap` (`capped`),
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
-   column, of the time to each stream's first event (`timeToFirstEvent`). That
-   column is left off when the document has no `timeToFirstEvent`, which the
-   engine omits when no stream delivered a timed event, so a zero never stands
-   for a figure that was not measured. A figure the document lacks reads `-`.
+   column, of the time to each stream's first event (`timeToFirstEvent`), then
+   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   off when the document lacks its block, which the engine omits when no
+   stream measured it, so a zero never stands for a figure that was not
+   measured. A figure the document lacks reads `-`.
 7. `## Capacity`, only for a run whose document has `report.capacity`: the
    stop reason in bold and what the search found (`**Latency budget exceeded**
    - Sustained 41 virtual users at 403 req/s, with a p99 of 178 ms against a
