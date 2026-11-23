@@ -1543,7 +1543,11 @@ delivered events the live total counts and the report does not.
 before the completion is handed on, or the tally's destructor does for a
 transfer that is cancelled or discarded unreported, so it counts streaming
 transfers alone (never `activeConnections`, which on a mixed collection also
-counts the ordinary steps) and reads 0 once the run settles. The trailing
+counts the ordinary steps) and reads 0 once the run settles. A streaming
+transfer is on the gauge from submission, before its reply says what it is;
+only a reply whose final hop announced `text/event-stream` is fed to the tally
+and reported as a stream (#3771), so a 429 holds the gauge while in flight and
+adds nothing else. The trailing
 window turns the tally into `eventsPerSecond` beside `currentRps`; and a gate
 frame adds `streamTimeToFirstEvent` from the completed streams' histogram, read
 through a snapshot as `cumulativePhases` is. All four are live only, never
@@ -1555,7 +1559,7 @@ its streaming steps are counted only in its report.
 deadline; only the flag's spelling is shared, through `read_stream_flag`. A
 sequential collection run's streaming step is the other design-side sender
 (#3235): `Client::send` honours `stream_bounds` with the load path's rules
-(whole-transfer timeout the cap plus the grace, a cap ending it as a success),
+(whole-transfer timeout the cap plus the grace, a cap ending an announced event stream as a success, #3771),
 the runner passes it `RunContext::should_stop` as its cancel, as it does for
 every step (#3397), so a stop ends the stream once answered, its step trace gains the `events` node parsed back from
 the body (`buffered_stream_events_node`), and its completion feeds the run's

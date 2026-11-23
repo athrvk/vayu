@@ -9897,7 +9897,8 @@ counts, its latency histogram and its status-code distribution like any other
 
 | Ending | Reported as |
 |--------|-------------|
-| A cap in `maxStreamEvents` / `maxStreamDurationMs` | Success, `stream.capped` incremented |
+| A cap in `maxStreamEvents` / `maxStreamDurationMs` on a reply that announced `text/event-stream` | Success, `stream.capped` incremented |
+| The duration cap on a reply that is not an event stream (#3771) | **Error** (`Timeout`), not a stream |
 | The server closing the stream | Success, not counted in `stream.capped` |
 | `maxResponseBodyBytes` exceeded | **Error** - a refusal to buffer, unchanged. The event cap bounds how many events arrive, not how large one is |
 | The whole-transfer timeout | **Error** - it sits a grace period *past* the duration cap, so reaching it means the cap never fired |
@@ -9931,7 +9932,7 @@ own. A step that does not stream ignores them. A top-level `stream` is a `400`
 stored request stream or stop one streaming, so accepting it would let a caller
 believe it did either. A collection **load** run sends a streaming step through
 the same event loop as a streaming single-request run, so the table above
-holds per step: a cap or the server's close ends it as a success, its events
+holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`), its events
 land in the report's `stream` section, its stored exchange keeps its event
 count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
 connect phase - the whole-transfer timeout is the duration cap plus the 5s
@@ -14127,8 +14128,20 @@ failure.
 Absent for every run that did not stream, and for one started with
 `stream_metrics: false` - not zeroed, because "this run was not a stream" and
 "this stream delivered nothing" are different answers, and a run whose target
-closed every connection before the first event is where telling them apart
+closed every stream before the first event is where telling them apart
 matters.
+
+**A completion is a reply that announced `text/event-stream`** (#3771), on its
+final hop. Asking for a stream does not make the answer one: a `429` or `500`
+in JSON, or a `200` JSON body from a server that ignored the request's
+`stream`, counts in `statusCodes` and the error tallies as it would on any run
+and nowhere in this section. A rate-limited run therefore reports
+`completions` equal to the streams that opened, its `events` percentiles their
+event counts, and a target that never streamed leaves the section absent. A
+transfer that got no answer at all is not a stream either. The duration cap
+still ends such a transfer, as a `timeout` error naming `maxStreamDurationMs`
+rather than a capped success. A stream that announced itself and was then cut
+off still counts, with the events it delivered.
 
 `events` is the **per-completion** distribution, not the run's total: 480
 streams of 40 events each have a p50 of 40, not of 19200. `eventsPerSecond` is
@@ -14136,8 +14149,9 @@ the whole-run rate, derived from the same `testDuration` the report's `rps`
 uses so the two are comparable. Both are reported because one long stream and
 250 short ones can share a rate while being entirely different runs.
 A stream that delivered nothing is a 0 in `events` like any other count
-(#3240), so a run whose target closed every connection before the first
-event reads `min`, `max` and every percentile as 0 beside `totalEvents: 0`.
+(#3240), so a run whose target announced every stream and closed it before
+the first event reads `min`, `max` and every percentile as 0 beside
+`totalEvents: 0`.
 The figures are exact up to 2,046 events per stream and within 0.1% above.
 
 `capped` counts the completions a cap ended rather than the server. In the

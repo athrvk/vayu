@@ -787,6 +787,11 @@ logged as a warning: it means a client skipped composition.
   every step, #3397) and its summary stores the load path's `stream`
   section (`build_stream_summary_payload`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
+  A transfer is a stream only when its final hop announced `text/event-stream`
+  (#3771, `announces_event_stream` in `stream_tally.hpp`, the design path's
+  reading too): the tally counts nothing for any other reply, leaves its
+  `stream_events` absent, and a duration cap that ends one is a `Timeout`
+  (`StreamTally::unannounced_cap_error`), never a capped success.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
   body already *is* the `text/event-stream` bytes, and the deferred script
