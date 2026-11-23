@@ -20,7 +20,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { switchAutoHeader, autoHeaderToAdd, withoutAutoHeader, autoHeaderRow } from "./auto-header";
+import {
+	switchAutoHeader,
+	autoHeaderToAdd,
+	withoutAutoHeader,
+	autoHeaderRow,
+	streamPatch,
+} from "./auto-header";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { KeyValueItem } from "@/types";
 
@@ -123,5 +129,35 @@ describe("switchAutoHeader on Accept", () => {
 	it("removes nothing when no row carries the marker", () => {
 		const headers = [row("r1", "Accept", SSE_ACCEPT)];
 		expect(withoutAutoHeader(headers, ACCEPT_HEADER, "stream")).toEqual(headers);
+	});
+});
+
+describe("streamPatch", () => {
+	it("turns the flag on and arms the stream-owned Accept row in one patch", () => {
+		const patch = streamPatch({ headers: [] }, true);
+
+		expect(patch.stream).toBe(true);
+		expect(patch.headers).toHaveLength(1);
+		expect(patch.headers[0]).toMatchObject({
+			key: ACCEPT_HEADER,
+			value: SSE_ACCEPT,
+			enabled: true,
+			source: "stream",
+		});
+	});
+
+	it("turns the flag off and takes the row it armed back out", () => {
+		const armed = streamPatch({ headers: [row("r1", "X-Trace", "1")] }, true);
+		const off = streamPatch({ headers: armed.headers }, false);
+
+		expect(off.stream).toBe(false);
+		expect(off.headers).toEqual([row("r1", "X-Trace", "1")]);
+	});
+
+	it("keeps an Accept the user wrote, on and off", () => {
+		const theirs = [row("r1", "Accept", "application/json")];
+
+		expect(streamPatch({ headers: theirs }, true)).toEqual({ stream: true, headers: theirs });
+		expect(streamPatch({ headers: theirs }, false)).toEqual({ stream: false, headers: theirs });
 	});
 });

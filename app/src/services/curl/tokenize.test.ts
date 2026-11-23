@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "vitest";
 import { chromeBashCopy, chromeCmdCopy, chromeCopyArgv } from "./chrome-copy.testkit";
-import { tokenize, UnterminatedQuoteError } from "./tokenize";
+import { tokenize, tokenizeCommand, UnterminatedQuoteError } from "./tokenize";
 
 describe("tokenize", () => {
 	test("splits plain whitespace-separated args", () => {
@@ -186,6 +186,109 @@ describe("tokenize", () => {
 				'x ^"y',
 				"https://x.com",
 			]);
+		});
+	});
+});
+
+describe("tokenizeCommand - shell variables (#3777)", () => {
+	/** The argument after `curl -d`, the one place each case below varies. */
+	const read = (arg: string) => {
+		const { tokens, variables } = tokenizeCommand(`curl -d ${arg}`);
+		return { arg: tokens[2], variables };
+	};
+
+	test.each([
+		["unquoted $NAME", "$NAME", "{{NAME}}"],
+		["unquoted ${NAME}", "${NAME}", "{{NAME}}"],
+		["double-quoted $NAME", '"$NAME"', "{{NAME}}"],
+		["double-quoted ${NAME}", '"${NAME}"', "{{NAME}}"],
+		["a name inside text", '"Bearer $OPENAI_API_KEY"', "Bearer {{OPENAI_API_KEY}}"],
+		["a name ending where the text goes on", '"$A-b"', "{{A}}-b"],
+		["braces that end a name early", '"${A}b"', "{{A}}b"],
+		["an underscore-led name", "$_x1", "{{_x1}}"],
+		["a name split from a quoted tail", `$A'$B'`, "{{A}}$B"],
+	])("converts %s", (_name, written, expected) => {
+		expect(read(written).arg).toBe(expected);
+	});
+
+	test.each([
+		["single quotes", "'$NAME'", "$NAME"],
+		["single quotes around ${NAME}", "'${NAME}'", "${NAME}"],
+		["ANSI-C quotes", "$'$NAME'", "$NAME"],
+		["a command substitution", '"$(date)"', "$(date)"],
+		["an unquoted command substitution", "$(date)", "$(date)"],
+		["a backtick substitution", '"`date`"', "`date`"],
+		["a positional parameter", "$1", "$1"],
+		["a special parameter", '"$? $@ $* $# $!"', "$? $@ $* $# $!"],
+		["the process id", "$$", "$$"],
+		["a name behind the process id", "$$NAME", "$$NAME"],
+		["a trailing dollar", '"cost$"', "cost$"],
+		["a dollar and a space", '"a $ b"', "a $ b"],
+		["a default-value expansion", '"${NAME:-x}"', "${NAME:-x}"],
+		["a length expansion", '"${#NAME}"', "${#NAME}"],
+		["an unterminated brace form", '"${NAME"', "${NAME"],
+		["an escaped dollar outside quotes", "\\$NAME", "$NAME"],
+		["an escaped dollar in double quotes", '"\\$NAME"', "$NAME"],
+	])("leaves %s as written", (_name, written, expected) => {
+		const { arg, variables } = read(written);
+
+		expect(arg).toBe(expected);
+		expect(variables).toEqual([]);
+	});
+
+	test.each([
+		["a bare span", "{{$guid}}", "{{$guid}}"],
+		["a double-quoted span", '"{{$guid}}"', "{{$guid}}"],
+		["a span with spaces", '"{{ $randomInt }}"', "{{ $randomInt }}"],
+		["a span among text", '"id={{$randomInt}}"', "id={{$randomInt}}"],
+	])("keeps the dollar of %s", (_name, written, expected) => {
+		expect(read(written)).toEqual({ arg: expected, variables: [] });
+	});
+
+	test("still converts a dollar beside, not inside, a {{ ... }} span", () => {
+		expect(read('"{{a}}$B{{$guid}}"')).toEqual({
+			arg: "{{a}}{{B}}{{$guid}}",
+			variables: ["B"],
+		});
+	});
+
+	test("lists each variable once, in the order first seen", () => {
+		const { tokens, variables } = tokenizeCommand(
+			`curl https://$HOST/$PATH_ID -H "A: $KEY" -H "B: \${KEY}-$HOST" -d $ZED`
+		);
+
+		expect(variables).toEqual(["HOST", "PATH_ID", "KEY", "ZED"]);
+		expect(tokens).toEqual([
+			"curl",
+			"https://{{HOST}}/{{PATH_ID}}",
+			"-H",
+			"A: {{KEY}}",
+			"-H",
+			"B: {{KEY}}-{{HOST}}",
+			"-d",
+			"{{ZED}}",
+		]);
+	});
+
+	test("reports nothing for a command with no variables", () => {
+		expect(tokenizeCommand("curl https://x.com -H 'A: $B'").variables).toEqual([]);
+	});
+
+	test("is what tokenize returns the tokens of", () => {
+		const command = `curl -H "Authorization: Bearer $KEY" https://x.com`;
+
+		expect(tokenize(command)).toEqual(tokenizeCommand(command).tokens);
+	});
+
+	test("reads no variable out of Chrome's cmd copy, where a dollar is ordinary", () => {
+		const cmd = [
+			String.raw`curl ^"https://x.com/$HOST^" ^`,
+			String.raw`  -H ^"A: $KEY^" -d ^"a\$b^"`,
+		].join("\n");
+
+		expect(tokenizeCommand(cmd)).toEqual({
+			tokens: ["curl", "https://x.com/$HOST", "-H", "A: $KEY", "-d", String.raw`a\$b`],
+			variables: [],
 		});
 	});
 });
