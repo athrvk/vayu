@@ -21,7 +21,13 @@ import {
 	type CustomBudgetDraft,
 } from "./budgets";
 import { monitorError, type MonitorDraft } from "./monitor";
-import { concurrencyLabel, durationLabel, profileParams, type ProfileParams } from "./profile";
+import {
+	appliesRetryAfter,
+	concurrencyLabel,
+	durationLabel,
+	profileParams,
+	type ProfileParams,
+} from "./profile";
 import { scenarioOnlyError } from "./scenario-only";
 import { scenarioStreamCapError } from "./scenarioProfile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
@@ -54,6 +60,8 @@ interface DraftToValidate {
 	/** The ranges in force: the shipped ones under the user's Settings ceilings. */
 	limits: LoadTestLimits;
 	slowThreshold: number;
+	retryAfterBackoff: boolean;
+	retryAfterMaxMs: number;
 	/** The field as typed; blank derives the cap, so only a typed value is checked. */
 	maxInFlight: string;
 }
@@ -103,13 +111,35 @@ function profileFieldError(
 	return null;
 }
 
+/** The cap is on screen only with the option on, in a mode that applies it. */
+function retryAfterCapError(
+	profile: LoadTestProfile,
+	limits: LoadTestLimits,
+	backoff: boolean,
+	capMs: number
+): string | null {
+	if (!backoff || !appliesRetryAfter(profile.mode)) return null;
+	return rangeError("Longest Retry-After wait", capMs, limits.RETRY_AFTER_MAX_MS, {
+		whole: true,
+		engineBound: true,
+	});
+}
+
 /**
  * The first field outside its range, among the ones this draft would send. A
  * field the mode does not send is hidden, so a stale value in it is nobody's
  * mistake (the stream caps only when the request streams).
  */
 function rangeErrorOf(
-	{ profile, limits, slowThreshold, maxInFlight, isStreamingRequest }: DraftToValidate,
+	{
+		profile,
+		limits,
+		slowThreshold,
+		maxInFlight,
+		retryAfterBackoff,
+		retryAfterMaxMs,
+		isStreamingRequest,
+	}: DraftToValidate,
 	startFloorError: string | null
 ): string | null {
 	return (
@@ -125,6 +155,7 @@ function rangeErrorOf(
 			whole: false,
 			engineBound: true,
 		}) ??
+		retryAfterCapError(profile, limits, retryAfterBackoff, retryAfterMaxMs) ??
 		(isStreamingRequest ? scenarioStreamCapError(profile, limits) : null)
 	);
 }

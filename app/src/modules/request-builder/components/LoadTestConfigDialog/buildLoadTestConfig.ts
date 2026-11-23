@@ -13,7 +13,7 @@ import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { type BudgetDraft, type CustomBudgetDraft, buildThresholds } from "./budgets";
 import { budgetsToSend, type CarriedBudgets } from "./carried-budgets";
 import { type MonitorDraft, buildMonitor } from "./monitor";
-import { type ProfileParams, profileParams } from "./profile";
+import { type ProfileParams, appliesRetryAfter, profileParams } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
@@ -31,6 +31,8 @@ export interface LoadTestDraft {
 	sampleRate: number;
 	slowThreshold: number;
 	saveTimingBreakdown: boolean;
+	retryAfterBackoff: boolean;
+	retryAfterMaxMs: number;
 	/** Null when the field is blank. */
 	maxInFlight: number | null;
 	budgets: BudgetDraft;
@@ -122,6 +124,11 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 		// Absent at the default, the same "absent already means what the
 		// user asked for" rule `failOnSchemaError` follows on the
 		// collection-run dialog (issue #1594).
+		// Absent when off or in a mode that has no next request to hold back,
+		// so the stored config says only what the run did.
+		...(draft.retryAfterBackoff && appliesRetryAfter(profile.mode)
+			? { retryAfterBackoff: true, retryAfterMaxMs: draft.retryAfterMaxMs }
+			: {}),
 		...(draft.scriptsOverride !== SCRIPTS_DEFAULT
 			? { elements: { scripts: draft.scriptsOverride } }
 			: {}),

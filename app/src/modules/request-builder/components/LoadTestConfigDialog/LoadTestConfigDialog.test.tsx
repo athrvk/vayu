@@ -1122,6 +1122,73 @@ describe("success sample rate reaches the engine in the engine's unit", () => {
 });
 
 /**
+ * Retry-After back-off (#3782) is a run option the engine reads from the body,
+ * so the proof is that the switch lands in the config `onStart` receives, in the
+ * engine's spelling, and that it is not offered where the engine would only skip it.
+ */
+describe("Retry-After back-off", () => {
+	const openRecording = () => fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+	const toggle = () => screen.getByRole("switch", { name: /wait out retry-after/i });
+	const cap = () => screen.getByLabelText(/longest retry-after wait/i) as HTMLInputElement;
+
+	it("is off by default and sends neither key", () => {
+		const { onStart } = open();
+		pickProfile("Constant virtual users");
+		openRecording();
+		expect(toggle()).not.toBeChecked();
+		expect(screen.queryByLabelText(/longest retry-after wait/i)).toBeNull();
+		const config = started(onStart);
+		expect(config).not.toHaveProperty("retryAfterBackoff");
+		expect(config).not.toHaveProperty("retryAfterMaxMs");
+	});
+
+	it("sends the option and the cap the user typed once switched on", () => {
+		const { onStart } = open();
+		pickProfile("Constant virtual users");
+		openRecording();
+		fireEvent.click(toggle());
+		expect(cap().value).toBe(String(LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS));
+		fireEvent.change(cap(), { target: { value: "2500" } });
+		expect(started(onStart)).toMatchObject({ retryAfterBackoff: true, retryAfterMaxMs: 2500 });
+	});
+
+	it("blocks Start on a cap the engine would refuse", () => {
+		open();
+		pickProfile("Constant virtual users");
+		openRecording();
+		fireEvent.click(toggle());
+		fireEvent.change(cap(), { target: { value: "3600001" } });
+		expect(screen.getByText(/Longest Retry-After wait must be/)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+
+	it("reopens on what the last run set", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({ mode: "ramp_up", retryAfterBackoff: true, retryAfterMaxMs: 4000 })
+		);
+		const { onStart } = open();
+		openRecording();
+		expect(toggle()).toBeChecked();
+		expect(cap().value).toBe("4000");
+		expect(started(onStart)).toMatchObject({ retryAfterBackoff: true, retryAfterMaxMs: 4000 });
+	});
+
+	it("is not offered, and not sent, on a constant-rate run", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({ mode: "constant_rps", retryAfterBackoff: true })
+		);
+		const { onStart } = open();
+		openRecording();
+		expect(screen.queryByRole("switch", { name: /wait out retry-after/i })).toBeNull();
+		const config = started(onStart);
+		expect(config).not.toHaveProperty("retryAfterBackoff");
+		expect(config).not.toHaveProperty("retryAfterMaxMs");
+	});
+});
+
+/**
  * The dialog's ceilings are a user setting, not a constant. Nothing else in the
  * app reads `loadTestCeilings`, so if this dialog stopped resolving them the
  * setting would be written and never read - which is the defect class this

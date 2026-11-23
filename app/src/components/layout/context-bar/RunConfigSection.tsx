@@ -33,6 +33,8 @@ import {
 	formatConcurrency,
 } from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
+import { LOAD_TEST_DEFAULTS } from "@/constants/load-test";
+import { formatNumber } from "@/lib/format-number";
 import { dataFileDisplayName } from "@/lib/run-data-file";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { scenarioFromSnapshot, scenarioOfSnapshot } from "./run-scenario";
@@ -161,6 +163,16 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 		rows.push(
 			<Row key="start" label="Starting at">
 				{formatConcurrency(config.startConcurrency)}
+			</Row>
+		);
+	}
+	// Shown only when on: off is what an absent key means, and every run before
+	// the option read as off (#3782). The cap is the engine's default when the
+	// run named none.
+	if (config?.retryAfterBackoff === true) {
+		rows.push(
+			<Row key="retry-after" label="Retry-After">
+				{`Waited, up to ${formatNumber(config.retryAfterMaxMs ?? LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS)} ms`}
 			</Row>
 		);
 	}

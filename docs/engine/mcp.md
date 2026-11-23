@@ -511,6 +511,15 @@ Notes:
   produced the run. Bounds mirror `validate_run_config`, so a value the schema
   accepts is one `POST /runs` accepts, and an absent knob stays absent - each has
   an engine default a stated value would overwrite.
+  `retryAfterBackoff` and `retryAfterMaxMs` (#3782) ride the same forwarding,
+  under the engine's own camelCase keys: with the option on, a `429` or `503`
+  carrying `Retry-After` holds the virtual user that received it for that long,
+  capped at `retryAfterMaxMs` (1-3600000, engine default 30000), before its next
+  request. Off by default, because a run that backs off measures the rate the
+  limiter allows; a `constant_rps` run skips it and the report says so. A scenario
+  run takes both too. The report's `warnings` carry `rate_limited_dominant` when
+  the option is off and most responses were `429`, and `retry_after_backoff`
+  (the waits counted) when it is on.
   The **redirect policy** (`followRedirects` / `maxRedirects`) belongs to the
   request half instead: it rides through `POST /compose` beside the method and
   the body, overriding a saved request's stored policy or supplying the only one

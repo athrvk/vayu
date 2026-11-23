@@ -50,9 +50,10 @@ describe("clearing a number field in the load-test dialog", () => {
 
 	it("RecordingSection does not commit 0", () => {
 		const onSlowThresholdChange = vi.fn();
+		const onRetryAfterMaxMsChange = vi.fn();
 		render(
 			<RecordingSection
-				mode="constant_rps"
+				mode="ramp_up"
 				limits={LOAD_TEST_LIMITS}
 				sampleRate={0}
 				onSampleRateChange={vi.fn()}
@@ -62,6 +63,10 @@ describe("clearing a number field in the load-test dialog", () => {
 				onMaxInFlightChange={vi.fn()}
 				saveTimingBreakdown={false}
 				onSaveTimingBreakdownChange={vi.fn()}
+				retryAfterBackoff
+				onRetryAfterBackoffChange={vi.fn()}
+				retryAfterMaxMs={30_000}
+				onRetryAfterMaxMsChange={onRetryAfterMaxMsChange}
 			/>
 		);
 		fireEvent.click(screen.getByText("Recording & limits"));
@@ -69,5 +74,10 @@ describe("clearing a number field in the load-test dialog", () => {
 			target: { value: "" },
 		});
 		expect(onSlowThresholdChange).not.toHaveBeenCalled();
+
+		fireEvent.change(screen.getByLabelText("Longest Retry-After wait"), {
+			target: { value: "" },
+		});
+		expect(onRetryAfterMaxMsChange).not.toHaveBeenCalled();
 	});
 });

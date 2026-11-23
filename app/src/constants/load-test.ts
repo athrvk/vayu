@@ -61,6 +61,10 @@ export const LOAD_TEST_DEFAULTS = {
 	 */
 	STEP_DURATION_S: 5,
 	SAVE_TIMING_BREAKDOWN: true,
+	/** Off: a run that waits out `Retry-After` measures the limiter's rate, so it is a choice (#3782). */
+	RETRY_AFTER_BACKOFF: false,
+	/** Matches the engine's `DEFAULT_RETRY_AFTER_MAX_MS`. */
+	RETRY_AFTER_MAX_MS: 30_000,
 	/**
 	 * Streaming runs (issue #576): how long one stream may run, and how many
 	 * events it may deliver, before the engine ends it as a **completed**
@@ -89,6 +93,7 @@ export type LoadTestLimitKey =
 	| "SLOW_THRESHOLD_MS"
 	| "SLO_MS"
 	| "STEP_DURATION_S"
+	| "RETRY_AFTER_MAX_MS"
 	| "STREAM_DURATION_S"
 	| "STREAM_MAX_EVENTS";
 
@@ -131,6 +136,8 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	 * to judge and the search would stall waiting for a window it never fills.
 	 */
 	STEP_DURATION_S: { MIN: 1, MAX: 600 },
+	/** The engine's own range for `retryAfterMaxMs` (`MAX_RETRY_AFTER_MAX_MS`), exact. */
+	RETRY_AFTER_MAX_MS: { MIN: 1, MAX: 3_600_000 },
 	/**
 	 * The two stream caps, in the dialog's units. Both ranges are the engine's
 	 * own `constants::sse` bounds - `MIN_STREAM_DURATION_MS` /

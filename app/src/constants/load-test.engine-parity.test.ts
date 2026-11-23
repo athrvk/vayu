@@ -217,4 +217,22 @@ describe("load-test limits parity with the engine", () => {
 		// literal; `tools.test.ts` ties it to this number.
 		expect(executionCpp).toMatch(/\{\s*"response_sample_rate",\s*1,\s*100000\b/);
 	});
+
+	// --- The Retry-After back-off cap (issue #3782) -------------------------
+
+	it("advertises exactly the engine's retryAfterMaxMs range", () => {
+		expect(LOAD_TEST_LIMITS.RETRY_AFTER_MAX_MS.MIN).toBe(1);
+		expect(LOAD_TEST_LIMITS.RETRY_AFTER_MAX_MS.MAX).toBe(
+			engineConstant("MAX_RETRY_AFTER_MAX_MS")
+		);
+		expect(executionCpp).toMatch(
+			/\{\s*"retryAfterMaxMs",\s*1,\s*limits::MAX_RETRY_AFTER_MAX_MS\b/
+		);
+	});
+
+	it("opens the dialog on the cap a run would get if it sent none", () => {
+		expect(LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS).toBe(
+			engineConstant("DEFAULT_RETRY_AFTER_MAX_MS")
+		);
+	});
 });

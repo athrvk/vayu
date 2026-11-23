@@ -926,6 +926,8 @@ export default function RequestBuilder() {
 					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
+					retryAfterBackoff: config.retryAfterBackoff,
+					retryAfterMaxMs: config.retryAfterMaxMs,
 					// Undefined when the dialog declared no budgets: the engine
 					// rejects an empty `thresholds` object rather than starting a
 					// run whose verdict nothing can compute.
