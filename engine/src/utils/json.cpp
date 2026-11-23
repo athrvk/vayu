@@ -13,7 +13,9 @@
 #include "vayu/utils/json.hpp"
 
 #include <algorithm>
+#include <array>
 #include <functional>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -1104,46 +1106,46 @@ std::optional<Error> read_mcp_tool_member (const Json& body_json, Body& body) {
 namespace {
 
 /**
- * The `body` object: its mode, its content and its fields.
+ * @p mode's body mode, or nothing for a spelling this engine does not know.
  *
  * Both spellings of each form mode reach the same enumerator: every client
  * produces the long one ("x-www-form-urlencoded", "form-data"), while
  * "form"/"formdata" are the engine's own older names, still accepted so a stored
- * or replayed payload keeps working. The table here is the one place a spelling
- * is added - the same rule `read_script`'s list-key/legacy-key pair follows.
+ * or replayed payload keeps working. This table is the one place a spelling is
+ * added - the same rule `read_script`'s list-key/legacy-key pair follows.
  */
+std::optional<BodyMode> body_mode_named (std::string_view mode) {
+    static constexpr auto MODES = std::to_array<std::pair<std::string_view, BodyMode>> ({
+    { "json", BodyMode::Json },
+    { "text", BodyMode::Text },
+    { "form", BodyMode::Form },
+    { "x-www-form-urlencoded", BodyMode::Form },
+    { "formdata", BodyMode::FormData },
+    { "form-data", BodyMode::FormData },
+    { "binary", BodyMode::Binary },
+    { "graphql", BodyMode::GraphQL },
+    { "jsonrpc", BodyMode::JsonRpc },
+    { "xml", BodyMode::Xml },
+    { "mcp", BodyMode::Mcp },
+    });
+    for (const auto& [name, value] : MODES) {
+        if (name == mode) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+/// The `body` object: its mode, its content and its fields. An unknown mode
+/// leaves the request's own.
 std::optional<Error> read_request_body (const Json& json, Request& request) {
     // Body (optional)
     if (json.contains ("body") && json["body"].is_object ()) {
         const auto& body_json = json["body"];
 
         if (body_json.contains ("mode")) {
-            std::string mode = body_json["mode"].get<std::string> ();
-
-            // Both spellings of each form mode reach the same enumerator:
-            // every client produces the long one ("x-www-form-urlencoded",
-            // "form-data"), while "form"/"formdata" are the engine's own
-            // older names, still accepted so a stored or replayed payload
-            // keeps working. This table is the one place a spelling is
-            // added - same rule as read_script's list-key/legacy-key pair.
-            if (mode == "json") {
-                request.body.mode = BodyMode::Json;
-            } else if (mode == "text") {
-                request.body.mode = BodyMode::Text;
-            } else if (mode == "form" || mode == "x-www-form-urlencoded") {
-                request.body.mode = BodyMode::Form;
-            } else if (mode == "formdata" || mode == "form-data") {
-                request.body.mode = BodyMode::FormData;
-            } else if (mode == "binary") {
-                request.body.mode = BodyMode::Binary;
-            } else if (mode == "graphql") {
-                request.body.mode = BodyMode::GraphQL;
-            } else if (mode == "jsonrpc") {
-                request.body.mode = BodyMode::JsonRpc;
-            } else if (mode == "xml") {
-                request.body.mode = BodyMode::Xml;
-            } else if (mode == "mcp") {
-                request.body.mode = BodyMode::Mcp;
+            if (auto mode = body_mode_named (body_json["mode"].get<std::string> ())) {
+                request.body.mode = *mode;
             }
         }
 
