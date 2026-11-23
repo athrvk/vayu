@@ -1813,6 +1813,25 @@ same way. The renderer joins live `text` itself in `execution-events-store`
 (`streamText`), and `restore-response.ts` carries the stored string, which wins
 at the swap.
 
+**The first content marker** (issue #3774) is the request's declared literal
+for the first token: the bytes a load run watches each stream's raw wire for, so
+the report's `stream.timeToFirstMatch` (and the `streamTimeToFirstMatchP95Ms`
+budget) times the first content and not a preamble event, which
+`timeToFirstEvent` reads as near zero. It is stored beside the path
+(`requests.stream_first_content_marker`; `streamFirstContentMarker` on
+`POST`/`PUT /requests`, `null` clears, an absent key keeps), held as a string
+(empty is none) and, unlike the path, **never trimmed**, since the engine
+matches its bytes as written. The Settings tab offers two presets
+(`content_block_delta`, `"delta":{"content":"`) and any literal typed in, with
+the caveat that the match is on the raw stream, so a server's JSON spacing and
+escaping decide what it must say. Only a load run times a stream to it (a Send
+checks the field and times nothing), so `streamFirstContentMarkerOf`
+(`utils/execute-mapping.ts`) adds it to the load run's `POST /runs` payload
+alone, from the request and never the load dialog, and only while the request
+streams; the engine refuses one beside a buffered request, and Event stream
+going off empties it (`streamPatch`) with the path. A Vayu export carries it in
+its settings and the importer reads it back.
+
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the
 dashboard's, and deliberately never reconnects. This one owns its retry, for

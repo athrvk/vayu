@@ -773,6 +773,16 @@ export function requestSettingsInput(statedOn?: string) {
 					"null clears it."
 				)
 			),
+		streamFirstContentMarker: z
+			.string()
+			.nullable()
+			.optional()
+			.describe(
+				described(
+					"Raw bytes a load run times each stream to (timeToFirstMatch), such as `content_block_delta`; 1-256 bytes. Needs `stream: true`.",
+					"null clears it."
+				)
+			),
 		verifySSL: z
 			.boolean()
 			.optional()
@@ -799,6 +809,7 @@ export const REQUEST_SETTINGS_KEYS = [
 	"httpVersion",
 	"stream",
 	"streamTextPath",
+	"streamFirstContentMarker",
 	"verifySSL",
 ] as const;
 

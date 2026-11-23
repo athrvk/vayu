@@ -1077,6 +1077,13 @@ export interface Request {
 	 */
 	streamTextPath?: string | null;
 	/**
+	 * The literal a load run's stream is timed to (issue #3774): the report's
+	 * `stream.timeToFirstMatch` is the wait for these bytes, such as
+	 * `content_block_delta`. Meaningful only beside {@link stream}. `null` (or
+	 * absent, on a row older than the column) is none.
+	 */
+	streamFirstContentMarker?: string | null;
+	/**
 	 * Which saved example a mock server answers with (issue #481 phase 3).
 	 * Always present, unlike `mockExampleId` - a request stored before this
 	 * column existed reads back `"first"`, which is what it always served.

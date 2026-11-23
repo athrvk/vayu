@@ -140,6 +140,7 @@ function requestWith(auth: RequestState["auth"]): RequestState {
 		disableUrlEncoding: false,
 		stream: false,
 		streamTextPath: "",
+		streamFirstContentMarker: "",
 	};
 }
 

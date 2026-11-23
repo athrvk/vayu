@@ -47,6 +47,7 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 			"disableUrlEncoding",
 			"stream",
 			"streamTextPath",
+			"streamFirstContentMarker",
 		],
 	},
 ];

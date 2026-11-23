@@ -232,6 +232,11 @@ export class RequestTransformer {
 			// Its text path (#3773): a row older than the column reads as none,
 			// which is what the engine serializes for one too.
 			streamTextPath: typeof raw.streamTextPath === "string" ? raw.streamTextPath : null,
+			// Its first content marker (#3774): same rule.
+			streamFirstContentMarker:
+				typeof raw.streamFirstContentMarker === "string"
+					? raw.streamFirstContentMarker
+					: null,
 			// Postman's protocol switches (issue #1765): same rule, a row stored
 			// before the columns existed reads as what it did - jar on, URL
 			// encoded, no automatic header suppressed.

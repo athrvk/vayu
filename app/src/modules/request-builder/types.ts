@@ -250,6 +250,12 @@ export interface RequestState {
 	 * refuses a path on a request that does not stream.
 	 */
 	streamTextPath: string;
+	/**
+	 * The literal a load run's stream is timed to (issue #3774), matched byte
+	 * for byte and so never trimmed. Empty is none. Cleared with
+	 * {@link streamTextPath} when the stream goes off (`streamPatch`).
+	 */
+	streamFirstContentMarker: string;
 }
 
 // ============================================================================

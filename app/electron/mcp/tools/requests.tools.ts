@@ -292,7 +292,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, streamTextPath, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
+					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, streamTextPath, streamFirstContentMarker, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
 					"input"
 				);
 			}
