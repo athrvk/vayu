@@ -116,6 +116,36 @@ TEST (VayuExtensions, KeepsWhatDescribesAJwtBearerGrantAndBlanksItsKeyFile) {
     EXPECT_EQ (omitted, 2);
 }
 
+// A config discovered from an MCP server (#3766) names the server it came from
+// and which fields discovery wrote. Neither is a credential, and blanking them
+// is not harmless: a re-import reads `"discoverUrl": ""` as discovery switched
+// on with no server, and a list of empty names as nothing discovered. The
+// export is read back through `auth_of`, the import's reader, to show the
+// round trip keeps both while the credentials still leave.
+// Mutation-check: drop either name from `NON_SECRET_CONFIG_KEYS` and its
+// assertion fails, with `omitted` counting the blanked strings.
+TEST (VayuExtensions, KeepsADiscoveredConfigsServerUrlAndFieldListThroughARoundTrip) {
+    int omitted         = 0;
+    const Json exported = ext::redact_auth (Json::parse (R"({"mode":"oauth2",
+        "config":{"grantType":"authorization_code","clientId":"dyn-1",
+          "clientSecret":"shh","password":"pw",
+          "discoverUrl":"https://mcp.example.com/mcp",
+          "authorizationUrl":"https://as.example.com/authorize",
+          "accessTokenUrl":"https://as.example.com/token",
+          "discoveredFields":["authorizationUrl","accessTokenUrl","clientId"]}})"),
+    omitted);
+    const std::optional<Json> imported = ext::auth_of (exported, false);
+    ASSERT_HAS_VALUE (imported);
+    const Json& config = imported->at ("config");
+    EXPECT_EQ (config["discoverUrl"], "https://mcp.example.com/mcp");
+    EXPECT_EQ (config["discoveredFields"],
+    Json::parse (R"(["authorizationUrl","accessTokenUrl","clientId"])"));
+    EXPECT_EQ (config["clientId"], "dyn-1");
+    EXPECT_EQ (config["clientSecret"], "");
+    EXPECT_EQ (config["password"], "");
+    EXPECT_EQ (omitted, 2);
+}
+
 // A pasted PEM is never kept: only a whole `{{variable}}` is a reference. The
 // routes refuse one on write (`reject_literal_private_key`), so this is the
 // export's own line for a document that did not come through them.

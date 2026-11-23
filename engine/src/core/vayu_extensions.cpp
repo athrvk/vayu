@@ -95,6 +95,9 @@ constexpr auto NON_SECRET_CONFIG_KEYS = std::to_array<std::string_view> (
 "callbackUrl", "clientId", "credentialsPlacement", "username", "pkce", "scope",
 "audience", "resource", "tokenPlacement", "headerPrefix", "queryParamName",
 "autoFetchToken", "autoRefreshToken", "useEmbeddedBrowser", "credentialsId",
+// Discovery from an MCP server (#3766): the server's URL and the names of the
+// fields discovery wrote, an array of strings kept whole.
+"discoverUrl", "discoveredFields",
 // The `jwt_bearer` grant (#3632): who it acts for, what it is addressed to,
 // how its assertion is signed and how long a token with no `expires_in` lives.
 // `privateKey` is a credential and `privateKeyFile` a path on one machine:

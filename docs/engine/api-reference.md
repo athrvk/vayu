@@ -3939,7 +3939,9 @@ describe the auth, so a member no list has heard of (Insomnia's IAM
 and `fallbackExpiresIn` are on that list; its `privateKey`, which is only ever
 one `{{variable}}` reference, stays as that reference (a key written any other
 way is blanked and counted), and its `privateKeyFile`, a path on one machine,
-is not on it and leaves blank, counted. OAuth 2.0's extra request parameter
+is not on it and leaves blank, counted. A config discovered from an MCP server
+keeps its `discoverUrl` and its `discoveredFields` list whole (#3766), so a
+re-import still knows which server it came from. OAuth 2.0's extra request parameter
 lists (`tokenParams`, `authorizationParams`, `refreshParams`) and the
 `jwt_bearer` grant's `assertionClaims` are redacted per row: a
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
