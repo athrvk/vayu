@@ -7970,16 +7970,20 @@ A body that is not JSON, not an object, lacks `wwwAuthenticate`, or whose
 A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -
 no real identity provider, so no 2FA prompts, provider rate limits or
 "suspicious login" mail in the dev loop. Each issuer is an independent
-`127.0.0.1` listener serving `/token` and `/authorize`; point any OAuth 2.0
-config's `accessTokenUrl` at the `tokenUrl` it returns.
+`127.0.0.1` listener serving `/token`, `/authorize`, `/register`, its RFC 8414
+metadata and a protected resource (#3794); point any OAuth 2.0 config's
+`accessTokenUrl` at the `tokenUrl` it returns, or an MCP server's OAuth
+discovery at its `discoverUrl`.
 
-It is **not an IdP**. JWKS/RS256, OIDC discovery documents, token introspection,
-consent screens and multi-tenant realms are deliberate non-goals.
+It is **not an IdP**. It serves RFC 8414 authorization server metadata and RFC
+9728 protected resource metadata, but not the OIDC `openid-configuration`
+document; JWKS/RS256, token introspection, consent screens and multi-tenant
+realms are deliberate non-goals.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /mock-issuer/start` | Start one → `{issuerId, issuerUrl, tokenUrl, authorizeUrl, signingKey}` |
-| `GET /mock-issuer` | List the running issuers |
+| `POST /mock-issuer/start` | Start one → `{issuerId, issuerUrl, tokenUrl, authorizeUrl, metadataUrl, discoverUrl, signingKey}` |
+| `GET /mock-issuer` | List the running issuers → `{issuers: [{issuerId, issuerUrl, tokenUrl, authorizeUrl, metadataUrl, discoverUrl, signingKey, port, expiresInSeconds, failureMode, slowMs, issueRefreshTokens, resourceScope, clientCount, createdAt}]}`; the `PUT` answers one such object |
 | `PUT /mock-issuer/:id` | Update `failureMode` / `slowMs` / `expiresInSeconds` live |
 | `POST /mock-issuer/:id/stop` | Stop one → `{stopped: true}` (`404` if unknown) |
 
@@ -7993,7 +7997,8 @@ consent screens and multi-tenant realms are deliberate non-goals.
   "clients": [{ "clientId": "cid", "clientSecret": "s3cret" }],
   "failureMode": "none",
   "slowMs": 2000,
-  "issueRefreshTokens": true
+  "issueRefreshTokens": true,
+  "resourceScope": ""
 }
 ```
 
@@ -8003,7 +8008,12 @@ naming that listener, for the [same `SO_REUSEPORT`
 reason](#webhook-inbox) the inbox refuses one. `clients` empty accepts **any**
 client id; with clients configured, an id must be one of them and, at `/token`,
 one carrying a secret must present it (Basic header or body - both RFC 6749
-§2.3.1 placements); `/authorize` checks the id only.
+§2.3.1 placements); `/authorize` checks the id only. A client `/register`
+issued is accepted beside them (below). `resourceScope` is the space-separated
+scope `/resource` requires of a token (empty, the default, requires none):
+scope tokens of RFC 6749 §3.3 (visible ASCII but `"` and `\`) joined by single
+spaces, at most 512 bytes, fixed at start like `port`, `clients`, `claims` and
+`issueRefreshTokens`.
 A field present with the wrong type or an out-of-range value is a `400`
 (`mock_issuer_invalid_config`) rather than a silent fallback to the default - a
 mock issuer running with an expiry other than the one asked for would defeat the
@@ -8021,7 +8031,51 @@ purpose. At most 8 issuers run at once (`429 mock_issuer_limit_reached`).
   steps. PKCE is verified when a `code_challenge` is present;
   `code_challenge_method` must then be `S256` (`plain` is refused rather than
   quietly accepted). An unknown client or a missing `redirect_uri` answers in
-  place rather than redirecting (RFC 6749 §4.1.2.1).
+  place rather than redirecting (RFC 6749 §4.1.2.1). The redirect also carries
+  `iss`, the `issuerUrl` (RFC 9207); it answers no error by redirect, so no
+  error redirect needs one.
+- `POST /register` - RFC 7591 dynamic client registration, open (no
+  credential). The JSON body's `redirect_uris` must be a non-empty array of at
+  most 8 absolute URIs (a scheme, then `:`; no fragment, space or control
+  byte; at most 2048 bytes each), else `400 invalid_redirect_uri`; a body that
+  is not a JSON object is `400 invalid_client_metadata`. Answers `201
+  {client_id, client_id_issued_at, redirect_uris, token_endpoint_auth_method:
+  "none", grant_types: ["authorization_code", "refresh_token"],
+  response_types: ["code"]}` with no `client_secret`: every registered client
+  is public, whatever the request asked for. `/authorize` then requires a
+  registered client's `redirect_uri` to equal one it registered exactly (else
+  `400`, answered in place) and a PKCE `code_challenge`; `/token` takes its id
+  with no secret for those two grants and answers any other
+  `400 unauthorized_client`. An issuer keeps its 64 newest registrations.
+- `GET /.well-known/oauth-authorization-server` - RFC 8414 metadata at the
+  `metadataUrl`: `issuer` (the `issuerUrl` byte for byte, no trailing `/`),
+  `authorization_endpoint`, `token_endpoint`, `registration_endpoint`,
+  `response_types_supported: ["code"]`, `grant_types_supported`,
+  `code_challenge_methods_supported: ["S256"]`,
+  `token_endpoint_auth_methods_supported` (`client_secret_basic`,
+  `client_secret_post`, `none`) and
+  `authorization_response_iss_parameter_supported: true`.
+- `GET /resource` - a protected resource, the `discoverUrl`. No bearer token
+  is `401` with `WWW-Authenticate: Bearer resource_metadata="<issuerUrl>/.well-known/oauth-protected-resource"`
+  (plus `scope="<resourceScope>"` when one is set); a token that is not an
+  unexpired HS256 JWT signed with this issuer's `signingKey` is the same `401`
+  with `error="invalid_token"` first; a good token whose `scope` lacks a word of
+  `resourceScope` is `403` with `Bearer error="insufficient_scope",
+  scope="<resourceScope>", resource_metadata="..."`; otherwise `200
+  {resource, scope}`.
+- `GET /.well-known/oauth-protected-resource` - RFC 9728 metadata for it:
+  `{resource: "<issuerUrl>/resource", authorization_servers: ["<issuerUrl>"],
+  bearer_methods_supported: ["header"]}`.
+
+**MCP OAuth discovery against the mock.** Discovery accepts a protected
+resource only for a server URL it covers (same origin, its path a prefix), so
+the URL to enter as an MCP server's `discoverUrl` is the issuer's own
+`discoverUrl` (`<issuerUrl>/resource`), which both `POST /mock-issuer/start`
+and `GET /mock-issuer` return. Its unauthenticated `401` names the metadata,
+that names the issuer, and the issuer's metadata names the endpoints and
+registration, so a discovered sign-in completes with nothing else configured.
+Both URLs are loopback, so the rule that refuses a loopback endpoint named by a
+server that is not on this machine does not apply.
 
 The access token is an **HS256 JWT** signed with the per-issuer `signingKey` the
 start call returned - hand that key to the service under test as its shared
@@ -8031,18 +8085,24 @@ describe the token being issued), with `sub`, `client_id` and `scope` filled in
 only when the claims did not set them.
 
 `failureMode` is what makes retry and error handling testable, and can be
-flipped on a **running** issuer with the `PUT`:
+flipped on a **running** issuer with the `PUT`. Each mode changes one route;
+every other route answers normally (`slow` and `server_error` slow or fail
+`/token` only, never the metadata, registration or resource routes):
 
-| Mode | `/token` answers |
-|------|------------------|
-| `none` | Normally |
-| `slow` | Normally, after `slowMs` (at once when the issuer stops first) |
-| `server_error` | `500 {"error": "temporarily_unavailable"}` |
-| `invalid_client` | `401 {"error": "invalid_client"}` |
+| Mode | What changes |
+|------|--------------|
+| `none` | Nothing |
+| `slow` | `/token` answers normally, after `slowMs` (at once when the issuer stops first) |
+| `server_error` | `/token` answers `500 {"error": "temporarily_unavailable"}` |
+| `invalid_client` | `/token` answers `401 {"error": "invalid_client"}` |
+| `metadata_not_found` | `GET /.well-known/oauth-authorization-server` answers `404`, so discovery fails with `oauth_discovery_authorization_server_metadata_not_found` |
+| `registration_refused` | `POST /register` answers `400 {"error": "invalid_client_metadata"}` |
+| `wrong_iss` | The `/authorize` redirect's `iss` is `<issuerUrl>/other`, which a discovered sign-in refuses (RFC 9207) |
 
 Issuers bind `127.0.0.1` only - never configurable, because they mint bearer
 tokens and the engine has no route auth. State is in-memory: a restart forgets
-every issuer, and stopping one drops its codes and refresh tokens with it.
+every issuer, and stopping one drops its codes, refresh tokens and registered
+clients with it.
 
 ## Execution
 

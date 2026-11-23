@@ -9,9 +9,11 @@
 
 #include "vayu/http/listener_registry.hpp"
 
+#include <array>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vayu::http {
@@ -36,9 +38,19 @@ struct MockIssuerSettings {
     int64_t expires_in_seconds = 3600;
     nlohmann::json claims      = nlohmann::json::object ();
     std::vector<MockIssuerClient> clients; // empty = accept any client id
-    std::string failure_mode  = "none"; // none|slow|server_error|invalid_client
+    /// One of `MOCK_ISSUER_FAILURE_MODES`.
+    std::string failure_mode  = "none";
     int64_t slow_ms           = 2000;
     bool issue_refresh_tokens = true;
+    /// What `GET /resource` requires of a token's `scope`, space-separated;
+    /// empty requires nothing.
+    std::string resource_scope;
+};
+
+/// Every `failureMode` a mock issuer accepts. `none` first: it is the default.
+inline constexpr std::array<std::string_view, 7> MOCK_ISSUER_FAILURE_MODES{
+    "none", "slow", "server_error", "invalid_client", "metadata_not_found",
+    "registration_refused", "wrong_iss"
 };
 
 /**
@@ -79,6 +91,11 @@ struct MockIssuerStart {
     std::string issuer_url;
     std::string token_url;
     std::string authorize_url;
+    /// The issuer's RFC 8414 authorization server metadata document.
+    std::string metadata_url;
+    /// The protected resource the issuer serves: the server URL an MCP OAuth
+    /// discovery starts from, since a resource covers only its own path.
+    std::string discover_url;
     /// The HS256 secret this issuer signs with. Returned because a service
     /// under test needs it to verify the tokens the mock mints; it is
     /// throwaway, per-issuer and in-memory only.
@@ -98,11 +115,14 @@ struct MockIssuerState;
 
 /**
  * Owns local OAuth 2.0 mock issuers: each is an independent `127.0.0.1`
- * listener serving `/token` and `/authorize`, so auth flows are exercisable
- * offline without a real identity provider.
+ * listener serving `/token`, `/authorize`, `/register`, its RFC 8414 metadata
+ * and a protected resource with its RFC 9728 metadata, so auth flows - MCP
+ * OAuth discovery included - are exercisable offline without a real identity
+ * provider.
  *
- * Not an IdP. JWKS/RS256, OIDC discovery, token introspection, consent screens
- * and multi-tenant realms are deliberate non-goals - this is a dev-loop tool.
+ * Not an IdP. JWKS/RS256, OIDC discovery (`openid-configuration`), token
+ * introspection, consent screens and multi-tenant realms are deliberate
+ * non-goals - this is a dev-loop tool.
  *
  * State is in-memory only: a restart forgets every issuer. Thread-safe; the
  * destructor shuts down (see `shutdown`), so the manager must outlive nothing

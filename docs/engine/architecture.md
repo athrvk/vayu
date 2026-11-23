@@ -190,7 +190,7 @@ four more are opened on demand, and the rule that separates them is where each m
 |----------|------|-----------|--------|
 | Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
 | OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode (at most 16 unsettled) | One `/callback` path, until the attempt settles or its 5-minute TTL expires, polled or not |
-| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
+| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token`, `/authorize`, `/register`, its RFC 8414 metadata and a protected `/resource` with its RFC 9728 metadata, until stopped |
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
 | [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
 
@@ -910,9 +910,14 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity
   provider. It mints HS256 JWTs with a random per-issuer key (libsodium again),
-  auto-approves `/authorize` with PKCE S256 verification, rotates refresh
-  tokens, and can be flipped between healthy and `slow` / `server_error` /
-  `invalid_client` while running. In-memory only and owned by the `Server`, on
+  auto-approves `/authorize` with PKCE S256 verification and an RFC 9207 `iss`,
+  rotates refresh tokens, and can be flipped between healthy and `slow` /
+  `server_error` / `invalid_client` / `metadata_not_found` /
+  `registration_refused` / `wrong_iss` while running. For MCP OAuth discovery
+  (#3794) it also serves RFC 8414 metadata, open RFC 7591 registration of
+  public clients bound to their redirect URIs, and a protected `/resource`
+  (its `discoverUrl`) that verifies its own tokens and answers the 401/403
+  Bearer challenges discovery and step-up read. In-memory only and owned by the `Server`, on
   the same reverse-member-order rule as the authorize manager.
 
 **Listener inventory.** Both auth listeners are spawned, loopback-bound and
