@@ -44,6 +44,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "log_capture.hpp"
+#include "mcp_fixture_server.hpp"
 #include "mock_server.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
@@ -4722,6 +4723,163 @@ TEST_F (ScenarioRunnerTest, AQuoteBearingCellReachesTheWireAsValidJson) {
     }
     EXPECT_EQ (json::parse (seen[0].body).at ("note").get<std::string> (), "has,comma \"quoted\"");
     EXPECT_EQ (json::parse (seen[1].body).at ("note").get<std::string> (), "line\nbreak\\slash");
+}
+
+// ============================================================================
+// An `mcp` request in a data-driven run (#3808)
+// ============================================================================
+
+/// The stored body of an `mcp` request calling the fixture's `execute_sql`,
+/// its arguments left as tokens for a data row to fill. Built with `dump`, so
+/// no escaping is written by hand.
+std::string mcp_body_with_data_tokens () {
+    const json call{ { "method", "tools/call" },
+        { "params",
+        { { "name", "execute_sql" },
+        { "arguments", { { "region", "{{data.region}}" }, { "query", "{{data.q}}" } } } } } };
+    return json{ { "mode", "mcp" }, { "content", call.dump () },
+        { "mcpTool", vayu::tests::execute_sql_tool_json () } }
+    .dump ();
+}
+
+/// The text of the one content item in a JSON-RPC `tools/call` answer.
+std::string reply_text_of (const json& frame) {
+    return frame.at ("result").at ("content").at (0).at ("text").get<std::string> ();
+}
+
+// The `Mcp-*` headers are never bound themselves, and they and the wire body are
+// both derived from the bound bytes, so each row must reach the server as a
+// call whose headers agree with its body, the fixture answering `400` where
+// they do not. The middle row's region is non-ASCII, which the engine can only
+// mirror as a `=?base64?` sentinel, and its `want` is wrong, so it fails
+// alone. Mutation checks: bind an `mcp` body as plain text in `body_context`
+// (`scenario_data.cpp`) and the quote-bearing row's body stops parsing; drop
+// `append_mcp_derived_headers` (`curl_utils.cpp`) and every row is refused.
+TEST_F (ScenarioRunnerTest, AnMcpRequestInADataDrivenRunSendsEachRowsBodyAndMirroredHeaders) {
+    vayu::tests::McpFixtureServer mcp;
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "", "",
+    "pm.test('the reply is the row\\'s want', function () {"
+    "  pm.expect(pm.response.json().result.content[0].text)"
+    "    .to.equal(pm.iterationData.get('want'));"
+    "});",
+    mcp.url (), "", "", mcp_body_with_data_tokens ());
+
+    const std::string reply{ vayu::tests::MCP_RESULT_TEXT };
+    struct Row {
+        std::string region;
+        std::string query;
+        std::string want;
+        std::string outcome;
+        /// Whether the header mirrors the region as a `=?base64?` sentinel.
+        bool sentinel;
+    };
+    // The non-ASCII region is spelled in bytes so no compiler's source
+    // encoding decides what the test sends.
+    const std::vector<Row> rows{
+        { "eu", R"(SELECT "a" FROM t WHERE p = 'C:\tmp')", reply, "passed", false },
+        { "\xC3\xA9-\xC3\xBC", "SELECT 2", "WRONG", "failed", true },
+        { "us", "SELECT 3", reply, "passed", false },
+    };
+    json data = json::array ();
+    for (const auto& row : rows) {
+        data.push_back (
+        { { "region", row.region }, { "q", row.query }, { "want", row.want } });
+    }
+
+    const auto run_id = start_with_data (data);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // The fixture counts a refused call too, so the count alone cannot say the
+    // headers agreed; the answers below do.
+    EXPECT_EQ (mcp.requests (), rows.size ());
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), rows.size ());
+    for (size_t i = 0; i < rows.size (); ++i) {
+        const auto& row   = rows.at (i);
+        const auto& trace = traces.at (i);
+        SCOPED_TRACE ("row " + std::to_string (i));
+
+        EXPECT_EQ (trace["outcome"].get<std::string> (), row.outcome) << trace.dump ();
+        EXPECT_EQ (trace["dataRowIndex"].get<size_t> (), i);
+
+        const auto& sent = trace["request"]["sentHeaders"];
+        EXPECT_EQ (sent.value ("Mcp-Method", ""), "tools/call");
+        EXPECT_EQ (sent.value ("Mcp-Name", ""), "execute_sql");
+        const auto mirrored               = sent.value ("Mcp-Param-Region", "");
+        constexpr std::string_view prefix = "=?base64?";
+        constexpr std::string_view suffix = "?=";
+        if (!row.sentinel) {
+            EXPECT_EQ (mirrored, row.region);
+        } else {
+            ASSERT_TRUE (mirrored.starts_with (prefix) && mirrored.ends_with (suffix))
+            << mirrored;
+            const auto inner = std::string_view (mirrored).substr (
+            prefix.size (), mirrored.size () - prefix.size () - suffix.size ());
+            EXPECT_EQ (vayu::utils::base64_decode (inner), row.region);
+        }
+
+        const auto call =
+        json::parse (trace["request"]["body"].get<std::string> (), nullptr, false);
+        ASSERT_FALSE (call.is_discarded ()) << trace["request"]["body"];
+        EXPECT_EQ (call["params"]["arguments"]["query"].get<std::string> (), row.query);
+        EXPECT_EQ (
+        call["params"]["arguments"]["region"].get<std::string> (), row.region);
+
+        const auto answer =
+        json::parse (trace["response"]["body"].get<std::string> (), nullptr, false);
+        ASSERT_FALSE (answer.is_discarded ()) << trace["response"]["body"];
+        EXPECT_EQ (reply_text_of (answer), reply) << answer.dump ();
+    }
+
+    const auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 2u) << scenario.dump ();
+    EXPECT_EQ (scenario["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// A step's elements read the final JSON-RPC response of an event-stream reply
+// on every row, where the stream's own bytes hold no `$.result`. Mutation
+// check: return the raw response from `mcp_element_view` and the assertion
+// fails on both rows.
+TEST_F (ScenarioRunnerTest, AnMcpEventStreamReplyIsReadByElementsOnEveryDataRow) {
+    vayu::tests::McpFixtureServer mcp;
+    mcp.reply_with (vayu::tests::McpReplyShape::EventStream);
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "", "", "", mcp.url (), "", "", mcp_body_with_data_tokens ());
+    auto stored = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (stored);
+    stored->elements = json::array (
+    { { { "id", "el_text" }, { "kind", "assert.jsonpath" }, { "enabled", true },
+    { "config",
+    { { "path", "$.result.content[0].text" },
+    { "expected", std::string (vayu::tests::MCP_RESULT_TEXT) } } } } })
+                       .dump ();
+    db_->save_request (*stored);
+
+    const auto run_id =
+    start_with_data (json::array ({ { { "region", "eu" }, { "q", "SELECT 1" } },
+    { { "region", "us" }, { "q", "SELECT 2" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (mcp.requests (), 2u);
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    for (size_t i = 0; i < traces.size (); ++i) {
+        const auto& trace = traces.at (i);
+        SCOPED_TRACE ("row " + std::to_string (i));
+        EXPECT_EQ (trace["outcome"].get<std::string> (), "passed") << trace.dump ();
+        EXPECT_EQ (trace["dataRowIndex"].get<size_t> (), i);
+        ASSERT_EQ (trace["elements"].size (), 1u) << trace.dump ();
+        EXPECT_EQ (trace["elements"][0]["id"], "el_text");
+        EXPECT_EQ (trace["elements"][0]["outcome"], "ok")
+        << trace["elements"][0].dump ();
+        // The stored body stays the stream the server sent.
+        EXPECT_NE (trace["response"]["body"].get<std::string> ().find (
+                   "notifications/progress"),
+        std::string::npos);
+    }
 }
 
 // A null cell is the missing-column failure one type down, and is refused the
