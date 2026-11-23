@@ -381,8 +381,9 @@ nlohmann::json& payload) {
 
 /**
  * The bounds a step whose stored request streams runs under: the run's caps,
- * and the row's own `streamTextPath` (#3773) compiled here, once for every
- * response of every user. Nothing for a request that does not stream.
+ * and the row's own `streamTextPath` (#3773) and `streamFirstContentMarker`
+ * (#3774) compiled here, once for every transfer of every user. Nothing for a
+ * request that does not stream.
  */
 std::optional<vayu::StreamBounds> step_stream_bounds (const vayu::db::Request& row,
 const vayu::StreamBounds& run_bounds) {
@@ -392,6 +393,10 @@ const vayu::StreamBounds& run_bounds) {
     vayu::StreamBounds bounds = run_bounds;
     if (row.stream_text_path) {
         bounds.text_path = vayu::http::compile_stream_text_path (*row.stream_text_path);
+    }
+    if (row.stream_first_content_marker) {
+        bounds.first_content_marker =
+        vayu::http::compile_stream_content_marker (*row.stream_first_content_marker);
     }
     return bounds;
 }

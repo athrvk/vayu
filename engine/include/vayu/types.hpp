@@ -2151,6 +2151,11 @@ struct Request {
     // none". Read only while `stream` is set, so a request whose stream is
     // switched off keeps the path for the next time it is switched on.
     std::optional<std::string> stream_text_path;
+    // The literal byte string a run's stream is watched for, timed as
+    // `stream.timeToFirstMatch` (issue #3774). A `stream` setting under
+    // `stream_text_path`'s rules: NULL declares none, and a row whose stream is
+    // switched off keeps it unread.
+    std::optional<std::string> stream_first_content_marker;
     // The Postman item's `protocolProfileBehavior` object, verbatim and in
     // source key order, when the request was imported with one (issue #1765).
     // Nothing sends it: `POST /export/postman` is its one reader and writes it

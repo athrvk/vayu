@@ -938,6 +938,12 @@ constexpr int64_t IDLE_TIMEOUT_MS_CEILING = 3600000;
 constexpr int RELAY_KEEPALIVE_MS          = 15000;
 constexpr int RELAY_POLL_INTERVAL_MS      = 50;
 constexpr int RELAY_CLAIM_STALE_INTERVALS = 2;
+
+/// Bytes of a request's `streamFirstContentMarker` (#3774). A marker is a
+/// token-shaped literal (`content_block_delta`, `"delta":{"content":"`); the
+/// bound keeps its compiled fallback table, one per streaming request of a
+/// run, a few kilobytes at most.
+constexpr std::size_t MAX_FIRST_CONTENT_MARKER_BYTES = 256;
 } // namespace sse
 
 /**

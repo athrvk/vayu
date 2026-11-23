@@ -636,8 +636,8 @@ TEST_F (RequestsRouteTest, AStreamTextPathRoundTripsAndNullClearsIt) {
     EXPECT_TRUE (plain["streamTextPath"].is_null ()) << plain.dump ();
 }
 
-// Mutation check: drop the `!r.stream` refusal in
-// `apply_stream_text_path_field` and the first create stores the path.
+// Mutation check: drop the `!streams` refusal in
+// `apply_stream_setting_field` and the first create stores the path.
 TEST_F (RequestsRouteTest, AStreamTextPathIsRefusedWhereItCouldNotBeRead) {
     seed_collection_at ("col_p", "", 0);
     const auto refused = [&] (const json& body) {
@@ -669,6 +669,99 @@ TEST_F (RequestsRouteTest, AStreamTextPathIsRefusedWhereItCouldNotBeRead) {
     *db_, "req_plain", json{ { "stream", true }, { "streamTextPath", "$.a" } });
     EXPECT_EQ (both_status, 200) << both.dump ();
     EXPECT_EQ (both["streamTextPath"], "$.a");
+}
+
+// -- A stream's first content marker (#3774) --------------------------------
+//
+// Stored beside `stream` under `streamTextPath`'s rules: a non-empty string of
+// at most 256 bytes with no NUL, stated only on a request that streams.
+
+TEST_F (RequestsRouteTest, AFirstContentMarkerRoundTripsAndNullClearsIt) {
+    seed_collection_at ("col_p", "", 0);
+    auto create                        = new_request ("col_p");
+    create["stream"]                   = true;
+    create["streamFirstContentMarker"] = "content_block_delta";
+    auto [created_status, created] =
+    vayu::http::routes::create_request_response (*db_, create);
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    EXPECT_EQ (created["streamFirstContentMarker"], "content_block_delta");
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [get_status, got] = vayu::http::routes::get_request_response (*db_, id);
+    ASSERT_EQ (get_status, 200);
+    EXPECT_EQ (got["streamFirstContentMarker"], "content_block_delta");
+    const auto list =
+    json::parse (vayu::http::routes::list_requests_body (*db_, "col_p"));
+    ASSERT_EQ (list.size (), 1u);
+    EXPECT_EQ (list[0]["streamFirstContentMarker"], "content_block_delta")
+    << "the list's streaming writer and the object serializer agree";
+
+    auto [update_status, updated] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "streamFirstContentMarker", "\"delta\":{\"content\":\"" } });
+    ASSERT_EQ (update_status, 200) << updated.dump ();
+    EXPECT_EQ (updated["streamFirstContentMarker"], "\"delta\":{\"content\":\"");
+
+    auto [off_status, off] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "stream", false } });
+    ASSERT_EQ (off_status, 200) << off.dump ();
+    EXPECT_EQ (off["streamFirstContentMarker"], "\"delta\":{\"content\":\"")
+    << "switching the stream off keeps the marker";
+
+    auto [clear_status, cleared] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "streamFirstContentMarker", nullptr } });
+    ASSERT_EQ (clear_status, 200) << cleared.dump ();
+    EXPECT_TRUE (cleared["streamFirstContentMarker"].is_null ()) << cleared.dump ();
+
+    auto [plain_status, plain] =
+    vayu::http::routes::create_request_response (*db_, new_request ("col_p"));
+    ASSERT_EQ (plain_status, 200) << plain.dump ();
+    EXPECT_TRUE (plain["streamFirstContentMarker"].is_null ()) << plain.dump ();
+}
+
+// Every refusal is a 400 naming the field, never the constructor's
+// `invalid_argument` escaping as a 500. Mutation checks: drop the `!streams`
+// refusal in `apply_stream_setting_field` and the buffered create stores the
+// marker; drop the empty check in `stream_first_content_marker_problem` and
+// the empty one does.
+TEST_F (RequestsRouteTest, AFirstContentMarkerIsRefusedWhereItCouldNotBeRead) {
+    seed_collection_at ("col_p", "", 0);
+    const auto refused = [&] (const json& body) {
+        auto request = new_request ("col_p");
+        request.update (body);
+        return vayu::http::routes::create_request_response (*db_, request);
+    };
+    const auto [buffered_status, buffered] =
+    refused (json{ { "streamFirstContentMarker", "delta" } });
+    EXPECT_EQ (buffered_status, 400) << buffered.dump ();
+    EXPECT_NE (buffered.dump ().find ("streaming request only"), std::string::npos)
+    << buffered.dump ();
+
+    constexpr std::size_t LIMIT = vayu::core::constants::sse::MAX_FIRST_CONTENT_MARKER_BYTES;
+    for (const json& bad : { json (7), json (""),
+         json (std::string (LIMIT + 1, 'a')), json (std::string ("a\0b", 3)) }) {
+        const auto [status, body] =
+        refused (json{ { "stream", true }, { "streamFirstContentMarker", bad } });
+        EXPECT_EQ (status, 400) << bad.dump () << " -> " << body.dump ();
+        EXPECT_NE (body.dump ().find ("streamFirstContentMarker"), std::string::npos)
+        << body.dump ();
+    }
+    ASSERT_TRUE (
+    json::parse (vayu::http::routes::list_requests_body (*db_, "col_p")).empty ())
+    << "no refused create left a row";
+
+    const auto [bound_status, bound] = refused (json{ { "stream", true },
+    { "streamFirstContentMarker", std::string (LIMIT, 'a') } });
+    EXPECT_EQ (bound_status, 200) << "a marker at the bound is stored";
+
+    // On update the rule reads the row as the write leaves it.
+    seed_request_at ("req_plain", "col_p", 0);
+    auto [update_status, update] = vayu::http::routes::update_request_response (
+    *db_, "req_plain", json{ { "streamFirstContentMarker", "delta" } });
+    EXPECT_EQ (update_status, 400) << update.dump ();
+    auto [both_status, both] = vayu::http::routes::update_request_response (*db_,
+    "req_plain", json{ { "stream", true }, { "streamFirstContentMarker", "delta" } });
+    EXPECT_EQ (both_status, 200) << both.dump ();
+    EXPECT_EQ (both["streamFirstContentMarker"], "delta");
 }
 
 // -- An `mcp` body's `mcpTool` (#3762) ---------------------------------------

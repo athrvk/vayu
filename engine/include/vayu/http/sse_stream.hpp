@@ -57,6 +57,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/live_claim.hpp"
 #include "vayu/http/sse_parser.hpp"
+#include "vayu/http/stream_content_marker.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -151,6 +152,15 @@ const vayu::StreamBounds& defaults);
  */
 [[nodiscard]] std::shared_ptr<const vayu::StreamTextPath>
 compile_stream_text_path (std::string_view path);
+
+/**
+ * @p marker compiled once for every transfer a run's stream sends (#3774):
+ * null when it is empty, which `StreamContentMarker` refuses and only a
+ * hand-edited row can hold once the write routes have checked it; it reads
+ * as no marker.
+ */
+[[nodiscard]] std::shared_ptr<const StreamContentMarker>
+compile_stream_content_marker (std::string_view marker);
 
 /**
  * One live stream: the ring its events land in, its termination reason, and the

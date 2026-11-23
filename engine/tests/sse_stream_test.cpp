@@ -582,6 +582,37 @@ TEST (StreamFlag, ATextPathWithoutTheFlagIsRefused) {
     EXPECT_NE (flag.error.find ("streamTextPath"), std::string::npos) << flag.error;
 }
 
+// `POST /execute` takes a first content marker (#3774) beside a stream, so a
+// by-id compose's payload sends as it is, and refuses one it could not use: a
+// 400 naming the field, never the constructor's `invalid_argument` as a 500.
+// Mutation check: drop `check_stream_first_content_marker` from
+// `read_stream_flag` and the bad markers pass.
+TEST (StreamFlag, AFirstContentMarkerIsCheckedBesideTheFlag) {
+    const auto flag = read_stream_flag (json{
+    { "stream", true }, { "streamFirstContentMarker", "content_block_delta" } });
+    EXPECT_TRUE (flag.ok) << flag.error;
+    EXPECT_TRUE (read_stream_flag (
+    json{ { "stream", true }, { "streamFirstContentMarker", nullptr } })
+    .ok);
+
+    constexpr std::size_t LIMIT = vayu::core::constants::sse::MAX_FIRST_CONTENT_MARKER_BYTES;
+    for (const json& marker : { json (""), json (7),
+         json (std::string (LIMIT + 1, 'x')), json (std::string ("a\0b", 3)) }) {
+        SCOPED_TRACE (marker.dump ());
+        const auto bad = read_stream_flag (
+        json{ { "stream", true }, { "streamFirstContentMarker", marker } });
+        EXPECT_FALSE (bad.ok);
+        EXPECT_NE (bad.error.find ("streamFirstContentMarker"), std::string::npos)
+        << bad.error;
+    }
+
+    const auto buffered =
+    read_stream_flag (json{ { "streamFirstContentMarker", "content_block_delta" } });
+    EXPECT_FALSE (buffered.ok);
+    EXPECT_NE (buffered.error.find ("streaming request only"), std::string::npos)
+    << buffered.error;
+}
+
 // ---------------------------------------------------------------------------
 // The config reader
 // ---------------------------------------------------------------------------

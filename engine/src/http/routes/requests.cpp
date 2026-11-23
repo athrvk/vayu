@@ -357,37 +357,58 @@ bool is_create) {
     return {};
 }
 
+/// Why a stream setting's value cannot be stored (`stream_text_path_problem`,
+/// `stream_first_content_marker_problem`); nothing when it can.
+using StreamSettingProblem = std::optional<std::string> (*) (const nlohmann::json&);
+
 /**
- * Applies `streamTextPath` (issue #3773) onto @p r after its `stream`: absent
- * keeps (or, on create, leaves none), `null` clears, and a path is held to
- * `stream_text_path_problem`, the check `POST /execute` makes.
+ * Applies one of a stream's string settings, `streamTextPath` (issue #3773) or
+ * `streamFirstContentMarker` (#3774), onto @p out after `stream` has landed in
+ * @p streams: absent keeps (or, on create, leaves none), `null` clears, and a
+ * value is held to @p problem_of, the check `POST /execute` makes.
  *
- * A path the body states is refused on a row that does not stream after this
+ * A value the body states is refused on a row that does not stream after this
  * write, as `POST /execute` refuses one beside a buffered send: it reads as a
- * promise of `text` the request will not produce. A stored path is not
+ * promise about events the request will not produce. A stored value is not
  * re-judged when only `stream` changes, so switching the stream off keeps it
  * for the next time it is switched on, and nothing reads it in between.
  */
-static RouteResult apply_stream_text_path_field (const nlohmann::json& json,
-vayu::db::Request& r,
+static RouteResult apply_stream_setting_field (const nlohmann::json& json,
+const char* key,
+StreamSettingProblem problem_of,
+bool streams,
+std::optional<std::string>& out,
 bool is_create) {
-    const auto field = json.find ("streamTextPath");
+    const auto field = json.find (key);
     if (field == json.end () || field->is_null ()) {
         if (field != json.end () || is_create) {
-            r.stream_text_path = std::nullopt;
+            out = std::nullopt;
         }
         return {};
     }
-    if (auto problem = stream_text_path_problem (json)) {
+    if (auto problem = problem_of (json)) {
         return route_error (400, *problem);
     }
-    if (!r.stream) {
+    if (!streams) {
         return route_error (400,
-        "'streamTextPath' applies to a streaming request only - set "
-        "'stream': true, or drop it");
+        std::string ("'") + key + "' applies to a streaming request only - set 'stream': true, or drop it");
     }
-    r.stream_text_path = field->get<std::string> ();
+    out = field->get<std::string> ();
     return {};
+}
+
+/// `stream` (issue #574) and the two settings that ride with it, each judged
+/// against the row's `stream` as this write leaves it.
+static RouteResult
+apply_stream_fields (const nlohmann::json& json, vayu::db::Request& r, bool is_create) {
+    apply_bool_field (json, "stream", r.stream, false, is_create);
+    if (auto outcome = apply_stream_setting_field (json, "streamTextPath",
+        stream_text_path_problem, r.stream, r.stream_text_path, is_create);
+    !outcome) {
+        return outcome;
+    }
+    return apply_stream_setting_field (json, "streamFirstContentMarker",
+    stream_first_content_marker_problem, r.stream, r.stream_first_content_marker, is_create);
 }
 
 /**
@@ -810,8 +831,7 @@ bool is_create) {
     // Consume the response as an event stream (issue #574). Through the shared
     // applier rather than the by-id route alone, so `POST /import/apply` -
     // which runs this same function over a bulk payload - carries it too.
-    apply_bool_field (json, "stream", r.stream, false, is_create);
-    if (auto outcome = apply_stream_text_path_field (json, r, is_create); !outcome) {
+    if (auto outcome = apply_stream_fields (json, r, is_create); !outcome) {
         return outcome;
     }
 

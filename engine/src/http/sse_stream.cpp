@@ -118,6 +118,14 @@ std::shared_ptr<const vayu::StreamTextPath> compile_stream_text_path (std::strin
     vayu::StreamTextPath{ std::string (path), std::move (*steps) });
 }
 
+std::shared_ptr<const StreamContentMarker> compile_stream_content_marker (
+std::string_view marker) {
+    if (marker.empty ()) {
+        return nullptr;
+    }
+    return std::make_shared<const StreamContentMarker> (std::string (marker));
+}
+
 vayu::StreamBounds resolve_stream_bounds (const nlohmann::json& config,
 const vayu::StreamBounds& defaults) {
     const auto cap = [&config] (const char* key, int64_t fallback) {

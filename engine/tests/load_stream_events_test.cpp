@@ -367,11 +367,35 @@ TEST_F (LoadReplayEventsTest, TheStoredEventsSettingBoundsWhatAReplayedScriptSee
 // An inline script on a single-request load run (#3769)
 // ---------------------------------------------------------------------------
 
-/// Serves `THREE_EVENTS` as one `text/event-stream` response and closes.
+/// How long `/preamble` holds its content event after its preamble.
+constexpr std::chrono::milliseconds PREAMBLE_CONTENT_DELAY{ 300 };
+
+/// Serves `THREE_EVENTS` as one `text/event-stream` response and closes, and
+/// at `/preamble` an Anthropic-style stream (#3774): a `message_start` at once
+/// and its `content_block_delta` `PREAMBLE_CONTENT_DELAY` later.
 class ThreeEventServer {
     public:
     ThreeEventServer () {
         svr_.new_task_queue = vayu::tests::pooled_task_queue (4);
+        svr_.Get ("/preamble", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string preamble =
+                "event: message_start\ndata: {\"type\":\"message_start\"}\n\n";
+                if (!sink.write (preamble.data (), preamble.size ())) {
+                    return false;
+                }
+                std::this_thread::sleep_for (PREAMBLE_CONTENT_DELAY);
+                const std::string content =
+                "event: content_block_delta\ndata: "
+                "{\"type\":\"content_block_delta\"}\n\n";
+                if (!sink.write (content.data (), content.size ())) {
+                    return false;
+                }
+                sink.done ();
+                return true;
+            });
+        });
         svr_.Get ("/events", [] (const httplib::Request&, httplib::Response& res) {
             res.set_chunked_content_provider (
             "text/event-stream", [] (size_t, httplib::DataSink& sink) {
@@ -398,8 +422,8 @@ class ThreeEventServer {
     ThreeEventServer (ThreeEventServer&&)                 = delete;
     ThreeEventServer& operator= (ThreeEventServer&&)      = delete;
 
-    [[nodiscard]] std::string url () const {
-        return "http://127.0.0.1:" + std::to_string (port_) + "/events";
+    [[nodiscard]] std::string url (const std::string& path = "/events") const {
+        return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
 
     private:
@@ -437,6 +461,19 @@ class LoadInlineEventsTest : public LoadReplayEventsTest {
             { vayu::tests::script_element_json ("el_post", "script.post", script) }) } };
         config.update (extra);
 
+        const auto summary = run_to_summary (config);
+        for (const auto& entry : summary.value ("elements", json::array ())) {
+            if (entry.value ("id", "") == "el_post") {
+                return entry;
+            }
+        }
+        ADD_FAILURE () << "no tally for el_post: " << summary.dump ();
+        return json::object ();
+    }
+
+    /// A single-request run of @p config, run to its end; answers its stored
+    /// summary.
+    json run_to_summary (const json& config) {
         const std::string run_id = "run-inline-events";
         vayu::db::Run row;
         row.id              = run_id;
@@ -465,14 +502,7 @@ class LoadInlineEventsTest : public LoadReplayEventsTest {
             ADD_FAILURE () << "the run stored no summary";
             return json::object ();
         }
-        const auto summary = json::parse (stored->summary);
-        for (const auto& entry : summary.value ("elements", json::array ())) {
-            if (entry.value ("id", "") == "el_post") {
-                return entry;
-            }
-        }
-        ADD_FAILURE () << "no tally for el_post: " << summary.dump ();
-        return json::object ();
+        return json::parse (stored->summary);
     }
 
     vayu::core::RunManager manager_;
@@ -527,6 +557,32 @@ TEST_F (LoadInlineEventsTest, AnInlineScriptPostOfARunWithNoTextPathReadsNoText)
     1);
     EXPECT_EQ (without.value ("passed", 0u), 1u) << without.dump ();
     EXPECT_EQ (without.value ("failed", 0u), 0u) << without.dump ();
+}
+
+// A single-request run's `streamFirstContentMarker` (#3774), which a by-id
+// compose carries from the saved request, is watched for on every transfer.
+// `/preamble` holds its content PREAMBLE_CONTENT_DELAY (300 ms) behind its
+// first event, so the match reads at least that; a lower bound only, which a
+// slow runner cannot fail. Mutation check: drop the marker compile in
+// `single_request_stream_bounds` and `timeToFirstMatch` is absent.
+TEST_F (LoadInlineEventsTest, ASingleRequestRunTimesItsFirstContentMarker) {
+    constexpr size_t ITERATIONS = 2;
+    const json config{ { "method", "GET" }, { "url", server_->url ("/preamble") },
+        { "mode", "iterations" }, { "iterations", ITERATIONS },
+        { "concurrency", 1 }, { "timeout", 5000 }, { "stream", true },
+        { "streamFirstContentMarker", "content_block_delta" } };
+
+    const auto summary = run_to_summary (config);
+
+    ASSERT_TRUE (summary.contains ("stream")) << summary.dump ();
+    const auto& stream = summary["stream"];
+    ASSERT_TRUE (stream.contains ("timeToFirstEvent")) << stream.dump ();
+    ASSERT_TRUE (stream.contains ("timeToFirstMatch")) << stream.dump ();
+    const auto& first_match = stream["timeToFirstMatch"];
+    EXPECT_EQ (first_match.value ("count", size_t{ 0 }), ITERATIONS) << stream.dump ();
+    EXPECT_GE (first_match.value ("p50", 0.0),
+    static_cast<double> (PREAMBLE_CONTENT_DELAY.count ()))
+    << stream.dump ();
 }
 
 // The run's own `sseMaxStoredEvents` bounds what the inline script reads, as

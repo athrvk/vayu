@@ -4198,6 +4198,63 @@ TEST_F (DatabaseTest, ADatabaseWithoutTheStreamTextPathColumnsGainsThemAndReadsN
     }
 }
 
+// `requests.stream_first_content_marker` (#3774) joined version 11 too, under
+// the same rule. Mutation check: unmap it in `make_vayu_storage` and the
+// setup finds no column to drop.
+TEST_F (DatabaseTest, ADatabaseWithoutTheFirstContentMarkerColumnGainsItAndReadsNone) {
+    for (const int stamped : { 10, 11 }) {
+        SCOPED_TRACE ("stamped " + std::to_string (stamped));
+        vayu::tests::remove_database_files (TEST_DB_PATH);
+        {
+            Database db (TEST_DB_PATH);
+            db.init ();
+            Collection col;
+            col.id   = "col_1";
+            col.name = "C";
+            db.create_collection (col);
+            Request r;
+            r.id            = "req_legacy";
+            r.collection_id = "col_1";
+            r.name          = "Legacy";
+            r.url           = "https://example.test/";
+            r.stream        = true;
+            db.save_request (r);
+        }
+        {
+            sqlite3* handle = nullptr;
+            ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+            char* err = nullptr;
+            ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE requests DROP COLUMN stream_first_content_marker",
+                       nullptr, nullptr, &err),
+            SQLITE_OK)
+            << (err != nullptr ? err : "(no message)");
+            sqlite3_free (err);
+            sqlite3_close (handle);
+        }
+        ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "stream_first_content_marker"))
+        << "test setup did not remove the column";
+        set_user_version (TEST_DB_PATH, stamped);
+
+        Database db (TEST_DB_PATH);
+        db.init ();
+        EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+        EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "stream_first_content_marker"));
+
+        auto legacy = db.get_request ("req_legacy");
+        ASSERT_HAS_VALUE (legacy)
+        << "a request stored before the column did not survive";
+        EXPECT_TRUE (legacy->stream);
+        EXPECT_FALSE (legacy->stream_first_content_marker.has_value ())
+        << "no backfill";
+
+        legacy->stream_first_content_marker = "content_block_delta";
+        db.save_request (*legacy);
+        const auto reread = db.get_request ("req_legacy");
+        ASSERT_HAS_VALUE (reread);
+        EXPECT_EQ (reread->stream_first_content_marker.value_or (""), "content_block_delta");
+    }
+}
+
 // A captured sample's `stream_text_path` is written with its row, beside its
 // event count.
 TEST_F (DatabaseTest, AResultBodyKeepsItsStreamTextPath) {
