@@ -4380,7 +4380,10 @@ and is fetched exactly as before, loopback and redirects included.
 - The refusal is `502` `Couldn't fetch the document: Cannot send this request:
   Vayu does not fetch a reference from a loopback or link-local address other
   than its source document's own host and port - not when the URL names one and
-  not when a host name resolves to one`, on both forms of the route.
+  not when a host name resolves to one`, on both forms of the route. With no
+  `sourceUrl` there is no source to except, and the sentence after the colon is
+  `Vayu does not send it to a loopback or link-local address - not when the URL
+  names one and not when a host name resolves to one`.
 - **The URL is judged before anything is dialled**, by the same source rule: a
   reference whose host names a loopback or link-local address in any spelling,
   `localhost` or a `*.localhost` name is refused with the same `502`, and the

@@ -583,8 +583,28 @@ TEST_F (LoopbackGuardTransport, TheReferenceRuleRefusesAPeerAndNamesItself) {
     EXPECT_EQ (response.status_code, 0);
     EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
     EXPECT_EQ (response.error_message,
-    "Cannot send this request: " + vayu::http::local_peer_refusal ());
+    "Cannot send this request: " + vayu::http::local_peer_refusal (LocalPeerRule{}));
     EXPECT_EQ (local.requests_seen (), 0);
+}
+
+// A rule with a source names it as the exception; one without (a discovery's
+// fetches and token exchange, #3766) has no source to name, so its sentence
+// says nothing of references or source documents.
+// Mutation-check: answer the sourced sentence for both and the second fails.
+TEST (LoopbackGuardRefusal, NamesTheSourceOnlyForARuleThatHasOne) {
+    const std::string sourced = vayu::http::local_peer_refusal (
+    rule_for ("http://localhost:3000/spec.json"));
+    EXPECT_NE (sourced.find ("its source document's own host and port"), std::string::npos)
+    << sourced;
+    const std::string unsourced = vayu::http::local_peer_refusal (LocalPeerRule{});
+    EXPECT_EQ (unsourced.find ("source"), std::string::npos) << unsourced;
+    EXPECT_EQ (unsourced.find ("reference"), std::string::npos) << unsourced;
+    for (const std::string& sentence : { sourced, unsourced }) {
+        EXPECT_NE (sentence.find ("loopback or link-local address"), std::string::npos)
+        << sentence;
+        EXPECT_NE (sentence.find ("a host name resolves to one"), std::string::npos)
+        << sentence;
+    }
 }
 
 // The reference rule is added to the reserved ports, never in place of them:
