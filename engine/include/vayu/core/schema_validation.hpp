@@ -74,8 +74,9 @@
  * the keywords that apply to the same value (`allOf`, `anyOf`, `oneOf`, `not`,
  * `if`/`then`/`else`, `dependencies`) never reaches one, and valijson recurses
  * through it until the stack runs out. `run_validator` refuses such a schema
- * first, iteratively, with the reason; a loop through `properties` or `items`
- * is a tree node and still validates.
+ * first, iteratively, with the reason, wherever the loop sits: one that only a
+ * `properties` step reaches is refused like one at the root (#3810). A loop
+ * through `properties` or `items` is a tree node and still validates.
  *
  * ### Dialect honesty
  *
