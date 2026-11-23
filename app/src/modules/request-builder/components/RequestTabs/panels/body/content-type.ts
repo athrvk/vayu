@@ -55,6 +55,12 @@ export const CONTENT_TYPE = "Content-Type";
  * when the request says it is, and without this the document goes out under
  * libcurl's default `application/x-www-form-urlencoded`.
  *
+ * `mcp` is absent although it is JSON on the wire too: the engine derives its
+ * Content-Type with the rest of the headers an MCP server wants (`Accept`,
+ * `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`, #3762), and
+ * a row written here would copy one of them while the others were not. The
+ * panel shows that none is typed by hand instead.
+ *
  * `json` is the Body panel's most common mode, so it earns the same auto-write
  * rather than staying silent about what the engine already implies for it.
  * `text` is deliberately absent: the engine derives `text/plain` for it at send

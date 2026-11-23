@@ -152,7 +152,8 @@ function buildUpdatePayload(
 		changedFields.has("body") ||
 		changedFields.has("formData") ||
 		changedFields.has("urlEncoded") ||
-		changedFields.has("binaryFile")
+		changedFields.has("binaryFile") ||
+		changedFields.has("mcpTool")
 	) {
 		const bodyPayload = toBodyPayload(request);
 		payload.body = bodyPayload;
@@ -444,24 +445,10 @@ export default function RequestBuilder() {
 		if (!fetchedRequest) return undefined;
 
 		const body = fetchedRequest.body;
-		const bodyMode =
-			body.mode === "json"
-				? "json"
-				: body.mode === "form-data"
-					? "form-data"
-					: body.mode === "x-www-form-urlencoded"
-						? "x-www-form-urlencoded"
-						: body.mode === "text"
-							? "text"
-							: body.mode === "graphql"
-								? "graphql"
-								: body.mode === "jsonrpc"
-									? "jsonrpc"
-									: body.mode === "xml"
-										? "xml"
-										: body.mode === "binary"
-											? "binary"
-											: "none";
+		// The stored mode is the editor's mode, one for one. The ternary chain
+		// this replaced read a mode it did not name as "none", which is how a new
+		// mode would have been dropped in silence.
+		const bodyMode = body.mode;
 
 		const rawBody = "content" in body ? body.content : "";
 
@@ -490,6 +477,10 @@ export default function RequestBuilder() {
 				urlEncoded: toKeyValueItems(body.fields),
 			}),
 			...(body.mode === "binary" && { binaryFile: body.file ?? noFile() }),
+			// Named for the stored mcp body alone, for the reason above, and even
+			// when it holds no tool: an external write that removed one must reach
+			// the draft as "none" rather than leave the old tool in place.
+			...(body.mode === "mcp" && { mcpTool: body.mcpTool }),
 			auth: fetchedRequest.auth,
 			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,

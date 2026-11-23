@@ -33,6 +33,7 @@ const BARE_DOCUMENT = "{ me { id } }";
 const CONTEXT_BY_MODE: Record<Exclude<BodyMode, "graphql">, DataFieldContext> = {
 	json: "json",
 	jsonrpc: "json",
+	mcp: "json",
 	xml: "xml",
 	text: "plain",
 	none: "plain",

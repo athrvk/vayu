@@ -26,6 +26,7 @@
 import type {
 	ExampleSentRequest,
 	FileRef,
+	McpTool,
 	RequestBody,
 	ResolvedElement,
 	SanityResult,
@@ -48,6 +49,8 @@ export interface ExecBody {
 	fields?: ExecField[];
 	/** A `binary` body's file - a path, never bytes. */
 	file?: WireFileRef;
+	/** An `mcp` body's tool, sent as stored: the engine reads it at send time. */
+	mcpTool?: McpTool;
 }
 
 /** A file reference as a payload carries it: no trust flag. */
@@ -94,7 +97,10 @@ export function toFileRef(
  * snippet (issue #1436) and the Send snapshot `sentRequestOf` takes.
  */
 export function toBodyPayload(
-	request: Pick<RequestState, "bodyMode" | "body" | "formData" | "urlEncoded" | "binaryFile">
+	request: Pick<
+		RequestState,
+		"bodyMode" | "body" | "formData" | "urlEncoded" | "binaryFile" | "mcpTool"
+	>
 ): RequestBody {
 	if (request.bodyMode === "form-data") {
 		return { mode: "form-data", fields: withoutFileTrust(toKeyValueEntries(request.formData)) };
@@ -104,6 +110,15 @@ export function toBodyPayload(
 	}
 	if (request.bodyMode === "binary") {
 		return { mode: "binary", file: toFileRef(request.binaryFile) };
+	}
+	// An absent `mcpTool` is a body that stores none, which clears one a
+	// previous save wrote: the body is replaced whole.
+	if (request.bodyMode === "mcp") {
+		return {
+			mode: "mcp",
+			content: request.body ?? "",
+			...(request.mcpTool && { mcpTool: request.mcpTool }),
+		};
 	}
 	if (request.bodyMode !== "none") {
 		return {
@@ -189,7 +204,14 @@ export function buildExecBody(
 
 	const resolvedBody = request.body ? resolveString(request.body) : request.body;
 	if (request.bodyMode !== "none" && resolvedBody) {
-		return { mode: request.bodyMode || "text", content: resolvedBody };
+		// The tool is the engine's input for the headers it derives, and its
+		// schema is not text a variable lives in, so it goes unresolved.
+		const mcpTool = request.bodyMode === "mcp" ? request.mcpTool : undefined;
+		return {
+			mode: request.bodyMode || "text",
+			content: resolvedBody,
+			...(mcpTool && { mcpTool }),
+		};
 	}
 
 	return undefined;

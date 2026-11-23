@@ -9,7 +9,7 @@
  * BodyPanel Component
  *
  * Mode selection, and whichever editor that mode needs: a code editor for JSON,
- * JSON-RPC, XML and text, the key/value table for form-data and urlencoded,
+ * JSON-RPC, MCP, XML and text, the key/value table for form-data and urlencoded,
  * `GraphQLBody` for GraphQL, and `BinaryBodyPanel` for a whole-file body.
  *
  * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
@@ -27,6 +27,11 @@
  * of GraphQL, whose query and variables are two documents the user writes
  * separately, and it is why this mode adds a `BODY_MODES` row and a language
  * rather than a component.
+ *
+ * **MCP is that same JSON pane with a tool above it** (`McpToolFields`): the
+ * engine completes the call and derives every MCP header, so what the mode adds
+ * is the tool its `Mcp-Param-*` headers are read from, and a note on where the
+ * derived headers appear.
  *
  * **GraphQL used to live here**, and was roughly 40% of the file - the only
  * mode with an editor pair, an introspection lifecycle and a header side effect
@@ -92,6 +97,7 @@ import { mountBodyDiagnostics } from "./body/body-diagnostics";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { switchGraphQLMethod } from "./body/graphql-method";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
+import McpToolFields from "./body/McpToolFields";
 import BinaryBodyPanel from "./body/BinaryBodyPanel";
 import { binaryContentType } from "./body/binary-content-type";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
@@ -355,6 +361,7 @@ export default function BodyPanel() {
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||
 		request.bodyMode === "jsonrpc" ||
+		request.bodyMode === "mcp" ||
 		request.bodyMode === "xml";
 	const isTable =
 		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
@@ -456,6 +463,15 @@ export default function BodyPanel() {
 				</Callout>
 			)}
 
+			{request.bodyMode === "mcp" && (
+				<McpToolFields
+					key={memoryKey}
+					tool={request.mcpTool}
+					onToolChange={(tool) => updateField("mcpTool", tool)}
+					requestId={request.id ?? null}
+				/>
+			)}
+
 			{isCodeMode && (
 				<div className={EDITOR_BOX}>
 					{showResolved ? (
@@ -468,7 +484,9 @@ export default function BodyPanel() {
 						<CodeEditor
 							height="100%"
 							language={
-								request.bodyMode === "json" || request.bodyMode === "jsonrpc"
+								request.bodyMode === "json" ||
+								request.bodyMode === "jsonrpc" ||
+								request.bodyMode === "mcp"
 									? "json"
 									: request.bodyMode === "xml"
 										? "xml"

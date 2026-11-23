@@ -24,6 +24,7 @@ export type BodyMode =
 	| "text"
 	| "graphql"
 	| "jsonrpc"
+	| "mcp"
 	| "xml"
 	| "form-data"
 	| "x-www-form-urlencoded"
@@ -169,12 +170,25 @@ export interface FileRoot {
 }
 
 /**
+ * The tool an `mcp` body's `tools/call` names (#3762), stored inside the body
+ * object. The engine reads each `x-mcp-header` annotation in `inputSchema` and
+ * sends the argument it marks as an `Mcp-Param-*` header; with no tool stored,
+ * none is sent. `name` is a non-empty string and `inputSchema` an object, or
+ * the engine refuses the write.
+ */
+export interface McpTool {
+	name: string;
+	inputSchema?: Record<string, unknown>;
+}
+
+/**
  * Request body as a discriminated union.
  * `body_type` on the domain `Request` is a denormalized mirror of `body.mode`.
  */
 export type RequestBody =
 	| { mode: "none" }
 	| { mode: "json" | "text" | "graphql" | "jsonrpc" | "xml"; content: string }
+	| { mode: "mcp"; content: string; mcpTool?: McpTool }
 	| { mode: "form-data"; fields: FormFieldEntry[] }
 	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] }
 	| { mode: "binary"; file: FileRef };

@@ -43,6 +43,7 @@ export const BODY_MODES: BodyModeOption[] = [
 	{ value: "text", label: "Text", contentType: "text/plain" },
 	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
 	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
+	{ value: "mcp", label: "MCP", contentType: "application/json" },
 	{ value: "xml", label: "XML", contentType: "application/xml" },
 	{ value: "form-data", label: "Form data", contentType: "multipart/form-data" },
 	{

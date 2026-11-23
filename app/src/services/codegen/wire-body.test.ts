@@ -183,6 +183,15 @@ describe("jsonRpcWireBody", () => {
 	});
 });
 
+describe("wireBodyContent for an mcp body", () => {
+	// The engine stamps `params._meta` and completes the envelope (#3762); a
+	// snippet is sent as stored and says so in a note instead of copying it.
+	it("returns the content as stored, without the envelope or _meta", () => {
+		const content = '{"method":"tools/call","params":{"name":"t"}}';
+		expect(wireBodyContent("mcp", content)).toBe(content);
+	});
+});
+
 describe("graphqlWireBody", () => {
 	it("wraps a bare document as a query string", () => {
 		expect(graphqlWireBody("{ hero { name } }")).toBe('{"query":"{ hero { name } }"}');

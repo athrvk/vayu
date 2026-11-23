@@ -37,12 +37,11 @@ namespace {
 
 using nlohmann::json;
 
-/// How many `BodyMode`s the table covers, `Xml` being the last one it has a
+/// How many `BodyMode`s the table covers, `Mcp` being the last one it has a
 /// row for: a mode inserted before it without a row in `modes` fails the
-/// coverage assertion below. `Mcp` follows it and gets its row, and this moves
-/// to it, when the app lists the mode (#3762).
+/// coverage assertion below.
 constexpr std::size_t BODY_MODE_COUNT =
-static_cast<std::size_t> (vayu::BodyMode::Xml) + 1;
+static_cast<std::size_t> (vayu::BodyMode::Mcp) + 1;
 
 json load_fixture () {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
@@ -96,9 +95,8 @@ TEST (ImpliedContentTypeConformance, EveryModeImpliesTheTypeTheTableNames) {
     << "`modes` must hold exactly one row per BodyMode";
 }
 
-// `mcp` has no row in the shared table until the app's body-mode picker lists
-// it (the app side requires the two to name the same modes), so its answers
-// are pinned here: JSON on the wire, the call `mcp_wire_body` completes.
+// The shared table's `mcp` row names only the type; what goes on the wire is
+// pinned here: JSON, the call `mcp_wire_body` completes.
 TEST (ImpliedContentTypeMcp, IsJsonAndSendsTheCompletedCall) {
     vayu::Body body;
     body.mode    = vayu::BodyMode::Mcp;
