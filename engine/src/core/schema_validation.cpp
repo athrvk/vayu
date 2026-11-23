@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <format>
 #include <map>
 #include <optional>
@@ -458,15 +459,16 @@ void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending)
 
 /**
  * Calls @p visit (object subschema, its pointer in the validation root) for
- * every subschema reachable from @p schema, `$ref` targets included.
+ * every subschema reachable from @p schema, `$ref` targets included, each
+ * target found by @p resolve (the ref text to a node, or null).
  *
  * Iterative rather than recursive: a schema arrives from outside the engine,
  * and a deeply nested one must cost stack the process does not have. The
  * visited set covers `$ref` cycles; the node budget covers a schema that is
  * merely enormous.
  */
-template <typename Visit>
-void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visit&& visit) {
+template <typename Resolve, typename Visit>
+void walk_schema_with (const nlohmann::json& schema, Resolve&& resolve, Visit&& visit) {
     std::unordered_set<std::string> visited_refs;
     std::vector<SchemaNode> pending = { { &schema, nlohmann::json::json_pointer () } };
     size_t visited_nodes = 0;
@@ -483,7 +485,7 @@ void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visi
         ref != node.schema->end () && ref->is_string ()) {
             const auto pointer = ref->get<std::string> ();
             if (visited_refs.insert (pointer).second) {
-                if (const nlohmann::json* target = resolve_pointer (root, pointer)) {
+                if (const nlohmann::json* target = resolve (pointer)) {
                     // resolve_pointer already parsed this text as a pointer.
                     pending.push_back (
                     { target, nlohmann::json::json_pointer (pointer.substr (1)) });
@@ -492,6 +494,15 @@ void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visi
         }
         queue_subschemas (node, pending);
     }
+}
+
+/// `walk_schema_with`, resolving every `$ref` against the one @p root.
+template <typename Visit>
+void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visit&& visit) {
+    walk_schema_with (
+    schema,
+    [&root] (const std::string& ref) { return resolve_pointer (root, ref); },
+    std::forward<Visit> (visit));
 }
 
 /// Locations a loop's description names before it says "...".
@@ -601,6 +612,80 @@ const nlohmann::json& ref_roots) {
     return edges;
 }
 
+/// A node on the search's current path, with the same-value edges still to try.
+struct OpenNode {
+    std::string at;
+    std::vector<SameValueFrame> edges;
+    size_t next = 0;
+};
+
+/// What the cycle search has learnt, kept across the nodes it starts from: a
+/// node marked `Done` reaches no cycle, so no later start expands it again.
+struct SameValueSearch {
+    enum class Mark : std::uint8_t { OnPath, Done };
+    std::unordered_map<std::string, Mark> marks;
+    size_t expanded = 0;
+};
+
+/// The locations from where @p at sits on @p path round to @p at again.
+std::vector<std::string>
+cycle_back_to (const std::vector<OpenNode>& path, const std::string& at) {
+    std::vector<std::string> loop;
+    const auto start = std::ranges::find (path, at, &OpenNode::at);
+    for (auto it = start; it != path.end (); ++it) {
+        loop.push_back ("#" + it->at);
+    }
+    loop.push_back ("#" + at);
+    return loop;
+}
+
+/**
+ * The same-value cycle reachable from @p start, or nothing.
+ *
+ * A depth-first search with the path held on the heap, so the check itself
+ * cannot overflow on the schema it is guarding against; every node it expands
+ * counts against the one `MAX_SCHEMA_NODES` budget in @p search.
+ */
+std::optional<std::vector<std::string>> same_value_cycle_from (const SameValueFrame& start,
+const nlohmann::json& schema_root,
+const nlohmann::json& ref_roots,
+SameValueSearch& search) {
+    using Mark = SameValueSearch::Mark;
+    std::vector<OpenNode> path;
+    const auto open = [&] (const SameValueFrame& frame, std::string at) {
+        ++search.expanded;
+        path.push_back ({ std::move (at),
+        same_value_edges (*frame.schema, frame.pointer, schema_root, ref_roots), 0 });
+    };
+
+    if (search.expanded >= limits::MAX_SCHEMA_NODES) {
+        return std::nullopt;
+    }
+    std::string start_at = start.pointer.to_string ();
+    if (!search.marks.try_emplace (start_at, Mark::OnPath).second) {
+        return std::nullopt;
+    }
+    open (start, std::move (start_at));
+
+    while (!path.empty () && search.expanded < limits::MAX_SCHEMA_NODES) {
+        OpenNode& top = path.back ();
+        if (top.next == top.edges.size ()) {
+            search.marks[top.at] = Mark::Done;
+            path.pop_back ();
+            continue;
+        }
+        const SameValueFrame edge = std::move (top.edges[top.next++]);
+        std::string at            = edge.pointer.to_string ();
+        const auto [entry, inserted] = search.marks.try_emplace (at, Mark::OnPath);
+        if (inserted) {
+            open (edge, std::move (at));
+        } else if (entry->second == Mark::OnPath) {
+            return cycle_back_to (path, at);
+        }
+    }
+    return std::nullopt;
+}
+
 /**
  * The locations of a cycle in which every step applies to the same value, or
  * nothing when there is none.
@@ -610,54 +695,25 @@ const nlohmann::json& ref_roots) {
  * through a keyword that steps into a child (a tree node's `properties`) is a
  * legitimate recursive schema and is not one of these.
  *
- * Iterative, with the same node budget as `walk_schema`, so the check itself
- * cannot overflow on the schema it is guarding against.
+ * The search starts from every subschema, not only the root: a cycle that only
+ * a child step reaches (`properties/a` `$ref`-ing into a loop, #3810) is
+ * found all the same. The marks are shared across starts, so the whole
+ * search expands each node once.
  */
 std::optional<std::vector<std::string>>
 find_same_value_cycle (const nlohmann::json& root, const nlohmann::json& ref_roots) {
-    struct Open {
-        std::string at;
-        std::vector<SameValueFrame> edges;
-        size_t next = 0;
+    const auto resolve = [&] (const std::string& ref) {
+        return resolve_in_either (root, ref_roots, ref);
     };
-    constexpr int ON_PATH = 1;
-    constexpr int DONE    = 2;
-    std::unordered_map<std::string, int> state;
-    std::vector<Open> path;
-
-    const nlohmann::json::json_pointer top;
-    state[top.to_string ()] = ON_PATH;
-    path.push_back (
-    { top.to_string (), same_value_edges (root, top, root, ref_roots), 0 });
-    size_t visited = 1;
-
-    while (!path.empty () && visited < limits::MAX_SCHEMA_NODES) {
-        if (path.back ().next == path.back ().edges.size ()) {
-            state[path.back ().at] = DONE;
-            path.pop_back ();
-            continue;
+    SameValueSearch search;
+    std::optional<std::vector<std::string>> cycle;
+    walk_schema_with (root, resolve,
+    [&] (const nlohmann::json& node, const nlohmann::json::json_pointer& at) {
+        if (!cycle) {
+            cycle = same_value_cycle_from ({ &node, at }, root, ref_roots, search);
         }
-        SameValueFrame edge = std::move (path.back ().edges[path.back ().next++]);
-        const std::string at         = edge.pointer.to_string ();
-        const auto [entry, inserted] = state.try_emplace (at, ON_PATH);
-        if (!inserted) {
-            if (entry->second != ON_PATH) {
-                continue;
-            }
-            std::vector<std::string> loop;
-            const auto start = std::find_if (path.begin (), path.end (),
-            [&] (const Open& open) { return open.at == at; });
-            for (auto it = start; it != path.end (); ++it) {
-                loop.push_back ("#" + it->at);
-            }
-            loop.push_back ("#" + at);
-            return loop;
-        }
-        ++visited;
-        path.push_back (
-        { at, same_value_edges (*edge.schema, edge.pointer, root, ref_roots), 0 });
-    }
-    return std::nullopt;
+    });
+    return cycle;
 }
 
 } // namespace

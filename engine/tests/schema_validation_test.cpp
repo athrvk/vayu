@@ -1522,6 +1522,74 @@ TEST (SchemaRefLoopTest, ALoopThatStepsIntoAnItemStillValidates) {
     expect_rejected (NESTED, R"([1,["x"]])");
 }
 
+// #3810: the search used to start at the root only, so a loop reached through a
+// child step (`properties`, `items`) was missed and valijson recursed through it
+// on the first body that had the child.
+TEST (SchemaRefLoopTest, ALoopOnlyAPropertyReachesIsRefused) {
+    const auto refused = validate_document_against_schema (
+    json::parse (R"({"properties":{"a":{"$ref":"#/definitions/x"}},)"
+                 R"("definitions":{"x":{"allOf":[{"$ref":"#/definitions/x"}]}}})"),
+    json::parse (R"({"a":1})"));
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_NE (
+    refused.error ().find ("refers to itself without describing any value"), std::string::npos)
+    << refused.error ();
+    EXPECT_NE (
+    refused.error ().find ("#/definitions/x -> #/definitions/x/allOf/0 -> "
+                           "#/definitions/x"),
+    std::string::npos)
+    << refused.error ();
+}
+
+TEST (SchemaRefLoopTest, ALoopOnlyAnItemReachesIsRefused) {
+    const auto refused = validate_document_against_schema (
+    json::parse (R"({"items":{"$ref":"#/definitions/x"},)"
+                 R"("definitions":{"x":{"not":{"$ref":"#/definitions/x"}}}})"),
+    json::parse ("[1]"));
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_NE (refused.error ().find ("without describing any value"), std::string::npos)
+    << refused.error ();
+}
+
+TEST (SchemaRefLoopTest, ALoopInTheSharedRootsThatOnlyAPropertyReachesIsFound) {
+    // The schema reaches X by `$ref`, X steps into `b`, and only `b` reaches the
+    // loop at Y: the walk has to follow a ref into the shared roots to start there.
+    const json roots =
+    json::parse (R"({"components":{"schemas":{)"
+                 R"("X":{"properties":{"b":{"$ref":"#/components/schemas/Y"}}},)"
+                 R"("Y":{"anyOf":[{"$ref":"#/components/schemas/Y"}]}}}})");
+    const auto loop = find_schema_loop (
+    json::parse (R"({"properties":{"a":{"$ref":"#/components/schemas/X"}}})"), roots);
+    ASSERT_HAS_VALUE (loop);
+    EXPECT_NE (loop->find ("#/components/schemas/Y"), std::string::npos) << *loop;
+}
+
+TEST (SchemaRefLoopTest, ALoopingDefinitionNothingReferencesIsFound) {
+    const auto loop = find_schema_loop (
+    json::parse (R"({"type":"object","definitions":{"x":{"$ref":"#/definitions/x"}}})"),
+    json::object ());
+    ASSERT_HAS_VALUE (loop);
+    EXPECT_EQ (*loop, "#/definitions/x -> #/definitions/x");
+}
+
+TEST (SchemaRefLoopTest, ATreeOnlyAPropertyReachesStillValidates) {
+    constexpr const char* TREE =
+    R"({"properties":{"root":{"$ref":"#/definitions/N"}},"definitions":{"N":{"type":"object",)"
+    R"("properties":{"child":{"$ref":"#/definitions/N"},"v":{"type":"integer"}}}}})";
+    expect_accepted (TREE, R"({"root":{"v":1,"child":{"v":2,"child":{"v":3}}}})");
+    expect_rejected (TREE, R"({"root":{"v":1,"child":{"v":"x"}}})");
+}
+
+TEST (SchemaRefLoopTest, ADefinitionTwoPropertiesShareIsNotALoop) {
+    // The second start meets a node the first finished: finished is not on the
+    // path, so it must not read as a cycle.
+    constexpr const char* SHARED =
+    R"({"properties":{"a":{"$ref":"#/definitions/S"},"b":{"$ref":"#/definitions/S"}},)"
+    R"("definitions":{"S":{"allOf":[{"$ref":"#/definitions/T"}]},"T":{"type":"integer"}}})";
+    expect_accepted (SHARED, R"({"a":1,"b":2})");
+    expect_rejected (SHARED, R"({"a":1,"b":"x"})");
+}
+
 TEST (SchemaRefLoopTest, ARefLoopInABoundSpecLeavesTheResponseUnchecked) {
     const json schema = json::parse (R"({"$ref":"#/components/schemas/A"})");
     const json roots  = json::parse (
