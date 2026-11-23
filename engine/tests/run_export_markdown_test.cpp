@@ -383,8 +383,11 @@ TEST (RunExportMarkdownTest, AStreamingRunHasAStreamSectionOfItsTotalsAndDistrib
     { "| Streams                | 120          |", "| Events                 | 14,400       |",
     "| Events per second      | 480 events/s |", "| Streams ended at a cap | 4            |",
     "| Measure | Events per stream | Time to first event (ms) |",
+    "| Largest event gap (ms) | Event rate (events/s) |",
     "| p50     | 118               | 43                       |",
-    "| max     | 310               | 1,250                    |" }) {
+    "| 28                     | 40                    |",
+    "| max     | 310               | 1,250                    |",
+    "| 313                    | 337                   |" }) {
         EXPECT_NE (section.find (line), std::string::npos) << line << " in:\n"
                                                            << section;
     }
@@ -399,6 +402,22 @@ TEST (RunExportMarkdownTest, TheTimeToFirstEventColumnIsThereOnlyWhenTheDocument
     EXPECT_EQ (without.find ("Time to first event"), std::string::npos) << without;
     EXPECT_NE (without.find ("| Measure | Events per stream |\n"), std::string::npos)
     << without;
+}
+
+// #3776: the largest gap and the event rate are columns of their own, each
+// there only when the document holds its block, so a document without one
+// keeps the others. Mutation check: write every column of
+// `STREAM_MEASURED_COLUMNS` (run_export_view.cpp) whatever the document
+// holds and the first expectation fails.
+TEST (RunExportMarkdownTest, TheGapAndRateColumnsAreThereOnlyWhenTheDocumentHasThem) {
+    ordered_json document = read_document ("stream-load");
+    document["report"]["stream"].erase ("maxEventGap");
+    const std::string section = stream_section_of (render_run_export_markdown (document));
+    ASSERT_FALSE (section.empty ());
+    EXPECT_EQ (section.find ("Largest event gap"), std::string::npos) << section;
+    EXPECT_NE (
+    section.find ("| Time to first event (ms) | Event rate (events/s) |\n"), std::string::npos)
+    << section;
 }
 
 TEST (RunExportMarkdownTest, ARunThatDidNotStreamHasNoStreamSectionAndNoLatencyCaption) {

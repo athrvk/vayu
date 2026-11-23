@@ -123,6 +123,7 @@ const METRIC_RECORD: ElementConfigSchema = {
 			title: "Source",
 			properties: {
 				jsonpath: { type: "string", title: "JSONPath" },
+				eventJsonpath: { type: "string", title: "Event JSONPath" },
 				header: { type: "string", title: "Header name" },
 				latency: {
 					type: "boolean",
@@ -286,6 +287,36 @@ describe("ModeElementForm - the mode on screen is the one the engine resolves", 
 			picker: "select",
 			present: ["Header name"],
 		},
+		{
+			// `eventJsonpath` sits between `jsonpath` and `header` in that loop, so
+			// a source carrying both records the stream's last event, not the header.
+			title: "prefers eventJsonpath over header, as metric.record's source_kind loop does",
+			kind: "metric.record",
+			schema: METRIC_RECORD,
+			config: {
+				name: "tok",
+				type: "trend",
+				source: { header: "X-Cost", eventJsonpath: "$.usage.total_tokens" },
+			},
+			mode: "Stream event JSONPath",
+			picker: "select",
+			present: ["Event JSONPath"],
+			absentLabels: ["Header name"],
+		},
+		{
+			title: "prefers jsonpath over eventJsonpath, as metric.record's source_kind loop does",
+			kind: "metric.record",
+			schema: METRIC_RECORD,
+			config: {
+				name: "tok",
+				type: "trend",
+				source: { eventJsonpath: "$.usage.total_tokens", jsonpath: "$.total" },
+			},
+			mode: "JSONPath",
+			picker: "select",
+			present: ["JSONPath"],
+			absentLabels: ["Event JSONPath"],
+		},
 	];
 
 	// A loop rather than `it.each`: `it.each`'s `$title` quotes and truncates
@@ -436,8 +467,25 @@ describe("ModeElementForm - switching modes clears the other strategies", () => 
 		});
 	});
 
+	it("switches from the stream event path to the whole-body path, clearing the first", () => {
+		const onChange = vi.fn();
+		render(
+			<ModeElementForm
+				kind="metric.record"
+				schema={METRIC_RECORD}
+				config={{ name: "tok", type: "trend", source: { eventJsonpath: "$.usage.total" } }}
+				onChange={onChange}
+			/>
+		);
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Source" }));
+		fireEvent.click(screen.getByRole("option", { name: "JSONPath" }));
+
+		expect(onChange).toHaveBeenCalledWith({ name: "tok", type: "trend", source: {} });
+	});
+
 	// Mutation check: make `switchMode` return `{ ...config }` unchanged - the
-	// four clearing cases red, each naming the key left behind, while the
+	// five clearing cases red, each naming the key left behind, while the
 	// marker case still passes on its own write.
 });
 

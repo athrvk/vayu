@@ -675,6 +675,11 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 		["metric.record", "source.jsonpath", (path) => ({ name: "m", source: { jsonpath: path } })],
 		[
 			"metric.record",
+			"source.eventJsonpath",
+			(path) => ({ name: "m", source: { eventJsonpath: path } }),
+		],
+		[
+			"metric.record",
 			"source.condition.jsonpath",
 			(path) => ({
 				name: "m",
@@ -726,6 +731,15 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 		// `validate_metric_paths` checks `source.jsonpath` unconditionally.
 		expect(validate("metric.record", { source: { jsonpath: "foo", status: true } })).toEqual({
 			"source.jsonpath": MESSAGE,
+		});
+	});
+
+	it("reads a metric source's event path whatever else the source holds", () => {
+		// `validate_metric_paths` checks `source.eventJsonpath` unconditionally too.
+		expect(
+			validate("metric.record", { source: { eventJsonpath: "foo", status: true } })
+		).toEqual({
+			"source.eventJsonpath": MESSAGE,
 		});
 	});
 

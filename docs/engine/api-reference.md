@@ -5735,10 +5735,12 @@ The sections, in order:
    (`eventsPerSecond`, in `events/s`) and `Streams ended at a cap` (`capped`),
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
-   column, of the time to each stream's first event (`timeToFirstEvent`). That
-   column is left off when the document has no `timeToFirstEvent`, which the
-   engine omits when no stream delivered a timed event, so a zero never stands
-   for a figure that was not measured. A figure the document lacks reads `-`.
+   column, of the time to each stream's first event (`timeToFirstEvent`), then
+   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   off when the document lacks its block, which the engine omits when no
+   stream measured it, so a zero never stands for a figure that was not
+   measured. A figure the document lacks reads `-`.
 7. `## Capacity`, only for a run whose document has `report.capacity`: the
    stop reason in bold and what the search found (`**Latency budget exceeded**
    - Sustained 41 virtual users at 403 req/s, with a p99 of 178 ms against a
@@ -8869,24 +8871,37 @@ events arrive on. Nothing about a non-streaming send changes.
 ```
 
 The worker parses SSE frames into a bounded in-memory ring that
-[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
-`events` node into the run's stored trace when the stream ends, so History
-restores the timeline. The cookie `warnings` a buffered send answers with
-(issue #3315) are written to the same stored trace, at its top level; the
-`202` carries none.
+[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes the
+stream into the run's stored trace when it ends, so History restores the
+timeline. The cookie `warnings` a buffered send answers with (issue #3315) are
+written to the same stored trace, at its top level; the `202` carries none.
 
-What the reply's bytes become depends on the final response's `Content-Type`
-(issue #3238), read per redirect hop, compared without case and without its
-parameters. A `text/event-stream` reply's bytes are its events and the stored
-`response.body` stays empty. Any other reply (a JSON `404`, NDJSON, chunked
-text) also keeps its bytes as `response.body`, up to
+The final hop's bytes are the stored `response.body`, whatever its
+`Content-Type` (issues #3238, #3770): a `text/event-stream` reply's
+`event:`/`data:` bytes, a JSON `404`, NDJSON or chunked text alike, up to
 `maxDesignResponseBodyBytes`, the bound a buffered send reads under. Past it
 the body is a prefix and the trace says so with `bodyCapped: true`, as on a
-buffered send; the stream itself still ends only by the rules below. Such a
-reply is still fed to the SSE parser, so a server that streams SSE under the
-wrong type still delivers its events. Either way the stored `response`
-carries `bodyBytes`, the body bytes the server delivered, whatever was kept:
-the relay carries no body, so the stored trace is where it lands.
+buffered send; the stream itself still ends only by the rules below, and every
+byte still reaches the SSE parser, so a server that streams SSE under the wrong
+type still delivers its events. The stored `response` carries `bodyBytes`, the
+body bytes the server delivered, whatever was kept: the relay carries no body,
+so the stored trace is where it lands. The declarative elements and the
+post-request script read the same bytes, so `assert.contains`, `assert.size`,
+`extract.regex` and `pm.response.text()` judge a streamed Send as they judge a
+collection or load run's.
+
+The bytes are stored once (issue #657). The trace's `events` node is served as
+`{items, totalEvents, eventsTruncated, endReason}` (each item `{event, data,
+sourceId?, dataTruncated?, dataBytes?, receivedAt}`), but the list is parsed
+from the stored body when the trace is read
+([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
+report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
+the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`,
+one arrival time per event `sseMaxStoredEvents` kept. The served list stops at
+the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when
+either the list is shorter than `totalEvents` or the body is a prefix
+(`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`). A trace stored
+before #3770 carries its `items` and is served as stored.
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
@@ -8927,8 +8942,9 @@ Refused with a **400** rather than silently reinterpreted:
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
 buffered send, so its `pm.request` edits reach the wire. The post-request script
-runs **once, after the stream has terminated**, and reads the bounded stored
-list as `pm.response.events` with `pm.response.totalEvents` and
+runs **once, after the stream has terminated**, and reads the bounded list
+parsed from the stream's bytes, the one its stored trace is served with, as
+`pm.response.events` with `pm.response.totalEvents` and
 `pm.response.eventsTruncated` beside it - a script runs to completion, its
 timers included, before anything is reported, so a live per-event callback is
 not a feature that was skipped but one the runtime cannot have. The same three
@@ -10058,6 +10074,8 @@ Start a load test run (Vayu Mode).
   "iterations": 1000,        // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps only; a 400 on any other mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
+  "retryAfterBackoff": false,  // Optional, default false - wait out a 429's or 503's Retry-After; see "Retry-After back-off" below
+  "retryAfterMaxMs": 30000,    // Optional, default 30000 - the longest one such wait
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
@@ -10867,6 +10885,29 @@ run row exists (#3121). The URL is judged as the scrape will send it, so a `\`
 in it counts as the `/` it is sent as. Loopback and private hosts get no
 exemption from a policy; without one, "Loopback and private addresses are
 deliberately allowed" above is the whole rule.
+
+#### Retry-After back-off (`retryAfterBackoff`)
+
+Off by default ([#3782](https://github.com/athrvk/vayu/issues/3782)). On, a
+`429` or `503` response carrying `Retry-After` holds the virtual user that
+received it for that long before its next request: delta-seconds, or an
+HTTP-date counted from the moment the response arrived, clamped to
+`retryAfterMaxMs` (default 30000). A value that is neither, a negative number
+included, or a date already past asks for no wait. The request is not
+retried: the `429` stays a counted response in the error rate and
+`statusCodes`, and the wait only delays what the user sends next. It composes
+with a think timer as the longer of the two, and the waits are counted in the
+`retry_after_backoff` warning (see [`warnings`](#get-runsrunidreport)). Both
+closed-loop shapes apply it, a single-request run by holding the completed
+slot as `timer.think` does and a scenario run on the virtual user itself. A
+`constant_rps` run does not, for the reason it skips a think timer: it sends
+on a schedule, so there is no next request to hold back, and a held slot
+would only fill `maxInFlight`. It carries one `retry_after_skipped_open_loop`
+warning instead. The option is opt-in because a run that backs off measures
+the rate the limiter allows rather than what the target does under the load
+asked for; with it off, a run whose responses are mostly `429` carries
+`rate_limited_dominant`, which names it (a `constant_rps` run's says the option
+does not apply to it).
 
 #### The `scenario` block (collection runs)
 
@@ -11946,7 +11987,9 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event, time-to-first-event, largest-gap and event-rate histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `retryAfterBackoff` | boolean | Read as a bool inside the run-context constructor, the same stranded-`pending` failure `save_timing_breakdown` had. See [Retry-After back-off](#retry-after-back-off-retryafterbackoff). |
+| `retryAfterMaxMs` | `1`-`3600000` ms | The longest one virtual user waits on a `Retry-After`. Past an hour it is waiting out a quota, not pacing against a limiter; `0` would be the option turned off said another way. Read only with `retryAfterBackoff` on. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -12917,7 +12960,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
-| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
@@ -13524,9 +13567,10 @@ bytes, which a client cannot recount from `body` because a JSON string's
 length is not its UTF-8 size. It is the length the engine held, which for a
 `bodyCapped` response is the prefix the read cap kept; a streaming run's is
 the body bytes the server delivered (issue #3238), which its `body` can be
-shorter than (an event stream stores none, any other reply at most
-`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A row
-stored before #3423 carries it only on a cut or streamed response.
+shorter than (at most `maxDesignResponseBodyBytes`, an event stream's bytes
+included since #3770; see [`POST /execute`](#post-execute)). A row stored
+before #3770 holds no body for an event stream, and one stored before #3423
+carries `bodyBytes` only on a cut or streamed response.
 
 If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
 affected `trace.request` and/or `trace.response` object carries
@@ -14295,7 +14339,9 @@ absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count
 `max`; a `"counter"` or `"rate"` entry carries `count` and `value` (a running total, or a 0-100
 percentage). `count` is always how many times the name was recorded: a trend's samples, a
 counter's records (four increments of 1024 are `count: 4, value: 4096`, never the total; #1937),
-a rate's evaluations. A counter's increments are finite and never negative - see
+a rate's evaluations, so a `metric.record` whose source is a stream's `eventJsonpath` (#3780) adds
+one sample per stream, read from the last event the path matches, never one per event. A
+counter's increments are finite and never negative - see
 [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets). The same shape rides every
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
 and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
@@ -14371,6 +14417,20 @@ under `summary.elements`) and held no slot. Its `message` is "A think timer
 does not apply to a constant-rate run: requests are sent on a schedule, not
 one after another", and it carries `timers` (how many enabled timers were
 skipped). A closed-loop mode runs the timer and raises nothing.
+Three are about [Retry-After back-off](#retry-after-back-off-retryafterbackoff)
+([#3782](https://github.com/athrvk/vayu/issues/3782)), at most one per run.
+`rate_limited_dominant` is raised with `retryAfterBackoff` off when more than
+half of the responses that carried a status (a transport failure carries
+none) were `429`: the report describes the target's rate limit more than the
+target. On a closed-loop run the `message` names the option; on a
+`constant_rps` run, which never backs off, it says so instead and does not
+advise the option. `count` is the `429`s. With the option on,
+`retry_after_backoff` carries `count`, the responses whose
+`Retry-After` a virtual user waited out, so a reader knows the run's rate is
+the one the target allowed; and `retry_after_skipped_open_loop` is raised
+instead by a `constant_rps` run that sent anything, with the `message` "Retry-After
+back-off does not apply to a constant-rate run: requests are sent on a
+schedule, not one after another".
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
@@ -14429,7 +14489,9 @@ failure.
   "capped": 480,
   "eventsPerSecond": 320.0,
   "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
-  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 }
+  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 },
+  "maxEventGap": { "p50": 27.1, "p95": 33.8, "p99": 41.0, "max": 312.4, "count": 480 },
+  "eventRate": { "p50": 40.0, "p95": 41.2, "p99": 41.9, "max": 42.3, "count": 480 }
 }
 ```
 
@@ -14479,6 +14541,26 @@ target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is
 absent when no completion delivered a timed event.
+
+`maxEventGap` and `eventRate` (issue #3776) are per-completion distributions
+of how each stream paced its events, in the same `{p50, p95, p99, max, count}`
+shape. `maxEventGap` is each stream's largest wait, in milliseconds, between
+two consecutive writes that delivered an event: a stall mid-reply shows at its
+`max` however fast the stream ran otherwise. `eventRate` is each stream's own
+rate in events per second, the events delivered after the first write that
+delivered one over the time from that write to the last, so 8 streams at 25 ms
+per event read a p50 near 40 beside one stream at 3 ms reading a `max` near
+333, where the whole-run `eventsPerSecond` blends them. The first write's own
+events are left out however many it carried: a backlog replayed in it took no
+measured time. Both are stamped on the write that
+completed an event, as `timeToFirstEvent` is: events that share a write share
+one time, and a proxy that buffers the stream shortens the gaps it holds back.
+A keep-alive comment is not an event and closes no gap, and the unterminated
+last frame the close completes counts toward `events` but toward neither of
+these. `count` is the completions with at least two such writes (`eventRate`
+also leaves out one whose writes all landed at one instant), so a stream whose
+events arrived in one write is in neither, and each object is absent when no
+completion measured it. Neither is on the live frames: they are report-only.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 
@@ -14943,8 +15025,9 @@ back to a character boundary, so it stays `utf8` with `bodyTruncated` set
 rather than turning the whole prefix into base64.
 
 **A streamed sample carries its events** (0.17.2). `events` is
-`{items, totalEvents, eventsTruncated}` - the same node a streaming design run
-stores on its trace, minus `endReason`: under load a stream ends by server close
+`{items, totalEvents, eventsTruncated}` - the same node a streaming design run's
+trace is served with, minus `endReason` and each item's `receivedAt`: under
+load a stream ends by server close
 or by one of two caps (`maxStreamEvents` / `maxStreamDurationMs`) and nothing
 per sample records which, so no reason is named rather than one invented. The
 list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`,
@@ -14986,9 +15069,11 @@ exchange failed, and `trace` when one was stored, without the cost of the
 whole report. The trace is served as stored: a design send's request and
 response bodies at the length `maxTraceBodyBytes` kept, and its
 `scripts.scriptRequests` holding every `pm.sendRequest` the scripts made, by
-index, in the shape [`POST /execute`](#post-execute) answers them. A trace
-that does not parse is served as its stored text, a JSON string, as the
-report serves it. Reads only.
+index, in the shape [`POST /execute`](#post-execute) answers them. A streamed
+send's `response.body` is the stream's bytes, and its `events` list is parsed
+from them as it is served, not stored (issue #3770,
+[`POST /execute`](#post-execute)). A trace that does not parse is served as its
+stored text, a JSON string, as the report serves it. Reads only.
 
 The handle is the `runId` and `resultId` a recorded buffered
 [`POST /execute`](#post-execute) answers; any `results[].id` of the report, or

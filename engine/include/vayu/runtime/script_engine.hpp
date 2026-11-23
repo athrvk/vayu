@@ -231,8 +231,9 @@ struct ScriptContext {
      *        null where the run was not a stream (issue #575).
      *
      * An `events` node: `items`, `totalEvents` and `eventsTruncated`. A design
-     * stream points at the very node its trace stores
-     * (`vayu::http::stream_trace_node`); every buffered stream (a collection
+     * stream points at one `vayu::http::stream_events_node` built from its
+     * body and the sidecar its trace stores, the builder every reader of that
+     * trace applies (#3770); every buffered stream (a collection
      * run's step, a load run's inline or replayed script) points at one
      * `vayu::http::bind_buffered_stream_events` built from the body with the
      * function its stored trace or sample is built with (issue #3769). Either

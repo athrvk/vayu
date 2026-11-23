@@ -564,12 +564,13 @@ the wire. An empty body reports `0`, not an absent property.
 ### `pm.response.events` - a streamed run's events
 
 A request sent with the **Event stream** setting on (`"stream": true` on
-`POST /execute`) has no single response body when the server answers
-`text/event-stream`; it has a list of events, and `pm.response.text()` is `""`.
-A reply of any other type (a JSON error, NDJSON) keeps its bytes as the body
-too, up to `maxDesignResponseBodyBytes`, so `text()` and `json()` read it as on
-a buffered send (issue #3238). The post-request script runs **once, after the
-stream has terminated**, and reads the event list:
+`POST /execute`) keeps the bytes the server delivered as its body, whatever
+their type, up to `maxDesignResponseBodyBytes` (issues #3238, #3770): for a
+`text/event-stream` reply `pm.response.text()` is the stream's `event:`/`data:`
+bytes, as it is on a collection or load run, and a JSON error or NDJSON reply
+reads through `text()` and `json()` as on a buffered send. Beside the bytes it
+has a list of events, parsed from those same bytes. The post-request script
+runs **once, after the stream has terminated**, and reads the event list:
 
 ```javascript
 const events = pm.response.events || [];
@@ -602,8 +603,9 @@ the stream arrives for one to run in. The script runs against what was
 retained.
 
 **Check the markers before asserting over the whole stream.** The stored list is
-bounded by `sseMaxStoredEvents`, and a script that counted a prefix would report
-a wrong number with total confidence:
+bounded by `sseMaxStoredEvents`, and by the bytes the body kept (a stream past
+`maxDesignResponseBodyBytes` is a prefix), and a script that counted a prefix
+would report a wrong number with total confidence:
 
 ```javascript
 if (!pm.response.eventsTruncated) {
@@ -619,8 +621,9 @@ pm.test('the stream produced something', function () {
 `pm.response.totalEvents` is every event the run received, including those
 beyond the stored list; `pm.response.eventsTruncated` is the engine's own
 comparison of the two, not something derived from a cap the script cannot see.
-Both mirror the markers on the run's stored trace, because they are read from
-the same node.
+Both mirror the markers on the run's stored trace, because the script's list and
+the one a restored response reads are parsed from the same bytes by the same
+rule (issue #3770).
 
 **Absent, not empty, on an ordinary response.** All three properties are missing
 unless the run was a stream, so `typeof` separates "this was not a stream" from
@@ -645,12 +648,14 @@ design Send behaves the same in each of these:
   #3769), or **deferred**, replayed after the run against its sampled responses
   (0.17.2).
 
-Two differences follow from where those responses come from, and both are
-visible to the script rather than assumed:
+On every path the list is parsed back out of the response's body, bounded by
+the same `sseMaxStoredEvents`, and `totalEvents` is the count taken on the
+wire, so it stays truthful even where the body was cut. Two differences follow
+from where those responses come from, and both are visible rather than assumed:
 
-- The list is parsed back out of the response's buffered body, bounded by the
-  same `sseMaxStoredEvents`. `totalEvents` is the count taken on the wire, so it
-  stays truthful even where the body was cut.
+- Only a design Send watched its events arrive, so only its entries carry a
+  `receivedAt` (milliseconds since the epoch) on the stored trace a History
+  entry restores.
 - There is no `endReason` on these paths. A buffered stream ends by server
   close or by one of the two caps, and nothing per response records which - the
   run report's `stream.capped` carries that fact for the run as a whole.
@@ -664,9 +669,9 @@ A request whose body mode is `mcp` is answered with one JSON object or with an
 event stream ending in the final JSON-RPC response
 ([the `mcp` reply](api-reference.md#the-mcp-reply)). A script reads that reply
 **as it arrived**, on every path: `pm.response.json()` and `text()` are the
-body exactly as for any other request (the JSON object, or for a buffered event
-stream its `event:`/`data:` bytes; a streamed send keeps no bytes, so `text()`
-is `""` there as above), and the frames themselves are `pm.response.events`. It
+body exactly as for any other request (the JSON object, or for an event stream
+its `event:`/`data:` bytes, on a streamed send as on a buffered one), and the
+frames themselves are `pm.response.events`. It
 is the declarative elements, not scripts, that read the final response in
 place of the body. What a script adds is the engine's judgement of the reply:
 

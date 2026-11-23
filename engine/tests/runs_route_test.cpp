@@ -2054,6 +2054,47 @@ TEST_F (RunsRouteTest, ReportCarriesAStreamsTimeToFirstEvent) {
     "timeToFirstEvent"));
 }
 
+// #3776: the largest event gap and the per-stream rate reach the report the
+// same way, and stay out of it when no stream measured them. Mutation check:
+// drop either from the table in `build_stream_summary_payload` and its block
+// fails; write them whatever the count and the last expectation fails.
+TEST_F (RunsRouteTest, ReportCarriesAStreamsLargestGapAndEventRate) {
+    vayu::core::MetricsCollector::StreamTotals stream;
+    stream.completions         = 4;
+    stream.total_events        = 160;
+    stream.max_event_gap.count = 4;
+    stream.max_event_gap.p50   = 27.0;
+    stream.max_event_gap.max   = 312.0;
+    stream.event_rate.count    = 4;
+    stream.event_rate.p50      = 40.0;
+    stream.event_rate.max      = 41.5;
+    auto inputs                = summary_inputs ();
+    inputs.stream              = stream;
+    seed ({ .id = "run_stream_pace", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_stream_pace", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_stream_pace");
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto& reported = body["stream"];
+    ASSERT_TRUE (reported.contains ("maxEventGap")) << reported.dump ();
+    EXPECT_DOUBLE_EQ (reported["maxEventGap"].value ("p50", -1.0), 27.0);
+    EXPECT_DOUBLE_EQ (reported["maxEventGap"].value ("max", -1.0), 312.0);
+    EXPECT_EQ (reported["maxEventGap"].value ("count", 0), 4);
+    ASSERT_TRUE (reported.contains ("eventRate")) << reported.dump ();
+    EXPECT_DOUBLE_EQ (reported["eventRate"].value ("p50", -1.0), 40.0);
+    EXPECT_DOUBLE_EQ (reported["eventRate"].value ("max", -1.0), 41.5);
+    EXPECT_EQ (reported["eventRate"].value ("count", 0), 4);
+
+    stream.max_event_gap = {};
+    stream.event_rate    = {};
+    inputs.stream        = stream;
+    const auto unmeasured =
+    vayu::core::build_run_summary_payload (inputs)["stream"];
+    EXPECT_FALSE (unmeasured.contains ("maxEventGap")) << unmeasured.dump ();
+    EXPECT_FALSE (unmeasured.contains ("eventRate")) << unmeasured.dump ();
+}
+
 // #3127: the deferred replay's console lines reach the report, on the run's
 // `testValidation` and on a scenario step's `tests`, each with its dropped
 // count, and a line logged more than once with its `count`. Mutation check:

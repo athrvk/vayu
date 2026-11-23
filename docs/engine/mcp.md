@@ -511,6 +511,15 @@ Notes:
   produced the run. Bounds mirror `validate_run_config`, so a value the schema
   accepts is one `POST /runs` accepts, and an absent knob stays absent - each has
   an engine default a stated value would overwrite.
+  `retryAfterBackoff` and `retryAfterMaxMs` (#3782) ride the same forwarding,
+  under the engine's own camelCase keys: with the option on, a `429` or `503`
+  carrying `Retry-After` holds the virtual user that received it for that long,
+  capped at `retryAfterMaxMs` (1-3600000, engine default 30000), before its next
+  request. Off by default, because a run that backs off measures the rate the
+  limiter allows; a `constant_rps` run skips it and the report says so. A scenario
+  run takes both too. The report's `warnings` carry `rate_limited_dominant` when
+  the option is off and most responses were `429`, and `retry_after_backoff`
+  (the waits counted) when it is on.
   The **redirect policy** (`followRedirects` / `maxRedirects`) belongs to the
   request half instead: it rides through `POST /compose` beside the method and
   the body, overriding a saved request's stored policy or supplying the only one
@@ -795,7 +804,10 @@ Notes:
   section also carries the per-completion event distribution, a derived
   `eventsPerSecond` and `timeToFirstEvent` (issue #3234), the wait from submit
   to each stream's first event, which `timingBreakdown.phases.firstByte` does
-  not measure: it ends at the response headers.
+  not measure: it ends at the response headers. `maxEventGap` (each stream's
+  longest pause between events, ms) and `eventRate` (each stream's own
+  events/s) (issue #3776) are what tell a stall mid-reply or one slow stream
+  from a healthy run, where the whole-run rate blends them.
 - **`start_load_run`'s `monitor` block** scrapes the target's own metrics
   endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
   and the `series` names to read), so an agent asked why a target slowed down
@@ -1527,6 +1539,12 @@ none, are an `input` error.
 | A run result | `runId`, `resultId`; `part` `"response"` (default) or `"request"`; `scriptRequest` N for the trace's Nth `pm.sendRequest` record | `GET /runs/:runId/results/:resultId`, the trace's bodies at their stored length. `resultId` is the `resultId` a recorded `run_request` answers, or a report row's `id`. A load run's result stores no trace (its exchanges are samples), and that is an `input` error naming `get_run_samples` |
 | An inbox capture | `inboxId`, `captureId` (a row's `id` in `get_inbox_captures`) | `GET /inbox/:id/requests/:captureId` (#3723), one call: the bare capture, whole, as a list row carries it |
 | A saved example | `requestId`, `exampleId` | `GET /requests/:id/examples`, the example picked by id |
+
+A streamed send's response body is the stream's bytes, its `event:`/`data:`
+lines as they arrived (#3770), so `read_body` pages them and `diff_bodies`
+compares two streams line by line like any other text. A result stored before
+#3770 holds an empty body for an event stream: its events are in the trace's
+`events` node only.
 
 An unknown run, result, inbox, capture or request is the engine's 404, worded
 as an unknown id (a capture the inbox does not hold, including another inbox's,

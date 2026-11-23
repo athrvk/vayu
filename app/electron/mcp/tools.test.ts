@@ -29,6 +29,7 @@ import {
 	MAX_RESPONSE_SAMPLES_BOUND,
 	MAX_RUN_SERIES_LIMIT,
 	MAX_SCHEMA_SDL_BYTES,
+	MAX_RETRY_AFTER_MAX_MS,
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SPEC_DIFF_ENTRIES,
 	MAX_SUCCESS_SAMPLE_PERIOD,
@@ -15798,6 +15799,37 @@ describe("start_load_run recording knobs", () => {
 		}
 	});
 
+	// Retry-After back-off (#3782) is camelCase on the wire, unlike the knobs
+	// above. Mutation check: drop the two pairs from LOAD_RECORDING_FIELDS in
+	// `compose.ts` and this fails, which is the accepted-and-dropped argument.
+	test("forwards Retry-After back-off and its cap under the engine's own keys", async () => {
+		const { res, client } = await start({ retryAfterBackoff: true, retryAfterMaxMs: 5000 });
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({ retryAfterBackoff: true, retryAfterMaxMs: 5000 });
+	});
+
+	test("sends no Retry-After keys when the caller named none", async () => {
+		const { client } = await start({ comment: "just a note" });
+		expect(started(client)).not.toHaveProperty("retryAfterBackoff");
+		expect(started(client)).not.toHaveProperty("retryAfterMaxMs");
+	});
+
+	test("bounds the Retry-After cap at the engine's range", () => {
+		const schema = argumentsSchema(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
+		);
+		// The dialog's range is the engine's, which `load-test.engine-parity.test.ts` pins.
+		expect(MAX_RETRY_AFTER_MAX_MS).toBe(LOAD_TEST_LIMITS.RETRY_AFTER_MAX_MS.MAX);
+		expect(schema.safeParse({ retryAfterMaxMs: 0 }).success).toBe(false);
+		expect(schema.safeParse({ retryAfterMaxMs: 1 }).success).toBe(true);
+		expect(schema.safeParse({ retryAfterMaxMs: MAX_RETRY_AFTER_MAX_MS }).success).toBe(true);
+		expect(schema.safeParse({ retryAfterMaxMs: MAX_RETRY_AFTER_MAX_MS + 1 }).success).toBe(
+			false
+		);
+		expect(schema.safeParse({ retryAfterBackoff: "yes" }).success).toBe(false);
+	});
+
 	// The rows go through untouched (issue #993): every rule about what a set may
 	// be lives engine-side, so a second copy of them here could only drift - and
 	// a set the schema quietly dropped would be a run of literal `{{data.*}}`
@@ -16094,6 +16126,8 @@ describe("start_load_run recording knobs", () => {
 				successSamplePeriod: 2,
 				slowRequestThresholdMs: 900,
 				saveTimingBreakdown: true,
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 1500,
 				comment: "scenario soak",
 			},
 			ctxWith(client, allow)
@@ -16104,6 +16138,8 @@ describe("start_load_run recording knobs", () => {
 			success_sample_rate: 2,
 			slow_threshold_ms: 900,
 			save_timing_breakdown: true,
+			retryAfterBackoff: true,
+			retryAfterMaxMs: 1500,
 			comment: "scenario soak",
 		});
 	});

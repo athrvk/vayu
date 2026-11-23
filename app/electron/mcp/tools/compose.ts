@@ -935,6 +935,8 @@ export const MAX_SUCCESS_SAMPLE_PERIOD = 100_000;
 export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
 export const MAX_RESPONSE_SAMPLE_PERIOD = 100_000;
 export const MAX_RESPONSE_SAMPLES_BOUND = 1_000_000;
+/** `limits::MAX_RETRY_AFTER_MAX_MS`: `retryAfterMaxMs` is 1 up to this (#3782). */
+export const MAX_RETRY_AFTER_MAX_MS = 3_600_000;
 
 /**
  * The redirect ceiling `apply_request_fields` clamps a stored request to
@@ -954,7 +956,8 @@ export const MAX_RESPONSE_SAMPLES_BOUND = 1_000_000;
 export const MAX_REDIRECTS_BOUND = 100;
 
 /**
- * The recording knobs of a load run, as `{tool argument: run config key}`. Two
+ * The recording knobs of a load run, plus its Retry-After back-off pair (#3782),
+ * as `{tool argument: run config key}`. Two
  * spellings because the engine's are snake_case here and only here -
  * `success_sample_rate` and `response_sample_rate` are not rates but *periods*
  * (keep 1 in N), and the app's own `StartLoadTestRequest` carries a comment
@@ -972,10 +975,15 @@ const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]
 	["saveTimingBreakdown", "save_timing_breakdown"],
 	["responseSamplePeriod", "response_sample_rate"],
 	["maxResponseSamples", "max_response_samples"],
+	// camelCase on the wire, so the same spelling twice: the option is read from
+	// the run config by `RunContext`, which both load executors share.
+	["retryAfterBackoff", "retryAfterBackoff"],
+	["retryAfterMaxMs", "retryAfterMaxMs"],
 ];
 
 /**
- * Copy the recording knobs and the run comment onto a `POST /runs` payload.
+ * Copy the recording knobs, the Retry-After back-off pair and the run comment
+ * onto a `POST /runs` payload.
  *
  * Shared by both load paths because both read them: a scenario load run is
  * driven by the same `RunContext`, whose constructor is the one place

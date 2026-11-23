@@ -15,11 +15,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { StreamTimeToFirstEvent } from "@/types";
+import type { StreamDistribution } from "@/types";
 import { isStreamFrame, latestStreamFirstEvent } from "./liveStream";
 import { tick } from "./liveDistributions.testkit";
 
-const ttfe = (p50: number): StreamTimeToFirstEvent => ({
+const ttfe = (p50: number): StreamDistribution => ({
 	p50,
 	p95: p50 * 3,
 	p99: p50 * 4,

@@ -2461,15 +2461,22 @@ than assuming all eight are there and flat (`engineMs` and `scriptMs` aside, abo
 | Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored` / `stopped`, the last a step a Stop or shutdown cut short, #3397), a flat **`scriptMs`** (#3676: the step's pre-request and test script time, `pm.sendRequest` included, `0` for a step with no script, absent for a row that could not bind and on a row stored before the key), and **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that failed, errored or was skipped is kept and successes, with `stopped` steps, fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
 A **streaming** design run (`POST /execute` with `"stream": true`, issue #573)
-adds one node the others never carry: **`events`**, holding `items` (the first
-`sseMaxStoredEvents` events, each with `event` / `data` / optional `sourceId` /
-`receivedAt`, and `dataTruncated` + `dataBytes` on one that hit the per-event
-cap), `totalEvents` (every event received, whatever was stored), `eventsTruncated`
-(true when the two differ) and `endReason`. `cap_trace_bodies` walks the
-request/response *body* nodes and does not reach this one, so its cap is applied
-when the node is built rather than when the trace is stored - which is why
-`eventsTruncated` is computed from the true total rather than derived from
-whatever the cap happened to be.
+stores the stream's bytes once, as `response.body` (issue #3770, up to
+`maxDesignResponseBodyBytes` and then `maxTraceBodyBytes`, with `bodyCapped` /
+`bodyTruncated` saying which cut a prefix), and adds one node the others never
+carry: **`events`**, a sidecar holding only what the bytes cannot say -
+`totalEvents` (every event received, whatever was kept), `endReason`,
+`maxEventBytes` (the per-event cap the live parser ran under) and `receivedAt`,
+an array of one arrival time (epoch milliseconds) per event, for the first
+`sseMaxStoredEvents` events. The list is not stored (#657): every route that
+serves a stored trace parses it back from `response.body` with the same
+`SseParser` (`expand_stored_stream_events`) and serves `events` as `items`
+(each `event` / `data` / optional `sourceId` / `receivedAt`, and
+`dataTruncated` + `dataBytes` on one that hit the per-event cap, at most one
+per `receivedAt` and never past `totalEvents`), `totalEvents`,
+`eventsTruncated` (true when the list is shorter than `totalEvents` or the body
+is a prefix) and `endReason`. A row stored before #3770 holds an empty body and
+the `items` list itself, and is served as stored.
 
 A design send or a scenario step whose scripts called `pm.sendRequest` carries
 **`scripts.scriptRequests`** (issue #3633): one record per call in execution
@@ -2553,8 +2560,9 @@ cap, which keeps it; a `request` carries it only when cut. On every response it 
 which a reader cannot recount from `body` (a JSON string's length is not its UTF-8 size): the
 length the engine held, which for a `bodyCapped` response is the prefix the read cap kept, and
 for a streaming run the bytes the server delivered (#3238), which can exceed what `body` holds
-(none for `text/event-stream`, at most `maxDesignResponseBodyBytes` otherwise). A row stored
-before #3423 carries it on `response` only when cut or streamed.
+(at most `maxDesignResponseBodyBytes`, a `text/event-stream` reply's bytes included since #3770;
+a row stored before #3770 holds none for one). A row stored before #3423 carries it on
+`response` only when cut or streamed.
 
 A `response.body` that is not text (not valid UTF-8 over its whole length, or carrying a NUL) is
 stored as its base64, and only then does `response` carry **`bodyEncoding: "base64"`** (#2458):
@@ -2632,7 +2640,9 @@ recover from those bytes is how many events the transfer actually delivered -
 the body may be a prefix - so that one number is stored beside them. NULL means
 "this was not a stream" (a 429 in JSON answering a streaming request is not
 one), which is why the column is nullable rather than
-defaulted to 0.
+defaulted to 0. A streamed design Send holds to the same rule in its trace
+(#3770): its `events` sidecar's `totalEvents` plays this column's part beside
+the stored body, with the arrival times only a live consumer has.
 
 A uniformly sampled success (`success_sample_rate`) is deliberately body-less.
 

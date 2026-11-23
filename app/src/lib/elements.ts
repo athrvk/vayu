@@ -218,6 +218,7 @@ export const JSON_PATH_FIELDS: readonly JsonPathField[] = [
 	},
 	{ kind: "extract.json", path: ["path"] },
 	{ kind: "metric.record", path: ["source", "jsonpath"] },
+	{ kind: "metric.record", path: ["source", "eventJsonpath"] },
 	{
 		kind: "metric.record",
 		path: ["source", "condition", "jsonpath"],

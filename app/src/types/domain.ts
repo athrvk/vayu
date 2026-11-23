@@ -1310,6 +1310,13 @@ export interface RunConfigSnapshot {
 	startConcurrency?: number;
 	comment?: string;
 	/**
+	 * Whether the run waited out `Retry-After` (#3782), and the longest wait, in
+	 * ms, as sent. Absent when the option was off, which is what every run before
+	 * it read as. `RunConfigSection` reads both.
+	 */
+	retryAfterBackoff?: boolean;
+	retryAfterMaxMs?: number;
+	/**
 	 * The data file that drove a **load** run (issue #2051): its name and the
 	 * SHA-256 of its bytes, never a path. A collection run keeps the pair inside
 	 * its `scenario` block - read both through `dataFileFromSnapshot`.
@@ -2475,6 +2482,15 @@ export interface LoadTestConfig {
 	success_sample_period?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
+	/**
+	 * Wait out a 429's or 503's `Retry-After` before the virtual user's next
+	 * request (#3782). camelCase because that is the engine's spelling of the
+	 * option. Both keys are absent when the option is off or the mode is
+	 * `constant_rps`, which the engine would only skip with a warning.
+	 */
+	retryAfterBackoff?: boolean;
+	/** The longest such wait, in ms. Present only with `retryAfterBackoff`. */
+	retryAfterMaxMs?: number;
 	comment?: string;
 	latency_percentiles?: number[];
 	max_in_flight?: number;
@@ -2975,8 +2991,12 @@ export interface LiveCapacityState {
 	stopReason?: string;
 }
 
-/** Milliseconds over the streams that delivered a timed first event (`count` of them). */
-export interface StreamTimeToFirstEvent {
+/**
+ * A per-stream distribution over the `count` streams that measured the figure.
+ * The unit belongs to the field that carries it: milliseconds for
+ * `timeToFirstEvent` and `maxEventGap`, events per second for `eventRate`.
+ */
+export interface StreamDistribution {
 	p50: number;
 	p95: number;
 	p99: number;
@@ -3143,7 +3163,7 @@ export interface LoadTestMetrics {
 	 * reader takes the latest frame that carries it (`utils/liveStream.ts`). Not
 	 * the First byte phase: that ends at the response headers.
 	 */
-	stream_time_to_first_event?: StreamTimeToFirstEvent;
+	stream_time_to_first_event?: StreamDistribution;
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has
@@ -3420,6 +3440,8 @@ export interface RunReport {
 		 * `unresolved_tokens`: requests affected. `connection_replayed`: requests
 		 * re-sent. `cookies_dropped`: `Set-Cookie` headers dropped across the run;
 		 * the message states it, a count and never a name.
+		 * `rate_limited_dominant` (#3782): the 429 responses. `retry_after_backoff`:
+		 * the responses whose `Retry-After` a virtual user waited out.
 		 */
 		count?: number;
 		names?: string[];
@@ -3758,6 +3780,12 @@ export interface RunReport {
 	 * headers: a gateway that answers 200 at once and then thinks reads fast
 	 * there and slow here (issue #3234). It is absent when no stream delivered a
 	 * timed event, while `stream` itself is present.
+	 *
+	 * `maxEventGap` and `eventRate` (issue #3776) say how each stream paced its
+	 * events, which the whole-run `eventsPerSecond` blends away and a first-event
+	 * time never sees. Each is per stream, over the streams that had two timed
+	 * events to measure between, and absent (never 0) when none did. Report-only:
+	 * a live gate frame carries neither.
 	 */
 	stream?: {
 		completions: number;
@@ -3774,7 +3802,11 @@ export interface RunReport {
 			count: number;
 		};
 		/** Milliseconds, over the completions that delivered a timed event (`count`). */
-		timeToFirstEvent?: StreamTimeToFirstEvent;
+		timeToFirstEvent?: StreamDistribution;
+		/** Milliseconds: each stream's largest pause between two consecutive events. */
+		maxEventGap?: StreamDistribution;
+		/** Events per second: each stream's own rate, the events after its first over first to last arrival. */
+		eventRate?: StreamDistribution;
 	};
 	testValidation?: {
 		samplesTested: number;

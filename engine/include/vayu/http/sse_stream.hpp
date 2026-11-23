@@ -44,6 +44,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -173,12 +174,14 @@ class SseStreamContext {
 
     /**
      * Record one parsed upstream event: count it, publish it to the ring, and
-     * keep it for the trace while the stored cap allows.
+     * keep its arrival time for the trace while the stored cap allows.
      *
      * The three happen together because they are three views of one arrival and
      * every one of them is read - the count by the completion record, the ring
-     * by the relay, the stored list by the run's trace. Splitting them is how a
-     * field ends up written and never read.
+     * by the relay, the arrival time by the run's trace. Splitting them is how a
+     * field ends up written and never read. The event itself is not kept: the
+     * response body holds its bytes, and the trace's list is parsed back from
+     * them (#3770).
      */
     void record_event (const SseEvent& event);
 
@@ -242,8 +245,9 @@ class SseStreamContext {
         return total_events_.load (std::memory_order_acquire);
     }
 
-    /// The first `max_stored_events` events, as the trace stores them.
-    [[nodiscard]] std::vector<nlohmann::json> stored_events () const;
+    /// When each of the first `max_stored_events` events arrived, in arrival
+    /// order: the `receivedAt` the trace pairs with the events it parses back.
+    [[nodiscard]] std::vector<int64_t> stored_arrivals () const;
 
     /// The initial response's status line and headers, recorded as soon as they
     /// arrive so the relay can report what the stream is even before its first
@@ -272,7 +276,7 @@ class SseStreamContext {
     /// Guarded by `mutex_`; empty until `request_stop` or `request_shutdown`.
     std::optional<SseEndReason> requested_end_;
     /// Guarded by `mutex_`; capped at `limits.max_stored_events`.
-    std::vector<nlohmann::json> stored_;
+    std::vector<int64_t> stored_arrivals_;
 
     mutable std::mutex claim_mutex_;
     LiveClaimSlot claim_;
@@ -282,19 +286,28 @@ class SseStreamContext {
 /// the trace records about how the stream ended.
 [[nodiscard]] nlohmann::json stream_completion_json (const SseStreamContext& context);
 
-/// The bounded `events` node a completed stream contributes to its run trace.
-/// Carries `totalEvents` and `eventsTruncated` beside the list, so a reader can
-/// always tell a stored slice from the whole stream - `cap_trace_bodies` does
-/// not reach new nodes, so the cap is applied here, at build time.
+/**
+ * @brief What a completed design stream stores as its trace's `events` node:
+ *        everything about its events that its bytes cannot say (#3770).
+ *
+ * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`, and no
+ * list. The stream's bytes are the trace's response body, so the list is parsed
+ * back from them when the trace is read (`expand_stored_stream_events`) rather
+ * than stored a second time (#657). `receivedAt` holds one arrival time per
+ * event the stored cap kept, which also bounds how many events the parse may
+ * report; `maxEventBytes` is the per-event cap the live parser ran under, so
+ * the parse back cuts an event where the live one did whatever the setting
+ * says by then.
+ */
 [[nodiscard]] nlohmann::json stream_trace_node (const SseStreamContext& context);
 
 /// One parsed event in the shape every stored `items` array uses - `event`,
 /// `data`, `sourceId` when the origin sent an id, and the in-band
 /// `dataTruncated` / `dataBytes` pair when the per-event cap cut it.
 ///
-/// No `receivedAt`: only a live consumer knows when an event arrived, and the
-/// design path stamps it on top of this. A node built from buffered bytes has
-/// no arrival to report and says nothing rather than inventing one.
+/// No `receivedAt`: only a live consumer knows when an event arrived, and
+/// `buffered_stream_events_node` adds the one it was given. A node built from
+/// bytes nobody watched arrive says nothing rather than inventing one.
 [[nodiscard]] nlohmann::json sse_event_node (const SseEvent& event);
 
 /**
@@ -317,6 +330,14 @@ class SseStreamContext {
  * @param body_complete   False when the stored bytes are a prefix of the
  *                        response (a truncated capture): the list is then a
  *                        prefix whatever the counts say.
+ * @param arrivals        When a live consumer watched the events arrive, the
+ *                        `receivedAt` of each one it kept: item `i` carries
+ *                        `arrivals[i]`, and the list stops at its size in place
+ *                        of `max_stored_events`. Absent for a load sample.
+ *
+ * The list never holds more than @p total_events: the body can run past the
+ * last event the transfer counted, because the event cap stops the transfer
+ * mid-chunk and the whole chunk was already held.
  *
  * `eventsTruncated` is the union of the two ways a reader can be looking at
  * less than the whole stream - the stored-events cap and a cut body - because
@@ -331,7 +352,34 @@ class SseStreamContext {
 [[nodiscard]] nlohmann::json buffered_stream_events_node (std::string_view body,
 const SseLimits& limits,
 int64_t total_events,
-bool body_complete);
+bool body_complete,
+std::optional<std::span<const int64_t>> arrivals = std::nullopt);
+
+/**
+ * @brief The `events` node a design stream's reader sees: the list parsed from
+ *        @p body, paired with what @p stored (a `stream_trace_node`) recorded.
+ *
+ * `{items, totalEvents, eventsTruncated, endReason}`, each item carrying its
+ * `receivedAt`. The completion pass binds it for the post-request script and
+ * `expand_stored_stream_events` builds it again from the stored trace, so the
+ * script and every later reader parse one set of bytes by one rule.
+ */
+[[nodiscard]] nlohmann::json stream_events_node (std::string_view body,
+bool body_complete,
+const nlohmann::json& stored);
+
+/**
+ * @brief Replace a stored trace's `events` sidecar with the list its response
+ *        body holds, as `stream_events_node` builds it. Called by every route
+ *        that serves a stored trace.
+ *
+ * A trace whose `events` node is not a sidecar (one stored before #3770
+ * carries its `items`; an ordinary send has none) is left as stored. The body
+ * is decoded when `bodyEncoding` says base64, and is complete unless the trace
+ * marks it `bodyCapped` (the design bound) or `bodyTruncated` (the storage
+ * cap).
+ */
+void expand_stored_stream_events (nlohmann::json& trace);
 
 /**
  * @brief Binds `pm.response.events` for a post-request script that reads a
@@ -360,10 +408,10 @@ struct SseStreamRequest {
     /// The composed, auth-resolved request, exactly as `POST /execute` built it.
     vayu::Request request;
     SseLimits limits;
-    /// What a reply that is not `text/event-stream` may hold as its body
-    /// (`maxDesignResponseBodyBytes`, issue #3238): the route resolves it
-    /// beside `limits`. Bytes past it are still counted, and still parsed as
-    /// events, but not kept; `Response::body_truncated` says so.
+    /// What the final hop may hold as its body, an event stream's bytes
+    /// included (`maxDesignResponseBodyBytes`, #3238, #3770): the route
+    /// resolves it beside `limits`. Bytes past it are still counted, and still
+    /// parsed as events, but not kept; `Response::body_truncated` says so.
     std::size_t max_body_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
     /// Per-request caps, already validated. Absent means the configured default.
     std::optional<int64_t> max_duration_ms;
@@ -494,11 +542,11 @@ class SseStreamManager {
  *
  * @return The response the exchange produced: the final hop's status line,
  *         headers and timings, with the error fields set when the transfer
- *         failed. `stream_body_bytes` counts what that hop delivered; `body`
- *         holds it only when the hop did not announce `text/event-stream`,
- *         since an event stream's bytes are its events. An `mcp` request's
- *         carries `mcp_reply`, read from the events as they arrived
- *         (`McpReplyStream`, #3762), so its final response needs no body.
+ *         failed. `stream_body_bytes` counts what that hop delivered and `body`
+ *         holds it up to `max_body_bytes`, whatever its type (#3770): the
+ *         elements and the post-request script read the same bytes a load
+ *         run buffers. An `mcp` request's carries `mcp_reply`, read from the
+ *         events as they arrived (`McpReplyStream`, #3762).
  *         Never an `Error` - `Client::send`'s contract, which every `/execute`
  *         caller relies on, holds on this path too.
  */

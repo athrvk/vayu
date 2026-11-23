@@ -17,10 +17,12 @@
  *
  * Mutation-check: drop the card from `PerformanceTab.tsx` and the first case
  * fails; render it without the `report.stream` gate and the absent case fails.
+ * The pace rows (#3776) fail the same way when `StreamMetrics` stops reading
+ * `maxEventGap` or `eventRate`.
  */
 
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import PerformanceTab from "./PerformanceTab";
 import type { RunReport } from "@/types";
@@ -78,5 +80,37 @@ describe("PerformanceTab stream events card", () => {
 
 		expect(screen.queryByText(/^Stream events/)).toBeNull();
 		expect(screen.queryByText("events/sec")).toBeNull();
+	});
+
+	describe("pace rows (#3776)", () => {
+		const maxEventGap = { p50: 27, p95: 34, p99: 41, max: 312, count: 4 };
+		const eventRate = { p50: 40, p95: 41.2, p99: 41.9, max: 42.3, count: 4 };
+
+		it("shows the max gap and the per-stream rate when the report carries them", () => {
+			renderTab(makeReport({ ...STREAM, maxEventGap, eventRate }));
+
+			expect(screen.getByText("max gap").parentElement).toHaveTextContent(
+				"27.0ms34.0ms41.0ms312ms"
+			);
+			expect(screen.getByText("events/s").parentElement).toHaveTextContent("40414242");
+		});
+
+		it("draws each row only when its own field is present", () => {
+			renderTab(makeReport({ ...STREAM, maxEventGap }));
+			expect(screen.getByText("max gap")).toBeInTheDocument();
+			expect(screen.queryByText("events/s")).toBeNull();
+			cleanup();
+
+			renderTab(makeReport({ ...STREAM, eventRate }));
+			expect(screen.queryByText("max gap")).toBeNull();
+			expect(screen.getByText("events/s")).toBeInTheDocument();
+		});
+
+		it("draws neither for a stream report that measured no pace", () => {
+			renderTab(makeReport(STREAM));
+			expect(screen.getByText("per stream")).toBeInTheDocument();
+			expect(screen.queryByText("max gap")).toBeNull();
+			expect(screen.queryByText("events/s")).toBeNull();
+		});
 	});
 });

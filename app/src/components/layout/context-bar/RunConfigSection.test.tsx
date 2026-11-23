@@ -69,6 +69,34 @@ describe("RunConfigSection", () => {
 		expect(screen.getByText(formatConcurrency(8))).toBeInTheDocument();
 	});
 
+	// Mutation check: drop the `retryAfterBackoff` row and the first two cases redden.
+	it("says a run waited out Retry-After, and for how long at most (#3782)", () => {
+		run = makeRun("load", {
+			mode: "constant_concurrency",
+			concurrency: 8,
+			retryAfterBackoff: true,
+			retryAfterMaxMs: 5000,
+		});
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(screen.getByText("Retry-After")).toBeInTheDocument();
+		expect(screen.getByText("Up to 5,000 ms")).toBeInTheDocument();
+	});
+
+	it("reads the engine's default cap when the run named none (#3782)", () => {
+		run = makeRun("load", { mode: "ramp_up", concurrency: 8, retryAfterBackoff: true });
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(screen.getByText("Up to 30,000 ms")).toBeInTheDocument();
+	});
+
+	it("draws no Retry-After row for a run that did not opt in (#3782)", () => {
+		run = makeRun("load", { mode: "ramp_up", concurrency: 8 });
+		render(<RunConfigSection tab={TAB} />);
+
+		expect(screen.queryByText("Retry-After")).not.toBeInTheDocument();
+	});
+
 	// Mutation check: drop the kind from the `loadTestModeLabel` call and the first case reddens.
 	it("reads Fixed passes for a collection load run and Fixed request count for a request (#3570)", () => {
 		run = makeRun("load", {

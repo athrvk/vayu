@@ -38,6 +38,14 @@ const TITLES: Record<string, string> = {
 	// The run sent everything it planned; a constant-rate run just has no
 	// think time to wait out (#3541).
 	think_timer_skipped_open_loop: "Think timer skipped on a constant-rate run",
+	// The run completed; most of its responses were the target's rate limit
+	// speaking, and the message names the option that would back off (#3782).
+	rate_limited_dominant: "Most responses were rate limited",
+	// The run did what it was asked, and paused where the target asked it to,
+	// so its rate is the limiter's (#3782).
+	retry_after_backoff: "Virtual users waited out Retry-After",
+	// Same shape as the think timer: a constant-rate run sends on a schedule (#3782).
+	retry_after_skipped_open_loop: "Retry-After back-off skipped on a constant-rate run",
 };
 
 export interface RunWarningsProps {

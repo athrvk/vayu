@@ -1787,8 +1787,9 @@ Send does not - and only the last two steps differ:
    Events tab renders them live.
 6. **Swap to stored truth**: on the relay's `complete` frame the provider
    fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
-   `events` node onto the response, which is the record from then on. One
-   fetch is enough: the engine sends `complete` only after the post-request
+   `events` node and its `response.body` - the stream's bytes, stored once and
+   read back into that list by the engine (#3770) - onto the response, which is
+   the record from then on. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
 
 **A different `EventSource` from the `SSEClient` singleton below.** That client
@@ -2173,6 +2174,16 @@ waited, because requests go out on a schedule. `timers` is the number of enabled
 timers skipped, `RunWarnings` titles it "Think timer skipped on a constant-rate
 run", and the Elements card tallies the element `skipped`.
 
+A load run's `report.warnings` also carry the three Retry-After codes
+([#3782](https://github.com/athrvk/vayu/issues/3782)), each titled by
+`RunWarnings` for what the run did rather than as a failure:
+`rate_limited_dominant` ("Most responses were rate limited", the option off and
+more than half the responses `429`, its message naming `retryAfterBackoff` on a
+closed-loop run and saying back-off does not apply on a constant-rate one),
+`retry_after_backoff` ("Virtual users waited out Retry-After", `count` the
+waits) and `retry_after_skipped_open_loop` ("Retry-After back-off skipped on a
+constant-rate run").
+
 `authNotice` is the engine's sentence for a request whose auth sent nothing: a
 mode it stores but does not execute (`digest`, `ntlm`, ..., issue #2474), or a
 bearer token or API key name that is empty (issue #3203). The request is still
@@ -2368,7 +2379,8 @@ what the server sent.
 A body's size is a **UTF-8 byte count** everywhere it is recorded. The live
 `bodySize` is one, and the stored trace carries the same number as
 `trace.response.bodyBytes` on every response (#3423; the original length when
-`bodyTruncated`, and a stream's wire count), so `responseFromRunResult` takes
+`bodyTruncated`, and a stream's wire count, which its held body falls short of
+once `bodyCapped` cut it), so `responseFromRunResult` takes
 `ResponseState.size` from it and the two funnels agree. A row stored before
 that has `bodyBytes` only when the body was cut or streamed, and the restore
 then counts the held text's UTF-8 bytes (`heldBodySize`, never `string.length`,
@@ -2602,11 +2614,18 @@ than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
 the request to each stream's first event. That is not `phases.firstByte`, which
 ends at the response headers: a gateway that answers `200` at once and then
 thinks reads fast there and slow here. It is absent when no stream delivered a
-timed event. `StreamMetrics` (`modules/dashboard/components/charts`) renders
-it, as its own first-event row, and says plainly when *every* stream was capped, because those counts then
-measure the caps rather than the target. The section is `undefined` for a run
-that did not stream, which is not the same claim as a stream that delivered
-nothing, so a report without it renders exactly as it did before.
+timed event. Two more optional blocks (issue #3776) say how each stream paced
+its events, each a `StreamDistribution` (`{p50, p95, p99, max, count}`) over the
+streams that had two timed events to measure between: `maxEventGap`, the
+largest pause between two consecutive events in a stream, in milliseconds, and
+`eventRate`, the stream's own events per second. Each is absent, never `0`,
+when no stream measured it, and neither rides a live gate frame. `StreamMetrics`
+(`modules/dashboard/components/charts`) renders them as a row each beside the
+first-event row, every row drawn only when its field is present, and says
+plainly when *every* stream was capped, because those counts then measure the
+caps rather than the target. The section is `undefined` for a run that did not
+stream, which is not the same claim as a stream that delivered nothing, so a
+report without it renders exactly as it did before.
 
 **Budgets and the verdict.** `LoadTestConfig.thresholds` (`RunThresholds`) rides
 through to `POST /runs` under the engine's own camelCase metric names, and the
@@ -2727,6 +2746,24 @@ did before, inverts the slider - "100% - everything" kept 1%.
 A `0` is a division by zero engine-side, so the control's floor is 1%. "Keep no
 success traces" is the **Save timing breakdown** toggle, which gates storage
 outright.
+
+#### Retry-After back-off is an opt-in run option
+
+**Recording & limits** carries a **Wait out Retry-After** switch and, with it on,
+a **Longest Retry-After wait** field in ms (`#lt-retry-after`,
+`#lt-retry-after-max`; [#3782](https://github.com/athrvk/vayu/issues/3782)). The
+dialog's `retryAfterBackoff` / `retryAfterMaxMs` keys are the engine's own
+camelCase spelling, so `buildLoadTestConfig` and the request builder pass them
+to `POST /runs` unchanged, and they are **absent** while the option is off: the
+engine's default is off, and the stored snapshot then says only what the run
+did. A `constant_rps` run sends on a schedule and has no next request to hold
+back, so the controls are hidden in that mode (`appliesRetryAfter` in
+`profile.ts`) and the keys are not sent; the memo keeps the choice for the next
+closed-loop run. The cap range, 1-3600000, is the engine's exactly
+(`load-test.engine-parity.test.ts`) and a value outside it blocks Start. The
+run's `RunConfigSection` reads the snapshot back as a **Retry-After** row ("Waited,
+up to N ms"), shown only when the option was on. `RunCollectionDialog` has no
+control for it; a collection run gets it through MCP's `start_load_run`.
 
 #### Dialog ceilings are a user setting
 

@@ -254,6 +254,30 @@
                 "max": {"type": "number"},
                 "count": {"type": "number"}
               }
+            },
+            "maxEventGap": {
+              "description": "Each stream's largest wait in milliseconds between two writes that delivered events; count is the completions with at least two such writes. Absent when none had.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
+            },
+            "eventRate": {
+              "description": "Each stream's own event rate in events per second: the events delivered after the first write that delivered one, over the time from that write to the last. count is the completions it was measured for. Absent when none was.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
             }
           }
         },
@@ -295,7 +319,7 @@
                 "type": "string"
               },
               "count": {
-                "description": "unresolved_tokens: requests sent with an unresolved variable. connection_replayed: requests re-sent on a new connection, equal to summary.connectionReplays. cookies_dropped: Set-Cookie headers libcurl's cookie engine discarded across the run.",
+                "description": "unresolved_tokens: requests sent with an unresolved variable. connection_replayed: requests re-sent on a new connection, equal to summary.connectionReplays. cookies_dropped: Set-Cookie headers libcurl's cookie engine discarded across the run. rate_limited_dominant: the 429 responses, more than half of those carrying a status, of a run without retryAfterBackoff. retry_after_backoff: the responses whose Retry-After a virtual user waited out.",
                 "type": "number"
               },
               "names": {"$ref": "#/definitions/names"},

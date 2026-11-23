@@ -201,6 +201,10 @@ vayu::core::constants::run_config::MAX_CONCURRENCY },
 // `constant_rps` requires, so the bound read is this spelling's alone.
 { "Rps", "rps", "constant_rps", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
 { "TargetRps", "targetRps", "constant_rps", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
+// The longest a virtual user waits on a `Retry-After` (#3782). 0 would be "back
+// off for no time", which is the option turned off said another way.
+{ "RetryAfterMaxMs", "retryAfterMaxMs", nullptr, 1,
+vayu::core::constants::run_config::MAX_RETRY_AFTER_MAX_MS },
 });
 
 class RunConfigBoundedCount : public ::testing::TestWithParam<BoundedCountCase> {
@@ -633,6 +637,28 @@ TEST (RunConfigValidation, StopOnErrorMustBeABooleanAndNullIsTheDefault) {
     EXPECT_FALSE (validate_run_config (ok).has_value ());
     ok["stopOnError"] = nullptr;
     EXPECT_FALSE (validate_run_config (ok).has_value ());
+}
+
+TEST (RunConfigValidation, RetryAfterBackoffMustBeABooleanAndNullIsTheDefault) {
+    // Read by RunContext's constructor through `config.value (..., false)`
+    // (#3782), which throws `type_error.302` on a string after the run row
+    // exists. Mutation check: drop the key from the boolean list in
+    // `validate_run_config` and the string is accepted.
+    auto config                 = valid_config ();
+    config["retryAfterBackoff"] = "on";
+    expect_rejected (config, "retryAfterBackoff");
+
+    auto ok                 = valid_config ();
+    ok["retryAfterBackoff"] = true;
+    EXPECT_FALSE (validate_run_config (ok).has_value ());
+    ok["retryAfterBackoff"] = nullptr;
+    EXPECT_FALSE (validate_run_config (ok).has_value ());
+}
+
+TEST (RunConfigValidation, ANonNumericRetryAfterCapIsRejected) {
+    auto config               = valid_config ();
+    config["retryAfterMaxMs"] = "30s";
+    expect_rejected (config, "retryAfterMaxMs");
 }
 
 // --- The collector's own guard, independent of the route ------------------

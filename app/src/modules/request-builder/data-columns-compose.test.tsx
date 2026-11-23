@@ -294,6 +294,32 @@ describe("a load run started with a data file", () => {
 		expect(sent.dataFileCastNumbers).toBeUndefined();
 	});
 
+	// Retry-After back-off (#3782) reaches `POST /runs` through the same
+	// hand-written payload. Mutation check: drop `retryAfterBackoff` or
+	// `retryAfterMaxMs` from the `apiRequest` literal in `index.tsx` and this fails.
+	it("forwards Retry-After back-off and its cap to the run (#3782)", async () => {
+		await startLoadRun({
+			...LOAD_CONFIG,
+			mode: "constant_concurrency",
+			concurrency: 4,
+			retryAfterBackoff: true,
+			retryAfterMaxMs: 2500,
+		});
+
+		expect(startLoadTest.mock.calls[0][0]).toMatchObject({
+			retryAfterBackoff: true,
+			retryAfterMaxMs: 2500,
+		});
+	});
+
+	it("sends no Retry-After keys when the option is off (#3782)", async () => {
+		await startLoadRun(LOAD_CONFIG);
+
+		const sent = startLoadTest.mock.calls[0][0] as Record<string, unknown>;
+		expect(sent.retryAfterBackoff).toBeUndefined();
+		expect(sent.retryAfterMaxMs).toBeUndefined();
+	});
+
 	// The dashboard judges a capacity run's breakpoint against the SLO the run was
 	// started with (#2816). Mutation check: drop `sloMs` from the `startRun`
 	// config in `index.tsx` and this fails.

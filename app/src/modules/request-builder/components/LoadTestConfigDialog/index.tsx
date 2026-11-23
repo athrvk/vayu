@@ -243,6 +243,8 @@ export default function LoadTestConfigDialog({
 	const [sampleRate, setSampleRate] = useState(initial.sampleRate);
 	const [slowThreshold, setSlowThreshold] = useState(initial.slowThreshold);
 	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(initial.saveTimingBreakdown);
+	const [retryAfterBackoff, setRetryAfterBackoff] = useState(initial.retryAfterBackoff);
+	const [retryAfterMaxMs, setRetryAfterMaxMs] = useState(initial.retryAfterMaxMs);
 	const [budgets, setBudgets] = useState(initial.budgets);
 	const [customBudgets, setCustomBudgets] = useState(initial.customBudgets);
 	const [failRun, setFailRun] = useState(initial.failRun);
@@ -276,6 +278,8 @@ export default function LoadTestConfigDialog({
 		limits,
 		slowThreshold,
 		maxInFlight,
+		retryAfterBackoff,
+		retryAfterMaxMs,
 	});
 	// A file the parser refused leaves no rows behind, so starting the run would
 	// send the request with its `{{data.*}}` tokens written as they stand - the
@@ -356,6 +360,8 @@ export default function LoadTestConfigDialog({
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
+			retryAfterBackoff,
+			retryAfterMaxMs,
 			budgets: budgetsToRemember(budgets, profile.mode, isStreamingRequest, carried.fixed),
 			budgetsFrom: budgetsOriginToSave(),
 			customBudgets,
@@ -369,6 +375,8 @@ export default function LoadTestConfigDialog({
 				sampleRate,
 				slowThreshold,
 				saveTimingBreakdown,
+				retryAfterBackoff,
+				retryAfterMaxMs,
 				maxInFlight: maxInFlightValue,
 				budgets,
 				customBudgets,
@@ -517,6 +525,10 @@ export default function LoadTestConfigDialog({
 								onMaxInFlightChange={setMaxInFlight}
 								saveTimingBreakdown={saveTimingBreakdown}
 								onSaveTimingBreakdownChange={setSaveTimingBreakdown}
+								retryAfterBackoff={retryAfterBackoff}
+								onRetryAfterBackoffChange={setRetryAfterBackoff}
+								retryAfterMaxMs={retryAfterMaxMs}
+								onRetryAfterMaxMsChange={setRetryAfterMaxMs}
 							/>
 
 							<BudgetsSection

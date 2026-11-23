@@ -866,7 +866,8 @@ const nlohmann::json* data_row) {
         [&context] (const std::string& name, vayu::core::CustomMetricType type, double value) {
             context->metrics_collector->record_custom_metric (name, type, value);
         },
-        .max_body_bytes = context->max_element_body_bytes,
+        .max_body_bytes  = context->max_element_body_bytes,
+        .max_event_bytes = context->sse_limits.max_event_bytes,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
@@ -1123,6 +1124,13 @@ class ScenarioLoadDriver {
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
+            // A `Retry-After` wait (#3782), stamped before `finish_step`
+            // releases the VU so the producer's acquire sees it; the step's
+            // think time there keeps whichever deadline is later.
+            if (const int64_t retry_ms = context->honour_retry_after (response);
+            retry_ms > 0) {
+                vu->ready_at_ms = std::max (vu->ready_at_ms, steady_now_ms () + retry_ms);
+            }
             // An `mcp` failure fails the step as an assertion does (#3762).
             const bool assertion_failed = assertion_failed_before ||
             after.assertion_failed ||

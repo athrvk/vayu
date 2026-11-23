@@ -936,22 +936,39 @@ Table stream_totals_table (const ordered& stream) {
     return table;
 }
 
-/// Events are whole counts, so they take the request-count spelling; the time to
-/// a first event is a latency and takes the latency's.
+/// A per-stream distribution the engine writes only once a stream measured
+/// it, so its column is there only when the document holds it: a zero never
+/// stands for a figure that was not measured.
+struct StreamMeasuredColumn {
+    std::string_view member;
+    std::string_view header;
+};
+
+/// Each a figure, never a count: two are latencies and the rate is
+/// fractional for a slow stream.
+constexpr auto STREAM_MEASURED_COLUMNS = std::to_array<StreamMeasuredColumn> ({
+{ "timeToFirstEvent", "Time to first event (ms)" },
+{ "maxEventGap", "Largest event gap (ms)" },
+{ "eventRate", "Event rate (events/s)" },
+});
+
+/// Events are whole counts, so they take the request-count spelling.
 Table stream_distribution_table (const ordered& stream) {
-    const ordered& events      = member (stream, "events");
-    const ordered& first_event = member (stream, "timeToFirstEvent");
-    const bool timed           = first_event.is_object ();
+    std::vector<const ordered*> measured;
     Table table{ { "Measure", "Events per stream" }, {} };
-    if (timed) {
-        table.headers.emplace_back ("Time to first event (ms)");
+    for (const StreamMeasuredColumn& column : STREAM_MEASURED_COLUMNS) {
+        if (const ordered& figure = member (stream, column.member); figure.is_object ()) {
+            measured.push_back (&figure);
+            table.headers.emplace_back (column.header);
+        }
     }
+    const ordered& events = member (stream, "events");
     for (const std::string_view key : STREAM_DISTRIBUTION_ROWS) {
         Row row{ plain_cell (std::string (key)),
             cell (figure_text (number_at (events, { key }), format_run_count)) };
-        if (timed) {
+        for (const ordered* figure : measured) {
             row.push_back (
-            cell (figure_text (number_at (first_event, { key }), format_run_figure)));
+            cell (figure_text (number_at (*figure, { key }), format_run_figure)));
         }
         table.rows.push_back (std::move (row));
     }

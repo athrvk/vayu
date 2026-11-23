@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	decodeResponseBody,
+	cappedReadExtent,
 	extensionForContentType,
 	heldBodySize,
 	isEventStreamType,
@@ -212,6 +213,53 @@ describe("heldBodySize", () => {
 
 		expect(text.length).toBe(500);
 		expect(heldBodySize({ body: text })).toBe(600);
+	});
+});
+
+/**
+ * What a capped body's notice calls the part the engine read (#3770): a
+ * stream's `size` counts the wire, which it keeps reading past the cap, so the
+ * figure for a stream is the held prefix and not `size`.
+ */
+describe("cappedReadExtent", () => {
+	const MB32 = 33_554_432;
+
+	it("is a buffered send's size, which is the prefix the cap kept", () => {
+		expect(cappedReadExtent({ body: "x".repeat(10), size: MB32 })).toBe("the first 32.0 MB");
+	});
+
+	it("falls back to the held body when a buffered response has no size", () => {
+		expect(cappedReadExtent({ body: "x".repeat(2048), size: 0 })).toBe("the first 2.0 KB");
+	});
+
+	it("is a stream's held prefix, not the bytes its wire delivered", () => {
+		expect(cappedReadExtent({ events: [], body: "x".repeat(2048), size: MB32 })).toBe(
+			"the first 2.0 KB"
+		);
+	});
+
+	it("counts a stream's held bytes when the body arrived as base64", () => {
+		const rawBytes = { data: new Uint8Array(4096), isText: true };
+		expect(cappedReadExtent({ events: [], body: "", rawBytes, size: MB32 })).toBe(
+			"the first 4.0 KB"
+		);
+	});
+
+	it("names no figure for a stream storage cut again, which records none", () => {
+		expect(
+			cappedReadExtent({
+				events: [],
+				body: "x".repeat(2048),
+				size: MB32,
+				bodyTruncated: true,
+			})
+		).toBe("the start");
+	});
+
+	it("still gives a buffered response its figure when storage cut it too", () => {
+		expect(cappedReadExtent({ body: "x".repeat(2048), size: MB32, bodyTruncated: true })).toBe(
+			"the first 32.0 MB"
+		);
 	});
 });
 

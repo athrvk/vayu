@@ -684,9 +684,12 @@ logged as a warning: it means a client skipped composition.
   settles - and `timer.think`'s wait is a run-level concurrency reservation
   (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
   per-VU `ready_at_ms`, since there is no VU to hold one on. Closed loop only:
-  a constant-rate run skips the timer and reserves nothing (#3541). It also has its
-  own place to declare `script.setup` / `script.teardown` - the run-boundary
-  kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
+  a constant-rate run skips the timer and reserves nothing (#3541). The run
+  option `retryAfterBackoff` (#3782) holds a 429's or 503's `Retry-After` wait
+  in the same two places (this reservation, a scenario VU's `ready_at_ms`), as
+  the longer of it and the think time, through `RunContext::honour_retry_after`,
+  the one reader both load paths call. It also has its own place to declare
+  `script.setup` / `script.teardown` - the run-boundary kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
   (#1573), dispatched through the same `run_setup_elements` /
   `run_teardown_elements` a collection-backed run uses; a script written
   there resolves into the run's own submissions only on a run whose
@@ -767,10 +770,17 @@ logged as a warning: it means a client skipped composition.
   one is recorded is `Error`, never `Completed`. `stream` with `transient` is a
   `400`. A by-id `POST /compose` always carries the stored `stream` (#3561), so
   a client that spreads it into `POST /execute` states its own or parses the
-  `202`. A final hop that is not `text/event-stream` also keeps its bytes as
-  the body, up to `maxDesignResponseBodyBytes`, and every response's trace
-  carries `response.bodyBytes` (a stream's wire count in place of the held
-  length), which `cap_trace_bodies` keeps (#3238, #3423). `POST /runs` takes `stream` too (#576) through the same
+  `202`. The final hop keeps its bytes as the body whatever its type, up to
+  `maxDesignResponseBodyBytes` (`bodyCapped` past it), so the elements and
+  `pm.response.text()` read what a load run reads (#3238, #3770), and every
+  response's trace carries `response.bodyBytes` (a stream's wire count in place
+  of the held length), which `cap_trace_bodies` keeps (#3423). The bytes are
+  stored once: the trace's `events` node is a sidecar (`stream_trace_node`:
+  `totalEvents`, `endReason`, `maxEventBytes`, one `receivedAt` per kept
+  event), and every reader of a stored trace (`report_result_node`,
+  `attach_design_result`) serves the list parsed back from the stored body by
+  `expand_stored_stream_events`, the `stream_events_node` the post-request
+  script is bound to. `POST /runs` takes `stream` too (#576) through the same
   `read_stream_flag` parser; under load a stream becomes
   `Request::stream_bounds`, the event loop ends it counting with
   `SseFrameCounter` (which agrees with `SseParser` on what an event is), and
@@ -791,8 +801,8 @@ logged as a warning: it means a client skipped composition.
   section (`build_stream_summary_payload`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
   A transfer is a stream only when its final hop announced `text/event-stream`
-  (#3771, `announces_event_stream` in `stream_tally.hpp`, the design path's
-  reading too): the tally counts nothing for any other reply, leaves its
+  (#3771, `announces_event_stream` in `stream_tally.hpp`; the design path no
+  longer reads it, #3770): the tally counts nothing for any other reply, leaves its
   `stream_events` absent, and a duration cap that ends one is a `Timeout`
   (`StreamTally::unannounced_cap_error`), never a capped success.
   The report gains a `stream` section, absent for runs that did not stream. A
@@ -809,6 +819,11 @@ logged as a warning: it means a client skipped composition.
   `Response::stream_events` is set: a sequential run's step
   (`ExchangeInputs::sse_limits`), a load run's inline `script.post` on either
   load path (`RunContext::sse_limits`) and the deferred replay.
+  `metric.record`'s `eventJsonpath` (#3780) reads the same body through
+  `ensure_parsed_events` (`ElementContext::max_event_bytes`, set from the run's
+  limits on the sequential and scenario load paths; a single-request load run
+  refuses `metric.*`), never through the `events` node, whose
+  `sseMaxStoredEvents` cap drops the last event the source exists to read.
   **A consumer worker is drained by whoever owns the manager, before the state
   it writes through goes away** (#646): `Server::stop()` calls
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its

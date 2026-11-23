@@ -8,7 +8,7 @@
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
-import { formatCount, pluralize } from "../../utils/format";
+import { formatCount, formatRate, pluralize } from "../../utils/format";
 import { DurationValue } from "./PhasePercentiles";
 import { StreamStat } from "./StreamStat";
 
@@ -29,6 +29,12 @@ import { StreamStat } from "./StreamStat";
  * thinks reads fast there (issue #3234). The row is absent when the report
  * carries no `timeToFirstEvent`, which is a run whose streams delivered no timed
  * event, not a first event that took 0ms.
+ *
+ * The max-gap and events/s rows (issue #3776) are how each stream paced itself,
+ * which the run's blended rate cannot show: the largest pause between two
+ * events, and the stream's own rate. Each is drawn only when the report carries
+ * it, independently of the others, since a stream whose events arrived in one
+ * write measures neither. Report-only: the live panel has no such figure.
  */
 export function StreamMetrics({ report }: { report: RunReport | null }) {
 	const stream = report?.stream;
@@ -36,7 +42,7 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 		return null;
 	}
 
-	const firstEvent = stream.timeToFirstEvent;
+	const { timeToFirstEvent: firstEvent, maxEventGap, eventRate } = stream;
 
 	// Every completion the caps ended rather than the server. All of them is
 	// not a failure - it is the honest reading that this run measured its own
@@ -85,6 +91,30 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 					<DurationValue value={firstEvent.max} />
 				</div>
 			)}
+			{maxEventGap && (
+				<div className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5">
+					<span className="text-label text-muted-foreground flex items-center">
+						max gap
+						<InfoChip tip={TOOLTIPS.streamMaxEventGap} />
+					</span>
+					<DurationValue value={maxEventGap.p50} />
+					<DurationValue value={maxEventGap.p95} />
+					<DurationValue value={maxEventGap.p99} emphasis />
+					<DurationValue value={maxEventGap.max} />
+				</div>
+			)}
+			{eventRate && (
+				<div className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5">
+					<span className="text-label text-muted-foreground flex items-center">
+						events/s
+						<InfoChip tip={TOOLTIPS.streamEventRate} />
+					</span>
+					<FigureCell text={formatRate(eventRate.p50)} />
+					<FigureCell text={formatRate(eventRate.p95)} />
+					<FigureCell text={formatRate(eventRate.p99)} emphasis />
+					<FigureCell text={formatRate(eventRate.max)} />
+				</div>
+			)}
 
 			{allCapped ? (
 				<p className="text-label text-warning-text">
@@ -110,10 +140,14 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 }
 
 function EventValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
+	return <FigureCell text={formatCount(value)} emphasis={emphasis} />;
+}
+
+function FigureCell({ text, emphasis }: { text: string; emphasis?: boolean }) {
 	return (
 		<span className="text-right font-mono tabular-nums text-label">
 			<span className={emphasis ? "text-foreground font-medium" : "text-foreground"}>
-				{formatCount(value)}
+				{text}
 			</span>
 		</span>
 	);
