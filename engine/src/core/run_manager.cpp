@@ -28,6 +28,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/retry_after.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/set_cookie_limits.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -1092,6 +1093,11 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     // `scripts_override` above, since a `script.post` element's
     // inline-or-deferred fate can depend on it.
     compile_step_elements (config);
+    // `validate_run_config` refused a wrong type or a cap outside its range
+    // before the run row existed.
+    retry_after_backoff = config.value ("retryAfterBackoff", false);
+    retry_after_max_ms  = config.value (
+    "retryAfterMaxMs", constants::run_config::DEFAULT_RETRY_AFTER_MAX_MS);
 
     // The route refused a malformed policy before this run existed, so a
     // reading that fails here means a caller skipped that check: no host is
@@ -1108,6 +1114,26 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     if (stream_bounds) {
         stream_bounds->live = metrics_collector->live_stream_counts ();
     }
+}
+
+int64_t RunContext::honour_retry_after (const vayu::Response& response) const {
+    if (!retry_after_backoff || !closed_loop.load (std::memory_order_relaxed)) {
+        return 0;
+    }
+    if (response.status_code != 429 && response.status_code != 503) {
+        return 0;
+    }
+    const auto header = response.headers.find ("Retry-After");
+    if (header == response.headers.end ()) {
+        return 0;
+    }
+    const auto delay = vayu::http::retry_after_delay_ms (
+    header->second, std::chrono::system_clock::now ());
+    if (!delay || *delay <= 0) {
+        return 0;
+    }
+    metrics_collector->record_retry_after_wait ();
+    return std::min (*delay, retry_after_max_ms);
 }
 
 /**
@@ -2023,6 +2049,65 @@ nlohmann::json cookies_dropped_warning (size_t headers) {
 }
 
 /**
+ * With `retryAfterBackoff` off, the warning for a run most of whose responses
+ * (more than half of those carrying a status; a transport failure is none)
+ * were 429 (#3782): its figures describe the target's rate limit, and the
+ * message names the option that would have made it back off instead.
+ */
+std::optional<nlohmann::json> rate_limited_dominant_warning (const MetricsCollector& mc) {
+    size_t responses = 0;
+    size_t limited   = 0;
+    for (const auto& [status, count] : mc.status_code_distribution ()) {
+        responses += status == 0 ? 0 : count;
+        limited += status == 429 ? count : 0;
+    }
+    if (limited * 2 <= responses) {
+        return std::nullopt;
+    }
+    return std::make_optional<nlohmann::json> ({ { "code", "rate_limited_dominant" },
+    { "message",
+    std::to_string (limited) + " of " + std::to_string (responses) +
+    " responses were 429 Too Many Requests, so this report describes the "
+    "target's rate limit more than the target. Set retryAfterBackoff to "
+    "have each virtual user wait out the Retry-After the target sends "
+    "before its next request." },
+    { "count", limited } });
+}
+
+/**
+ * What the run's Retry-After back-off (#3782) changed about what it measured,
+ * as at most one warning: with the option off, a run dominated by 429s; on,
+ * the constant-rate run it could not apply to, or the waits it took.
+ */
+std::optional<nlohmann::json> retry_after_warning (const RunContext& context) {
+    if (!context.retry_after_backoff) {
+        return rate_limited_dominant_warning (*context.metrics_collector);
+    }
+    // A run that sent nothing never reached its strategy, and `closed_loop`
+    // reads false there whatever the mode.
+    if (context.requests_sent.load () == 0) {
+        return std::nullopt;
+    }
+    if (!context.closed_loop.load (std::memory_order_relaxed)) {
+        return std::make_optional<nlohmann::json> ({ { "code", "retry_after_skipped_open_loop" },
+        { "message", RunContext::OPEN_LOOP_RETRY_AFTER_SKIP_REASON } });
+    }
+    const size_t waits = context.metrics_collector->retry_after_waits ();
+    if (waits == 0) {
+        return std::nullopt;
+    }
+    return std::make_optional<nlohmann::json> ({ { "code", "retry_after_backoff" },
+    { "message",
+    std::to_string (waits) + (waits == 1 ? " response" : " responses") +
+    " asked for a Retry-After wait, and the virtual user that received " +
+    (waits == 1 ? "it" : "each") + " waited it out (at most " +
+    std::to_string (context.retry_after_max_ms) +
+    " ms) before its next request, so this run's rate is the one the "
+    "target allowed." },
+    { "count", waits } });
+}
+
+/**
  * Whether @p config asks for virtual users: a `concurrency` it carries. A run
  * that sets none (every `constant_rps` run the app starts) is sized from the
  * `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
@@ -2066,8 +2151,9 @@ size_t open_loop_skipped_timers (const RunContext& context) {
  * the virtual users it asked for (#2801), so a run that opened more
  * connections than the setting says is not silent about it. And requests
  * libcurl re-sent on a new connection (#2799), `Set-Cookie` headers its
- * cookie engine discarded from a virtual user's responses (#3307), and the
- * think timers a constant-rate run skipped (#3541). Empty for a
+ * cookie engine discarded from a virtual user's responses (#3307), the
+ * think timers a constant-rate run skipped (#3541), and what Retry-After
+ * back-off did or would have done (#3782). Empty for a
  * run with nothing to say, which is what lets the caller omit the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
@@ -2132,6 +2218,10 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     if (const size_t timers = open_loop_skipped_timers (*context); timers > 0) {
         warnings.push_back ({ { "code", "think_timer_skipped_open_loop" },
         { "message", RunContext::OPEN_LOOP_TIMER_SKIP_REASON }, { "timers", timers } });
+    }
+
+    if (auto warning = retry_after_warning (*context)) {
+        warnings.push_back (std::move (*warning));
     }
 
     return warnings;

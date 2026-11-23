@@ -241,6 +241,14 @@ constexpr int64_t DEFAULT_RAMP_DURATION_MS = 10000;
 /// Virtual users a ramp-up run starts from when the config names no
 /// `startConcurrency`.
 constexpr int64_t DEFAULT_START_CONCURRENCY = 1;
+/// The longest one virtual user waits on a `Retry-After` when a run turns on
+/// `retryAfterBackoff` and names no `retryAfterMaxMs` (#3782). Covers a
+/// per-second or per-minute limiter's answer; a server asking for a day keeps
+/// the run measuring something rather than idling to its end.
+constexpr int64_t DEFAULT_RETRY_AFTER_MAX_MS = 30000;
+/// Upper bound on `retryAfterMaxMs`: an hour. Past it a virtual user is
+/// waiting out a quota, not pacing against a limiter.
+constexpr int64_t MAX_RETRY_AFTER_MAX_MS = 3600000;
 } // namespace run_config
 
 /**

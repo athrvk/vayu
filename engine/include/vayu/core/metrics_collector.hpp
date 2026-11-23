@@ -874,6 +874,21 @@ class MetricsCollector {
         return set_cookie_headers_dropped_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count one wait a virtual user took for a 429's or 503's
+     *        `Retry-After` (`RunContext::honour_retry_after`, #3782).
+     *
+     * Lock-free, called once per completion that asked for a wait the run
+     * honoured; read once, by the run's warnings.
+     */
+    void record_retry_after_wait () {
+        retry_after_waits_.fetch_add (1, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t retry_after_waits () const {
+        return retry_after_waits_.load (std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -1421,6 +1436,7 @@ class MetricsCollector {
     std::atomic<size_t> http_version_downgraded_{ 0 };
     std::atomic<size_t> connection_replays_{ 0 };
     std::atomic<size_t> set_cookie_headers_dropped_{ 0 };
+    std::atomic<size_t> retry_after_waits_{ 0 };
 
     // The in-flight integral at T is closed_ms + open * T - opened_sum_ms.
     // One lock for all three, not three atomics: a reader that pairs one

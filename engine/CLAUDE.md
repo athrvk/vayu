@@ -681,9 +681,12 @@ logged as a warning: it means a client skipped composition.
   settles - and `timer.think`'s wait is a run-level concurrency reservation
   (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
   per-VU `ready_at_ms`, since there is no VU to hold one on. Closed loop only:
-  a constant-rate run skips the timer and reserves nothing (#3541). It also has its
-  own place to declare `script.setup` / `script.teardown` - the run-boundary
-  kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
+  a constant-rate run skips the timer and reserves nothing (#3541). The run
+  option `retryAfterBackoff` (#3782) holds a 429's or 503's `Retry-After` wait
+  in the same two places (this reservation, a scenario VU's `ready_at_ms`), as
+  the longer of it and the think time, through `RunContext::honour_retry_after`,
+  the one reader both load paths call. It also has its own place to declare
+  `script.setup` / `script.teardown` - the run-boundary kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
   (#1573), dispatched through the same `run_setup_elements` /
   `run_teardown_elements` a collection-backed run uses; a script written
   there resolves into the run's own submissions only on a run whose

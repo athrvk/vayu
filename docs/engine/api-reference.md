@@ -9750,6 +9750,8 @@ Start a load test run (Vayu Mode).
   "iterations": 1000,        // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps only; a 400 on any other mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
+  "retryAfterBackoff": false,  // Optional, default false - wait out a 429's or 503's Retry-After; see "Retry-After back-off" below
+  "retryAfterMaxMs": 30000,    // Optional, default 30000 - the longest one such wait
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
@@ -10558,6 +10560,28 @@ run row exists (#3121). The URL is judged as the scrape will send it, so a `\`
 in it counts as the `/` it is sent as. Loopback and private hosts get no
 exemption from a policy; without one, "Loopback and private addresses are
 deliberately allowed" above is the whole rule.
+
+#### Retry-After back-off (`retryAfterBackoff`)
+
+Off by default ([#3782](https://github.com/athrvk/vayu/issues/3782)). On, a
+`429` or `503` response carrying `Retry-After` holds the virtual user that
+received it for that long before its next request: delta-seconds, or an
+HTTP-date counted from the moment the response arrived, clamped to
+`retryAfterMaxMs` (default 30000). A value that is neither, a negative number
+included, or a date already past asks for no wait. The request is not
+retried: the `429` stays a counted response in the error rate and
+`statusCodes`, and the wait only delays what the user sends next. It composes
+with a think timer as the longer of the two, and the waits are counted in the
+`retry_after_backoff` warning (see [`warnings`](#get-runsrunidreport)). Both
+closed-loop shapes apply it, a single-request run by holding the completed
+slot as `timer.think` does and a scenario run on the virtual user itself. A
+`constant_rps` run does not, for the reason it skips a think timer: it sends
+on a schedule, so there is no next request to hold back, and a held slot
+would only fill `maxInFlight`. It carries one `retry_after_skipped_open_loop`
+warning instead. The option is opt-in because a run that backs off measures
+the rate the limiter allows rather than what the target does under the load
+asked for; with it off, a run whose responses are mostly `429` carries
+`rate_limited_dominant`, which names it.
 
 #### The `scenario` block (collection runs)
 
@@ -11638,6 +11662,8 @@ default, and whose message names the offending field and why the bound exists:
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `retryAfterBackoff` | boolean | Read as a bool inside the run-context constructor, the same stranded-`pending` failure `save_timing_breakdown` had. See [Retry-After back-off](#retry-after-back-off-retryafterbackoff). |
+| `retryAfterMaxMs` | `1`-`3600000` ms | The longest one virtual user waits on a `Retry-After`. Past an hour it is waiting out a quota, not pacing against a limiter; `0` would be the option turned off said another way. Read only with `retryAfterBackoff` on. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -14062,6 +14088,18 @@ under `summary.elements`) and held no slot. Its `message` is "A think timer
 does not apply to a constant-rate run: requests are sent on a schedule, not
 one after another", and it carries `timers` (how many enabled timers were
 skipped). A closed-loop mode runs the timer and raises nothing.
+Three are about [Retry-After back-off](#retry-after-back-off-retryafterbackoff)
+([#3782](https://github.com/athrvk/vayu/issues/3782)), at most one per run.
+`rate_limited_dominant` is raised with `retryAfterBackoff` off when more than
+half of the responses that carried a status (a transport failure carries
+none) were `429`: the report describes the target's rate limit more than the
+target, and the `message` names the option; `count` is the `429`s. With the
+option on, `retry_after_backoff` carries `count`, the responses whose
+`Retry-After` a virtual user waited out, so a reader knows the run's rate is
+the one the target allowed; and `retry_after_skipped_open_loop` is raised
+instead by a `constant_rps` run that sent anything, with the `message` "Retry-After
+back-off does not apply to a constant-rate run: requests are sent on a
+schedule, not one after another".
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
