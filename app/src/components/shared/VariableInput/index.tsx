@@ -103,6 +103,14 @@ interface VariableInputProps {
 const NO_VARIABLES: Record<string, ResolvedVariable> = {};
 
 /**
+ * Both text layers shape without ligatures (#3783). Blink paints stale glyph
+ * positions in a native <input> after incremental typing when the font ligates
+ * `//` (JetBrains Mono, Fira Code), so `http://host` draws as "http: /host". The
+ * overlay is set the same way so the two layers keep agreeing on glyph widths.
+ */
+const NO_LIGATURES = "[font-variant-ligatures:none]";
+
+/**
  * One `{{token}}` the strip paints: what the name addresses, and where its text
  * sits in `value`.
  *
@@ -855,6 +863,7 @@ export default function VariableInput({
 				disabled={disabled}
 				className={cn(
 					"absolute inset-0 w-full h-full bg-transparent border-0 outline-none px-[inherit] font-[inherit] text-[inherit]",
+					NO_LIGATURES,
 					"placeholder:text-muted-foreground disabled:cursor-not-allowed",
 					// When we have variables, hide real text so the overlay shows through
 					hasVariables && "text-transparent caret-foreground selection:bg-primary/30"
@@ -885,7 +894,10 @@ export default function VariableInput({
 				<div
 					ref={overlayRef}
 					data-variable-overlay
-					className="absolute inset-0 flex items-center px-[inherit] overflow-hidden"
+					className={cn(
+						"absolute inset-0 flex items-center px-[inherit] overflow-hidden",
+						NO_LIGATURES
+					)}
 					style={{
 						zIndex: 2,
 						pointerEvents: "none", // Pass clicks through to input

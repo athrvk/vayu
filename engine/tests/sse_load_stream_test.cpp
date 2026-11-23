@@ -37,6 +37,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -52,6 +53,11 @@ namespace {
 
 /// How long `/delayed` holds its first event after the headers.
 constexpr std::chrono::milliseconds FIRST_EVENT_DELAY{ 300 };
+
+/// The body of every reply that is not a stream: one event's worth of bytes
+/// under another content type.
+constexpr std::string_view NOT_A_STREAM_BODY =
+"data: {\"error\":\"rate limited\"}\n\n";
 
 /**
  * Two shapes of stream a cap has to end: one that never stops sending, and one
@@ -148,6 +154,69 @@ class LoadStreamServer {
             res.set_content ("too late", "text/plain");
         });
 
+        // Replies to a streaming request that are not streams (#3771). Each
+        // body is shaped like an event, so a tally that counted a body it
+        // should not have read would show it in the event and live counts.
+        svr_.Get ("/rate-limited", [] (const httplib::Request&, httplib::Response& res) {
+            res.status = 429;
+            res.set_content (NOT_A_STREAM_BODY.data (),
+            NOT_A_STREAM_BODY.size (), "application/json");
+        });
+        svr_.Get ("/json", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (NOT_A_STREAM_BODY.data (),
+            NOT_A_STREAM_BODY.size (), "application/json");
+        });
+        svr_.Get ("/redirect-to-json",
+        [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect (url ("/json"));
+        });
+        svr_.Get ("/redirect-to-finite",
+        [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect (url ("/finite"));
+        });
+        // A JSON answer whose body never finishes: only the duration cap can
+        // end it, and what it ends is not a stream.
+        svr_.Get ("/slow-json", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "application/json", [this] (size_t, httplib::DataSink& sink) {
+                const std::string start = "{\"partial\":";
+                if (!sink.write (start.data (), start.size ())) {
+                    return false;
+                }
+                while (!stopping_.load ()) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                }
+                sink.done ();
+                return true;
+            });
+        });
+        // A rate-limited stream: every other request is refused with a 429.
+        svr_.Get ("/sse-or-429", [this] (const httplib::Request&, httplib::Response& res) {
+            if (sse_or_429_hits_.fetch_add (1) % 2 == 1) {
+                res.status = 429;
+                res.set_content (NOT_A_STREAM_BODY.data (),
+                NOT_A_STREAM_BODY.size (), "application/json");
+                return;
+            }
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body = "data: a\n\ndata: b\n\n";
+                sink.write (body.data (), body.size ());
+                sink.done ();
+                return true;
+            });
+        });
+        // Announces an event stream, sends two events, then drops the
+        // connection without ending the chunked body (#3240).
+        svr_.Get ("/sse-then-reset", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body = "data: a\n\ndata: b\n\n";
+                sink.write (body.data (), body.size ());
+                return false;
+            });
+        });
+
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -174,6 +243,7 @@ class LoadStreamServer {
     std::thread thread_;
     int port_ = 0;
     std::atomic<bool> stopping_{ false };
+    std::atomic<int> sse_or_429_hits_{ 0 };
 };
 
 vayu::Request stream_request (const std::string& url, int64_t max_events, int64_t max_duration_ms) {
@@ -506,6 +576,155 @@ TEST (SseLoadStreamTest, AStopTakesAnOpenStreamOffTheOpenGauge) {
 }
 
 // ---------------------------------------------------------------------------
+// A reply is a stream only when it announces one (#3771)
+// ---------------------------------------------------------------------------
+
+// A 429 or a 200 JSON answer to a streaming request is that status in the
+// run's mix and nothing else: no event count, no first-event time, nothing on
+// the live counters, and off the open gauge by its completion. The bodies
+// carry an event's bytes, so each half of the gate shows on its own.
+// Mutation checks: drop the content-type test from `StreamTally::report` and
+// `stream_events` reads 0 here; drop it from `StreamTally::feed` and the live
+// events read 1.
+TEST (SseLoadStreamTest, AReplyThatDidNotAnnounceAStreamCarriesNoEventCount) {
+    LoadStreamServer server;
+    for (const auto& [path, status] : { std::pair{ "/rate-limited", 429 },
+         std::pair{ "/json", 200 }, std::pair{ "/redirect-to-json", 200 } }) {
+        auto request    = stream_request (server.url (path), 1000, 30000);
+        const auto live = count_live (request);
+        vayu::http::EventLoop loop (one_worker ());
+        loop.start ();
+        auto result = run_one (loop, request);
+        loop.stop ();
+
+        ASSERT_TRUE (result.is_ok ()) << path;
+        const auto& response = result.value ();
+        EXPECT_FALSE (response.has_error ()) << path << ": " << response.error_message;
+        EXPECT_EQ (response.status_code, status) << path;
+        EXPECT_EQ (response.body, NOT_A_STREAM_BODY) << path;
+        EXPECT_FALSE (response.stream_events.has_value ()) << path;
+        EXPECT_FALSE (response.stream_capped) << path;
+        EXPECT_FALSE (response.stream_first_event_ms.has_value ()) << path;
+        EXPECT_EQ (live->events.load (), 0u) << path;
+        EXPECT_EQ (live->open.load (), 0u) << path;
+    }
+}
+
+// The final hop decides: a redirect's own reply is never the stream, and the
+// event stream it leads to is counted as if it had been asked for directly.
+TEST (SseLoadStreamTest, AStreamBehindARedirectIsCountedFromItsFinalHop) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+
+    auto result =
+    run_one (loop, stream_request (server.url ("/redirect-to-finite"), 1000, 30000));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 3u);
+
+    loop.stop ();
+}
+
+// The duration cap still ends a transfer that is not a stream, since it is the
+// transfer's bound, but as the timeout it is: neither a JSON body that never
+// finishes nor a server that never answers is a stream the cap completed.
+// Mutation check: drop `response.stream_events` from the cap-ended return in
+// `extract_response` and both read as status-0 or 200 successes.
+TEST (SseLoadStreamTest, ADurationCapOnAReplyThatIsNotAStreamIsATimeout) {
+    LoadStreamServer server;
+    for (const char* path : { "/slow-json", "/mute" }) {
+        vayu::http::EventLoop loop (one_worker ());
+        loop.start ();
+        auto result = run_one (loop, stream_request (server.url (path), 1000, 1000));
+        loop.stop ();
+
+        ASSERT_TRUE (result.is_ok ()) << path;
+        const auto& response = result.value ();
+        ASSERT_TRUE (response.has_error ()) << path;
+        EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout) << path;
+        EXPECT_NE (response.error_message.find ("1000 ms duration cap"), std::string::npos)
+        << path << ": " << response.error_message;
+        EXPECT_FALSE (response.stream_events.has_value ()) << path;
+        EXPECT_FALSE (response.stream_capped) << path;
+    }
+}
+
+// A stream that announced itself and was then cut off is still a stream: it
+// fails, and it still reports the events it delivered (#3240).
+TEST (SseLoadStreamTest, AStreamCutAfterItAnnouncedKeepsItsEvents) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+
+    auto result =
+    run_one (loop, stream_request (server.url ("/sse-then-reset"), 1000, 30000));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_TRUE (response.has_error ());
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 2u);
+    EXPECT_FALSE (response.stream_capped);
+
+    loop.stop ();
+}
+
+// A rate-limited target under concurrency: the completions that carry an
+// event count are exactly the replies that streamed, each with its own
+// events, and the live counters agree. Mutation check: drop the content-type
+// test from `StreamTally::report` and every 429 carries a count of 0.
+TEST (SseLoadStreamTest, OnlyTheRepliesThatStreamedCarryAnEventCount) {
+    LoadStreamServer server;
+    vayu::http::EventLoopConfig config;
+    config.num_workers = 2;
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+
+    constexpr size_t TRANSFERS = 12;
+    auto request    = stream_request (server.url ("/sse-or-429"), 1000, 20000);
+    const auto live = count_live (request);
+    std::mutex mutex;
+    std::vector<vayu::Response> responses;
+    for (size_t i = 0; i < TRANSFERS; ++i) {
+        loop.submit (request, [&] (size_t, const vayu::Result<vayu::Response>& result) {
+            if (result.is_ok ()) {
+                const std::lock_guard<std::mutex> lock (mutex);
+                responses.push_back (result.value ());
+            }
+        });
+    }
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+        const std::lock_guard<std::mutex> lock (mutex);
+        return responses.size () == TRANSFERS;
+    }))
+    << "every transfer completes";
+    loop.stop ();
+
+    size_t streamed = 0;
+    size_t refused  = 0;
+    for (const auto& response : responses) {
+        if (response.status_code == 429) {
+            ++refused;
+            EXPECT_FALSE (response.stream_events.has_value ());
+            continue;
+        }
+        ++streamed;
+        EXPECT_EQ (response.status_code, 200);
+        ASSERT_HAS_VALUE (response.stream_events);
+        EXPECT_EQ (*response.stream_events, 2u);
+    }
+    EXPECT_EQ (streamed, TRANSFERS / 2);
+    EXPECT_EQ (refused, TRANSFERS / 2);
+    EXPECT_EQ (live->events.load (), streamed * 2);
+    EXPECT_EQ (live->open.load (), 0u);
+}
+
+// ---------------------------------------------------------------------------
 // The same bounds on the single-request client (#3235)
 // ---------------------------------------------------------------------------
 
@@ -603,8 +822,8 @@ TEST (SseClientStreamTest, ADurationCapBeforeAnyAnswerIsATimeoutNamingTheCap) {
     EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout);
     EXPECT_NE (response.error_message.find ("1000 ms duration cap"), std::string::npos)
     << response.error_message;
-    ASSERT_HAS_VALUE (response.stream_events);
-    EXPECT_EQ (*response.stream_events, 0u);
+    EXPECT_FALSE (response.stream_events.has_value ())
+    << "nothing announced an event stream, so there was no stream (#3771)";
 }
 
 TEST (SseClientStreamTest, AnOrdinarySendCarriesNoEventCount) {
@@ -649,4 +868,75 @@ TEST (SseClientStreamTest, AStreamIsOpenOnTheGaugeUntilTheSendReturns) {
     EXPECT_FALSE (finite.has_error ()) << finite.error_message;
     EXPECT_EQ (finite_live->open.load (), 0u);
     EXPECT_EQ (finite_live->events.load (), 3u);
+}
+
+// The client's half of #3771, by the same rule: a reply that did not announce
+// `text/event-stream` is an ordinary response, its body kept and nothing
+// counted. Mutation checks as `AReplyThatDidNotAnnounceAStreamCarriesNoEventCount`.
+TEST (SseClientStreamTest, AReplyThatDidNotAnnounceAStreamCarriesNoEventCount) {
+    LoadStreamServer server;
+    for (const auto& [path, status] : { std::pair{ "/rate-limited", 429 },
+         std::pair{ "/json", 200 }, std::pair{ "/redirect-to-json", 200 } }) {
+        auto request    = stream_request (server.url (path), 1000, 30000);
+        const auto live = count_live (request);
+
+        const auto response = send_one (request);
+
+        EXPECT_FALSE (response.has_error ()) << path << ": " << response.error_message;
+        EXPECT_EQ (response.status_code, status) << path;
+        EXPECT_EQ (response.body, NOT_A_STREAM_BODY) << path;
+        EXPECT_FALSE (response.stream_events.has_value ()) << path;
+        EXPECT_FALSE (response.stream_first_event_ms.has_value ()) << path;
+        EXPECT_EQ (live->events.load (), 0u) << path;
+        EXPECT_EQ (live->open.load (), 0u) << path;
+    }
+}
+
+TEST (SseClientStreamTest, AStreamBehindARedirectIsCountedFromItsFinalHop) {
+    LoadStreamServer server;
+    const auto response =
+    send_one (stream_request (server.url ("/redirect-to-finite"), 1000, 30000));
+
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 3u);
+}
+
+// Neither a cap nor a stop makes a reply that is not a stream end as one: the
+// cap is the timeout it is, and a stop is the cancel any other send reports.
+// Mutation check: drop `response.stream_events` from `stream_ended_by_rule`
+// and both read as 200 successes.
+TEST (SseClientStreamTest, ACapOrAStopOnAReplyThatIsNotAStreamFailsIt) {
+    LoadStreamServer server;
+    const auto capped = send_one (stream_request (server.url ("/slow-json"), 1000, 1000));
+    ASSERT_TRUE (capped.has_error ());
+    EXPECT_EQ (capped.error_code, vayu::ErrorCode::Timeout);
+    EXPECT_NE (capped.error_message.find ("1000 ms duration cap"), std::string::npos)
+    << capped.error_message;
+    EXPECT_FALSE (capped.stream_events.has_value ());
+
+    std::atomic<bool> cancel{ false };
+    vayu::http::ClientConfig config;
+    config.cancel           = &cancel;
+    config.on_body_progress = [&cancel] (uint64_t, std::optional<uint64_t>) {
+        cancel.store (true);
+        return true;
+    };
+    const auto stopped = send_one (
+    stream_request (server.url ("/slow-json"), 1000, 30000), std::move (config));
+    ASSERT_TRUE (stopped.has_error ());
+    EXPECT_EQ (stopped.error_code, vayu::ErrorCode::Cancelled) << stopped.error_message;
+    EXPECT_FALSE (stopped.stream_events.has_value ());
+}
+
+TEST (SseClientStreamTest, AStreamCutAfterItAnnouncedKeepsItsEvents) {
+    LoadStreamServer server;
+    const auto response =
+    send_one (stream_request (server.url ("/sse-then-reset"), 1000, 30000));
+
+    EXPECT_TRUE (response.has_error ());
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 2u);
+    EXPECT_FALSE (response.stream_capped);
 }

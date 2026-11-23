@@ -2545,6 +2545,8 @@ and a run with no p99 budget draws none: the setting is never the line. A Capaci
 #2816): the engine judges `latencyP99Ms` on the run's pooled histogram, which
 holds every over-budget level the search climbed through on purpose, so
 `thresholds` omits it and a run with no other budget reads "No budgets set". A
+streaming request does not send it either (issue #3772): a stream's latency is
+its whole duration, which the Dashboard threshold was never set against. A
 p99 typed in the dialog, or carried from the last Start, is sent in every mode.
 
 `LoadTestConfigDialog` also tells the engine which of those budgets the user did
@@ -2552,7 +2554,7 @@ not set for this run (issue #2195): top-level `carriedBudgets: string[]` on
 `POST /runs` (`StartLoadTestRequest`), the `thresholds` keys still holding a
 value the memo or the Settings p99 threshold seed filled in and the user left alone, spelled as
 they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`; the threshold seed
-only outside Capacity discovery, which does not send it). The engine
+only outside Capacity discovery and a streaming request, which do not send it). The engine
 only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
 `ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is
 computed the same either way. The list is cut at the engine's 64-entry cap

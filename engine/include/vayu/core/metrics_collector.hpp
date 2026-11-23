@@ -115,8 +115,9 @@ struct ResponseSample {
     std::optional<size_t> vu;
     std::optional<size_t> data_row_index;
     /**
-     * Events this transfer delivered, when it was a bounded stream
-     * (`Response::stream_events`); absent otherwise.
+     * Events this transfer delivered, when it was a bounded stream whose reply
+     * announced `text/event-stream` (`Response::stream_events`, #3771); absent
+     * otherwise.
      *
      * The events themselves are not copied: `body` already holds the
      * `text/event-stream` bytes they were parsed from, and the deferred replay

@@ -247,6 +247,68 @@ describe("buildLoadTestConfig", () => {
 			});
 		});
 	});
+
+	/**
+	 * A stream's latency is its whole duration, which the Dashboard's per-request
+	 * threshold was never set against.
+	 */
+	describe("the Settings p99 seed on a streaming request (issue #3772)", () => {
+		const budgets = { ...emptyBudgetDraft(), latencyP99Ms: "500" };
+		const seed = { budgetSources: { latencyP99Ms: "slo" as const } };
+		const STREAM_MODES = ["constant_concurrency", "ramp_up", "iterations"] as const;
+
+		it.each(STREAM_MODES)(
+			"drops a seeded p99 from a streaming %s run, and the carried key",
+			(mode) => {
+				const config = build({
+					...withMode(mode),
+					isStreamingRequest: true,
+					budgets,
+					carriedBudgets: ["latencyP99Ms"],
+					...seed,
+				});
+				expect(config.thresholds).toBeUndefined();
+				expect(config).not.toHaveProperty("carriedBudgets");
+			}
+		);
+
+		it("keeps the other budgets of a streaming run, carried keys included", () => {
+			const config = build({
+				isStreamingRequest: true,
+				budgets: { ...budgets, streamEventsPerSecondMin: "5" },
+				failRun: true,
+				carriedBudgets: ["latencyP99Ms", "streamEventsPerSecondMin"],
+				budgetSources: { latencyP99Ms: "slo", streamEventsPerSecondMin: "memo" },
+			});
+			expect(config.thresholds).toEqual({ streamEventsPerSecondMin: 5, failRun: true });
+			expect(config.carriedBudgets).toEqual(["streamEventsPerSecondMin"]);
+		});
+
+		it("keeps a p99 the memo carried or the user typed", () => {
+			const memo = build({
+				isStreamingRequest: true,
+				budgets,
+				carriedBudgets: ["latencyP99Ms"],
+				budgetSources: { latencyP99Ms: "memo" },
+			});
+			expect(memo.thresholds).toEqual({ latencyP99Ms: 500 });
+			expect(memo.carriedBudgets).toEqual(["latencyP99Ms"]);
+
+			const typed = build({ isStreamingRequest: true, budgets, budgetSources: {} });
+			expect(typed.thresholds).toEqual({ latencyP99Ms: 500 });
+		});
+
+		it("still sends the seed when the request does not stream", () => {
+			const config = build({
+				isStreamingRequest: false,
+				budgets,
+				carriedBudgets: ["latencyP99Ms"],
+				...seed,
+			});
+			expect(config.thresholds).toEqual({ latencyP99Ms: 500 });
+			expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+		});
+	});
 });
 
 describe("wireTimings (#3542)", () => {
