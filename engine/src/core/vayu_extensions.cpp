@@ -934,6 +934,16 @@ std::optional<Json> settings_of (const Json& value) {
         }
         out["httpVersion"] = *found;
     }
+    // Held to what the request applier accepts (#3773): a path in the subset,
+    // beside `stream: true`, so a bad one is this piece's
+    // `vayu_extension_invalid`, never a refused import.
+    if (const auto found = value.find ("streamTextPath"); found != value.end ()) {
+        if (!found->is_string () || vayu::http::routes::stream_text_path_problem (value) ||
+        !out.value ("stream", false)) {
+            return std::nullopt;
+        }
+        out["streamTextPath"] = *found;
+    }
     return std::make_optional (std::move (out));
 }
 

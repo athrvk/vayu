@@ -27,7 +27,7 @@ supported is listed [below](#not-yet-supported).
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.responseSize` (the body's bytes, `.size().body`), `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
-| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated?, text? }`), `.totalEvents`, `.eventsTruncated` - a streamed response only, on a Send and on every run that streams; `.streamText` on a Send that declared a `streamTextPath`, see below. **Vayu-specific** |
+| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated?, text? }`), `.totalEvents`, `.eventsTruncated` - a streamed response only, on a Send and on every run that streams; `.streamText` on a stream whose request declared a `streamTextPath`, see below. **Vayu-specific** |
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
@@ -1254,13 +1254,12 @@ assert over the *whole* stream has to check `eventsTruncated` first; counting a
 prefix would otherwise report a wrong number with complete confidence.
 
 **`pm.response.streamText` is the streamed reply, assembled** (issue #3773). A
-Send whose `POST /execute` names a `streamTextPath` (a JSONPath such as
-`$.choices[0].delta.content` or `$.delta.text`) gets each event's `text`, what
-the path read off its JSON `data`, and the joined string here, covering every
-event the body kept, past `sseMaxStoredEvents` too. An event the path reads
-nothing from (a role-only chunk, a ping, `[DONE]`) has no `text`. Without a
-path both are absent, and no run declares one, so a run's streaming steps bind
-neither:
+streaming request that declares a `streamTextPath` (a JSONPath such as
+`$.choices[0].delta.content` or `$.delta.text`, saved with the request beside
+Event stream) gets each event's `text`, what the path read off its JSON
+`data`, and the joined string here, covering every event the body kept, past
+`sseMaxStoredEvents` too. An event the path reads nothing from (a role-only
+chunk, a ping, `[DONE]`) has no `text`. Without a path both are absent:
 
 ```javascript
 pm.test('the reply is not empty', function () {
@@ -1268,7 +1267,8 @@ pm.test('the reply is not empty', function () {
 });
 ```
 
-**Every run that streams reads the same three.** A collection run's streaming
+**Every run that streams reads the same three**, and `streamText` with them
+when the request declares a path. A collection run's streaming
 step, a load run's inline post-request script (marked inline, or Scripts = All
 inline) on a streamed response, and a load run's deferred `tests` script
 replayed against its sampled streams all see them, so the three properties mean

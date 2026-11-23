@@ -298,6 +298,29 @@ TEST_F (LoadReplayEventsTest, AStreamedSampleReplaysWithItsEvents) {
     EXPECT_EQ (validation.run->passed, 1u);
 }
 
+// A sampled stream keeps the text path its request declared (#3773), so the
+// deferred replay reads `streamText` as Send does. Mutation check: drop the
+// `stream_text_path` copy in `sample_response` (run_manager.cpp) and the
+// replayed test fails on an undefined `streamText`.
+TEST_F (LoadReplayEventsTest, AStreamedSampleReplaysWithItsDeclaredText) {
+    auto context              = context_with (R"(
+        pm.test('the reply is assembled', function () {
+            pm.expect(pm.response.streamText).to.equal('1');
+            pm.expect(pm.response.events[0].text).to.equal('1');
+            pm.expect(pm.response.events[1]).to.not.have.property('text');
+        });
+    )");
+    auto response             = streamed_response (THREE_EVENTS, 3);
+    response.stream_text_path = vayu::http::compile_stream_text_path ("$.n");
+    ASSERT_NE (response.stream_text_path, nullptr);
+    context->metrics_collector->record_response_sample (response);
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u);
+    EXPECT_EQ (validation.run->passed, 1u);
+}
+
 // Absent, not empty. A load run over an ordinary endpoint must leave the field
 // undefined - an empty array would tell a script it read a stream.
 TEST_F (LoadReplayEventsTest, ANonStreamSampleLeavesTheFieldUndefined) {
@@ -402,14 +425,17 @@ class LoadInlineEventsTest : public LoadReplayEventsTest {
     /// A streaming single-request run of @p iterations whose `script.post`
     /// runs inline through `elements.scripts: "allInline"` (the app's
     /// Scripts = All inline), run to its end; answers the element's tally.
-    json run_inline_post_script (const std::string& script, size_t iterations) {
-        const json config{ { "method", "GET" }, { "url", server_->url () },
+    json run_inline_post_script (const std::string& script,
+    size_t iterations,
+    const json& extra = json::object ()) {
+        json config{ { "method", "GET" }, { "url", server_->url () },
             { "mode", "iterations" }, { "iterations", iterations },
             { "concurrency", 1 }, { "timeout", 5000 }, { "stream", true },
             { "elements", { { "scripts", "allInline" } } },
             { "requestElements",
             json::array (
             { vayu::tests::script_element_json ("el_post", "script.post", script) }) } };
+        config.update (extra);
 
         const std::string run_id = "run-inline-events";
         vayu::db::Run row;
@@ -472,6 +498,35 @@ TEST_F (LoadInlineEventsTest, AnInlineScriptPostReadsTheStreamsEvents) {
     ITERATIONS);
     EXPECT_EQ (tally.value ("passed", 0u), ITERATIONS) << tally.dump ();
     EXPECT_EQ (tally.value ("failed", 0u), 0u) << tally.dump ();
+}
+
+// A single-request run's `streamTextPath` (#3773), which a by-id compose
+// carries from the saved request, is read in its inline script, and a run
+// without one reads no text. Mutation check: drop the `text_path` compile in
+// `RunContext`'s constructor and the first run's test fails on an undefined
+// `streamText`.
+TEST_F (LoadInlineEventsTest, AnInlineScriptPostReadsTheRunsTextPath) {
+    const auto with_path = run_inline_post_script (R"(
+        pm.test('the reply is assembled', function () {
+            pm.expect(pm.response.streamText).to.equal('1');
+            pm.expect(pm.response.events[0].text).to.equal('1');
+        });
+    )",
+    1, json{ { "streamTextPath", "$.n" } });
+    EXPECT_EQ (with_path.value ("passed", 0u), 1u) << with_path.dump ();
+    EXPECT_EQ (with_path.value ("failed", 0u), 0u) << with_path.dump ();
+}
+
+TEST_F (LoadInlineEventsTest, AnInlineScriptPostOfARunWithNoTextPathReadsNoText) {
+    const auto without = run_inline_post_script (R"(
+        pm.test('no path, no text', function () {
+            pm.expect(typeof pm.response.streamText).to.equal('undefined');
+            pm.expect(pm.response.events[0]).to.not.have.property('text');
+        });
+    )",
+    1);
+    EXPECT_EQ (without.value ("passed", 0u), 1u) << without.dump ();
+    EXPECT_EQ (without.value ("failed", 0u), 0u) << without.dump ();
 }
 
 // The run's own `sseMaxStoredEvents` bounds what the inline script reads, as
@@ -555,6 +610,38 @@ TEST_F (StreamedSampleRouteTest, AStreamedCaptureCarriesItsParsedEvents) {
     // The raw bytes stay beside the parsed list - the Body view is still the
     // honest record of what came back.
     EXPECT_EQ (body["data"][0]["response"]["body"], THREE_EVENTS);
+}
+
+// A capture keeps its request's `streamTextPath` (#3773) in its row, so the
+// served list carries each event's `text` and the joined `streamText`, and a
+// capture without one carries neither. Mutation check: drop the
+// `stream_text_path` copy in `flush_to_database`'s `collect_capture` and the
+// first sample carries no `streamText`.
+TEST_F (StreamedSampleRouteTest, AStreamedCaptureReadsItsDeclaredText) {
+    vayu::core::MetricsCollector collector ("run-1", capture_config ());
+    auto with_path             = streamed_response (THREE_EVENTS, 3);
+    with_path.stream_text_path = vayu::http::compile_stream_text_path ("$.n");
+    auto without               = streamed_response (THREE_EVENTS, 3);
+    for (auto* response : { &with_path, &without }) {
+        collector.record_error (
+        vayu::ErrorCode::ConnectionFailed, "closed early", "{}", response);
+    }
+    collector.flush_to_database (*db_);
+
+    const auto [status, body] =
+    vayu::http::routes::run_samples_response (*db_, "run-1", 50, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 2u);
+    std::vector<json> texts;
+    for (const auto& sample : body["data"]) {
+        const auto& events = sample["response"]["events"];
+        texts.push_back (events.value ("streamText", json ()));
+    }
+    // Rows come back in insert order, which is record order here.
+    EXPECT_EQ (texts[0], "1") << body.dump ();
+    EXPECT_TRUE (texts[1].is_null ()) << body.dump ();
+    EXPECT_EQ (
+    body["data"][0]["response"]["events"]["items"][0].value ("text", json ()), "1");
 }
 
 // Absent, not empty, on this side too: a row with no wire count - every row

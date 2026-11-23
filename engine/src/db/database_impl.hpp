@@ -313,6 +313,10 @@ inline auto make_vayu_storage (const std::string& path) {
     // existing requests table and every pre-existing row backfills to "not a
     // stream", which is what they all were.
     make_column ("stream", &Request::stream, default_value (false)),
+    // The stream's text path (issue #3773, schema version 11). Nullable with
+    // no default, on the `spec_operation` precedent below: NULL is "declares
+    // none", and every pre-existing row backfills to it.
+    make_column ("stream_text_path", &Request::stream_text_path),
     // Postman's per-request protocol settings (issue #1765, schema version
     // 2). The three typed ones are NOT NULL + default_value for the same
     // reason `stream` is: sync_schema ALTERs them onto an existing requests
@@ -521,7 +525,11 @@ inline auto make_vayu_storage (const std::string& path) {
     // result_bodies table without a backfill value - and so a row written
     // before issue #657 reads as "this was not a stream" rather than as a
     // stream that delivered nothing.
-    make_column ("stream_events", &ResultBody::stream_events)),
+    make_column ("stream_events", &ResultBody::stream_events),
+    // The sample's `streamTextPath` (issue #3773, schema version 11). Nullable
+    // like `stream_events`: NULL is "declared none", which every earlier row
+    // reads as.
+    make_column ("stream_text_path", &ResultBody::stream_text_path)),
 
     // Inbox requests: what a webhook inbox listener captured (issue #480).
     // Not owned by a run, so nothing in the run cascade touches it - the rows

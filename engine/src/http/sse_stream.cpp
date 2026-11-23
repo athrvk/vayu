@@ -109,6 +109,15 @@ vayu::StreamBounds default_stream_bounds (const SseLimits& limits) {
     return bounds;
 }
 
+std::shared_ptr<const vayu::StreamTextPath> compile_stream_text_path (std::string_view path) {
+    auto steps = vayu::core::detail::parse_json_path (path);
+    if (!steps) {
+        return nullptr;
+    }
+    return std::make_shared<const vayu::StreamTextPath> (
+    vayu::StreamTextPath{ std::string (path), std::move (*steps) });
+}
+
 vayu::StreamBounds resolve_stream_bounds (const nlohmann::json& config,
 const vayu::StreamBounds& defaults) {
     const auto cap = [&config] (const char* key, int64_t fallback) {
@@ -390,8 +399,10 @@ nlohmann::json& slot) {
     if (!response.stream_events) {
         return;
     }
-    slot = buffered_stream_events_node (response.body, limits,
-    static_cast<int64_t> (*response.stream_events), !response.body_truncated);
+    const auto& text_path = response.stream_text_path;
+    slot                  = buffered_stream_events_node (response.body, limits,
+    static_cast<int64_t> (*response.stream_events), !response.body_truncated,
+    std::nullopt, text_path ? &text_path->steps : nullptr);
     script_ctx.response_events = &slot;
 }
 

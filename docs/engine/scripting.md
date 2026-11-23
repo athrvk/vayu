@@ -592,8 +592,8 @@ Each entry is `{ event, id, data }`:
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
 | `text` | What the request's `streamTextPath` read off this event (issue #3773). **Absent** when no path was declared, when the path matched nothing, `null`, an array or an object, when `data` is not JSON, and when the event was cut (`dataTruncated`). |
 
-**`pm.response.streamText` is the reply, assembled.** A Send that declares a
-`streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an
+**`pm.response.streamText` is the reply, assembled.** A stream whose request
+declares a `streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an
 OpenAI-compatible chat completion or `$.delta.text` for an Anthropic-style one,
 see [`POST /execute`](api-reference.md#post-execute)) gets every event's `text`
 joined in order, the events the path missed skipped (a role-only chunk, a
@@ -608,8 +608,10 @@ pm.test('the model answered in French', function () {
 });
 ```
 
-A run's streaming steps declare no path, so on a collection or load run both
-`text` and `pm.response.streamText` are absent.
+Every run that streams reads the same: a collection run's streaming step
+through its saved request's `streamTextPath`, a single-request load run through
+the one its payload carries (a by-id compose fills it from the saved request),
+inline and in the deferred replay alike.
 
 **Buffered, never live.** The script runs once the stream is over, and runs to
 completion - its timers and promise jobs included, see

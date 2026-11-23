@@ -28,7 +28,6 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
-#include "vayu/core/json_path.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
@@ -329,26 +328,18 @@ bool read_stream_caps (const nlohmann::json& json, StreamFlag& flag) {
     sse_limits::STREAM_EVENTS_CEILING, flag.max_events, flag);
 }
 
-/// `streamTextPath` (#3773): a string inside the JSONPath subset the elements
-/// read, refused on @p flag otherwise.
+/// `streamTextPath` (#3773), held to `stream_text_path_problem`, onto
+/// @p flag; refused on @p flag otherwise.
 bool read_stream_text_path (const nlohmann::json& json, StreamFlag& flag) {
-    const auto field = json.find ("streamTextPath");
-    if (field == json.end () || field->is_null ()) {
-        return true;
-    }
-    if (!field->is_string ()) {
-        flag.ok    = false;
-        flag.error = "'streamTextPath' must be a string (got " +
-        std::string (field->type_name ()) + ")";
-        return false;
-    }
-    if (auto problem = vayu::core::detail::json_path_problem (
-        json, "streamTextPath", "streamTextPath")) {
+    if (auto problem = stream_text_path_problem (json)) {
         flag.ok    = false;
         flag.error = std::move (*problem);
         return false;
     }
-    flag.text_path = field->get<std::string> ();
+    if (const auto field = json.find ("streamTextPath");
+    field != json.end () && field->is_string ()) {
+        flag.text_path = field->get<std::string> ();
+    }
     return true;
 }
 
@@ -424,6 +415,15 @@ StreamFlag read_collection_run_stream_caps (const nlohmann::json& json) {
         "'stream' is not valid on a collection run - a step streams when its "
         "stored request has 'stream' set. 'maxStreamDurationMs' and "
         "'maxStreamEvents' bound those steps without it, so drop 'stream'";
+        return flag;
+    }
+    if (const auto path = json.find ("streamTextPath");
+    path != json.end () && !path->is_null ()) {
+        flag.ok = false;
+        flag.error =
+        "'streamTextPath' is not valid on a collection run - a step reads its "
+        "stream's text through its stored request's 'streamTextPath', so set "
+        "it there and drop it here";
         return flag;
     }
     read_stream_caps (json, flag);
@@ -1458,14 +1458,6 @@ const vayu::core::MonitorLimits& monitor_limits) {
         return "'transient' is not valid on a run - it applies to POST "
                "/execute "
                "only, because a run is identified by the row it creates";
-    }
-
-    // Refused rather than ignored, for the reason `transient` is: no run binds
-    // a stream's `text` or `pm.response.streamText` yet (#3773), so a caller
-    // sending it would believe in text it never gets.
-    if (config.contains ("streamTextPath") && !config["streamTextPath"].is_null ()) {
-        return "'streamTextPath' is not valid on a run - it applies to a "
-               "streaming POST /execute only";
     }
 
     // `stream` and its caps are read through the *same* parser `POST /execute`

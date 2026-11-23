@@ -1756,7 +1756,7 @@ declare const pm: {
 		 */
 		status: string;
 		/**
-		 * The reply a Send streamed, assembled: the text the request's streamTextPath read off every event, joined in order. Each entry of pm.response.events carries its own part as text. Events where the path matched nothing are skipped (a role-only chunk, a ping). Covers every event the stored body holds, past sseMaxStoredEvents too. Absent when the request declared no streamTextPath.
+		 * The reply a stream delivered, assembled: the text the request's streamTextPath read off every event, joined in order. Each entry of pm.response.events carries its own part as text. Events where the path matched nothing are skipped (a role-only chunk, a ping). Covers every event the stored body holds, past sseMaxStoredEvents too. Absent when the request declared no streamTextPath.
 		 * 
 		 * Example:
 		 * pm.test('the reply mentions Paris', function () { pm.expect(pm.response.streamText || '').to.include('Paris'); });

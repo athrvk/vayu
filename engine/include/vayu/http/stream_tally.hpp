@@ -78,6 +78,7 @@ class StreamTally {
         max_events_      = bounds.max_events;
         max_duration_ms_ = bounds.max_duration_ms;
         live_            = bounds.live;
+        text_path_       = bounds.text_path;
         started_at_      = started_at;
         deadline_ = started_at + std::chrono::milliseconds (bounds.max_duration_ms);
         if (live_ != nullptr) {
@@ -181,6 +182,7 @@ class StreamTally {
         response.stream_first_event_ms   = first_event_ms ();
         response.stream_max_event_gap_ms = max_event_gap_ms ();
         response.stream_event_rate       = event_rate ();
+        response.stream_text_path        = text_path_;
     }
 
     private:
@@ -269,6 +271,8 @@ class StreamTally {
     /// Null unless the run reports stream metrics live, and once the stream
     /// has been reported.
     std::shared_ptr<LiveStreamCounts> live_;
+    /// The request's `streamTextPath`, handed to the response `report` ends.
+    std::shared_ptr<const StreamTextPath> text_path_;
     Clock::time_point started_at_;
     Clock::time_point deadline_;
     SseFrameCounter counter_;

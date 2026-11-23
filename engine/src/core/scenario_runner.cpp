@@ -1022,9 +1022,11 @@ ScenarioStepStore& store) {
     // design stream's trace carries. After the body cap, as there: the list
     // carries its own bound, and it reads the response's whole held body.
     if (const auto& events = exchange.response.stream_events; exchange.sent && events) {
+        const auto& text_path = exchange.response.stream_text_path;
         record.trace["events"] =
         vayu::http::buffered_stream_events_node (exchange.response.body, ctx.sse_limits,
-        static_cast<int64_t> (*events), !exchange.response.body_truncated);
+        static_cast<int64_t> (*events), !exchange.response.body_truncated,
+        std::nullopt, text_path ? &text_path->steps : nullptr);
     }
 
     // What the scripts produced, on the node design mode already

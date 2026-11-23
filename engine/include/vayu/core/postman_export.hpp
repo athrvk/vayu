@@ -69,6 +69,9 @@ struct PostmanExportRequest {
     std::string http_version        = "auto";
     bool verify_ssl                 = true;
     bool stream                     = false;
+    /// Whether the request stores a `streamTextPath` (#3773), which Postman
+    /// cannot carry either.
+    bool has_stream_text_path = false;
     /// The request's own timeout (issue #2937). A Postman item has no
     /// timeout member, so a stated one is only counted in `notCarried`.
     std::optional<int> timeout_ms;

@@ -712,6 +712,10 @@ Json serialize (const vayu::db::Request& r, const vayu::http::FileAccessPolicy& 
     json["httpVersion"]     = r.http_version;
     json["verifySSL"]       = r.verify_ssl;
     json["stream"]          = r.stream;
+    // Always present as a key, `null` for none (issue #3773), on the
+    // `mockExampleId` rule below.
+    json["streamTextPath"] =
+    r.stream_text_path.has_value () ? Json (*r.stream_text_path) : Json (nullptr);
     // Postman's per-request protocol settings (issue #1765), always emitted
     // like every other execution option.
     json["disableCookies"] = r.disable_cookies;
@@ -1878,6 +1882,9 @@ const vayu::http::FileAccessPolicy& files) {
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"verifySSL\":" << (r.verify_ssl ? "true" : "false") << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
+    out << "\"streamTextPath\":"
+        << (r.stream_text_path.has_value () ? Json (*r.stream_text_path).dump () : "null")
+        << ",";
     out << "\"disableCookies\":" << (r.disable_cookies ? "true" : "false") << ",";
     out << "\"disabledSystemHeaders\":"
         << disabled_system_headers_node (r.disabled_system_headers).dump () << ",";

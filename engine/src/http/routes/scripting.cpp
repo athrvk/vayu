@@ -236,7 +236,7 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.response.streamText" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.streamText" }, { "detail", "string | undefined" },
     { "documentation",
-    "The reply a Send streamed, assembled: the text the request's "
+    "The reply a stream delivered, assembled: the text the request's "
     "streamTextPath read off every event, joined in order. Each entry of "
     "pm.response.events carries its own part as text. Events where the path "
     "matched nothing are skipped (a role-only chunk, a ping). Covers every "

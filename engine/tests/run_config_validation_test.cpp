@@ -571,18 +571,33 @@ nlohmann::json collection_run_config () {
 }
 } // namespace
 
-// No run binds a stream's text (#3773), so a path on either run shape is
-// refused rather than ignored. Mutation check: drop the `streamTextPath`
-// refusal in `validate_run_config` and the streaming load run is accepted.
-TEST (RunConfigValidation, AStreamTextPathIsRejectedOnEveryRunShape) {
+// A single-request run reads a stream's text through `streamTextPath` (#3773)
+// by `POST /execute`'s rules, since a by-id compose carries the saved
+// request's. A collection run's steps each read their own stored path, so a
+// top-level one there is refused rather than ignored. Mutation check: drop the
+// `streamTextPath` refusal in `read_collection_run_stream_caps` and the
+// collection run is accepted.
+TEST (RunConfigValidation, AStreamTextPathIsReadOnASingleRequestRunAndRefusedOnACollectionRun) {
     auto load              = valid_config ();
     load["stream"]         = true;
     load["streamTextPath"] = "$.delta.text";
-    expect_rejected (load, "streamTextPath");
+    EXPECT_FALSE (validate_run_config (load).has_value ());
+
+    auto buffered              = valid_config ();
+    buffered["streamTextPath"] = "$.delta.text";
+    expect_rejected (buffered, "streamTextPath");
+
+    auto outside              = load;
+    outside["streamTextPath"] = "$.a[?(@.b)]";
+    expect_rejected (outside, "streamTextPath");
 
     auto collection              = collection_run_config ();
     collection["streamTextPath"] = "$.delta.text";
     expect_rejected (collection, "streamTextPath");
+
+    auto cleared              = collection_run_config ();
+    cleared["streamTextPath"] = nullptr;
+    EXPECT_FALSE (validate_run_config (cleared).has_value ());
 }
 
 TEST (RunConfigValidation, CapsWithoutStreamAreAcceptedOnACollectionRun) {

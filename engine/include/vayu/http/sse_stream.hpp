@@ -144,6 +144,15 @@ struct SseLimits {
 const vayu::StreamBounds& defaults);
 
 /**
+ * @p path compiled for every response a run's stream reads (#3773): null when
+ * it is outside the JSONPath subset, which only a hand-edited row can hold
+ * once the write routes have checked it, and which reads as no path, as a
+ * stored trace's does.
+ */
+[[nodiscard]] std::shared_ptr<const vayu::StreamTextPath>
+compile_stream_text_path (std::string_view path);
+
+/**
  * One live stream: the ring its events land in, its termination reason, and the
  * single-watcher slot its relay claims.
  *
@@ -422,9 +431,11 @@ void expand_stored_stream_events (nlohmann::json& trace);
  *        step, a load run's inline `script.post` and the deferred replay.
  *
  * When @p response was a bounded stream (`Response::stream_events` set), fills
- * @p slot with `buffered_stream_events_node` over its body and points
- * `ScriptContext::response_events` at it. Otherwise it leaves both untouched, so
- * the script reads an absent field rather than an empty list.
+ * @p slot with `buffered_stream_events_node` over its body, reading each
+ * event's `text` and the joined `streamText` through its
+ * `Response::stream_text_path` when the request declared one (#3773), and
+ * points `ScriptContext::response_events` at it. Otherwise it leaves both
+ * untouched, so the script reads an absent field rather than an empty list.
  *
  * @p slot is the caller's, and must outlive every execute that reads
  * @p script_ctx. `Response::body_truncated` decides whether the body is

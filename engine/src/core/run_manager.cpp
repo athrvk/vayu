@@ -232,12 +232,13 @@ RecordFailure&& record_failure) {
 /// `CapturedExchange` is the path that truncates, and it is not this one.
 vayu::Response sample_response (const ResponseSample& sample) {
     vayu::Response response;
-    response.status_code     = sample.status_code;
-    response.status_text     = sample.status_text;
-    response.body            = sample.body;
-    response.headers         = sample.headers;
-    response.timing.total_ms = sample.latency_ms;
-    response.stream_events   = sample.stream_events;
+    response.status_code      = sample.status_code;
+    response.status_text      = sample.status_text;
+    response.body             = sample.body;
+    response.headers          = sample.headers;
+    response.timing.total_ms  = sample.latency_ms;
+    response.stream_events    = sample.stream_events;
+    response.stream_text_path = sample.stream_text_path;
     return response;
 }
 
@@ -957,6 +958,25 @@ bool plan_streams (const std::shared_ptr<const ScenarioExecution>& scenario) {
     return scenario != nullptr && longest_stream_bounds (scenario->plan).has_value ();
 }
 
+/// A single-request run's stream bounds: its caps over @p defaults, and its
+/// `streamTextPath` (#3773), compiled once for every response. Nothing when
+/// the run does not stream. `read_stream_flag` has already checked both in
+/// the route, so a value here is usable.
+std::optional<vayu::StreamBounds> single_request_stream_bounds (const nlohmann::json& config,
+const vayu::http::SseLimits& defaults) {
+    if (!config.value ("stream", false)) {
+        return std::nullopt;
+    }
+    auto bounds = vayu::http::resolve_stream_bounds (
+    config, vayu::http::default_stream_bounds (defaults));
+    if (const auto path = config.find ("streamTextPath");
+    path != config.end () && path->is_string ()) {
+        bounds.text_path =
+        vayu::http::compile_stream_text_path (path->get_ref<const std::string&> ());
+    }
+    return bounds;
+}
+
 } // namespace
 
 RunContext::RunContext (const std::string& id,
@@ -1012,14 +1032,10 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     mc_config.stream_metrics = config.value (
     "stream_metrics", constants::metrics_collector::DEFAULT_STREAM_METRICS);
 
-    // The caps a streaming run's transfers are bounded by. `stream` has already
-    // been validated by `read_stream_flag` in the route, so a value here is a
-    // boolean. A collection run never carries it (the route refuses it there):
-    // each streaming step took its caps from the plan (#3235).
-    if (config.value ("stream", false)) {
-        stream_bounds = vayu::http::resolve_stream_bounds (
-        config, vayu::http::default_stream_bounds (engine_defaults.sse_limits));
-    }
+    // The caps a streaming run's transfers are bounded by. A collection run
+    // never carries `stream` (the route refuses it there): each streaming step
+    // took its caps and its text path from the plan (#3235, #3773).
+    stream_bounds = single_request_stream_bounds (config, engine_defaults.sse_limits);
     mc_config.streams = stream_bounds.has_value () || plan_streams (scenario);
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",

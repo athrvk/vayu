@@ -783,8 +783,15 @@ logged as a warning: it means a client skipped composition.
   script is bound to. A send's `streamTextPath` (#3773) is stored in that
   sidecar, never the text: the relay, every reader and `pm.response.streamText`
   derive each event's `text` through `sse_event_text`, on the elements' one
-  JSONPath subset (`vayu/core/json_path.hpp`), and `POST /runs` refuses the
-  field. `POST /runs` takes `stream` too (#576) through the same
+  JSONPath subset (`vayu/core/json_path.hpp`). A run reads it too: a request
+  stores it (`requests.stream_text_path`, held to `stream_text_path_problem`),
+  a by-id compose carries it beside `stream: true`, and it is compiled once
+  per step or per run into `StreamBounds::text_path`, which `StreamTally`
+  hands to `Response::stream_text_path`, so `bind_buffered_stream_events`, the
+  deferred replay's samples and a captured exchange
+  (`result_bodies.stream_text_path`) read it off the response with no
+  per-event cost for a run that declares none; a collection run refuses a
+  top-level one. `POST /runs` takes `stream` too (#576) through the same
   `read_stream_flag` parser; under load a stream becomes
   `Request::stream_bounds`, the event loop ends it counting with
   `SseFrameCounter` (which agrees with `SseParser` on what an event is), and
