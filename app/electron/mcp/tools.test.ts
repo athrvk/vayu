@@ -3709,6 +3709,7 @@ describe("document CRUD parity", () => {
 			["timeout", 1500],
 			["httpVersion", "http2"],
 			["stream", true],
+			["streamTextPath", "$.delta.text"],
 			["verifySSL", false],
 		] as const)("update_request forwards %s on its own", async (key, value) => {
 			const client = fakeClient();
@@ -3739,6 +3740,45 @@ describe("document CRUD parity", () => {
 				expect(schema.safeParse(accepted).success, String(accepted)).toBe(true);
 			}
 			expect(schemaOf("create_request", "timeout").safeParse(null).success).toBe(true);
+		});
+
+		// Mutation check: take "streamTextPath" out of REQUEST_SETTINGS_KEYS and
+		// neither verb sends it.
+		test("streamTextPath is forwarded by create_request, and null reaches update_request to clear it", async () => {
+			const created = fakeClient();
+			await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "Chat",
+					url: "https://api.example.com/chat",
+					stream: true,
+					streamTextPath: "$.choices[0].delta.content",
+				},
+				ctxWith(created, { allowWrites: true })
+			);
+			expect(callArgs(created.createRequest)[0]).toMatchObject({
+				stream: true,
+				streamTextPath: "$.choices[0].delta.content",
+			});
+
+			const cleared = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", streamTextPath: null },
+				ctxWith(cleared, { allowWrites: true })
+			);
+			expect(callArgs(cleared.updateRequest)[1]).toEqual({ streamTextPath: null });
+			expect(schemaOf("update_request", "streamTextPath").safeParse(7).success).toBe(false);
+		});
+
+		test("the path is stated once, on create_request, and update_request points there", () => {
+			const stated = schemaOf("create_request", "streamTextPath").description ?? "";
+			expect(stated).toContain("$.choices[0].delta.content");
+			expect(stated).toContain("$.delta.text");
+			expect(schemaOf("update_request", "streamTextPath").description).toBe(
+				"As on `create_request`; null clears it."
+			);
 		});
 
 		test("run_request refuses a per-call downgrade before anything is sent", async () => {
@@ -5175,6 +5215,29 @@ describe("run_collection_smoke", () => {
 		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(outgoing).toMatchObject({ stream: false });
+	});
+
+	// Mutation check: spread `{ ...outgoing, stream: false }` as before and the
+	// path rides the buffered send.
+	test("buffers a stored streaming request without its stream text path (#3773)", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "chat" }]),
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "POST",
+				url: "https://api.example.com/chat",
+				stream: true,
+				streamTextPath: "$.choices[0].delta.content",
+			}),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(outgoing).toMatchObject({ stream: false });
+		expect(outgoing).not.toHaveProperty("streamTextPath");
 	});
 
 	test("a request that fails to compose is reported failed, not dropped", async () => {
@@ -8705,6 +8768,139 @@ describe("dispatchTool", () => {
 			expect(client.consumeStreamEvents).not.toHaveBeenCalled();
 		});
 
+		/*
+		 * #3773: a saved request that declares a stream text path comes back from
+		 * a by-id compose with it beside `stream: true`, and the engine puts each
+		 * event's `text` on the relay.
+		 */
+		describe("a declared stream text path", () => {
+			const PATH = "$.choices[0].delta.content";
+			const savedStream = (consumed: Record<string, unknown>, composed = {}) =>
+				fakeClient({
+					composeRequest: vi.fn().mockResolvedValue({
+						method: "POST",
+						url: "https://api.example.com/chat",
+						stream: true,
+						streamTextPath: PATH,
+						...composed,
+					}),
+					executeRequest: vi.fn().mockResolvedValue(started),
+					consumeStreamEvents: vi.fn().mockResolvedValue(consumed),
+				});
+			const run = (client: EngineClient, extra: Record<string, unknown> = {}) =>
+				dispatchTool(
+					"run_request",
+					{ requestId: "req_1", ...extra },
+					ctxWith(client, allow)
+				);
+			const tokens = (count: number) =>
+				Array.from({ length: count }, (_, i) => ({
+					event: "message",
+					data: JSON.stringify({
+						id: "chatcmpl-1",
+						object: "chat.completion.chunk",
+						choices: [{ index: 0, delta: { content: `t${i} ` } }],
+					}),
+					receivedAt: 1_755_000_000_000 + i,
+					// A role-only chunk and `[DONE]` carry no `text`.
+					...(i % 10 === 9 ? {} : { text: `t${i} ` }),
+				}));
+
+			test("returns the joined text beside the rows, in order, skipping events with none", async () => {
+				const events = tokens(12);
+				const client = savedStream({ events, completed: true, capReached: false });
+				const res = await run(client);
+				expect(res.isError).toBeFalsy();
+				const expected = events.map((e) => ("text" in e ? e.text : "")).join("");
+				expect(res.structuredContent).toMatchObject({ text: expected, eventCount: 12 });
+				expect((res.structuredContent as { events: unknown[] }).events).toHaveLength(12);
+				expect(executedPayload(client)).toMatchObject({
+					stream: true,
+					streamTextPath: PATH,
+				});
+			});
+
+			// Mutation check: drop the `events !== false` guard in runStreamingRequest
+			// and the rows come back; drop the text and the reply is gone.
+			test("events: false returns the text without the rows, under 1 KB for a 40-token reply", async () => {
+				const events = tokens(40);
+				const client = savedStream({
+					events,
+					completed: true,
+					capReached: false,
+					endReason: "completed",
+					totalEvents: 40,
+				});
+				const res = await run(client, { events: false });
+				expect(res.isError).toBeFalsy();
+				const out = res.structuredContent as Record<string, unknown>;
+				expect(out).not.toHaveProperty("events");
+				expect(out.text).toBe(events.map((e) => ("text" in e ? e.text : "")).join(""));
+				expect(out).toMatchObject({ eventCount: 40, totalEvents: 40, completed: true });
+				expect(firstText(res).length).toBeLessThan(1024);
+			});
+
+			// Mutation check: emit `text` unconditionally and this fails.
+			test("a request with no path has no `text` key at all, not an empty one", async () => {
+				const client = savedStream(
+					{ events: [{ event: "tick", data: "1" }], completed: true, capReached: false },
+					{ streamTextPath: undefined }
+				);
+				const res = await run(client);
+				expect(res.structuredContent).not.toHaveProperty("text");
+				expect(res.structuredContent).toHaveProperty("events");
+				const rowless = await run(client, { events: false });
+				expect(rowless.structuredContent).not.toHaveProperty("text");
+				expect(rowless.structuredContent).not.toHaveProperty("events");
+				expect(rowless.structuredContent).toMatchObject({ eventCount: 1 });
+			});
+
+			test("a declared path that read nothing yet is an empty reply", async () => {
+				const client = savedStream({ events: [], completed: false, capReached: false });
+				const res = await run(client);
+				expect(res.structuredContent).toMatchObject({ text: "", budgetExhausted: true });
+			});
+
+			test("a capped read carries the reply read so far, and says it was capped", async () => {
+				const client = savedStream({
+					events: tokens(3),
+					completed: false,
+					capReached: true,
+				});
+				const res = await run(client, { events: false, maxStreamEvents: 3 });
+				expect(res.structuredContent).toMatchObject({
+					text: "t0 t1 t2 ",
+					capReached: true,
+					completed: false,
+				});
+			});
+
+			// Mutation check: set `payload.stream` directly in run_request and the
+			// path rides a buffered send, which the engine answers with a 400.
+			test("an explicit stream: false drops the path the compose carried", async () => {
+				const client = savedStream({ events: [], completed: true, capReached: false });
+				const res = await run(client, { stream: false });
+				expect(res.isError).toBeFalsy();
+				const sent = executedPayload(client);
+				expect(sent).toMatchObject({ stream: false });
+				expect(sent).not.toHaveProperty("streamTextPath");
+				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+			});
+
+			test("`events` is declared on run_request alone and is boolean", () => {
+				const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema.events;
+				expect(schema.safeParse(false).success).toBe(true);
+				expect(schema.safeParse("no").success).toBe(false);
+				expect(schema.description).toMatch(/streamTextPath/);
+			});
+
+			const executedPayload = (client: EngineClient) =>
+				(client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+					string,
+					unknown
+				>;
+		});
+
 		test("the tool description names its bounds before the payload", () => {
 			const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema as Record<
 				string,
@@ -10666,6 +10862,26 @@ describe("dispatchTool", () => {
 		};
 		expect(await sent({})).toMatchObject({ stream: true });
 		expect(await sent({ stream: false })).toMatchObject({ stream: false });
+	});
+
+	// Mutation check: assign `payload.stream` bare in start_load_run and the
+	// stored path rides a buffered run, which POST /runs refuses.
+	test("start_load_run keeps a stored stream text path beside stream, and drops it when stream is forced off (#3773)", async () => {
+		const sent = async (extra: Record<string, unknown>) => {
+			const client = savedRequestClient({ stream: true, streamTextPath: "$.delta.text" });
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true, ...extra },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+		expect(await sent({})).toMatchObject({ stream: true, streamTextPath: "$.delta.text" });
+		expect(await sent({ stream: true })).toMatchObject({ streamTextPath: "$.delta.text" });
+		const buffered = await sent({ stream: false });
+		expect(buffered).toMatchObject({ stream: false });
+		expect(buffered).not.toHaveProperty("streamTextPath");
 	});
 
 	test("start_load_run composes a saved request; the chain's assertions fold into `requestElements`", async () => {
@@ -19832,6 +20048,35 @@ describe("secret withholding", () => {
 		]);
 		const revealed = await read("run_request", client, { ...ALLOW_API, ...REVEAL }, args);
 		expect(revealed.body.events).toEqual(events);
+	});
+
+	// Mutation check: return the joined text without `withhold` and it carries
+	// the secret, which no row reveals once the reply is split across events.
+	test("run_request masks a streamed run's text, joined across events, unless revealed", async () => {
+		const events = [
+			{ event: "token", data: "{}", text: "key glob-" },
+			{ event: "token", data: "{}", text: "secret-1 ok" },
+		];
+		const client = runClient({
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://api.example.com/v1",
+				stream: true,
+				streamTextPath: "$.t",
+			}),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+			consumeStreamEvents: vi
+				.fn()
+				.mockResolvedValue({ events, completed: true, capReached: false }),
+		});
+		const args = { requestId: "req_1", events: false };
+		const withheld = await read("run_request", client, ALLOW_API, args);
+		expect(withheld.body.text).toBe("key <redacted> ok");
+		expect(withheld.body).not.toHaveProperty("events");
+		const revealed = await read("run_request", client, { ...ALLOW_API, ...REVEAL }, args);
+		expect(revealed.body.text).toBe("key glob-secret-1 ok");
 	});
 
 	const RUN_REPORT = {

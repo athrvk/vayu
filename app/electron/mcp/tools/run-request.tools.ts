@@ -42,6 +42,7 @@ import {
 	asMcpSend,
 	runStreamingRequest,
 	scriptElement,
+	setStreamFlag,
 } from "./compose.js";
 import {
 	authInput,
@@ -51,6 +52,7 @@ import {
 	elementSchema,
 	ENGINE_DEFAULT_HEADERS_SENTENCE,
 	environmentIdInput,
+	eventsInput,
 	INSECURE_TLS_REFUSAL,
 	maxStreamEventsInput,
 	requestHeadersInput,
@@ -252,6 +254,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			stream: streamInput,
 			maxStreamEvents: maxStreamEventsInput,
 			streamBudgetMs: streamBudgetMsInput,
+			events: eventsInput,
 		},
 		handler: async (args, ctx, signal) => {
 			// Before anything is composed, let alone sent: a refusal that arrived
@@ -318,7 +321,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			// engine default. The same rule both app clients follow for
 			// `followRedirects`.
 			const streaming = streamsThisSend(args, payload, sendsSaved);
-			payload.stream = streaming;
+			setStreamFlag(payload, streaming);
 			// Beside `stream` so both transports carry it: with write access off,
 			// what a script or extractor sets stays within this send (#1904).
 			if (!ctx.config.allowWrites) payload.persistVariables = false;

@@ -69,7 +69,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		retry: { check: "list_requests", noun: "request" },
 		invalidates: ["request"],
 		description: (config) =>
-			"Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app's builder stores except form-data file parts. " +
+			"Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, stream text path, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app's builder stores except form-data file parts. " +
 			GUARDED_WRITE_SENTENCE +
 			'. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.' +
 			withheldPointer(config),
@@ -171,7 +171,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		invalidates: ["request"],
 		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, stream text path, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
 			GUARDED_WRITE_SENTENCE +
 			". Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running." +
 			withheldPointer(config),
@@ -292,7 +292,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
+					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, streamTextPath, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
 					"input"
 				);
 			}
