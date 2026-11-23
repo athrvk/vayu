@@ -30,6 +30,7 @@ import type { TimeRow } from "@/lib/time-value";
 import {
 	ENGINE_COST_TIP,
 	SCRIPT_TIME_TIP,
+	elapsedBetween,
 	formatResponseTime,
 	isReportedMs,
 	responseSizeTip,
@@ -112,8 +113,12 @@ export interface ResponseStatusBarProps {
 	 * finished for as long as the stream kept going. Omitted entirely on a
 	 * response that is not a live stream - a chip present on every response is a
 	 * chip nobody reads.
+	 *
+	 * `sentAt` (epoch ms) is when the stream started: with it, the time slot
+	 * counts up from there instead of showing `time`, which a stream has not
+	 * settled and holds at 0 (#3775).
 	 */
-	streaming?: { events: number };
+	streaming?: { events: number; sentAt?: number };
 	/**
 	 * What checking this response against its declared schema found (issue
 	 * #628). Absent for a request whose collection binds no OpenAPI document -
@@ -126,6 +131,20 @@ export interface ResponseStatusBarProps {
 /** Scripts are worth a place on the bar only once they outweigh the transfer. */
 function scriptsDominate(scriptMs?: number, wireMs?: number): scriptMs is number {
 	return isReportedMs(scriptMs) && isReportedMs(wireMs) && scriptMs > wireMs;
+}
+
+/**
+ * The time since @p sentAt, recomputed on its own interval so only this text
+ * re-renders on a tick. The interval is torn down with the component, which
+ * is when the stream ends and the bar reverts to `time`.
+ */
+function ElapsedClock({ sentAt }: { sentAt: number }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const id = setInterval(() => setNow(Date.now()), TIMING.STREAM_CLOCK_TICK_MS);
+		return () => clearInterval(id);
+	}, []);
+	return <>{formatResponseTime(elapsedBetween(sentAt, now) ?? 0)}</>;
 }
 
 export function ResponseStatusBar({
@@ -244,7 +263,13 @@ export function ResponseStatusBar({
 			{time !== undefined && (
 				<div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
 					<Clock className="size-icon-sm" />
-					<span className="tabular-nums">{formatResponseTime(time)}</span>
+					<span className="tabular-nums">
+						{streaming?.sentAt !== undefined ? (
+							<ElapsedClock sentAt={streaming.sentAt} />
+						) : (
+							formatResponseTime(time)
+						)}
+					</span>
 					{/* Plain text, no `bg-`: see the variant="chip" rule in badge-hover.test.tsx. */}
 					{isReportedMs(engineMs) && (
 						<span className="tabular-nums" title={ENGINE_COST_TIP}>

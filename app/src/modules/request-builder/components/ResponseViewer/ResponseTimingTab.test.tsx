@@ -222,4 +222,28 @@ describe("ResponseTimingTab", () => {
 			expect(await tipFor("TTFB")).toBe(PHASE_TIPS.ttfb);
 		});
 	});
+
+	describe("first event of a stream (#3775)", () => {
+		it("states the time to the first event beside the total", async () => {
+			renderTab({ timing: sample, firstEventMs: 1500 });
+
+			// Mutation check: drop the `firstEventMs` row and the figure a stream's
+			// reader wants (TTFB reads the headers, not the first token) is gone.
+			const label = screen.getByText("First event");
+			expect(label.parentElement?.textContent).toBe("First event1.50s");
+			expect(await tipFor("First event")).toMatch(/first event of the stream arrived/);
+		});
+
+		it("is absent for a response that is not a stream, or has no first event yet", () => {
+			renderTab({ timing: sample });
+			expect(screen.queryByText("First event")).not.toBeInTheDocument();
+		});
+
+		it("keeps a first event that arrived in the same instant as the send", () => {
+			renderTab({ timing: sample, firstEventMs: 0 });
+			expect(screen.getByText("First event").parentElement?.textContent).toBe(
+				"First event0ms"
+			);
+		});
+	});
 });

@@ -59,6 +59,13 @@ interface SendSnapshot {
 	sent: ExampleSentRequest | null;
 	/** The draft elements the Send left out of its payload (#3066). */
 	leftOut: LeftOutElement[];
+	/**
+	 * Epoch ms the stream was started at (#3775): the zero of the Events rows'
+	 * offsets, the status bar's clock and the Timing tab's first event. Null for
+	 * a stream not started in this session; the stored run carries no start the
+	 * app could subtract from an event's `receivedAt` without error.
+	 */
+	sentAt: number | null;
 }
 
 /** A run whose live feed was dropped for another request's stream. */
@@ -116,6 +123,8 @@ interface ExecutionEventsState {
 	leftOut: LeftOutElement[];
 	/** This stream's Send snapshot (#1763), attached to its stored response. */
 	sent: ExampleSentRequest | null;
+	/** When the stream started, epoch ms; see {@link SendSnapshot.sentAt}. */
+	sentAt: number | null;
 	/** Claimed by this stream's finalisation: the report is being fetched or has landed. */
 	finalized: boolean;
 	/**
@@ -208,6 +217,7 @@ const EMPTY = {
 	error: null,
 	leftOut: [],
 	sent: null,
+	sentAt: null,
 	finalized: false,
 } satisfies StreamFields;
 
@@ -223,7 +233,13 @@ function displacedByHandOver(
 		return s.displaced;
 	}
 	// The snapshot travels with the run: its finalisation is still owed.
-	return { requestId: s.requestId, runId: s.runId, sent: s.sent, leftOut: s.leftOut };
+	return {
+		requestId: s.requestId,
+		runId: s.runId,
+		sent: s.sent,
+		sentAt: s.sentAt,
+		leftOut: s.leftOut,
+	};
 }
 
 /** `replacedFeeds` once a stream for `requestId` has started over `s.displaced`. */
@@ -232,8 +248,8 @@ function feedsAfterStart(
 	requestId: string | null
 ): ExecutionEventsState["replacedFeeds"] {
 	if (!s.displaced || s.displaced.requestId === requestId) return s.replacedFeeds;
-	const { requestId: owner, runId, sent, leftOut } = s.displaced;
-	return { ...s.replacedFeeds, [owner]: { runId, sent, leftOut, finalized: false } };
+	const { requestId: owner, runId, sent, sentAt, leftOut } = s.displaced;
+	return { ...s.replacedFeeds, [owner]: { runId, sent, sentAt, leftOut, finalized: false } };
 }
 
 /** The request whose replaced feed is `runId`, if one is. */
@@ -250,12 +266,18 @@ function claimableRun(
 	if (s.runId === runId) {
 		// A live stream is never finalized; its `complete` frame comes first.
 		if (!s.requestId || !s.endReason || s.finalized) return null;
-		return { requestId: s.requestId, runId, sent: s.sent, leftOut: s.leftOut };
+		return {
+			requestId: s.requestId,
+			runId,
+			sent: s.sent,
+			sentAt: s.sentAt,
+			leftOut: s.leftOut,
+		};
 	}
 	const owner = replacedOwnerOf(s, runId);
 	const feed = owner ? s.replacedFeeds[owner] : undefined;
 	if (!owner || !feed || feed.finalized) return null;
-	return { requestId: owner, runId, sent: feed.sent, leftOut: feed.leftOut };
+	return { requestId: owner, runId, sent: feed.sent, sentAt: feed.sentAt, leftOut: feed.leftOut };
 }
 
 /** The state with `runId`'s finalisation claim set or given back, wherever it is held. */
@@ -296,6 +318,7 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set, get) =
 			eventsUrl,
 			leftOut,
 			sent: sent ?? null,
+			sentAt: Date.now(),
 			isStreaming: true,
 			displaced: null,
 			replacedFeeds: feedsAfterStart(s, requestId),
