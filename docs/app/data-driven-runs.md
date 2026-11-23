@@ -264,6 +264,36 @@ _outside_ a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
 a number arrives as a number: a JSON file's, or a CSV cell read as one. A cast
 `1.50` binds as `1.5` either way; inside quotes it is the text `"1.5"`.
 
+An **MCP** request follows the same rule as a JSON and a JSON-RPC body: all
+three bind a token the way a JSON document wants it. Put the token in the call's
+`params.arguments`:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "execute_sql",
+    "arguments": { "region": "{{data.region}}", "query": "{{data.q}}" }
+  }
+}
+```
+
+With a row whose `q` is `SELECT "a" FROM t`, the server receives a call whose
+`query` is that text, quotes intact. Only the body is bound; the `Mcp-*` headers
+are then written from the bound call, so they follow the row. `Mcp-Name` is the
+row's `params.name`, and each `x-mcp-header` annotation of the request's tool
+becomes an `Mcp-Param-*` header carrying the row's argument, as a
+`=?base64?...?=` value when it is not plain printable ASCII (a cell such as
+`é-ü`). Three consequences:
+
+- A templated `params.name` that comes out different from the tool the request
+  stores (`mcpTool.name`) sends no `Mcp-Param-*` header for that row, since the
+  stored annotations describe another tool. `Mcp-Name` still names the row's tool.
+- The headers a trace records are what was sent, bound cells included and not
+  redacted, as for any other header.
+- An assertion reads the final JSON-RPC response whether the server answered with
+  one JSON object or an event stream, on every row.
+
 A cell is **safe in an XML body** too, and by a rule that reads the token's
 position rather than one that escapes everything:
 

@@ -2267,6 +2267,13 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     file's unquoted numeric cells as numbers; Vayu never converts the rows, it
     only records the reading, and it is forwarded and refused without rows on
     the same terms. See [Data files](#data-files).
+  - A stored `mcp` request is bound per row like any other: `{{data.column}}` in
+    its `body.content` is escaped as a JSON string, and the wire body and the
+    `Mcp-Method`, `Mcp-Name` and `Mcp-Param-*` headers are derived from the
+    bound call, so each row sends headers that agree with its own body
+    (`tests/scenario_runner_test.cpp`, #3808). `Mcp-Param-*` needs the stored
+    `mcpTool` (see above); a row whose `params.name` differs from `mcpTool.name`
+    sends none.
   - `scenario.iterations` is offered on `run_collection` only. A load run reads
     the **top-level** `iterations` (total passes across all virtual users); the
     in-block count is the design runner's and the load executor never reads it,
