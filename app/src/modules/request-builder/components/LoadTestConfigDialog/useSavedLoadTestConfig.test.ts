@@ -76,6 +76,44 @@ describe("useSavedLoadTestConfig", () => {
 		expect(() => save({ ...profile, ...rest, maxInFlight: null })).not.toThrow();
 	});
 
+	describe("Retry-After back-off (#3782)", () => {
+		const memo = (value: Record<string, unknown>) =>
+			localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(value));
+
+		it("restores off, with the engine's default cap, from a memo that predates it", () => {
+			memo({ rps: 50 });
+			const { initial } = restore();
+			expect(initial.retryAfterBackoff).toBe(false);
+			expect(initial.retryAfterMaxMs).toBe(LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS);
+		});
+
+		it("restores what a past run set, and clamps a cap above the engine's range", () => {
+			memo({ retryAfterBackoff: true, retryAfterMaxMs: 5000 });
+			expect(restore().initial).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 5000,
+			});
+			memo({ retryAfterMaxMs: limits.RETRY_AFTER_MAX_MS.MAX + 1 });
+			expect(restore().initial.retryAfterMaxMs).toBe(limits.RETRY_AFTER_MAX_MS.MAX);
+		});
+
+		it("round-trips through save", () => {
+			const { initial: first, save } = restore();
+			const { profile, carried: _carried, ...rest } = first;
+			save({
+				...profile,
+				...rest,
+				maxInFlight: null,
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 750,
+			});
+			expect(restore().initial).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 750,
+			});
+		});
+	});
+
 	describe("carried budgets (#2194)", () => {
 		const memo = (value: Record<string, unknown>) =>
 			localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(value));

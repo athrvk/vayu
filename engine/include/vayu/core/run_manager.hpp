@@ -996,8 +996,10 @@ struct RunContext {
     mutable std::atomic<size_t> think_reservation_count{ 0 };
 
     /// Reserve one concurrency slot's release for @p wait_ms from now
-    /// (issue #1594). Called from `handle_result` on an event-loop worker
-    /// thread; a non-positive wait reserves nothing.
+    /// (issue #1594): a think timer's wait, or a `Retry-After`'s
+    /// (@ref honour_retry_after, #3782), whichever is longer. Called from
+    /// `submit_to_loop`'s completion on an event-loop worker thread; a
+    /// non-positive wait reserves nothing.
     void reserve_think_wait (int64_t wait_ms) {
         if (wait_ms <= 0) {
             return;
@@ -1056,6 +1058,37 @@ struct RunContext {
         }
         return vayu::core::ElementSkip{ std::string (OPEN_LOOP_TIMER_SKIP_REASON), false };
     }
+
+    /**
+     * `retryAfterBackoff` and `retryAfterMaxMs` (#3782), read once by the
+     * constructor and by both load paths through @ref honour_retry_after. On
+     * a closed loop, a 429 or 503 carrying `Retry-After` holds the virtual
+     * user that received it for that long, capped, before its next request: a
+     * single-request run through @ref reserve_think_wait, a scenario run
+     * through `VirtualUser::ready_at_ms`, each the larger of that wait and the
+     * step's think time. Off by default, because a run that backs off
+     * measures the limiter's rate rather than the target's. An open-loop run
+     * never applies it, for the reason it skips a think timer. Plain members:
+     * written before any thread of the run exists.
+     */
+    bool retry_after_backoff = false;
+    int64_t retry_after_max_ms = constants::run_config::DEFAULT_RETRY_AFTER_MAX_MS;
+
+    /// The sentence of the run's `retry_after_skipped_open_loop` warning.
+    static constexpr std::string_view OPEN_LOOP_RETRY_AFTER_SKIP_REASON =
+    "Retry-After back-off does not apply to a constant-rate run: requests are "
+    "sent on a schedule, not one after another";
+
+    /**
+     * The wait @p response's `Retry-After` asks of the virtual user that
+     * received it, clamped to @ref retry_after_max_ms and counted in
+     * `MetricsCollector::retry_after_waits`. 0 when the option is off, the
+     * run is open-loop, the status is neither 429 nor 503, or the header is
+     * absent, malformed or already past. A run without the option pays one
+     * bool load. Called on an event-loop worker; computes a deadline and
+     * never blocks.
+     */
+    [[nodiscard]] int64_t honour_retry_after (const vayu::Response& response) const;
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
     // Ring capacity in ticks, derived from `liveReplayWindowMs` and this run's
@@ -1294,13 +1327,13 @@ struct RunContext {
         size_t done = total_requests () +
         (metrics_collector ? metrics_collector->cancelled () : 0);
         size_t base = sent > done ? sent - done : 0;
-        // A run with no `timer.think` element (the overwhelming common case)
-        // never reserves one, so this is one relaxed load and nothing else -
-        // see `reserve_think_wait`'s doc comment. Only the single-request path
-        // reserves, and only on a closed loop (#3541): a scenario virtual
-        // user's timer wait must stay out, because the scenario dispatcher
-        // refills while this is under its target and counts a deferred user as
-        // not in flight (#2821).
+        // A run with no `timer.think` element and no Retry-After wait (the
+        // overwhelming common case) never reserves one, so this is one relaxed
+        // load and nothing else - see `reserve_think_wait`'s doc comment.
+        // Only the single-request path reserves, and only on a closed loop
+        // (#3541): a scenario virtual user's timer wait must stay out, because
+        // the scenario dispatcher refills while this is under its target and
+        // counts a deferred user as not in flight (#2821).
         if (think_reservation_count.load (std::memory_order_relaxed) == 0) {
             return base;
         }

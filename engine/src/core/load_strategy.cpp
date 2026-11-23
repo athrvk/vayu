@@ -923,13 +923,15 @@ const ResultAnnotations& annotations) {
  * Runs @p context's `requestElements` `step.after` and `step.between`
  * elements for one completed submission - `step.after` against the response
  * that came back, `step.between` for `timer.think`'s non-blocking wait
- * (issue #1594), reserved on a closed-loop @p context through
- * `reserve_think_wait` rather than applied to a `VirtualUser::ready_at_ms`
- * there is none of here, and skipped on an open-loop one (#3541). Never
- * blocks: this runs on an event-loop worker thread, inside the curl
- * completion drain.
+ * (issue #1594), returned for the caller to reserve on a closed-loop
+ * @p context through `reserve_think_wait` rather than applied to a
+ * `VirtualUser::ready_at_ms` there is none of here; an open-loop one skips
+ * the timer (#3541). Never blocks: this runs on an event-loop worker thread,
+ * inside the curl completion drain.
+ *
+ * @return the think time, in ms, the submission's slot is still owed.
  */
-void run_request_elements_after_submission (const std::shared_ptr<RunContext>& context,
+int64_t run_request_elements_after_submission (const std::shared_ptr<RunContext>& context,
 vayu::Request& request,
 const vayu::Response& response,
 vayu::http::routes::ScopeOverlay& overlay,
@@ -1018,9 +1020,9 @@ const ResultAnnotations& annotations) {
     // `step.between` (issue #1594): `timer.think`'s load-path counterpart to
     // the sequential run's own dispatch, run here instead of blocking a
     // worker thread. There is no `VirtualUser::ready_at_ms` to stamp on a
-    // single-request run's anonymous submissions, so the wait is reserved on
-    // the run itself instead - see `RunContext::reserve_think_wait`. An
-    // open-loop run skips the timer and reserves nothing (#3541). A fresh
+    // single-request run's anonymous submissions, so the caller reserves the
+    // wait on the run itself instead - see `RunContext::reserve_think_wait`.
+    // An open-loop run skips the timer and reserves nothing (#3541). A fresh
     // context, on the same terms `scenario_load.cpp`'s own `run_step_between`
     // builds one: never read or written by a `step.between` kind
     // (`timer.think`) beyond the request it is bound to for `pm.request`.
@@ -1050,14 +1052,17 @@ const ResultAnnotations& annotations) {
         total_wait_ms += outcome.waited_ms.value_or (0);
         context->element_tallies.record (outcome);
     }
-    context->reserve_think_wait (total_wait_ms);
+    return total_wait_ms;
 }
 
 /// Hand @p request to the event loop and account for it, with @p annotations on
 /// whatever record its completion produces. @p sent_request and @p overlay are
 /// non-null only for a submission whose run carries `requestElements` (issue
 /// #1594); non-null, they run `step.after` / `step.between` against the
-/// response before the shared `handle_result` records it.
+/// response before the shared `handle_result` records it. The slot is held
+/// for the longer of the think time and the response's `Retry-After`
+/// (#3782), reserved before `handle_result` counts the completion, so the
+/// controller never sees the slot free in between.
 void submit_to_loop (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const vayu::Request& request,
@@ -1071,9 +1076,14 @@ std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
     [context, &db, annotations, opened_ms, sent_request = std::move (sent_request),
     overlay = std::move (overlay)] (size_t, const vayu::Result<vayu::Response>& result) {
         context->metrics_collector->close_open (opened_ms);
-        if (sent_request && overlay && result.is_ok ()) {
-            run_request_elements_after_submission (
-            context, *sent_request, result.value (), *overlay, annotations);
+        if (result.is_ok ()) {
+            int64_t wait_ms = 0;
+            if (sent_request && overlay) {
+                wait_ms = run_request_elements_after_submission (
+                context, *sent_request, result.value (), *overlay, annotations);
+            }
+            context->reserve_think_wait (
+            std::max (wait_ms, context->honour_retry_after (result.value ())));
         }
         handle_result (context, db, result, annotations);
     });

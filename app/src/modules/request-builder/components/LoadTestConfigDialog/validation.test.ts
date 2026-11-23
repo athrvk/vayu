@@ -13,6 +13,7 @@ import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 import type { ResolvedElement } from "@/types";
 import {
 	DEFAULT_LOAD_TEST_CEILINGS,
+	LOAD_TEST_DEFAULTS,
 	LOAD_TEST_LIMITS,
 	resolveLoadTestLimits,
 } from "@/constants/load-test";
@@ -46,6 +47,8 @@ const validate = (
 		isStreamingRequest: false,
 		limits: LOAD_TEST_LIMITS,
 		slowThreshold: 1000,
+		retryAfterBackoff: false,
+		retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
 		maxInFlight: "",
 	});
 
@@ -60,6 +63,8 @@ const validateStreamBudget = (isStreamingRequest: boolean) =>
 		isStreamingRequest,
 		limits: LOAD_TEST_LIMITS,
 		slowThreshold: 1000,
+		retryAfterBackoff: false,
+		retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
 		maxInFlight: "",
 	});
 
@@ -133,6 +138,8 @@ describe("ceilings from Settings", () => {
 			isStreamingRequest,
 			limits: resolveLoadTestLimits({ ...DEFAULT_LOAD_TEST_CEILINGS, ...ceilings }),
 			slowThreshold,
+			retryAfterBackoff: false,
+			retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
 			maxInFlight,
 		}).profileRangeError;
 
@@ -276,5 +283,40 @@ describe("firstBlockingError", () => {
 		expect(
 			firstBlockingError({ ...NONE, scenarioOnlyError: "pacing", monitoringError: "monitor" })
 		).toBe("monitor");
+	});
+});
+
+describe("the Retry-After wait cap (#3782)", () => {
+	const check = (
+		mode: LoadTestProfile["mode"],
+		retryAfterBackoff: boolean,
+		retryAfterMaxMs: number
+	) =>
+		validateLoadTestDraft({
+			profile: { ...PROFILE, mode },
+			budgets: emptyBudgetDraft(),
+			customBudgets: [],
+			monitor: emptyMonitorDraft(),
+			maxSeries: 10,
+			scenarioOnly: [],
+			isStreamingRequest: false,
+			limits: LOAD_TEST_LIMITS,
+			slowThreshold: 1000,
+			retryAfterBackoff,
+			retryAfterMaxMs,
+			maxInFlight: "",
+		}).profileRangeError;
+
+	it("refuses a cap outside the engine's range once the option is on", () => {
+		expect(check("ramp_up", true, 0)).toContain("Longest Retry-After wait");
+		expect(check("ramp_up", true, 3_600_001)).toContain("3,600,000");
+		expect(check("ramp_up", true, 3_600_000)).toBeNull();
+		expect(check("ramp_up", true, 1)).toBeNull();
+		expect(check("ramp_up", true, 1.5)).toContain("whole");
+	});
+
+	it("ignores a stale cap while the option is off or the mode never shows it", () => {
+		expect(check("ramp_up", false, 0)).toBeNull();
+		expect(check("constant_rps", true, 0)).toBeNull();
 	});
 });

@@ -32,6 +32,8 @@ export interface SavedLoadTestConfig {
 	sampleRate: number;
 	slowThreshold: number;
 	saveTimingBreakdown: boolean;
+	retryAfterBackoff: boolean;
+	retryAfterMaxMs: number;
 	/**
 	 * The stream caps (issue #576), memoed like every other field so a second
 	 * run of the same stream does not have to be re-bounded by hand. Stored
@@ -213,6 +215,13 @@ function restoreConfig(
 		),
 		slowThreshold: saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS,
 		saveTimingBreakdown: saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN,
+		// A memo written before the option existed carries neither key.
+		retryAfterBackoff: saved.retryAfterBackoff ?? LOAD_TEST_DEFAULTS.RETRY_AFTER_BACKOFF,
+		retryAfterMaxMs: restore(
+			saved.retryAfterMaxMs,
+			LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
+			"RETRY_AFTER_MAX_MS"
+		),
 		// Budgets and monitor are merged onto an empty draft rather than swapped
 		// wholesale: a block saved by an older build predates whatever field this
 		// build added since, and `budgetError` / `monitorError` read every

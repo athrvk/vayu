@@ -818,6 +818,16 @@ export interface StartLoadTestRequest {
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	/**
+	 * Hold a virtual user for a 429's or 503's `Retry-After` (capped by
+	 * `retryAfterMaxMs`) before its next request, so the run does not hammer a
+	 * limiter (#3782). Off by default: a run that backs off measures the rate
+	 * the limiter allows. Closed-loop modes only; `constant_rps` skips it with
+	 * a warning.
+	 */
+	retryAfterBackoff?: boolean;
+	/** The longest one wait, 1-3600000 ms; the engine defaults it to 30000. */
+	retryAfterMaxMs?: number;
+	/**
 	 * This run's own step-level elements (issue #1594): the collection chain
 	 * root to leaf, then the request's own, the same resolved list
 	 * {@link ExecuteRequestRequest.elements} carries and `POST /compose`

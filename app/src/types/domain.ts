@@ -1304,6 +1304,13 @@ export interface RunConfigSnapshot {
 	startConcurrency?: number;
 	comment?: string;
 	/**
+	 * Whether the run waited out `Retry-After` (#3782), and the longest wait, in
+	 * ms, as sent. Absent when the option was off, which is what every run before
+	 * it read as. `RunConfigSection` reads both.
+	 */
+	retryAfterBackoff?: boolean;
+	retryAfterMaxMs?: number;
+	/**
 	 * The data file that drove a **load** run (issue #2051): its name and the
 	 * SHA-256 of its bytes, never a path. A collection run keeps the pair inside
 	 * its `scenario` block - read both through `dataFileFromSnapshot`.
@@ -2469,6 +2476,15 @@ export interface LoadTestConfig {
 	success_sample_period?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
+	/**
+	 * Wait out a 429's or 503's `Retry-After` before the virtual user's next
+	 * request (#3782). camelCase because that is the engine's spelling of the
+	 * option. Both keys are absent when the option is off or the mode is
+	 * `constant_rps`, which the engine would only skip with a warning.
+	 */
+	retryAfterBackoff?: boolean;
+	/** The longest such wait, in ms. Present only with `retryAfterBackoff`. */
+	retryAfterMaxMs?: number;
 	comment?: string;
 	latency_percentiles?: number[];
 	max_in_flight?: number;
@@ -3418,6 +3434,8 @@ export interface RunReport {
 		 * `unresolved_tokens`: requests affected. `connection_replayed`: requests
 		 * re-sent. `cookies_dropped`: `Set-Cookie` headers dropped across the run;
 		 * the message states it, a count and never a name.
+		 * `rate_limited_dominant` (#3782): the 429 responses. `retry_after_backoff`:
+		 * the responses whose `Retry-After` a virtual user waited out.
 		 */
 		count?: number;
 		names?: string[];

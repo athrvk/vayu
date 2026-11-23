@@ -1507,6 +1507,10 @@ const vayu::core::MonitorLimits& monitor_limits) {
     "so a negative count is ~1.8e19 requests and a run that never ends." },
     { "rps", 0, limits::MAX_TARGET_RPS, "It is an open-loop arrival rate per second; 0 asks for none." },
     { "targetRps", 0, limits::MAX_TARGET_RPS, "It is an open-loop arrival rate per second; 0 asks for none." },
+    { "retryAfterMaxMs", 1, limits::MAX_RETRY_AFTER_MAX_MS,
+    "It is the longest one virtual user waits on a Retry-After under "
+    "retryAfterBackoff; past an hour it is waiting out a quota, not pacing "
+    "against a limiter." },
     });
     for (const auto& field : fields) {
         if (auto reason = check_numeric_field (config, field)) {
@@ -1527,7 +1531,7 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // mean "use the default", matching the null-vs-absent rule the resource
     // routes follow.
     for (const char* key : { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
-         "stream_metrics", "failOnSchemaError", "stopOnError" }) {
+         "stream_metrics", "failOnSchemaError", "stopOnError", "retryAfterBackoff" }) {
         const auto it = config.find (key);
         if (it != config.end () && !it->is_null () && !it->is_boolean ()) {
             return "'" + std::string (key) + "' must be a boolean (got " +

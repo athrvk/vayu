@@ -519,6 +519,7 @@ add_library(vayu_core STATIC
     src/http/oauth_discovery.cpp
     src/http/oauth_registration.cpp
     src/http/redirect_policy.cpp
+    src/http/retry_after.cpp
     src/http/event_loop.cpp
     src/http/event_loop/curl_callbacks.cpp
     src/http/event_loop/transfer_context.cpp

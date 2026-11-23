@@ -143,6 +143,35 @@ describe("RunWarnings", () => {
 		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
 	});
 
+	// Mutation check: drop a #3782 title and its row reads the generic "did not
+	// do everything it was asked", which a throttled-but-complete run did.
+	it.each([
+		{
+			code: "rate_limited_dominant",
+			title: "Most responses were rate limited",
+			message:
+				"9 of 10 responses were 429 Too Many Requests. Set retryAfterBackoff to back off.",
+			count: 9,
+		},
+		{
+			code: "retry_after_backoff",
+			title: "Virtual users waited out Retry-After",
+			message: "4 responses asked for a Retry-After wait, and each was waited out.",
+			count: 4,
+		},
+		{
+			code: "retry_after_skipped_open_loop",
+			title: "Retry-After back-off skipped on a constant-rate run",
+			message: "Retry-After back-off does not apply to a constant-rate run",
+			count: undefined,
+		},
+	])("titles $code for what the run did, not as a failure", ({ code, title, message, count }) => {
+		const { container } = render(<RunWarnings warnings={[{ code, message, count }]} />);
+		expect(screen.getByText(title)).toBeTruthy();
+		expect(container.textContent).toContain(message);
+		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
+	});
+
 	it("renders one callout per warning when a run carries both", () => {
 		render(
 			<RunWarnings

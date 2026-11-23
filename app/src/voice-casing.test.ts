@@ -69,6 +69,7 @@ const PROPER_NOUNS: readonly { readonly name: string; readonly reason: string }[
 	{ name: "GraphQL", reason: "a protocol name, mixed case by its own spelling" },
 	{ name: "JSONPath", reason: "a query language name, mixed case by its own spelling" },
 	{ name: "Content-Type", reason: "an HTTP header name, spelled as the protocol registers it" },
+	{ name: "Retry-After", reason: "an HTTP header name, spelled as the protocol registers it" },
 	{ name: "Akamai EdgeGrid", reason: "a vendor's authentication scheme" },
 	{ name: "Space Grotesk", reason: "a typeface in constants/appearance.ts" },
 	{ name: "JetBrains Mono", reason: "a typeface in constants/appearance.ts" },

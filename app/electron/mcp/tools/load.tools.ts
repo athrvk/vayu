@@ -50,6 +50,7 @@ import {
 	MAX_REDIRECTS_BOUND,
 	MAX_RESPONSE_SAMPLE_PERIOD,
 	MAX_RESPONSE_SAMPLES_BOUND,
+	MAX_RETRY_AFTER_MAX_MS,
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SUCCESS_SAMPLE_PERIOD,
 	readLoadParams,
@@ -370,6 +371,21 @@ export const LOAD_TOOLS: McpTool[] = [
 				.optional()
 				.describe(
 					"Store the per-phase timing (DNS, connect, TLS, TTFB) of each sampled success, which is what fills the report's timing-breakdown section. Off by default - a breakdown is stored per retained record, so it is the knob that decides whether the run keeps traces at all."
+				),
+			retryAfterBackoff: z
+				.boolean()
+				.optional()
+				.describe(
+					"After a 429 or 503 with Retry-After, that virtual user waits (capped) before its next request; the response still counts, nothing is retried. Off by default: a run that backs off measures the limiter's rate. Closed-loop modes only; constant_rps skips it with a warning."
+				),
+			retryAfterMaxMs: z
+				.number()
+				.int()
+				.min(1)
+				.max(MAX_RETRY_AFTER_MAX_MS)
+				.optional()
+				.describe(
+					`Longest single Retry-After wait, 1-${MAX_RETRY_AFTER_MAX_MS} ms. Default 30000. Read only with \`retryAfterBackoff\`.`
 				),
 			requestId: z
 				.string()
