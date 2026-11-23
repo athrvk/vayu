@@ -2660,8 +2660,8 @@ otherwise; a pattern JavaScript cannot compile is no constraint.
 A **malformed JSONPath** is the one rule no keyword carries (the schema says only
 `type: string`): `JSON_PATH_FIELDS` lists every config string the engine reads
 as one - `assert.jsonpath` and `extract.json`'s `path`, `metric.record`'s
-`source.jsonpath`, and its `source.condition.jsonpath` only while that
-condition's `field` is `jsonpath` - and `isSupportedJsonPath` refuses what
+`source.jsonpath` and `source.eventJsonpath`, and its `source.condition.jsonpath` only while
+that condition's `field` is `jsonpath` - and `isSupportedJsonPath` refuses what
 `parse_json_path` (`engine/src/core/elements/json_path.cpp`) refuses: no leading
 `$`, an empty `.name`, a filter, an unterminated or empty `['name']`, a `[n]`
 that is not a whole integer. The message is "Start with $, then use .name,
@@ -2895,7 +2895,7 @@ accepts an `in` list **or** a `range`; `timer.think` waits `ms` **or**
 `expected` **or** `regex` (the **Exists** mode writes `exists: true` and has no toggle -
 `negate` turns it into "must be absent", while a stored `exists: false` summarizes as
 "<path> does not exist", #3049); `control.throughput` limits by `everyN` **or**
-`percent`; `metric.record`'s `source` reads exactly one of its six keys. The
+`percent`; `metric.record`'s `source` reads exactly one of its seven keys. The
 engine resolves each by an if/else-if chain or a fixed-priority loop and never
 combines two - but JSON Schema declares them as independent optional siblings,
 so the generic form rendered every alternative's fields at once, with nothing
@@ -2915,7 +2915,7 @@ leftover is both unreachable in the UI and, with `additionalProperties: false`
 on all five schemas, a save failure. The chosen mode's own value is kept, not
 reset - switching *to* it is what makes that data visible and editable. The
 picker is the `ToggleGroup` segmented control up to three modes and a compact
-`SelectSettingRow` past that (`metric.record`'s six sources), the split
+`SelectSettingRow` past that (`metric.record`'s seven sources), the split
 `SettingControls.tsx` already draws between a few options a user browses and a
 set that reads as a list. Everything below the picker is still
 `GenericElementForm`, over a subset of the same schema: titles, hints, units,

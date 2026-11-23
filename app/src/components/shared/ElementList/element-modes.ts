@@ -72,7 +72,7 @@ export interface ElementMode {
 export interface ElementModeSpec {
 	/**
 	 * The sub-object the modes live in, when they are not top-level keys.
-	 * `metric.record`'s six sources sit under `source`.
+	 * `metric.record`'s seven sources sit under `source`.
 	 */
 	path?: string;
 	/** Top-level properties rendered above the picker (the mode's subject). */
@@ -157,7 +157,7 @@ export const ELEMENT_MODES: Record<string, ElementModeSpec> = {
 		],
 	},
 
-	// `source_kind` (metric_kinds.cpp) loops the six keys in exactly this
+	// `source_kind` (metric_kinds.cpp) loops the seven keys in exactly this
 	// order and returns the first one present. `name` and `type` are the
 	// metric itself, not the source, so they lead.
 	"metric.record": {
@@ -165,9 +165,18 @@ export const ELEMENT_MODES: Record<string, ElementModeSpec> = {
 		leadNames: ["name", "type"],
 		pickerLabel: "Source",
 		defaultMode: "jsonpath",
-		detectionOrder: ["jsonpath", "header", "latency", "status", "size", "condition"],
+		detectionOrder: [
+			"jsonpath",
+			"eventJsonpath",
+			"header",
+			"latency",
+			"status",
+			"size",
+			"condition",
+		],
 		modes: [
 			{ id: "jsonpath", label: "JSONPath", render: "fields" },
+			{ id: "eventJsonpath", label: "Stream event JSONPath", render: "fields" },
 			{ id: "header", label: "Header", render: "fields" },
 			{ id: "latency", label: "Latency", render: "marker" },
 			{ id: "status", label: "Status code", render: "marker" },

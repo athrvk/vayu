@@ -26,8 +26,8 @@
  *
  * **The picker is a segmented control up to three modes, a dropdown past
  * that** - the split `SettingControls.tsx` already draws between a few options
- * a user browses and a set that reads as a list. `metric.record`'s six sources
- * are the only ones on the far side of it, and six segments would not fit an
+ * a user browses and a set that reads as a list. `metric.record`'s seven sources
+ * are the only ones on the far side of it, and seven segments would not fit an
  * element card's width at any reasonable label length.
  *
  * **The picker's state is the config, not a `useState`.** The mode on screen
