@@ -19,7 +19,11 @@
  * The tool exists for `Mcp-Param-*`: the engine mirrors each argument its
  * `inputSchema` marks `x-mcp-header`. Without a stored tool none is sent, which
  * the note says in that state because nothing else on screen would. The fields
- * are typed by hand; the import path is expected to fill them (#3762).
+ * are typed by hand; importing an MCP server is what will fill them (#3765).
+ *
+ * The schema editor is not a native control, so `LabelledField`'s
+ * `<label for>` cannot name it; the label and the error reach it through a
+ * named group instead, the shape `GenericElementForm`'s map field uses.
  */
 
 import { useState } from "react";
@@ -39,6 +43,7 @@ export interface McpToolFieldsProps {
 }
 
 const NAME_ERROR_ID = "mcp-tool-name-error";
+const SCHEMA_LABEL_ID = "mcp-tool-schema-label";
 const SCHEMA_ERROR_ID = "mcp-tool-schema-error";
 
 export default function McpToolFields({ tool, onToolChange, requestId }: McpToolFieldsProps) {
@@ -90,8 +95,15 @@ export default function McpToolFields({ tool, onToolChange, requestId }: McpTool
 					)}
 				</LabelledField>
 
-				<div className="space-y-2">
-					<p className="text-sm font-medium leading-none">Input schema</p>
+				<div
+					role="group"
+					aria-labelledby={SCHEMA_LABEL_ID}
+					aria-describedby={schemaError ? SCHEMA_ERROR_ID : undefined}
+					className="space-y-2"
+				>
+					<p id={SCHEMA_LABEL_ID} className="text-sm font-medium leading-none">
+						Input schema
+					</p>
 					<div className="h-28 overflow-hidden rounded-md border border-input">
 						<CodeEditor
 							height="100%"

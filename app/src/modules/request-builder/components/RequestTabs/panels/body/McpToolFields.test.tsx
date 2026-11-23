@@ -34,15 +34,21 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	),
 }));
 
-/** The fields over a stored tool the way the panel holds one, with every write recorded. */
+/**
+ * The fields over a stored tool the way the panel holds one, with every write
+ * recorded; `store` is what the round trip makes of a write before it is read
+ * back.
+ */
 function Harness({
 	initial,
 	writes,
 	requestId = "req_1",
+	store = (next) => next,
 }: {
 	initial?: McpTool;
 	writes: Array<McpTool | undefined>;
 	requestId?: string;
+	store?: (next: McpTool | undefined) => McpTool | undefined;
 }) {
 	const [tool, setTool] = useState<McpTool | undefined>(initial);
 	return (
@@ -51,10 +57,25 @@ function Harness({
 			requestId={requestId}
 			onToolChange={(next) => {
 				writes.push(next);
-				setTool(next);
+				setTool(store(next));
 			}}
 		/>
 	);
+}
+
+/** The same JSON value with every object's members in reverse order. */
+function reversed(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(reversed);
+	if (typeof value !== "object" || value === null) return value;
+	return Object.fromEntries(
+		Object.entries(value)
+			.reverse()
+			.map(([key, member]) => [key, reversed(member)])
+	);
+}
+
+function reversedMembers(tool: McpTool | undefined): McpTool | undefined {
+	return tool && (reversed(tool) as McpTool);
 }
 
 const SCHEMA = '{"type":"object","properties":{"region":{"x-mcp-header":"Region"}}}';
@@ -129,6 +150,33 @@ describe("McpToolFields", () => {
 
 		expect(writes).toEqual([]);
 		expect(screen.getByRole("alert")).toHaveTextContent("Name the tool");
+	});
+
+	it("keeps what was typed when the stored schema comes back with its members reordered", () => {
+		const writes: Array<McpTool | undefined> = [];
+		render(<Harness writes={writes} store={reversedMembers} />);
+
+		setName("execute_sql");
+		setSchema(SCHEMA);
+		const edited = '{"type":"object","properties":{"region":{"x-mcp-header":"Zone"}}}';
+		setSchema(edited);
+
+		expect(screen.getByLabelText("MCP tool input schema")).toHaveValue(edited);
+		expect(writes).toEqual([
+			{ name: "execute_sql" },
+			{ name: "execute_sql", inputSchema: JSON.parse(SCHEMA) },
+			{ name: "execute_sql", inputSchema: JSON.parse(edited) },
+		]);
+	});
+
+	it("names the schema editor's group and describes it by the schema's error", () => {
+		render(<Harness writes={[]} initial={{ name: "t" }} />);
+		const group = screen.getByRole("group", { name: "Input schema" });
+		expect(group).not.toHaveAttribute("aria-describedby");
+
+		setSchema("[]");
+
+		expect(group).toHaveAccessibleDescription("The input schema must be a JSON object.");
 	});
 
 	it("takes a tool another writer stored", () => {

@@ -86,5 +86,34 @@ export function readFields(fields: McpToolFields): McpToolReading {
 export function describes(fields: McpToolFields, tool: McpTool | undefined): boolean {
 	const reading = readFields(fields);
 	if (reading.schemaError) return true;
-	return JSON.stringify(reading.tool ?? null) === JSON.stringify(tool ?? null);
+	return sameJson(reading.tool ?? null, tool ?? null);
+}
+
+/**
+ * Two JSON values are the same value whatever order their members were written
+ * in: a stored schema read back from the engine need not keep the order it was
+ * typed in, and a reordering is no edit. An `undefined` member counts as absent,
+ * as it does in `JSON.stringify`.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+	if (Array.isArray(a) || Array.isArray(b)) {
+		return (
+			Array.isArray(a) &&
+			Array.isArray(b) &&
+			a.length === b.length &&
+			a.every((item, i) => sameJson(item, b[i]))
+		);
+	}
+	const left = definedMembers(a);
+	const right = new Map(definedMembers(b));
+	return (
+		left.length === right.size &&
+		left.every(([key, value]) => right.has(key) && sameJson(value, right.get(key)))
+	);
+}
+
+function definedMembers(value: object): Array<[string, unknown]> {
+	return Object.entries(value).filter(([, member]) => member !== undefined);
 }

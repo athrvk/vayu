@@ -90,6 +90,18 @@ describe("describes", () => {
 		expect(describes(fieldsOf({ name: "a" }), undefined)).toBe(false);
 	});
 
+	it("ignores the order a stored schema's members come back in", () => {
+		const typed = { name: "t", schema: JSON.stringify(SCHEMA) };
+		const reordered = {
+			inputSchema: { properties: { region: { "x-mcp-header": "Region" } }, type: "object" },
+			name: "t",
+		};
+		expect(describes(typed, reordered)).toBe(true);
+		expect(
+			describes(typed, { name: "t", inputSchema: { type: "object", properties: {} } })
+		).toBe(false);
+	});
+
 	it("holds a stored tool through half-typed JSON", () => {
 		expect(describes({ name: "t", schema: '{"type":' }, { name: "t" })).toBe(true);
 	});
