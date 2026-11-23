@@ -127,6 +127,19 @@ bool first_event_data_present (const RunSummaryInputs& inputs) {
     return stream && stream->time_to_first_event.count > 0;
 }
 
+/// The report's `stream.timeToFirstMatch.p95` (#3774).
+double measured_first_match_p95 (const RunSummaryInputs& inputs) {
+    const auto& stream = inputs.stream;
+    return stream ? stream->time_to_first_match.p95 : 0.0;
+}
+
+/// No stream's first content marker arrived: none declared one, or the
+/// content never came. Either is no measurement, never a fast one.
+bool first_match_data_present (const RunSummaryInputs& inputs) {
+    const auto& stream = inputs.stream;
+    return stream && stream->time_to_first_match.count > 0;
+}
+
 /// The report's `stream.eventsPerSecond`, through the same derivation.
 double measured_events_per_second (const RunSummaryInputs& inputs) {
     const auto& stream = inputs.stream;
@@ -134,8 +147,8 @@ double measured_events_per_second (const RunSummaryInputs& inputs) {
 }
 
 /// Every budget a run may declare, in the order the report lists them.
-const std::array<ThresholdMetric, 8>& metrics () {
-    static const std::array<ThresholdMetric, 8> table = { {
+const std::array<ThresholdMetric, 9>& metrics () {
+    static const std::array<ThresholdMetric, 9> table = { {
     { "latencyP50Ms", "p50 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
@@ -161,6 +174,9 @@ const std::array<ThresholdMetric, 8>& metrics () {
     0.0, false, MAX_LATENCY_BUDGET_MS, "greater than 0 and at most 86400000",
     "It is a ceiling in milliseconds on a stream's wait for its first event.",
     measured_first_event_p95, first_event_data_present, nullptr },
+    { "streamTimeToFirstMatchP95Ms", "Time to first match p95", Direction::AtMost,
+    0.0, false, MAX_LATENCY_BUDGET_MS, "greater than 0 and at most 86400000", "It is a ceiling in milliseconds on a stream's wait for its first content marker.",
+    measured_first_match_p95, first_match_data_present, nullptr },
     { "streamEventsPerSecondMin", "Events per second", Direction::AtLeast, 0.0,
     false, MAX_THROUGHPUT_BUDGET_RPS, "greater than 0 and at most 1000000000",
     "It is a floor on a streaming run's delivered events per second.",

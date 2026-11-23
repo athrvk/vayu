@@ -310,6 +310,7 @@ constexpr auto BUDGET_METRICS = std::to_array<BudgetMetric> ({
 { "minThroughputRps", "throughput", " req/s", true, format_run_figure },
 { "maxAssertionFailureRatePct", "assertion failures", "%", false, format_run_percent },
 { "streamTimeToFirstEventP95Ms", "time to first event p95", " ms", false, format_run_figure },
+{ "streamTimeToFirstMatchP95Ms", "time to first match p95", " ms", false, format_run_figure },
 { "streamEventsPerSecondMin", "event rate", " events/s", true, format_run_figure },
 });
 
@@ -944,10 +945,11 @@ struct StreamMeasuredColumn {
     std::string_view header;
 };
 
-/// Each a figure, never a count: two are latencies and the rate is
+/// Each a figure, never a count: three are latencies and the rate is
 /// fractional for a slow stream.
 constexpr auto STREAM_MEASURED_COLUMNS = std::to_array<StreamMeasuredColumn> ({
 { "timeToFirstEvent", "Time to first event (ms)" },
+{ "timeToFirstMatch", "Time to first match (ms)" },
 { "maxEventGap", "Largest event gap (ms)" },
 { "eventRate", "Event rate (events/s)" },
 });

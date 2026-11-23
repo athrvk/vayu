@@ -5758,8 +5758,9 @@ The sections, in order:
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
    column, of the time to each stream's first event (`timeToFirstEvent`), then
-   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
-   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   a `Time to first match (ms)` column (`timeToFirstMatch`, #3774), a
+   `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those four columns is left
    off when the document lacks its block, which the engine omits when no
    stream measured it, so a zero never stands for a figure that was not
    measured. A figure the document lacks reads `-`.
@@ -10450,6 +10451,7 @@ its report has no such section at all.
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
     "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
     "streamTimeToFirstEventP95Ms": 800, // ceiling, ms, streaming runs; > 0 and <= 86400000
+    "streamTimeToFirstMatchP95Ms": 900, // ceiling, ms, streams with a first content marker; > 0 and <= 86400000
     "streamEventsPerSecondMin": 200,    // floor, events per second, streaming runs; > 0
     "failRun": true            // a missed budget sets status "failed"; default false
   }
@@ -10515,6 +10517,15 @@ unevaluated when no completion delivered a timed event. It judges the first
 event of any kind, so an API that opens with a preamble event (Anthropic's
 `message_start`, an OpenAI role-only chunk) reads near zero on it and passes
 whatever its first token costs.
+
+`streamTimeToFirstMatchP95Ms` (issue #3774) is the budget for that first
+token: it judges `stream.timeToFirstMatch.p95`, the wait for a request's
+first content marker (`streamFirstContentMarker`), the same figure the report
+prints. It is unevaluated, and so counts toward `failed`, whenever no
+completion's marker arrived: on a run with no `stream` section, on one whose
+requests declare no marker, and on one whose content never came. A
+stream that never matched is no measurement, never a fast one, so this budget
+cannot pass on a run that did not measure it.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
@@ -13039,7 +13050,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
-| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.timeToFirstMatch` (#3774), `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
@@ -14572,6 +14583,7 @@ failure.
   "eventsPerSecond": 320.0,
   "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
   "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 },
+  "timeToFirstMatch": { "p50": 1204.0, "p95": 1388.0, "p99": 1910.0, "max": 2480.0, "count": 476 },
   "maxEventGap": { "p50": 27.1, "p95": 33.8, "p99": 41.0, "max": 312.4, "count": 480 },
   "eventRate": { "p50": 40.0, "p95": 41.2, "p99": 41.9, "max": 42.3, "count": 480 }
 }
@@ -14627,6 +14639,24 @@ target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is
 absent when no completion delivered a timed event.
+
+`timeToFirstMatch` (issue #3774) is the figure for that first token: the
+per-completion distribution, in milliseconds from the same submission, of the
+wait for a request's first content marker (`streamFirstContentMarker`), a
+literal byte string such as `content_block_delta` or `"delta":{"content":"`.
+Each stream is timed at the write that delivered the marker's last byte, on
+the clock `timeToFirstEvent` reads, so the two compare: a preamble API reads
+near zero on the first and its real wait on the second. The match is on the
+stream's wire bytes, not its parsed events: it runs across the SSE framing, so
+a marker can match in an `event:` name or a comment as well as in `data`, and
+a partial match carries across writes however the server chunked them. It is
+not JSON-aware: a marker containing a quote matches only the escaping the
+server writes, which differs between APIs (`"text":"` against one server is
+`"text": "` against another). Only a reply that announced `text/event-stream`
+is scanned, and only until its first match. `count` is the completions whose
+marker arrived; a stream that never matched, and one whose request declared no
+marker, are left out rather than read as 0, and the object is absent when no
+completion matched. It is report-only, with no live counterpart.
 
 `maxEventGap` and `eventRate` (issue #3776) are per-completion distributions
 of how each stream paced its events, in the same `{p50, p95, p99, max, count}`
