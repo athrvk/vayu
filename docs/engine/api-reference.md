@@ -918,9 +918,11 @@ arrive, so an event cut at `sseMaxEventBytes` cannot be read, and the failure
 says so.
 
 **What reads it.** The element pipeline reads the final response in place of
-the body, so `assert.jsonpath`, `assert.contains`, `assert.size`,
-`extract.json`, `extract.regex` and `extract.boundary` address
-`$.result.content[0].text` whatever shape the reply took. Everything else keeps
+the body, so `assert.jsonpath`, `assert.jsonschema`, `assert.contains`,
+`assert.size`, `extract.json`, `extract.regex` and `extract.boundary` address
+`$.result.content[0].text` whatever shape the reply took; an `assert.jsonschema`
+with `source: "jsonpath"` and `path: "$.result.structuredContent"` holds a
+tool's structured result to a JSON Schema. Everything else keeps
 the raw reply: the stored and live `body`, `pm.response.text()` and `json()`,
 `pm.response.events` and the Events view. A reply with no final response
 leaves the elements the raw body.
@@ -1393,7 +1395,7 @@ governs what a run measures rather than what it keeps:
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from any of that run's scripts (inline step scripts, `script.setup` / `script.teardown`, the deferred `tests` script) may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts (a collection run's setup and teardown scripts included) may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
-| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json` or `assert.jsonpath` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all, instead of paying for - or failing on - a parse of an oversized body, and the step does not pass on it: an `assert.jsonpath` fails and a `required` `extract.json` fails the step, both with the reason, while an optional `extract.json` reports `skipped` with it. A body that parses but nests deeper than 100 levels is unreadable the same way, whatever its size, as is one that is not JSON; that depth is fixed, not a setting. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
+| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json`, `assert.jsonpath` or `assert.jsonschema` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all, instead of paying for - or failing on - a parse of an oversized body, and the step does not pass on it: an `assert.jsonpath` or `assert.jsonschema` fails and a `required` `extract.json` fails the step, both with the reason, while an optional `extract.json` reports `skipped` with it. A body that parses but nests deeper than 100 levels is unreadable the same way, whatever its size, as is one that is not JSON; that depth is fixed, not a setting. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
@@ -2586,7 +2588,10 @@ pattern RE2 does not compile (`'pattern' is not a valid regular expression -
 <reason>`, likewise `'regex'` and `'text'`, #3043), an `assert.status` with
 neither a non-empty `in` nor a `range`, an `assert.jsonpath` with none of
 `expected`, `regex` or `exists`, and one that sets `exists` beside `expected` or
-`regex` (#3049), and what the engine would otherwise accept and ignore (#3055): a
+`regex` (#3049), an `assert.jsonschema` whose `schema` is not an object or a
+boolean, whose `source` is `jsonpath` with no `path` (or a `path` beside any other
+`source`), or whose `schema` refers to itself without describing any value
+(#3806), and what the engine would otherwise accept and ignore (#3055): a
 `control.throughput` naming neither or both of `percent` and `everyN`, a
 `timer.think` with no `ms`, `gaussian` or `minMs` + `maxMs` pair, an
 `assert.contains` with an empty `text` in `contains` mode, and an `extract.*`
@@ -2708,7 +2713,7 @@ Every property of every kind's `configSchema` carries a `title` and a `descripti
 or `x-vayu-unit` (`"ms"`, `"%"` or `"B"`, a numeric suffix to render) - see
 [Elements](elements.md#schema-annotations). A property the engine gives a value when its key is
 absent also carries `default` (issue #3045), taken from the constant the kind reads - `assert.size`
-`op` is `"lte"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput`
+`op` is `"lte"`, `assert.jsonschema` `source` is `"body"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput`
 `perUser` are `true`, `timer.throughput` `perUser` is `false`. An absent key means that default; a
 client shows it without writing the key.
 

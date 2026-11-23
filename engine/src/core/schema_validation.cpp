@@ -926,6 +926,16 @@ validate_document_against_schema (const nlohmann::json& schema, const nlohmann::
     return run_validator (schema, nlohmann::json::object (), document);
 }
 
+std::string unevaluated_keywords_disclosure (const ValidationVerdict& verdict) {
+    std::string list;
+    for (const auto& [keyword, count] : verdict.unevaluated_keywords) {
+        list += (list.empty () ? "" : ", ") + std::format ("{} ({})", keyword, count);
+    }
+    return "uses keywords the draft-07 validator does not evaluate, so they "
+           "were not checked: " +
+    list;
+}
+
 /**
  * The responses one indexed operation declares.
  *

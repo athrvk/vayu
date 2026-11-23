@@ -7,10 +7,11 @@
 
 /**
  * @file assert_kinds.cpp
- * @brief `assert.status`, `assert.jsonpath`, `assert.contains`,
- *        `assert.duration`, `assert.size` (issue #1514).
+ * @brief `assert.status`, `assert.jsonpath`, `assert.jsonschema`,
+ *        `assert.contains`, `assert.duration`, `assert.size` (issue #1514;
+ *        `assert.jsonschema` #3806).
  *
- * All five run in `step.after` and report through the same channel a `pm.test`
+ * All six run in `step.after` and report through the same channel a `pm.test`
  * call does: one `TestResult` appended to `ElementContext::post_script_result`
  * regardless of the verdict, so `classify_step`'s `describe_failed_tests` and
  * the SSE frame's `tests` tally count a declarative assertion exactly as they
@@ -20,6 +21,7 @@
 
 #include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/http/request_composer.hpp"
 
 #include <algorithm>
@@ -354,6 +356,136 @@ class AssertJsonPathElement final : public Element {
 };
 
 // ---------------------------------------------------------------------------
+// assert.jsonschema (#3806) - the body, or the first value a JSONPath finds in
+// it, against a JSON Schema, through the validator `pm.response.to.have
+// .jsonSchema` and the OpenAPI contracts share. That validator is draft-07: a
+// keyword it does not evaluate fails the assertion naming it, because a pass
+// would read as "the contract held" when part of it went unread.
+// ---------------------------------------------------------------------------
+
+/// One failure as the message lists it: where, then what.
+std::string schema_failure_line (const SchemaFailure& failure) {
+    return std::format ("{}: {}",
+    failure.path.empty () ? "the root" : failure.path, failure.message);
+}
+
+/// The failures the verdict kept, then how many the validator's cap left out.
+std::string schema_failure_list (const ValidationVerdict& verdict) {
+    std::string list;
+    for (const auto& failure : verdict.failures) {
+        list += (list.empty () ? "" : "; ") + schema_failure_line (failure);
+    }
+    const size_t omitted = verdict.failures_total - verdict.failures.size ();
+    if (omitted > 0) {
+        list += std::format (" ({} more)", omitted);
+    }
+    return list;
+}
+
+/// Why @p verdict is not a pass, or nothing when it is one. A verdict that
+/// names unevaluated keywords is never a pass, whichever way the checked part
+/// went: ignored, such a keyword makes the schema looser than its author wrote.
+std::optional<std::string> schema_verdict_failure (const ValidationVerdict& verdict,
+const std::string& subject) {
+    if (!verdict.unevaluated_keywords.empty ()) {
+        std::string message = "the schema " + unevaluated_keywords_disclosure (verdict);
+        if (!verdict.valid && !verdict.failures.empty ()) {
+            message += "; of what was checked, the first failure is " +
+            schema_failure_line (verdict.failures.front ());
+        }
+        return message;
+    }
+    if (verdict.valid) {
+        return std::nullopt;
+    }
+    return std::format ("expected {} to match the schema, but it fails: {}",
+    subject, schema_failure_list (verdict));
+}
+
+bool reads_a_jsonpath (const nlohmann::json& config) {
+    return string_member (config, "source") == "jsonpath";
+}
+
+/// What `assert.jsonschema`'s config leaves it nothing to judge with: no schema
+/// to hold the value to, or a path that is missing, outside the subset, or
+/// written beside a `source` that never reads it.
+std::optional<std::string> assert_jsonschema_shape_problem (const nlohmann::json& config) {
+    const auto schema = config.find ("schema");
+    if (schema == config.end () || !(schema->is_object () || schema->is_boolean ())) {
+        return "'schema' is required and must be a JSON Schema object (or true "
+               "or false)";
+    }
+    if (!reads_a_jsonpath (config)) {
+        if (config.contains ("path")) {
+            return "'path' is only read when 'source' is 'jsonpath'";
+        }
+        return std::nullopt;
+    }
+    if (!config.contains ("path")) {
+        return "'path' is required when 'source' is 'jsonpath' - name the "
+               "value to check, for an MCP tool result "
+               "$.result.structuredContent";
+    }
+    return detail::json_path_problem (config, "path", "path");
+}
+
+class AssertJsonSchemaElement final : public Element {
+    public:
+    explicit AssertJsonSchemaElement (nlohmann::json config)
+    : config_ (std::move (config)) {
+        if (reads_a_jsonpath (config_)) {
+            path_ = detail::parse_json_path (string_member (config_, "path"));
+        }
+    }
+
+    [[nodiscard]] Phase phase () const override {
+        return Phase::StepAfter;
+    }
+
+    void apply (ElementContext& ctx) override {
+        const std::string path_text = string_member (config_, "path");
+        const std::string subject =
+        reads_a_jsonpath (config_) ? "'" + path_text + "'" : "the body";
+        const std::string name = subject + " matches the JSON Schema";
+        if (const auto problem = assert_jsonschema_shape_problem (config_)) {
+            record_unrunnable_assertion (ctx, name, "assert.jsonschema: " + *problem);
+            return;
+        }
+        const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
+        if (body == nullptr) {
+            record_assertion (ctx, name, false,
+            std::string (constants::elements::BODY_UNREADABLE_MESSAGE));
+            return;
+        }
+        const nlohmann::ordered_json* judged = body;
+        if (path_) {
+            const auto matches = detail::evaluate_json_path (*body, *path_);
+            if (matches.empty ()) {
+                record_assertion (ctx, name, false,
+                "expected " + subject + " to match the schema, but the path has no match");
+                return;
+            }
+            judged = matches.front ();
+        }
+        // Converted: the validator reads a `nlohmann::json`, and the body was
+        // parsed ordered so a path's wildcard visits members in the body's order.
+        const auto verdict = validate_document_against_schema (
+        config_.at ("schema"), nlohmann::json (*judged));
+        if (!verdict) {
+            record_unrunnable_assertion (
+            ctx, name, "the schema could not be read: " + verdict.error ());
+            return;
+        }
+        const auto failure = schema_verdict_failure (*verdict, subject);
+        record_assertion (ctx, name, !failure, failure.value_or (""));
+    }
+
+    private:
+    nlohmann::json config_;
+    std::optional<std::vector<detail::JsonPathStep>> path_;
+};
+
+// ---------------------------------------------------------------------------
 // assert.contains - `field` (body | headers | url | status), `text`, `mode`
 // (contains | equals | matches), `negate`.
 // ---------------------------------------------------------------------------
@@ -555,6 +687,19 @@ std::optional<std::string> assert_jsonpath_problem (const nlohmann::json& config
     return user_regex_problem (config, "regex", "regex");
 }
 
+/// The shape problems, then a schema whose `$ref`s loop without reaching a
+/// value, which the validator would refuse on every run.
+std::optional<std::string> assert_jsonschema_problem (const nlohmann::json& config) {
+    if (auto problem = assert_jsonschema_shape_problem (config)) {
+        return problem;
+    }
+    const auto& schema = config.at ("schema");
+    if (const auto loop = find_schema_loop (schema, nlohmann::json::object ())) {
+        return "'schema' refers to itself without describing any value (" + *loop + ")";
+    }
+    return std::nullopt;
+}
+
 /// `matches` reads `text` as a pattern (an empty one is a valid match-anything
 /// pattern, so it stays accepted); `equals` against "" asks for an empty
 /// subject, which is a judgement. Only `contains` finds "" in every subject,
@@ -653,6 +798,48 @@ ElementKind make_assert_jsonpath_kind () {
         "Flips the assertion's pass/fail verdict. A response "
         "body that cannot be read as JSON fails it either way." } } } } },
         { "required", nlohmann::json::array ({ "path" }) },
+        { "additionalProperties", false },
+    };
+    return kind;
+}
+
+ElementKind make_assert_jsonschema_kind () {
+    ElementKind kind;
+    kind.kind    = "assert.jsonschema";
+    kind.version = 1;
+    kind.phases  = { Phase::StepAfter };
+    kind.label   = "Assert JSON Schema";
+    kind.description =
+    "Fails the step unless the response body, or the value a JSONPath finds in "
+    "it, conforms to a JSON Schema.";
+    kind.category = "assert";
+    kind.hot_path = HotPathClass::Declarative;
+    kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
+        return std::make_unique<AssertJsonSchemaElement> (config);
+    };
+    kind.validate_config = assert_jsonschema_problem;
+    kind.config_schema   = {
+        { "type", "object" },
+        { "properties",
+        { { "source",
+          { { "type", "string" }, { "enum", { "body", "jsonpath" } },
+          { "default", element_defaults::ASSERT_JSONSCHEMA_SOURCE }, { "title", "Check" },
+          { "description",
+          "What the schema judges: the whole response body, or the first "
+          "value a JSONPath finds in it." } } },
+        { "path",
+        { { "type", "string" }, { "title", "JSONPath" },
+        { "description",
+        "Locates the value to check when the source is a JSONPath, e.g. "
+        "$.result.structuredContent for an MCP tool result. The first "
+        "match is checked, and no match fails the assertion." } } },
+        { "schema",
+        { { "title", "JSON Schema" },
+        { "description",
+        "The schema the value must conform to: an object, or true / false. "
+        "Draft-07 is evaluated; a keyword from a later draft is not, and "
+        "a schema that uses one fails the assertion naming it." } } } } },
+        { "required", nlohmann::json::array ({ "schema" }) },
         { "additionalProperties", false },
     };
     return kind;

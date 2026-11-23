@@ -449,4 +449,16 @@ find_schema_loop (const nlohmann::json& schema, const nlohmann::json& ref_roots)
 [[nodiscard]] std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots);
 
+/**
+ * @brief The sentence a script or a declarative assertion gives for a verdict
+ *        whose schema used keywords the validator did not evaluate: `uses
+ *        keywords the draft-07 validator does not evaluate, so they were not
+ *        checked: unevaluatedProperties (2), prefixItems (1)`.
+ *
+ * One copy for `pm.response.to.have.jsonSchema` and `assert.jsonschema`, so the
+ * dialect disclosure reads the same wherever a verdict reaches a person. Call
+ * it only for a verdict with `unevaluated_keywords`; it names nothing otherwise.
+ */
+[[nodiscard]] std::string unevaluated_keywords_disclosure (const ValidationVerdict& verdict);
+
 } // namespace vayu::core

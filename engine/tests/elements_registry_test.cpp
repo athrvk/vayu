@@ -338,6 +338,70 @@ TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCanRunIsAccepted) {
 }
 
 // ---------------------------------------------------------------------------
+// assert.jsonschema (#3806). Mutation check: drop its `validate_config` and
+// every refusal below is accepted.
+// ---------------------------------------------------------------------------
+
+TEST_F (ElementsRegistryTest, AnAssertJsonSchemaThatCannotRunIsRefusedNamingTheField) {
+    struct Refused {
+        json config;
+        std::string field;
+    };
+    const json simple                = { { "type", "object" } };
+    const std::vector<Refused> cases = {
+        { json::object (), "is required" },
+        { { { "schema", "{}" } }, "'schema' is required and must be a JSON Schema object" },
+        { { { "schema", json::array () } }, "'schema' is required and must be a JSON Schema object" },
+        { { { "schema", nullptr } }, "'schema' is required and must be a JSON Schema object" },
+        { { { "source", "jsonpath" }, { "schema", simple } },
+        "'path' is required when 'source' is 'jsonpath'" },
+        { { { "source", "jsonpath" }, { "path", "$[?(@.a)]" }, { "schema", simple } },
+        "not a supported JSONPath" },
+        { { { "path", "$.a" }, { "schema", simple } },
+        "'path' is only read when 'source' is 'jsonpath'" },
+        { { { "source", "body" }, { "path", "$.a" }, { "schema", simple } },
+        "'path' is only read when 'source' is 'jsonpath'" },
+        { { { "schema", { { "$ref", "#" } } } }, "'schema' refers to itself" },
+        { { { "schema",
+          { { "allOf", json::array ({ { { "$ref", "#/definitions/x" } } }) },
+          { "definitions",
+          { { "x", { { "allOf", json::array ({ { { "$ref", "#/definitions/x" } } }) } } } } } } } },
+        "'schema' refers to itself" },
+        // The schema's own errors stay the schema's.
+        { { { "source", "xml" }, { "schema", simple } }, "item 1" },
+        { { { "schema", simple }, { "schemaRef", "x" } }, "item 1" },
+    };
+    for (const auto& [config, field] : cases) {
+        const auto reason = validate_entry (entry_of ("assert.jsonschema", config));
+        ASSERT_HAS_VALUE (reason) << config.dump ();
+        EXPECT_NE (reason->find (field), std::string::npos)
+        << config.dump () << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, AnAssertJsonSchemaThatCanRunIsAccepted) {
+    const json simple               = { { "type", "object" } };
+    const std::vector<json> configs = {
+        { { "schema", simple } },
+        { { "source", "body" }, { "schema", simple } },
+        { { "schema", true } },
+        { { "schema", false } },
+        { { "source", "jsonpath" }, { "path", "$.result.structuredContent" },
+        { "schema", simple } },
+        // A recursive schema is a pointer that resolves, not a loop.
+        { { "schema",
+        { { "type", "object" }, { "properties", { { "child", { { "$ref", "#" } } } } } } } },
+        // A keyword the validator ignores is written, and disclosed at run time.
+        { { "schema", { { "unevaluatedProperties", false } } } },
+    };
+    for (const auto& config : configs) {
+        const auto reason = validate_entry (entry_of ("assert.jsonschema", config));
+        EXPECT_FALSE (reason.has_value ())
+        << config.dump () << ": " << reason.value_or ("");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // A setting the engine accepted and then ignored is refused naming the field
 // (#3055). Mutation check: drop the `validate_config` of `control.throughput`,
 // `timer.think` or `assert.contains`, or `variable_name_problem` from an
@@ -586,6 +650,7 @@ TEST_F (ElementsRegistryTest, TheCatalogueDeclaresTheDefaultEachKindRuns) {
         { "assert.contains", "mode", "contains" },
         { "assert.contains", "negate", false },
         { "assert.jsonpath", "negate", false },
+        { "assert.jsonschema", "source", "body" },
         { "extract.json", "scope", "collection" },
         { "extract.regex", "scope", "collection" },
         { "extract.header", "scope", "collection" },
