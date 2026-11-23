@@ -41,6 +41,7 @@ import {
 } from "@/lib/elements";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
+import { resolvesVariables } from "./variable-fields";
 import { ElementList } from "./index";
 import { GenericElementForm } from "./GenericElementForm";
 import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
@@ -236,6 +237,35 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 				}
 			}
 		}
+	});
+
+	it("resolves variables only in properties the live catalogue declares, and says so in their hint", () => {
+		// `variable-fields.ts` transcribes which properties the engine reads
+		// `{{tokens}}` in (#3779). A renamed property would leave a plain field
+		// where a token should paint, and a property the engine stopped
+		// resolving would promise a substitution that never happens - neither
+		// throws. Mutation check: rename `text` or `expected` in the table and
+		// this reds.
+		const resolved = (kind: string, config: Record<string, unknown>) => {
+			const entry = fixture.find((k) => k.kind === kind);
+			expect(entry, `the catalogue no longer serves "${kind}"`).toBeTruthy();
+			return Object.keys(entry!.configSchema.properties ?? {}).filter((name) =>
+				resolvesVariables(kind, name, config)
+			);
+		};
+
+		expect(resolved("assert.contains", {})).toEqual(["text"]);
+		expect(resolved("assert.contains", { mode: "equals" })).toEqual(["text"]);
+		expect(resolved("assert.contains", { mode: "matches" })).toEqual([]);
+		expect(resolved("assert.jsonpath", {})).toEqual(["expected"]);
+
+		// The hint the form prints is the engine's own sentence: it is what tells
+		// the user the field resolves, so it has to still say so.
+		const describes = (kind: string, name: string) =>
+			fixture.find((k) => k.kind === kind)?.configSchema.properties?.[name]?.description ??
+			"";
+		expect(describes("assert.contains", "text")).toContain("{{name}}");
+		expect(describes("assert.jsonpath", "expected")).toContain("{{name}}");
 	});
 
 	it("names, for every kind with an operand rule, properties the live catalogue declares", () => {

@@ -79,6 +79,13 @@ interface VariableInputProps {
 	 */
 	"aria-label"?: string;
 	/**
+	 * Forwarded to the real `<input>`, not the wrapper, so a validation message
+	 * (`FieldError`) is tied to the control a screen reader lands on and not to
+	 * the box drawn around it.
+	 */
+	"aria-invalid"?: boolean;
+	"aria-describedby"?: string;
+	/**
 	 * The field's element id, for the rare caller something outside its subtree
 	 * has to reach - the Shell's ⌘L focuses the URL field this way, having no
 	 * ref into the request builder. From `constants/dom-ids.ts`, both ends.
@@ -184,6 +191,8 @@ export default function VariableInput({
 	suggestions = [],
 	onPaste,
 	"aria-label": ariaLabel,
+	"aria-invalid": ariaInvalid,
+	"aria-describedby": ariaDescribedBy,
 	id,
 	contextKind,
 	variables,
@@ -846,6 +855,8 @@ export default function VariableInput({
 				// Falls back to the placeholder text so the field keeps a name
 				// even when the placeholder itself is withheld above.
 				aria-label={ariaLabel ?? placeholder}
+				aria-invalid={ariaInvalid}
+				aria-describedby={ariaDescribedBy}
 				/*
 				 * Combobox, but only where a list can actually appear (issue
 				 * #1215). A field with no scope and no plain suggestions never

@@ -41,7 +41,7 @@ import { useState } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { SelectSettingRow } from "@/modules/settings/main/panels/SettingControls";
 import { errorsWithin } from "@/lib/elements";
-import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
+import type { ElementConfigProperty, ElementConfigSchema, VariableSupport } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { subsetSchema } from "./schema-subset";
 import {
@@ -73,6 +73,8 @@ export interface ModeElementFormProps {
 	 * the top of `config`. Each field of the forms below shows its own.
 	 */
 	errors?: Readonly<Record<string, string>>;
+	/** The variable scope the element is edited in; see `GenericElementFormProps.variables`. */
+	variables?: VariableSupport;
 	onChange: (config: Record<string, unknown>) => void;
 }
 
@@ -154,6 +156,8 @@ function ModeFields({
 	required,
 	config,
 	errors,
+	kind,
+	variables,
 	onChange,
 }: {
 	mode: ElementMode;
@@ -162,6 +166,9 @@ function ModeFields({
 	config: Record<string, unknown>;
 	/** The messages for `config`'s own level, by dot path from it. */
 	errors: Readonly<Record<string, string>>;
+	/** The element's kind when `config` is its top level, so the mode's fields can be variable-aware; absent for a sub-object level. */
+	kind: string | undefined;
+	variables: VariableSupport | undefined;
 	onChange: (config: Record<string, unknown>) => void;
 }) {
 	// A marker mode has nothing to render: the app only writes `true` (see
@@ -186,7 +193,14 @@ function ModeFields({
 	const subset = subsetSchema(properties, required, [mode.id, ...(mode.also ?? [])]);
 	if (Object.keys(subset.properties ?? {}).length === 0) return null;
 	return (
-		<GenericElementForm schema={subset} config={config} errors={errors} onChange={onChange} />
+		<GenericElementForm
+			schema={subset}
+			config={config}
+			errors={errors}
+			kind={kind}
+			variables={variables}
+			onChange={onChange}
+		/>
 	);
 }
 
@@ -195,6 +209,7 @@ export function ModeElementForm({
 	schema,
 	config,
 	errors = NO_ERRORS,
+	variables,
 	onChange,
 }: ModeElementFormProps) {
 	// Only consulted while the chosen mode has written nothing yet - see the
@@ -210,6 +225,8 @@ export function ModeElementForm({
 				schema={schema ?? EMPTY_SCHEMA}
 				config={config}
 				errors={errors}
+				kind={kind}
+				variables={variables}
 				onChange={onChange}
 			/>
 		);
@@ -250,6 +267,8 @@ export function ModeElementForm({
 					schema={lead}
 					config={config}
 					errors={errors}
+					kind={kind}
+					variables={variables}
 					onChange={onChange}
 				/>
 			)}
@@ -265,6 +284,10 @@ export function ModeElementForm({
 				required={levelRequired}
 				config={levelConfig}
 				errors={levelErrors}
+				// `metric.record`'s modes live one level down, which the
+				// kind's table does not describe.
+				kind={spec.path ? undefined : kind}
+				variables={variables}
 				onChange={writeLevel}
 			/>
 			{Object.keys(trail.properties ?? {}).length > 0 && (
@@ -272,6 +295,8 @@ export function ModeElementForm({
 					schema={trail}
 					config={config}
 					errors={errors}
+					kind={kind}
+					variables={variables}
 					onChange={onChange}
 				/>
 			)}

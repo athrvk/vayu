@@ -47,6 +47,7 @@
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/schema_error_text.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "wide_json.hpp"
 
 namespace {
@@ -121,6 +122,24 @@ class ElementKindsTest : public ::testing::Test {
         RecordedRun run;
         post_result_       = {}; // The fixture's slot outlives a loop's passes.
         ElementContext ctx = make_context ();
+        ElementPipeline::run (Phase::StepAfter, ctx, elements, run.outcomes);
+        run.tests = ctx.post_script_result.tests;
+        return run;
+    }
+
+    /// `step.after` with the step's own resolver bound to @p vars and the
+    /// bound data @p row (null for none): the real
+    /// `resolve_template_with_optional_row`, so a token naming a missing
+    /// column keeps the whole text as written, as it does in a run.
+    [[nodiscard]] RecordedRun run_after_resolving (const std::vector<CompiledElement>& elements,
+    const nlohmann::json* row,
+    const vayu::http::VariableValues& vars = {}) {
+        RecordedRun run;
+        post_result_         = {};
+        ElementContext ctx   = make_context ();
+        ctx.resolve_template = [&vars, row] (const std::string& text) {
+            return vayu::http::resolve_template_with_optional_row (text, vars, row, {});
+        };
         ElementPipeline::run (Phase::StepAfter, ctx, elements, run.outcomes);
         run.tests = ctx.post_script_result.tests;
         return run;
@@ -612,6 +631,207 @@ TEST_F (ElementKindsTest, AssertContainsMatchesReportsAnInvalidPattern) {
     << "an error is a failed assertion (#3043)";
     EXPECT_FALSE (run.tests[0].passed);
     EXPECT_EQ (run.tests[0].name, "body matches '(?<!x)abc'");
+}
+
+// ---------------------------------------------------------------------------
+// `{{name}}` in an assertion's operand (#3779). Mutation check: make
+// `resolve_operand` return `written` without calling the resolver and the
+// per-row cases below compare the template as typed.
+// ---------------------------------------------------------------------------
+
+std::vector<CompiledElement>
+contains_text (const std::string& text, const std::string& mode = "contains") {
+    return one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.contains" },
+    { "config", { { "field", "body" }, { "text", text }, { "mode", mode } } } });
+}
+
+TEST_F (ElementKindsTest, AssertContainsResolvesTheBoundRowsColumnPerRow) {
+    response = ok_json_response (200, "The capital of France is Paris.");
+    const auto elements = contains_text ("{{data.expect}}");
+
+    const nlohmann::json passing = { { "expect", "Paris" } };
+    const auto pass              = run_after_resolving (elements, &passing);
+    ASSERT_EQ (pass.outcomes.size (), 1u);
+    EXPECT_EQ (pass.outcomes[0].status, "ok");
+    ASSERT_EQ (pass.tests.size (), 1u);
+    EXPECT_TRUE (pass.tests[0].passed);
+
+    const nlohmann::json failing = { { "expect", "Lyon" } };
+    const auto fail              = run_after_resolving (elements, &failing);
+    ASSERT_EQ (fail.outcomes.size (), 1u);
+    EXPECT_EQ (fail.outcomes[0].status, "failed");
+    ASSERT_EQ (fail.tests.size (), 1u);
+    EXPECT_FALSE (fail.tests[0].passed);
+    EXPECT_EQ (fail.tests[0].name, "body contain '{{data.expect}}'")
+    << "the name quotes the text as written, not what the row produced";
+    EXPECT_EQ (message_of (fail.outcomes[0]), "expected body to contain '{{data.expect}}'");
+}
+
+TEST_F (ElementKindsTest, AssertContainsResolvesAScopeVariableAndTextAroundIt) {
+    response = ok_json_response (200, "hello, Ada!");
+    const vayu::http::VariableValues vars = { { "who", "Ada" } };
+
+    EXPECT_EQ (run_after_resolving (contains_text ("hello, {{who}}!", "equals"), nullptr, vars)
+               .outcomes[0]
+               .status,
+    "ok");
+    EXPECT_EQ (run_after_resolving (contains_text ("hello, {{ who }}"), nullptr, vars)
+               .outcomes[0]
+               .status,
+    "ok")
+    << "a padded name is trimmed, as everywhere else";
+}
+
+TEST_F (ElementKindsTest, AssertContainsNegateStillJudgesAResolvedText) {
+    response                 = ok_json_response (200, "Paris");
+    const nlohmann::json row = { { "expect", "Paris" } };
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.contains" },
+    { "config", { { "text", "{{data.expect}}" }, { "negate", true } } } });
+
+    EXPECT_EQ (run_after_resolving (elements, &row).outcomes[0].status, "failed");
+}
+
+TEST_F (ElementKindsTest, AssertContainsFailsNamingAColumnTheRowLacks) {
+    response                 = ok_json_response (200, "Paris, {{data.exepct}}");
+    const nlohmann::json row = { { "expect", "Paris" } };
+    // Both tokens: the resolver hands the whole text back when one is missing,
+    // so only the missing name may be reported.
+    const auto run =
+    run_after_resolving (contains_text ("{{data.expect}} {{data.exepct}}"), &row);
+
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "'text' uses {{data.exepct}}, which no variable or data column answers");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed)
+    << "an assertion with an unanswered token is never compared as typed, even"
+       " against a body that holds the token's own spelling";
+}
+
+TEST_F (ElementKindsTest, AssertContainsFailsOnAnUnknownVariableEvenUnderNegate) {
+    response = ok_json_response (200, "anything");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.contains" },
+    { "config", { { "text", "{{nope}}" }, { "negate", true } } } });
+
+    const auto run = run_after_resolving (elements, nullptr);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed)
+    << "negate must not turn an unanswered token into a pass";
+    EXPECT_EQ (run.tests[0].name, "body does not contain '{{nope}}'");
+}
+
+TEST_F (ElementKindsTest, AssertContainsWithATokenAndNoResolverFailsNamingIt) {
+    response       = ok_json_response (200, "{{who}}");
+    const auto run = run_after_recording (contains_text ("{{who}}"));
+
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "'text' uses {{who}}, which no variable or data column answers");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+}
+
+TEST_F (ElementKindsTest, AssertContainsWithoutATokenNeverAsksTheResolver) {
+    response             = ok_json_response (200, "plain text");
+    ElementContext ctx   = make_context ();
+    int calls            = 0;
+    ctx.resolve_template = [&calls] (const std::string& text) {
+        ++calls;
+        return text;
+    };
+    std::vector<ElementOutcome> sink;
+    ElementPipeline::run (Phase::StepAfter, ctx, contains_text ("plain"), sink);
+
+    EXPECT_EQ (sink[0].status, "ok");
+    EXPECT_EQ (calls, 0);
+}
+
+TEST_F (ElementKindsTest, AssertContainsMatchesPatternStaysLiteral) {
+    const vayu::http::VariableValues vars = { { "n", "5" } };
+    const auto elements                   = contains_text ("{{n}}", "matches");
+
+    response = ok_json_response (200, "value 5");
+    EXPECT_EQ (run_after_resolving (elements, nullptr, vars).outcomes[0].status, "failed")
+    << "the pattern is not resolved, so the variable's value does not match";
+    response = ok_json_response (200, "value {{n}}");
+    EXPECT_EQ (run_after_resolving (elements, nullptr, vars).outcomes[0].status, "ok");
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathExpectedResolvesATokenAtTheTopLevel) {
+    response = ok_json_response (200, R"({"answer": "Paris"})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.answer" }, { "expected", "{{data.expect}}" } } } });
+
+    const nlohmann::json passing = { { "expect", "Paris" } };
+    const nlohmann::json failing = { { "expect", "Lyon" } };
+    EXPECT_EQ (run_after_resolving (elements, &passing).outcomes[0].status, "ok");
+    const auto fail = run_after_resolving (elements, &failing);
+    EXPECT_EQ (fail.outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (fail.outcomes[0]),
+    "expected '$.answer' to equal \"{{data.expect}}\", got Paris");
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathExpectedResolvesTokensNestedInArraysAndObjects) {
+    response = ok_json_response (200, R"({"r": {"city": "Paris", "tags": ["fr", "eu"], "n": 2}})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config",
+    { { "path", "$.r" },
+    { "expected",
+    { { "city", "{{data.city}}" },
+    { "tags", nlohmann::json::array ({ "fr", "{{region}}" }) }, { "n", 2 } } } } } });
+
+    const nlohmann::json row              = { { "city", "Paris" } };
+    const vayu::http::VariableValues vars = { { "region", "eu" } };
+    EXPECT_EQ (run_after_resolving (elements, &row, vars).outcomes[0].status, "ok");
+
+    const vayu::http::VariableValues wrong = { { "region", "asia" } };
+    EXPECT_EQ (run_after_resolving (elements, &row, wrong).outcomes[0].status, "failed");
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathExpectedKeepsAResolvedValueAString) {
+    response = ok_json_response (200, R"({"n": 5})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.n" }, { "expected", "{{n}}" } } } });
+
+    EXPECT_EQ (
+    run_after_resolving (elements, nullptr, { { "n", "5" } }).outcomes[0].status, "failed")
+    << "\"5\" is not the number 5";
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathExpectedFailsNamingEveryUnansweredTokenNested) {
+    response = ok_json_response (200, R"({"a": ["x"]})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config",
+    { { "path", "$.a" },
+    { "expected", nlohmann::json::array ({ "{{one}}", { { "k", "{{two}}" } } }) } } } });
+
+    const auto run = run_after_resolving (elements, nullptr);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    EXPECT_EQ (message_of (run.outcomes[0]), "'expected' uses {{one}}, {{two}}, which no variable or data column answers");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathExpectedWithATokenAndNoResolverFails) {
+    response = ok_json_response (200, R"({"a": "{{who}}"})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.a" }, { "expected", "{{who}}" } } } });
+
+    const auto run = run_after_recording (elements);
+    EXPECT_EQ (run.outcomes[0].status, "error")
+    << "the body holds the template's own spelling; it must not pass";
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
 }
 
 // Validation refuses each of these (#3043); a row stored before it did still
