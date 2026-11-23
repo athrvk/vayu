@@ -696,9 +696,11 @@ describe("eventsFromTrace", () => {
 });
 
 /**
- * A stream's trace states how many bytes it delivered (issue #3238), and a
- * reply that was not an event stream keeps its body. The pane's size chip is
- * the first, the Body tab the second, and neither is a truncation.
+ * A stream's trace holds the bytes it delivered as `response.body` and counts
+ * them in `bodyBytes` (issues #3238, #3770). The pane's size chip reads the
+ * count, the Body tab reads the bytes, and neither is a truncation: the held
+ * body can be shorter than the count because the engine's cap cut it, which is
+ * `bodyCapped`, not `bodyTruncated`.
  */
 describe("a stored stream's body and byte count", () => {
 	const streamSample = (response: Record<string, unknown>): RunResultSample =>
@@ -715,21 +717,73 @@ describe("a stored stream's body and byte count", () => {
 			},
 		});
 
+	const EVENT_STREAM_BODY = 'event: token\ndata: {"t":"Par"}\n\nevent: token\ndata: is\n\n';
+
+	it("shows the bytes the stream delivered as the body, beside its events", () => {
+		// The Body tab of a finished stream was blank while the engine kept no
+		// bytes. Mutation check: drop `body`/`bodyRaw` from the head and this reads "".
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					...sample().trace,
+					response: {
+						headers: { "content-type": "text/event-stream" },
+						body: EVENT_STREAM_BODY,
+						bodyBytes: EVENT_STREAM_BODY.length,
+					},
+					events: {
+						items: [
+							{ event: "token", data: '{"t":"Par"}', receivedAt: 1 },
+							{ event: "token", data: "is", receivedAt: 2 },
+						],
+						totalEvents: 2,
+						eventsTruncated: false,
+						endReason: "completed",
+					},
+				},
+			})
+		);
+
+		expect(restored?.bodyRaw).toBe(EVENT_STREAM_BODY);
+		// Pretty is the same text: a stream is not JSON and `paneBody` leaves it be.
+		expect(restored?.body).toBe(EVENT_STREAM_BODY);
+		expect(restored?.events).toHaveLength(2);
+		expect(restored?.size).toBe(EVENT_STREAM_BODY.length);
+	});
+
 	it("sizes the response by the bytes delivered, not by the body held", () => {
-		// An event stream keeps no body, so the held length is 0 and only
-		// `bodyBytes` can say what arrived. Mutation check: size from the held
-		// body only and this reads 0.
+		// A capped stream holds a prefix and counts the whole wire in `bodyBytes`.
+		// Mutation check: size from the held body and this reads its 14 bytes.
 		const restored = responseFromRunResult(
 			streamSample({
 				headers: { "content-type": "text/event-stream" },
-				body: "",
+				body: "data: a\n\ndata:",
 				bodyBytes: 2048,
+				bodyCapped: true,
 			})
 		);
 
 		expect(restored?.size).toBe(2048);
 		expect(restored?.bodyBytes).toBe(2048);
 		expect(restored?.bodyTruncated).toBeUndefined();
+		// The engine stopped reading at its cap: a different notice from storage's.
+		expect(restored?.bodyCapped).toBe(true);
+	});
+
+	it("restores a stream body the engine stored as base64 to its text and bytes", () => {
+		const bytes = Uint8Array.from([...new TextEncoder().encode("data: caf"), 0xe9, 0x0a, 0x0a]);
+		const restored = responseFromRunResult(
+			streamSample({
+				headers: { "content-type": "text/event-stream; charset=latin1" },
+				body: btoa(String.fromCharCode(...bytes)),
+				bodyEncoding: "base64",
+				bodyBytes: bytes.length,
+			})
+		);
+
+		expect(restored?.rawBytes?.data).toEqual(bytes);
+		expect(restored?.bodyRaw).toBe("data: café\n\n");
+		expect(restored?.size).toBe(bytes.length);
 	});
 
 	it("keeps a non-stream reply's body, with bodyBytes as its size and no truncation", () => {
