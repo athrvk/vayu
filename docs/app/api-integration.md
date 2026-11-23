@@ -143,7 +143,7 @@ the file members, and a part without it sends none. A **`binary`** body is one f
 refuse it as "no file selected" rather than send a bodiless request.
 
 An **`mcp`** body (#3762) is `{mode: "mcp", content, mcpTool?}`, where `mcpTool`
-is `{name, inputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
+is `{name, inputSchema?, outputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
 names, which the engine reads for the `Mcp-Param-*` headers it mirrors out of
 the call's arguments. It is stored **inside the body object**, so a `PUT` that
 sends `body` replaces it whole and a body sent without `mcpTool` clears the

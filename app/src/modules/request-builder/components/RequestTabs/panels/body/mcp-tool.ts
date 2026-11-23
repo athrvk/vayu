@@ -12,10 +12,10 @@
  * with a blank name or an `inputSchema` that is not an object, and refuses the
  * whole save for it. The `outputSchema` (#3806) is held to the same rule, though
  * the engine does not read it: the builder does, and a value that is not an
- * object would be a default nothing could fill. So the editor state is not committed key by key: it is
- * read here, and only a tool the engine would accept reaches the request. What
- * is left over (a schema typed before its tool is named, half-typed JSON) stays
- * in the fields with its reason.
+ * object would be a default nothing could fill. So the editor state is not
+ * committed key by key: it is read here, and only a tool the engine would
+ * accept reaches the request. What is left over (a schema typed before its
+ * tool is named, half-typed JSON) stays in the fields with its reason.
  */
 
 import type { McpTool } from "@/types";

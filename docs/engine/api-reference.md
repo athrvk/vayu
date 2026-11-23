@@ -892,7 +892,7 @@ a stored `mcpTool`, no `Mcp-Param-*` header is sent. `name` must be a non-empty
 string, `inputSchema` (optional) an object, and every annotation a header-name
 token unique without regard to case: anything else is a `400` where it is
 written (`POST`/`PUT /requests`, `POST /import/apply`) and where it is sent. A
-body of another mode keeps an `mcpTool` it carries unread. An `x-vayu-request`
+body of another mode keeps an `mcpTool` it carries unread. An `outputSchema` member (#3806) is stored with the tool and never read by a send: the builder reads it to prefill an `assert.jsonschema` element. An `x-vayu-request`
 export carries it and its import reads it back; a Postman export cannot carry
 it (counted under `mcp_bodies`).
 

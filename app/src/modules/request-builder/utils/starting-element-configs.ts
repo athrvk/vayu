@@ -16,15 +16,12 @@
  * whole response body, and an MCP tool result sits under `result`.
  */
 
+import { isPlainObject } from "@/lib/elements";
 import type { RequestState } from "../types";
 
 export const MCP_STRUCTURED_CONTENT_PATH = "$.result.structuredContent";
 
 type StartingElementConfigs = Record<string, Record<string, unknown>>;
-
-function isSchemaObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * The starting configs for @p request's elements, by kind, or `undefined` when
@@ -35,7 +32,7 @@ export function startingElementConfigs(
 	request: Pick<RequestState, "bodyMode" | "mcpTool">
 ): StartingElementConfigs | undefined {
 	const outputSchema = request.mcpTool?.outputSchema;
-	if (request.bodyMode !== "mcp" || !isSchemaObject(outputSchema)) return undefined;
+	if (request.bodyMode !== "mcp" || !isPlainObject(outputSchema)) return undefined;
 	return {
 		"assert.jsonschema": {
 			source: "jsonpath",
