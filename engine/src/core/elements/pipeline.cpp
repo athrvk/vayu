@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <random>
 
 #include "json_path.hpp"
@@ -569,6 +570,23 @@ const nlohmann::ordered_json* ensure_parsed_body (ElementContext& ctx) {
         }
     }
     return ctx.parsed_body ? &*ctx.parsed_body : nullptr;
+}
+
+const std::vector<vayu::http::SseEvent>* ensure_parsed_events (ElementContext& ctx) {
+    if (ctx.response == nullptr || !ctx.response->stream_events) {
+        return nullptr;
+    }
+    if (!ctx.parsed_events) {
+        // `finish` dispatches a last frame the server closed without its
+        // terminating blank line, as `buffered_stream_events_node` does.
+        vayu::http::SseParser parser (ctx.max_event_bytes);
+        auto events = parser.feed (ctx.response->body);
+        auto tail   = parser.finish ();
+        events.insert (events.end (), std::make_move_iterator (tail.begin ()),
+        std::make_move_iterator (tail.end ()));
+        ctx.parsed_events = std::move (events);
+    }
+    return &*ctx.parsed_events;
 }
 
 std::string_view response_field_text (const ElementContext& ctx,

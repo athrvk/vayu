@@ -209,6 +209,7 @@ TEST_F (ElementsRegistryTest, APathOutsideTheSubsetIsRefusedForEveryJsonPathKind
         { "extract.json", extract_json_entry ("$x") },
         { "assert.jsonpath", assert_jsonpath_entry ("$x") },
         { "metric.record", metric_source_entry ({ { "jsonpath", "$x" } }) },
+        { "metric.record eventJsonpath", metric_source_entry ({ { "eventJsonpath", "$x" } }) },
         { "metric.record condition",
         metric_source_entry ({ { "condition",
         { { "field", "jsonpath" }, { "jsonpath", "$x" }, { "operator", "eq" },
@@ -230,6 +231,9 @@ TEST_F (ElementsRegistryTest, TheSubsetAcceptsWhatTheOldSchemaPatternRefused) {
         EXPECT_FALSE (validate_entry (assert_jsonpath_entry (path)).has_value ()) << path;
         EXPECT_FALSE (
         validate_entry (metric_source_entry ({ { "jsonpath", path } })).has_value ())
+        << path;
+        EXPECT_FALSE (
+        validate_entry (metric_source_entry ({ { "eventJsonpath", path } })).has_value ())
         << path;
     }
 }
