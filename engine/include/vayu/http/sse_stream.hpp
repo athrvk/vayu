@@ -239,6 +239,14 @@ class SseStreamContext {
         return completed_at_ms_.load (std::memory_order_acquire);
     }
 
+    /// Stamp the moment the transfer began, once: a repeat keeps the first.
+    void note_transfer_start ();
+    /// 0 until `note_transfer_start`; a stream refused before its transfer
+    /// began never has one.
+    [[nodiscard]] int64_t transfer_started_at_ms () const {
+        return transfer_started_at_ms_.load (std::memory_order_acquire);
+    }
+
     /// How many upstream events this stream received, including those the ring
     /// has since evicted and those the trace will not store.
     [[nodiscard]] int64_t total_events () const {
@@ -270,6 +278,7 @@ class SseStreamContext {
     std::atomic<std::size_t> published_count_{ 0 };
     std::atomic<bool> closed_{ false };
     std::atomic<int64_t> completed_at_ms_{ 0 };
+    std::atomic<int64_t> transfer_started_at_ms_{ 0 };
     std::atomic<int64_t> total_events_{ 0 };
     /// Guarded by `mutex_`; empty until `record_end` or `close`.
     std::optional<SseEndReason> end_reason_;
@@ -290,8 +299,11 @@ class SseStreamContext {
  * @brief What a completed design stream stores as its trace's `events` node:
  *        everything about its events that its bytes cannot say (#3770).
  *
- * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`, and no
- * list. The stream's bytes are the trace's response body, so the list is parsed
+ * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...], startedAt?}`,
+ * and no list. `startedAt` is when the transfer began (epoch ms, the clock
+ * `receivedAt` reads), absent for a stream that never began one, so a reader
+ * can tell the wait for the first event from the stream's whole span. The
+ * stream's bytes are the trace's response body, so the list is parsed
  * back from them when the trace is read (`expand_stored_stream_events`) rather
  * than stored a second time (#657). `receivedAt` holds one arrival time per
  * event the stored cap kept, which also bounds how many events the parse may
@@ -359,10 +371,12 @@ std::optional<std::span<const int64_t>> arrivals = std::nullopt);
  * @brief The `events` node a design stream's reader sees: the list parsed from
  *        @p body, paired with what @p stored (a `stream_trace_node`) recorded.
  *
- * `{items, totalEvents, eventsTruncated, endReason}`, each item carrying its
- * `receivedAt`. The completion pass binds it for the post-request script and
- * `expand_stored_stream_events` builds it again from the stored trace, so the
- * script and every later reader parse one set of bytes by one rule.
+ * `{items, totalEvents, eventsTruncated, endReason, startedAt?}`, each item
+ * carrying its `receivedAt`; `startedAt` is copied from @p stored when it has
+ * one, so a row stored without it is served without it. The completion pass
+ * binds it for the post-request script and `expand_stored_stream_events`
+ * builds it again from the stored trace, so the script and every later reader
+ * parse one set of bytes by one rule.
  */
 [[nodiscard]] nlohmann::json stream_events_node (std::string_view body,
 bool body_complete,
