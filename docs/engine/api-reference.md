@@ -10581,7 +10581,8 @@ would only fill `maxInFlight`. It carries one `retry_after_skipped_open_loop`
 warning instead. The option is opt-in because a run that backs off measures
 the rate the limiter allows rather than what the target does under the load
 asked for; with it off, a run whose responses are mostly `429` carries
-`rate_limited_dominant`, which names it.
+`rate_limited_dominant`, which names it (a `constant_rps` run's says the option
+does not apply to it).
 
 #### The `scenario` block (collection runs)
 
@@ -14093,8 +14094,10 @@ Three are about [Retry-After back-off](#retry-after-back-off-retryafterbackoff)
 `rate_limited_dominant` is raised with `retryAfterBackoff` off when more than
 half of the responses that carried a status (a transport failure carries
 none) were `429`: the report describes the target's rate limit more than the
-target, and the `message` names the option; `count` is the `429`s. With the
-option on, `retry_after_backoff` carries `count`, the responses whose
+target. On a closed-loop run the `message` names the option; on a
+`constant_rps` run, which never backs off, it says so instead and does not
+advise the option. `count` is the `429`s. With the option on,
+`retry_after_backoff` carries `count`, the responses whose
 `Retry-After` a virtual user waited out, so a reader knows the run's rate is
 the one the target allowed; and `retry_after_skipped_open_loop` is raised
 instead by a `constant_rps` run that sent anything, with the `message` "Retry-After

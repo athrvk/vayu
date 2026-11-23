@@ -2097,7 +2097,8 @@ A load run's `report.warnings` also carry the three Retry-After codes
 ([#3782](https://github.com/athrvk/vayu/issues/3782)), each titled by
 `RunWarnings` for what the run did rather than as a failure:
 `rate_limited_dominant` ("Most responses were rate limited", the option off and
-more than half the responses `429`, its message naming `retryAfterBackoff`),
+more than half the responses `429`, its message naming `retryAfterBackoff` on a
+closed-loop run and saying back-off does not apply on a constant-rate one),
 `retry_after_backoff` ("Virtual users waited out Retry-After", `count` the
 waits) and `retry_after_skipped_open_loop` ("Retry-After back-off skipped on a
 constant-rate run").

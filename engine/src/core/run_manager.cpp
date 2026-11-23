@@ -2051,26 +2051,35 @@ nlohmann::json cookies_dropped_warning (size_t headers) {
 /**
  * With `retryAfterBackoff` off, the warning for a run most of whose responses
  * (more than half of those carrying a status; a transport failure is none)
- * were 429 (#3782): its figures describe the target's rate limit, and the
- * message names the option that would have made it back off instead.
+ * were 429 (#3782): its figures describe the target's rate limit. A
+ * closed-loop run's message names the option that would have made it back off;
+ * a constant-rate run's does not, because the option never applies there
+ * (`RunContext::honour_retry_after`) and turning it on only raises
+ * `retry_after_skipped_open_loop`. A run with responses has reached its
+ * strategy, so `closed_loop` is meaningful here.
  */
-std::optional<nlohmann::json> rate_limited_dominant_warning (const MetricsCollector& mc) {
+std::optional<nlohmann::json> rate_limited_dominant_warning (const RunContext& context) {
     size_t responses = 0;
     size_t limited   = 0;
-    for (const auto& [status, count] : mc.status_code_distribution ()) {
+    for (const auto& [status, count] :
+    context.metrics_collector->status_code_distribution ()) {
         responses += status == 0 ? 0 : count;
         limited += status == 429 ? count : 0;
     }
     if (limited * 2 <= responses) {
         return std::nullopt;
     }
+    const bool closed_loop = context.closed_loop.load (std::memory_order_relaxed);
     return std::make_optional<nlohmann::json> ({ { "code", "rate_limited_dominant" },
     { "message",
     std::to_string (limited) + " of " + std::to_string (responses) +
     " responses were 429 Too Many Requests, so this report describes the "
-    "target's rate limit more than the target. Set retryAfterBackoff to "
-    "have each virtual user wait out the Retry-After the target sends "
-    "before its next request." },
+    "target's rate limit more than the target. " +
+    (closed_loop ?
+    "Set retryAfterBackoff to have each virtual user wait out the "
+    "Retry-After the target sends before its next request." :
+    "Retry-After back-off applies only to runs that send one request "
+    "after another, not to constant-rate runs.") },
     { "count", limited } });
 }
 
@@ -2081,7 +2090,7 @@ std::optional<nlohmann::json> rate_limited_dominant_warning (const MetricsCollec
  */
 std::optional<nlohmann::json> retry_after_warning (const RunContext& context) {
     if (!context.retry_after_backoff) {
-        return rate_limited_dominant_warning (*context.metrics_collector);
+        return rate_limited_dominant_warning (context);
     }
     // A run that sent nothing never reached its strategy, and `closed_loop`
     // reads false there whatever the mode.

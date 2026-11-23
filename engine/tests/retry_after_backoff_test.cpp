@@ -209,6 +209,25 @@ TEST (RetryAfterWarnings, MostlyRateLimitedWithTheOptionOffNamesTheOption) {
     << "exactly half is not more than half";
 }
 
+// A constant-rate run cannot back off, so the message must not send the user to
+// an option that only raises `retry_after_skipped_open_loop`. Mutation check:
+// drop the `closed_loop` branch in `rate_limited_dominant_warning` and either
+// this test (the option named) or the closed-loop one (the option missing) fails.
+TEST (RetryAfterWarnings, MostlyRateLimitedOnAConstantRateRunDoesNotAdviseTheOption) {
+    auto open = std::make_shared<vayu::core::RunContext> (
+    "run-retry-after-open", json::object ());
+    record_statuses (*open, 429, 6);
+    record_statuses (*open, 200, 4);
+    const auto warnings = vayu::core::build_run_warnings (open);
+    const auto warning  = warning_entry (warnings, "rate_limited_dominant");
+    ASSERT_TRUE (warning.is_object ()) << warnings.dump ();
+    EXPECT_EQ (warning["count"], 6u);
+    const auto message = warning.value ("message", "");
+    EXPECT_NE (message.find ("6 of 10 responses"), std::string::npos) << message;
+    EXPECT_NE (message.find ("not to constant-rate runs"), std::string::npos) << message;
+    EXPECT_EQ (message.find ("retryAfterBackoff"), std::string::npos) << message;
+}
+
 // A transport failure is no response, so it neither dilutes nor joins the 429s.
 TEST (RetryAfterWarnings, TransportFailuresAreNotResponses) {
     auto context = closed_loop_context (json::object ());
