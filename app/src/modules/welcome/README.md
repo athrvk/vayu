@@ -37,6 +37,8 @@ Two consequences worth keeping in mind before adding anything here:
 - `components/ActionTile.tsx`, `components/DemoApiTile.tsx`,
   `components/RecentRuns.tsx`, `components/FooterLinks.tsx`
 - `demo-request.ts` - the request `DemoApiTile` creates
+- `llm-request-presets.ts` - the LLM request templates (#3778) the Collections
+  sidebar's template menu and the palette create; not a Welcome tile
 - `welcome-column.ts` - the one class string the three states share
 
 ## Notes
