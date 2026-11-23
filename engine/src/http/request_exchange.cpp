@@ -1432,6 +1432,9 @@ ExchangeInputs inputs) {
                 // `client.send` recorded these, so an empty list here is a
                 // chain that was not redirected, not one that went unmeasured.
                 post_ctx.redirect_hops = &outcome.response.redirect_hops;
+                nlohmann::json stream_events;
+                vayu::http::bind_buffered_stream_events (
+                post_ctx, outcome.response, inputs.sse_limits, stream_events);
                 return execute_script (engine, script, post_ctx, "Post-request");
             });
         },

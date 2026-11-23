@@ -58,6 +58,10 @@
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
+namespace vayu::runtime {
+struct ScriptContext;
+} // namespace vayu::runtime
+
 namespace vayu::http {
 
 /**
@@ -328,6 +332,25 @@ class SseStreamContext {
 const SseLimits& limits,
 int64_t total_events,
 bool body_complete);
+
+/**
+ * @brief Binds `pm.response.events` for a post-request script that reads a
+ *        stream's *buffered* bytes (issue #3769): a collection run's streaming
+ *        step, a load run's inline `script.post` and the deferred replay.
+ *
+ * When @p response was a bounded stream (`Response::stream_events` set), fills
+ * @p slot with `buffered_stream_events_node` over its body and points
+ * `ScriptContext::response_events` at it. Otherwise it leaves both untouched, so
+ * the script reads an absent field rather than an empty list.
+ *
+ * @p slot is the caller's, and must outlive every execute that reads
+ * @p script_ctx. `Response::body_truncated` decides whether the body is
+ * complete; a load response never sets it.
+ */
+void bind_buffered_stream_events (vayu::runtime::ScriptContext& script_ctx,
+const vayu::Response& response,
+const SseLimits& limits,
+nlohmann::json& slot);
 
 /** Everything a stream needs to start. */
 struct SseStreamRequest {

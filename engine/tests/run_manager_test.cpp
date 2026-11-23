@@ -240,7 +240,8 @@ TEST (NaturalEndDrainMs, ACollectionRunWaitsTheLongerOfItsStreamsAndItsTimeout) 
 // this throws `type_error`.
 TEST (RunContextStreamBounds, ANullCapFallsBackToTheSetting) {
     EngineDefaults defaults;
-    defaults.stream_defaults = vayu::StreamBounds{ 45000, 12 };
+    defaults.sse_limits.max_stream_duration_ms = 45000;
+    defaults.sse_limits.max_stream_events      = 12;
     const nlohmann::json config{ { "stream", true },
         { "maxStreamDurationMs", nullptr }, { "maxStreamEvents", 3 } };
     const RunContext context ("r", config,

@@ -678,7 +678,8 @@ struct StepContext {
     /// pre-request script (`ExchangeInputs::token_cache`, #2521).
     vayu::db::Database* token_cache = nullptr;
     /// The `sse*` settings, read once for the run: what bounds a streaming
-    /// step's stored `events` list (#3235).
+    /// step's stored `events` list (#3235) and the `pm.response.events` its
+    /// post-request script reads (#3769).
     const vayu::http::SseLimits& sse_limits;
 };
 
@@ -725,6 +726,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.target_policy          = target_policy ? &*target_policy : nullptr;
     inputs.max_response_bytes     = ctx.max_response_bytes;
     inputs.max_element_body_bytes = ctx.max_element_body_bytes;
+    inputs.sse_limits             = ctx.sse_limits;
     // The files the plan already checked (`ScenarioExecution::files`); a step
     // re-checks nothing it saw at plan time.
     inputs.files = ctx.execution->files.get ();

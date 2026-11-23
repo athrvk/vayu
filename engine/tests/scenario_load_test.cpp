@@ -68,6 +68,8 @@ using nlohmann::json;
 class ScenarioMockServer {
     public:
     static constexpr int64_t SLOW_MS = 20;
+    /// The events `/sse-three` sends before it closes.
+    static constexpr int STREAM_EVENTS = 3;
 
     struct Hit {
         std::string path;
@@ -156,6 +158,22 @@ class ScenarioMockServer {
         svr.Post ("/body", [this] (const httplib::Request& req, httplib::Response& res) {
             record (req, "/body");
             res.set_content ("{}", "application/json");
+        });
+
+        // A short event stream that closes on its own (#3769): STREAM_EVENTS
+        // frames written at once, so no cap has to end it.
+        svr.Get ("/sse-three", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/sse-three");
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body =
+                "data: one\n\ndata: two\n\ndata: three\n\n";
+                if (!sink.write (body.data (), body.size ())) {
+                    return false;
+                }
+                sink.done ();
+                return true;
+            });
         });
 
         // A `{{data.*}}` token substitutes into the path, so the row a virtual
@@ -1327,6 +1345,39 @@ TEST_F (ScenarioLoadTest, AnInlineSkipRequestThrowsSoItsStepIsErroredAndStillSen
     EXPECT_EQ (summary["errored"], 2) << summary.dump ();
     EXPECT_EQ (summary["skipped"], 0) << summary.dump ();
     expect_load_outcome_identities (summary);
+}
+
+// An inline `script.post` on a streaming step reads the stream's events
+// (#3769), parsed back from the body the event loop buffered. Mutation check:
+// drop the `bind_buffered_stream_events` call in `run_step_after` and every
+// iteration's test fails on an undefined `pm.response.events`.
+TEST_F (ScenarioLoadTest, AnInlineScriptPostOnAStreamingStepReadsItsEvents) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/sse-three") });
+    execution.plan.steps[0].request.stream_bounds = vayu::StreamBounds{ 5000, 100 };
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post", R"(
+        pm.test('events are readable', function () {
+            if (typeof pm.response.events === 'undefined') {
+                throw new Error('pm.response.events was undefined');
+            }
+            pm.expect(pm.response.events.length).to.equal(3);
+            pm.expect(pm.response.events[2].data).to.equal('three');
+            pm.expect(pm.response.totalEvents).to.equal(3);
+            pm.expect(pm.response.eventsTruncated).to.equal(false);
+        });
+    )") });
+    static_assert (ScenarioMockServer::STREAM_EVENTS == 3,
+    "the script above asserts the fixture's event count");
+
+    constexpr size_t ITERATIONS = 2;
+    auto state = run (json{ { "mode", "iterations" },
+                      { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
+
+    EXPECT_EQ (server.hits_for ("/sse-three").size (), ITERATIONS);
+    EXPECT_EQ (state->inline_tests_failed.load (), 0u);
+    EXPECT_EQ (state->inline_tests_passed.load (), ITERATIONS);
 }
 
 // A script that failed an assertion and then threw is one `errored` execution,

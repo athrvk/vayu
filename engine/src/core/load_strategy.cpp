@@ -32,6 +32,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -905,6 +906,9 @@ const ResultAnnotations& annotations) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             bind_submission_identity (script_ctx, *context, annotations);
+            nlohmann::json stream_events;
+            vayu::http::bind_buffered_stream_events (
+            script_ctx, response, context->sse_limits, stream_events);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);

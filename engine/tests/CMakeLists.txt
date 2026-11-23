@@ -468,6 +468,7 @@ set(vayu_scratch_database_suites
     LoadIdentityTest
     ScenarioIdentityTest
     LoadReplayEventsTest
+    LoadInlineEventsTest
     LoadScriptScopesTest
     LoadTemplateScopesRunTest
     LoadFailureDedupTest

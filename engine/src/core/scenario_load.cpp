@@ -29,6 +29,7 @@
 #include "vayu/core/script_config.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
@@ -816,6 +817,9 @@ const nlohmann::json* data_row) {
             context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, iteration, vu_index, data_row);
+            nlohmann::json stream_events;
+            vayu::http::bind_buffered_stream_events (
+            script_ctx, response, context->sse_limits, stream_events);
             script_ctx.record_metric = [&context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
