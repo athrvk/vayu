@@ -2064,7 +2064,8 @@ bool is_scenario);
  * remember to honour.
  */
 struct StreamRecord {
-    /// The bounded `events` node, from `stream_trace_node`.
+    /// The `events` sidecar, from `stream_trace_node`: no list, which a reader
+    /// parses back from the stored body (#3770).
     nlohmann::json events;
     /// The run's terminal status. A stream that was stopped is `Stopped`, which
     /// is neither the `Completed` nor the `Failed` the response alone implies.

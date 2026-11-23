@@ -214,8 +214,8 @@ nlohmann::json response_trace_node (const vayu::Response& response) {
     // `bodyBytes` above is the held length in bytes (#3423), which a reader
     // cannot recount from `body`: a JSON string's length is not its UTF-8
     // size, and `cap_trace_bodies` keeps it when it cuts the body. A stream
-    // overwrites it with what it delivered, which its `body` cannot say: an
-    // event stream keeps none, and any other reply at most the bound (#3238).
+    // overwrites it with what it delivered, which its `body` cannot say: it
+    // holds at most the design bound (#3238, #3770).
     if (response.stream_body_bytes) {
         node["bodyBytes"] = *response.stream_body_bytes;
     }

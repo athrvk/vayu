@@ -324,6 +324,12 @@ parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
 
+**A streamed step's body is the stream's bytes** (issue #3770): the `event:`/`data:` lines as they
+arrived, up to `maxDesignResponseBodyBytes` on a Send, which a collection run and a load run
+buffer the same way. So `assert.contains`, `assert.size`, `extract.regex` and `extract.boundary`
+judge a streamed Send as they judge the same stream in a run, and a word one event carried is in
+the body they search.
+
 **An `mcp` step's body is its final JSON-RPC response** (issue #3762). Every kind that reads the
 body (the JSON-reading and text-reading kinds above, `assert.size`, `metric.record`) reads the
 final response the [reply reader](api-reference.md#the-mcp-reply) found, whether the server

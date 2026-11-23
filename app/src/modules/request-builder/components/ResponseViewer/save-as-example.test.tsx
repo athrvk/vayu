@@ -336,6 +336,34 @@ describe("save response as example", () => {
 		expect(dialog.getByText(/not the whole response/i)).toBeTruthy();
 	});
 
+	// A stream's `size` counts what the wire delivered, past what the cap let the
+	// engine read, so the callout names the prefix held (#3770).
+	it("saves a capped stream's bytes and words the read by the prefix, not the wire", async () => {
+		const held = "data: x\n\n".repeat(100).padEnd(1024, "\n");
+		state.response = okResponse({
+			headers: { "Content-Type": "text/event-stream" },
+			body: held,
+			bodyRaw: held,
+			events: [],
+			size: 33_554_432,
+			bodyCapped: true,
+		});
+		renderViewer();
+
+		openDialog();
+		const callout = screen.getByText(/capped while reading/i).parentElement?.textContent;
+		expect(callout).toMatch(/Only the first 1\.0 KB of this response was read/);
+		expect(callout).not.toMatch(/32\.0 MB/);
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1]).toMatchObject({
+			body: held,
+			contentType: "text/event-stream",
+			bodyTruncated: true,
+		});
+	});
+
 	it("sends bodyTruncated false for a response whose read was not capped", async () => {
 		state.response = okResponse({ bodyCapped: false });
 		renderViewer();

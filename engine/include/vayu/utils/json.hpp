@@ -158,7 +158,9 @@ const vayu::http::FileAccessPolicy& files);
  * aggregate whose summary, for a design run, is computed from one sample.
  *
  * Does nothing for a load run, where `results` means the sampled subset and
- * belongs in the report. Does nothing when there are no results.
+ * belongs in the report. Does nothing when there are no results. A stream's
+ * `events` sidecar is served as the list its stored body holds
+ * (`vayu::http::expand_stored_stream_events`, #3770).
  */
 void attach_design_result (nlohmann::json& json,
 const vayu::db::Run& run,

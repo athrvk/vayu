@@ -8864,24 +8864,37 @@ events arrive on. Nothing about a non-streaming send changes.
 ```
 
 The worker parses SSE frames into a bounded in-memory ring that
-[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
-`events` node into the run's stored trace when the stream ends, so History
-restores the timeline. The cookie `warnings` a buffered send answers with
-(issue #3315) are written to the same stored trace, at its top level; the
-`202` carries none.
+[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes the
+stream into the run's stored trace when it ends, so History restores the
+timeline. The cookie `warnings` a buffered send answers with (issue #3315) are
+written to the same stored trace, at its top level; the `202` carries none.
 
-What the reply's bytes become depends on the final response's `Content-Type`
-(issue #3238), read per redirect hop, compared without case and without its
-parameters. A `text/event-stream` reply's bytes are its events and the stored
-`response.body` stays empty. Any other reply (a JSON `404`, NDJSON, chunked
-text) also keeps its bytes as `response.body`, up to
+The final hop's bytes are the stored `response.body`, whatever its
+`Content-Type` (issues #3238, #3770): a `text/event-stream` reply's
+`event:`/`data:` bytes, a JSON `404`, NDJSON or chunked text alike, up to
 `maxDesignResponseBodyBytes`, the bound a buffered send reads under. Past it
 the body is a prefix and the trace says so with `bodyCapped: true`, as on a
-buffered send; the stream itself still ends only by the rules below. Such a
-reply is still fed to the SSE parser, so a server that streams SSE under the
-wrong type still delivers its events. Either way the stored `response`
-carries `bodyBytes`, the body bytes the server delivered, whatever was kept:
-the relay carries no body, so the stored trace is where it lands.
+buffered send; the stream itself still ends only by the rules below, and every
+byte still reaches the SSE parser, so a server that streams SSE under the wrong
+type still delivers its events. The stored `response` carries `bodyBytes`, the
+body bytes the server delivered, whatever was kept: the relay carries no body,
+so the stored trace is where it lands. The declarative elements and the
+post-request script read the same bytes, so `assert.contains`, `assert.size`,
+`extract.regex` and `pm.response.text()` judge a streamed Send as they judge a
+collection or load run's.
+
+The bytes are stored once (issue #657). The trace's `events` node is served as
+`{items, totalEvents, eventsTruncated, endReason}` (each item `{event, data,
+sourceId?, dataTruncated?, dataBytes?, receivedAt}`), but the list is parsed
+from the stored body when the trace is read
+([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
+report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
+the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`,
+one arrival time per event `sseMaxStoredEvents` kept. The served list stops at
+the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when
+either the list is shorter than `totalEvents` or the body is a prefix
+(`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`). A trace stored
+before #3770 carries its `items` and is served as stored.
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
@@ -8922,8 +8935,9 @@ Refused with a **400** rather than silently reinterpreted:
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
 buffered send, so its `pm.request` edits reach the wire. The post-request script
-runs **once, after the stream has terminated**, and reads the bounded stored
-list as `pm.response.events` with `pm.response.totalEvents` and
+runs **once, after the stream has terminated**, and reads the bounded list
+parsed from the stream's bytes, the one its stored trace is served with, as
+`pm.response.events` with `pm.response.totalEvents` and
 `pm.response.eventsTruncated` beside it - a script runs to completion, its
 timers included, before anything is reported, so a live per-event callback is
 not a feature that was skipped but one the runtime cannot have. The same three
@@ -13519,9 +13533,10 @@ bytes, which a client cannot recount from `body` because a JSON string's
 length is not its UTF-8 size. It is the length the engine held, which for a
 `bodyCapped` response is the prefix the read cap kept; a streaming run's is
 the body bytes the server delivered (issue #3238), which its `body` can be
-shorter than (an event stream stores none, any other reply at most
-`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A row
-stored before #3423 carries it only on a cut or streamed response.
+shorter than (at most `maxDesignResponseBodyBytes`, an event stream's bytes
+included since #3770; see [`POST /execute`](#post-execute)). A row stored
+before #3770 holds no body for an event stream, and one stored before #3423
+carries `bodyBytes` only on a cut or streamed response.
 
 If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
 affected `trace.request` and/or `trace.response` object carries
@@ -14938,8 +14953,9 @@ back to a character boundary, so it stays `utf8` with `bodyTruncated` set
 rather than turning the whole prefix into base64.
 
 **A streamed sample carries its events** (0.17.2). `events` is
-`{items, totalEvents, eventsTruncated}` - the same node a streaming design run
-stores on its trace, minus `endReason`: under load a stream ends by server close
+`{items, totalEvents, eventsTruncated}` - the same node a streaming design run's
+trace is served with, minus `endReason` and each item's `receivedAt`: under
+load a stream ends by server close
 or by one of two caps (`maxStreamEvents` / `maxStreamDurationMs`) and nothing
 per sample records which, so no reason is named rather than one invented. The
 list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`,
@@ -14981,9 +14997,11 @@ exchange failed, and `trace` when one was stored, without the cost of the
 whole report. The trace is served as stored: a design send's request and
 response bodies at the length `maxTraceBodyBytes` kept, and its
 `scripts.scriptRequests` holding every `pm.sendRequest` the scripts made, by
-index, in the shape [`POST /execute`](#post-execute) answers them. A trace
-that does not parse is served as its stored text, a JSON string, as the
-report serves it. Reads only.
+index, in the shape [`POST /execute`](#post-execute) answers them. A streamed
+send's `response.body` is the stream's bytes, and its `events` list is parsed
+from them as it is served, not stored (issue #3770,
+[`POST /execute`](#post-execute)). A trace that does not parse is served as its
+stored text, a JSON string, as the report serves it. Reads only.
 
 The handle is the `runId` and `resultId` a recorded buffered
 [`POST /execute`](#post-execute) answers; any `results[].id` of the report, or
