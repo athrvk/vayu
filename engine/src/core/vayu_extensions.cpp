@@ -900,6 +900,36 @@ std::optional<Json> variables_of (const Json& value) {
     return std::make_optional (std::move (out));
 }
 
+namespace {
+
+/**
+ * `streamTextPath` (#3773) and `streamFirstContentMarker` (#3774) off
+ * @p value onto @p out, which already holds its `stream`. Each is held to
+ * what the request applier accepts, a usable value beside `stream: true`, so
+ * a bad one is this piece's `vayu_extension_invalid`, never a refused import:
+ * false on the first that is not.
+ */
+bool read_stream_settings (const Json& value, Json& out) {
+    using Problem = std::optional<std::string> (*) (const nlohmann::json&);
+    const auto settings = std::to_array<std::pair<const char*, Problem>> ({
+    { "streamTextPath", vayu::http::routes::stream_text_path_problem },
+    { "streamFirstContentMarker", vayu::http::routes::stream_first_content_marker_problem },
+    });
+    for (const auto& [key, problem_of] : settings) {
+        const auto found = value.find (key);
+        if (found == value.end ()) {
+            continue;
+        }
+        if (!found->is_string () || problem_of (value) || !out.value ("stream", false)) {
+            return false;
+        }
+        out[key] = *found;
+    }
+    return true;
+}
+
+} // namespace
+
 std::optional<Json> settings_of (const Json& value) {
     if (!value.is_object ()) {
         return std::nullopt;
@@ -934,15 +964,8 @@ std::optional<Json> settings_of (const Json& value) {
         }
         out["httpVersion"] = *found;
     }
-    // Held to what the request applier accepts (#3773): a path in the subset,
-    // beside `stream: true`, so a bad one is this piece's
-    // `vayu_extension_invalid`, never a refused import.
-    if (const auto found = value.find ("streamTextPath"); found != value.end ()) {
-        if (!found->is_string () || vayu::http::routes::stream_text_path_problem (value) ||
-        !out.value ("stream", false)) {
-            return std::nullopt;
-        }
-        out["streamTextPath"] = *found;
+    if (!read_stream_settings (value, out)) {
+        return std::nullopt;
     }
     return std::make_optional (std::move (out));
 }

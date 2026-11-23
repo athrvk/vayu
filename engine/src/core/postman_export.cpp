@@ -2027,7 +2027,7 @@ void note_request_losses (const PostmanExportRequest& request, Walk& walk) {
     if (request.http_version != "auto" && !request.http_version.empty ()) {
         walk.lose (Loss::HttpVersion);
     }
-    if (request.stream || request.has_stream_text_path) {
+    if (request.stream || request.has_stream_text_path || request.has_stream_first_content_marker) {
         walk.lose (Loss::EventStream);
     }
     if (request.timeout_ms) {

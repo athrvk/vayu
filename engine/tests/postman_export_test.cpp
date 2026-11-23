@@ -2285,6 +2285,17 @@ TEST (PostmanExport, AStreamTextPathIsAnEventStreamNote) {
     EXPECT_EQ (losses (run (root)), (json{ { "event_stream", 2 } }));
 }
 
+// A stored `streamFirstContentMarker` (#3774) counts the same way. Mutation
+// check: drop `has_stream_first_content_marker` from `note_request_losses` and
+// the request counts nothing.
+TEST (PostmanExport, AFirstContentMarkerIsAnEventStreamNote) {
+    PostmanExportRequest off            = request ("b", "u");
+    off.has_stream_first_content_marker = true;
+    PostmanExportFolder root            = collection ();
+    root.requests.push_back (off);
+    EXPECT_EQ (losses (run (root)), (json{ { "event_stream", 1 } }));
+}
+
 TEST (PostmanExport, DefaultsAreNotNotes) {
     PostmanExportFolder root = collection ();
     root.requests.push_back (request ("r", "u"));

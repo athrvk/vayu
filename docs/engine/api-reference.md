@@ -2425,7 +2425,9 @@ string, is empty, is longer than 256 bytes or holds a NUL byte is a `400`, and
 so is a marker stated on a request that does not stream once the write lands;
 a `PUT` that only switches `stream` off keeps it, `null` clears it. A by-id
 [`POST /compose`](#post-compose) carries it beside `stream: true` only, and a
-collection run's streaming step is timed to it.
+collection run's streaming step is timed to it. An OpenAPI export carries it in
+`x-vayu-request.settings` beside `stream`; a Postman export lists it under
+`notCarried` (`event_stream`).
 
 **`timeout` is the saved half of [`POST /execute`'s `timeout`](#post-execute)**
 (issue #2937): one slow endpoint can wait longer, or a fast one fail sooner,
@@ -4107,7 +4109,8 @@ and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `timeout`,
-`httpVersion`, `verifySSL`, `stream`), every saved example with its headers and its `origin`
+`httpVersion`, `verifySSL`, `stream`, and beside `stream` its `streamTextPath`
+and `streamFirstContentMarker`), every saved example with its headers and its `origin`
 (`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
 and a document with none, as an older Vayu wrote, imports as `"import"`), and
 the mock mode with the index of a `fixed` target. At the root,
@@ -5334,7 +5337,7 @@ was before these rules.
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
-| `event_stream` | A request consumed as an event stream, or one storing a `streamTextPath` |
+| `event_stream` | A request consumed as an event stream, or one storing a `streamTextPath` or a `streamFirstContentMarker` |
 | `request_timeout` | A request with a timeout of its own (Postman has only an app-wide one) |
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
