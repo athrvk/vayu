@@ -2209,6 +2209,11 @@ const vayu::Response& response) {
     return response.has_error () ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
 }
 
+/// The bound data row as the pointer `resolve_element_template` takes.
+const nlohmann::json* row_or_null (const std::optional<nlohmann::json>& row) {
+    return row ? &*row : nullptr;
+}
+
 /**
  * The streaming half of a design send (issue #573).
  *
@@ -2327,6 +2332,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 return unset_scope_variable (scopes, scope, name);
             },
             .should_stop = nullptr, // A single exchange has nothing to interrupt.
+            .resolve_template =
+            [&] (const std::string& text) {
+                return resolve_element_template (text, scopes, row_or_null (send.data_row));
+            },
             .record_metric = nullptr, // A streaming send has no run to record into.
         };
         vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,
@@ -2456,6 +2465,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                             return unset_scope_variable (scopes, scope, name);
                         },
                         .should_stop = nullptr,
+                        .resolve_template =
+                        [&] (const std::string& text) {
+                            return resolve_element_template (
+                            text, scopes, row_or_null (iteration_data));
+                        },
                         .record_metric = nullptr, // A streaming send has no run to record into.
                         .max_body_bytes = element_body_bytes,
                     };

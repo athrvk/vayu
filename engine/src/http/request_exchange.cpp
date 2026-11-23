@@ -972,6 +972,13 @@ vayu::http::VariableValues flatten_variable_scopes (const ScriptVariableScopes& 
     return values_from_scopes (scopes);
 }
 
+std::string resolve_element_template (const std::string& text,
+const ScriptVariableScopes& scopes,
+const nlohmann::json* row) {
+    return vayu::http::resolve_template_with_optional_row (
+    text, values_from_scopes (scopes), row, enabled_values (scopes.local));
+}
+
 std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
 const vayu::http::VariableValues& vars) {
     const vayu::http::BoundColumnNames no_columns;
@@ -1448,9 +1455,7 @@ ExchangeInputs inputs) {
         // already gives it.
         .resolve_template =
         [&] (const std::string& text) {
-            return vayu::http::resolve_template_with_optional_row (text,
-            values_from_scopes (scopes), inputs.iteration_data,
-            enabled_values (scopes.local));
+            return resolve_element_template (text, scopes, inputs.iteration_data);
         },
         .iteration        = inputs.iteration.value_or (0),
         .step_position    = inputs.step_position,
