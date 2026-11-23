@@ -9697,9 +9697,16 @@ describe("dispatchTool", () => {
 		expect(stream({ streamEventsPerSecondMin: 200 }).thresholds).toEqual({
 			streamEventsPerSecondMin: 200,
 		});
+		// Mutation check: drop the key from the schema and the catchall takes the
+		// 0 below as a number, so the engine's 400 is the only refusal.
+		expect(stream({ streamTimeToFirstMatchP95Ms: 900 }).thresholds).toEqual({
+			streamTimeToFirstMatchP95Ms: 900,
+		});
 		const refused: Record<string, number>[] = [
 			{ streamTimeToFirstEventP95Ms: 0 },
 			{ streamTimeToFirstEventP95Ms: 86_400_001 },
+			{ streamTimeToFirstMatchP95Ms: 0 },
+			{ streamTimeToFirstMatchP95Ms: 86_400_001 },
 			{ streamEventsPerSecondMin: 0 },
 			{ streamEventsPerSecondMin: -1 },
 			{ streamEventsPerSecondMin: 1_000_000_001 },
@@ -9717,6 +9724,8 @@ describe("dispatchTool", () => {
 		>;
 		const description = shape.thresholds.description ?? "";
 		expect(description).toContain("streamTimeToFirstEventP95Ms");
+		expect(description).toContain("streamTimeToFirstMatchP95Ms");
+		expect(description).toContain("streamFirstContentMarker");
 		expect(description).toContain("streamEventsPerSecondMin");
 		expect(description).toContain("not evaluated and count as failed");
 	});

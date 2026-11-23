@@ -2654,7 +2654,12 @@ than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
 the request to each stream's first event. That is not `phases.firstByte`, which
 ends at the response headers: a gateway that answers `200` at once and then
 thinks reads fast there and slow here. It is absent when no stream delivered a
-timed event. Two more optional blocks (issue #3776) say how each stream paced
+timed event, and it stops at the first event of any kind, so an API that opens
+with a preamble event (Anthropic's `message_start`, an OpenAI role-only chunk)
+reads near zero on it. `timeToFirstMatch` (issue #3774) is the same clock stopped
+at the request's first content marker, so that API's first token reads as its
+real wait; it is absent, never `0`, when no stream matched, and a request that
+declares no marker has none. Two more optional blocks (issue #3776) say how each stream paced
 its events, each a `StreamDistribution` (`{p50, p95, p99, max, count}`) over the
 streams that had two timed events to measure between: `maxEventGap`, the
 largest pause between two consecutive events in a stream, in milliseconds, and
@@ -2738,7 +2743,7 @@ derived from the steps it actually sent.
 
 **Stream budgets** (issue #3234): `streamTimeToFirstEventP95Ms` (a ceiling on
 `stream.timeToFirstEvent.p95`, ms) and `streamEventsPerSecondMin` (a floor on
-`stream.eventsPerSecond`) judge the report's `stream` section, which only a
+`stream.eventsPerSecond`), and the third below, judge the report's `stream` section, which only a
 streaming request's load run and a collection run with a streaming step
 (#3235, design or load) have. On any other run the engine reports them not evaluated,
 and that counts as failed, so the dialog treats them as a property of the
@@ -2751,6 +2756,17 @@ next streaming request, and is not named as carried over).
 the run sends streams, so it offers, checks and sends them only then. A streaming request's latency budgets
 read on each stream's full duration, from sending the request to the stream
 closing, and the section says so under the p99 field.
+
+`streamTimeToFirstMatchP95Ms` (issue #3774, "Time to first match p95 at most")
+is the third `streamOnly` budget, a ceiling on `stream.timeToFirstMatch.p95`: the
+first-token budget, since a budget on `timeToFirstEvent` passes whatever a
+preamble API's first token costs. It is offered for any streaming request
+(the dialog does not read the request's marker), so its hint says the request
+must declare a first content marker; a run where no stream matched has no
+figure, and the engine reports the budget not evaluated, which counts as failed,
+never as a pass. `StreamMetrics` draws the figure as a **first match** row, only
+when the report carries it; the live panel stays on the first event, because a
+live frame carries no match.
 
 **`custom.<name>.<stat>` budgets** (issue #1579) are the only dynamic thing the
 block can carry: a ceiling on a value the run records

@@ -39,6 +39,11 @@ export const THRESHOLD_METRICS: Record<string, ThresholdMetricMeta> = {
 		short: "time to first event p95",
 		unit: "ms",
 	},
+	streamTimeToFirstMatchP95Ms: {
+		label: "Time to first match p95",
+		short: "time to first match p95",
+		unit: "ms",
+	},
 	streamEventsPerSecondMin: {
 		label: "Events per second",
 		short: "event rate",

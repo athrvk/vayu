@@ -58,6 +58,18 @@ describe("stream tooltips", () => {
 		}
 	});
 
+	it("says the first-match figure is the first content marker on the first event's clock, matched on raw bytes (issue #3774)", () => {
+		const tip = String(TOOLTIPS.streamFirstMatch);
+		expect(tip).toMatch(/first content marker/);
+		expect(tip).toMatch(/same clock as the first event/);
+		expect(tip).toMatch(/raw bytes/);
+		expect(tip).toMatch(/left out rather than read as zero/);
+	});
+
+	it("sends the reader of the first-event figure to First match for a first token (issue #3774)", () => {
+		expect(String(TOOLTIPS.streamFirstEvent)).toMatch(/first content marker.*First match/);
+	});
+
 	it("explains that the live card counts events as they arrive (issue #3236)", () => {
 		expect(String(TOOLTIPS.liveStream)).toMatch(/as they arrive/);
 		expect(String(TOOLTIPS.liveStream)).not.toMatch(/first byte/i);

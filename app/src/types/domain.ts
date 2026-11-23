@@ -2434,6 +2434,13 @@ export interface RunThresholdBudgets {
 	 */
 	streamTimeToFirstEventP95Ms?: number;
 	/**
+	 * Ceiling on the p95 of `RunReport.stream.timeToFirstMatch`, in ms (issue
+	 * #3774): the wait for the request's first content marker. Streaming runs
+	 * only, and a run whose streams never matched (no marker declared, or none
+	 * seen) has no figure, which the engine reports not evaluated, so failed.
+	 */
+	streamTimeToFirstMatchP95Ms?: number;
+	/**
 	 * Floor on `RunReport.stream.eventsPerSecond` (issue #3234). Streaming
 	 * runs only, judged like {@link streamTimeToFirstEventP95Ms}.
 	 */
@@ -3816,6 +3823,12 @@ export interface RunReport {
 	 * time never sees. Each is per stream, over the streams that had two timed
 	 * events to measure between, and absent (never 0) when none did. Report-only:
 	 * a live gate frame carries neither.
+	 *
+	 * `timeToFirstMatch` (issue #3774) is `timeToFirstEvent`'s clock stopped at
+	 * the request's first content marker instead of its first event, so a
+	 * preamble API's first token reads as its real wait. Absent, never 0, when
+	 * no stream matched, including every run whose request declares no marker.
+	 * Report-only: the live gate frame carries no match.
 	 */
 	stream?: {
 		completions: number;
@@ -3833,6 +3846,8 @@ export interface RunReport {
 		};
 		/** Milliseconds, over the completions that delivered a timed event (`count`). */
 		timeToFirstEvent?: StreamDistribution;
+		/** Milliseconds, over the completions whose stream carried the first content marker (`count`). */
+		timeToFirstMatch?: StreamDistribution;
 		/** Milliseconds: each stream's largest pause between two consecutive events. */
 		maxEventGap?: StreamDistribution;
 		/** Events per second: each stream's own rate, the events after its first over first to last arrival. */

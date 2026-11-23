@@ -1335,6 +1335,7 @@ describe("pass/fail budgets", () => {
 	 */
 	describe("stream budgets (#3234)", () => {
 		const firstEvent = () => screen.queryByLabelText(/^time to first event p95 at most/i);
+		const firstMatch = () => screen.queryByLabelText(/^time to first match p95 at most/i);
 		const eventRate = () => screen.queryByLabelText(/^events per second at least/i);
 		const seedStreamMemo = () =>
 			localStorage.setItem(
@@ -1343,23 +1344,26 @@ describe("pass/fail budgets", () => {
 					budgets: {
 						latencyP99Ms: "",
 						streamTimeToFirstEventP95Ms: "800",
+						streamTimeToFirstMatchP95Ms: "900",
 						streamEventsPerSecondMin: "200",
 					},
 				})
 			);
 
-		it("offers both fields, and the latency note, for a streaming request", () => {
+		it("offers the fields, and the latency note, for a streaming request", () => {
 			open({ isStreamingRequest: true });
 			openBudgets();
 			expect(firstEvent()).toBeInTheDocument();
+			expect(firstMatch()).toBeInTheDocument();
 			expect(eventRate()).toBeInTheDocument();
 			expect(screen.getByText(STREAM_LATENCY_NOTE)).toBeInTheDocument();
 		});
 
-		it("offers neither for a request that does not stream", () => {
+		it("offers none for a request that does not stream", () => {
 			open({ isStreamingRequest: false });
 			openBudgets();
 			expect(firstEvent()).not.toBeInTheDocument();
+			expect(firstMatch()).not.toBeInTheDocument();
 			expect(eventRate()).not.toBeInTheDocument();
 			expect(screen.queryByText(STREAM_LATENCY_NOTE)).not.toBeInTheDocument();
 		});
@@ -1368,9 +1372,11 @@ describe("pass/fail budgets", () => {
 			const { onStart } = open({ isStreamingRequest: true });
 			openBudgets();
 			fireEvent.change(firstEvent()!, { target: { value: "800" } });
+			fireEvent.change(firstMatch()!, { target: { value: "900" } });
 			fireEvent.change(eventRate()!, { target: { value: "200" } });
 			expect(started(onStart).thresholds).toMatchObject({
 				streamTimeToFirstEventP95Ms: 800,
+				streamTimeToFirstMatchP95Ms: 900,
 				streamEventsPerSecondMin: 200,
 			});
 		});
@@ -1392,10 +1398,15 @@ describe("pass/fail budgets", () => {
 			const config = started(onStart);
 			expect(config.thresholds).toMatchObject({
 				streamTimeToFirstEventP95Ms: 800,
+				streamTimeToFirstMatchP95Ms: 900,
 				streamEventsPerSecondMin: 200,
 			});
 			expect(config.carriedBudgets).toEqual(
-				expect.arrayContaining(["streamTimeToFirstEventP95Ms", "streamEventsPerSecondMin"])
+				expect.arrayContaining([
+					"streamTimeToFirstEventP95Ms",
+					"streamTimeToFirstMatchP95Ms",
+					"streamEventsPerSecondMin",
+				])
 			);
 		});
 
@@ -1417,6 +1428,7 @@ describe("pass/fail budgets", () => {
 				localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG) ?? "{}"
 			) as { budgets: Record<string, string> };
 			expect(memo.budgets.streamTimeToFirstEventP95Ms).toBe("800");
+			expect(memo.budgets.streamTimeToFirstMatchP95Ms).toBe("900");
 		});
 	});
 
