@@ -137,7 +137,7 @@ export const TOOLTIPS = {
 	streamMaxEventGap:
 		"The largest pause between two consecutive events within one stream, as a distribution over the run's streams: the p50 is the worst pause of a typical stream and the max is the longest pause any stream had. Measured when each chunk arrives, so a proxy that buffers the stream and releases it in bursts hides the pauses it holds back and reads lower than the server's own. Only streams with at least two timed events are counted.",
 	streamEventRate:
-		"How fast each stream delivered its events, in events per second: the events after the first over the time from the first to the last. Unlike the whole-run events/sec above, which blends every stream into one rate, this is each stream's own pace, so a low p50 means the typical stream was slow, however high the run's total reads. A stream whose events all arrived at one instant is not counted.",
+		"How fast each stream delivered its events, in events per second: the events delivered after the first write, over the time from that write to the last, so a backlog replayed at the start does not inflate it. Unlike the whole-run events/sec above, which blends every stream into one rate, this is each stream's own pace, so a low p50 means the typical stream was slow, however high the run's total reads. A stream whose events all arrived at one instant is not counted.",
 	liveStream:
 		"Events delivered by the run's streams so far, counted as they arrive rather than when a stream finishes, so a run of long streams does not read zero until the first one ends. Events/sec is the rate over the last second or more; open streams is how many transfers are streaming right now.",
 	liveStreamFirstEvent:

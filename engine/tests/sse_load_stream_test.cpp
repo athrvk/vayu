@@ -478,6 +478,37 @@ TEST (StreamTallyTimingTest, OnlyWritesThatCompleteAnEventAreArrivals) {
     EXPECT_NEAR (*response.stream_event_rate, 80.0, 1e-9);
 }
 
+// A first write that replays a backlog took no measured time, so its events
+// stay out of the rate: 100 events at 10 ms, then one event a second for 10 s
+// is 10 events over 10 s. Healthy: 1/s. Mutation check: count every event
+// after the first one (`events_at_last_arrival_ - 1`) and it reads 10.9/s.
+TEST (StreamTallyTimingTest, AFirstWriteBacklogIsNotInTheRate) {
+    using std::chrono::milliseconds;
+    using std::chrono::seconds;
+    const auto started = vayu::http::StreamTally::Clock::now ();
+    const auto headers = event_stream_headers ();
+    vayu::http::StreamTally tally;
+    tally.start (vayu::StreamBounds{ 60000, 1000 }, started);
+
+    std::string backlog;
+    for (int i = 0; i < 100; ++i) {
+        backlog += "data: replayed\n\n";
+    }
+    const auto first = started + milliseconds (10);
+    tally.feed (backlog, headers, first);
+    for (int i = 1; i <= 10; ++i) {
+        tally.feed ("data: live\n\n", headers, first + seconds (i));
+    }
+    vayu::Response response;
+    response.headers = headers;
+    tally.report (response);
+
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 110u);
+    ASSERT_HAS_VALUE (response.stream_event_rate);
+    EXPECT_NEAR (*response.stream_event_rate, 1.0, 1e-9);
+}
+
 // One write has no gap and no span, whatever it carried; two writes at one
 // instant have a gap of 0 and no rate, since the span is nothing to divide by.
 TEST (StreamTallyTimingTest, OneArrivalHasNoGapAndAZeroSpanHasNoRate) {

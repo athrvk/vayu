@@ -14336,10 +14336,12 @@ of how each stream paced its events, in the same `{p50, p95, p99, max, count}`
 shape. `maxEventGap` is each stream's largest wait, in milliseconds, between
 two consecutive writes that delivered an event: a stall mid-reply shows at its
 `max` however fast the stream ran otherwise. `eventRate` is each stream's own
-rate in events per second, the events after the first over the time from the
-first write that delivered one to the last, so 8 streams at 25 ms per event
-read a p50 near 40 beside one stream at 3 ms reading a `max` near 333, where
-the whole-run `eventsPerSecond` blends them. Both are stamped on the write that
+rate in events per second, the events delivered after the first write that
+delivered one over the time from that write to the last, so 8 streams at 25 ms
+per event read a p50 near 40 beside one stream at 3 ms reading a `max` near
+333, where the whole-run `eventsPerSecond` blends them. The first write's own
+events are left out however many it carried: a backlog replayed in it took no
+measured time. Both are stamped on the write that
 completed an event, as `timeToFirstEvent` is: events that share a write share
 one time, and a proxy that buffers the stream shortens the gaps it holds back.
 A keep-alive comment is not an event and closes no gap, and the unterminated

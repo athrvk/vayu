@@ -1316,9 +1316,11 @@ struct Response {
     std::optional<double> stream_max_event_gap_ms;
 
     /**
-     * @brief A bounded stream's own event rate (issue #3776): the events after
-     *        the first, over the time from the first write that completed an
-     *        event to the last, in events per second.
+     * @brief A bounded stream's own event rate (issue #3776): the events
+     *        delivered after the first write that completed an event, over
+     *        the time from that write to the last, in events per second.
+     *        The first write's own events are left out however many it
+     *        carried (a replayed backlog), since they took no measured time.
      *
      * Absent below two such writes or over a zero span. An unterminated last
      * frame the close completed is not in it, for the reason it is not in

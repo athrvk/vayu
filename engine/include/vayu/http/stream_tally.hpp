@@ -193,7 +193,8 @@ class StreamTally {
     /// every gap would be per-event work for a figure the maximum answers.
     void note_arrival (Clock::time_point now) {
         if (!first_arrival_) {
-            first_arrival_ = now;
+            first_arrival_           = now;
+            events_at_first_arrival_ = counter_.events ();
         } else {
             max_gap_ = std::max (
             max_gap_.value_or (Clock::duration::zero ()), now - last_arrival_);
@@ -217,9 +218,12 @@ class StreamTally {
         return Milliseconds (*max_gap_).count ();
     }
 
-    /// The events after the first, over the first arrival to the last, in
-    /// events per second. Absent below two arrivals or over a zero span,
-    /// where it would be a division by nothing.
+    /// The events delivered after the first arrival, over the first arrival
+    /// to the last, in events per second. The first write's events are left
+    /// out however many it carried: they took no measured time, so a backlog
+    /// replayed in one write would otherwise inflate the rate. Absent below
+    /// two arrivals or over a zero span, where it would be a division by
+    /// nothing.
     [[nodiscard]] std::optional<double> event_rate () const {
         if (!first_arrival_ || !max_gap_) {
             return std::nullopt;
@@ -228,7 +232,8 @@ class StreamTally {
         if (span.count () <= 0.0) {
             return std::nullopt;
         }
-        return static_cast<double> (events_at_last_arrival_ - 1) / span.count ();
+        const std::size_t delivered = events_at_last_arrival_ - events_at_first_arrival_;
+        return static_cast<double> (delivered) / span.count ();
     }
 
     /// Add what the counter counted since it read @p before to the run's live
@@ -267,6 +272,8 @@ class StreamTally {
     /// The first write that completed an event; empty until one has.
     std::optional<Clock::time_point> first_arrival_;
     Clock::time_point last_arrival_;
+    /// The events counted by the first arrival, the rate's zero point.
+    std::size_t events_at_first_arrival_ = 0;
     /// The events counted by the last arrival, so a frame `finish` completes
     /// at the close never enters the rate it took no time in.
     std::size_t events_at_last_arrival_ = 0;

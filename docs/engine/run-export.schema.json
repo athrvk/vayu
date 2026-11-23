@@ -268,7 +268,7 @@
               }
             },
             "eventRate": {
-              "description": "Each stream's own event rate in events per second: the events after the first over the first to the last write that delivered one. count is the completions it was measured for. Absent when none was.",
+              "description": "Each stream's own event rate in events per second: the events delivered after the first write that delivered one, over the time from that write to the last. count is the completions it was measured for. Absent when none was.",
               "type": "object",
               "additionalProperties": false,
               "properties": {
