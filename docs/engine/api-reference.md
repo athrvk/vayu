@@ -951,8 +951,13 @@ the server did not name` when it gives none. The challenge is read by
 `classify_bearer_challenge`, the classifier behind
 [`POST /oauth2/step-up`](#post-oauth2step-up); the run never retries, refreshes
 or re-authorizes, and its status counts are the ones the `403` always had.
-`invalid_token`, any other challenge and a refusal with no `WWW-Authenticate`
-keep `HTTP <status> with no JSON-RPC response`. A JSON-RPC `error` body is the
+A collection run carries the message as the step's error; a load run counts the
+`403` as a status, not an error (an error record would move it to status 0), so
+the message is on the kept trace's `mcp` node (the status exemplars, the sample
+and the slow ones), not in the run's error list. `invalid_token`, any other
+challenge and a refusal with no `WWW-Authenticate` keep
+`HTTP <status> with no JSON-RPC response` (`HTTP <status> answered with a
+JSON-RPC result` when the body is a result). A JSON-RPC `error` body is the
 server's own answer and stays `protocol`.
 
 A failed class **fails the step as a failed assertion does**, with or without an
