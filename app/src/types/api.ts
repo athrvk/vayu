@@ -98,6 +98,19 @@ export interface OAuth2AuthorizeStartResponse {
 	redirectUri: string;
 	/** Epoch ms at which the engine fails the attempt: the one deadline both branches wait on. */
 	expiresAt: number;
+	/** What a discovered attempt (`discoverUrl`) runs on and exchanges its code with; absent otherwise. */
+	resolved?: OAuth2AuthorizeResolved;
+}
+
+/** `POST /oauth2/authorize/start`'s `resolved`: no secret is ever in it. */
+export interface OAuth2AuthorizeResolved {
+	authorizationUrl: string;
+	accessTokenUrl: string;
+	clientId: string;
+	resource: string;
+	/** `""` when discovery chose none. */
+	scope: string;
+	issuer: string;
 }
 
 export interface OAuth2AuthorizeStatusResponse {

@@ -15,7 +15,8 @@
 
 import { apiService } from "@/services/api";
 import { computeOAuth2CacheKey } from "./cache-key";
-import type { OAuth2Config } from "@/types";
+import { discoveredValues } from "./discovery";
+import type { OAuth2AuthorizeResolved, OAuth2Config } from "@/types";
 
 export class InteractiveAuthError extends Error {}
 
@@ -105,6 +106,18 @@ function withDeadline<T>(
 	});
 }
 
+/** What a completed sign-in hands back. */
+export interface InteractiveAuthResult {
+	/** The key the engine cached the token under. */
+	cacheKey: string;
+	/**
+	 * The start's `resolved`, for a config with a `discoverUrl` (#3766): what
+	 * the attempt ran on, which the caller writes into the stored config
+	 * (`discoveredValues`) so the next refresh or run keys the same token.
+	 */
+	resolved?: OAuth2AuthorizeResolved;
+}
+
 /**
  * Run the interactive flow for a *resolved* OAuth2Config (variables already
  * substituted). Resolves with the cache key on success; throws on failure or
@@ -118,7 +131,7 @@ function withDeadline<T>(
 export async function runInteractiveAuthorization(
 	config: OAuth2Config,
 	signal?: AbortSignal
-): Promise<string> {
+): Promise<InteractiveAuthResult> {
 	const api = window.electronAPI;
 	if (!api) {
 		throw new InteractiveAuthError(
@@ -140,6 +153,14 @@ export async function runInteractiveAuthorization(
 		);
 	}
 	const remainingMs = started.expiresAt - Date.now();
+	// A discovered attempt exchanges its code with the values it was completed
+	// with, so its key and its embedded window's partition are those values'.
+	const { resolved } = started;
+	const exchanged = resolved ? { ...config, ...discoveredValues(config, resolved) } : config;
+	const done = (cacheKey: string | undefined): InteractiveAuthResult => ({
+		cacheKey: cacheKey ?? computeOAuth2CacheKey(exchanged),
+		...(resolved ? { resolved } : {}),
+	});
 
 	if (useEmbedded) {
 		if (remainingMs <= 0) throw new InteractiveAuthError(TIMED_OUT_MESSAGE);
@@ -148,7 +169,7 @@ export async function runInteractiveAuthorization(
 				authorizeUrl: started.authorizeUrl,
 				redirectUri: started.redirectUri,
 				timeoutMs: remainingMs,
-				partition: `oauth:${computeOAuth2CacheKey(config)}`,
+				partition: `oauth:${computeOAuth2CacheKey(exchanged)}`,
 			}),
 			remainingMs + EXPIRY_GRACE_MS,
 			TIMED_OUT_MESSAGE,
@@ -165,7 +186,7 @@ export async function runInteractiveAuthorization(
 		if (status.state !== "completed") {
 			throw new InteractiveAuthError(status.error || "Couldn't complete authorization.");
 		}
-		return status.cacheKey ?? computeOAuth2CacheKey(config);
+		return done(status.cacheKey);
 	}
 
 	// Loopback: open the system browser and poll the engine's listener result.
@@ -182,7 +203,7 @@ export async function runInteractiveAuthorization(
 		const status = await apiService.getOAuth2AuthorizeStatus(started.attemptId);
 		throwIfCancelled(signal);
 		if (status.state === "completed") {
-			return status.cacheKey ?? computeOAuth2CacheKey(config);
+			return done(status.cacheKey);
 		}
 		if (status.state === "failed") {
 			throw new InteractiveAuthError(status.error || "Couldn't complete authorization.");

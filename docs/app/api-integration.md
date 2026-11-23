@@ -1387,7 +1387,7 @@ apiService.getOAuth2TokenStatus(cacheKey): Promise<OAuth2StatusResponse> // GET 
 apiService.clearOAuth2Token(cacheKey): Promise<void>                   // DELETE /oauth2/token?key=
 
 // Interactive Authorization Code flow (engine-hosted loopback + PKCE)
-apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStartResponse>  // { attemptId, authorizeUrl, redirectUri, expiresAt }
+apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStartResponse>  // { attemptId, authorizeUrl, redirectUri, expiresAt, resolved? }
 apiService.getOAuth2AuthorizeStatus(attemptId): Promise<OAuth2AuthorizeStatus>
 apiService.completeOAuth2Authorize(attemptId, callbackUrl): Promise<OAuth2AuthorizeStatus>
 ```
@@ -1432,13 +1432,39 @@ arrives first, and the embedded window is handed the time remaining
 (`timeoutMs` on `oauthOpenWindow`, which the main process refuses unless it is a
 positive finite number).
 
-`runInteractiveAuthorization(config, signal?)` stops on an `AbortSignal`: the poll delay
+**Discovered from a server URL (#3766).** An `authorization_code` config may carry
+`discoverUrl`, the OAuth-protected MCP server's URL (`""` is the form's switch on with
+nothing typed yet). The engine runs the discovery, and a client registration when no
+`clientId` is typed, inside `POST /oauth2/authorize/start`, so a start naming one gets
+`startOAuth2Authorize`'s longer budget (`discoveredStartTimeoutMs`: the `defaultTimeout`
+setting counted twice, plus the grace). The answer's `resolved`
+(`OAuth2AuthorizeResolved`: `authorizationUrl`, `accessTokenUrl`, `clientId`,
+`resource`, `scope`, `issuer`; no secret) is what the attempt runs on. Discovery is a
+**fill** step on both sides: the engine fills only the members the posted config left
+blank, and once the sign-in succeeds the form writes exactly those into the stored
+config (`discoveredValues` and `withDiscoveredValues`, `services/oauth/discovery.ts`)
+and names them in `discoveredFields`. From then on the stored config holds ordinary
+endpoints and a client id, so the cache key, a refresh, a Send and a run read it like
+any other and need no discovery; `cache-key.ts` is unchanged. `issuer` is not stored.
+A config with discovery on and no cache key yet (`awaitsDiscovery`) has no token to
+look up: the token row offers the sign-in under `oauth2SignInKey` (`discover:<url>`),
+and the load-test guards say to sign in first. `missingOAuth2Fields` asks such a config
+for the server URL only. `clearDiscovered` (the form's Discover again) removes what
+discovery wrote and keeps what was typed, so the next sign-in discovers, and
+registers, again.
+
+`runInteractiveAuthorization(config, signal?)` resolves with `{ cacheKey, resolved? }`,
+`resolved` only for a discovered start; the embedded window's partition and a
+fallback `cacheKey` are computed from the config with the discovered values filled in,
+the values the engine exchanged the code with. It stops on an `AbortSignal`: the poll delay
 and the embedded-window wait both end at once, every engine call is preceded by a
 check, and it rejects with `InteractiveAuthCancelledError` (a subclass of
 `InteractiveAuthError` that callers skip reporting). The renderer cannot close the
 embedded window or the system browser tab, so an abort stops waiting and ignores
-whatever the window answers later. `TokenStatusRow` passes the signal from
-`stores/oauth-signin-store.ts`, which keys one sign-in per token cache key.
+whatever the window answers later. `useOAuth2SignIn` (`components/shared/OAuth2Form/`)
+passes the signal from `stores/oauth-signin-store.ts`, which keys one sign-in per
+`oauth2SignInKey`, and hands a landed sign-in to its caller only while that caller
+still shows a config with the same key.
 
 > **`HttpClient.delete`** takes an optional `params` argument so the token-clear
 > call can pass `?key=`.

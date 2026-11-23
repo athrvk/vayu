@@ -37,6 +37,7 @@ import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { Button, Switch } from "@/components/ui";
 import { oauth2TokenKey } from "@/services/oauth/cache-key";
+import { awaitsDiscovery } from "@/services/oauth/discovery";
 import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/queries/oauth";
 import { tokenScopeIds } from "@/services/oauth/signing-key";
 import { useSessionStore, useToastStore } from "@/stores";
@@ -132,6 +133,17 @@ export default function OAuth2LoadTestGuard({
 	useEffect(() => {
 		onGateChange(gated);
 	}, [gated, onGateChange]);
+
+	// Whatever the run's length: a config whose endpoints only a sign-in can
+	// find (#3766) has no token a run could fetch headless.
+	if (awaitsDiscovery(config)) {
+		return (
+			<Callout severity="warning" title="Sign in before running">
+				This auth finds its endpoints from the server URL when you sign in, and a run
+				can&apos;t sign in. Get a token from the Auth tab first.
+			</Callout>
+		);
+	}
 
 	if (state.kind === "inert" || state.kind === "no-config") {
 		return null;

@@ -24,7 +24,7 @@
  */
 
 import { effectiveOAuth2Config } from "@/modules/request-builder/utils/auth-resolution";
-import { oauth2TokenKey } from "@/services/oauth/cache-key";
+import { oauth2SignInKey } from "@/services/oauth/discovery";
 import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import {
 	buildVariableValues,
@@ -36,9 +36,11 @@ import type { Collection, OAuth2Config, Request } from "@/types";
 import { walkAncestors } from "./tree-utils";
 
 /**
- * One distinct token the run sends: its cache key, a config that yields it and
- * the collection of the request it was first seen on, whose chain resolves a
- * `jwt_bearer` key reference when the guard refreshes it.
+ * One distinct token the run sends: its cache key (for a config awaiting
+ * discovery, the key its sign-in runs under, so the guard can say to sign in
+ * first), a config that yields it and the collection of the request it was
+ * first seen on, whose chain resolves a `jwt_bearer` key reference when the
+ * guard refreshes it.
  */
 export interface RunOAuth2Config {
 	key: string;
@@ -62,7 +64,8 @@ export interface RunVariableScopes {
  * The distinct OAuth 2.0 configs @p groups' requests send, in first-seen order.
  *
  * A config the engine cannot key (no token URL or client id once resolved) is
- * left out: the guard has nothing to look up for it, and it renders nothing.
+ * left out, unless discovery will fill those at sign-in: the guard has nothing
+ * to look up for it, and it renders nothing.
  */
 export function distinctRunOAuth2Configs(
 	groups: readonly RunRequestGroup[],
@@ -90,7 +93,7 @@ export function distinctRunOAuth2Configs(
 			// The signing key stays the reference the config wrote: the engine
 			// resolves it, so the PEM never rides a request this app builds.
 			const config = keepSigningKeyReference(resolveStringsDeep(raw, resolveString), raw);
-			const key = oauth2TokenKey(config);
+			const key = oauth2SignInKey(config);
 			if (key !== null && !byKey.has(key)) byKey.set(key, { config, collectionId });
 		}
 	}

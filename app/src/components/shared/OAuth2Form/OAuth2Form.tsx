@@ -28,9 +28,11 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui";
-import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
-import type { OAuth2Config, OAuth2GrantType, OAuth2ParamRow } from "@/types";
+import { DISCOVERED_FIELD_LABELS, OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
+import { withDiscoveredValues } from "@/services/oauth/discovery";
+import type { OAuth2Config, OAuth2DiscoveredField, OAuth2GrantType, OAuth2ParamRow } from "@/types";
 import { LabelledField, type LabelledControlProps } from "../LabelledField";
+import DiscoveryFields from "./DiscoveryFields";
 import JwtBearerFields from "./JwtBearerFields";
 import ParamRowsEditor from "./ParamRowsEditor";
 import { resolveOAuth2Config } from "./resolve-config";
@@ -40,6 +42,15 @@ import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
 /** What the engine holds `fallbackExpiresIn` to (`MAX_FALLBACK_EXPIRES_IN_SECONDS`): one year. */
 const MAX_FALLBACK_EXPIRES_IN_SECONDS = 365 * 24 * 3600;
+
+/** A blank discoverable member's placeholder while discovery is on. */
+const DISCOVERY_PLACEHOLDERS: Record<OAuth2DiscoveredField, string> = {
+	authorizationUrl: "found at sign-in",
+	accessTokenUrl: "found at sign-in",
+	clientId: "blank registers a client at sign-in",
+	resource: "found at sign-in",
+	scope: "found at sign-in",
+};
 
 const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 	{ value: "client_credentials", label: "Client credentials" },
@@ -93,6 +104,8 @@ export default function OAuth2Form({
 	const isAuthCode = grant === "authorization_code";
 	const isPassword = grant === "password";
 	const isJwtBearer = grant === "jwt_bearer";
+	const discovering = isAuthCode && value.discoverUrl !== undefined;
+	const discovered = new Set(value.discoveredFields ?? []);
 
 	// The grant has no client secret, so a stored one is dropped with the field:
 	// hidden, it would still be sent as client authentication beside the assertion.
@@ -125,6 +138,32 @@ export default function OAuth2Form({
 		</LabelledField>
 	);
 
+	// A member discovery wrote is the server's answer, shown read-only so it is
+	// not mistaken for a typed one; Discover again is how it changes. With
+	// discovery on, a blank member says it is found at sign-in, and one typed
+	// there wins over what discovery would find.
+	const discoverable = (
+		key: OAuth2DiscoveredField,
+		c: LabelledControlProps,
+		placeholder: string
+	) =>
+		discovered.has(key) ? (
+			<Input
+				id={c.id}
+				readOnly
+				value={value[key] ?? ""}
+				title={value[key]}
+				className="font-mono text-sm"
+			/>
+		) : (
+			<TextInput
+				{...c}
+				value={value[key] ?? ""}
+				onChange={(v) => set(key, v)}
+				placeholder={discovering ? DISCOVERY_PLACEHOLDERS[key] : placeholder}
+			/>
+		);
+
 	return (
 		<div className="space-y-4">
 			{field(OAUTH2_FIELD_LABELS.grantType, (c) => (
@@ -146,24 +185,18 @@ export default function OAuth2Form({
 				</Select>
 			))}
 
-			{isAuthCode &&
-				field(OAUTH2_FIELD_LABELS.authorizationUrl, (c) => (
-					<TextInput
-						{...c}
-						value={value.authorizationUrl ?? ""}
-						onChange={(v) => set("authorizationUrl", v)}
-						placeholder="https://idp.example.com/authorize"
-					/>
-				))}
+			{isAuthCode && (
+				<DiscoveryFields value={value} onChange={onChange} TextInput={TextInput} />
+			)}
 
-			{field(OAUTH2_FIELD_LABELS.accessTokenUrl, (c) => (
-				<TextInput
-					{...c}
-					value={value.accessTokenUrl}
-					onChange={(v) => set("accessTokenUrl", v)}
-					placeholder="https://idp.example.com/token"
-				/>
-			))}
+			{isAuthCode &&
+				field(OAUTH2_FIELD_LABELS.authorizationUrl, (c) =>
+					discoverable("authorizationUrl", c, "https://idp.example.com/authorize")
+				)}
+
+			{field(OAUTH2_FIELD_LABELS.accessTokenUrl, (c) =>
+				discoverable("accessTokenUrl", c, "https://idp.example.com/token")
+			)}
 
 			{isAuthCode &&
 				field(
@@ -182,14 +215,7 @@ export default function OAuth2Form({
 			<div className="grid grid-cols-2 gap-4">
 				{field(
 					OAUTH2_FIELD_LABELS.clientId,
-					(c) => (
-						<TextInput
-							{...c}
-							value={value.clientId}
-							onChange={(v) => set("clientId", v)}
-							placeholder="client id or {{var}}"
-						/>
-					),
+					(c) => discoverable("clientId", c, "client id or {{var}}"),
 					isJwtBearer ? "The assertion's iss claim." : undefined
 				)}
 				{!isJwtBearer &&
@@ -235,14 +261,9 @@ export default function OAuth2Form({
 				</div>
 			)}
 
-			{field("Scope", (c) => (
-				<TextInput
-					{...c}
-					value={value.scope ?? ""}
-					onChange={(v) => set("scope", v)}
-					placeholder="openid profile email"
-				/>
-			))}
+			{field(DISCOVERED_FIELD_LABELS.scope, (c) =>
+				discoverable("scope", c, "openid profile email")
+			)}
 
 			{isAuthCode &&
 				field("PKCE", (c) => (
@@ -343,14 +364,9 @@ export default function OAuth2Form({
 								placeholder="optional"
 							/>
 						))}
-						{field("Resource", (c) => (
-							<TextInput
-								{...c}
-								value={value.resource ?? ""}
-								onChange={(v) => set("resource", v)}
-								placeholder="optional"
-							/>
-						))}
+						{field(DISCOVERED_FIELD_LABELS.resource, (c) =>
+							discoverable("resource", c, "optional")
+						)}
 					</div>
 
 					{field("Refresh token URL", (c) => (
@@ -429,6 +445,7 @@ export default function OAuth2Form({
 					resolvedConfig={resolvedConfig}
 					deferredNames={deferredNames}
 					collectionId={collectionId}
+					onDiscovered={(found) => onChange(withDiscoveredValues(value, found))}
 				/>
 			</div>
 		</div>

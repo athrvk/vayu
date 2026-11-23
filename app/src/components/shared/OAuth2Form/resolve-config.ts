@@ -91,6 +91,7 @@ export function resolveOAuth2Config(
 		resource: rz("resource", value.resource),
 		authorizationUrl: rz("authorizationUrl", value.authorizationUrl),
 		refreshTokenUrl: rz("refreshTokenUrl", value.refreshTokenUrl),
+		discoverUrl: rz("discoverUrl", value.discoverUrl),
 		authorizationParams: resolveParamRows("authorizationParams", value.authorizationParams, r),
 		tokenParams: resolveParamRows("tokenParams", value.tokenParams, r),
 		refreshParams: resolveParamRows("refreshParams", value.refreshParams, r),

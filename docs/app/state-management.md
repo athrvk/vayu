@@ -1991,7 +1991,12 @@ belongs to the config rather than to the `TokenStatusRow` that started it: the
 Auth tab, the context bar and the collection editor can each show a row for one
 config, and they must share one pending state and one browser tab. Modelled on
 `request-builder/context/send-tracker.ts`: the store holds only what renders, and
-the `AbortController`s and owner counts sit in module maps beside it.
+the `AbortController`s and owner counts sit in module maps beside it. The key is
+`oauth2SignInKey` (`services/oauth/discovery.ts`): the cache key, or
+`discover:<server URL>` for a config discovered from a server URL that no sign-in
+has filled yet (#3766), which has no cache key. Every surface that starts a
+sign-in goes through `useOAuth2SignIn` (`components/shared/OAuth2Form/`), which
+acquires the key while it is mounted.
 
 **State:**
 ```typescript

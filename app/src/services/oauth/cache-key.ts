@@ -45,7 +45,8 @@ const text = (v: unknown): string => (typeof v === "string" ? v : "");
  * "". Not `String.prototype.trim`, which also strips a no-break space and every
  * other Unicode space the engine leaves alone.
  */
-const urlText = (v: unknown): string => text(v).replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, "");
+export const urlText = (v: unknown): string =>
+	text(v).replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, "");
 
 /** UTF-8 byte order, which is how the engine's `std::string` sort compares. */
 function compareBytes(a: string, b: string): number {

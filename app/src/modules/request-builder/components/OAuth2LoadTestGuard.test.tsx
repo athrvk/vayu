@@ -291,3 +291,46 @@ describe("OAuth2LoadTestGuard's lapsed token", () => {
 		expect(screen.getByText(/^Access token covers the whole run\.$/)).toBeInTheDocument();
 	});
 });
+
+describe("a config awaiting discovery from a server URL (#3766)", () => {
+	const awaiting: OAuth2Config = {
+		grantType: "authorization_code",
+		discoverUrl: "https://mcp.example.com/mcp",
+		accessTokenUrl: "",
+		clientId: "",
+	};
+
+	beforeEach(() => {
+		statusQuery.data = undefined;
+	});
+
+	it.each([
+		["a duration run", 600],
+		["an iterations run", null],
+	])("says to sign in first for %s, without gating Start", (_case, durationSeconds) => {
+		const onGateChange = vi.fn();
+		render(
+			<OAuth2LoadTestGuard
+				config={awaiting}
+				durationSeconds={durationSeconds}
+				onGateChange={onGateChange}
+			/>
+		);
+
+		expect(screen.getByText("Sign in before running")).toBeInTheDocument();
+		expect(onGateChange).toHaveBeenLastCalledWith(false);
+	});
+
+	it("judges a discovered config that a sign-in has filled like any other", () => {
+		renderGuard({
+			config: {
+				...awaiting,
+				accessTokenUrl: "https://auth.example.com/token",
+				clientId: "registered",
+			},
+		});
+
+		expect(screen.queryByText("Sign in before running")).toBeNull();
+		expect(screen.getByText("No token cached yet")).toBeInTheDocument();
+	});
+});
