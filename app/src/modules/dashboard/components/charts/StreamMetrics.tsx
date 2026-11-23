@@ -8,7 +8,7 @@
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
-import { formatCount, pluralize } from "../../utils/format";
+import { formatCount, formatRate, pluralize } from "../../utils/format";
 import { DurationValue } from "./PhasePercentiles";
 import { StreamStat } from "./StreamStat";
 
@@ -109,10 +109,10 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 						events/s
 						<InfoChip tip={TOOLTIPS.streamEventRate} />
 					</span>
-					<EventValue value={eventRate.p50} decimals={1} />
-					<EventValue value={eventRate.p95} decimals={1} />
-					<EventValue value={eventRate.p99} decimals={1} emphasis />
-					<EventValue value={eventRate.max} decimals={1} />
+					<FigureCell text={formatRate(eventRate.p50)} />
+					<FigureCell text={formatRate(eventRate.p95)} />
+					<FigureCell text={formatRate(eventRate.p99)} emphasis />
+					<FigureCell text={formatRate(eventRate.max)} />
 				</div>
 			)}
 
@@ -139,19 +139,15 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 	);
 }
 
-function EventValue({
-	value,
-	emphasis,
-	decimals,
-}: {
-	value: number;
-	emphasis?: boolean;
-	decimals?: number;
-}) {
+function EventValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
+	return <FigureCell text={formatCount(value)} emphasis={emphasis} />;
+}
+
+function FigureCell({ text, emphasis }: { text: string; emphasis?: boolean }) {
 	return (
 		<span className="text-right font-mono tabular-nums text-label">
 			<span className={emphasis ? "text-foreground font-medium" : "text-foreground"}>
-				{formatCount(value, decimals)}
+				{text}
 			</span>
 		</span>
 	);
