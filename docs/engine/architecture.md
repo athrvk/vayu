@@ -873,7 +873,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Its reaper thread expires attempts at their TTL whether or not
-  anyone polls (#3347). Owned by the `Server` for a clean shutdown.
+  anyone polls (#3347). Owned by the `Server` for a clean shutdown. A config
+  naming `discoverUrl` (#3766) is completed by `oauth_discovery` before the
+  attempt starts (blanks only, a typed value wins) and answers what it
+  resolved so the app stores it.
 - **`oauth_discovery`** (`discover_oauth_server`, #3766) - finds the
   authorization server of an MCP server URL in the MCP authorization spec's
   order: an unauthenticated `GET` whose 401 `Bearer` challenge names
@@ -889,8 +892,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
   link-local URL, and its fetches run under an empty `LocalPeerRule`. Every
   member is type-checked, each failure carries a stable
   `oauth_discovery_*` code, and validated metadata is cached by issuer for
-  five minutes. No route calls it yet; #3766 wires it into the authorize
-  flow.
+  five minutes. `POST /oauth2/authorize/start` calls it for a config naming
+  `discoverUrl`.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity

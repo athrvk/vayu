@@ -10,17 +10,37 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/listener_registry.hpp"
+#include "vayu/http/oauth_discovery.hpp"
 #include "vayu/utils/stop_signal.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 
 namespace vayu::http {
+
+/**
+ * What a discovered attempt (`discoverUrl`, #3766) runs on: the values a client
+ * writes into its stored config, so a later refresh or run needs no discovery
+ * and keys the same cached token (`oauth::cache_key` reads `accessTokenUrl` and
+ * `clientId`). Each is the config's own value where it set one. Never a secret.
+ */
+struct ResolvedAuthorization {
+    std::string authorization_url;
+    std::string access_token_url;
+    std::string client_id;
+    std::string resource;
+    /// Empty when no scope was typed, challenged or listed.
+    std::string scope;
+    /// The discovered authorization server.
+    std::string issuer;
+};
 
 /**
  * Result of starting an interactive authorization attempt.
@@ -33,6 +53,8 @@ struct AuthorizeStart {
     /// When the attempt times out, in epoch milliseconds: the one deadline a
     /// client waits on (#3347).
     int64_t expires_at = 0;
+    /// Set only for a discovered attempt.
+    std::optional<ResolvedAuthorization> resolved;
     // error (when !ok)
     int http_status = 400;
     std::string error_code;
@@ -81,8 +103,11 @@ class OAuth2AuthorizeManager {
     public:
     // Constructor and destructor are defined out-of-line (in the .cpp) because
     // the registry holds unique_ptr<Attempt> and Attempt is an incomplete type
-    // here.
-    explicit OAuth2AuthorizeManager (AuthorizeTimings timings = {});
+    // here. @p discovery_cache must outlive the manager; a test passes its own
+    // so an ephemeral port reused by an earlier test's issuer is not answered
+    // from that test's metadata.
+    explicit OAuth2AuthorizeManager (AuthorizeTimings timings = {},
+    AuthorizationServerMetadataCache& discovery_cache = shared_authorization_server_cache ());
     ~OAuth2AuthorizeManager ();
 
     OAuth2AuthorizeManager (const OAuth2AuthorizeManager&)            = delete;
@@ -92,8 +117,16 @@ class OAuth2AuthorizeManager {
 
     // mode: "loopback" (default) or "embedded". Refused with a 429 while
     // `MAX_ATTEMPTS` are unsettled, and with a 503 after `shutdown`.
-    AuthorizeStart
-    start (vayu::db::Database& db, const nlohmann::json& config, const std::string& mode);
+    //
+    // A config naming `discoverUrl` is first completed from the discovery of
+    // that MCP server (`discover_oauth_server`): its authorization and token
+    // endpoints, `resource` and scope fill what the config leaves blank. The
+    // discovery is bounded by the request timeout setting and ends on
+    // @p cancel (the route's `RouteContext::server_stopping`).
+    AuthorizeStart start (vayu::db::Database& db,
+    const nlohmann::json& config,
+    const std::string& mode,
+    const std::atomic<bool>* cancel = nullptr);
 
     // Embedded mode: complete the attempt from the captured callback URL. Its
     // token exchange ends early when the attempt is cancelled or the manager
@@ -128,6 +161,7 @@ class OAuth2AuthorizeManager {
     AuthorizeStatus settled_status (const std::string& attempt_id) const;
 
     const AuthorizeTimings timings_;
+    AuthorizationServerMetadataCache& discovery_cache_;
     /// Unsettled attempts only, so the registry's cap counts what holds a
     /// port or an exchange.
     Attempts attempts_;

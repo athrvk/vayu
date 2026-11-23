@@ -7593,7 +7593,7 @@ hands it back.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt}` |
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt, resolved?}` (`resolved` only for a [discovered](#discovered-from-an-mcp-server-url) config) |
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}`; reads only |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
@@ -7634,6 +7634,58 @@ an IdP that omits `state` on its error redirect leaves the attempt pending until
 it times out. A callback with the right `state` after `expiresAt` answers `410`.
 A loopback attempt settles once, and the first settlement wins: a later callback
 with the right `state` answers `409` and changes nothing.
+
+#### Discovered from an MCP server URL
+
+A config naming `discoverUrl` (#3766), the URL of an OAuth-protected MCP
+server, is completed from that server before the attempt starts, in the MCP
+authorization spec's order: the server's 401 challenge or its RFC 9728
+well-known document, then its authorization server's RFC 8414 or OpenID Connect
+metadata (`discover_oauth_server`, see
+[architecture](architecture.md)). `discoverUrl` is read trimmed, like the URL
+members above. Discovery **fills only what the config leaves blank**: a typed
+`authorizationUrl`, `accessTokenUrl`, `resource`, `scope` or `clientId` wins.
+
+| Member | Filled from |
+|--------|-------------|
+| `authorizationUrl`, `accessTokenUrl` | The metadata's `authorization_endpoint` and `token_endpoint` |
+| `resource` | The protected resource metadata's `resource`, the canonical server URL; sent on the authorize URL and the token request (RFC 8707) |
+| `scope` | The 401 challenge's `scope`; without one, every `scopes_supported` entry of the protected resource metadata, space-joined; without those, no scope is sent (the MCP spec's scope selection) |
+
+A discovered config still needs a `clientId` (with its `clientSecret` when the
+client has one); without one the start is refused with `400`
+`oauth2_client_id_required`. The discovery is bounded by the request timeout
+setting, goes through the shared client and transport policy, and ends when
+the engine stops.
+
+The answer's `resolved` holds what the attempt runs on, the values a client
+writes into its stored config so that a later refresh or run needs no
+discovery and keys the same [cached token](#oauth-20-token-cache) (no secret is
+ever in it):
+
+```json
+{
+  "authorizationUrl": "https://auth.example/authorize",
+  "accessTokenUrl": "https://auth.example/token",
+  "clientId": "typed-client",
+  "resource": "https://mcp.example/mcp",
+  "scope": "mcp:read",
+  "issuer": "https://auth.example"
+}
+```
+
+`scope` is `""` when none was chosen. The callback (loopback or `POST
+/oauth2/authorize/complete`) exchanges its code with these values, not with
+the config as sent.
+
+A start that cannot complete the config is refused before any attempt exists:
+
+| Status | Code | When |
+|--------|------|------|
+| `400` | `oauth_discovery_invalid_server_url` | `discoverUrl` is not an absolute `http` or `https` URL |
+| `504` | `oauth_discovery_timeout` | The discovery ran out of time |
+| `502` | any other `oauth_discovery_*` code | Discovery found no usable metadata: none answered, a document is invalid, its `resource` or `issuer` does not match, it lacks PKCE `S256`, or it names a local URL for a remote server |
+| `400` | `oauth2_client_id_required` | No `clientId` |
 
 ### Local mock issuer
 

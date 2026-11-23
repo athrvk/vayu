@@ -11,6 +11,7 @@
  *
  * POST   /oauth2/token          {config, force?, interactive?, environmentId?,
  *                                collectionId?} → token | error
+ * POST   /oauth2/authorize/start {config, mode?} → attempt | error
  * GET    /oauth2/token?key=K    → {found, expired?, token?}
  * DELETE /oauth2/token?key=K    → {deleted}
  *
@@ -171,6 +172,40 @@ oauth2_token_delete (vayu::db::Database& db, const std::string& key) {
     return { 200, nlohmann::json{ { "deleted", existed } } };
 }
 
+/**
+ * Start an interactive authorization attempt for the `{config, mode?}` in
+ * @p request_body. Separated from the route for unit testing; @p cancel is the
+ * route's `RouteContext::server_stopping`, which ends a discovery the start
+ * makes.
+ */
+std::pair<int, nlohmann::json> oauth2_authorize_start (OAuth2AuthorizeManager& manager,
+vayu::db::Database& db,
+const std::string& request_body,
+const std::atomic<bool>* cancel) {
+    const auto parsed = parse_request_json (
+    request_body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
+    if (!parsed) {
+        return as_response (parsed.error ());
+    }
+    const auto config = parsed->value ("config", nlohmann::json ());
+    const auto mode   = parsed->value ("mode", std::string{ "loopback" });
+    const auto result = manager.start (db, config, mode, cancel);
+    if (!result.ok) {
+        return { result.http_status,
+            error_body (result.http_status, result.error_message, result.error_code) };
+    }
+    nlohmann::json out{ { "attemptId", result.attempt_id },
+        { "authorizeUrl", result.authorize_url },
+        { "redirectUri", result.redirect_uri }, { "expiresAt", result.expires_at } };
+    if (const auto& resolved = result.resolved) {
+        out["resolved"] = { { "authorizationUrl", resolved->authorization_url },
+            { "accessTokenUrl", resolved->access_token_url },
+            { "clientId", resolved->client_id }, { "resource", resolved->resource },
+            { "scope", resolved->scope }, { "issuer", resolved->issuer } };
+    }
+    return { 200, out };
+}
+
 namespace {
 
 nlohmann::json authorize_status_json (const AuthorizeStatus& st) {
@@ -205,28 +240,12 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/authorize/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const auto body = parse_request_json (
-        req.body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
-        if (!body) {
-            refuse_request_body (res, "POST /oauth2/authorize/start", body.error ());
-            return;
-        }
-        const auto config = body->value ("config", nlohmann::json ());
-        const auto mode   = body->value ("mode", std::string{ "loopback" });
-        auto result       = ctx.authorize_manager.start (ctx.db, config, mode);
-        if (!result.ok) {
-            res.status = result.http_status;
-            res.set_content (
-            error_body (res.status, result.error_message, result.error_code).dump (),
-            "application/json");
-            return;
-        }
-        res.status = 200;
-        res.set_content (
-        nlohmann::json{ { "attemptId", result.attempt_id },
-        { "authorizeUrl", result.authorize_url },
-        { "redirectUri", result.redirect_uri }, { "expiresAt", result.expires_at } }
-        .dump (),
+        auto [status, body] = oauth2_authorize_start (
+        ctx.authorize_manager, ctx.db, req.body, &ctx.server_stopping);
+        res.status = status;
+        // A refusal can quote what a discovered server sent, and a parse
+        // refusal the bytes it stopped at, so a strict dump could throw.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     });
 

@@ -3,12 +3,14 @@
 /**
  * @file oauth_discovery_server.hpp
  * @brief An in-process MCP server and authorization server for the OAuth
- *        discovery tests (#3766).
+ *        discovery and authorize tests (#3766).
  *
- * Every `GET` is answered from a table the test fills by path (the query is
- * not part of the key), and every path counts its requests: `hits` is how a
- * test tells a cached document from a fetched one, and an unlisted path is a
- * 404, which is what moves discovery on to its next well-known URL.
+ * Every `GET` and `POST` is answered from a table the test fills by path (the
+ * method and the query are not part of the key), and every path counts its
+ * requests: `hits` is how a test tells a cached document from a fetched one,
+ * and an unlisted path is a 404, which is what moves discovery on to its next
+ * well-known URL. A path's last request body is kept, so a test reads what a
+ * token request sent.
  */
 
 #include "task_queue.hpp"
@@ -39,22 +41,11 @@ class DiscoveryServer {
     public:
     DiscoveryServer () {
         svr_.new_task_queue = pooled_task_queue (8);
-        svr_.Get (".*", [this] (const httplib::Request& req, httplib::Response& res) {
-            const std::lock_guard<std::mutex> lock (mutex_);
-            ++hits_[req.path];
-            last_accept_[req.path] = req.get_header_value ("Accept");
-            const auto found       = answers_.find (req.path);
-            if (found == answers_.end ()) {
-                res.status = 404;
-                return;
-            }
-            const DiscoveryAnswer& answer = found->second;
-            res.status                    = answer.status;
-            for (const auto& [name, value] : answer.headers) {
-                res.headers.emplace (name, value);
-            }
-            res.set_content (answer.body, answer.content_type);
-        });
+        const auto handler = [this] (const httplib::Request& req, httplib::Response& res) {
+            answer_request (req, res);
+        };
+        svr_.Get (".*", handler);
+        svr_.Post (".*", handler);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] { svr_.listen_after_bind (); });
         if (!wait_until ([this] { return svr_.is_running (); })) {
@@ -102,6 +93,13 @@ class DiscoveryServer {
         return total;
     }
 
+    /// The body of the last request for @p path, "" when it had none.
+    [[nodiscard]] std::string last_body (const std::string& path) const {
+        const std::lock_guard<std::mutex> lock (mutex_);
+        const auto found = last_body_.find (path);
+        return found == last_body_.end () ? "" : found->second;
+    }
+
     /// The `Accept` header of the last request for @p path.
     [[nodiscard]] std::string last_accept (const std::string& path) const {
         const std::lock_guard<std::mutex> lock (mutex_);
@@ -110,6 +108,24 @@ class DiscoveryServer {
     }
 
     private:
+    void answer_request (const httplib::Request& req, httplib::Response& res) {
+        const std::lock_guard<std::mutex> lock (mutex_);
+        ++hits_[req.path];
+        last_accept_[req.path] = req.get_header_value ("Accept");
+        last_body_[req.path]   = req.body;
+        const auto found       = answers_.find (req.path);
+        if (found == answers_.end ()) {
+            res.status = 404;
+            return;
+        }
+        const DiscoveryAnswer& answer = found->second;
+        res.status                    = answer.status;
+        for (const auto& [name, value] : answer.headers) {
+            res.headers.emplace (name, value);
+        }
+        res.set_content (answer.body, answer.content_type);
+    }
+
     httplib::Server svr_;
     int port_ = 0;
     std::thread thread_;
@@ -117,6 +133,7 @@ class DiscoveryServer {
     std::map<std::string, DiscoveryAnswer> answers_;
     std::map<std::string, int> hits_;
     std::map<std::string, std::string> last_accept_;
+    std::map<std::string, std::string> last_body_;
 };
 
 } // namespace vayu::tests
