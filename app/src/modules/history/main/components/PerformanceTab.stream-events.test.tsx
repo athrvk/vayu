@@ -92,9 +92,7 @@ describe("PerformanceTab stream events card", () => {
 			expect(screen.getByText("max gap").parentElement).toHaveTextContent(
 				"27.0ms34.0ms41.0ms312ms"
 			);
-			expect(screen.getByText("events/s").parentElement).toHaveTextContent(
-				"40.041.241.942.3"
-			);
+			expect(screen.getByText("events/s").parentElement).toHaveTextContent("40414242");
 		});
 
 		it("draws each row only when its own field is present", () => {
