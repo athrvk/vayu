@@ -1725,7 +1725,7 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
  * separates "not a stream" from "a stream with no events", which an empty
  * array could not. Same rule as `pm.request.body` and `pm.iterationData`.
  *
- * Entries are `{ event, id?, data, dataTruncated? }`. The stored node spells
+ * Entries are `{ event, id?, data, receivedAt?, dataTruncated? }`. The stored node spells
  * the upstream id `sourceId` because a relay frame id sits beside it there;
  * inside a script there is only one id to mean, so it is `id`. `id` is absent
  * when the origin sent none, rather than `""` - a script comparing ids must be
@@ -1757,6 +1757,14 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
                 const auto id = source_id->get<std::string> ();
                 JS_SetPropertyStr (
                 ctx, entry, "id", JS_NewStringLen (ctx, id.data (), id.size ()));
+            }
+            // The arrival time in epoch milliseconds, stamped by the SSE
+            // context. Only a Send measures it, so a load run's sampled node
+            // has none and the property stays absent there (#3775).
+            if (const auto received = item.find ("receivedAt");
+            received != item.end () && received->is_number ()) {
+                JS_SetPropertyStr (ctx, entry, "receivedAt",
+                JS_NewInt64 (ctx, received->get<int64_t> ()));
             }
             // Per-event truncation is disclosed in band exactly as the stored
             // node discloses it: an event whose data is a prefix must never

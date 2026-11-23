@@ -1640,7 +1640,7 @@ declare const pm: {
 		 */
 		errorMessage: string | undefined;
 		/**
-		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
+		 * The events a streaming request received, as { event, id, data, receivedAt } entries (id absent when the origin sent none; receivedAt is epoch milliseconds on a Send and absent in a load run; dataTruncated when one event hit the per-event byte cap). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
 		 * 
 		 * Absent - not empty - for an ordinary response, so typeof separates 'not a stream' from 'a stream with no events'. The list is bounded by sseMaxStoredEvents; check eventsTruncated before asserting over it as a whole.
 		 * 

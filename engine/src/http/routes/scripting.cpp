@@ -200,9 +200,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.response.events" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.events" }, { "detail", "object[] | undefined" },
     { "documentation",
-    "The events a streaming request received, as { event, id, data } entries "
-    "(id absent when the origin sent none; dataTruncated when one event hit "
-    "the per-event byte cap). Buffered, not live: a post-request script "
+    "The events a streaming request received, as { event, id, data, "
+    "receivedAt } entries (id absent when the origin sent none; receivedAt "
+    "is epoch milliseconds on a Send and absent in a load run; dataTruncated "
+    "when one event hit the per-event byte cap). Buffered, not live: a "
+    "post-request script "
     "runs once, after the stream has terminated, over this list.\n\nAbsent - "
     "not empty - for an ordinary "
     "response, so typeof separates 'not a stream' from 'a stream with no "

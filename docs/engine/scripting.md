@@ -581,7 +581,7 @@ pm.test('every token frame parsed', function () {
 });
 ```
 
-Each entry is `{ event, id, data }`:
+Each entry is `{ event, id, data, receivedAt }`:
 
 | Field | |
 |-------|--|
@@ -589,6 +589,7 @@ Each entry is `{ event, id, data }`:
 | `id` | The origin's `id:`, **absent** when it sent none. Not the relay's own frame id, which is a different number and would make a comparison silently wrong. |
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
+| `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads), so `events[0].receivedAt` against the send time is the time to first event. A **number on a design Send**, **absent** wherever the list is parsed back out of a buffered body - a load run's inline or deferred script, where it is not measured. |
 
 **Buffered, never live.** The script runs once the stream is over, and runs to
 completion - its timers and promise jobs included, see
