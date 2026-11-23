@@ -306,6 +306,14 @@ describe("stream budgets (issue #3234)", () => {
 		);
 	});
 
+	it("warns that a preamble event reads near zero on the time to first event budget (issue #3774)", () => {
+		const hint = BUDGET_FIELDS.find((f) => f.key === "streamTimeToFirstEventP95Ms")?.hint ?? "";
+		expect(hint).toMatch(/preamble event/);
+		expect(hint).toMatch(/reads near zero/);
+		expect(hint).toMatch(/not time to first token/);
+		expect(hint).toMatch(/passes falsely/);
+	});
+
 	it("round-trips into the engine's keys for a streaming request", () => {
 		expect(buildThresholds(streamDraft, false, [], true)).toEqual({
 			streamTimeToFirstEventP95Ms: 800,

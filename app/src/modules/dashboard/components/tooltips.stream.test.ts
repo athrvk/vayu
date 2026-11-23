@@ -47,6 +47,17 @@ describe("stream tooltips", () => {
 		expect(tip).toMatch(/still open is not counted/);
 	});
 
+	it("says a preamble event reads near zero on the first-event figure, so it is not time to first token (issue #3774)", () => {
+		for (const key of ["streamFirstEvent", "liveStreamFirstEvent"] as const) {
+			const tip = String(TOOLTIPS[key]);
+			expect(tip).toMatch(/preamble event/);
+			expect(tip).toMatch(/message_start/);
+			expect(tip).toMatch(/role-only chunk/);
+			expect(tip).toMatch(/reads near zero here/);
+			expect(tip).toMatch(/not time to first token/);
+		}
+	});
+
 	it("explains that the live card counts events as they arrive (issue #3236)", () => {
 		expect(String(TOOLTIPS.liveStream)).toMatch(/as they arrive/);
 		expect(String(TOOLTIPS.liveStream)).not.toMatch(/first byte/i);

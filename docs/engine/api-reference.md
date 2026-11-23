@@ -10511,7 +10511,10 @@ prints. Both are unevaluated, and so count toward `failed`, on a run with no
 `stream` section (one that did not stream, or ran with `stream_metrics: false`),
 because a run that streamed nothing measured neither; a floor read as `0`
 there would fail for the wrong reason. The time-to-first-event budget is also
-unevaluated when no completion delivered a timed event.
+unevaluated when no completion delivered a timed event. It judges the first
+event of any kind, so an API that opens with a preamble event (Anthropic's
+`message_start`, an OpenAI role-only chunk) reads near zero on it and passes
+whatever its first token costs.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
@@ -14615,7 +14618,11 @@ to the write that completed the first frame carrying a `data` field. It is not
 `timingBreakdown.phases.firstByte`, which ends at the response headers: an LLM
 gateway answers `200` at once and then thinks, so its wait lands in the
 download phase and `firstByte` reads fast for a stream whose first token was
-slow. `count` is the completions that delivered an event, so a stream the
+slow. Nor is it time to first token: an API that opens a stream with a preamble
+event (Anthropic's `message_start`, an OpenAI chunk that carries only the role)
+delivers that event at once, so `timeToFirstEvent` reads near zero however late
+the first token comes, and a budget on it passes falsely for such an API.
+`count` is the completions that delivered an event, so a stream the
 target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is

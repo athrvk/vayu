@@ -142,7 +142,7 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		min: 0,
 		minInclusive: false,
 		max: MAX_LATENCY_MS,
-		hint: "From sending the request to a stream's first event, so a server that answers at once and then waits still counts. Streams that never delivered an event are left out.",
+		hint: "From sending the request to a stream's first event, so a server that answers at once and then waits still counts. Streams that never delivered an event are left out. An API that opens with a preamble event (Anthropic's message_start, an OpenAI role-only chunk) reads near zero, so this is not time to first token and a budget on it passes falsely.",
 		streamOnly: true,
 	},
 	{
