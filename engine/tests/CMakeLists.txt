@@ -169,6 +169,7 @@ add_executable(vayu_tests
     execute_result_handle_test.cpp
     send_log_test.cpp
     oauth_client_test.cpp
+    oauth_discovery_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
     jwt_test.cpp
@@ -482,6 +483,7 @@ set(vayu_scratch_database_suites
     MutualTlsTest
     OAuthAuthorizeTest
     OAuthClientTest
+    OAuthDiscoveryTest
     OAuthRouteTest
     PerHostLimitRunTest
     PersistIntoUnsavedGlobalsTest
@@ -491,6 +493,7 @@ set(vayu_scratch_database_suites
     PostmanExportRouteTest
     RecordDesignResultTest
     RelayTest
+    RemoteOAuthDiscoveryTest
     ReorderRouteTest
     RequestBodyDepthRouteTest
     RequestComposerTest

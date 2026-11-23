@@ -874,6 +874,23 @@ applied to the outgoing request rather than being left to the UI. This lives in
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Its reaper thread expires attempts at their TTL whether or not
   anyone polls (#3347). Owned by the `Server` for a clean shutdown.
+- **`oauth_discovery`** (`discover_oauth_server`, #3766) - finds the
+  authorization server of an MCP server URL in the MCP authorization spec's
+  order: an unauthenticated `GET` whose 401 `Bearer` challenge names
+  `resource_metadata` (`parse_bearer_challenge`, the RFC 9110 challenge
+  grammar), else `/.well-known/oauth-protected-resource` with the server's
+  path inserted, then bare (RFC 9728); the document's `resource` must cover
+  the server URL, and its first `authorization_servers` entry is the issuer.
+  The issuer's metadata comes from `/.well-known/oauth-authorization-server`
+  (RFC 8414), then OpenID Connect's `openid-configuration` (path inserted,
+  then appended); its `issuer` must equal the issuer it was fetched for, and
+  a server whose `code_challenge_methods_supported` does not list `S256` is
+  refused. A server that is not on this machine may not name a loopback or
+  link-local URL, and its fetches run under an empty `LocalPeerRule`. Every
+  member is type-checked, each failure carries a stable
+  `oauth_discovery_*` code, and validated metadata is cached by issuer for
+  five minutes. No route calls it yet; #3766 wires it into the authorize
+  flow.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity

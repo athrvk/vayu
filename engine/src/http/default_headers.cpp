@@ -19,9 +19,6 @@
 
 namespace vayu::http {
 
-namespace {
-
-/// RFC 9110 `tchar`: what a header name is allowed to be built from.
 bool is_token_char (char c) {
     const auto byte = static_cast<unsigned char> (c);
     if (std::isalnum (byte) != 0) {
@@ -30,6 +27,8 @@ bool is_token_char (char c) {
     constexpr std::string_view SYMBOLS = "!#$%&'*+-.^_`|~";
     return SYMBOLS.find (c) != std::string_view::npos;
 }
+
+namespace {
 
 /// A byte of a refused name as a message can show it. A byte outside printable
 /// ASCII is spelled as a number: written out raw it would be a fragment of a
