@@ -553,7 +553,7 @@ Version `10` is a bump of its own: `0.46.0` released `9`. **Merge gate:** the
 must check the tag the same way. The release that carries `10` says so under
 Changed, naming #3031.
 
-Version `11` is a bump of its own: `0.51.0`, the last release, stamps `10`.
+Version `11` is a bump of its own: `0.51.1`, the last release, stamps `10`.
 **Merge gate:** the `git grep` against the last tag must show `10`; a change
 that joins `11` later must check the tag the same way. The release that carries
 `11` says so under Changed, naming #3547.
