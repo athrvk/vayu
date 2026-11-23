@@ -23,6 +23,16 @@ export function usesDuration(mode: LoadTestConfig["mode"]): boolean {
 }
 
 /**
+ * Whether a virtual user has a "next request" to hold back. `constant_rps`
+ * sends on a schedule, so the engine skips Retry-After back-off there with a
+ * warning (#3782); the dialog hides the control instead of offering one that
+ * does nothing.
+ */
+export function appliesRetryAfter(mode: LoadTestConfig["mode"]): boolean {
+	return mode !== "constant_rps";
+}
+
+/**
  * What the dialog calls the virtual-user count in each mode. Shared with the
  * range message, so the field a refusal names is the one on screen.
  */

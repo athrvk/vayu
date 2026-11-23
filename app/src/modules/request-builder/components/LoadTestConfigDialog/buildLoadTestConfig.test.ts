@@ -33,6 +33,8 @@ const DRAFT: LoadTestDraft = {
 	sampleRate: 100,
 	slowThreshold: 1000,
 	saveTimingBreakdown: false,
+	retryAfterBackoff: false,
+	retryAfterMaxMs: 30_000,
 	maxInFlight: null,
 	budgets: emptyBudgetDraft(),
 	customBudgets: [],
@@ -109,6 +111,36 @@ describe("buildLoadTestConfig", () => {
 			elements: { scripts: "allInline" },
 		});
 		expect(build({ scriptsOverride: SCRIPTS_DEFAULT })).not.toHaveProperty("elements");
+	});
+
+	describe("Retry-After back-off (#3782)", () => {
+		it("sends the option and its cap, in the engine's spelling, when on", () => {
+			expect(build({ retryAfterBackoff: true, retryAfterMaxMs: 5000 })).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 5000,
+			});
+		});
+
+		it("sends neither key when off, whatever the cap holds", () => {
+			const config = build({ retryAfterBackoff: false, retryAfterMaxMs: 5000 });
+			expect(config).not.toHaveProperty("retryAfterBackoff");
+			expect(config).not.toHaveProperty("retryAfterMaxMs");
+		});
+
+		it.each(["constant_concurrency", "ramp_up", "iterations", "capacity"] as const)(
+			"applies it to %s, a closed-loop mode",
+			(mode) => {
+				expect(build({ ...withMode(mode), retryAfterBackoff: true })).toMatchObject({
+					retryAfterBackoff: true,
+				});
+			}
+		);
+
+		it("withholds it from a constant-rate run, which sends on a schedule", () => {
+			const config = build({ ...withMode("constant_rps"), retryAfterBackoff: true });
+			expect(config).not.toHaveProperty("retryAfterBackoff");
+			expect(config).not.toHaveProperty("retryAfterMaxMs");
+		});
 	});
 
 	it("turns a blank comment into an absent one", () => {

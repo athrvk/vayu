@@ -2151,6 +2151,16 @@ waited, because requests go out on a schedule. `timers` is the number of enabled
 timers skipped, `RunWarnings` titles it "Think timer skipped on a constant-rate
 run", and the Elements card tallies the element `skipped`.
 
+A load run's `report.warnings` also carry the three Retry-After codes
+([#3782](https://github.com/athrvk/vayu/issues/3782)), each titled by
+`RunWarnings` for what the run did rather than as a failure:
+`rate_limited_dominant` ("Most responses were rate limited", the option off and
+more than half the responses `429`, its message naming `retryAfterBackoff` on a
+closed-loop run and saying back-off does not apply on a constant-rate one),
+`retry_after_backoff` ("Virtual users waited out Retry-After", `count` the
+waits) and `retry_after_skipped_open_loop` ("Retry-After back-off skipped on a
+constant-rate run").
+
 `authNotice` is the engine's sentence for a request whose auth sent nothing: a
 mode it stores but does not execute (`digest`, `ntlm`, ..., issue #2474), or a
 bearer token or API key name that is empty (issue #3203). The request is still
@@ -2713,6 +2723,24 @@ did before, inverts the slider - "100% - everything" kept 1%.
 A `0` is a division by zero engine-side, so the control's floor is 1%. "Keep no
 success traces" is the **Save timing breakdown** toggle, which gates storage
 outright.
+
+#### Retry-After back-off is an opt-in run option
+
+**Recording & limits** carries a **Wait out Retry-After** switch and, with it on,
+a **Longest Retry-After wait** field in ms (`#lt-retry-after`,
+`#lt-retry-after-max`; [#3782](https://github.com/athrvk/vayu/issues/3782)). The
+dialog's `retryAfterBackoff` / `retryAfterMaxMs` keys are the engine's own
+camelCase spelling, so `buildLoadTestConfig` and the request builder pass them
+to `POST /runs` unchanged, and they are **absent** while the option is off: the
+engine's default is off, and the stored snapshot then says only what the run
+did. A `constant_rps` run sends on a schedule and has no next request to hold
+back, so the controls are hidden in that mode (`appliesRetryAfter` in
+`profile.ts`) and the keys are not sent; the memo keeps the choice for the next
+closed-loop run. The cap range, 1-3600000, is the engine's exactly
+(`load-test.engine-parity.test.ts`) and a value outside it blocks Start. The
+run's `RunConfigSection` reads the snapshot back as a **Retry-After** row ("Waited,
+up to N ms"), shown only when the option was on. `RunCollectionDialog` has no
+control for it; a collection run gets it through MCP's `start_load_run`.
 
 #### Dialog ceilings are a user setting
 

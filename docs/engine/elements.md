@@ -768,7 +768,9 @@ nothing: its `step.between` dispatch skips a `timer.*` kind through the
 pipeline's skip hook (`RunContext::open_loop_timer_skip_reason`, read through
 the registry's `category`), because its pacer's `maxInFlight` headroom reads
 the same `in_flight()` and would drop arrivals for slots no request holds
-(#3541). What issue #1573 wires for this run shape stays
+(#3541). The same reservation holds a `Retry-After` wait under the run option
+`retryAfterBackoff` (#3782, not an element kind), one deadline per completion
+for the longer of the two waits. What issue #1573 wires for this run shape stays
 separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
 not a step's. `validate_request_elements_run_override` refuses a `control.*`
 kind, `timer.pacing` and `timer.throughput` outright (a `400` naming the

@@ -46,14 +46,14 @@ interface Budget {
 type Session = Pick<Budget, "host" | "allowWrites" | "revealSecretsToAgents">;
 
 const BUDGETS: Budget[] = [
-	{ host: "app", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 152_500 },
-	{ host: "app", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 149_600 },
-	{ host: "app", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 219_900 },
-	{ host: "app", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 215_200 },
-	{ host: "cli", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 152_800 },
-	{ host: "cli", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 149_800 },
-	{ host: "cli", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 221_700 },
-	{ host: "cli", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 217_000 },
+	{ host: "app", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 153_000 },
+	{ host: "app", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 150_000 },
+	{ host: "app", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 220_400 },
+	{ host: "app", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 215_700 },
+	{ host: "cli", allowWrites: false, revealSecretsToAgents: false, tools: 56, maxBytes: 153_300 },
+	{ host: "cli", allowWrites: false, revealSecretsToAgents: true, tools: 56, maxBytes: 150_300 },
+	{ host: "cli", allowWrites: true, revealSecretsToAgents: false, tools: 84, maxBytes: 222_200 },
+	{ host: "cli", allowWrites: true, revealSecretsToAgents: true, tools: 84, maxBytes: 217_500 },
 ];
 
 const HOSTS: McpHost[] = ["app", "cli"];
