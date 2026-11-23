@@ -14,6 +14,11 @@
  * what the tokens *are* - how long they live, what they claim, and how the
  * issuer misbehaves.
  *
+ * The resource scope is the one field not validated here: the engine's rule is
+ * RFC 6749's scope-token grammar, and its `400` names the break, which the
+ * callout below shows beside the field rather than a second copy of the grammar
+ * drifting from it.
+ *
  * The port is not offered. An issuer binds an ephemeral loopback port by
  * default, an explicit one that another listener holds is a `500`, and nothing
  * about a mock issuer wants a memorable port - its URLs are copied, not typed.
@@ -102,6 +107,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 	const [failureMode, setFailureMode] = useState<MockIssuerFailureMode>("none");
 	const [slowMs, setSlowMs] = useState(String(DEFAULT_SLOW_MS));
 	const [claimsText, setClaimsText] = useState("");
+	const [resourceScope, setResourceScope] = useState("");
 
 	const expiresInValue = Number(expiresIn);
 	const expiresInValid =
@@ -128,6 +134,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 				// in the row summary that nothing acts on.
 				...(failureMode === "slow" ? { slowMs: slowMsValue } : {}),
 				...(claims.claims ? { claims: claims.claims } : {}),
+				...(resourceScope.trim() ? { resourceScope: resourceScope.trim() } : {}),
 			},
 			{
 				onSuccess: (issuer) => {
@@ -153,8 +160,8 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 					<DialogTitle>New OAuth issuer</DialogTitle>
 					<DialogDescription>
 						A local issuer that mints signed tokens on demand - point a request&apos;s
-						OAuth 2.0 config at its token URL and no external identity provider is
-						involved.
+						OAuth 2.0 config at its token URL, or discover it from its discovery URL,
+						and no external identity provider is involved.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -200,8 +207,9 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 						<Label htmlFor="new-issuer-failure-mode" className="leading-snug">
 							Failure mode
 							<span className="block text-xs font-normal text-muted-foreground">
-								How <code className="font-mono">/token</code> answers. Changeable
-								while the issuer runs.
+								What goes wrong: <code className="font-mono">/token</code>, the
+								metadata, registration or the <code className="font-mono">iss</code>{" "}
+								on the redirect. Changeable while the issuer runs.
 							</span>
 						</Label>
 						<Select
@@ -214,11 +222,11 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 								id="new-issuer-failure-mode"
 								/*
 								 * `w-40` rode `--spacing`: at the Default density it rendered
-								 * as 120px, and "Invalid client" (the longest option) truncated
-								 * to "Invalid cl…". `w-[10rem]` is the fixed 160px the trigger
-								 * needs to hold every label, at both densities.
+								 * as 120px, and "Invalid client" truncated to "Invalid cl…".
+								 * `w-[13rem]` is the fixed 208px the trigger needs to hold the
+								 * longest label ("Registration refused"), at both densities.
 								 */
-								className="w-[10rem] shrink-0"
+								className="w-[13rem] shrink-0"
 							>
 								<SelectValue />
 							</SelectTrigger>
@@ -285,6 +293,23 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 							aria-describedby={claims.error ? "new-issuer-claims-error" : undefined}
 						/>
 						<FieldError id="new-issuer-claims-error">{claims.error}</FieldError>
+					</div>
+
+					<div className="space-y-1">
+						<Label htmlFor="new-issuer-resource-scope" className="leading-snug">
+							Resource scope
+							<span className="block text-xs font-normal text-muted-foreground">
+								Optional. Scopes the protected resource at the discovery URL
+								requires of a token, separated by spaces.
+							</span>
+						</Label>
+						<Input
+							id="new-issuer-resource-scope"
+							placeholder="mcp:read mcp:write"
+							value={resourceScope}
+							onChange={(e) => setResourceScope(e.target.value)}
+							className="font-mono text-xs"
+						/>
 					</div>
 
 					{/* The engine's own refusal, shown where the field that caused it

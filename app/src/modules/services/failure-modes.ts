@@ -8,7 +8,7 @@
 /**
  * What a mock issuer's `failureMode` means, in one place.
  *
- * The row badge, the row's live switch and the start dialog all name these four
+ * The row badge, the row's live switch and the start dialog all name these
  * modes; three copies of the mapping would be three chances for the UI to call
  * `server_error` something the next surface calls something else.
  *
@@ -25,6 +25,24 @@ export const FAILURE_MODE_LABELS: Record<MockIssuerFailureMode, string> = {
 	slow: "Slow",
 	server_error: "Server error",
 	invalid_client: "Invalid client",
+	metadata_not_found: "Metadata not found",
+	registration_refused: "Registration refused",
+	wrong_iss: "Wrong iss",
+};
+
+/**
+ * What each mode does, as the clause the expanded row's summary carries. A
+ * `Record` over the union, so a mode added to the type fails to compile here
+ * instead of reading as healthy in the summary.
+ */
+const FAILURE_MODE_EFFECTS: Record<MockIssuerFailureMode, (issuer: MockIssuer) => string | null> = {
+	none: () => null,
+	slow: (issuer) => `answers after ${issuer.slowMs}ms`,
+	server_error: () => "answers with a server error",
+	invalid_client: () => "rejects every client id",
+	metadata_not_found: () => "hides its metadata document",
+	registration_refused: () => "refuses client registration",
+	wrong_iss: () => "sends a wrong iss on the authorize redirect",
 };
 
 /** `mi::MAX_EXPIRES_IN_SECONDS` - 31 days. */
@@ -37,18 +55,16 @@ export const DEFAULT_SLOW_MS = 2000;
 /** The issuer's configuration as one line, for the expanded row. */
 export function failureModeSummary(issuer: MockIssuer): string {
 	const parts = [`Tokens expire in ${issuer.expiresInSeconds}s`];
-	if (issuer.failureMode === "slow") {
-		parts.push(`answers after ${issuer.slowMs}ms`);
-	} else if (issuer.failureMode === "server_error") {
-		parts.push("answers with a server error");
-	} else if (issuer.failureMode === "invalid_client") {
-		parts.push("rejects every client id");
-	}
+	// `?.`: a mode from an engine newer than this app has no clause, and the
+	// summary should say nothing rather than throw while the row renders.
+	const effect = FAILURE_MODE_EFFECTS[issuer.failureMode]?.(issuer);
+	if (effect) parts.push(effect);
 	parts.push(
 		issuer.clientCount === 0
 			? "any client id accepted"
 			: `${issuer.clientCount} ${pluralize(issuer.clientCount, "client")} configured`
 	);
 	if (issuer.issueRefreshTokens) parts.push("refresh tokens issued");
+	if (issuer.resourceScope) parts.push(`resource requires scope ${issuer.resourceScope}`);
 	return `${parts.join(" · ")}.`;
 }

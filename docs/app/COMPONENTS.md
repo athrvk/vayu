@@ -1072,7 +1072,7 @@ both reveal it.
   only) and **delete** (every row) in one hover-revealed `⋯` menu, `RowActionsMenu` like every other
   row in the app - these were the last rows painting their actions as always-visible icon buttons,
   which on a 32px row truncated the URL that is the row's own payload (issue #1690); the URLs those
-  buttons carried in tooltips ride the items' `hint`, so they read without hovering; an issuer row expands in place to its token and authorize URLs,
+  buttons carried in tooltips ride the items' `hint`, so they read without hovering; an issuer row expands in place to its discovery URL (the one an OAuth config's "Discover from the server URL" field takes), metadata, token and authorize URLs,
   a copy for the HS256 signing key, its configuration in one line, a live `failureMode` switch, and
   - in `slow` only - the delay that mode answers after, committed on blur rather than per keystroke.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
@@ -1122,7 +1122,7 @@ both reveal it.
   success while the rejection goes unhandled. It is a shared hook rather than a local one because
   the inbox tab's header offers the same URL and kept that exact defect after the drawer's fix
   (#555 item 6, then #565 item 1) - a hand-rolled copy does not receive the primitive's fixes. A row's
-  `⋯` menu items toast; the icon buttons inside an expanded issuer (token URL, authorize URL, signing
+  `⋯` menu items toast; the icon buttons inside an expanded issuer (discovery, metadata, token and authorize URLs, signing
   key) each own a `useCopy({ feedback: "icon" })` and swap their glyph to a check instead (#2315). Rows are ordered **by port**, because the engine lists them in map order (not stable across
   polls) and the record carries no creation stamp; the inbox tab's switcher orders the same way.
   Creating one **toasts and flashes** the new row for `TIMING.ROW_FLASH_MS` - it lands wherever its
@@ -1136,10 +1136,11 @@ both reveal it.
   wire-shape change - to label something whose whole identity is already the port it holds. `Port
   NNNN` ships instead and needs nothing from the engine. Revisit only if inboxes ever outlive the
   engine process, where a port is no longer a stable name.
-- `NewIssuerDialog.tsx` - the start form: token lifetime, failure mode (plus its delay), and a JSON
-  claims box. Everything is validated before it is sent, because the engine refuses a bad config
+- `NewIssuerDialog.tsx` - the start form: token lifetime, failure mode (plus its delay), a JSON
+  claims box and an optional resource scope. Everything but the scope is validated before it is sent, because the engine refuses a bad config
   with a `400` rather than falling back to a default, and a claims typo is otherwise invisible until
-  a token comes back without the claim. Every refusal **names its bound in words**: a reddened field
+  a token comes back without the claim; the scope's grammar stays the engine's, whose `400` the
+  dialog shows. Every refusal **names its bound in words**: a reddened field
   beside a greyed-out Start says something is wrong and never which field or why, and `aria-invalid`
   alone announces "invalid" with no correction. Mounted only while open, so the mount is the reset.
 - `useRunningServices.ts` - `useRunningServices()` and the count derived from it, shared by the

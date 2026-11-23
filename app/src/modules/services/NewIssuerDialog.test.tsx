@@ -53,9 +53,9 @@ describe("NewIssuerDialog helper lines", () => {
 		expect(helperCodes("Token lifetime")).toEqual(["exp", "expires_in"]);
 	});
 
-	it("sets the failure mode's endpoint in code", () => {
+	it("sets the failure mode's endpoint and claim in code", () => {
 		renderDialog();
-		expect(helperCodes("Failure mode")).toEqual(["/token"]);
+		expect(helperCodes("Failure mode")).toEqual(["/token", "iss"]);
 	});
 
 	it("sets the reserved claims in code", () => {
