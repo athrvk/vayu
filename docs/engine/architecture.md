@@ -873,7 +873,39 @@ applied to the outgoing request rather than being left to the UI. This lives in
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Its reaper thread expires attempts at their TTL whether or not
-  anyone polls (#3347). Owned by the `Server` for a clean shutdown.
+  anyone polls (#3347). Owned by the `Server` for a clean shutdown. A config
+  naming `discoverUrl` (#3766) is completed by `oauth_discovery` before the
+  attempt starts (blanks only, a typed value wins), registers a client through
+  `oauth_registration` when it names no `clientId`, answers what it resolved
+  so the app stores it, and checks the callback's `iss` against the
+  discovered issuer (RFC 9207) before the code is exchanged.
+- **`oauth_discovery`** (`discover_oauth_server`, #3766) - finds the
+  authorization server of an MCP server URL in the MCP authorization spec's
+  order: an unauthenticated `GET` whose 401 `Bearer` challenge names
+  `resource_metadata` (`parse_bearer_challenge`, the RFC 9110 challenge
+  grammar), else `/.well-known/oauth-protected-resource` with the server's
+  path inserted, then bare (RFC 9728); the document's `resource` must cover
+  the server URL, and its first `authorization_servers` entry is the issuer.
+  The issuer's metadata comes from `/.well-known/oauth-authorization-server`
+  (RFC 8414), then OpenID Connect's `openid-configuration` (path inserted,
+  then appended); its `issuer` must equal the issuer it was fetched for, and
+  a server whose `code_challenge_methods_supported` does not list `S256` is
+  refused. A server that is not on this machine may not name a loopback or
+  link-local URL, and its fetches, its client registration and the attempt's
+  code exchange run under an empty `LocalPeerRule`, decided once by
+  `discovered_peer_rule`. Every
+  member is type-checked, each failure carries a stable
+  `oauth_discovery_*` code, and validated metadata is cached by issuer for
+  five minutes. `POST /oauth2/authorize/start` calls it for a config naming
+  `discoverUrl`. The same unit's `classify_bearer_challenge` is the one
+  reader of a 401/403 `Bearer` challenge's step-up facts (`insufficient_scope`
+  with its scopes unioned into the held ones, `invalid_token` reported but
+  not a step-up); it is pure, and `POST /oauth2/step-up` is its route.
+- **`oauth_registration`** (`register_oauth_client`, #3766) - dynamic client
+  registration (RFC 7591) of a public native client (`token_endpoint_auth_method`
+  `none`, `application_type` `native`) for the one redirect an attempt uses,
+  posted through the shared client like a token request; a response that needs
+  a secret is refused, and no secret is kept or reported.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity

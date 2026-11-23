@@ -147,6 +147,44 @@ describe("diff_bodies on two JSON bodies", () => {
 	});
 });
 
+/**
+ * Two streamed sends are compared by their bytes (#3770). Their bodies were
+ * empty, so a 34-event reply and a 44-event one read as `equal`.
+ *
+ * Mutation check: have `contentOf` answer an empty body for a response whose
+ * headers name an event stream and the first case reads `equal: true`.
+ */
+describe("diff_bodies on two streamed results", () => {
+	const frame = (word: string) => `event: token\ndata: ${word}\n\n`;
+	const stream = (words: string[]) => words.map(frame).join("") + "data: [DONE]\n\n";
+	const sse = { headers: { "content-type": "text/event-stream" } };
+
+	test("different events are not equal, and the line diff names them", async () => {
+		const a = stream(["Par", "is"]);
+		const b = stream(["Par", "is", "in", "France"]);
+		const answer = await diff(
+			pairEngine(a, b, {
+				a: { ...sse, bodyBytes: a.length },
+				b: { ...sse, bodyBytes: b.length },
+			})
+		);
+
+		expect(answer).toMatchObject({ kind: "text", equal: false });
+		expect(answer.differenceCount).toBeGreaterThan(0);
+		expect(answer.differences).toContainEqual(
+			expect.objectContaining({ op: "added", new: "data: France" })
+		);
+		expect(answer.a?.totalBytes).toBe(Buffer.byteLength(a));
+		expect(answer.b?.totalBytes).toBe(Buffer.byteLength(b));
+	});
+
+	test("the same stream is equal", async () => {
+		const body = stream(["Par", "is"]);
+		const answer = await diff(pairEngine(body, body, { a: sse, b: sse }));
+		expect(answer).toMatchObject({ kind: "text", equal: true, differenceCount: 0 });
+	});
+});
+
 describe("diff_bodies masks both bodies before it diffs", () => {
 	// Mutation check: hand `diffBodies` the records as fetched (bypass the
 	// masking `callEngineForRunOutput` applies to `{ a, b }`) and both tokens

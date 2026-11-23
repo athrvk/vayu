@@ -240,9 +240,8 @@ and its failure message quote the text as written, never what a variable produce
 can be a secret and the message reaches whoever reads the run. This differs from the
 [pre-send failure on a missing `{{data.column}}`](../app/data-driven-runs.md#reading-a-row-datacolumn-vs-pmiterationdata),
 which stops the step before it is sent: here the request has already been sent and only the
-assertion fails. A single-request load run's `requestElements` resolve against the run's variables
-only and are not handed the bound row (`load_strategy.cpp`), so a `{{data.*}}` there is unanswered
-and fails (#3790).
+assertion fails. A single-request load run's `requestElements` read the row each submission bound,
+as a scenario step's do (#3790).
 
 `assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
 one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
@@ -324,6 +323,12 @@ as a miss does. `metric.record`'s `jsonpath` source reads the same shared
 parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
+
+**A streamed step's body is the stream's bytes** (issue #3770): the `event:`/`data:` lines as they
+arrived, up to `maxDesignResponseBodyBytes` on a Send, which a collection run and a load run
+buffer the same way. So `assert.contains`, `assert.size`, `extract.regex` and `extract.boundary`
+judge a streamed Send as they judge the same stream in a run, and a word one event carried is in
+the body they search.
 
 **An `mcp` step's body is its final JSON-RPC response** (issue #3762). Every kind that reads the
 body (the JSON-reading and text-reading kinds above, `assert.size`, `metric.record`) reads the

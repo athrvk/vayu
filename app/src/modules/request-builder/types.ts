@@ -342,10 +342,10 @@ export interface ResponseState {
 	bodyTruncated?: boolean;
 	/**
 	 * The response body's UTF-8 byte count: the original length when the body
-	 * was truncated, and on a stored stream the bytes delivered whether or not a
-	 * body was kept (issue #3238). A restored row carries it on every response
-	 * since #3423, a live one never - so it is the size, never a truncation
-	 * signal: `bodyTruncated` is.
+	 * was truncated, and on a stored stream the bytes delivered, which the held
+	 * body falls short of once `bodyCapped` cut it (issues #3238, #3770). A
+	 * restored row carries it on every response since #3423, a live one never -
+	 * so it is the size, never a truncation signal: `bodyTruncated` is.
 	 */
 	bodyBytes?: number;
 	/**

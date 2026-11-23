@@ -281,7 +281,19 @@ export interface OAuth2Config {
 	privateKeyFile?: string;
 	/** Seconds a token that states no `expires_in` is kept for; absent or 0 keeps it until replaced. */
 	fallbackExpiresIn?: number;
+	/**
+	 * `authorization_code`: the OAuth-protected MCP server a sign-in discovers
+	 * the authorization server from (#3766). The engine fills only the members
+	 * left blank; `""` is discovery switched on with no URL typed yet.
+	 */
+	discoverUrl?: string;
+	/** The members a sign-in's discovery wrote, which the form shows read-only and Discover again clears. */
+	discoveredFields?: OAuth2DiscoveredField[];
 }
+
+/** The config members discovery can fill (the engine's `resolved` minus `issuer`). */
+export type OAuth2DiscoveredField =
+	"authorizationUrl" | "accessTokenUrl" | "clientId" | "resource" | "scope";
 
 /**
  * `none` vs `noauth` - the distinction the inheritance walk turns on.

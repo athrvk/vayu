@@ -46,6 +46,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/stream_tally.hpp"
 #include "vayu/types.hpp"
 #include "wait_until.hpp"
 
@@ -578,6 +579,22 @@ TEST (SseLoadStreamTest, AStopTakesAnOpenStreamOffTheOpenGauge) {
 // ---------------------------------------------------------------------------
 // A reply is a stream only when it announces one (#3771)
 // ---------------------------------------------------------------------------
+
+// The media type, not the header's spelling, decides. Mutation check: compare
+// the raw header value with "text/event-stream" in `announces_event_stream`
+// and the two decorated spellings read as no stream.
+TEST (AnnouncesEventStream, KnowsTheMediaTypeWhateverItsCaseOrCharset) {
+    const auto announces = [] (std::string type) {
+        vayu::Headers headers;
+        headers["content-type"] = std::move (type);
+        return vayu::http::announces_event_stream (headers);
+    };
+    EXPECT_TRUE (announces ("text/event-stream"));
+    EXPECT_TRUE (announces ("Text/Event-Stream"));
+    EXPECT_TRUE (announces ("text/event-stream; charset=UTF-8"));
+    EXPECT_FALSE (announces ("application/json"));
+    EXPECT_FALSE (vayu::http::announces_event_stream (vayu::Headers{}));
+}
 
 // A 429 or a 200 JSON answer to a streaming request is that status in the
 // run's mix and nothing else: no event count, no first-event time, nothing on

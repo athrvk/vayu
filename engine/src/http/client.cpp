@@ -659,7 +659,7 @@ refused_reference_url (const ClientConfig& config, const Request& request) {
         return std::nullopt;
     }
     return Error{ ErrorCode::InvalidUrl,
-        "Cannot send this request: " + vayu::http::local_peer_refusal () };
+        "Cannot send this request: " + vayu::http::local_peer_refusal (*rule) };
 }
 
 /// Records @p error on a response whose transfer ran, keeping its timing and

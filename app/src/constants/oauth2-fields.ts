@@ -30,6 +30,8 @@
  * otherwise untouched.
  */
 
+import type { OAuth2DiscoveredField } from "@/types";
+
 /**
  * Label for each config field the engine can name. Source of truth: `OAuth2Form`
  * renders these, so an error and the field it points at cannot drift apart.
@@ -46,6 +48,22 @@ export const OAUTH2_FIELD_LABELS = {
 } as const;
 
 export type OAuth2LabelledField = keyof typeof OAUTH2_FIELD_LABELS;
+
+/**
+ * The `discoverUrl` field's label (#3766). Outside the registry because no
+ * engine message names `discoverUrl`; its two readers are the form's field and
+ * the token row's missing-field sentence.
+ */
+export const DISCOVER_URL_LABEL = "Server URL";
+
+/** Each member discovery can fill, as its form field is labelled. */
+export const DISCOVERED_FIELD_LABELS: Record<OAuth2DiscoveredField, string> = {
+	authorizationUrl: OAUTH2_FIELD_LABELS.authorizationUrl,
+	accessTokenUrl: OAUTH2_FIELD_LABELS.accessTokenUrl,
+	clientId: OAUTH2_FIELD_LABELS.clientId,
+	resource: "Resource",
+	scope: "Scope",
+};
 
 // Whole words only, so `clientIdentifier` in a provider's own message survives.
 const FIELD_PATTERN = new RegExp(`\\b(${Object.keys(OAUTH2_FIELD_LABELS).join("|")})\\b`, "g");

@@ -672,16 +672,17 @@ json test_named (const json& trace, const std::string& name) {
 }
 
 // The elements read the final response, while a script keeps the stream:
-// its events, an empty `text()` and `pm.response.mcp`. Mutation check: hand
-// the stream's elements `&mutable_response` rather than the view in
-// `execution.cpp` and the assertion fails.
+// its events, its bytes as `text()` (#3770) and `pm.response.mcp`. Mutation
+// check: hand the stream's elements `&mutable_response` rather than the view
+// in `execution.cpp` and the assertion fails.
 TEST_F (McpReplyStreamTest, AStreamedReplysElementsReadTheFinalResponseAndScriptsTheStream) {
     server_->reply_with (McpReplyShape::EventStream);
     const auto trace = stream (json::array ({ text_assertion (), text_extractor (),
     vayu::tests::script_element_json ("el_post", "script.post", R"JS(
         pm.test('raw stream', function () {
             pm.expect(pm.response.events.length).to.equal(3);
-            pm.expect(pm.response.text()).to.equal('');
+            pm.expect(pm.response.text().indexOf('event: message\ndata: ')).to.equal(0);
+            pm.expect(pm.response.text()).to.include('notifications/progress');
             pm.expect(JSON.stringify(pm.response.mcp)).to.equal('{}');
         });
     )JS") }));

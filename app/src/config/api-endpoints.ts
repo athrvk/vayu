@@ -314,4 +314,5 @@ export const API_ENDPOINTS = {
 	OAUTH2_AUTHORIZE_START: `/oauth2/authorize/start`,
 	OAUTH2_AUTHORIZE_COMPLETE: `/oauth2/authorize/complete`,
 	OAUTH2_AUTHORIZE_STATUS: (attemptId: string) => `/oauth2/authorize/${attemptId}`,
+	OAUTH2_STEP_UP: `/oauth2/step-up`,
 } as const;

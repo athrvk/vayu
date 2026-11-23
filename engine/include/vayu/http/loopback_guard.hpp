@@ -157,8 +157,11 @@ bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view
  */
 bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule);
 
-/// The sentence a peer `LocalPeerRule` refused reports, for every driver.
-std::string local_peer_refusal ();
+/// The sentence a peer @p rule refused reports, for every driver. A rule with
+/// a source names the source's host and port as the exception; one without
+/// (a discovery's fetches and token exchange, #3766, or a reference with no
+/// `sourceUrl`) names none, because it has none.
+std::string local_peer_refusal (const LocalPeerRule& rule);
 
 namespace detail {
 

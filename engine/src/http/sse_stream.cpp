@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,8 +34,9 @@
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
-#include "vayu/http/stream_tally.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/encoding.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -149,14 +151,15 @@ void SseStreamContext::append_locked (std::string payload) {
 }
 
 void SseStreamContext::record_event (const SseEvent& event) {
-    nlohmann::json payload = sse_event_node (event);
-    payload["receivedAt"]  = now_ms ();
+    const int64_t received_at = now_ms ();
+    nlohmann::json payload    = sse_event_node (event);
+    payload["receivedAt"]     = received_at;
 
     total_events_.fetch_add (1, std::memory_order_acq_rel);
     {
         std::lock_guard<std::mutex> lock (mutex_);
-        if (stored_.size () < limits.max_stored_events) {
-            stored_.push_back (payload);
+        if (stored_arrivals_.size () < limits.max_stored_events) {
+            stored_arrivals_.push_back (received_at);
         }
     }
     append ("message", payload);
@@ -229,9 +232,9 @@ std::optional<SseEndReason> SseStreamContext::requested_end () const {
     return requested_end_;
 }
 
-std::vector<nlohmann::json> SseStreamContext::stored_events () const {
+std::vector<int64_t> SseStreamContext::stored_arrivals () const {
     std::lock_guard<std::mutex> lock (mutex_);
-    return stored_;
+    return stored_arrivals_;
 }
 
 void SseStreamContext::note_response_open (int status_code,
@@ -291,20 +294,28 @@ nlohmann::json sse_event_node (const SseEvent& event) {
 nlohmann::json buffered_stream_events_node (std::string_view body,
 const SseLimits& limits,
 int64_t total_events,
-bool body_complete) {
+bool body_complete,
+std::optional<std::span<const int64_t>> arrivals) {
     nlohmann::json items = nlohmann::json::array ();
+    const std::size_t kept = arrivals ? arrivals->size () : limits.max_stored_events;
+    const std::size_t cap =
+    std::min (kept, static_cast<std::size_t> (std::max<int64_t> (total_events, 0)));
 
     // Fed in one call and finished, because the whole body is already here -
     // the incremental path exists for a socket, not for a string. `finish()`
     // still matters: a capture cut mid-frame, or a server that closed without
     // the terminating blank line, leaves a dispatchable event behind.
     SseParser parser (limits.max_event_bytes);
-    const auto append = [&items, &limits] (const std::vector<SseEvent>& parsed) {
+    const auto append = [&items, &arrivals, cap] (const std::vector<SseEvent>& parsed) {
         for (const auto& event : parsed) {
-            if (items.size () >= limits.max_stored_events) {
+            if (items.size () >= cap) {
                 return;
             }
-            items.push_back (sse_event_node (event));
+            nlohmann::json item = sse_event_node (event);
+            if (arrivals) {
+                item["receivedAt"] = (*arrivals)[items.size ()];
+            }
+            items.push_back (std::move (item));
         }
     };
     append (parser.feed (body));
@@ -334,16 +345,71 @@ nlohmann::json& slot) {
 }
 
 nlohmann::json stream_trace_node (const SseStreamContext& context) {
-    const auto stored = context.stored_events ();
     nlohmann::json node;
-    node["items"]       = stored;
-    node["totalEvents"] = context.total_events ();
-    // Truthful rather than derived from the cap: a stream that ended under the
-    // cap and one whose tail was dropped must be distinguishable without the
-    // reader knowing what the cap was when the run happened.
-    node["eventsTruncated"] = std::cmp_greater (context.total_events (), stored.size ());
-    node["endReason"] = to_string (context.end_reason ());
+    node["totalEvents"]   = context.total_events ();
+    node["endReason"]     = to_string (context.end_reason ());
+    node["maxEventBytes"] = context.limits.max_event_bytes;
+    node["receivedAt"]    = context.stored_arrivals ();
     return node;
+}
+
+nlohmann::json stream_events_node (std::string_view body,
+bool body_complete,
+const nlohmann::json& stored) {
+    const auto arrivals = stored.at ("receivedAt").get<std::vector<int64_t>> ();
+    SseLimits limits;
+    limits.max_event_bytes = stored.value ("maxEventBytes", limits.max_event_bytes);
+    nlohmann::json node = buffered_stream_events_node (body, limits,
+    stored.value ("totalEvents", int64_t{ 0 }), body_complete,
+    std::span<const int64_t> (arrivals));
+    node["endReason"] =
+    stored.value ("endReason", std::string (to_string (SseEndReason::Error)));
+    return node;
+}
+
+namespace {
+
+/// Whether @p events is what `stream_trace_node` stores rather than a list: a
+/// trace stored before #3770 carries its `items` and is served as it is.
+bool is_stored_sidecar (const nlohmann::json& events) {
+    return events.is_object () && !events.contains ("items") &&
+    events.contains ("receivedAt") && events["receivedAt"].is_array ();
+}
+
+/// The bytes a stored response node's `body` holds, decoded when it travels
+/// as base64; empty for a body that is absent or does not decode.
+std::string stored_body_bytes (const nlohmann::json& response) {
+    const auto body = response.find ("body");
+    if (body == response.end () || !body->is_string ()) {
+        return {};
+    }
+    const auto& text = body->get_ref<const std::string&> ();
+    if (response.value ("bodyEncoding", "") != vayu::json::BODY_ENCODING_BASE64) {
+        return text;
+    }
+    return vayu::utils::base64_decode (text).value_or ("");
+}
+
+} // namespace
+
+void expand_stored_stream_events (nlohmann::json& trace) {
+    if (!trace.is_object ()) {
+        return;
+    }
+    const auto events = trace.find ("events");
+    if (events == trace.end () || !is_stored_sidecar (*events)) {
+        return;
+    }
+    const auto response = trace.find ("response");
+    if (response == trace.end () || !response->is_object ()) {
+        *events = stream_events_node ({}, false, *events);
+        return;
+    }
+    // Either cut makes the stored bytes a prefix: the design bound at the
+    // transfer (`bodyCapped`) or `maxTraceBodyBytes` at the write.
+    const bool complete = !response->value ("bodyCapped", false) &&
+    !response->value ("bodyTruncated", false);
+    *events = stream_events_node (stored_body_bytes (*response), complete, *events);
 }
 
 // ---------------------------------------------------------------------------
@@ -403,9 +469,6 @@ struct TransferState {
     /// Body bytes the current hop delivered, kept or not. Reset per hop, so it
     /// ends as the final response's count.
     std::size_t delivered_bytes = 0;
-    /// Whether the current hop's bytes are also kept as `Response::body`.
-    /// Decided at the hop's first body byte, from its own `Content-Type`.
-    std::optional<bool> keeps_body;
     /// Where a `Set-Cookie` line is counted, or null for a stream with no jar:
     /// libcurl's cookie engine is off then and drops nothing.
     IncomingCookieWatch* incoming_cookies = nullptr;
@@ -413,15 +476,6 @@ struct TransferState {
     /// null for every other request (`consume_transfer`).
     McpReplyStream* mcp_reply = nullptr;
 };
-
-/// Whether the current hop's bytes are kept as a body. Read at a body byte,
-/// when the hop's header block is complete, and decided once per hop.
-bool hop_keeps_body (TransferState& state) {
-    if (!state.keeps_body) {
-        state.keeps_body = !announces_event_stream (state.response->headers);
-    }
-    return *state.keeps_body;
-}
 
 /// Append @p bytes to the body up to the request's bound, marking the body a
 /// prefix once a byte is refused.
@@ -444,8 +498,7 @@ void begin_response_hop (TransferState& state) {
     response.body.clear ();
     response.body_truncated = false;
     state.delivered_bytes   = 0;
-    state.keeps_body.reset ();
-    state.discard = false;
+    state.discard           = false;
 }
 
 /// Publish the final hop's status line and headers as the ring's first frame,
@@ -475,13 +528,12 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
     }
     const std::string_view bytes (ptr, total_size);
 
-    // A reply that is not an event stream (a JSON 404, NDJSON) still goes
-    // through the parser below, so a server that streams SSE under the wrong
-    // type keeps working; what it gains is a body to read (#3238).
+    // Every reply keeps its bytes as the body, an event stream's included
+    // (#3238, #3770): the elements and the script read them, and the trace's
+    // event list is parsed back from them. Every reply also goes through the
+    // parser, so a server that streams SSE under the wrong type keeps working.
     state->delivered_bytes += total_size;
-    if (hop_keeps_body (*state)) {
-        hold_body_bytes (*state, bytes);
-    }
+    hold_body_bytes (*state, bytes);
 
     for (auto& event : state->parser->feed (bytes)) {
         state->context->record_event (event);
@@ -743,7 +795,7 @@ const CurlErrorBuffer& errors) {
 
 /// `consume_sse_stream`'s transfer. @p mcp_reply, when set, observes every
 /// event the parser dispatches, so an `mcp` reply's final response is read
-/// though the stream keeps no bytes (issue #3762).
+/// from every event, even past the bytes the body bound kept (issue #3762).
 vayu::Response consume_transfer (const SseStreamRequest& request,
 SseStreamContext& context,
 McpReplyStream* mcp_reply) {

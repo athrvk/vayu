@@ -40,7 +40,7 @@ import { formatBytes } from "@/lib/format-number";
 import { useCreateRequestExampleMutation } from "@/queries";
 import { isCommitEnter } from "@/lib/keyboard";
 import { defaultExampleName, exampleFromResponse } from "./save-as-example";
-import { heldBodySize } from "../../utils/response-bytes";
+import { cappedReadExtent, heldBodySize } from "../../utils/response-bytes";
 import type { ResponseState } from "../../types";
 
 export interface SaveAsExampleDialogProps {
@@ -129,10 +129,10 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					 */}
 					{response.bodyCapped && (
 						<Callout severity="warning" title="This body was capped while reading">
-							Only the first {formatBytes(response.size || heldBodySize(response))} of
-							this response was read - Vayu&apos;s engine stops a Send there, so
-							re-sending reads the same amount, and that is what gets saved. Raise Max
-							Send response body in Settings to read more.
+							Only {cappedReadExtent(response)} of this response was read -
+							Vayu&apos;s engine stops a Send there, so re-sending reads the same
+							amount, and that is what gets saved. Raise Max Send response body in
+							Settings to read more.
 						</Callout>
 					)}
 

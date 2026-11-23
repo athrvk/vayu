@@ -62,12 +62,14 @@ import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import SendingWave from "./SendingWave";
+import StepUpNotice from "./StepUpNotice";
 import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
 import { useFittedTabs } from "@/components/layout/useFittedTabs";
 import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
 import { streamPatch } from "../../utils/auto-header";
 import {
+	cappedReadExtent,
 	contentTypeOf,
 	heldBodySize,
 	isEventStreamType,
@@ -704,6 +706,11 @@ export default function ResponseViewer() {
 				</div>
 			)}
 
+			{/* Beside the auth note for the same reason: it explains a 403. */}
+			{shown !== streamedResponse && (
+				<StepUpNotice response={shown} className={cn("px-4 pt-3 shrink-0", staleClass)} />
+			)}
+
 			{/*
 			 * What the engine did to the exchange that the response does not show
 			 * (issue #3307), e.g. a jar cookie left off the `Cookie` line. A band
@@ -827,11 +834,10 @@ export default function ResponseViewer() {
 							{shown.bodyCapped && (
 								<div className="px-4 pt-3 shrink-0">
 									<Callout severity="warning" title="Body capped while reading">
-										Only the first{" "}
-										{formatBytes(shown.size || heldBodySize(shown))} of this
-										response was read - Vayu&apos;s engine stops a Send there,
-										so re-sending reads the same amount. Raise Max Send response
-										body in Settings to read more.
+										Only {cappedReadExtent(shown)} of this response was read -
+										Vayu&apos;s engine stops a Send there, so re-sending reads
+										the same amount. Raise Max Send response body in Settings to
+										read more.
 									</Callout>
 								</div>
 							)}

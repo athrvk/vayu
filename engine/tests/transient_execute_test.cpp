@@ -414,8 +414,10 @@ TEST_F (RecordDesignResultTest, AStreamRecordCarriesItsEventsAndItsOwnStatus) {
     const auto id = seed_running_run ("run_streamed");
 
     vayu::http::routes::StreamRecord record;
-    record.events = json{ { "items", json::array ({ json{ { "data", "hi" } } }) },
-        { "totalEvents", 9 }, { "eventsTruncated", true }, { "endReason", "stopped" } };
+    // The sidecar `stream_trace_node` builds (#3770), stored as given: the list
+    // is the response body, parsed back when the trace is read.
+    record.events = json{ { "totalEvents", 9 }, { "endReason", "stopped" },
+        { "maxEventBytes", 64 }, { "receivedAt", json::array ({ 1000 }) } };
     record.status = vayu::RunStatus::Stopped;
 
     record_design_result (*db_, id, sent_request (), ok_response (), &record);
@@ -424,11 +426,7 @@ TEST_F (RecordDesignResultTest, AStreamRecordCarriesItsEventsAndItsOwnStatus) {
     ASSERT_EQ (results.size (), 1u);
     auto trace = json::parse (results[0].trace_data);
     ASSERT_TRUE (trace.contains ("events"));
-    EXPECT_EQ (trace["events"]["totalEvents"], 9);
-    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
-    // The request/response bodies are still capped by `cap_trace_bodies`; the
-    // events node carries its own cap, applied when it was built.
-    EXPECT_EQ (trace["events"]["items"].size (), 1u);
+    EXPECT_EQ (trace["events"], record.events);
 
     auto row = db_->get_run (id);
     ASSERT_HAS_VALUE (row);

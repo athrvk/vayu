@@ -26,10 +26,13 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -127,19 +130,41 @@ TEST (BufferedStreamEvents, AgreesWithTheLivePathOnTheSameBytes) {
         context.record_event (event);
     }
 
-    const auto live     = vayu::http::stream_trace_node (context);
+    // What the live path published: the ring's frames, each one event.
+    std::vector<json> live;
+    for (const auto& frame : context.events_since (0).payloads) {
+        live.push_back (json::parse (frame.substr (frame.find ("data: ") + 6)));
+    }
     const auto buffered = vayu::http::buffered_stream_events_node (
     body, limits, context.total_events (), true);
 
-    ASSERT_EQ (buffered["items"].size (), live["items"].size ());
-    for (std::size_t i = 0; i < live["items"].size (); ++i) {
-        auto live_item = live["items"][i];
+    ASSERT_EQ (buffered["items"].size (), live.size ());
+    for (std::size_t i = 0; i < live.size (); ++i) {
+        auto live_item = live[i];
         // The live node stamps arrival; nothing else may differ.
         live_item.erase ("receivedAt");
         EXPECT_EQ (buffered["items"][i], live_item) << "item " << i;
     }
-    EXPECT_EQ (buffered["totalEvents"], live["totalEvents"]);
-    EXPECT_EQ (buffered["eventsTruncated"], live["eventsTruncated"]);
+    EXPECT_EQ (buffered["totalEvents"], context.total_events ());
+    EXPECT_FALSE (buffered["eventsTruncated"]);
+}
+
+// The arrival times a live consumer kept are paired with the events in order
+// and bound the list, which never runs past the events the wire counted
+// (#3770). Mutation check: drop the `total_events` bound and the four-event
+// body serves one item per arrival, three.
+TEST (BufferedStreamEvents, PairsArrivalsInOrderAndStopsAtTheCountedTotal) {
+    const vayu::http::SseLimits limits;
+    const std::vector<int64_t> arrivals{ 10, 20, 30 };
+    const auto node = vayu::http::buffered_stream_events_node (
+    event_body (4), limits, 2, true, std::span<const int64_t> (arrivals));
+
+    ASSERT_EQ (node["items"].size (), 2u);
+    EXPECT_EQ (node["items"][0].value ("receivedAt", int64_t{ -1 }), 10);
+    EXPECT_EQ (node["items"][1].value ("receivedAt", int64_t{ -1 }), 20);
+    EXPECT_EQ (node["items"][1]["data"], "token-1");
+    EXPECT_EQ (node["totalEvents"], 2);
+    EXPECT_FALSE (node["eventsTruncated"]);
 }
 
 TEST (BufferedStreamEvents, StopsAtTheStoredEventsCapAndSaysSo) {

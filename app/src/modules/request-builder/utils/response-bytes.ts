@@ -17,6 +17,7 @@
  */
 
 import { SSE_ACCEPT } from "@/constants/request";
+import { formatBytes } from "@/lib/format-number";
 import type { ResponseState } from "../types";
 
 /** How `bodyRaw` is spelled on the wire. Absent means `"utf8"`. */
@@ -270,6 +271,29 @@ export function heldBodySize(
 	response: Pick<ResponseState, "body" | "bodyRaw" | "rawBytes">
 ): number {
 	return response.rawBytes?.data.length ?? utf8ByteLength(receivedBody(response));
+}
+
+/**
+ * How much of a `bodyCapped` response the engine read, as the notice words it:
+ * "the first 32.0 MB", or "the start" when the figure is not recorded.
+ *
+ * A buffered send's `size` is that prefix. A stream keeps reading past the cap
+ * so its events still count every one (#3770), which makes its `size` the bytes
+ * the server delivered, past what was read. The prefix is then the held body -
+ * until storage shortened that too (`bodyTruncated`), when nothing records how
+ * much was read.
+ */
+export function cappedReadExtent(
+	response: Pick<
+		ResponseState,
+		"events" | "size" | "bodyTruncated" | "body" | "bodyRaw" | "rawBytes"
+	>
+): string {
+	if (response.events === undefined) {
+		return `the first ${formatBytes(response.size || heldBodySize(response))}`;
+	}
+	if (response.bodyTruncated) return "the start";
+	return `the first ${formatBytes(heldBodySize(response))}`;
 }
 
 const PLAUSIBLE_EXTENSION = /^[a-z0-9]{1,8}$/;

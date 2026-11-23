@@ -32,6 +32,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/mcp_body.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
@@ -248,6 +249,7 @@ const std::vector<vayu::db::Result>& results) {
     if (!result.trace_data.empty ()) {
         try {
             out["trace"] = nlohmann::json::parse (result.trace_data);
+            vayu::http::expand_stored_stream_events (out["trace"]);
         } catch (...) {
             out["trace"] = result.trace_data;
         }

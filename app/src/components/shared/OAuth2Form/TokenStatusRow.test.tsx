@@ -296,7 +296,7 @@ describe("TokenStatusRow with a complete config", () => {
 	});
 
 	it("tells the user their sign-in landed, since the browser had them", async () => {
-		authorize.mockResolvedValue(undefined);
+		authorize.mockResolvedValue({ cacheKey: "k" });
 
 		renderRow(
 			config({
@@ -403,7 +403,7 @@ describe("TokenStatusRow when a pre-request script may change a name in the conf
 	it("runs the interactive sign-in for an authorization_code grant", async () => {
 		// With a script anywhere in the request's chain this row is the only
 		// place the Auth tab offers the sign-in a Send's AUTH_REQUIRED points to.
-		authorize.mockResolvedValue(undefined);
+		authorize.mockResolvedValue({ cacheKey: "k" });
 		renderRow(interactive, ["clientId"]);
 
 		fireEvent.click(getTokenButton());
@@ -658,16 +658,16 @@ describe("TokenStatusRow's interactive sign-in is the config's, not the row's (#
 		});
 
 		it("drops a success that arrives after the cancel", async () => {
-			let finish: (cacheKey: string) => void = () => undefined;
+			let finish: (result: { cacheKey: string }) => void = () => undefined;
 			authorize.mockImplementation(
-				() => new Promise<string>((resolve) => (finish = resolve))
+				() => new Promise<{ cacheKey: string }>((resolve) => (finish = resolve))
 			);
 			renderRow(interactive);
 			fireEvent.click(getTokenButton());
 			fireEvent.click(cancelButtons()[0]!);
 
 			await act(async () => {
-				finish("late");
+				finish({ cacheKey: "late" });
 				await Promise.resolve();
 			});
 
@@ -833,5 +833,126 @@ describe("TokenStatusRow with a jwt_bearer grant (#3632)", () => {
 
 		expect(screen.getByText("ya29…ijkl")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /renew|refresh/i })).toBeEnabled();
+	});
+});
+
+describe("TokenStatusRow for a config discovered from a server URL (#3766)", () => {
+	const awaiting = config({
+		grantType: "authorization_code",
+		discoverUrl: "https://mcp.example.com/mcp",
+	});
+	const RESOLVED = {
+		authorizationUrl: "https://auth.example.com/authorize",
+		accessTokenUrl: "https://auth.example.com/token",
+		clientId: "registered",
+		resource: "https://mcp.example.com/mcp",
+		scope: "",
+		issuer: "https://auth.example.com",
+	};
+
+	function renderDiscovering(onDiscovered?: (values: object) => void) {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		return render(
+			<QueryClientProvider client={client}>
+				<TooltipProvider>
+					<TokenStatusRow resolvedConfig={awaiting} onDiscovered={onDiscovered} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+	}
+
+	it("reads as not signed in, never as missing the fields discovery fills", () => {
+		renderDiscovering(vi.fn());
+
+		expect(
+			screen.getByText("Not signed in - Get token discovers the server's endpoints")
+		).toBeInTheDocument();
+		expect(screen.queryByText(/Enter the/)).toBeNull();
+		expect(getTokenButton()).toBeEnabled();
+	});
+
+	it("signs in and hands the host what discovery filled", async () => {
+		const onDiscovered = vi.fn();
+		authorize.mockResolvedValue({ cacheKey: "filled-key", resolved: RESOLVED });
+		renderDiscovering(onDiscovered);
+
+		fireEvent.click(getTokenButton());
+
+		await waitFor(() => expect(onDiscovered).toHaveBeenCalledTimes(1));
+		expect(authorize).toHaveBeenCalledWith(awaiting, expect.any(AbortSignal));
+		expect(onDiscovered).toHaveBeenCalledWith({
+			authorizationUrl: RESOLVED.authorizationUrl,
+			accessTokenUrl: RESOLVED.accessTokenUrl,
+			clientId: "registered",
+			resource: RESOLVED.resource,
+		});
+		expect(fetchMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("writes nothing for a sign-in that failed", async () => {
+		const onDiscovered = vi.fn();
+		authorize.mockRejectedValue(new Error("issuer mismatch"));
+		renderDiscovering(onDiscovered);
+
+		fireEvent.click(getTokenButton());
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith("issuer mismatch", "error"));
+		expect(onDiscovered).not.toHaveBeenCalled();
+	});
+
+	it("cannot sign in where nothing would store what it found, and says where to", () => {
+		renderDiscovering();
+
+		expect(getTokenButton()).toBeDisabled();
+		expect(
+			screen.getByText(
+				"Get a token from the Auth tab first - it discovers the server's endpoints"
+			)
+		).toBeInTheDocument();
+		fireEvent.click(getTokenButton());
+		expect(authorize).not.toHaveBeenCalled();
+	});
+});
+
+describe("a discovered sign-in that lands after its row moved on (#3766)", () => {
+	it("writes nothing into the config the row shows now", async () => {
+		const awaiting = config({
+			grantType: "authorization_code",
+			discoverUrl: "https://mcp.example.com/mcp",
+		});
+		let finish: (result: object) => void = () => undefined;
+		authorize.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+		const onDiscovered = vi.fn();
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const rowFor = (cfg: OAuth2Config) => (
+			<QueryClientProvider client={client}>
+				<TooltipProvider>
+					<TokenStatusRow resolvedConfig={cfg} onDiscovered={onDiscovered} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+		// A second row for the same config holds the sign-in once the first moves on.
+		renderRow(awaiting);
+		const first = render(rowFor(awaiting));
+		fireEvent.click(within(first.container).getByRole("button", { name: /get token/i }));
+
+		first.rerender(rowFor({ ...awaiting, discoverUrl: "https://other.example.com/mcp" }));
+		await act(async () => {
+			finish({
+				cacheKey: "k",
+				resolved: {
+					authorizationUrl: "https://auth.example.com/authorize",
+					accessTokenUrl: "https://auth.example.com/token",
+					clientId: "registered",
+					resource: "",
+					scope: "",
+					issuer: "https://auth.example.com",
+				},
+			});
+			await Promise.resolve();
+		});
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith("Authorized", "success"));
+		expect(onDiscovered).not.toHaveBeenCalled();
 	});
 });
