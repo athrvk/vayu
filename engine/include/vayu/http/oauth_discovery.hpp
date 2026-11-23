@@ -113,6 +113,43 @@ struct BearerChallenge {
 [[nodiscard]] std::expected<std::optional<BearerChallenge>, std::string>
 parse_bearer_challenge (std::string_view field_value);
 
+/// What the `WWW-Authenticate` lines of a 401 or 403 say about the token that
+/// was sent (RFC 6750 section 3.1), for a client deciding whether a wider
+/// token would help.
+struct StepUp {
+    /// True only for a `Bearer` challenge whose `error` is `insufficient_scope`.
+    bool step_up = false;
+    /// The challenge's `error` as written (`invalid_token` and any other
+    /// included, which are not a step-up); empty when it carries none.
+    std::string error;
+    /// The challenge's `scope`, split on whitespace and deduplicated in the
+    /// order written. Empty unless `step_up`.
+    std::vector<std::string> required_scopes;
+    /// The scopes already held, then the required ones not among them, space
+    /// joined: what a re-authorization asks for. Empty unless `step_up`.
+    std::string scope;
+    /// The challenge's `error_description`, empty when absent.
+    std::string description;
+};
+
+/**
+ * @brief Classifies the `WWW-Authenticate` field values of one response.
+ *
+ * Reads the first `Bearer` challenge that names an `error` across
+ * @p www_authenticate, in order; a value that is not
+ * `parse_auth_challenges`' grammar is passed over, so it never makes the
+ * answer a step-up. `error` is compared exactly: RFC 6750 error codes are
+ * case-sensitive. A step-up whose challenge names no `scope` keeps
+ * `required_scopes` empty and `scope` equal to the held ones.
+ *
+ * Pure: it retries nothing and makes no network call.
+ *
+ * @param current_scope the scopes already requested or granted, space
+ *        separated; may be empty.
+ */
+[[nodiscard]] StepUp classify_bearer_challenge (const std::vector<std::string>& www_authenticate,
+std::string_view current_scope);
+
 // ============================================================================
 // Discovery
 // ============================================================================

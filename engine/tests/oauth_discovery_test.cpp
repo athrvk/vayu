@@ -157,6 +157,97 @@ TEST (AuthChallengeParse, RefusesWhatIsNotTheGrammar) {
 }
 
 // ============================================================================
+// Step-up classification
+// ============================================================================
+
+using vayu::http::classify_bearer_challenge;
+using Fields = std::vector<std::string>;
+
+TEST (BearerStepUp, InsufficientScopeNamesTheUnionInOrderWithoutRepeats) {
+    const auto result = classify_bearer_challenge (
+    { R"(Bearer error="insufficient_scope", scope="write read write admin", )"
+      R"(error_description="needs more")" },
+    "read profile read");
+
+    EXPECT_TRUE (result.step_up);
+    EXPECT_EQ (result.error, "insufficient_scope");
+    EXPECT_EQ (result.required_scopes, (Fields{ "write", "read", "admin" }));
+    EXPECT_EQ (result.scope, "read profile write admin");
+    EXPECT_EQ (result.description, "needs more");
+}
+
+TEST (BearerStepUp, NoScopeHeldMakesTheUnionTheRequiredScopes) {
+    const auto result = classify_bearer_challenge (
+    { "Bearer error=\"insufficient_scope\", scope=\"  a\tb  \"" }, "");
+    EXPECT_TRUE (result.step_up);
+    EXPECT_EQ (result.required_scopes, (Fields{ "a", "b" }));
+    EXPECT_EQ (result.scope, "a b");
+}
+
+TEST (BearerStepUp, InsufficientScopeNamingNoScopeKeepsWhatIsHeld) {
+    const auto result = classify_bearer_challenge (
+    { R"(Bearer error="insufficient_scope")" }, "read read write");
+    EXPECT_TRUE (result.step_up);
+    EXPECT_TRUE (result.required_scopes.empty ());
+    EXPECT_EQ (result.scope, "read write");
+}
+
+TEST (BearerStepUp, InvalidTokenIsReportedAndIsNotAStepUp) {
+    const auto result = classify_bearer_challenge (
+    { R"(Bearer error="invalid_token", scope="admin", error_description="expired")" }, "read");
+    EXPECT_FALSE (result.step_up);
+    EXPECT_EQ (result.error, "invalid_token");
+    EXPECT_EQ (result.description, "expired");
+    EXPECT_TRUE (result.required_scopes.empty ());
+    EXPECT_TRUE (result.scope.empty ());
+}
+
+TEST (BearerStepUp, TheErrorCodeIsComparedExactly) {
+    const auto result = classify_bearer_challenge (
+    { R"(Bearer error="Insufficient_Scope", scope="a")" }, "");
+    EXPECT_FALSE (result.step_up);
+    EXPECT_EQ (result.error, "Insufficient_Scope");
+}
+
+TEST (BearerStepUp, NothingToClassifyIsEmpty) {
+    for (const Fields& fields : { Fields{}, Fields{ "" },
+         Fields{ R"(Basic realm="x")" }, Fields{ R"(Bearer realm="x", scope="a")" },
+         Fields{ R"(Bearer resource_metadata="https://r.test/prm")" } }) {
+        const auto result = classify_bearer_challenge (fields, "read");
+        EXPECT_FALSE (result.step_up);
+        EXPECT_TRUE (result.error.empty ());
+        EXPECT_TRUE (result.required_scopes.empty ());
+        EXPECT_TRUE (result.scope.empty ());
+        EXPECT_TRUE (result.description.empty ());
+    }
+}
+
+TEST (BearerStepUp, SeveralHeaderLinesAreReadInOrder) {
+    const auto second = classify_bearer_challenge (
+    { R"(Basic realm="x")", R"(Bearer error="insufficient_scope", scope="b")" }, "a");
+    EXPECT_TRUE (second.step_up);
+    EXPECT_EQ (second.scope, "a b");
+
+    const auto first_wins = classify_bearer_challenge (
+    { R"(Bearer error="invalid_token")", R"(Bearer error="insufficient_scope", scope="b")" }, "a");
+    EXPECT_FALSE (first_wins.step_up);
+    EXPECT_EQ (first_wins.error, "invalid_token");
+}
+
+TEST (BearerStepUp, AMalformedValueIsPassedOverAndNeverAStepUp) {
+    const auto alone = classify_bearer_challenge (
+    { R"(Bearer error="insufficient_scope", scope="unterminated)" }, "a");
+    EXPECT_FALSE (alone.step_up);
+    EXPECT_TRUE (alone.error.empty ());
+    EXPECT_TRUE (alone.scope.empty ());
+
+    const auto beside = classify_bearer_challenge (
+    { R"(Bearer error=)", R"(Bearer error="insufficient_scope", scope="b")" }, "a");
+    EXPECT_TRUE (beside.step_up);
+    EXPECT_EQ (beside.scope, "a b");
+}
+
+// ============================================================================
 // The resource and local-endpoint rules
 // ============================================================================
 

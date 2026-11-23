@@ -842,6 +842,52 @@ const AuthorizationServerMetadata& metadata) {
     return std::nullopt;
 }
 
+/// RFC 6750 section 3.1: the `error` value a challenge uses to say the token
+/// is valid but too narrow.
+constexpr std::string_view INSUFFICIENT_SCOPE = "insufficient_scope";
+
+/// The words of a space-separated scope (RFC 6749 section 3.3) not already in
+/// @p words, in order, appended to it.
+void append_new_scope_words (std::vector<std::string>& words, std::string_view scope) {
+    constexpr std::string_view SEPARATORS = " \t\r\n";
+    while (true) {
+        const auto start = scope.find_first_not_of (SEPARATORS);
+        if (start == std::string_view::npos) {
+            return;
+        }
+        scope.remove_prefix (start);
+        const auto word = scope.substr (0, scope.find_first_of (SEPARATORS));
+        scope.remove_prefix (word.size ());
+        if (std::ranges::find (words, word) == words.end ()) {
+            words.emplace_back (word);
+        }
+    }
+}
+
+std::string join_scope_words (const std::vector<std::string>& words) {
+    std::string joined;
+    for (const auto& word : words) {
+        joined += joined.empty () ? word : " " + word;
+    }
+    return joined;
+}
+
+/// The first `Bearer` challenge, across @p field_values, that names an
+/// `error`; a value that does not parse has none.
+std::optional<BearerChallenge> first_bearer_error (const std::vector<std::string>& field_values) {
+    for (const auto& value : field_values) {
+        const auto parsed = parse_bearer_challenge (value);
+        if (!parsed) {
+            continue;
+        }
+        const auto& challenge = *parsed;
+        if (challenge && challenge->error) {
+            return challenge;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 // ============================================================================
@@ -889,6 +935,29 @@ parse_bearer_challenge (std::string_view field_value) {
     }
     return BearerChallenge{ bearer->param ("resource_metadata"), bearer->param ("scope"),
         bearer->param ("error"), bearer->param ("error_description") };
+}
+
+StepUp classify_bearer_challenge (const std::vector<std::string>& www_authenticate,
+std::string_view current_scope) {
+    StepUp result;
+    const auto challenge = first_bearer_error (www_authenticate);
+    if (!challenge) {
+        return result;
+    }
+    const auto& error  = challenge->error;
+    result.error       = error.value_or (std::string ());
+    result.description = challenge->error_description.value_or (std::string ());
+    result.step_up     = result.error == INSUFFICIENT_SCOPE;
+    if (!result.step_up) {
+        return result;
+    }
+    append_new_scope_words (
+    result.required_scopes, challenge->scope.value_or (std::string ()));
+    std::vector<std::string> wanted;
+    append_new_scope_words (wanted, current_scope);
+    append_new_scope_words (wanted, join_scope_words (result.required_scopes));
+    result.scope = join_scope_words (wanted);
+    return result;
 }
 
 AuthorizationServerMetadataCache::AuthorizationServerMetadataCache (Clock clock)

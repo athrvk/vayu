@@ -12,6 +12,7 @@
  * POST   /oauth2/token          {config, force?, interactive?, environmentId?,
  *                                collectionId?} → token | error
  * POST   /oauth2/authorize/start {config, mode?} → attempt | error
+ * POST   /oauth2/step-up        {wwwAuthenticate, scope?} → classification | error
  * GET    /oauth2/token?key=K    → {found, expired?, token?}
  * DELETE /oauth2/token?key=K    → {deleted}
  *
@@ -24,15 +25,19 @@
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/oauth_discovery.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <expected>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace vayu::http::routes {
 
@@ -208,6 +213,65 @@ const std::atomic<bool>* cancel) {
 
 namespace {
 
+/**
+ * The `wwwAuthenticate` field of a step-up body: one header value or a list of
+ * them, each a string.
+ *
+ * @return why it is neither, or the values.
+ */
+std::expected<std::vector<std::string>, std::string>
+read_www_authenticate_values (const nlohmann::json& body) {
+    const auto field = body.find ("wwwAuthenticate");
+    if (field == body.end ()) {
+        return std::unexpected (std::string ("'wwwAuthenticate' is required"));
+    }
+    if (field->is_string ()) {
+        return std::vector<std::string>{ field->get<std::string> () };
+    }
+    if (!field->is_array () || !std::ranges::all_of (*field, &nlohmann::json::is_string)) {
+        return std::unexpected (std::string (
+        "'wwwAuthenticate' must be a string or an array of strings"));
+    }
+    return field->get<std::vector<std::string>> ();
+}
+
+} // namespace
+
+/**
+ * Classify the `WWW-Authenticate` values of a 401 or 403 in @p request_body
+ * (`{wwwAuthenticate, scope?}`). Separated from the route for unit testing.
+ * Reads only: it sends nothing, retries nothing and re-authorizes nothing.
+ */
+std::pair<int, nlohmann::json> oauth2_step_up_post (const std::string& request_body) {
+    const auto parsed = parse_request_json (
+    request_body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
+    if (!parsed) {
+        return as_response (parsed.error ());
+    }
+    const auto refuse = [] (const std::string& message) {
+        return std::pair{ 400, error_body (400, message, OAUTH2_INVALID_CONFIG) };
+    };
+    if (!parsed->is_object ()) {
+        return refuse ("the body must be a JSON object");
+    }
+    const auto values = read_www_authenticate_values (*parsed);
+    if (!values) {
+        return refuse (values.error ());
+    }
+    const auto scope = read_optional_string_field (*parsed, "scope");
+    if (!scope) {
+        return refuse (scope.error ());
+    }
+    const auto step_up =
+    classify_bearer_challenge (*values, scope->value_or (std::string ()));
+    return { 200,
+        nlohmann::json{ { "stepUp", step_up.step_up },
+        { "error", step_up.error }, { "requiredScopes", step_up.required_scopes },
+        { "scope", step_up.scope }, { "description", step_up.description } } };
+}
+
+namespace {
+
 nlohmann::json authorize_status_json (const AuthorizeStatus& st) {
     nlohmann::json out;
     out["state"] = st.state;
@@ -245,6 +309,16 @@ void register_oauth_routes (RouteContext& ctx) {
         res.status = status;
         // A refusal can quote what a discovered server sent, and a parse
         // refusal the bytes it stopped at, so a strict dump could throw.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    });
+
+    ctx.server.Post (
+    "/oauth2/step-up", [] (const httplib::Request& req, httplib::Response& res) {
+        auto [status, body] = oauth2_step_up_post (req.body);
+        res.status          = status;
+        // The description is text a server wrote, and a parse refusal quotes
+        // the bytes it stopped at, so a strict dump could throw.
         res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     });

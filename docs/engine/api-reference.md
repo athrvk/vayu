@@ -7715,6 +7715,37 @@ callback named), never the response's `error` or `error_description`, and the
 code is never sent to a token endpoint. An attempt that was not discovered
 records no issuer and reads no `iss`.
 
+#### POST /oauth2/step-up
+
+Classifies the `WWW-Authenticate` of a `401` or `403` as a step-up or not
+(#3766, `classify_bearer_challenge`). It **only classifies**: it sends nothing,
+retries nothing, re-authorizes nothing and caches nothing, so a client decides
+what follows (an interactive re-authorization is a
+[`POST /oauth2/authorize/start`](#interactive-authorization-code-flow) with
+the `scope` it answers; a load run cannot take that browser step and fails
+naming the scopes instead).
+
+| Request member | Type | Meaning |
+|----------------|------|---------|
+| `wwwAuthenticate` | string or array of strings | Required. The response's `WWW-Authenticate` value, or each header line's when it carried several. An empty array or string is a response with no challenge |
+| `scope` | string | The scopes already granted or requested, space-separated. Optional, default empty |
+
+The first `Bearer` challenge, across the values in order, that names an
+`error` is read; a value that is not the RFC 9110 challenge grammar is passed
+over, never an error and never a step-up. The answer is `200`:
+
+| Member | Meaning |
+|--------|---------|
+| `stepUp` | `true` only when the challenge's `error` is exactly `insufficient_scope` (RFC 6750 codes are case-sensitive) |
+| `error` | The challenge's `error` as written: `invalid_token` and any other are reported here with `stepUp` `false`. `""` when there is none |
+| `requiredScopes` | The challenge's `scope` split on whitespace, repeats dropped, in the order written. `[]` unless `stepUp` |
+| `scope` | What a re-authorization asks for: `scope` as sent, then the `requiredScopes` it did not hold, deduplicated and space-joined. `""` unless `stepUp`; a step-up whose challenge names no `scope` answers the held ones |
+| `description` | The challenge's `error_description`, `""` when absent |
+
+A body that is not JSON, not an object, lacks `wwwAuthenticate`, or whose
+`wwwAuthenticate` or `scope` has the wrong type answers `400`
+`oauth2_invalid_config`.
+
 ### Local mock issuer
 
 A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -

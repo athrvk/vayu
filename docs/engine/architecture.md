@@ -895,7 +895,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   member is type-checked, each failure carries a stable
   `oauth_discovery_*` code, and validated metadata is cached by issuer for
   five minutes. `POST /oauth2/authorize/start` calls it for a config naming
-  `discoverUrl`.
+  `discoverUrl`. The same unit's `classify_bearer_challenge` is the one
+  reader of a 401/403 `Bearer` challenge's step-up facts (`insufficient_scope`
+  with its scopes unioned into the held ones, `invalid_token` reported but
+  not a step-up); it is pure, and `POST /oauth2/step-up` is its route.
 - **`oauth_registration`** (`register_oauth_client`, #3766) - dynamic client
   registration (RFC 7591) of a public native client (`token_endpoint_auth_method`
   `none`, `application_type` `native`) for the one redirect an attempt uses,

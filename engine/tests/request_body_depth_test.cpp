@@ -233,6 +233,8 @@ const std::vector<CodedRoute>& other_routes () {
         R"({"config":{},"extra":)", "}" },
         { "POST", "/oauth2/authorize/complete", "oauth2_invalid_config",
         R"({"attemptId":"a","extra":)", "}" },
+        { "POST", "/oauth2/step-up", "oauth2_invalid_config",
+        R"({"wwwAuthenticate":[],"extra":)", "}" },
         { "POST", "/mock/start", GENERIC_CODE, R"({"collectionId":"c","extra":)", "}" },
         { "POST", "/mock-issuer/start", "mock_issuer_invalid_config", R"({"extra":)", "}" },
         { "PUT", "/mock-issuer/missing", "mock_issuer_invalid_config", R"({"extra":)", "}" },
@@ -391,4 +393,16 @@ TEST_F (RequestBodyDepthRouteTest, AnEmptyMockStartBodyIsTheEmptyObjectNotAParse
     EXPECT_NE (
     vayu::http::routes::error_message_of (body).rfind ("Invalid JSON", 0), 0U)
     << body.dump ();
+}
+
+// This fixture registers every route over a real listener, so it is where the
+// step-up route's registration is held (the core's cases are in
+// `oauth_route_test.cpp`). Mutation check: drop the `Post` in
+// `register_oauth_routes` and the status is 404.
+TEST_F (RequestBodyDepthRouteTest, TheStepUpRouteIsRegisteredAndClassifies) {
+    const auto [status, body] = send_text ("POST", "/oauth2/step-up",
+    R"({"wwwAuthenticate":["Bearer error=\"insufficient_scope\", scope=\"b a\""],"scope":"a"})");
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body.value ("stepUp", false), true) << body.dump ();
+    EXPECT_EQ (body.value ("scope", ""), "a b") << body.dump ();
 }
