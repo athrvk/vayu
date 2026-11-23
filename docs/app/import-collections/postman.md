@@ -525,7 +525,10 @@ nothing is written: an export is a read of what the collection already is.
 [#3244](https://github.com/athrvk/vayu/issues/3244)). Postman has no JSON-RPC
 mode, so the body is written as raw JSON, with the `jsonrpc` and `id` members
 Vayu adds on send already in it; a body that already carries a full frame is
-written unchanged. The export still counts it under `jsonrpc_bodies`.
+written unchanged. The export still counts it under `jsonrpc_bodies`. An MCP
+body is written as raw JSON with its content as stored, without the `Mcp-*`
+headers and `params._meta` Vayu derives on send or its `mcpTool`, and counted
+under `mcp_bodies`.
 
 **Credentials stay out by default.** With **Include credentials** off, auth
 secrets and variables marked secret are written empty, and so are the

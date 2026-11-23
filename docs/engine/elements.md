@@ -325,6 +325,15 @@ parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
 
+**An `mcp` step's body is its final JSON-RPC response** (issue #3762). Every kind that reads the
+body (the JSON-reading and text-reading kinds above, `assert.size`, `metric.record`) reads the
+final response the [reply reader](api-reference.md#the-mcp-reply) found, whether the server
+answered with one JSON object or with an event stream of notifications ending in it, so
+`assert.jsonpath` on `$.result.content[0].text` reads the tool's text on a Send, a collection run
+and both load-run shapes alike. Scripts, the stored body and `pm.response.events` keep the raw
+reply. A reply with no final response leaves the elements the raw body, and its failure class
+already fails the step as a failed assertion would (a failed `MCP reply` test).
+
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
 (a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total `value`
 beside a `count` of how many times it was recorded, #1937) or `rate`

@@ -108,8 +108,9 @@ namespace vayu::http {
  * @brief The bytes this body puts in the request's body frame.
  *
  * The one answer to "what actually goes on the wire", because it is not
- * `body.content` for three of the six modes: the form modes carry their
- * content as fields, and a `graphql` body is enveloped on the way out. Both
+ * `body.content` for several modes: the form modes carry their content as
+ * fields, and a `graphql`, `jsonrpc` or `mcp` body is enveloped on the way out
+ * (`mcp_body.hpp` adds `_meta` to the last). Both
  * HTTP drivers read it, and so does the raw-request view - a view that
  * rebuilt the body itself would show something the transfer did not send.
  *
@@ -129,8 +130,8 @@ namespace vayu::http {
  * `x-www-form-urlencoded` because its encoding is chosen engine-side, so
  * nothing else can name it; `graphql` and `jsonrpc` because the engine is what
  * writes their envelope (see `graphql_body.hpp`), and a body the engine shaped
- * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`
- * and `json` because the mode *is* the type.
+ * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`,
+ * `json` and `mcp` because the mode *is* the type.
  *
  * **`json` was absent until issue #889, and that was a bug rather than the
  * restraint it read as.** The old rule here - "those clients own the header and

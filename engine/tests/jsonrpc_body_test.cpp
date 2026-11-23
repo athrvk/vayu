@@ -99,6 +99,21 @@ TEST (JsonRpcBodyStorageTest, ContentRoundTripsVerbatim) {
     EXPECT_EQ (parsed.value ().body.content, kEnvelope);
 }
 
+// The `mcp` mode is stored the way `jsonrpc` is: the string the user wrote,
+// under its own wire name.
+TEST (McpBodyStorageTest, ContentRoundTripsVerbatim) {
+    Request request   = jsonrpc_request ("https://x.test", kBareCall);
+    request.body.mode = BodyMode::Mcp;
+
+    const auto stored = json::serialize (request);
+    EXPECT_EQ (stored["body"]["mode"], "mcp");
+
+    auto parsed = json::deserialize_request (stored);
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+    EXPECT_EQ (parsed.value ().body.mode, BodyMode::Mcp);
+    EXPECT_EQ (parsed.value ().body.content, kBareCall);
+}
+
 // A jsonrpc body carries `content`, never `fields`. `has_wire_body` is the
 // predicate every sender asks, so an empty call has to answer the way an empty
 // json body does.

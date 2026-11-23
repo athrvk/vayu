@@ -481,7 +481,7 @@ int count_examples (const json& collections) {
 /// is the exception, because those go out under their own type (#2539).
 std::string required_content_type (const json& body) {
     const std::string mode = body.at ("mode").get<std::string> ();
-    if (mode == "graphql" || mode == "jsonrpc") {
+    if (mode == "graphql" || mode == "jsonrpc" || mode == "mcp") {
         return "application/json";
     }
     if (mode == "xml") {

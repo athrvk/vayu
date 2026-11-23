@@ -62,6 +62,11 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
 	bad_content_encoding: "Bad content encoding",
 	protocol_mismatch: "Protocol mismatch",
 	unsendable_file: "File can't be sent",
+	// An `mcp` body's failed reply under a success status (#3762). The fallback
+	// would spell them "Mcp transport", losing the acronym.
+	mcp_transport: "MCP transport",
+	mcp_protocol: "MCP protocol",
+	mcp_tool: "MCP tool",
 	internal_error: "Internal error",
 	unknown: "Unknown",
 };

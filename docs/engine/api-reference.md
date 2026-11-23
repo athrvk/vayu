@@ -646,6 +646,7 @@ so a body that round-trips through storage sends the same bytes.
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
+| `mcp` | `content` (string), optional `mcpTool` | the JSON-RPC envelope plus `params._meta`, and the headers MCP mirrors out of the body (see below) |
 | `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
 | `form-data` | `fields` | `multipart/form-data`, boundary engine-generated |
@@ -678,7 +679,7 @@ The Content-Type rules follow from the encoding:
   created any other way - MCP `create_request`, an import, a payload posted
   straight to `/execute` - sent the wrong type. A declared header still wins, so
   `application/vnd.api+json` reaches the server unchanged.
-- `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
+- `graphql`, `jsonrpc` and `mcp` set `Content-Type: application/json` under the same
   rule - a Content-Type the caller wrote wins. `graphql` only on the method
   that carries a body at all: a GraphQL `GET` has no body and derives no
   Content-Type, since there is nothing to describe (see below).
@@ -813,6 +814,157 @@ resolves the body first (`POST /compose`), and the envelope rule then runs on
 the *resolved* text; a body still holding a token at wire time does not parse,
 so it is passed through as typed rather than completed into a well-formed
 request carrying an unresolved template.
+
+#### The `mcp` body
+
+An `mcp` body is one call to a Model Context Protocol server over the
+Streamable HTTP transport, modern era, revision **`2026-07-28`**
+(`vayu::http::mcp::PROTOCOL_VERSION`, `http/mcp_body.hpp`; issue #3762). The
+revision asks for metadata inside the body and for headers that repeat the
+body, and a server refuses a request whose headers disagree with its body
+(`400`, JSON-RPC error `-32020`, HeaderMismatch). The engine writes both, for
+every client (Send, a collection run, a load run, MCP `run_request`, the CLI),
+so nobody keeps them in step by hand.
+
+**The body** follows [the `jsonrpc` envelope](#the-jsonrpc-envelope) row for
+row - a full envelope, a non-object, unparseable text and a call past 128
+levels pass through byte for byte; a bare call gains `"jsonrpc":"2.0"` and
+`"id":1` - and a bare call also gains `params._meta` (`params` is created when
+absent or `null`):
+
+```json
+"_meta": {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientInfo": { "name": "vayu", "version": "<engine version>" },
+  "io.modelcontextprotocol/clientCapabilities": {}
+}
+```
+
+A call whose `params` already carries `_meta` keeps it untouched, and a full
+envelope is never stamped.
+
+**The headers** are derived from the resolved bytes about to be sent, in the
+one header-list builder every driver uses, so they appear in `requestHeaders`
+/ `requestHeaderLines` and a run's `sentHeaders` like any other sent header:
+
+| Header | Value |
+|---|---|
+| `Accept` | `application/json, text/event-stream`, always |
+| `MCP-Protocol-Version` | the body's `params._meta` protocol version when it is a string, else `2026-07-28` |
+| `Mcp-Method` | the call's `method` |
+| `Mcp-Name` | `params.name` for `tools/call` and `prompts/get`, `params.uri` for `resources/read` |
+| `Mcp-Param-<Name>` | for a `tools/call` of the tool `mcpTool` describes, each `x-mcp-header` argument (below) |
+
+The precedence is the body-implied `Content-Type`'s: a header the request
+carries under the same name (any case) is sent instead of the derived one, and
+a name in `disabledSystemHeaders` (or a send's `disabledDefaultHeaders`) is not
+added; a refused `Accept` also keeps libcurl's `Accept: */*` off. `Mcp-Name`
+and `Mcp-Param-*` values that are not plain printable ASCII (non-ASCII, a
+control character, an edge space, an empty value, or text that itself looks
+like the sentinel) are sent as `=?base64?<Base64 of the UTF-8 bytes>?=`. A
+`method` or protocol version that cannot be a header line is left out, since
+neither has that form, and the server's `-32020` names it. A body that is not
+one JSON object (an unresolved `{{token}}`) derives only `Accept` and
+`MCP-Protocol-Version`. A correlation id cannot be configured under any of
+these names (`correlationIdHeader`).
+
+**`mcpTool`** is the tool a `tools/call` body calls, stored inside the body
+object, so it needs no column and a `PUT` that leaves `body` out keeps it:
+
+```json
+{
+  "mode": "mcp",
+  "content": "{\"method\":\"tools/call\",\"params\":{\"name\":\"execute_sql\",\"arguments\":{\"region\":\"us-west1\"}}}",
+  "mcpTool": {
+    "name": "execute_sql",
+    "inputSchema": { "type": "object", "properties": {
+      "region": { "type": "string", "x-mcp-header": "Region" } } }
+  }
+}
+```
+
+Each property reached from `inputSchema` through `properties` keys alone that
+carries `x-mcp-header` mirrors the argument at the same path in
+`params.arguments` as `Mcp-Param-<value>`: a string as written, an integer,
+number or boolean as JSON spells it; a `null`, absent, object or array argument
+sends no header. Mirroring needs `params.name` to equal `mcpTool.name`; without
+a stored `mcpTool`, no `Mcp-Param-*` header is sent. `name` must be a non-empty
+string, `inputSchema` (optional) an object, and every annotation a header-name
+token unique without regard to case: anything else is a `400` where it is
+written (`POST`/`PUT /requests`, `POST /import/apply`) and where it is sent. A
+body of another mode keeps an `mcpTool` it carries unread. An `x-vayu-request`
+export carries it and its import reads it back; a Postman export cannot carry
+it (counted under `mcp_bodies`).
+
+#### The `mcp` reply
+
+A server answers with one JSON object or with a request-scoped
+`text/event-stream` whose progress and log notifications come before the final
+response. The **reply reader** (`vayu::http::read_mcp_reply`,
+`http/mcp_reply.hpp`) finds that final response once, where each driver hands
+its response on: Send (buffered or streamed), a collection run's steps, and
+both load-run shapes. Two paths are not read and keep the raw reply: a
+collection run's OpenAPI response validation (`validate_step_response` in
+`scenario_runner.cpp`), which checks the body as it arrived, and
+`pm.sendRequest`, which has no `mcp` body mode: a call it sends to an MCP server
+is a `raw` body, and its response is the raw reply with no `mcp` member and no
+failure class. For a JSON reply it is the body. For an
+event stream it is the last `message` event whose `data` is a JSON-RPC
+response (a `result` or `error` member) carrying the request's
+`id`: the envelope's own, else the constant `1` a bare call is stamped with. A
+`stream: false` request answered with an event stream is read from its
+buffered bytes by the same rule; a streamed one is read from its events as they
+arrive, so an event cut at `sseMaxEventBytes` cannot be read, and the failure
+says so.
+
+**What reads it.** The element pipeline reads the final response in place of
+the body, so `assert.jsonpath`, `assert.contains`, `assert.size`,
+`extract.json`, `extract.regex` and `extract.boundary` address
+`$.result.content[0].text` whatever shape the reply took. Everything else keeps
+the raw reply: the stored and live `body`, `pm.response.text()` and `json()`,
+`pm.response.events` and the Events view. A reply with no final response
+leaves the elements the raw body.
+
+**Failure classes.** A failed reply carries one of three stable wire names:
+
+| `errorClass` | When |
+|---|---|
+| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream that ended before the final response |
+| `protocol` | the final response carries an `error` member, whatever the status (`-32020` header mismatch, `-32022` version refusal, `-32600` and the rest) |
+| `tool` | the call succeeded and `result.isError` is `true` |
+
+A JSON-RPC notification (an envelope with no `id`) expects no response, so a
+2xx with none is a success. Two messages name an era mismatch without retrying
+or falling back, since a retry hides the mismatch from a regression test and
+doubles a load run's traffic: a `-32022` that lists `error.data.supported`
+reads `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`, and
+a `400` with no JSON-RPC error says the server looks legacy-era and to send an
+explicit `initialize` request first.
+
+A failed class **fails the step as a failed assertion does**, with or without an
+element on it: the exchange gains a failed test named `MCP reply`, whose error
+is `<errorClass> failure: <message>`. A collection run's step is `failed`, and
+a scenario load run's step execution is `failed` too. A failed transfer is
+not given that test, since it already fails its step as an error.
+
+**Where it is reported.** An `mcp` request's response carries `mcp`, on the
+live `POST /execute` answer and on the stored trace's `response` node alike:
+`{}` for a reply that succeeded, `{ "errorClass", "code"?, "message" }` for one
+that failed, `code` being the JSON-RPC `error.code` when there was one. Absent
+for every other body mode. Scripts read the same object as `pm.response.mcp`
+([scripting](scripting.md#pmresponsemcp---an-mcp-replys-failure-class)).
+
+**Under load** a failed reply whose status reads as a success (2xx, 3xx) is
+recorded as an error of the run under the error type `mcp_transport`,
+`mcp_protocol` or `mcp_tool` (`error_types` in the summary, `error_type` on the
+stored error record, which also carries the `mcp` node), and in a scenario run
+as its step's `httpErrors` too. Like every completion recorded with an error
+type, it is bucketed under status `0` in the status distribution. A failed
+reply under a `4xx` or `5xx` is an error by its status already and is counted
+once, there, with no error record or error type; the cause is named instead on
+the trace the run keeps for that completion (a status exemplar, a sampled or a
+slow result), which carries the same `mcp` node, so a `-32022` refusal or a
+legacy-era `400` still reads as one.
 
 #### File references: `binary` bodies and file parts
 
@@ -1425,7 +1577,7 @@ it does the proxy policy.
 | `loadNegotiateCompression` | `true` | boolean | The same decision for a load run, separate because compression is part of what a load test measures: off measures a server's uncompressed ceiling, on measures what its clients actually get. |
 | `sendExpectContinue` | `false` | boolean | Let libcurl send `Expect: 100-continue` on a large body. libcurl adds that header on its own to an HTTP/1.1 body over 1 MiB (1048577 bytes and up) and then waits about a second for an interim reply a server that ignores the header never sends, so with this off the engine removes it with libcurl's `Expect:` removal line and the transfer sends the body at once. One key for a Send, a collection run and a load run alike. The removal line is not a sent header, so it is not in `requestHeaders`. |
 | `correlationIdEnabled` | `false` | boolean | Send a header carrying a fresh identifier with every request, so one send - or one iteration of a load run - can be found in a server's log. Off by default: it is a header the target did not ask for. |
-| `correlationIdHeader` | `X-Vayu-Request-Id` | header name | Which name that identifier goes out under. Vendor-namespaced by default so it collides with nothing a gateway defines; set it to `X-Request-ID` or `X-Correlation-ID` for infrastructure that reads one of those. `POST /config` refuses a value that is not a header name (RFC 9110 token), because a broken name would otherwise put a broken line on every request afterwards. |
+| `correlationIdHeader` | `X-Vayu-Request-Id` | header name | Which name that identifier goes out under. Vendor-namespaced by default so it collides with nothing a gateway defines; set it to `X-Request-ID` or `X-Correlation-ID` for infrastructure that reads one of those. `POST /config` refuses a value that is not a header name (RFC 9110 token), because a broken name would otherwise put a broken line on every request afterwards, and a name the engine derives itself (`User-Agent`, `Accept-Encoding`, `Content-Type`, and an `mcp` body's `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`), which would go out twice. |
 
 Three rules hold for all of them, and for the `User-Agent` the engine has always
 added:
@@ -5126,6 +5278,7 @@ was before these rules.
 | `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
 | `script_settings` | A script with a name or the load-test `inline` setting |
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
+| `mcp_bodies` | An MCP body (Postman has no such mode), written as a raw JSON body holding its content as stored; the `Mcp-*` headers and `params._meta` the engine derives on send, and its `mcpTool`, are not written (the phrase: "MCP bodies were written as raw JSON, without their Mcp-* headers, _meta or mcpTool") |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
 | `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, an empty header prefix, or the `jwt_bearer` grant (Postman has no RFC 7523 grant: the block is written with its endpoints, client id and scope and no `grant_type`, and the subject, claims and key are not written) (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
@@ -10892,7 +11045,7 @@ Write `"n":"{{data.n}}"` instead and the number arrives quoted; that is the
 knob, not a bug.
 
 **A value cannot break the document it lands in.** For a body whose text is a
-JSON document - `json`, `jsonrpc`, and a `graphql` body written as the
+JSON document - `json`, `jsonrpc`, `mcp`, and a `graphql` body written as the
 `{"query": ...}` envelope - a token inside a string literal binds **escaped**,
 so a cell carrying `"`, `\` or a newline arrives as its own text inside valid
 JSON rather than ending the string early. A token outside a string literal is

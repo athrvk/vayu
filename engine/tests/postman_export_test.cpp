@@ -606,6 +606,25 @@ TEST (PostmanExport, JsonRpcBodyIsWrittenAsTheCompletedFrame) {
     EXPECT_EQ (body_of ({ { "mode", "jsonrpc" }, { "content", full } })["raw"], full);
 }
 
+// Postman has no MCP mode, so the body is a raw JSON body written as stored.
+TEST (PostmanExport, McpIsARawJsonBodyAndANote) {
+    PostmanExportRequest entry = request ("r", "u");
+    const std::string call     = R"({"method":"tools/list"})";
+    entry.body = ordered{ { "mode", "mcp" }, { "content", call } };
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+    const auto outcome = run (root);
+    const auto body =
+    ordered::parse (outcome.text)["item"][0]["request"]["body"];
+    EXPECT_EQ (body["options"]["raw"]["language"], "json");
+    EXPECT_EQ (body["raw"], call);
+    EXPECT_EQ (losses (outcome), (json{ { "mcp_bodies", 1 } }));
+    ASSERT_EQ (outcome.notes.not_carried.size (), 1U);
+    EXPECT_EQ (outcome.notes.not_carried[0].message,
+    "MCP bodies were written as raw JSON, without their Mcp-* headers, _meta "
+    "or mcpTool");
+}
+
 TEST (PostmanExport, GraphqlVariablesAreThePanesText) {
     ordered object_vars = body_of ({ { "mode", "graphql" },
     { "content", R"({"query":"{ me }","variables":{"id":1},"operationName":"Me"})" } });

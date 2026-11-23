@@ -275,6 +275,58 @@ describe("execIdentity", () => {
 });
 
 /**
+ * An `mcp` body carries its tool inside the body object, on the stored shape
+ * and on the sent one: the engine reads it at send time for the `Mcp-Param-*`
+ * headers (#3762). The renderer derives no header itself.
+ */
+describe("mcp bodies", () => {
+	const TOOL = { name: "execute_sql", inputSchema: { type: "object" } };
+	const CALL = '{"method":"tools/call","params":{"name":"execute_sql"}}';
+
+	function mcpState(overrides: Partial<RequestState> = {}): RequestState {
+		return { ...createDefaultRequestState(), bodyMode: "mcp", body: CALL, ...overrides };
+	}
+
+	it("stores the mode, content and tool", () => {
+		expect(toBodyPayload(mcpState({ mcpTool: TOOL }))).toEqual({
+			mode: "mcp",
+			content: CALL,
+			mcpTool: TOOL,
+		});
+	});
+
+	it("stores no mcpTool key when none is set, which clears a stored one", () => {
+		const body = toBodyPayload(mcpState());
+		expect(body).toEqual({ mode: "mcp", content: CALL });
+		expect(body).not.toHaveProperty("mcpTool");
+	});
+
+	it("sends the tool unresolved beside the resolved content", () => {
+		const request = mcpState({
+			body: '{"method":"tools/call","params":{"name":"{{tool}}"}}',
+			mcpTool: TOOL,
+		});
+
+		expect(buildExecBody(request, (s) => s.split("{{tool}}").join("execute_sql"))).toEqual({
+			mode: "mcp",
+			content: CALL,
+			mcpTool: TOOL,
+		});
+	});
+
+	it("sends no mcpTool key when none is set", () => {
+		expect(buildExecBody(mcpState(), (s) => s)).toEqual({ mode: "mcp", content: CALL });
+	});
+
+	it("keeps a tool out of the body of another mode, whatever the state holds", () => {
+		const request = mcpState({ bodyMode: "json", mcpTool: TOOL });
+
+		expect(toBodyPayload(request)).toEqual({ mode: "json", content: CALL });
+		expect(buildExecBody(request, (s) => s)).toEqual({ mode: "json", content: CALL });
+	});
+});
+
+/**
  * The form modes are a contract with the engine, not a renderer-local
  * convention: `deserialize_request` (engine/src/utils/json.cpp) keys off these
  * exact strings and reads the content out of `fields`. It matched neither

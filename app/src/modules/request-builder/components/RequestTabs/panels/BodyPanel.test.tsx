@@ -45,8 +45,8 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	// mode with no editor of its own gets: JSON-RPC is the plain pane plus
 	// `language="json"`, and a stub that dropped it could not tell that apart
 	// from plaintext.
-	CodeEditor: ({ language }: { language?: string }) => (
-		<div data-testid="code-editor" data-language={language} />
+	CodeEditor: ({ language, ariaLabel }: { language?: string; ariaLabel?: string }) => (
+		<div data-testid="code-editor" data-language={language} aria-label={ariaLabel} />
 	),
 }));
 /** The props the GraphQL pane was last rendered with. */
@@ -177,6 +177,55 @@ describe("the JSON-RPC mode", () => {
 		renderPanel({ bodyMode: "jsonrpc", body: '{"method":"m","params":["{{addr}}"]}' });
 		fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
 		expect(screen.getByText(/resolved-addr/)).toBeInTheDocument();
+	});
+});
+
+/**
+ * MCP is the JSON pane plus a tool above it. The headers the engine derives are
+ * not listed or computed here: the panel only says they exist and where to find
+ * them, and says so honestly when no tool is stored (#3762).
+ */
+describe("the MCP mode", () => {
+	it("uses the plain code editor, highlighted as JSON", () => {
+		renderPanel({ bodyMode: "mcp" });
+		expect(screen.getByLabelText("Request body")).toHaveAttribute("data-language", "json");
+		expect(screen.queryByTestId("graphql-body")).not.toBeInTheDocument();
+	});
+
+	it("shows the type its call is sent as", () => {
+		renderPanel({ bodyMode: "mcp" });
+		expect(screen.getByText("application/json")).toBeInTheDocument();
+	});
+
+	it("offers the tool fields and says the engine adds the headers", () => {
+		renderPanel({ bodyMode: "mcp" });
+		expect(screen.getByLabelText("MCP tool")).toBeInTheDocument();
+		expect(screen.getByText(/Vayu.s engine adds Accept/)).toBeInTheDocument();
+	});
+
+	it("says no Mcp-Param header is sent while no tool is stored", () => {
+		renderPanel({ bodyMode: "mcp" });
+		expect(screen.getByText(/no Mcp-Param-\* header is sent/)).toBeInTheDocument();
+	});
+
+	it("drops that sentence once a tool is stored, and shows its name", () => {
+		renderPanel({ bodyMode: "mcp", mcpTool: { name: "execute_sql" } });
+		expect(screen.queryByText(/no Mcp-Param-\* header is sent/)).not.toBeInTheDocument();
+		expect(screen.getByLabelText("MCP tool")).toHaveValue("execute_sql");
+	});
+
+	it("offers the resolved preview, because it is a code mode", () => {
+		renderPanel({
+			bodyMode: "mcp",
+			body: '{"method":"tools/call","params":{"name":"{{tool}}"}}',
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
+		expect(screen.getByText(/resolved-tool/)).toBeInTheDocument();
+	});
+
+	it("adds the tool fields to no other mode", () => {
+		renderPanel({ bodyMode: "jsonrpc" });
+		expect(screen.queryByLabelText("MCP tool")).not.toBeInTheDocument();
 	});
 });
 

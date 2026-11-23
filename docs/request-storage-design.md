@@ -139,8 +139,9 @@ parse time (`parseImport`, see
 
 #### An empty body keeps its mode
 
-A content-based body (`json`, `text`, `graphql`, `jsonrpc`, `xml`) is stored as
-`{ "mode": "<mode>", "content": "<string>" }`, and an empty `content` is still a
+A content-based body (`json`, `text`, `graphql`, `jsonrpc`, `mcp`, `xml`) is stored as
+`{ "mode": "<mode>", "content": "<string>" }` (an `mcp` body may add `mcpTool`,
+see [api-reference.md](engine/api-reference.md#the-mcp-body)), and an empty `content` is still a
 body of that mode - clearing the editor to retype it is not the same action as
 picking **None**. The save path tests `bodyMode` alone rather than falling back
 to `mode: "none"` when the content is an empty (falsy) string, which used to

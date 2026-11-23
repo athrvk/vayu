@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 #include "vayu/core/path_template.hpp"
@@ -29,6 +30,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
@@ -216,6 +218,12 @@ nlohmann::json response_trace_node (const vayu::Response& response) {
     // event stream keeps none, and any other reply at most the bound (#3238).
     if (response.stream_body_bytes) {
         node["bodyBytes"] = *response.stream_body_bytes;
+    }
+
+    // The live answer's `mcp` (issue #3762), on the same absent-for-other-modes
+    // rule, so a restored response names the failure the live one did.
+    if (response.mcp_reply) {
+        node["mcp"] = vayu::json::serialize_mcp_reply (*response.mcp_reply);
     }
     return node;
 }
@@ -1556,9 +1564,17 @@ ExchangeInputs inputs) {
         outcome.response = client.send (outcome.request).value ();
     }
 
-    element_ctx.response = &outcome.response;
+    // An `mcp` reply is judged once here, for the design send and the
+    // sequential run alike (#3762): its elements read the final response, and
+    // a failure fails the step as an assertion does. Scripts keep the raw reply.
+    vayu::http::attach_mcp_reply (outcome.request, outcome.response);
+    std::optional<vayu::Response> unwrapped;
+    element_ctx.response = vayu::http::mcp_element_view (outcome.response, unwrapped);
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, element_ctx,
     elements, outcome.element_outcomes);
+    if (auto failure = vayu::http::mcp_failure_test (outcome.response)) {
+        outcome.post_script_result.tests.push_back (std::move (*failure));
+    }
 
     // The post-request script's jar writes: the transfer has already
     // captured, so there is nothing left to carry them. A write its own

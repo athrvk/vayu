@@ -71,6 +71,28 @@ describe("ErrorSummary", () => {
 	// file"), so deleting its entry fails here.
 	// Mutation-check: change any label's wording in ERROR_TYPE_LABELS and this
 	// fails; deleting the entry alone does not, the fallback renders it identically.
+	// The fallback spells these "Mcp transport" and so on, so deleting an entry
+	// from ERROR_TYPE_LABELS fails here.
+	it("labels the three MCP reply failure types with the acronym", () => {
+		render(
+			<ErrorSummary
+				{...props({
+					errors: {
+						total: 6,
+						withDetails: 6,
+						types: { mcp_transport: 1, mcp_protocol: 2, mcp_tool: 3 },
+					},
+					noResponse: 6,
+				})}
+			/>
+		);
+
+		expect(screen.getByText("MCP transport").nextSibling?.textContent).toBe("1");
+		expect(screen.getByText("MCP protocol").nextSibling?.textContent).toBe("2");
+		expect(screen.getByText("MCP tool").nextSibling?.textContent).toBe("3");
+		expect(screen.queryByText("mcp_tool")).toBeNull();
+	});
+
 	it("labels the redirect-loop, content-encoding, protocol-mismatch and unsendable-file types", () => {
 		render(
 			<ErrorSummary

@@ -42,6 +42,7 @@ import type {
 	HttpMethod,
 	HttpVersion,
 	KeyValueItem,
+	McpTool,
 	MethodSource,
 	RequestAuth,
 	ResolvedElement,
@@ -192,6 +193,13 @@ export interface RequestState {
 	 * (`FileRef`, `lib/file-trust.ts`).
 	 */
 	binaryFile: FileRef;
+	/**
+	 * The tool an `mcp` body calls, for the engine's `Mcp-Param-*` headers
+	 * (`McpTool`). Absent means none is stored. Kept beside the other modes'
+	 * state like `binaryFile`, so a mode switch and back does not lose it, and
+	 * written only while the mode is `mcp`.
+	 */
+	mcpTool?: McpTool;
 
 	// Auth
 	auth: RequestAuth;

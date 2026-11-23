@@ -26,6 +26,7 @@
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
@@ -97,6 +98,13 @@ std::string system_resolve (const std::string& hostname) {
 /// that gives up on a request before curl owns it ends here, so a request can
 /// never be dropped without completing.
 void complete_transfer (TransferData& data, Result<Response> result) {
+    // An `mcp` reply is judged here, once, before any consumer reads it
+    // (issue #3762); the body stays the raw reply.
+    if (result.is_ok () && data.request.body.mode == BodyMode::Mcp) {
+        Response response = std::move (result).value ();
+        attach_mcp_reply (data.request, response);
+        result = Result<Response> (std::move (response));
+    }
     if (data.callback) {
         data.callback (data.request_id, result);
     }

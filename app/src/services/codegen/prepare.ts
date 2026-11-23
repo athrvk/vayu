@@ -149,6 +149,15 @@ function unreproducibleAuthName(mode: string): string {
 	return `${mode} auth`;
 }
 
+/**
+ * The note an `mcp` body earns. Its Content-Type is deliberately absent from
+ * `IMPLIED_CONTENT_TYPE` as well: the engine derives that type with the other
+ * headers an MCP server requires, and a snippet that wrote one of them would
+ * look finished while the rest were missing (#3762).
+ */
+const MCP_BODY_NOTE =
+	"This request is an MCP call: Vayu's engine adds Content-Type, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name and any Mcp-Param-* headers, and the params._meta block of a bare call, at send time. The snippet carries none of them, so a server that checks them refuses it.";
+
 function asString(value: unknown): string {
 	return typeof value === "string" ? value : "";
 }
@@ -678,6 +687,7 @@ export function prepareRequest(
 	const graphqlQuery = graphqlUrlTransport(method, request.body);
 	if (graphqlQuery !== undefined) url = urlWithQuery(url, graphqlQuery);
 	const body = graphqlQuery === undefined ? normalizeBody(request.body) : undefined;
+	if (body && (request.body as SnippetBody).mode === "mcp") notes.push(MCP_BODY_NOTE);
 	// Absent means following: the engine's own default (issue #1445), unlike
 	// curl's, which is why the flag is worth emitting on the common case
 	// rather than only when it departs from one.

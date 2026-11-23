@@ -27,6 +27,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/script_config.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -803,9 +804,15 @@ const nlohmann::json* data_row) {
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult unused_pre_result;
     vayu::ScriptResult post_result;
+    // An `mcp` reply's elements read its final response (#3762). The cast only
+    // lets the completion's const response travel as `ElementContext::response`,
+    // which no kind writes through.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    auto& received = const_cast<vayu::Response&> (response);
+    std::optional<vayu::Response> unwrapped;
     vayu::core::ElementContext ctx{
-        .request = request,
-        .response = const_cast<vayu::Response*> (&response), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        .request        = request,
+        .response       = vayu::http::mcp_element_view (received, unwrapped),
         .run_pre_script = nullptr,
         .run_post_script =
         [&] (const std::string& script) {
@@ -1116,7 +1123,10 @@ class ScenarioLoadDriver {
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
-            const bool assertion_failed = assertion_failed_before || after.assertion_failed;
+            // An `mcp` failure fails the step as an assertion does (#3762).
+            const bool assertion_failed = assertion_failed_before ||
+            after.assertion_failed ||
+            vayu::http::mcp_failure_test (response).has_value ();
             finish_step (context, state, plan, vu, step_index,
             StepSignals{ .no_response = errored,
             .sent                     = true,
@@ -1350,7 +1360,10 @@ class ScenarioLoadDriver {
             return;
         }
         state.steps.record (step_index, latency_ms);
-        if (!vayu::is_success_status (response.status_code)) {
+        // An `mcp` failure under a 200 is one of the step's errors, as
+        // `handle_result` makes it one of the run's (#3762).
+        if (!vayu::is_success_status (response.status_code) ||
+        vayu::http::mcp_failure_behind_success_status (response) != nullptr) {
             state.steps.record_failed_status (step_index);
         }
     }

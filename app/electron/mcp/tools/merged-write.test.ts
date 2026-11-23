@@ -417,6 +417,81 @@ describe("update_request under a concurrent edit (#3549)", () => {
 		]);
 	});
 
+	// An `mcp` body keeps its tool inside the body object and a write of `body`
+	// replaces it whole; this server states no tool, so it carries the stored one
+	// (#3762). Mutation check: drop the carry in `mergeRequestEdits` and the
+	// stored tool is gone after the write.
+	describe("an mcp body", () => {
+		const TOOL = { name: "execute_sql", inputSchema: { type: "object" } };
+		const CALL = '{"method":"tools/call","params":{"name":"execute_sql"}}';
+		const mcpRequest = (body: Record<string, unknown>): RequestRow => ({
+			...savedRequest(),
+			body,
+			bodyType: body.mode,
+		});
+
+		test("keeps the stored tool when the call is rewritten, and says so", async () => {
+			const engine = fakeRequestEngine(
+				mcpRequest({ mode: "mcp", content: "{}", mcpTool: TOOL }),
+				[]
+			);
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "mcp", body: CALL },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "mcp", content: CALL, mcpTool: TOOL });
+			expect(res.content.map((c) => c.text).join("\n")).toContain(
+				"The stored MCP tool (mcpTool) was kept"
+			);
+		});
+
+		test("writes none when the stored body had no tool", async () => {
+			const engine = fakeRequestEngine(mcpRequest({ mode: "mcp", content: "{}" }), []);
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "mcp", body: CALL },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "mcp", content: CALL });
+		});
+
+		test("takes no tool into a body of another mode", async () => {
+			const engine = fakeRequestEngine(
+				mcpRequest({ mode: "mcp", content: "{}", mcpTool: TOOL }),
+				[]
+			);
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "json", body: "{}" },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "json", content: "{}" });
+		});
+
+		test("carries no tool into an mcp body that replaced one of another mode", async () => {
+			const engine = fakeRequestEngine(mcpRequest({ mode: "json", content: "{}" }), []);
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "mcp", body: CALL },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "mcp", content: CALL });
+		});
+	});
+
 	test("a URL read with its key withheld and written back keeps the stored key", async () => {
 		const engine = fakeRequestEngine(savedRequest(), []);
 

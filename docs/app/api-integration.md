@@ -127,7 +127,7 @@ untransformed. The mode strings are a contract: the engine matches
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
 engine writes the Content-Type each mode implies when the request declares none:
-`application/json` for `json`, `graphql` and `jsonrpc`, `application/xml` for
+`application/json` for `json`, `graphql`, `jsonrpc` and `mcp`, `application/xml` for
 `xml`, `text/plain` for `text`, the form type for each form mode and the file's
 own type for `binary`. A bodyless POST goes out with no Content-Type at all,
 where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
@@ -141,6 +141,23 @@ the file members, and a part without it sends none. A **`binary`** body is one f
 `{mode: "binary", file: {src, fileName?, contentType?}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
 refuse it as "no file selected" rather than send a bodiless request.
+
+An **`mcp`** body (#3762) is `{mode: "mcp", content, mcpTool?}`, where `mcpTool`
+is `{name, inputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
+names, which the engine reads for the `Mcp-Param-*` headers it mirrors out of
+the call's arguments. It is stored **inside the body object**, so a `PUT` that
+sends `body` replaces it whole and a body sent without `mcpTool` clears the
+stored one: `toBodyPayload` writes the key whenever a tool is set, and the
+builder's save sends `body` when `mcpTool` was touched. `index.tsx`'s load reads
+it back for an `mcp` body only, and `buildExecBody` sends it unresolved beside
+the resolved `content`. The renderer does not derive the headers or the
+`params._meta` block: the engine writes `Accept`, `MCP-Protocol-Version`,
+`Mcp-Method`, `Mcp-Name` and `Mcp-Param-*` for every client and reports them in
+the response's `requestHeaders` / `requestHeaderLines`, which the Body panel
+points to. A run's stored snapshot carries the body's content and not its tool,
+so a History copy and Save to request take the saved request's tool instead. The
+engine refuses a tool with a blank `name` or a non-object `inputSchema` with a
+400, which is why the fields commit only a tool it would accept.
 
 **`unresolved` comes back, never goes out** (#2356). The engine sends a file
 reference only when its path was picked on this machine or lies under a folder

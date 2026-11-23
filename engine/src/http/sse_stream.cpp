@@ -29,6 +29,7 @@
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
@@ -408,6 +409,9 @@ struct TransferState {
     /// Where a `Set-Cookie` line is counted, or null for a stream with no jar:
     /// libcurl's cookie engine is off then and drops nothing.
     IncomingCookieWatch* incoming_cookies = nullptr;
+    /// Where an `mcp` request's events are read for its final response, or
+    /// null for every other request (`consume_transfer`).
+    McpReplyStream* mcp_reply = nullptr;
 };
 
 /// Whether the current hop's bytes are kept as a body. Read at a body byte,
@@ -481,6 +485,9 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
 
     for (auto& event : state->parser->feed (bytes)) {
         state->context->record_event (event);
+        if (state->mcp_reply != nullptr) {
+            state->mcp_reply->observe (event);
+        }
         if (state->context->total_events () >= state->max_events) {
             state->abort_reason = SseEndReason::MaxEvents;
             // Returning short of `total_size` is how a write callback aborts a
@@ -734,9 +741,12 @@ const CurlErrorBuffer& errors) {
     return SseEndReason::Error;
 }
 
-} // namespace
-
-vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamContext& context) {
+/// `consume_sse_stream`'s transfer. @p mcp_reply, when set, observes every
+/// event the parser dispatches, so an `mcp` reply's final response is read
+/// though the stream keeps no bytes (issue #3762).
+vayu::Response consume_transfer (const SseStreamRequest& request,
+SseStreamContext& context,
+McpReplyStream* mcp_reply) {
     vayu::Response response;
 
     // The same gate both other drivers apply: a request curl cannot send as
@@ -770,6 +780,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.parser          = &parser;
     state.response        = &response;
     state.peer_check      = &peer_check;
+    state.mcp_reply       = mcp_reply;
     state.idle_timeout_ms = request.limits.idle_timeout_ms;
     state.max_events = request.max_events.value_or (request.limits.max_stream_events);
     state.max_duration_ms =
@@ -861,6 +872,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     if (state.abort_reason != SseEndReason::MaxEvents) {
         for (auto& event : parser.finish ()) {
             context.record_event (event);
+            if (mcp_reply != nullptr) {
+                mcp_reply->observe (event);
+            }
         }
     }
 
@@ -899,6 +913,18 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     curl_easy_cleanup (curl);
     context.record_end (reason);
+    return response;
+}
+
+} // namespace
+
+vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamContext& context) {
+    if (request.request.body.mode != BodyMode::Mcp) {
+        return consume_transfer (request, context, nullptr);
+    }
+    McpReplyStream reply_stream (mcp_request_id (request.request));
+    vayu::Response response = consume_transfer (request, context, &reply_stream);
+    response.mcp_reply = read_mcp_reply (request.request, response, &reply_stream);
     return response;
 }
 

@@ -35,6 +35,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -581,6 +582,29 @@ std::string typed_cookie_value (const Request& request) {
     return joined;
 }
 
+namespace {
+
+/// What an `mcp` body mirrors into headers, read off the bytes this transfer
+/// sends (#3762). @p adds_default and @p append are `build_request_header_list`'s
+/// own, so a header the caller wrote or suppressed wins here as it does for any
+/// other default.
+template <typename AddsDefault, typename Append>
+void append_mcp_derived_headers (const Request& request,
+const AddsDefault& adds_default,
+const Append& append) {
+    if (request.body.mode != BodyMode::Mcp) {
+        return;
+    }
+    for (const auto& [name, value] : vayu::http::mcp_derived_headers (
+         vayu::http::wire_body_bytes (request), request.body.mcp_tool)) {
+        if (adds_default (name)) {
+            append (name, value);
+        }
+    }
+}
+
+} // namespace
+
 curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
 HeaderList* sent) {
@@ -657,6 +681,8 @@ HeaderList* sent) {
     append ("Content-Type", body_content_type_value (request))) {
         lists_content_type = true;
     }
+
+    append_mcp_derived_headers (request, adds_default, append);
 
     if (adds_default ("User-Agent")) {
         append ("User-Agent", policy.user_agent);
