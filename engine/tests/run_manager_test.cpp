@@ -1501,6 +1501,93 @@ TEST (LoadDrain, AStreamingStepDoesNotCutACollectionRunsOrdinaryStepShort) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #3771: a streaming run against a rate-limited target reports as streams
+// only the replies that announced `text/event-stream`. Eight iterations meet
+// `/sse-or-429` as two two-event streams and six 429s: `completions` is 2 and
+// every percentile 2, not 8 completions with a p50 of 0. Mutation check: drop
+// the content-type test from `StreamTally::report` and `completions` reads 8
+// with `events.min` 0.
+TEST (LoadStream, OnlyTheRepliesThatAnnouncedAStreamAreTheReportsStreams) {
+    constexpr int ITERATIONS = 8;
+    constexpr int STREAMS = ITERATIONS / vayu::tests::SlowMockServer::SSE_OR_429_EVERY;
+    const std::string db_path = "test_load_stream_rate_limited.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.sse_or_429_url () }, { "mode", "iterations" },
+            { "iterations", ITERATIONS }, { "concurrency", 1 }, { "timeout", 5000 },
+            { "workers", 1 }, { "stream", true }, { "maxStreamDurationMs", 10000 } };
+        const std::string run_id = "run_load_stream_rate_limited";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const nlohmann::json expected_codes =
+        nlohmann::json::array ({ { 200, STREAMS }, { 429, ITERATIONS - STREAMS } });
+        EXPECT_EQ (report.at ("statusCodes"), expected_codes) << report.dump ();
+        const auto& stream = report.at ("stream");
+        EXPECT_EQ (stream.at ("completions").get<int> (), STREAMS) << stream.dump ();
+        EXPECT_EQ (stream.at ("totalEvents").get<int> (), STREAMS * 2) << stream.dump ();
+        EXPECT_EQ (stream.at ("events").at ("min").get<int> (), 2) << stream.dump ();
+        EXPECT_EQ (stream.at ("events").at ("p50").get<int> (), 2) << stream.dump ();
+        EXPECT_EQ (stream.at ("timeToFirstEvent").at ("count").get<int> (), STREAMS)
+        << stream.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #3771: a target that answers a streaming run with 200 JSON never streamed,
+// so the report has no `stream` section at all. Mutation check: drop the
+// content-type test from `StreamTally::report` and the section appears with
+// every completion at 0 events.
+TEST (LoadStream, AStreamingRunAnsweredWithJsonHasNoStreamSection) {
+    const std::string db_path = "test_load_stream_json.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.fast_url () }, { "mode", "iterations" },
+            { "iterations", 4 }, { "concurrency", 1 }, { "timeout", 5000 },
+            { "workers", 1 }, { "stream", true }, { "maxStreamDurationMs", 10000 } };
+        const std::string run_id = "run_load_stream_json";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        EXPECT_EQ (report.at ("summary").at ("successfulRequests").get<int> (), 4)
+        << report.dump ();
+        EXPECT_FALSE (report.contains ("stream")) << report.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #3236: a streaming run's live frames count its events while its one stream
 // is still open, and settle on the report's total once it closes. `/sse-held`
 // sends three events and the start of a fourth, then holds until released, so

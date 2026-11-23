@@ -1679,6 +1679,9 @@ std::optional<Error> transfer_failure (CURL* curl, const TransferData& data, CUR
             "Response body exceeded the " + std::to_string (data.max_response_bytes) +
             " byte cap (maxResponseBodyBytes)" };
     }
+    if (data.stream.cap_reached ()) {
+        return data.stream.unannounced_cap_error ();
+    }
     return curl_to_error (curl, result, data.errors, &data.request);
 }
 
@@ -1969,7 +1972,12 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // `body_limit_exceeded` still wins - it is checked first below only because
     // it cannot be set at the same time as this: write_callback returns at the
     // byte cap without ever marking the tally's cap reached.
-    if (result != CURLE_OK && data->stream.cap_reached () && !data->body_limit_exceeded) {
+    //
+    // Only a stream ends this way: `stream_events` is set exactly when the
+    // reply announced `text/event-stream` (#3771). A cap that passed on any
+    // other reply is `transfer_failure`'s timeout.
+    if (result != CURLE_OK && data->stream.cap_reached () &&
+    !data->body_limit_exceeded && response.stream_events.has_value ()) {
         long stream_code = 0;
         get_info<CURLINFO_RESPONSE_CODE> (curl, &stream_code);
         response.status_code = static_cast<int> (stream_code);

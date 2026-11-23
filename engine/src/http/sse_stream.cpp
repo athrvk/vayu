@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "vayu/core/run_manager.hpp"
-#include "vayu/core/sample_capture.hpp"
 #include "vayu/http/cookie_warnings.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_options.hpp"
@@ -33,6 +32,7 @@
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/stream_tally.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
@@ -409,13 +409,6 @@ struct TransferState {
     /// libcurl's cookie engine is off then and drops nothing.
     IncomingCookieWatch* incoming_cookies = nullptr;
 };
-
-/// Whether @p headers announce an event stream, whose bytes are its events
-/// rather than a body. A missing `Content-Type` is not one.
-bool announces_event_stream (const Headers& headers) {
-    const auto found = headers.find ("content-type");
-    return found != headers.end () && vayu::core::media_type (found->second) == "text/event-stream";
-}
 
 /// Whether the current hop's bytes are kept as a body. Read at a body byte,
 /// when the hop's header block is complete, and decided once per hop.
