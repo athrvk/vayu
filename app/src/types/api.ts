@@ -113,6 +113,25 @@ export interface OAuth2AuthorizeResolved {
 	issuer: string;
 }
 
+/** `POST /oauth2/step-up`: classify a 401/403's challenge; the engine sends and retries nothing. */
+export interface OAuth2StepUpRequest {
+	/** Each `WWW-Authenticate` line's value, in the order received. */
+	wwwAuthenticate: string[];
+	/** The scopes already requested, space-separated. */
+	scope?: string;
+}
+
+export interface OAuth2StepUpResponse {
+	/** True only for a Bearer challenge whose `error` is exactly `insufficient_scope`. */
+	stepUp: boolean;
+	error: string;
+	/** The challenge's `scope`, split and deduplicated; `[]` unless `stepUp`. */
+	requiredScopes: string[];
+	/** What a re-authorization asks for: the held scopes plus the required ones; `""` unless `stepUp`. */
+	scope: string;
+	description: string;
+}
+
 export interface OAuth2AuthorizeStatusResponse {
 	state: "pending" | "completed" | "failed" | "not_found";
 	error?: string;

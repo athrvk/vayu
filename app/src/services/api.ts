@@ -108,6 +108,8 @@ import type {
 	OAuth2AuthorizeStartRequest,
 	OAuth2AuthorizeStartResponse,
 	OAuth2AuthorizeStatusResponse,
+	OAuth2StepUpRequest,
+	OAuth2StepUpResponse,
 	Inbox,
 	InboxCannedResponse,
 	InboxCapturesResponse,
@@ -1265,5 +1267,9 @@ export const apiService = {
 		return await httpClient.get<OAuth2AuthorizeStatusResponse>(
 			API_ENDPOINTS.OAUTH2_AUTHORIZE_STATUS(attemptId)
 		);
+	},
+
+	async classifyOAuth2StepUp(data: OAuth2StepUpRequest): Promise<OAuth2StepUpResponse> {
+		return await httpClient.post<OAuth2StepUpResponse>(API_ENDPOINTS.OAUTH2_STEP_UP, data);
 	},
 };

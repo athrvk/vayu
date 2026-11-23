@@ -62,6 +62,7 @@ import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import SendingWave from "./SendingWave";
+import StepUpNotice from "./StepUpNotice";
 import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
 import { useFittedTabs } from "@/components/layout/useFittedTabs";
 import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
@@ -683,6 +684,11 @@ export default function ResponseViewer() {
 						{shown.authNotice}
 					</Callout>
 				</div>
+			)}
+
+			{/* Beside the auth note for the same reason: it explains a 403. */}
+			{shown !== streamedResponse && (
+				<StepUpNotice response={shown} className={cn("px-4 pt-3 shrink-0", staleClass)} />
 			)}
 
 			{/*

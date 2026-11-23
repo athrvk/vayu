@@ -2853,6 +2853,12 @@ into a pane that can never load on every restart.
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
+- **`useOAuth2StepUpQuery(input)`** (`queryKeys.oauth.stepUp(wwwAuthenticate,
+  scope)`) - `POST /oauth2/step-up` for a 403's challenge (#3766), asked by the
+  response pane's step-up callout. The engine only classifies, so the answer is a
+  function of the key: `staleTime: Infinity`, no poll, disabled for a `null`
+  input. Under `oauth.all`, so the MCP feed's OAuth invalidation refetches a
+  mounted one, which answers the same
 - **`queryKeys.compose.forRequest(requestId, environmentId, source)`** - `POST /compose`
   for a request, behind `compositionOptions` (`code-composition.ts`), which the
   context bar's Code section, the Params tab's "Sends" line and the tab strip

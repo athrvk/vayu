@@ -1390,6 +1390,10 @@ apiService.clearOAuth2Token(cacheKey): Promise<void>                   // DELETE
 apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStartResponse>  // { attemptId, authorizeUrl, redirectUri, expiresAt, resolved? }
 apiService.getOAuth2AuthorizeStatus(attemptId): Promise<OAuth2AuthorizeStatus>
 apiService.completeOAuth2Authorize(attemptId, callbackUrl): Promise<OAuth2AuthorizeStatus>
+
+// Is a 401/403's challenge a step-up? Classifies only (#3766)
+apiService.classifyOAuth2StepUp({ wwwAuthenticate: string[], scope? }): Promise<OAuth2StepUpResponse>
+// { stepUp, error, requiredScopes, scope, description }       // POST /oauth2/step-up
 ```
 
 These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
@@ -1465,6 +1469,16 @@ whatever the window answers later. `useOAuth2SignIn` (`components/shared/OAuth2F
 passes the signal from `stores/oauth-signin-store.ts`, which keys one sign-in per
 `oauth2SignInKey`, and hands a landed sign-in to its caller only while that caller
 still shows a config with the same key.
+
+**Step-up (#3766).** A 403 whose `WWW-Authenticate` the engine classifies as
+`insufficient_scope` is a step-up. The response pane sends each received
+`WWW-Authenticate` line (`stepUpChallenges`, `ResponseViewer/step-up.ts`; a 403 only,
+and nothing is asked about any other status) with the scope the request's own OAuth
+2.0 config requests, through `useOAuth2StepUpQuery`. The answer's `scope` is the held
+scopes plus the required ones, and that is what the callout's Re-authorize signs in
+with (`useOAuth2SignIn`, the token row's path) and then writes into the config's
+`scope`. The engine retries and re-authorizes nothing, and neither does the app on its
+own; a load run cannot take a browser step at all.
 
 > **`HttpClient.delete`** takes an optional `params` argument so the token-clear
 > call can pass `?key=`.
