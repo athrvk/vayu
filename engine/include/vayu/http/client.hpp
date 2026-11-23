@@ -244,7 +244,9 @@ class Client {
      * A request carrying `stream_bounds` is sent as a bounded stream, by the
      * event loop's rules (`StreamTally`, #3235): its events are counted as
      * they arrive, either cap (or a cancel once the server answered) ends it
-     * as a **success**, and the whole-transfer timeout is the duration cap
+     * as a **success** when the reply announced `text/event-stream` (#3771;
+     * any other reply carries no event count, and a duration cap on it is a
+     * `Timeout`), and the whole-transfer timeout is the duration cap
      * plus `LOAD_STREAM_TIMEOUT_GRACE_MS`, so its own `timeout_ms` bounds the
      * connect phase alone. The body is the `text/event-stream` bytes, held to
      * `max_response_bytes` like any other.

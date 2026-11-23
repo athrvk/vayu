@@ -164,7 +164,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   does not. JSON carried inside a *string* field is outside the request-body
   depth bound (`parse_request_json`, #2417), so whoever parses it bounds it at
   `constants::request_body::MAX_JSON_DEPTH` before anything copies or `dump`s
-  it (#2672): `jsonrpc_wire_body` parses with that depth,
+  it (#2672): `jsonrpc_wire_body` parses with that depth (`mcp_wire_body` and
+  `mcp_derived_headers` with it, #3762),
   `graphql_get_parameters` and the `pm` GraphQL view probe `exceeds_depth`, and
   `postmanProtocolBehavior` measures with `json_within_depth`. Each has a
   crash-depth test and an at-bound test in its suite. Only text the engine wrote
@@ -174,8 +175,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   type (`using json = nlohmann::ordered_json`) makes `json::parse` the same
   call, so grep for the alias too. Guard: `tests/wide_json.hpp` builds the
   input (`wide_object_json`, 100,000 keys) and holds `LINEAR_PARSE_BUDGET`;
-  each entry point (`jsonrpc_wire_body`, `parse_import`, `read_document`, the
-  element pipeline, `postmanProtocolBehavior`, an example's `savedFrom`, the
+  each entry point (`jsonrpc_wire_body`, `mcp_wire_body`, `parse_import`, `read_document`, the
+  element pipeline and the MCP reply reader that feeds it (`read_mcp_reply`, bounded at the
+  pipeline's `elements::MAX_BODY_DEPTH`), `postmanProtocolBehavior`, an example's `savedFrom`, the
   Postman export's stored columns) has a test that fails the budget on the
   quadratic parse. The rest of a path can still be quadratic after the parse is
   not (`ordered_map::operator[]` per member); the test measures the whole path.
@@ -788,15 +790,25 @@ logged as a warning: it means a client skipped composition.
   every step, #3397) and its summary stores the load path's `stream`
   section (`build_stream_summary_payload`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
+  A transfer is a stream only when its final hop announced `text/event-stream`
+  (#3771, `announces_event_stream` in `stream_tally.hpp`, the design path's
+  reading too): the tally counts nothing for any other reply, leaves its
+  `stream_events` absent, and a duration cap that ends one is a `Timeout`
+  (`StreamTally::unannounced_cap_error`), never a capped success.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
-  body already *is* the `text/event-stream` bytes, and the deferred script
-  replay and `GET /runs/:id/samples` rebuild the list with
-  `buffered_stream_events_node`, bounded by `sseMaxStoredEvents`; the one thing
-  stored beside the body is the wire count (`result_bodies.stream_events`, NULL
-  = not a stream). Scripts run (#575): pre-request before the transfer,
-  post-request after the stream ends with `pm.response.events`, output stored
-  on the trace's `scripts` node because the route already answered `202`.
+  body already *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`
+  rebuilds the list with `buffered_stream_events_node`, bounded by
+  `sseMaxStoredEvents`; the one thing stored beside the body is the wire count
+  (`result_bodies.stream_events`, NULL = not a stream). Scripts run (#575):
+  pre-request before the transfer, post-request after the stream ends with
+  `pm.response.events`, output stored on the trace's `scripts` node because the
+  route already answered `202`. Every other post-request script over a
+  streamed response binds the list through `bind_buffered_stream_events`
+  (`http/sse_stream.hpp`, #3769), which parses only when
+  `Response::stream_events` is set: a sequential run's step
+  (`ExchangeInputs::sse_limits`), a load run's inline `script.post` on either
+  load path (`RunContext::sse_limits`) and the deferred replay.
   **A consumer worker is drained by whoever owns the manager, before the state
   it writes through goes away** (#646): `Server::stop()` calls
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its

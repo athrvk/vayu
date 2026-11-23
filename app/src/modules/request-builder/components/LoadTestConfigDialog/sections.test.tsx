@@ -24,6 +24,7 @@ import {
 	CAPACITY_BUDGETS_NOTE,
 	CAPACITY_SEED_HINT,
 	STREAM_LATENCY_NOTE,
+	STREAM_SEED_HINT,
 	emptyBudgetDraft,
 	emptyCustomBudgetRow,
 } from "./budgets";
@@ -171,6 +172,60 @@ describe("BudgetsSection", () => {
 				"1 budget active"
 			);
 			expect(screen.queryByText(CAPACITY_SEED_HINT)).not.toBeInTheDocument();
+		});
+	});
+
+	describe("on a streaming request (issue #3772)", () => {
+		const seeded = { ...emptyBudgetDraft(), latencyP99Ms: "500" };
+		const slo = { latencyP99Ms: "slo" } as const;
+		const closedCard = () => screen.getByRole("button", { name: /pass\/fail budgets/i });
+
+		it("does not count the unsent Settings seed on the closed card", () => {
+			renderBudgets(false, { isStreamingRequest: true, budgets: seeded, budgetSources: slo });
+			expect(closedCard()).toHaveTextContent("No budgets");
+		});
+
+		it("says the seeded p99 is not sent by a streaming request, but still shows it", () => {
+			renderBudgets(false, { isStreamingRequest: true, budgets: seeded, budgetSources: slo });
+			expect(screen.getByLabelText(/^p99 latency/i)).toHaveValue(500);
+			expect(screen.getByText(STREAM_SEED_HINT)).toBeInTheDocument();
+			expect(screen.queryByText(CAPACITY_SEED_HINT)).not.toBeInTheDocument();
+		});
+
+		it("does not show the capacity note, which is about the search", () => {
+			renderBudgets(false, { isStreamingRequest: true, budgets: seeded, budgetSources: slo });
+			expect(screen.queryByText(CAPACITY_BUDGETS_NOTE)).not.toBeInTheDocument();
+		});
+
+		it("names the capacity reason, not the stream one, when both apply", () => {
+			renderBudgets(false, {
+				mode: "capacity",
+				isStreamingRequest: true,
+				budgets: seeded,
+				budgetSources: slo,
+			});
+			expect(screen.getByText(CAPACITY_SEED_HINT)).toBeInTheDocument();
+			expect(screen.queryByText(STREAM_SEED_HINT)).not.toBeInTheDocument();
+		});
+
+		it("counts a p99 the memo carried, and claims no seed for it", () => {
+			renderBudgets(false, {
+				isStreamingRequest: true,
+				budgets: seeded,
+				budgetSources: { latencyP99Ms: "memo" },
+			});
+			expect(closedCard()).toHaveTextContent("1 budget active");
+			expect(screen.queryByText(STREAM_SEED_HINT)).not.toBeInTheDocument();
+		});
+
+		it("still counts and describes the seed when the request does not stream", () => {
+			renderBudgets(false, {
+				isStreamingRequest: false,
+				budgets: seeded,
+				budgetSources: slo,
+			});
+			expect(closedCard()).toHaveTextContent("1 budget active");
+			expect(screen.queryByText(STREAM_SEED_HINT)).not.toBeInTheDocument();
 		});
 	});
 });

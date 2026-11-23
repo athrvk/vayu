@@ -542,6 +542,8 @@ add_library(vayu_core STATIC
     src/http/header_names.cpp
     src/http/graphql_body.cpp
     src/http/jsonrpc_body.cpp
+    src/http/mcp_body.cpp
+    src/http/mcp_reply.cpp
     src/http/loopback_guard.cpp
     src/http/list_page.cpp
     src/http/target_policy.cpp

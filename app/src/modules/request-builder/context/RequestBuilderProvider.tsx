@@ -108,6 +108,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"formData",
 	"urlEncoded",
 	"binaryFile",
+	"mcpTool",
 	"auth",
 	"elements",
 	"followRedirects",

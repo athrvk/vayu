@@ -226,79 +226,119 @@ describe("describeCarried", () => {
 /**
  * The Settings p99 seed is withheld from a capacity search (issue #2816): the
  * engine judges the pooled histogram, which holds every over-budget level the
- * search climbed through on purpose.
+ * search climbed through on purpose. It is withheld from a streaming request
+ * too (issue #3772), whose latency is the stream's whole duration.
  */
-describe("the Settings p99 seed in Capacity discovery", () => {
+describe("the Settings p99 seed where it is withheld", () => {
 	const SEED: CarriedBudgets["fixed"] = { latencyP99Ms: "slo" };
 	const MEMO: CarriedBudgets["fixed"] = { latencyP99Ms: "memo" };
 	const OTHER_MODES = ["constant_rps", "constant_concurrency", "ramp_up", "iterations"] as const;
 	const seeded = draft({ latencyP99Ms: "500", maxErrorRatePct: "2" });
 
 	describe("isUnsentSeed", () => {
-		it("holds for a seed in capacity", () => {
-			expect(isUnsentSeed("capacity", SEED)).toBe(true);
+		it("holds for a seed in capacity, streaming or not", () => {
+			expect(isUnsentSeed("capacity", false, SEED)).toBe(true);
+			expect(isUnsentSeed("capacity", true, SEED)).toBe(true);
 		});
 
-		it("does not hold for a p99 the memo carried, or nothing carried", () => {
-			expect(isUnsentSeed("capacity", MEMO)).toBe(false);
-			expect(isUnsentSeed("capacity", {})).toBe(false);
+		it.each(OTHER_MODES)("holds for a seed in a streaming %s run only", (mode) => {
+			expect(isUnsentSeed(mode, true, SEED)).toBe(true);
+			expect(isUnsentSeed(mode, false, SEED)).toBe(false);
 		});
 
-		it.each(OTHER_MODES)("does not hold in %s", (mode) => {
-			expect(isUnsentSeed(mode, SEED)).toBe(false);
-		});
+		it.each([true, false])(
+			"does not hold for a p99 the memo carried, or nothing carried (streaming %s)",
+			(streaming) => {
+				expect(isUnsentSeed("capacity", streaming, MEMO)).toBe(false);
+				expect(isUnsentSeed("capacity", streaming, {})).toBe(false);
+				expect(isUnsentSeed("ramp_up", streaming, MEMO)).toBe(false);
+				expect(isUnsentSeed("ramp_up", streaming, {})).toBe(false);
+			}
+		);
 	});
 
 	describe("budgetsToSend", () => {
 		it("blanks the seed and nothing else in capacity", () => {
-			expect(budgetsToSend(seeded, "capacity", SEED)).toEqual(
+			expect(budgetsToSend(seeded, "capacity", false, SEED)).toEqual(
 				draft({ latencyP99Ms: "", maxErrorRatePct: "2" })
 			);
 		});
 
-		it("keeps a memo or typed p99 in capacity", () => {
-			expect(budgetsToSend(seeded, "capacity", MEMO)).toBe(seeded);
-			expect(budgetsToSend(seeded, "capacity", {})).toBe(seeded);
-			expect(budgetsToSend(seeded, "capacity", undefined)).toBe(seeded);
+		it("blanks the seed and nothing else on a stream", () => {
+			expect(budgetsToSend(seeded, "ramp_up", true, SEED)).toEqual(
+				draft({ latencyP99Ms: "", maxErrorRatePct: "2" })
+			);
 		});
 
-		it.each(OTHER_MODES)("keeps the seed in %s", (mode) => {
-			expect(budgetsToSend(seeded, mode, SEED)).toBe(seeded);
+		it.each([true, false])(
+			"keeps a memo or typed p99 in capacity (streaming %s)",
+			(streaming) => {
+				expect(budgetsToSend(seeded, "capacity", streaming, MEMO)).toBe(seeded);
+				expect(budgetsToSend(seeded, "capacity", streaming, {})).toBe(seeded);
+				expect(budgetsToSend(seeded, "capacity", streaming, undefined)).toBe(seeded);
+			}
+		);
+
+		it("keeps a memo or typed p99 on a stream", () => {
+			expect(budgetsToSend(seeded, "ramp_up", true, MEMO)).toBe(seeded);
+			expect(budgetsToSend(seeded, "ramp_up", true, {})).toBe(seeded);
+			expect(budgetsToSend(seeded, "ramp_up", true, undefined)).toBe(seeded);
+		});
+
+		it.each(OTHER_MODES)("keeps the seed in a non-streaming %s run", (mode) => {
+			expect(budgetsToSend(seeded, mode, false, SEED)).toBe(seeded);
 		});
 	});
 
 	describe("budgetsToRemember", () => {
-		it("leaves the seed out of the memo, so it restores as a seed and not as the user's", () => {
-			const kept = budgetsToRemember(seeded, "capacity", SEED);
-			expect(kept).not.toHaveProperty("latencyP99Ms");
-			expect(findCarriedBudgets(kept, []).fixed).toEqual({
-				maxErrorRatePct: "memo",
-				latencyP99Ms: "slo",
-			});
+		it.each([
+			["capacity", false],
+			["ramp_up", true],
+		] as const)(
+			"leaves the seed out of the memo in %s (streaming %s), so it restores as a seed and not as the user's",
+			(mode, streaming) => {
+				const kept = budgetsToRemember(seeded, mode, streaming, SEED);
+				expect(kept).not.toHaveProperty("latencyP99Ms");
+				expect(findCarriedBudgets(kept, []).fixed).toEqual({
+					maxErrorRatePct: "memo",
+					latencyP99Ms: "slo",
+				});
+			}
+		);
+
+		it.each([true, false])("writes a typed p99 as typed (streaming %s)", (streaming) => {
+			expect(budgetsToRemember(seeded, "capacity", streaming, {})).toBe(seeded);
+			expect(budgetsToRemember(seeded, "ramp_up", streaming, {})).toBe(seeded);
 		});
 
-		it("writes a typed p99 as typed", () => {
-			expect(budgetsToRemember(seeded, "capacity", {})).toBe(seeded);
-		});
-
-		it.each(OTHER_MODES)("writes the seed as it stands in %s", (mode) => {
-			expect(budgetsToRemember(seeded, mode, SEED)).toBe(seeded);
+		it.each(OTHER_MODES)("writes the seed as it stands in a non-streaming %s run", (mode) => {
+			expect(budgetsToRemember(seeded, mode, false, SEED)).toBe(seeded);
 		});
 	});
 
 	describe("withoutUnsentSeed", () => {
 		const carried = findCarriedBudgets(undefined, []);
 
-		it("takes the seed out of the carried set in capacity, so the notice does not name it", () => {
-			const judged = withoutUnsentSeed(carried, "capacity");
-			expect(judged.fixed).toEqual({});
-			expect(describeCarried(judged, seeded, [], undefined)).toBeNull();
+		it.each([
+			["capacity", false],
+			["ramp_up", true],
+		] as const)(
+			"takes the seed out of the carried set in %s (streaming %s), so the notice does not name it",
+			(mode, streaming) => {
+				const judged = withoutUnsentSeed(carried, mode, streaming);
+				expect(judged.fixed).toEqual({});
+				expect(describeCarried(judged, seeded, [], undefined)).toBeNull();
+			}
+		);
+
+		it("leaves a memo p99 alone, streaming or not", () => {
+			const memo = findCarriedBudgets({ latencyP99Ms: "150" }, []);
+			expect(withoutUnsentSeed(memo, "capacity", false)).toBe(memo);
+			expect(withoutUnsentSeed(memo, "ramp_up", true)).toBe(memo);
 		});
 
-		it("leaves a memo p99 and the other modes alone", () => {
-			const memo = findCarriedBudgets({ latencyP99Ms: "150" }, []);
-			expect(withoutUnsentSeed(memo, "capacity")).toBe(memo);
-			expect(withoutUnsentSeed(carried, "ramp_up")).toBe(carried);
+		it("leaves the seed in a non-streaming run of another mode", () => {
+			expect(withoutUnsentSeed(carried, "ramp_up", false)).toBe(carried);
 		});
 	});
 });

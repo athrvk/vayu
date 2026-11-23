@@ -132,6 +132,43 @@ describe("fetch - the body survives escaping", () => {
 	});
 });
 
+describe("an mcp body", () => {
+	const mcp: SnippetRequest = {
+		...GET,
+		method: "POST",
+		body: {
+			mode: "mcp",
+			content: '{"method":"tools/call","params":{"name":"t"}}',
+		},
+	};
+
+	// The engine derives every MCP header and stamps `_meta` into a bare call
+	// (#3762); copying either here would be a second, drifting copy. The snippet
+	// sends the content as stored and says so.
+	it.each(CODE_TARGETS.map((target) => [target.id] as const))(
+		"%s sends the content as stored, with no derived header, and says why",
+		(id) => {
+			const { code, notes } = generateSnippet(id, mcp);
+			expect(code).toContain("tools/call");
+			expect(code).not.toContain("_meta");
+			expect(code.toLowerCase()).not.toContain("mcp-method");
+			expect(code.toLowerCase()).not.toContain("content-type");
+			expect(notes.join(" ")).toContain("Mcp-Method");
+			expect(notes.join(" ")).toContain("params._meta");
+		}
+	);
+
+	it("adds no note to a json body", () => {
+		const { notes } = generateCurl({ ...mcp, body: { mode: "json", content: "{}" } });
+		expect(notes.join(" ")).not.toContain("MCP");
+	});
+
+	it("adds no note to an mcp body that sends nothing", () => {
+		const { notes } = generateCurl({ ...mcp, body: { mode: "mcp", content: "" } });
+		expect(notes).toEqual([]);
+	});
+});
+
 describe("form bodies", () => {
 	const formData: SnippetRequest = {
 		...GET,

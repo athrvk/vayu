@@ -11,17 +11,23 @@
  * Splits a command string into argv, honoring the quoting rules that show up in
  * real-world "Copy as cURL" output from browsers and docs:
  *   - single quotes '...'      → literal (no escapes)
- *   - double quotes "..."      → \" and \\ escapes honored
+ *   - double quotes "..."      → \" \\ and \$ escapes honored
  *   - ANSI-C $'...'            → \n \t \r \a \b \e \f \v \' \\ and the numeric forms
  *                                \xHH, \NNN (octal), \uHHHH, \UHHHHHHHH decoded
  *   - line continuations       → backslash + newline (bash) and ^ + newline (cmd)
  *   - Chrome "Copy as cURL (cmd)" → every ^ escape removed before tokenizing
  *   - leading prompt noise      → "$ " / "> " stripped per line
  *
- * `{{variables}}` are not special - they pass through as plain text.
+ * `{{variables}}` pass through as plain text. A shell variable (`$NAME`,
+ * `${NAME}`) outside single quotes becomes `{{NAME}}` and is reported in
+ * `variables` (#3777): the command was written for a shell that fills it in,
+ * and the request would otherwise carry the literal text `$NAME`. Everything
+ * else a shell would expand (`$(cmd)`, `$1`, `${NAME:-x}`) stays as written.
  *
  * Throws on an unterminated quote so the caller can fall back to a no-op.
  */
+
+import { VARIABLE_PATTERN } from "@/constants/variables";
 
 export class UnterminatedQuoteError extends Error {
 	constructor() {
@@ -189,15 +195,101 @@ function unescapeCmdCarets(input: string): string {
 	return input.replace(/\^(?:\r?\n|([\s\S])|$)/g, (_match, escaped?: string) => escaped ?? "");
 }
 
+export interface TokenizedCommand {
+	tokens: string[];
+	/** Shell variables rewritten to `{{NAME}}`, each once, in the order first seen. */
+	variables: string[];
+}
+
+/** `$NAME` or the plain `${NAME}`; any other `${...}` form is a shell expansion left alone. */
+const SHELL_VARIABLE = /\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})/y;
+
+/** Marks every index inside a `{{ ... }}` span, so `{{$guid}}` is not read as a shell variable. */
+function templateSpanMask(src: string): Uint8Array {
+	const mask = new Uint8Array(src.length);
+	for (const span of src.matchAll(VARIABLE_PATTERN)) {
+		mask.fill(1, span.index, span.index + span[0].length);
+	}
+	return mask;
+}
+
+interface Expansion {
+	text: string;
+	next: number;
+}
+
+/**
+ * Reads what a `$` at `at` stands for outside single quotes: the `{{NAME}}` a
+ * shell variable becomes, or null when the `$` is an ordinary character. `$$`
+ * is read whole so its second `$` cannot open a name (`$$X` is the shell's PID
+ * followed by `X`).
+ */
+type DollarReader = (at: number) => Expansion | null;
+
+function dollarReader(src: string, enabled: boolean, variables: string[]): DollarReader {
+	if (!enabled) return () => null;
+	const inTemplate = templateSpanMask(src);
+	return (at) => {
+		if (src[at] !== "$" || inTemplate[at]) return null;
+		if (src[at + 1] === "$") return { text: "$$", next: at + 2 };
+		SHELL_VARIABLE.lastIndex = at;
+		const match = SHELL_VARIABLE.exec(src);
+		if (!match) return null;
+		const name = match[1] ?? match[2];
+		if (!variables.includes(name)) variables.push(name);
+		return { text: `{{${name}}}`, next: at + match[0].length };
+	};
+}
+
+/**
+ * Read a double-quoted string whose opening quote ends just before `start`.
+ * `\$` escapes only where the shell's variables are read; the cmd copy has no
+ * `$` to escape.
+ */
+function readDoubleQuoted(
+	src: string,
+	start: number,
+	readDollar: DollarReader,
+	escapes: string
+): { value: string; next: number } {
+	let value = "";
+	let i = start;
+	while (i < src.length && src[i] !== '"') {
+		const escaped = src[i + 1];
+		if (src[i] === "\\" && escaped !== undefined && escapes.includes(escaped)) {
+			value += escaped;
+			i += 2;
+			continue;
+		}
+		const dollar = readDollar(i);
+		if (dollar) {
+			value += dollar.text;
+			i = dollar.next;
+			continue;
+		}
+		value += src[i];
+		i++;
+	}
+	if (i >= src.length) throw new UnterminatedQuoteError();
+	return { value, next: i + 1 };
+}
+
 export function tokenize(input: string): string[] {
+	return tokenizeCommand(input).tokens;
+}
+
+export function tokenizeCommand(input: string): TokenizedCommand {
 	const prompted = stripPrompts(input);
 	// A recognized cmd copy has its carets (continuations included) consumed
 	// whole; `^^` before a newline is then a literal caret, not a continuation.
-	const unescaped = CMD_QUOTED_ARGUMENT.test(prompted)
-		? unescapeCmdCarets(prompted)
-		: joinCaretContinuations(prompted);
+	// Its `$` is an ordinary character, so no variable is read out of it.
+	const isCmdCopy = CMD_QUOTED_ARGUMENT.test(prompted);
+	const unescaped = isCmdCopy ? unescapeCmdCarets(prompted) : joinCaretContinuations(prompted);
 	const src = joinBackslashContinuations(unescaped);
 	const tokens: string[] = [];
+	const variables: string[] = [];
+	const readDollar = dollarReader(src, !isCmdCopy, variables);
+	const doubleQuoteEscapes = isCmdCopy ? '"\\' : '"\\$';
 
 	let current = "";
 	let hasToken = false; // distinguishes "" (empty quoted arg) from no arg
@@ -240,21 +332,12 @@ export function tokenize(input: string): string[] {
 			continue;
 		}
 
-		// Double quotes: honor \" and \\ escapes.
+		// Double quotes: honor \" \\ and \$ escapes; $NAME is a variable.
 		if (ch === '"') {
 			hasToken = true;
-			i++;
-			while (i < n && src[i] !== '"') {
-				if (src[i] === "\\" && (src[i + 1] === '"' || src[i + 1] === "\\")) {
-					current += src[i + 1];
-					i += 2;
-				} else {
-					current += src[i];
-					i++;
-				}
-			}
-			if (i >= n) throw new UnterminatedQuoteError();
-			i++; // closing "
+			const quoted = readDoubleQuoted(src, i + 1, readDollar, doubleQuoteEscapes);
+			current += quoted.value;
+			i = quoted.next;
 			continue;
 		}
 
@@ -266,6 +349,15 @@ export function tokenize(input: string): string[] {
 			continue;
 		}
 
+		// A shell variable outside quotes.
+		const dollar = readDollar(i);
+		if (dollar) {
+			hasToken = true;
+			current += dollar.text;
+			i = dollar.next;
+			continue;
+		}
+
 		// Ordinary character.
 		hasToken = true;
 		current += ch;
@@ -273,5 +365,5 @@ export function tokenize(input: string): string[] {
 	}
 
 	if (hasToken) tokens.push(current);
-	return tokens;
+	return { tokens, variables };
 }

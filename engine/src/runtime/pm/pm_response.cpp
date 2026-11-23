@@ -1833,6 +1833,29 @@ const std::vector<RedirectHop>* hops) {
     JS_SetPropertyStr (ctx, response, "redirects", redirects);
 }
 
+/**
+ * Bind `pm.response.mcp`, the reply reader's judgement of an `mcp` request's
+ * reply (issue #3762), or nothing for every other mode: `{}` when the call
+ * succeeded, `{ errorClass, code?, message }` when it failed. The body readers
+ * stay the raw reply, so this is the one place a script reads the class.
+ */
+void install_response_mcp (JSContext* ctx, JSValue response, const std::optional<McpReply>& reply) {
+    if (!reply) {
+        return;
+    }
+    JSValue mcp = JS_NewObject (ctx);
+    if (reply->error_class) {
+        JS_SetPropertyStr (ctx, mcp, "errorClass",
+        JS_NewString (ctx, vayu::to_string (*reply->error_class)));
+        if (reply->code) {
+            JS_SetPropertyStr (ctx, mcp, "code", JS_NewInt64 (ctx, *reply->code));
+        }
+        JS_SetPropertyStr (ctx, mcp, "message",
+        JS_NewStringLen (ctx, reply->message.data (), reply->message.size ()));
+    }
+    JS_SetPropertyStr (ctx, response, "mcp", mcp);
+}
+
 } // namespace
 
 void setup_pm_response (JSContext* ctx, JSValue pm) {
@@ -1922,6 +1945,9 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
 
         // pm.response.redirects - the followed 3xx hops, where recorded.
         install_response_redirects (ctx, response, data->redirect_hops);
+
+        // pm.response.mcp - an mcp request's reply class, where read.
+        install_response_mcp (ctx, response, data->response->mcp_reply);
 
         // pm.response.to.have chain for Postman-compatible assertions
         JS_SetPropertyStr (

@@ -29,6 +29,13 @@
  * editor (#3047); a text box would save a string where the engine wants an
  * object.
  *
+ * **A property the engine resolves `{{tokens}}` in is a variable-aware input**
+ * (#3779): given the host's `variables` and the element's `kind`, the text of an
+ * `assert.contains` in `contains` / `equals` mode and an `assert.jsonpath`'s
+ * `expected` take `VariableInput`, so a `{{data.column}}` paints as the token it
+ * is. Which properties those are is `variable-fields.ts`'s table, not this
+ * form's; a pattern field is never in it.
+ *
  * One level of `object` nesting is supported (`assert.status.range`'s
  * `{min, max}`) - see {@link ElementConfigProperty}. Anything deeper, or a
  * form richer than {@link groupRows}' one-or-two fields per line, ships a
@@ -58,9 +65,11 @@ import {
 	TooltipIconButton,
 } from "@/components/ui";
 import { FieldError } from "@/components/shared/FieldError";
+import VariableInput from "@/components/shared/VariableInput";
 import { errorsWithin } from "@/lib/elements";
 import { cn } from "@/lib/utils";
-import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
+import type { ElementConfigProperty, ElementConfigSchema, VariableSupport } from "@/types";
+import { resolvesVariables } from "./variable-fields";
 
 /** Messages by field name within one form level; a nested object's form gets its own slice. */
 type FieldErrors = Readonly<Record<string, string>>;
@@ -77,6 +86,20 @@ export interface GenericElementFormProps {
 	 * nested level with `errorsWithin`. Each message shows under its own field.
 	 */
 	errors?: FieldErrors;
+	/**
+	 * The variable scope the element is edited in. With `kind`, it makes the
+	 * properties the engine resolves at run time (`variable-fields.ts`) a
+	 * variable-aware input - tokens painted, `{{` completing - rather than a
+	 * plain text box. Omitted where there is no scope, which is a plain field,
+	 * not a degraded one (`VariableSupport`).
+	 */
+	variables?: VariableSupport;
+	/**
+	 * The element's kind, only to look its resolved properties up. Pass it for
+	 * the kind's own top level and nowhere else: a nested object's form is a
+	 * different level, whose property names the table does not describe.
+	 */
+	kind?: string;
 }
 
 function asString(value: unknown): string {
@@ -203,12 +226,16 @@ function PropertyRows({
 	properties,
 	config,
 	errors,
+	kind,
+	variables,
 	onChange,
 }: {
 	names: string[];
 	properties: Record<string, ElementConfigProperty | null | undefined>;
 	config: Record<string, unknown>;
 	errors: FieldErrors;
+	kind?: string;
+	variables?: VariableSupport;
 	/** The whole level's next value; the caller decides where it is written. */
 	onChange: (config: Record<string, unknown>) => void;
 }) {
@@ -222,6 +249,9 @@ function PropertyRows({
 						property={properties[name]}
 						value={config[name]}
 						errors={errors}
+						variables={
+							kind && resolvesVariables(kind, name, config) ? variables : undefined
+						}
 						onChange={(value) => onChange(setField(config, name, value))}
 					/>
 				));
@@ -500,12 +530,14 @@ function JsonValueField({
 	hint,
 	value,
 	error,
+	variables,
 	onChange,
 }: {
 	label: string;
 	hint: string | undefined;
 	value: unknown;
 	error: string | undefined;
+	variables: VariableSupport | undefined;
 	onChange: (value: unknown) => void;
 }) {
 	const inputId = useId();
@@ -528,16 +560,16 @@ function JsonValueField({
 				{label}
 			</Label>
 			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-			<Input
-				size="sm"
+			<TextEntry
 				id={inputId}
+				label={label}
 				value={draft}
-				className={error ? "border-destructive" : undefined}
-				aria-invalid={error ? true : undefined}
-				aria-describedby={describedBy(error && errorId, kind && kindId)}
-				onChange={(e) => {
-					setDraft(e.target.value);
-					onChange(parseJsonValue(e.target.value));
+				invalid={Boolean(error)}
+				describedBy={describedBy(error && errorId, kind && kindId)}
+				variables={variables}
+				onChange={(text) => {
+					setDraft(text);
+					onChange(parseJsonValue(text));
 				}}
 			/>
 			<FieldError id={errorId}>{error}</FieldError>
@@ -547,6 +579,63 @@ function JsonValueField({
 				</p>
 			)}
 		</div>
+	);
+}
+
+/**
+ * The text control of a string-valued field: a variable-aware input when the
+ * engine resolves `{{tokens}}` in the property and the host has a scope, the
+ * plain one otherwise. One place for the two, so the error styling and the
+ * ARIA wiring cannot differ between them.
+ */
+function TextEntry({
+	id,
+	label,
+	value,
+	invalid,
+	describedBy: describedByIds,
+	variables,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	value: string;
+	invalid: boolean;
+	describedBy: string | undefined;
+	variables: VariableSupport | undefined;
+	onChange: (text: string) => void;
+}) {
+	const className = invalid ? "border-destructive" : undefined;
+	const ariaInvalid = invalid ? true : undefined;
+	if (variables) {
+		return (
+			<VariableInput
+				size="sm"
+				id={id}
+				value={value}
+				// The overlay drops a placeholder once a token is typed, and the
+				// field was never given one; an empty string also stops the
+				// primitive naming the field "Value" over its `<label>`.
+				placeholder=""
+				aria-label={label}
+				className={className}
+				aria-invalid={ariaInvalid}
+				aria-describedby={describedByIds}
+				variables={variables}
+				onChange={onChange}
+			/>
+		);
+	}
+	return (
+		<Input
+			size="sm"
+			id={id}
+			value={value}
+			className={className}
+			aria-invalid={ariaInvalid}
+			aria-describedby={describedByIds}
+			onChange={(e) => onChange(e.target.value)}
+		/>
 	);
 }
 
@@ -561,6 +650,7 @@ function PropertyRow({
 	property,
 	value,
 	errors,
+	variables,
 	onChange,
 }: {
 	name: string;
@@ -577,6 +667,8 @@ function PropertyRow({
 	value: unknown;
 	/** This level's messages; the row reads its own by `name`, and hands a nested object its slice. */
 	errors: FieldErrors;
+	/** Set only for a property the engine resolves `{{tokens}}` in (`variable-fields.ts`); its text control is then variable-aware. */
+	variables?: VariableSupport;
 	onChange: (value: unknown) => void;
 }) {
 	property ??= {};
@@ -676,6 +768,7 @@ function PropertyRow({
 				hint={hint}
 				value={value}
 				error={error}
+				variables={variables}
 				onChange={onChange}
 			/>
 		);
@@ -688,14 +781,14 @@ function PropertyRow({
 				{label}
 			</Label>
 			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-			<Input
-				size="sm"
+			<TextEntry
 				id={inputId}
+				label={label}
 				value={asString(value)}
-				className={error ? "border-destructive" : undefined}
-				aria-invalid={error ? true : undefined}
-				aria-describedby={describedBy(error && errorId)}
-				onChange={(e) => onChange(e.target.value)}
+				invalid={Boolean(error)}
+				describedBy={describedBy(error && errorId)}
+				variables={variables}
+				onChange={onChange}
 			/>
 			<FieldError id={errorId}>{error}</FieldError>
 		</div>
@@ -706,6 +799,8 @@ export function GenericElementForm({
 	schema,
 	config,
 	errors = NO_ERRORS,
+	variables,
+	kind,
 	onChange,
 }: GenericElementFormProps) {
 	const properties = schema.properties ?? {};
@@ -733,6 +828,8 @@ export function GenericElementForm({
 				properties={properties}
 				config={config}
 				errors={errors}
+				kind={kind}
+				variables={variables}
 				onChange={onChange}
 			/>
 			{advancedNames.length > 0 && (
@@ -752,6 +849,8 @@ export function GenericElementForm({
 							properties={properties}
 							config={config}
 							errors={errors}
+							kind={kind}
+							variables={variables}
 							onChange={onChange}
 						/>
 					</CollapsibleContent>

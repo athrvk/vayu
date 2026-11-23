@@ -26,6 +26,7 @@ import { ElementList } from "@/components/shared/ElementList";
 import { useOpenElementRows } from "@/components/shared/ElementList/useOpenElementRows";
 import { ScriptReferencesRow } from "@/components/shared";
 import { useRequestBuilderContext } from "../../../context";
+import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import InheritedElementsNotice from "./InheritedElementsNotice";
 import LegacyScriptNotice from "./LegacyScriptNotice";
 
@@ -41,6 +42,7 @@ export default function ElementsPanel() {
 		getVariableOrigins,
 		dataColumns,
 	} = useRequestBuilderContext();
+	const variables = useVariableSupport();
 	const { data: kinds } = useElementKindsQuery();
 	// The saved row, not the builder's draft: an unsaved rename would put a name
 	// in the line that the engine and the agent's tools do not know yet.
@@ -71,6 +73,7 @@ export default function ElementsPanel() {
 				onChange={(elements) => updateField("elements", elements)}
 				kinds={addableKinds}
 				errors={elementErrors}
+				variables={variables}
 				{...openRows}
 				referenceOwner={
 					savedRequest ? { type: "request", request: savedRequest } : undefined

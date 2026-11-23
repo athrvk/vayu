@@ -826,10 +826,14 @@ query row's boolean `equals`.
 **body** - discriminated union:
 ```json
 {"mode":"none"}
-{"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
+{"mode":"json"|"text"|"graphql"|"jsonrpc"|"mcp"|"xml","content":"..."}
+{"mode":"mcp","content":"...","mcpTool":{"name":"...","inputSchema":{...}}}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 {"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```
+An `mcp` body may carry `mcpTool`, the called tool and its input schema, whose
+`x-mcp-header` annotations the send mirrors as `Mcp-Param-*` headers (#3762);
+it is part of the blob, so it needed no column and no schema version.
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
 same file members a binary body's `file` does: `src` (an absolute path, stored
 as written) and `fileName` and `contentType` (both optional, omitted when
@@ -2600,7 +2604,7 @@ nothing on the report path touches it.
 | `truncated`    | INTEGER    | 1 when the stored bytes are a prefix (`maxSampleBodyBytes`)        |
 | `binary`       | INTEGER    | 1 when the body was stored as a descriptor rather than as text     |
 | `content_type` | TEXT       | The response's `Content-Type`, `""` when it sent none              |
-| `stream_events` | INTEGER   | Events the transfer delivered when it was a **stream**; NULL otherwise, and NULL on every row written before 0.17.2 |
+| `stream_events` | INTEGER   | Events the transfer delivered when it was a **stream** (its reply announced `text/event-stream`, #3771); NULL otherwise, and NULL on every row written before 0.17.2 |
 
 **Which completions get a row.** Not a uniform sample - a uniform slice of a 30M-request run is
 a thousand identical 200s. Three buckets, all decided before anything is copied:
@@ -2626,7 +2630,8 @@ events back out of it with the same `SseParser` the live path feeds rather than
 storing a second copy that could disagree with the first. What a reader cannot
 recover from those bytes is how many events the transfer actually delivered -
 the body may be a prefix - so that one number is stored beside them. NULL means
-"this was not a stream", which is why the column is nullable rather than
+"this was not a stream" (a 429 in JSON answering a streaming request is not
+one), which is why the column is nullable rather than
 defaulted to 0.
 
 A uniformly sampled success (`success_sample_rate`) is deliberately body-less.

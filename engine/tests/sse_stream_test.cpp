@@ -1987,6 +1987,44 @@ TEST_F (StreamExecuteTest, AStreamsTraceKeepsTheCollectionsFailingTestUnderItsSc
     EXPECT_EQ (tests[1]["scope"], "request");
 }
 
+// #3779 on the streaming transport: an assertion's `{{data.column}}` resolves
+// against the send's own row, and a column the row lacks fails the assertion
+// by name rather than comparing the template. The post-request pass runs in
+// the completion callback, so its context must carry the resolver itself.
+// Mutation check: drop `.resolve_template` from the `step.after` context in
+// `execution.cpp` and the passing case reports the unresolved-token failure.
+TEST_F (StreamExecuteTest, AnAssertionResolvesTheSendsDataRowInTheCompletionPass) {
+    serve (1);
+    const auto assert_url_contains = [] (const std::string& text) {
+        return json::array ({ { { "id", "el_a" }, { "kind", "assert.contains" },
+        { "config", { { "field", "url" }, { "text", text } } } } });
+    };
+    const auto first_test = [this] (const json& payload) {
+        const auto run_id = start (payload);
+        EXPECT_FALSE (run_id.empty ());
+        const auto trace = trace_for (run_id);
+        EXPECT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+        return trace.value ("scripts", json::object ())
+        .value ("testResults", json::array ())
+        .at (0);
+    };
+
+    const auto passing = first_test (json{ { "data", { { "leaf", "scripted" } } },
+    { "elements", assert_url_contains ("/{{data.leaf}}") } });
+    EXPECT_TRUE (passing["passed"].get<bool> ()) << passing.dump (2);
+
+    const auto failing = first_test (json{ { "data", { { "leaf", "elsewhere" } } },
+    { "elements", assert_url_contains ("/{{data.leaf}}") } });
+    EXPECT_FALSE (failing["passed"].get<bool> ()) << failing.dump (2);
+    EXPECT_EQ (failing["error"], "expected url to contain '/{{data.leaf}}'");
+
+    const auto missing = first_test (json{ { "data", { { "leaf", "scripted" } } },
+    { "elements", assert_url_contains ("/{{data.leef}}") } });
+    EXPECT_FALSE (missing["passed"].get<bool> ()) << missing.dump (2);
+    EXPECT_EQ (missing["error"],
+    "'text' uses {{data.leef}}, which no variable or data column answers");
+}
+
 // A stream's scripts' `pm.sendRequest` records reach its stored trace, the
 // only place they can land once the route has answered 202 (#3633). The call
 // is refused, so the record is the failure one and no second server is needed.

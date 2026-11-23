@@ -29,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -36,11 +37,11 @@ namespace {
 
 using nlohmann::json;
 
-/// How many `BodyMode`s there are, `Xml` being the last enumerator: a mode
-/// inserted before it without a row in `modes` fails the coverage assertion
-/// below, and one appended after it has to move this along with the enum.
+/// How many `BodyMode`s the table covers, `Mcp` being the last one it has a
+/// row for: a mode inserted before it without a row in `modes` fails the
+/// coverage assertion below.
 constexpr std::size_t BODY_MODE_COUNT =
-static_cast<std::size_t> (vayu::BodyMode::Xml) + 1;
+static_cast<std::size_t> (vayu::BodyMode::Mcp) + 1;
 
 json load_fixture () {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
@@ -92,6 +93,20 @@ TEST (ImpliedContentTypeConformance, EveryModeImpliesTheTypeTheTableNames) {
     EXPECT_EQ (check_rows (fixture.at ("modes"), &modes), BODY_MODE_COUNT);
     EXPECT_EQ (modes.size (), BODY_MODE_COUNT)
     << "`modes` must hold exactly one row per BodyMode";
+}
+
+// The shared table's `mcp` row names only the type; what goes on the wire is
+// pinned here: JSON, the call `mcp_wire_body` completes.
+TEST (ImpliedContentTypeMcp, IsJsonAndSendsTheCompletedCall) {
+    vayu::Body body;
+    body.mode    = vayu::BodyMode::Mcp;
+    body.content = R"({"method":"tools/list"})";
+    EXPECT_EQ (vayu::http::implied_content_type (body), "application/json");
+    EXPECT_EQ (vayu::http::wire_body_bytes (body),
+    vayu::http::mcp_wire_body (body.content));
+
+    body.content.clear ();
+    EXPECT_EQ (vayu::http::implied_content_type (body), "");
 }
 
 TEST (ImpliedContentTypeConformance, EveryEdgeCaseImpliesTheTypeTheTableNames) {

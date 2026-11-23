@@ -170,6 +170,20 @@ export interface WithheldParts {
 	body: boolean;
 }
 
+/**
+ * The saved request's tool for a copy of an `mcp` run. A run records the
+ * body's content and not its tool, so the copy takes the live request's, or its
+ * Send would go without the `Mcp-Param-*` headers the original carried.
+ */
+function mcpToolOf(
+	bodyMode: string,
+	live: Request | null | undefined
+): Pick<RequestState, "mcpTool"> {
+	// The optional chain on `body` is deliberate: a stored row can come back with none.
+	const stored = live?.body as Request["body"] | undefined;
+	return stored?.mode === "mcp" && bodyMode === "mcp" ? { mcpTool: stored.mcpTool } : {};
+}
+
 /** A snapshot body's `file` as an editor `FileRef`, or an empty one. */
 function fileRefOf(node: unknown): FileRef {
 	if (!node || typeof node !== "object") return noFile();
@@ -506,6 +520,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),
 			binaryFile: bodyMode === "binary" ? fileRefOf(body?.file) : noFile(),
+			...mcpToolOf(bodyMode, liveRequest),
 			auth,
 			elements: recorded.own,
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,

@@ -46,12 +46,11 @@ import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui"
 import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
-import { SSE_ACCEPT } from "@/constants/request";
 import { formatJson } from "@/lib/json-format";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import { mediaTypeOf } from "@/modules/request-builder/utils/response-bytes";
+import { isEventStreamType, mediaTypeOf } from "@/modules/request-builder/utils/response-bytes";
 
 export interface ResponseEventsProps {
 	/** The events to render, oldest first. */
@@ -155,8 +154,7 @@ function nonEventStreamType(contentType: string | undefined): string | undefined
 	if (!contentType) return undefined;
 	const { type, subtype } = mediaTypeOf(contentType);
 	if (!type || !subtype) return undefined;
-	const essence = `${type}/${subtype}`;
-	return essence === SSE_ACCEPT ? undefined : essence;
+	return isEventStreamType(contentType) ? undefined : `${type}/${subtype}`;
 }
 
 /** The empty state of a stream that has no rows, by what the server answered. */

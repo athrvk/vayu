@@ -17,7 +17,7 @@ import { importCommand, readCommand } from "./parseCurl";
 
 vi.mock("./tokenize", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./tokenize")>()),
-	tokenize: () => {
+	tokenizeCommand: () => {
 		throw new RangeError("a parser fault that is not an unterminated quote");
 	},
 }));

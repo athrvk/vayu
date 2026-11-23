@@ -79,6 +79,13 @@ interface VariableInputProps {
 	 */
 	"aria-label"?: string;
 	/**
+	 * Forwarded to the real `<input>`, not the wrapper, so a validation message
+	 * (`FieldError`) is tied to the control a screen reader lands on and not to
+	 * the box drawn around it.
+	 */
+	"aria-invalid"?: boolean;
+	"aria-describedby"?: string;
+	/**
 	 * The field's element id, for the rare caller something outside its subtree
 	 * has to reach - the Shell's ⌘L focuses the URL field this way, having no
 	 * ref into the request builder. From `constants/dom-ids.ts`, both ends.
@@ -101,6 +108,14 @@ interface VariableInputProps {
 
 /** Stable identity for the no-scope case, so the memos below do not re-run. */
 const NO_VARIABLES: Record<string, ResolvedVariable> = {};
+
+/**
+ * Both text layers shape without ligatures (#3783). Blink paints stale glyph
+ * positions in a native <input> after incremental typing when the font ligates
+ * `//` (JetBrains Mono, Fira Code), so `http://host` draws as "http: /host". The
+ * overlay is set the same way so the two layers keep agreeing on glyph widths.
+ */
+const NO_LIGATURES = "[font-variant-ligatures:none]";
 
 /**
  * One `{{token}}` the strip paints: what the name addresses, and where its text
@@ -176,6 +191,8 @@ export default function VariableInput({
 	suggestions = [],
 	onPaste,
 	"aria-label": ariaLabel,
+	"aria-invalid": ariaInvalid,
+	"aria-describedby": ariaDescribedBy,
 	id,
 	contextKind,
 	variables,
@@ -838,6 +855,8 @@ export default function VariableInput({
 				// Falls back to the placeholder text so the field keeps a name
 				// even when the placeholder itself is withheld above.
 				aria-label={ariaLabel ?? placeholder}
+				aria-invalid={ariaInvalid}
+				aria-describedby={ariaDescribedBy}
 				/*
 				 * Combobox, but only where a list can actually appear (issue
 				 * #1215). A field with no scope and no plain suggestions never
@@ -855,6 +874,7 @@ export default function VariableInput({
 				disabled={disabled}
 				className={cn(
 					"absolute inset-0 w-full h-full bg-transparent border-0 outline-none px-[inherit] font-[inherit] text-[inherit]",
+					NO_LIGATURES,
 					"placeholder:text-muted-foreground disabled:cursor-not-allowed",
 					// When we have variables, hide real text so the overlay shows through
 					hasVariables && "text-transparent caret-foreground selection:bg-primary/30"
@@ -885,7 +905,10 @@ export default function VariableInput({
 				<div
 					ref={overlayRef}
 					data-variable-overlay
-					className="absolute inset-0 flex items-center px-[inherit] overflow-hidden"
+					className={cn(
+						"absolute inset-0 flex items-center px-[inherit] overflow-hidden",
+						NO_LIGATURES
+					)}
 					style={{
 						zIndex: 2,
 						pointerEvents: "none", // Pass clicks through to input

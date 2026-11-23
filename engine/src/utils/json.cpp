@@ -13,7 +13,9 @@
 #include "vayu/utils/json.hpp"
 
 #include <algorithm>
+#include <array>
 #include <functional>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -29,6 +31,7 @@
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
@@ -169,6 +172,13 @@ Json serialize (const Request& request) {
         // storage must not reformat what sending will not.
         case BodyMode::Xml:
             body_json["mode"]    = "xml";
+            body_json["content"] = request.body.content;
+            break;
+        // Verbatim for the same reason as `jsonrpc`: a body still holding
+        // `{{tokens}}` is not JSON to re-serialize. No `mcpTool`: `Body` keeps
+        // only the annotations a send reads, not the schema they came from.
+        case BodyMode::Mcp:
+            body_json["mode"]    = "mcp";
             body_json["content"] = request.body.content;
             break;
         default: break;
@@ -1075,49 +1085,67 @@ std::optional<Error> read_body_parts (const Json& body_json, Body& body) {
     return std::nullopt;
 }
 
+/// An `mcp` body's `mcpTool` (#3762). A body of another mode is not refused
+/// for carrying one, because the editor keeps it across a mode switch; it is
+/// read only where something sends from it.
+std::optional<Error> read_mcp_tool_member (const Json& body_json, Body& body) {
+    const auto stated = body_json.find ("mcpTool");
+    if (body.mode != BodyMode::Mcp || stated == body_json.end () || stated->is_null ()) {
+        return std::nullopt;
+    }
+    auto tool = vayu::http::read_mcp_tool (*stated);
+    if (!tool) {
+        return Error{ ErrorCode::InternalError, tool.error () };
+    }
+    body.mcp_tool = std::move (*tool);
+    return std::nullopt;
+}
+
 } // namespace
 
 namespace {
 
 /**
- * The `body` object: its mode, its content and its fields.
+ * @p mode's body mode, or nothing for a spelling this engine does not know.
  *
  * Both spellings of each form mode reach the same enumerator: every client
  * produces the long one ("x-www-form-urlencoded", "form-data"), while
  * "form"/"formdata" are the engine's own older names, still accepted so a stored
- * or replayed payload keeps working. The table here is the one place a spelling
- * is added - the same rule `read_script`'s list-key/legacy-key pair follows.
+ * or replayed payload keeps working. This table is the one place a spelling is
+ * added - the same rule `read_script`'s list-key/legacy-key pair follows.
  */
+std::optional<BodyMode> body_mode_named (std::string_view mode) {
+    static constexpr auto MODES = std::to_array<std::pair<std::string_view, BodyMode>> ({
+    { "json", BodyMode::Json },
+    { "text", BodyMode::Text },
+    { "form", BodyMode::Form },
+    { "x-www-form-urlencoded", BodyMode::Form },
+    { "formdata", BodyMode::FormData },
+    { "form-data", BodyMode::FormData },
+    { "binary", BodyMode::Binary },
+    { "graphql", BodyMode::GraphQL },
+    { "jsonrpc", BodyMode::JsonRpc },
+    { "xml", BodyMode::Xml },
+    { "mcp", BodyMode::Mcp },
+    });
+    for (const auto& [name, value] : MODES) {
+        if (name == mode) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+/// The `body` object: its mode, its content and its fields. An unknown mode
+/// leaves the request's own.
 std::optional<Error> read_request_body (const Json& json, Request& request) {
     // Body (optional)
     if (json.contains ("body") && json["body"].is_object ()) {
         const auto& body_json = json["body"];
 
         if (body_json.contains ("mode")) {
-            std::string mode = body_json["mode"].get<std::string> ();
-
-            // Both spellings of each form mode reach the same enumerator:
-            // every client produces the long one ("x-www-form-urlencoded",
-            // "form-data"), while "form"/"formdata" are the engine's own
-            // older names, still accepted so a stored or replayed payload
-            // keeps working. This table is the one place a spelling is
-            // added - same rule as read_script's list-key/legacy-key pair.
-            if (mode == "json") {
-                request.body.mode = BodyMode::Json;
-            } else if (mode == "text") {
-                request.body.mode = BodyMode::Text;
-            } else if (mode == "form" || mode == "x-www-form-urlencoded") {
-                request.body.mode = BodyMode::Form;
-            } else if (mode == "formdata" || mode == "form-data") {
-                request.body.mode = BodyMode::FormData;
-            } else if (mode == "binary") {
-                request.body.mode = BodyMode::Binary;
-            } else if (mode == "graphql") {
-                request.body.mode = BodyMode::GraphQL;
-            } else if (mode == "jsonrpc") {
-                request.body.mode = BodyMode::JsonRpc;
-            } else if (mode == "xml") {
-                request.body.mode = BodyMode::Xml;
+            if (auto mode = body_mode_named (body_json["mode"].get<std::string> ())) {
+                request.body.mode = *mode;
             }
         }
 
@@ -1131,6 +1159,9 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
         }
 
         if (auto refusal = read_body_parts (body_json, request.body)) {
+            return refusal;
+        }
+        if (auto refusal = read_mcp_tool_member (body_json, request.body)) {
             return refusal;
         }
     }
@@ -1486,6 +1517,19 @@ Json serialize_warnings (const std::vector<ResponseWarning>& warnings) {
     return out;
 }
 
+Json serialize_mcp_reply (const McpReply& reply) {
+    Json out = Json::object ();
+    if (!reply.error_class) {
+        return out;
+    }
+    out["errorClass"] = to_string (*reply.error_class);
+    if (reply.code) {
+        out["code"] = *reply.code;
+    }
+    out["message"] = reply.message;
+    return out;
+}
+
 namespace {
 
 /// `serialize`'s `body` for a text body: its parse, or `null` when the caller
@@ -1542,6 +1586,12 @@ Json serialize (const Response& response, bool include_parsed_body) {
     // engine is too old to warn". `build_result_trace` stores the same array
     // under the same name, so the live pane and a restored one read one field.
     json["warnings"] = serialize_warnings (response.warnings);
+
+    // An `mcp` request's reply as the reply reader judged it (issue #3762),
+    // absent for every other mode. `build_result_trace` stores the same node.
+    if (response.mcp_reply) {
+        json["mcp"] = serialize_mcp_reply (*response.mcp_reply);
+    }
 
     // Decided once, by `response_body_text` (issue #2458): a JSON string holds
     // only UTF-8, so bytes that are not text travel as base64 rather than

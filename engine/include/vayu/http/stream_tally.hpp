@@ -22,6 +22,11 @@
  * gauge up from `start` until `report` or, on a path that never reports (a
  * cancelled or discarded transfer), its destructor.
  *
+ * A request that asks to stream is not yet a stream (#3771): the reply is one
+ * only when its final hop announces `text/event-stream`. A 429 or a 200 JSON
+ * answer is counted as nothing here, so it is what it already is in the run's
+ * status mix and never a stream that delivered 0 events.
+ *
  * Not thread-safe: one tally belongs to one transfer, which libcurl drives
  * from one thread. The live counters it feeds are shared, and atomic.
  */
@@ -32,13 +37,23 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
+#include "vayu/core/sample_capture.hpp"
 #include "vayu/http/sse_frame_counter.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
+
+/// Whether @p headers announce an event stream, whose bytes are its events
+/// rather than a body. A missing `Content-Type` is not one. The one reading
+/// of it: the design stream (`sse_stream.cpp`) and both load drivers' tallies.
+inline bool announces_event_stream (const Headers& headers) {
+    const auto found = headers.find ("content-type");
+    return found != headers.end () && vayu::core::media_type (found->second) == "text/event-stream";
+}
 
 class StreamTally {
     public:
@@ -58,10 +73,11 @@ class StreamTally {
     /// never started is inactive, and its owner calls nothing but `report` on
     /// it. Called at most once.
     void start (const StreamBounds& bounds, Clock::time_point started_at) {
-        active_     = true;
-        max_events_ = bounds.max_events;
-        live_       = bounds.live;
-        started_at_ = started_at;
+        active_          = true;
+        max_events_      = bounds.max_events;
+        max_duration_ms_ = bounds.max_duration_ms;
+        live_            = bounds.live;
+        started_at_      = started_at;
         deadline_ = started_at + std::chrono::milliseconds (bounds.max_duration_ms);
         if (live_ != nullptr) {
             live_->open.fetch_add (1, std::memory_order_relaxed);
@@ -78,8 +94,20 @@ class StreamTally {
      * way, and a tally that stopped mid-chunk would under-report the stream
      * it exists to measure. The events it completes reach the live tally
      * here rather than at completion, so a tick sees an open stream's events.
+     *
+     * @p headers are the hop's own, complete by its first body byte, which is
+     * when the reply is judged a stream or not. A redirect hop's body never
+     * reaches here (both drivers discard it), so the first chunk fed is the
+     * final hop's. A reply that did not announce `text/event-stream` counts
+     * nothing and never reaches the cap.
      */
-    bool feed (std::string_view chunk) {
+    bool feed (std::string_view chunk, const Headers& headers) {
+        if (!announced_) {
+            announced_ = announces_event_stream (headers);
+        }
+        if (!*announced_) {
+            return false;
+        }
         const std::size_t before = counter_.events ();
         counter_.feed (chunk);
         publish_since (before);
@@ -99,14 +127,25 @@ class StreamTally {
         return now >= deadline_;
     }
 
-    /// Record that a cap ended the transfer: its completion is a **success**,
-    /// whatever libcurl calls the abort that delivered it.
+    /// Record that a cap ended the transfer: when the reply announced an
+    /// event stream its completion is a **success**, whatever libcurl calls
+    /// the abort that delivered it; any other reply ends as
+    /// `unannounced_cap_error` (#3771).
     void mark_cap_reached () {
         cap_reached_ = true;
     }
 
     [[nodiscard]] bool cap_reached () const {
         return cap_reached_;
+    }
+
+    /// The failure for a duration cap that passed on a reply that is not a
+    /// stream (no answer yet, or one that announced another type): the cap
+    /// still ends the transfer, but only a stream's end is a success.
+    [[nodiscard]] Error unannounced_cap_error () const {
+        return Error{ ErrorCode::Timeout,
+            "No text/event-stream reply before the stream's " +
+            std::to_string (max_duration_ms_) + " ms duration cap (maxStreamDurationMs)" };
     }
 
     /**
@@ -117,11 +156,17 @@ class StreamTally {
      * when it was the only one: no write delivered it at a time to measure.
      * That frame reaches the live tally too, and the stream stops counting as
      * open. An inactive tally reports nothing, so an ordinary transfer's
-     * `stream_events` stays absent rather than zero. Called once per
-     * transfer.
+     * `stream_events` stays absent rather than zero, and so does a reply
+     * whose final hop (`response.headers`) did not announce
+     * `text/event-stream`, a transfer that never got an answer included: it
+     * only leaves the open gauge. Called once per transfer.
      */
     void report (Response& response) {
         if (!active_) {
+            return;
+        }
+        if (!announces_event_stream (response.headers)) {
+            close_live ();
             return;
         }
         const std::size_t before = counter_.events ();
@@ -155,8 +200,12 @@ class StreamTally {
         live_.reset ();
     }
 
-    bool active_        = false;
-    int64_t max_events_ = 0;
+    bool active_             = false;
+    int64_t max_events_      = 0;
+    int64_t max_duration_ms_ = 0;
+    /// Whether the reply announced an event stream, decided at its first
+    /// body byte; empty until one arrives.
+    std::optional<bool> announced_;
     /// Null unless the run reports stream metrics live, and once the stream
     /// has been reported.
     std::shared_ptr<LiveStreamCounts> live_;

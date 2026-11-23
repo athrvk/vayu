@@ -93,9 +93,9 @@ export const REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). The engine sends the path only once ' +
+					'Body type: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). The engine sends the path only once ' +
 						BINARY_FILE_ACCESS_TOKEN +
-						', because an agent cannot choose a file on their behalf. Form-data file parts are not supported here; author them in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An xml `body` is stored and sent verbatim as application/xml.'
+						', because an agent cannot choose a file on their behalf. Form-data file parts are not supported here; author them in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An mcp `body` is one call to an MCP server (`{"method":"tools/call","params":{"name":...,"arguments":{...}}}`); the engine adds `params._meta`, Accept, MCP-Protocol-Version, Mcp-Method and Mcp-Name itself, so set no header by hand (Mcp-Param-* needs a tool only the app sets). An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			description: z.string().optional(),
 			auth: storedAuthInput(
@@ -196,9 +196,9 @@ export const REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded, binary. Only meaningful alongside `body`, or alongside `file` for binary, which replaces the body with that file exactly as `create_request` describes - sent only once " +
+					"Body type for `body`: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary. Only meaningful alongside `body`, or alongside `file` for binary, which replaces the body with that file exactly as `create_request` describes - sent only once " +
 						BINARY_FILE_ACCESS_TOKEN +
-						". A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. Form-data file parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
+						". A jsonrpc or mcp `body` is completed engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. Form-data file parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
 			auth: storedAuthInput(
@@ -467,7 +467,8 @@ async function writeRequestEdits(
  * withheld, which keeps the stored value (#3550); and, while secrets are
  * withheld, a `url`, whose credentials the read emptied (#3549), or any
  * `headers`, so a stored row the session could not read is named when the
- * write drops it (#3550).
+ * write drops it (#3550); and an `mcp` body, whose stored tool a write of the
+ * body would otherwise clear (#3762).
  */
 function readsStoredRequest(
 	payload: Record<string, unknown>,
@@ -475,7 +476,22 @@ function readsStoredRequest(
 	reveal: boolean
 ): boolean {
 	if (edits.scripts.length > 0 || edits.headers?.some(keepsStoredValue)) return true;
+	if (isMcpBody(payload.body)) return true;
 	return !reveal && (typeof payload.url === "string" || edits.headers !== undefined);
+}
+
+function isMcpBody(body: unknown): boolean {
+	return isRecord(body) && body.mode === "mcp";
+}
+
+/**
+ * The tool a stored `mcp` body carries. The engine keeps it inside the body
+ * object and a write of `body` replaces that object whole, while this server
+ * has no argument to state one (the cost is `tools/list` bytes), so a write of
+ * an `mcp` body would clear a tool the app set.
+ */
+function storedMcpTool(body: unknown): unknown {
+	return isRecord(body) && body.mode === "mcp" ? body.mcpTool : undefined;
 }
 
 /** The body to write over @p stored, and the caveat lines naming what it kept or dropped unread. */
@@ -501,6 +517,13 @@ function mergeRequestEdits(
 				)
 			);
 		}
+	}
+	const keptTool = isMcpBody(payload.body) ? storedMcpTool(stored.body) : undefined;
+	if (keptTool !== undefined) {
+		body.body = { ...(payload.body as Record<string, unknown>), mcpTool: keptTool };
+		notes.push(
+			"The stored MCP tool (mcpTool) was kept; it mirrors Mcp-Param-* headers only while params.name in the body names it."
+		);
 	}
 	if (edits.scripts.length > 0) {
 		let elements = stored.elements;

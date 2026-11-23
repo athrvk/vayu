@@ -1105,6 +1105,44 @@ describe("seedFromRun, binary bodies", () => {
 	});
 });
 
+describe("seedFromRun, mcp bodies", () => {
+	const TOOL = { name: "execute_sql", inputSchema: { type: "object" } };
+	const base = run();
+	const mcpRun = run({
+		configSnapshot: {
+			...base.configSnapshot,
+			body: { mode: "mcp", content: '{"method":"tools/call"}' },
+		},
+	} as Partial<Run>);
+	const withBody = (body: unknown) => ({ ...liveRequest, body }) as unknown as Request;
+
+	// A run records an mcp body's content and not its tool, so the copy takes the
+	// saved request's: its Send would otherwise lose the `Mcp-Param-*` headers.
+	it("seeds the mode and content, and the saved request's tool", () => {
+		const { request } = seedFromRun(
+			mcpRun,
+			withBody({ mode: "mcp", content: "{}", mcpTool: TOOL })
+		);
+
+		expect(request.bodyMode).toBe("mcp");
+		expect(request.body).toBe('{"method":"tools/call"}');
+		expect(request.mcpTool).toEqual(TOOL);
+	});
+
+	it("seeds no tool when the request is gone or saved in another mode", () => {
+		expect(seedFromRun(mcpRun, null).request.mcpTool).toBeUndefined();
+		expect(
+			seedFromRun(mcpRun, withBody({ mode: "json", content: "{}" })).request.mcpTool
+		).toBeUndefined();
+	});
+
+	it("seeds no tool for a run of another mode, whatever the request holds", () => {
+		const live = withBody({ mode: "mcp", content: "{}", mcpTool: TOOL });
+
+		expect(seedFromRun(run(), live).request.mcpTool).toBeUndefined();
+	});
+});
+
 describe("scriptPartToElement", () => {
 	it("turns a part with script text into an element of the kind asked", () => {
 		expect(

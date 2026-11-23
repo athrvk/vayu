@@ -26,6 +26,7 @@
 #include "vayu/core/trailing_window.hpp"
 #include "vayu/core/worker_count.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -225,6 +226,9 @@ RecordFailure&& record_failure) {
 }
 
 /// The response a recorded sample stands for, as a script reads it.
+/// `body_truncated` stays false: the reservoir copies `Response::body`, which
+/// the byte cap has already ended the transfer over if it was ever exceeded.
+/// `CapturedExchange` is the path that truncates, and it is not this one.
 vayu::Response sample_response (const ResponseSample& sample) {
     vayu::Response response;
     response.status_code     = sample.status_code;
@@ -232,6 +236,7 @@ vayu::Response sample_response (const ResponseSample& sample) {
     response.body            = sample.body;
     response.headers         = sample.headers;
     response.timing.total_ms = sample.latency_ms;
+    response.stream_events   = sample.stream_events;
     return response;
 }
 
@@ -274,22 +279,11 @@ nlohmann::json& stream_events) {
     *sample.data_row_index < replay.data_rows->size ()) {
         script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
     }
-    // `pm.response.events` for a sampled stream (issue #657). Parsed here, at
-    // the end of the run, rather than copied on the completion path: the body
-    // already is the event list, and the deferred pass is where the expensive
-    // half of sampling belongs. A sample that did not stream sets nothing, so
-    // the script reads `undefined` - the same absent-not-empty rule the live
-    // path keeps.
-    if (sample.stream_events) {
-        stream_events = vayu::http::buffered_stream_events_node (sample.body,
-        replay.sse_limits, static_cast<int64_t> (*sample.stream_events),
-        // A load sample keeps the whole body it captured: the reservoir
-        // copies `Response::body`, which the byte cap has already ended the
-        // transfer over if it was ever exceeded. `CapturedExchange` is the
-        // path that truncates, and it is not this one.
-        true);
-        script_ctx.response_events = &stream_events;
-    }
+    // `pm.response.events` for a sampled stream (issue #657), parsed here at
+    // the end of the run rather than copied on the completion path: the body
+    // already is the event list.
+    vayu::http::bind_buffered_stream_events (
+    script_ctx, response, replay.sse_limits, stream_events);
     return script_ctx;
 }
 
@@ -337,12 +331,15 @@ std::vector<bool>& timed_out,
 ScriptValidationTotals& totals,
 DistinctMessageSample& console,
 RecordFailure& record_failure) {
-    const vayu::Response response = sample_response (sample);
     std::optional<vayu::Request> sent;
     if (replay.request_as_sent) {
         sent = replay.request_as_sent (sample);
     }
     const vayu::Request& request = sent ? *sent : *replay.request;
+    // A sample keeps no reply reading, so an `mcp` one is read again off its
+    // bytes by the completion's rule, for `pm.response.mcp` (#3762).
+    vayu::Response response = sample_response (sample);
+    vayu::http::attach_mcp_reply (request, response);
     nlohmann::json stream_events;
     const auto script_ctx =
     replay_context (replay, scopes, sample, request, response, stream_events);
@@ -1019,8 +1016,8 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     // boolean. A collection run never carries it (the route refuses it there):
     // each streaming step took its caps from the plan (#3235).
     if (config.value ("stream", false)) {
-        stream_bounds =
-        vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
+        stream_bounds = vayu::http::resolve_stream_bounds (
+        config, vayu::http::default_stream_bounds (engine_defaults.sse_limits));
     }
     mc_config.streams = stream_bounds.has_value () || plan_streams (scenario);
     mc_config.max_exemplar_results =
@@ -1028,6 +1025,7 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
     capture_response_bodies = mc_config.capture_response_bodies;
     max_element_body_bytes  = engine_defaults.max_element_body_bytes;
+    sse_limits              = engine_defaults.sse_limits;
 
     // Configure response sampling for script validation. Bounded twice: in
     // count here, and in bytes by the budget below - a retained sample holds a
@@ -1484,10 +1482,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         engine_defaults.max_response_sample_bytes =
         static_cast<size_t> (db.get_config_int ("maxResponseSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES)));
-        // The same two settings the design path's stream reads, so a user who
+        // The same settings the design path's stream reads, so a user who
         // tightened them once has tightened them for both (issue #576).
-        engine_defaults.stream_defaults =
-        vayu::http::default_stream_bounds (vayu::http::read_sse_limits (db));
+        engine_defaults.sse_limits = vayu::http::read_sse_limits (db);
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",

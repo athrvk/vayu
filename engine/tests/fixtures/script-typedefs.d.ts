@@ -1329,7 +1329,7 @@ declare const pm: {
 			 */
 			length: number;
 			/**
-			 * Postman's mode name: "urlencoded", "formdata", "graphql", "file" for a binary body, or "raw" for every other content mode - json, text, xml and jsonrpc all carry their body as one string, which is what raw means. Read-only; the mode follows the request's body type.
+			 * Postman's mode name: "urlencoded", "formdata", "graphql", "file" for a binary body, or "raw" for every other content mode - json, text, xml, jsonrpc and mcp all carry their body as one string, which is what raw means. Read-only; the mode follows the request's body type.
 			 */
 			mode: string;
 			/**
@@ -1708,6 +1708,15 @@ declare const pm: {
 		 * pm.expect(data.id).to.exist;
 		 */
 		json(): any;
+		/**
+		 * The engine's judgement of an mcp request's reply: {} when the call succeeded, { errorClass, code, message } when it failed. errorClass is "transport", "protocol" or "tool"; code is the JSON-RPC error.code, absent when the reply carried none; message is the sentence the failed MCP reply test carries.
+		 * 
+		 * Absent for every other body mode, so typeof separates an mcp request from the rest.
+		 * 
+		 * Example:
+		 * pm.test('the tool call succeeded', function () { pm.expect(pm.response.mcp.errorClass).to.be.undefined; });
+		 */
+		mcp: { [key: string]: any } | undefined;
 		/**
 		 * The status line's reason phrase ('OK', 'Not Found'). A client-side failure reports vayu's synthetic status 0 as 'Error'.
 		 */

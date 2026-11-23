@@ -1428,7 +1428,7 @@ std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
     if (trim (body.content).empty ()) {
         return std::nullopt;
     }
-    if (body.mode == "json" || body.mode == "jsonrpc") {
+    if (body.mode == "json" || body.mode == "jsonrpc" || body.mode == "mcp") {
         return BodyExample{ body_media_type (entry, "application/json"),
             example_value (body.content), std::nullopt };
     }

@@ -350,7 +350,11 @@ struct ElementContext {
     /// `vayu::http::resolve_template`, never a copy of it here (issue
     /// #1515's `control.if` / `control.switch`, which read a condition or a
     /// dispatch variable that lives in config text rather than the request
-    /// composition already resolved). Unset only where nothing needs it.
+    /// composition already resolved, and #3779's `assert.contains` `text` and
+    /// `assert.jsonpath` `expected`). A token it cannot answer keeps its
+    /// braces. Unset only where nothing needs it; a kind that needs an answer
+    /// treats an unset hook as every token unanswered (`assert.*` fails
+    /// naming it) rather than reading the template as typed.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::function<std::string (const std::string& text)> resolve_template{};
 

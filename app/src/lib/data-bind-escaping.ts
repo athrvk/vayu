@@ -56,7 +56,7 @@ export function graphqlBodyIsEnveloped(content: string): boolean {
 
 /**
  * The context a body binds under: the engine's `body_context`
- * (`core/scenario_data.cpp`). `json` and `jsonrpc` are JSON documents and `xml`
+ * (`core/scenario_data.cpp`). `json`, `jsonrpc` and `mcp` are JSON documents and `xml`
  * an XML one; a `graphql` body is JSON only as an envelope, because a bare
  * document is escaped wholesale when the engine wraps it and escaping it first
  * would double every quote. Every other mode is plain text to a bind.
@@ -69,6 +69,7 @@ export function bodyFieldContext(mode: BodyMode, content: string): DataFieldCont
 	switch (mode) {
 		case "json":
 		case "jsonrpc":
+		case "mcp":
 			return "json";
 		case "xml":
 			return "xml";

@@ -39,8 +39,13 @@ bool is_full_envelope (const nlohmann::ordered_json& call) {
 } // namespace
 
 std::string jsonrpc_wire_body (const std::string& content) {
+    auto call = bare_jsonrpc_call (content);
+    return call ? complete_jsonrpc_call (*call) : content;
+}
+
+std::optional<nlohmann::ordered_json> bare_jsonrpc_call (const std::string& content) {
     if (content.empty ()) {
-        return content;
+        return std::nullopt;
     }
 
     // Non-throwing, linear parse, and `ordered_json` rather than `json`: a body
@@ -60,11 +65,13 @@ std::string jsonrpc_wire_body (const std::string& content) {
     // to complete? A parse failure is no value at all; a batch array is not an
     // object; and an object that already declares its version is finished.
     if (!parsed || !parsed->is_object () || is_full_envelope (*parsed)) {
-        return content;
+        return std::nullopt;
     }
+    return parsed;
+}
 
-    nlohmann::ordered_json& call = *parsed;
-    call["jsonrpc"]              = kVersion;
+std::string complete_jsonrpc_call (nlohmann::ordered_json& call) {
+    call["jsonrpc"] = kVersion;
     if (!call.contains ("id")) {
         call["id"] = kDefaultId;
     }

@@ -291,6 +291,12 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 /// stored trace's top-level `warnings`.
 [[nodiscard]] Json serialize_warnings (const std::vector<ResponseWarning>& warnings);
 
+/// `Response::mcp_reply` as `{errorClass?, code?, message?}` (issue #3762):
+/// `{}` for a reply that succeeded, `code` only when the reply carried a
+/// JSON-RPC error code. The one spelling behind `serialize`'s `mcp` and the
+/// stored trace's `response.mcp`.
+[[nodiscard]] Json serialize_mcp_reply (const McpReply& reply);
+
 /**
  * @brief Serialize a Response to JSON
  *

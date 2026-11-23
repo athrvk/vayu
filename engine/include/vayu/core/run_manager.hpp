@@ -42,6 +42,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -219,11 +220,11 @@ struct EngineDefaults {
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 
-    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
-    /// (`vayu::http::default_stream_bounds`), so a load stream the caller gave
-    /// no caps is bounded by the user's own settings (issue #576).
-    vayu::StreamBounds stream_defaults{ constants::sse::MAX_STREAM_DURATION_MS,
-        constants::sse::MAX_STREAM_EVENTS };
+    /// The `sse*` settings (`vayu::http::read_sse_limits`). Their two caps
+    /// bound a load stream the caller gave none (issue #576, through
+    /// `vayu::http::default_stream_bounds`); the rest bound the events an
+    /// inline `script.post` reads off a streamed response (issue #3769).
+    vayu::http::SseLimits sse_limits;
 
     /// Config key `maxElementBodyBytes` (issue #1514's reopen):
     /// `ElementContext::max_body_bytes` for a scenario load run's own
@@ -628,6 +629,12 @@ struct RunContext {
     /// read directly by every scenario load `step.after` element through
     /// `ElementContext::max_body_bytes`.
     size_t max_element_body_bytes = constants::elements::MAX_BODY_BYTES;
+
+    /// `EngineDefaults::sse_limits`, copied in by the constructor: what bounds
+    /// `pm.response.events` for an inline `script.post` on a streamed response
+    /// (`vayu::http::bind_buffered_stream_events`, issue #3769), on the
+    /// single-request and the scenario load path alike.
+    vayu::http::SseLimits sse_limits;
 
     /// The raw seed behind @ref rng (issue #1498's `elements.seed`): from the
     /// payload when given, else drawn once from `std::random_device`. Kept

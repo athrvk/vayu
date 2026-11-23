@@ -31,10 +31,13 @@
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -48,19 +51,33 @@ void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
     }
 }
 
+/// Names a failed `mcp` reply's class, code and message on the record (#3762),
+/// whichever store keeps it; a reply that succeeded adds nothing.
+void stamp_mcp_failure (nlohmann::json& record, const vayu::Response& response) {
+    if (const auto& reply = response.mcp_reply; reply && reply->error_class) {
+        record["mcp"] = vayu::json::serialize_mcp_reply (*reply);
+    }
+}
+
 } // namespace
 
-/** A response that reached this engine carrying a client-side error. */
-void record_failed_response (const std::shared_ptr<RunContext>& context,
-const vayu::Response& response,
-const ResultAnnotations& annotations) {
-    // Response carrying a client-side error
+namespace {
 
+/**
+ * @p response recorded as a failure under @p code and @p message: a transfer's
+ * own error, or an `mcp` reply's failure class (#3762), whose record also
+ * names the class and the JSON-RPC code.
+ */
+void record_failure (const std::shared_ptr<RunContext>& context,
+const vayu::Response& response,
+vayu::ErrorCode code,
+const std::string& message,
+const ResultAnnotations& annotations) {
     // Build detailed error trace data
-    nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
-        { "error_type", vayu::error_type_name (response.error_code) },
-        { "message", response.error_message },
+    nlohmann::json error_json = { { "error_code", static_cast<int> (code) },
+        { "error_type", vayu::error_type_name (code) }, { "message", message },
         { "request_number", context->total_requests () } };
+    stamp_mcp_failure (error_json, response);
 
     annotate (error_json, annotations);
 
@@ -90,11 +107,19 @@ const ResultAnnotations& annotations) {
         attempt = AttemptDuration{ response.timing.total_ms + annotations.script_ms,
             response.timing.queue_wait_ms };
     }
-    context->metrics_collector->record_error (response.error_code,
-    response.error_message, error_json.dump (),
+    context->metrics_collector->record_error (code, message, error_json.dump (),
     context->capture_response_bodies ? &response : nullptr, attempt);
     context->metrics_collector->record_bytes (
     response.timing.bytes_up, response.timing.bytes_down);
+}
+
+} // namespace
+
+/** A response that reached this engine carrying a client-side error. */
+void record_failed_response (const std::shared_ptr<RunContext>& context,
+const vayu::Response& response,
+const ResultAnnotations& annotations) {
+    record_failure (context, response, response.error_code, response.error_message, annotations);
 }
 
 /** A response that completed, and everything the run keeps of it. */
@@ -161,6 +186,10 @@ const ResultAnnotations& annotations) {
             timing_json["isSlow"]      = true;
             timing_json["thresholdMs"] = context->slow_threshold_ms;
         }
+        // A failed reply reaches this branch only under a status the
+        // distribution already counts as a failure; the trace kept for it
+        // names the cause, so nothing is counted twice.
+        stamp_mcp_failure (timing_json, response);
         annotate (timing_json, annotations);
 
         trace_data = timing_json.dump ();
@@ -289,6 +318,13 @@ const ResultAnnotations& annotations) {
 
     if (response.has_error ()) {
         record_failed_response (context, response, annotations);
+    } else if (const auto* mcp = vayu::http::mcp_failure_behind_success_status (response)) {
+        // A JSON-RPC error or a tool's `isError` under a 200 is an error of the
+        // run, counted under its class; a 4xx or 5xx is one by its status.
+        record_failure (context, response,
+        vayu::mcp_error_code (vayu::utils::invariant_value (mcp->error_class,
+        "mcp_failure_behind_success_status answers a failed reply")),
+        mcp->message, annotations);
     } else {
         record_successful_response (context, response, annotations);
     }
@@ -892,9 +928,15 @@ const ResultAnnotations& annotations) {
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult unused_pre_result;
     vayu::ScriptResult post_result;
+    // An `mcp` reply's elements read its final response (#3762). The cast only
+    // lets the completion's const response travel as `ElementContext::response`,
+    // which no kind writes through.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    auto& received = const_cast<vayu::Response&> (response);
+    std::optional<vayu::Response> unwrapped;
     vayu::core::ElementContext ctx{
-        .request = request,
-        .response = const_cast<vayu::Response*> (&response), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        .request        = request,
+        .response       = vayu::http::mcp_element_view (received, unwrapped),
         .run_pre_script = nullptr,
         .run_post_script =
         [&] (const std::string& script) {
@@ -905,6 +947,9 @@ const ResultAnnotations& annotations) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             bind_submission_identity (script_ctx, *context, annotations);
+            nlohmann::json stream_events;
+            vayu::http::bind_buffered_stream_events (
+            script_ctx, response, context->sse_limits, stream_events);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);

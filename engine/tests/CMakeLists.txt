@@ -111,6 +111,8 @@ add_executable(vayu_tests
     file_grants_route_test.cpp
     graphql_body_test.cpp
     jsonrpc_body_test.cpp
+    mcp_body_test.cpp
+    mcp_reply_test.cpp
     url_parts_test.cpp
     script_request_url_test.cpp
     script_request_auth_test.cpp
@@ -436,6 +438,9 @@ set(vayu_scratch_database_suites
     ExecuteGlobalsTest
     ExecuteTransportFailureTest
     ExecuteDisconnectTest
+    McpReplyLoadTally
+    McpReplyRunTest
+    McpReplyStreamTest
     SendLogRouteTest
     ExecuteResultHandleTest
     ExecuteByteRowTest
@@ -469,6 +474,7 @@ set(vayu_scratch_database_suites
     LoadIdentityTest
     ScenarioIdentityTest
     LoadReplayEventsTest
+    LoadInlineEventsTest
     LoadScriptScopesTest
     LoadTemplateScopesRunTest
     LoadFailureDedupTest

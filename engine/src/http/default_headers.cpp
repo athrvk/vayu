@@ -8,6 +8,7 @@
 #include "vayu/http/default_headers.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <format>
 
@@ -15,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::http {
@@ -225,17 +227,19 @@ std::optional<std::string> unusable_header_name (std::string_view name) {
     }
     // A name the engine already derives would be added twice, by two rules that
     // each check only the request's own headers - see the header for what each
-    // collision does on the wire.
+    // collision does on the wire. From `accept` on, the names an `mcp` body
+    // derives (#3762), whose `Mcp-Param-*` is a family rather than a name.
+    constexpr auto DERIVED = std::to_array<std::string_view> ({ "user-agent", "accept-encoding",
+    "content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name" });
     const std::string folded = vayu::utils::ascii_lower (name);
-    for (const std::string_view derived : { "user-agent", "accept-encoding", "content-type" }) {
-        if (folded == derived) {
-            return std::format (
-            "'{}' is a header the engine derives on its own, so it cannot also "
-            "carry the correlation id",
-            name);
-        }
+    const bool derived = std::ranges::find (DERIVED, folded) != DERIVED.end () ||
+    folded.starts_with (vayu::utils::ascii_lower (mcp::PARAM_HEADER_PREFIX));
+    if (!derived) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    return std::format ("'{}' is a header the engine derives on its own, so it "
+                        "cannot also carry the correlation id",
+    name);
 }
 
 DefaultHeaderPolicy resolve_default_header_policy (vayu::db::Database& db,
