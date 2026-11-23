@@ -279,8 +279,8 @@ three bind a token the way a JSON document wants it. Put the token in the call's
 ```
 
 With a row whose `q` is `SELECT "a" FROM t`, the server receives a call whose
-`query` is that text, quotes intact. Only the body is bound; the `Mcp-*` headers
-are then written from the bound call, so they follow the row. `Mcp-Name` is the
+`query` is that text, quotes intact. The `Mcp-*` headers are never bound themselves: they
+are written from the bound call, so they follow the row. `Mcp-Name` is the
 row's `params.name`, and each `x-mcp-header` annotation of the request's tool
 becomes an `Mcp-Param-*` header carrying the row's argument, as a
 `=?base64?...?=` value when it is not plain printable ASCII (a cell such as
@@ -291,8 +291,9 @@ becomes an `Mcp-Param-*` header carrying the row's argument, as a
   stored annotations describe another tool. `Mcp-Name` still names the row's tool.
 - The headers a trace records are what was sent, bound cells included and not
   redacted, as for any other header.
-- An assertion reads the final JSON-RPC response whether the server answered with
-  one JSON object or an event stream, on every row.
+- An `assert.*` or `extract.*` element reads the final JSON-RPC response whether
+  the server answered with one JSON object or an event stream, on every row. A
+  script still sees the raw reply, the whole stream in the second case.
 
 A cell is **safe in an XML body** too, and by a rule that reads the token's
 position rather than one that escapes everything:

@@ -4694,7 +4694,7 @@ std::string reply_text_of (const json& frame) {
     return frame.at ("result").at ("content").at (0).at ("text").get<std::string> ();
 }
 
-// Only `body.content` is bound, and the wire body and the `Mcp-*` headers are
+// The `Mcp-*` headers are never bound themselves, and they and the wire body are
 // both derived from the bound bytes, so each row must reach the server as a
 // call whose headers agree with its body, the fixture answering `400` where
 // they do not. The middle row's region is non-ASCII, which the engine can only
