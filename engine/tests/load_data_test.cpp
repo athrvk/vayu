@@ -88,6 +88,12 @@ class RecordingServer {
             record (req, "/row/" + req.matches[1].str ());
             res.set_content ("{}", "application/json");
         });
+        // Answers the bound segment as its body, so a row decides what the
+        // reply holds and an assertion can be checked against the row.
+        svr.Get (R"(/say/(.*))", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/say/" + req.matches[1].str ());
+            res.set_content (req.matches[1].str (), "text/plain");
+        });
         svr.Get ("/plain", [this] (const httplib::Request& req, httplib::Response& res) {
             record (req, "/plain");
             res.set_content ("{}", "application/json");
@@ -736,6 +742,29 @@ TEST_F (LoadDataTest, TheDeferredScriptReadsTheRequestItsSampleSent) {
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 2u);
+}
+
+// An assertion's operand reads the row its submission bound (#3790): the reply
+// echoes `id`, so the two rows whose `expect` matches it pass and the third
+// fails, each counted once. Mutation check: pass a null row in
+// `run_request_elements_after_submission`'s resolver (load_strategy.cpp) and
+// all three fail as unrunnable, naming `data.expect`.
+TEST_F (LoadDataTest, AnAssertionOperandReadsTheRowItsSubmissionBound) {
+    RecordingServer server;
+    json payload = iterations_payload (server.url ("/say/{{data.id}}"), 3);
+    payload["data"] = json::array ({ json{ { "id", "alpha" }, { "expect", "alpha" } },
+    json{ { "id", "beta" }, { "expect", "beta" } },
+    json{ { "id", "gamma" }, { "expect", "delta" } } });
+    payload["requestElements"] = json::array ({ json{ { "kind", "assert.contains" },
+    { "config", { { "field", "body" }, { "text", "{{data.expect}}" } } } } });
+
+    run (payload);
+
+    ASSERT_EQ (server.paths ().size (), 3u);
+    EXPECT_EQ (context_->inline_tests_passed.load (), 2u)
+    << "a row whose reply holds its `expect` did not pass";
+    EXPECT_EQ (context_->inline_tests_failed.load (), 1u)
+    << "only the row whose reply lacks its `expect` should fail";
 }
 
 // A run sent without rows leaves the scope `undefined`, which is the distinction
