@@ -8090,6 +8090,49 @@ TEST_F (ScriptEngineTest, ResponseEventsDisclosesAPerEventTruncation) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// A stream that declared a `streamTextPath` (#3773) binds each event's `text`
+// and the joined `streamText`; one that declared none binds neither, so
+// `typeof` tells "no path" from "a path that read nothing" (""). Mutation
+// check: drop the `streamText` binding in `install_response_events` and the
+// first test fails.
+TEST_F (ScriptEngineTest, ResponseEventsBindsTheDeclaredStreamText) {
+    const nlohmann::json with_path{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "message" },
+                                 { "data", "{\"t\":\"Hel\"}" }, { "text", "Hel" } },
+        nlohmann::json{ { "event", "ping" }, { "data", "{}" } } }) },
+        { "totalEvents", 3 }, { "eventsTruncated", true }, { "streamText", "Hello" }
+    };
+    auto ctx    = streamed_test (request, response, env, with_path);
+    auto result = engine.execute (R"JS(
+        pm.test("the joined text and each part", function() {
+            pm.expect(pm.response.streamText).to.equal("Hello");
+            pm.expect(pm.response.events[0].text).to.equal("Hel");
+            pm.expect(typeof pm.response.events[1].text).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+
+    const nlohmann::json without_path{ { "items",
+                                       nlohmann::json::array ({ nlohmann::json{
+                                       { "event", "message" }, { "data", "x" } } }) },
+        { "totalEvents", 1 }, { "eventsTruncated", false } };
+    auto bare_ctx    = streamed_test (request, response, env, without_path);
+    auto bare_result = engine.execute (R"JS(
+        pm.test("no path, no text", function() {
+            pm.expect(typeof pm.response.streamText).to.equal("undefined");
+            pm.expect(typeof pm.response.events[0].text).to.equal("undefined");
+        });
+    )JS",
+    bare_ctx);
+    ASSERT_TRUE (bare_result.success) << bare_result.error_message;
+    ASSERT_EQ (bare_result.tests.size (), 1u);
+    EXPECT_TRUE (bare_result.tests[0].passed) << bare_result.tests[0].error_message;
+}
+
 // Absent, not empty. An ordinary send binds none of the three, so `typeof`
 // separates "this was not a stream" from "this stream produced nothing" - the
 // distinction an empty array would erase.

@@ -2269,6 +2269,22 @@ TEST (PostmanExport, VayuOnlySettingsAreNotes) {
     EXPECT_TRUE (notes["notCarried"][0]["message"].is_string ());
 }
 
+// A stored `streamTextPath` (#3773) is an event-stream setting Postman cannot
+// carry, counted with the stream's on the same request and on its own on a
+// request whose stream is off. Mutation check: drop `has_stream_text_path`
+// from `note_request_losses` and the second request counts nothing.
+TEST (PostmanExport, AStreamTextPathIsAnEventStreamNote) {
+    PostmanExportRequest streaming = request ("a", "u");
+    streaming.stream               = true;
+    streaming.has_stream_text_path = true;
+    PostmanExportRequest off       = request ("b", "u");
+    off.has_stream_text_path       = true;
+    PostmanExportFolder root       = collection ();
+    root.requests.push_back (streaming);
+    root.requests.push_back (off);
+    EXPECT_EQ (losses (run (root)), (json{ { "event_stream", 2 } }));
+}
+
 TEST (PostmanExport, DefaultsAreNotNotes) {
     PostmanExportFolder root = collection ();
     root.requests.push_back (request ("r", "u"));

@@ -19,6 +19,7 @@ import {
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
 	DEFAULT_STREAM,
+	DEFAULT_STREAM_TEXT_PATH,
 	DEFAULT_VERIFY_SSL,
 	type HttpVersion,
 } from "@/constants/request";
@@ -68,6 +69,7 @@ export const createDefaultRequestState = (
 		disabledSystemHeaders: [],
 		disableUrlEncoding: DEFAULT_DISABLE_URL_ENCODING,
 		stream: DEFAULT_STREAM,
+		streamTextPath: DEFAULT_STREAM_TEXT_PATH,
 	};
 };
 
@@ -78,7 +80,7 @@ export const createDefaultRequestState = (
  * toggled off and back on stops badging again.
  *
  * Covers the redirect policy, the timeout (any number badges; `null` is the
- * default), the protocol, the event-stream flag *and*
+ * default), the protocol, the event-stream flag and its text path *and*
  * Postman's protocol switches (issue #1765): a
  * request that only changes `httpVersion` (redirects left at their defaults)
  * must still badge, which is why this checks every field the tab owns rather
@@ -96,6 +98,7 @@ export function isRequestSettingsNonDefault(
 		| "httpVersion"
 		| "verifySSL"
 		| "stream"
+		| "streamTextPath"
 		| "disableCookies"
 		| "disabledSystemHeaders"
 		| "disableUrlEncoding"
@@ -108,6 +111,7 @@ export function isRequestSettingsNonDefault(
 		state.httpVersion !== DEFAULT_HTTP_VERSION ||
 		state.verifySSL !== DEFAULT_VERIFY_SSL ||
 		state.stream !== DEFAULT_STREAM ||
+		state.streamTextPath !== DEFAULT_STREAM_TEXT_PATH ||
 		state.disableCookies !== DEFAULT_DISABLE_COOKIES ||
 		state.disabledSystemHeaders.length > 0 ||
 		state.disableUrlEncoding !== DEFAULT_DISABLE_URL_ENCODING

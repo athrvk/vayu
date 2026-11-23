@@ -455,6 +455,13 @@ export const maxStreamEventsInput = z
 		`Streaming only: how many events to return before stopping the read (default ${DEFAULT_STREAM_MAX_EVENTS}). Reaching it sets \`capReached\` - the stream itself is not stopped.`
 	);
 
+export const eventsInput = z
+	.boolean()
+	.optional()
+	.describe(
+		"Streaming only: false returns the reply as `text` without the event rows; `eventCount`, `totalEvents` and the stop flags stay. `text` is present only when the request has a `streamTextPath`, and joins the events this read collected, so a `capReached` or `budgetExhausted` result holds the reply so far (raise `maxStreamEvents`, or read get_run_report once the run ends)."
+	);
+
 export const streamBudgetMsInput = z
 	.number()
 	.int()
@@ -685,8 +692,8 @@ export function storedCollectionAuthInput(extra: string) {
 }
 
 /**
- * The **Settings** tab's six per-request fields, as the engine stores them on
- * the row (issues #759, #795).
+ * The **Settings** tab's seven per-request fields, as the engine stores them on
+ * the row (issues #759, #795, #3773).
  *
  * One definition spread into both `create_request` and `update_request`: the
  * fields mean the same thing on either verb, and the merge-patch difference is
@@ -756,6 +763,16 @@ export function requestSettingsInput(statedOn?: string) {
 					"Consume the response as a text/event-stream rather than buffering it (default false). Stored on the request, so a later send - from the app or from run_request - streams without being told to."
 				)
 			),
+		streamTextPath: z
+			.string()
+			.nullable()
+			.optional()
+			.describe(
+				described(
+					"JSONPath read off each streamed event's JSON `data` to assemble the reply: `$.choices[0].delta.content` (OpenAI-compatible) or `$.delta.text` (Anthropic-style). Needs `stream: true`; the engine refuses a path on a request that does not stream. run_request then returns the joined reply as `text`.",
+					"null clears it."
+				)
+			),
 		verifySSL: z
 			.boolean()
 			.optional()
@@ -781,6 +798,7 @@ export const REQUEST_SETTINGS_KEYS = [
 	"timeout",
 	"httpVersion",
 	"stream",
+	"streamTextPath",
 	"verifySSL",
 ] as const;
 

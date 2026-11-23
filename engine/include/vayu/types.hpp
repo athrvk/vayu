@@ -34,6 +34,10 @@
 // cannot cycle back here.
 #include "vayu/core/constants.hpp"
 
+// For `StreamTextPath`'s steps. Depends on nothing but the standard library
+// and nlohmann, so it cannot cycle back here.
+#include "vayu/core/json_path.hpp"
+
 // For `CaseInsensitiveLess`, whose fold is the engine's one ASCII fold. Depends
 // on nothing but the standard library, so it cannot cycle back here either.
 #include "vayu/utils/ascii_case.hpp"
@@ -528,6 +532,17 @@ struct LiveStreamCounts {
 };
 
 /**
+ * @brief A request's declared `streamTextPath` (#3773), compiled once for
+ *        every response it reads: the text as written, which a stored row
+ *        keeps, and the steps of the elements' JSONPath subset
+ *        (`vayu/core/json_path.hpp`) each event's `data` is read through.
+ */
+struct StreamTextPath {
+    std::string source;
+    std::vector<core::detail::JsonPathStep> steps;
+};
+
+/**
  * @brief The caps that end a bounded streaming transfer (issue #576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
@@ -554,6 +569,10 @@ struct StreamBounds {
     /// is what lets a caller spell the two caps alone
     /// (`StreamBounds{ ms, events }`) under `-Wmissing-field-initializers`.
     std::shared_ptr<LiveStreamCounts> live = nullptr;
+    /// The request's `streamTextPath`, which `StreamTally::report` hands to
+    /// the response it ends. Null for none, so a run that declares none
+    /// copies nothing but a null pointer per transfer.
+    std::shared_ptr<const StreamTextPath> text_path = nullptr;
 };
 
 /**
@@ -1290,6 +1309,18 @@ struct Response {
      * what an event is - see that header.
      */
     std::optional<std::size_t> stream_events;
+
+    /**
+     * @brief How this stream's events read as text (#3773): the request's
+     *        `StreamBounds::text_path`, set beside `stream_events` and null
+     *        whenever it is absent or the request declared no path.
+     *
+     * On the response because everything that reads a run's streamed reply
+     * holds the response and not always the request it was sent as: a
+     * post-request script (`bind_buffered_stream_events`), a sampled
+     * response replayed after the run, a captured exchange.
+     */
+    std::shared_ptr<const StreamTextPath> stream_text_path;
 
     /**
      * @brief Milliseconds from submission to the first event of a bounded
@@ -2096,6 +2127,13 @@ struct Request {
     bool disable_cookies                = false; // INTEGER NOT NULL DEFAULT 0
     std::string disabled_system_headers = "[]";  // TEXT NOT NULL DEFAULT '[]'
     bool disable_url_encoding           = false; // INTEGER NOT NULL DEFAULT 0
+    // The JSONPath, in the elements' subset, each event's `data` is read
+    // through for the reply's text (issue #3773). A `stream` setting, placed
+    // beside the other optionals rather than the bools for the struct's
+    // packing. Nullable on the `spec_operation` precedent: NULL is "declares
+    // none". Read only while `stream` is set, so a request whose stream is
+    // switched off keeps the path for the next time it is switched on.
+    std::optional<std::string> stream_text_path;
     // The Postman item's `protocolProfileBehavior` object, verbatim and in
     // source key order, when the request was imported with one (issue #1765).
     // Nothing sends it: `POST /export/postman` is its one reader and writes it
@@ -2574,6 +2612,14 @@ struct ResultBody {
      * parses them back with the same parser the live path feeds.
      */
     std::optional<int64_t> stream_events;
+    /**
+     * The `streamTextPath` the streamed sample was sent with (issue #3773);
+     * NULL for none and for a row written before the column. Stored per row
+     * because a collection run's steps each declare their own and a sample
+     * names no step, and so `GET /runs/:id/samples` derives each event's
+     * `text` from the bytes rather than from a stored copy of it.
+     */
+    std::optional<std::string> stream_text_path;
 };
 
 /**
@@ -2597,6 +2643,8 @@ struct PendingResultBody {
     /// See `ResultBody::stream_events` - absent for everything that did not
     /// stream.
     std::optional<int64_t> stream_events;
+    /// See `ResultBody::stream_text_path`.
+    std::optional<std::string> stream_text_path;
 };
 
 /**

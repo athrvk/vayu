@@ -30,8 +30,8 @@
 #include <string_view>
 #include <vector>
 
-#include "json_path.hpp"
 #include "user_regex.hpp"
+#include "vayu/core/json_path.hpp"
 
 namespace vayu::core {
 

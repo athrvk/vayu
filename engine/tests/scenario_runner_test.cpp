@@ -34,6 +34,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -190,6 +191,13 @@ class ScenarioMockServer {
                 return true;
             });
         });
+        // A model's reply as Anthropic-style deltas (#3773), with a ping
+        // between them and a `[DONE]` the text path reads nothing from.
+        svr.Get ("/sse-deltas",
+        [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (std::string (DELTA_STREAM), "text/event-stream");
+        });
         svr.Get ("/sse-endless",
         [this, record] (const httplib::Request& req, httplib::Response& res) {
             record (req);
@@ -252,6 +260,12 @@ class ScenarioMockServer {
 
     /// The events `/sse-short` sends before it closes.
     static constexpr int SHORT_STREAM_EVENTS = 3;
+    /// What `/sse-deltas` sends: two text deltas around a ping, then `[DONE]`.
+    static constexpr std::string_view DELTA_STREAM =
+    "data: {\"delta\":{\"text\":\"Hel\"}}\n\n"
+    "data: {\"type\":\"ping\"}\n\n"
+    "data: {\"delta\":{\"text\":\"lo\"}}\n\n"
+    "data: [DONE]\n\n";
 
     private:
     httplib::Server svr;
@@ -421,18 +435,20 @@ class ScenarioRunnerTest : public ::testing::Test {
     int order,
     const std::string& path,
     int timeout_ms,
-    const std::string& post_script = "") {
+    const std::string& post_script              = "",
+    const std::optional<std::string>& text_path = std::nullopt) {
         vayu::db::Request r;
-        r.id            = id;
-        r.collection_id = "col_1";
-        r.name          = "Step " + id;
-        r.method        = vayu::HttpMethod::GET;
-        r.url           = server_->url (path);
-        r.stream        = true;
-        r.timeout_ms    = timeout_ms;
-        r.order         = order;
-        r.created_at    = 1;
-        r.updated_at    = 1;
+        r.id               = id;
+        r.collection_id    = "col_1";
+        r.name             = "Step " + id;
+        r.method           = vayu::HttpMethod::GET;
+        r.url              = server_->url (path);
+        r.stream           = true;
+        r.stream_text_path = text_path;
+        r.timeout_ms       = timeout_ms;
+        r.order            = order;
+        r.created_at       = 1;
+        r.updated_at       = 1;
         if (!post_script.empty ()) {
             r.elements = json::array (
             { { { "id", "el_post_" + id }, { "kind", "script.post" },
@@ -2204,6 +2220,44 @@ TEST_F (ScenarioRunnerTest, AStreamingStepsPostRequestScriptReadsItsEvents) {
     const auto& tests = trace["scripts"]["testResults"];
     ASSERT_EQ (tests.size (), 1u) << trace.dump ();
     EXPECT_TRUE (tests[0]["passed"].get<bool> ()) << tests[0].dump ();
+}
+
+// A streaming step whose stored request declares a `streamTextPath` (#3773)
+// reads its reply as text: each event's `text`, the joined
+// `pm.response.streamText`, and the same on the step's stored trace, while a
+// step that declares none binds neither. Mutation check: drop the
+// `response.stream_text_path` assignment in `StreamTally::report` and the
+// first step's test fails on an undefined `streamText`.
+TEST_F (ScenarioRunnerTest, AStreamingStepReadsItsReplyThroughItsStoredTextPath) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_text", 0, "/sse-deltas", /*timeout_ms=*/5000, R"(
+        pm.test('the reply is assembled', function () {
+            pm.expect(pm.response.streamText).to.equal('Hello');
+            pm.expect(pm.response.events[0].text).to.equal('Hel');
+            pm.expect(pm.response.events[1]).to.not.have.property('text');
+            pm.expect(pm.response.events[3]).to.not.have.property('text');
+        });
+    )",
+    "$.delta.text");
+    seed_streaming_request ("req_plain", 1, "/sse-deltas", /*timeout_ms=*/5000, R"(
+        pm.test('no path, no text', function () {
+            pm.expect(pm.response.events.length).to.equal(4);
+            pm.expect(typeof pm.response.streamText).to.equal('undefined');
+            pm.expect(pm.response.events[0]).to.not.have.property('text');
+        });
+    )");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    for (const auto& trace : traces) {
+        EXPECT_EQ (trace["outcome"].get<std::string> (), "passed") << trace.dump ();
+    }
+    EXPECT_EQ (traces[0].at ("events").at ("streamText").get<std::string> (), "Hello")
+    << traces[0].dump ();
+    EXPECT_FALSE (traces[1].at ("events").contains ("streamText")) << traces[1].dump ();
 }
 
 // Either cap ends a streaming step as a pass, and the run's `stream` section

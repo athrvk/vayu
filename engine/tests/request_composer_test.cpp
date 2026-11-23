@@ -45,6 +45,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
@@ -763,6 +764,54 @@ TEST_F (RequestComposerTest, AStoredStreamFlagIsAlwaysComposed) {
     json{ { "requestId", "req_stream" }, { "request", { { "stream", false } } } });
     ASSERT_EQ (overlay_status, 200) << overlay_payload.dump ();
     EXPECT_EQ (overlay_payload.value ("stream", true), false) << overlay_payload.dump ();
+}
+
+// A by-id compose carries the saved request's `streamTextPath` (#3773) beside
+// its stream, so a Send or a run of it reads the reply as text, and never
+// beside a buffered send, which `POST /execute` would refuse: not for a row
+// whose stream is off, and not under an overlay that switches it off. Mutation
+// checks: drop the `streamTextPath` emit in `payload_from_stored` and the
+// first expectation fails; drop `drop_stored_text_path_without_stream` and the
+// overlay's payload keeps the path.
+TEST_F (RequestComposerTest, AStoredStreamTextPathIsComposedOnlyBesideItsStream) {
+    seed_collection ("root", "");
+    auto streaming             = make_request ("req_stream", "root");
+    streaming.stream           = true;
+    streaming.stream_text_path = "$.choices[0].delta.content";
+    db_->save_request (streaming);
+    auto off             = make_request ("req_off", "root");
+    off.stream_text_path = "$.delta.text";
+    db_->save_request (off);
+    db_->save_request (make_request ("req_plain", "root"));
+
+    auto [stream_status, stream_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_stream" } });
+    ASSERT_EQ (stream_status, 200) << stream_payload.dump ();
+    EXPECT_EQ (stream_payload.value ("streamTextPath", ""), "$.choices[0].delta.content")
+    << stream_payload.dump ();
+    EXPECT_TRUE (vayu::http::routes::read_stream_flag (stream_payload).ok);
+
+    for (const char* id : { "req_off", "req_plain" }) {
+        auto [status, payload] =
+        vayu::http::compose_request_core (*db_, json{ { "requestId", id } });
+        ASSERT_EQ (status, 200) << payload.dump ();
+        EXPECT_FALSE (payload.contains ("streamTextPath"))
+        << id << ": " << payload.dump ();
+    }
+
+    auto [overlay_status, overlay_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_stream" }, { "request", { { "stream", false } } } });
+    ASSERT_EQ (overlay_status, 200) << overlay_payload.dump ();
+    EXPECT_FALSE (overlay_payload.contains ("streamTextPath"))
+    << overlay_payload.dump ();
+    EXPECT_TRUE (vayu::http::routes::read_stream_flag (overlay_payload).ok);
+
+    // An overlay that states its own path keeps it.
+    auto [own_status, own_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_stream" },
+    { "request", { { "streamTextPath", "$.delta.text" } } } });
+    ASSERT_EQ (own_status, 200) << own_payload.dump ();
+    EXPECT_EQ (own_payload.value ("streamTextPath", ""), "$.delta.text");
 }
 
 // The same chain with no pre-request script anywhere above the request: every

@@ -151,8 +151,8 @@ shipping silently mismatched.
 | `control.transaction` | transaction | `step.after` | #1515 |
 | `metric.record` | metric | `step.after` | #1500 |
 
-`extract.json`, `assert.jsonpath` and `metric.record`'s `jsonpath` and `eventJsonpath` sources share
-one JSONPath subset:
+`extract.json`, `assert.jsonpath`, `metric.record`'s `jsonpath` and `eventJsonpath` sources and a
+stream's `streamTextPath` (`POST /execute`, issue #3773) share one JSONPath subset:
 `$.a.b` (any member name up to the next `.` or `[`, so `$.data.user-id` works), `$['a.b']` or
 `$["a.b"]` for a name that holds a `.`, `[` or `]` (the name runs to the next matching quote and has
 no escape for it; an empty name or an unterminated quote is refused), `[n]` (negative counts from the

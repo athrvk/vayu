@@ -78,6 +78,25 @@ function capture(events?: SampledEvents): RunSample {
 }
 
 describe("UnifiedResponseViewer events tab", () => {
+	it("opens a sampled stream on its joined text when the request declared a path (#3773)", () => {
+		// The node is the sample's own: `streamText` over every stored event, so
+		// it reads the whole reply although `items` holds one event of it.
+		render(
+			<UnifiedResponseViewer
+				response={{ body: "", headers: {}, status: 200 }}
+				events={{
+					items: [{ event: "message", data: "{}", text: "Hel" }],
+					totalEvents: 3,
+					eventsTruncated: true,
+					streamText: "Hello!",
+				}}
+			/>
+		);
+
+		openEventsTab();
+		expect(screen.getByTestId("stream-text").textContent).toBe("Hello!");
+	});
+
 	it("shows the timeline for a sample that streamed", () => {
 		render(
 			<UnifiedResponseViewer

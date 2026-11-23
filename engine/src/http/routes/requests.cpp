@@ -358,6 +358,39 @@ bool is_create) {
 }
 
 /**
+ * Applies `streamTextPath` (issue #3773) onto @p r after its `stream`: absent
+ * keeps (or, on create, leaves none), `null` clears, and a path is held to
+ * `stream_text_path_problem`, the check `POST /execute` makes.
+ *
+ * A path the body states is refused on a row that does not stream after this
+ * write, as `POST /execute` refuses one beside a buffered send: it reads as a
+ * promise of `text` the request will not produce. A stored path is not
+ * re-judged when only `stream` changes, so switching the stream off keeps it
+ * for the next time it is switched on, and nothing reads it in between.
+ */
+static RouteResult apply_stream_text_path_field (const nlohmann::json& json,
+vayu::db::Request& r,
+bool is_create) {
+    const auto field = json.find ("streamTextPath");
+    if (field == json.end () || field->is_null ()) {
+        if (field != json.end () || is_create) {
+            r.stream_text_path = std::nullopt;
+        }
+        return {};
+    }
+    if (auto problem = stream_text_path_problem (json)) {
+        return route_error (400, *problem);
+    }
+    if (!r.stream) {
+        return route_error (400,
+        "'streamTextPath' applies to a streaming request only - set "
+        "'stream': true, or drop it");
+    }
+    r.stream_text_path = field->get<std::string> ();
+    return {};
+}
+
+/**
  * Applies `mockResponseMode` / `mockExampleId` (issue #481 phase 3) - which
  * saved example a mock server answers with. Same null-vs-absent rule as
  * `methodSource`: `mockResponseMode` absent-on-create defaults to "first"
@@ -778,6 +811,9 @@ bool is_create) {
     // applier rather than the by-id route alone, so `POST /import/apply` -
     // which runs this same function over a bulk payload - carries it too.
     apply_bool_field (json, "stream", r.stream, false, is_create);
+    if (auto outcome = apply_stream_text_path_field (json, r, is_create); !outcome) {
+        return outcome;
+    }
 
     // Postman's per-request protocol settings (issue #1765). Here for the
     // same reason `stream` is: `POST /import/apply` runs this same applier,

@@ -1092,6 +1092,18 @@ inline constexpr NumericRunField REQUEST_TIMEOUT_FIELD{ "timeout", 1, 86400000,
 check_numeric_field (const nlohmann::json& payload, const NumericRunField& field);
 
 /**
+ * Why @p holder's `streamTextPath` (#3773) cannot be stored or sent: a value
+ * that is not a string, or a path outside the JSONPath subset the elements
+ * read (`vayu/core/json_path.hpp`). Nothing when it is absent, `null` or a
+ * path in the subset. Whether the request streams is the caller's rule:
+ * `read_stream_flag` for a send or a run, the request applier for a stored
+ * row, `x-vayu-request.settings` for an import. Here beside
+ * `check_numeric_field` for the reason it is: that reader is in `core/`.
+ */
+[[nodiscard]] std::optional<std::string> stream_text_path_problem (
+const nlohmann::json& holder);
+
+/**
  * The timeout a request or run payload sends with: its own numeric `timeout`
  * when it carries one, otherwise `configured_default`. Absent and `null` both
  * mean "use the default". Reads, never validates: every route range-checks

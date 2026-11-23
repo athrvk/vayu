@@ -29,8 +29,8 @@
 #include <random>
 #include <span>
 
-#include "json_path.hpp"
 #include "user_regex.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/http/request_composer.hpp"
 
 namespace vayu::core {

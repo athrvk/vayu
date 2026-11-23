@@ -1384,6 +1384,8 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPostOnAStreamingStepReadsItsEvents) {
             pm.expect(pm.response.events[2].data).to.equal('three');
             pm.expect(pm.response.totalEvents).to.equal(3);
             pm.expect(pm.response.eventsTruncated).to.equal(false);
+            pm.expect(typeof pm.response.streamText).to.equal('undefined');
+            pm.expect(pm.response.events[0]).to.not.have.property('text');
         });
     )") });
     static_assert (ScenarioMockServer::STREAM_EVENTS == 3,
@@ -1395,6 +1397,37 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPostOnAStreamingStepReadsItsEvents) {
     execution);
 
     EXPECT_EQ (server.hits_for ("/sse-three").size (), ITERATIONS);
+    EXPECT_EQ (state->inline_tests_failed.load (), 0u);
+    EXPECT_EQ (state->inline_tests_passed.load (), ITERATIONS);
+}
+
+// A streaming step whose request declares a `streamTextPath` (#3773, set on
+// the step's bounds as `step_stream_bounds` compiles it from the row)
+// reads its reply through it in an inline `script.post`. Mutation check:
+// drop the `text_path_` assignment in `StreamTally::start` and every
+// iteration's test fails on an undefined `streamText`.
+TEST_F (ScenarioLoadTest, AnInlineScriptPostReadsAStreamingStepsTextPath) {
+    ScenarioMockServer server;
+    auto execution    = plan_over ({ server.url ("/sse-usage") });
+    auto& bounds      = execution.plan.steps[0].request.stream_bounds;
+    bounds            = vayu::StreamBounds{ 5000, 100 };
+    bounds->text_path = vayu::http::compile_stream_text_path ("$.delta");
+    ASSERT_NE (bounds->text_path, nullptr);
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post", R"(
+        pm.test('the reply is assembled', function () {
+            pm.expect(pm.response.streamText).to.equal('hi');
+            pm.expect(pm.response.events[0]).to.not.have.property('text');
+            pm.expect(pm.response.events[1].text).to.equal('hi');
+        });
+    )") });
+
+    constexpr size_t ITERATIONS = 2;
+    auto state = run (json{ { "mode", "iterations" },
+                      { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
+
+    EXPECT_EQ (server.hits_for ("/sse-usage").size (), ITERATIONS);
     EXPECT_EQ (state->inline_tests_failed.load (), 0u);
     EXPECT_EQ (state->inline_tests_passed.load (), ITERATIONS);
 }

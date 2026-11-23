@@ -34,7 +34,7 @@
 #include <limits>
 #include <string>
 
-#include "json_path.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::core {

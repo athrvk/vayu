@@ -20,8 +20,8 @@
  * interval is therefore one implementation rather than two copies that can
  * come to disagree about the same wait.
  *
- * Source-tree-local (not under `include/vayu/`), on `json_path.hpp`'s
- * precedent: nothing outside `engine/src/core/elements/` needs it.
+ * Source-tree-local (not under `include/vayu/`): nothing outside
+ * `engine/src/core/elements/` needs it.
  */
 
 #include "vayu/core/elements.hpp"

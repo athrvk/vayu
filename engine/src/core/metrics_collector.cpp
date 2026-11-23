@@ -560,6 +560,7 @@ CapturedExchange MetricsCollector::capture_exchange (const Response& response) {
     captured.body_bytes = static_cast<int64_t> (response.body.size ());
     if (response.stream_events) {
         captured.stream_events = static_cast<int64_t> (*response.stream_events);
+        captured.stream_text_path = response.stream_text_path;
     }
 
     // Headers compares case-insensitively, so one lookup covers every spelling
@@ -1484,6 +1485,9 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         pending.truncated     = exchange.truncated;
         pending.content_type  = exchange.content_type;
         pending.stream_events = exchange.stream_events;
+        if (exchange.stream_text_path) {
+            pending.stream_text_path = exchange.stream_text_path->source;
+        }
 
         if (!exchange.body_dropped && !exchange.body.empty ()) {
             // A binary body is stored as its size and content type, never as

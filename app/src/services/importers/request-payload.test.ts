@@ -40,6 +40,7 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			"disableCookies",
 			"disabledSystemHeaders",
 			"disableUrlEncoding",
+			"streamTextPath",
 			"postmanProtocolBehavior",
 		]) {
 			expect(key in fields).toBe(false);
@@ -57,12 +58,16 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			disableCookies: false,
 			disabledSystemHeaders: ["user-agent"],
 			disableUrlEncoding: true,
+			stream: true,
+			streamTextPath: "$.delta.text",
 			postmanProtocolBehavior: carrier,
 		});
 		expect(fields).toMatchObject({
 			disableCookies: false,
 			disabledSystemHeaders: ["user-agent"],
 			disableUrlEncoding: true,
+			stream: true,
+			streamTextPath: "$.delta.text",
 			postmanProtocolBehavior: carrier,
 		});
 	});

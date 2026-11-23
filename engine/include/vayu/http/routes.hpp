@@ -1814,12 +1814,15 @@ struct StreamFlag {
     /// records which caps the *caller* chose.
     std::optional<int64_t> max_duration_ms;
     std::optional<int64_t> max_events;
+    /// `streamTextPath` (#3773), already checked against the JSONPath subset;
+    /// absent when the payload named none. A collection run refuses it.
+    std::optional<std::string> text_path;
 };
 
 /**
- * Read `stream`, `maxStreamDurationMs` and `maxStreamEvents` off a
- * `POST /execute` or `POST /runs` payload, and refuse the combinations that
- * cannot mean anything.
+ * Read `stream`, `maxStreamDurationMs`, `maxStreamEvents` and
+ * `streamTextPath` off a `POST /execute` or `POST /runs` payload, and refuse
+ * the combinations that cannot mean anything.
  *
  * **Both endpoints read through this one function** (issue #576), so the two
  * cannot drift on what a cap is called, what type it takes or what range it
@@ -1852,7 +1855,9 @@ StreamFlag read_stream_flag (const nlohmann::json& json);
  * only those steps. A top-level `stream` is refused, either value: `true`
  * cannot make a stored non-streaming request stream and `false` cannot stop a
  * streaming one, so accepting it would let a caller believe it did either.
- * The answer's `value` is always false.
+ * A top-level `streamTextPath` is refused for the same reason: each step reads
+ * its stream through its stored request's own path. The answer's `value` is
+ * always false.
  */
 StreamFlag read_collection_run_stream_caps (const nlohmann::json& json);
 
