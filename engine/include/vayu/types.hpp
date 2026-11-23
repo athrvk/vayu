@@ -748,6 +748,27 @@ struct Timing {
     size_t bytes_up   = 0;
 };
 
+/**
+ * @brief Why an `mcp` request's reply failed (issue #3762).
+ *
+ * - `Transport`: no reply, a non-2xx status that carries no JSON-RPC error, or
+ *   an event stream that ended before the final response.
+ * - `Protocol`: the final response carries a JSON-RPC `error` member, whatever
+ *   the status (a `-32020` header mismatch, a `-32022` version refusal).
+ * - `Tool`: the call succeeded and the tool reported `result.isError: true`.
+ */
+enum class McpErrorClass : std::uint8_t { Transport, Protocol, Tool };
+
+/// The stable wire spelling of @p error_class, served as `errorClass`.
+[[nodiscard]] constexpr const char* to_string (McpErrorClass error_class) noexcept {
+    switch (error_class) {
+    case McpErrorClass::Transport: return "transport";
+    case McpErrorClass::Protocol: return "protocol";
+    case McpErrorClass::Tool: return "tool";
+    }
+    return "transport";
+}
+
 // ============================================================================
 // Error Types (defined early so Response can use ErrorCode)
 // ============================================================================
@@ -824,14 +845,33 @@ enum class ErrorCode : std::uint8_t {
     /// looking for a Vayu fault where the request needs a different path.
     /// Stored traces from before it keep `InternalError`. Appended for the same
     /// reason `ProxyError` was.
-    UnsendableFile
+    UnsendableFile,
+    /// An `mcp` reply whose status reads as a success failed by its
+    /// `McpErrorClass` (issue #3762), one code per class. Never set on a
+    /// `Response`, whose own status and body stay what the server sent: a load
+    /// run's `handle_result` records such a completion as an error under these,
+    /// so its error tally counts it. Appended for the same reason `ProxyError`
+    /// was.
+    McpTransport,
+    McpProtocol,
+    McpTool
 };
 
 /// How many `ErrorCode` values there are, for a table indexed by one. Names the
 /// last enumerator by hand: appending a code does not move it. The
 /// `static_assert` after `to_string` fails the build when one is appended.
 inline constexpr std::size_t ERROR_CODE_COUNT =
-static_cast<std::size_t> (ErrorCode::UnsendableFile) + 1;
+static_cast<std::size_t> (ErrorCode::McpTool) + 1;
+
+/// The load error code an `mcp` reply's failure class is counted under.
+[[nodiscard]] constexpr ErrorCode mcp_error_code (McpErrorClass error_class) noexcept {
+    switch (error_class) {
+    case McpErrorClass::Transport: return ErrorCode::McpTransport;
+    case McpErrorClass::Protocol: return ErrorCode::McpProtocol;
+    case McpErrorClass::Tool: return ErrorCode::McpTool;
+    }
+    return ErrorCode::McpTransport;
+}
 
 /**
  * @brief The name a load run reports an error under: a stored error trace's
@@ -859,6 +899,9 @@ static_cast<std::size_t> (ErrorCode::UnsendableFile) + 1;
     case ErrorCode::BadContentEncoding: return "bad_content_encoding";
     case ErrorCode::ProtocolMismatch: return "protocol_mismatch";
     case ErrorCode::UnsendableFile: return "unsendable_file";
+    case ErrorCode::McpTransport: return "mcp_transport";
+    case ErrorCode::McpProtocol: return "mcp_protocol";
+    case ErrorCode::McpTool: return "mcp_tool";
     default: return "unknown";
     }
 }
@@ -888,6 +931,9 @@ constexpr const char* to_string (ErrorCode code) {
     case ErrorCode::InvalidHeaderName: return "INVALID_HEADER_NAME";
     case ErrorCode::ProtocolMismatch: return "PROTOCOL_MISMATCH";
     case ErrorCode::UnsendableFile: return "UNSENDABLE_FILE";
+    case ErrorCode::McpTransport: return "MCP_TRANSPORT";
+    case ErrorCode::McpProtocol: return "MCP_PROTOCOL";
+    case ErrorCode::McpTool: return "MCP_TOOL";
     }
     return "UNKNOWN";
 }
@@ -1006,6 +1052,24 @@ struct RedirectHop {
  */
 struct ResponseWarning {
     std::string code;
+    std::string message;
+};
+
+/**
+ * @brief An `mcp` request's reply as the reply reader read it
+ *        (`vayu::http::read_mcp_reply`, issue #3762).
+ */
+struct McpReply {
+    /// The final JSON-RPC response object, as the text it arrived as (the
+    /// body of a JSON reply, the `data` of an event stream's final event).
+    /// Empty when the reply held none. The element pipeline reads this in
+    /// place of the body (`mcp_element_view`).
+    std::string response;
+    /// Absent when the call succeeded.
+    std::optional<McpErrorClass> error_class;
+    /// The JSON-RPC `error.code`, when the reply carried one.
+    std::optional<std::int64_t> code;
+    /// What a person reads about the failure; empty on success.
     std::string message;
 };
 
@@ -1269,6 +1333,18 @@ struct Response {
      * lines (`CookieJar`).
      */
     std::vector<std::string> cookie_lines;
+
+    /**
+     * @brief The reply reader's reading of an `mcp` request's reply (issue
+     *        #3762); absent for every other body mode.
+     *
+     * Set where each driver hands its response on (`execute_exchange`,
+     * `consume_sse_stream`, the event loop's completion), so every consumer
+     * reads one judgement: the element pipeline, the trace's `mcp` node,
+     * `pm.response.mcp` and a load run's error tally. `body` is left as it
+     * arrived, so scripts and the stored body keep the raw reply.
+     */
+    std::optional<McpReply> mcp_reply;
 
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response

@@ -26,6 +26,7 @@
 #include "vayu/core/trailing_window.hpp"
 #include "vayu/core/worker_count.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -337,12 +338,15 @@ std::vector<bool>& timed_out,
 ScriptValidationTotals& totals,
 DistinctMessageSample& console,
 RecordFailure& record_failure) {
-    const vayu::Response response = sample_response (sample);
     std::optional<vayu::Request> sent;
     if (replay.request_as_sent) {
         sent = replay.request_as_sent (sample);
     }
     const vayu::Request& request = sent ? *sent : *replay.request;
+    // A sample keeps no reply reading, so an `mcp` one is read again off its
+    // bytes by the completion's rule, for `pm.response.mcp` (#3762).
+    vayu::Response response = sample_response (sample);
+    vayu::http::attach_mcp_reply (request, response);
     nlohmann::json stream_events;
     const auto script_ctx =
     replay_context (replay, scopes, sample, request, response, stream_events);

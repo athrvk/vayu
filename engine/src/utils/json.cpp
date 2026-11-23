@@ -1515,6 +1515,19 @@ Json serialize_warnings (const std::vector<ResponseWarning>& warnings) {
     return out;
 }
 
+Json serialize_mcp_reply (const McpReply& reply) {
+    Json out = Json::object ();
+    if (!reply.error_class) {
+        return out;
+    }
+    out["errorClass"] = to_string (*reply.error_class);
+    if (reply.code) {
+        out["code"] = *reply.code;
+    }
+    out["message"] = reply.message;
+    return out;
+}
+
 namespace {
 
 /// `serialize`'s `body` for a text body: its parse, or `null` when the caller
@@ -1571,6 +1584,12 @@ Json serialize (const Response& response, bool include_parsed_body) {
     // engine is too old to warn". `build_result_trace` stores the same array
     // under the same name, so the live pane and a restored one read one field.
     json["warnings"] = serialize_warnings (response.warnings);
+
+    // An `mcp` request's reply as the reply reader judged it (issue #3762),
+    // absent for every other mode. `build_result_trace` stores the same node.
+    if (response.mcp_reply) {
+        json["mcp"] = serialize_mcp_reply (*response.mcp_reply);
+    }
 
     // Decided once, by `response_body_text` (issue #2458): a JSON string holds
     // only UTF-8, so bytes that are not text travel as base64 rather than

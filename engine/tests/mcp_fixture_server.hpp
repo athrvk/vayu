@@ -17,7 +17,13 @@
  * derivation, so a header the engine stops deriving, or derives wrongly, is
  * answered `400` with JSON-RPC code `-32020` (HeaderMismatch) exactly as a real
  * server would answer it. A request that passes is answered `200` with a
- * `tools/call`-shaped result.
+ * `tools/call`-shaped result whose text is `MCP_RESULT_TEXT`.
+ *
+ * `reply_with` chooses how that answer arrives - one JSON object, a
+ * request-scoped event stream of two progress notifications and then the
+ * response, or that stream cut before the response - and what it says: the
+ * result, a tool error, a JSON-RPC error, a `-32022` version refusal, or the
+ * plain `400` a legacy-era server answers a modern request with.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -26,6 +32,9 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -45,16 +54,42 @@ inline nlohmann::json execute_sql_tool_json () {
           "query":{"type":"string"}}}})");
 }
 
+/// The text of the fixture's successful tool result.
+inline constexpr std::string_view MCP_RESULT_TEXT = "42 rows";
+
+/// How the fixture's answer to an accepted call arrives.
+enum class McpReplyShape : std::uint8_t {
+    Json,
+    /// Two progress notifications, then the response.
+    EventStream,
+    /// The two notifications, and the stream ends there.
+    EventStreamCut,
+};
+
+/// What the fixture's answer to an accepted call says.
+enum class McpReplyOutcome : std::uint8_t {
+    Result,
+    ToolError,
+    RpcError,
+    UnsupportedVersion,
+    LegacyBadRequest,
+};
+
 class McpFixtureServer {
     public:
     McpFixtureServer () {
         svr_.new_task_queue = pooled_task_queue (2);
         svr_.Post ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
+            McpReplyShape shape     = McpReplyShape::Json;
+            McpReplyOutcome outcome = McpReplyOutcome::Result;
             {
                 std::lock_guard<std::mutex> lock (mutex_);
                 headers_ = req.headers;
+                shape    = shape_;
+                outcome  = outcome_;
             }
-            answer (req, res);
+            ++requests_;
+            answer (req, res, shape, outcome);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -74,6 +109,17 @@ class McpFixtureServer {
 
     std::string url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/mcp";
+    }
+
+    void reply_with (McpReplyShape shape, McpReplyOutcome outcome = McpReplyOutcome::Result) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        shape_   = shape;
+        outcome_ = outcome;
+    }
+
+    /// Calls answered so far.
+    std::size_t requests () const {
+        return requests_.load ();
     }
 
     /// One header of the last request, or nothing when it was not sent.
@@ -164,7 +210,64 @@ class McpFixtureServer {
         return std::nullopt;
     }
 
-    static void answer (const httplib::Request& req, httplib::Response& res) {
+    static nlohmann::json response_frame (const nlohmann::json& id, McpReplyOutcome outcome) {
+        nlohmann::json frame{ { "jsonrpc", "2.0" }, { "id", id } };
+        switch (outcome) {
+        case McpReplyOutcome::ToolError:
+            frame["result"] = { { "content",
+                                { { { "type", "text" },
+                                { "text", "relation \"orders\" does not exist" } } } },
+                { "isError", true } };
+            break;
+        case McpReplyOutcome::RpcError:
+            frame["error"] = { { "code", -32602 }, { "message", "Unknown tool: execute_sql" } };
+            break;
+        case McpReplyOutcome::UnsupportedVersion:
+            frame["error"] = { { "code", -32022 },
+                { "message", "Unsupported protocol version" },
+                { "data",
+                { { "supported", { "2025-11-25", "2025-06-18" } },
+                { "requested", "2026-07-28" } } } };
+            break;
+        case McpReplyOutcome::Result:
+        case McpReplyOutcome::LegacyBadRequest:
+            frame["result"] = { { "content",
+                                { { { "type", "text" }, { "text", MCP_RESULT_TEXT } } } },
+                { "isError", false } };
+            break;
+        }
+        return frame;
+    }
+
+    static std::string progress_event (int progress) {
+        const nlohmann::json note{ { "jsonrpc", "2.0" },
+            { "method", "notifications/progress" },
+            { "params",
+            { { "progressToken", "p1" }, { "progress", progress }, { "total", 2 } } } };
+        return "event: message\ndata: " + note.dump () + "\n\n";
+    }
+
+    static void send_frame (httplib::Response& res, const nlohmann::json& frame, McpReplyShape shape) {
+        if (shape == McpReplyShape::Json) {
+            res.set_content (frame.dump (), "application/json");
+            return;
+        }
+        std::string stream = progress_event (1) + progress_event (2);
+        if (shape == McpReplyShape::EventStream) {
+            stream += "event: message\ndata: " + frame.dump () + "\n\n";
+        }
+        res.set_content (stream, "text/event-stream");
+    }
+
+    static void answer (const httplib::Request& req,
+    httplib::Response& res,
+    McpReplyShape shape,
+    McpReplyOutcome outcome) {
+        if (outcome == McpReplyOutcome::LegacyBadRequest) {
+            res.status = 400;
+            res.set_content ("Bad Request: No valid session ID provided", "text/plain");
+            return;
+        }
         const auto call = nlohmann::json::parse (req.body, nullptr, false);
         const nlohmann::json id =
         call.is_object () ? call.value ("id", nlohmann::json ()) : nlohmann::json ();
@@ -186,11 +289,10 @@ class McpFixtureServer {
             "application/json");
             return;
         }
-        res.set_content (
-        nlohmann::json{ { "jsonrpc", "2.0" }, { "id", id },
-        { "result", { { "content", { { { "type", "text" }, { "text", "ok" } } } }, { "isError", false } } } }
-        .dump (),
-        "application/json");
+        if (outcome == McpReplyOutcome::UnsupportedVersion) {
+            res.status = 400;
+        }
+        send_frame (res, response_frame (id, outcome), shape);
     }
 
     httplib::Server svr_;
@@ -198,6 +300,9 @@ class McpFixtureServer {
     std::thread thread_;
     mutable std::mutex mutex_;
     httplib::Headers headers_;
+    McpReplyShape shape_     = McpReplyShape::Json;
+    McpReplyOutcome outcome_ = McpReplyOutcome::Result;
+    std::atomic<std::size_t> requests_{ 0 };
 };
 
 } // namespace vayu::tests

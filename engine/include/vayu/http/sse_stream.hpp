@@ -473,7 +473,9 @@ class SseStreamManager {
  *         headers and timings, with the error fields set when the transfer
  *         failed. `stream_body_bytes` counts what that hop delivered; `body`
  *         holds it only when the hop did not announce `text/event-stream`,
- *         since an event stream's bytes are its events.
+ *         since an event stream's bytes are its events. An `mcp` request's
+ *         carries `mcp_reply`, read from the events as they arrived
+ *         (`McpReplyStream`, #3762), so its final response needs no body.
  *         Never an `Error` - `Client::send`'s contract, which every `/execute`
  *         caller relies on, holds on this path too.
  */

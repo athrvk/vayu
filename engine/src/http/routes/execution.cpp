@@ -41,6 +41,7 @@
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
@@ -2392,8 +2393,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         record.status = stream_run_status (context.end_reason (), response);
 
         const bool has_element_output = elements && !elements->empty ();
-        const bool has_script_output  = has_element_output ||
-        !pre_script_result.tests.empty () ||
+        // An `mcp` failure fails the stream's step as an assertion does
+        // (#3762), with or without an element to run.
+        std::optional<vayu::TestResult> mcp_failure =
+        vayu::http::mcp_failure_test (response);
+        const bool has_script_output = has_element_output ||
+        mcp_failure.has_value () || !pre_script_result.tests.empty () ||
         !pre_script_result.console_output.empty () ||
         !pre_script_result.script_requests.empty () || !pre_script_result.success;
         if (has_script_output) {
@@ -2413,9 +2418,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     // have been, without a const_cast.
                     vayu::Request mutable_sent      = sent;
                     vayu::Response mutable_response = response;
+                    std::optional<vayu::Response> unwrapped;
                     vayu::core::ElementContext element_ctx{
-                        .request  = mutable_sent,
-                        .response = &mutable_response,
+                        .request = mutable_sent,
+                        .response = vayu::http::mcp_element_view (mutable_response, unwrapped),
                         .run_pre_script =
                         [] (const std::string&) { return vayu::ScriptResult{}; },
                         .run_post_script =
@@ -2464,6 +2470,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     // Nothing left to carry them - the transfer has
                     // already captured, exactly as on the buffered path.
                     jar.apply (cookie_scope, post_cookie_writes);
+                }
+                if (mcp_failure) {
+                    post_script_result.tests.push_back (std::move (*mcp_failure));
                 }
                 scripts = build_script_result_node (pre_script_result,
                 post_script_result, script_config.max_trace_body_bytes);

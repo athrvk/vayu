@@ -646,6 +646,32 @@ is, and both are visible to the script rather than assumed:
 A sample that did not stream still reads `undefined`, so the `typeof` check
 above is the one guard on both paths.
 
+### `pm.response.mcp` - an mcp reply's failure class
+
+A request whose body mode is `mcp` is answered with one JSON object or with an
+event stream ending in the final JSON-RPC response
+([the `mcp` reply](api-reference.md#the-mcp-reply)). A script reads that reply
+**as it arrived**, on every path: `pm.response.json()` and `text()` are the
+body exactly as for any other request (the JSON object, or for a buffered event
+stream its `event:`/`data:` bytes; a streamed send keeps no bytes, so `text()`
+is `""` there as above), and the frames themselves are `pm.response.events`. It
+is the declarative elements, not scripts, that read the final response in
+place of the body. What a script adds is the engine's judgement of the reply:
+
+```javascript
+pm.test('the tool call succeeded', function () {
+    pm.expect(pm.response.mcp.errorClass).to.be.undefined;
+});
+```
+
+`pm.response.mcp` is `{}` when the call succeeded and
+`{ errorClass, code, message }` when it failed: `errorClass` is `transport`,
+`protocol` or `tool`, `code` the JSON-RPC `error.code` (absent when the reply
+carried none) and `message` the sentence the failed `MCP reply` test carries.
+It is absent for every other body mode, so `typeof pm.response.mcp` tells an
+`mcp` request apart. A load run's deferred replay reads it off the sample's
+stored bytes by the same rule.
+
 A streaming send is answered `202` before its script has run, so the results go
 to the run's trace rather than into a response body - the app's Tests and
 Console panes show them when the stream finishes, and

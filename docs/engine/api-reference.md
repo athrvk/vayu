@@ -896,6 +896,68 @@ body of another mode keeps an `mcpTool` it carries unread. An `x-vayu-request`
 export carries it and its import reads it back; a Postman export cannot carry
 it (counted under `mcp_bodies`).
 
+#### The `mcp` reply
+
+A server answers with one JSON object or with a request-scoped
+`text/event-stream` whose progress and log notifications come before the final
+response. The **reply reader** (`vayu::http::read_mcp_reply`,
+`http/mcp_reply.hpp`) finds that final response once, where each driver hands
+its response on, on every path: Send (buffered or streamed), a collection
+run's steps, and both load-run shapes. For a JSON reply it is the body. For an
+event stream it is the last `message` event whose `data` is a JSON-RPC
+response (a `result` or `error` member) carrying the request's
+`id`: the envelope's own, else the constant `1` a bare call is stamped with. A
+`stream: false` request answered with an event stream is read from its
+buffered bytes by the same rule; a streamed one is read from its events as they
+arrive, so an event cut at `sseMaxEventBytes` cannot be read, and the failure
+says so.
+
+**What reads it.** The element pipeline reads the final response in place of
+the body, so `assert.jsonpath`, `assert.contains`, `assert.size`,
+`extract.json`, `extract.regex` and `extract.boundary` address
+`$.result.content[0].text` whatever shape the reply took. Everything else keeps
+the raw reply: the stored and live `body`, `pm.response.text()` and `json()`,
+`pm.response.events` and the Events view. A reply with no final response
+leaves the elements the raw body.
+
+**Failure classes.** A failed reply carries one of three stable wire names:
+
+| `errorClass` | When |
+|---|---|
+| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream that ended before the final response |
+| `protocol` | the final response carries an `error` member, whatever the status (`-32020` header mismatch, `-32022` version refusal, `-32600` and the rest) |
+| `tool` | the call succeeded and `result.isError` is `true` |
+
+A JSON-RPC notification (an envelope with no `id`) expects no response, so a
+2xx with none is a success. Two messages name an era mismatch without retrying
+or falling back, since a retry hides the mismatch from a regression test and
+doubles a load run's traffic: a `-32022` that lists `error.data.supported`
+reads `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`, and
+a `400` with no JSON-RPC error says the server looks legacy-era and to send an
+explicit `initialize` request first.
+
+A failed class **fails the step as a failed assertion does**, with or without an
+element on it: the exchange gains a failed test named `MCP reply`, whose error
+is `<errorClass> failure: <message>`. A collection run's step is `failed`, and
+a scenario load run's step execution is `failed` too. A failed transfer is
+not given that test, since it already fails its step as an error.
+
+**Where it is reported.** An `mcp` request's response carries `mcp`, on the
+live `POST /execute` answer and on the stored trace's `response` node alike:
+`{}` for a reply that succeeded, `{ "errorClass", "code"?, "message" }` for one
+that failed, `code` being the JSON-RPC `error.code` when there was one. Absent
+for every other body mode. Scripts read the same object as `pm.response.mcp`
+([scripting](scripting.md#pmresponsemcp---an-mcp-replys-failure-class)).
+
+**Under load** a failed reply whose status reads as a success (2xx, 3xx) is
+recorded as an error of the run under the error type `mcp_transport`,
+`mcp_protocol` or `mcp_tool` (`error_types` in the summary, `error_type` on the
+stored error record, which also carries the `mcp` node), and in a scenario run
+as its step's `httpErrors` too. Like every completion recorded with an error
+type, it is bucketed under status `0` in the status distribution. A failed
+reply under a `4xx` or `5xx` is an error by its status already and is counted
+once, there.
+
 #### File references: `binary` bodies and file parts
 
 Two body shapes name a file on the machine running the engine. They carry a

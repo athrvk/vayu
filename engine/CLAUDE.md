@@ -176,7 +176,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   call, so grep for the alias too. Guard: `tests/wide_json.hpp` builds the
   input (`wide_object_json`, 100,000 keys) and holds `LINEAR_PARSE_BUDGET`;
   each entry point (`jsonrpc_wire_body`, `mcp_wire_body`, `parse_import`, `read_document`, the
-  element pipeline, `postmanProtocolBehavior`, an example's `savedFrom`, the
+  element pipeline and the MCP reply reader that feeds it (`read_mcp_reply`, bounded at the
+  pipeline's `elements::MAX_BODY_DEPTH`), `postmanProtocolBehavior`, an example's `savedFrom`, the
   Postman export's stored columns) has a test that fails the budget on the
   quadratic parse. The rest of a path can still be quadratic after the parse is
   not (`ordered_map::operator[]` per member); the test measures the whole path.
