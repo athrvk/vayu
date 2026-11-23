@@ -143,3 +143,14 @@ export function computeOAuth2CacheKey(config: OAuth2Config): string {
 	].join(US);
 	return base + EXTRA_PARAM_LISTS.map((list) => extraParamsSegment(config, list)).join("");
 }
+
+/**
+ * The cache key a token for @p config lives under, or null while it has no
+ * access token URL or client id: the engine fetches no token without both, so
+ * there is no entry to look up. The one guard every surface that queries the
+ * token cache reads, so none of them keys a config another would leave out.
+ */
+export function oauth2TokenKey(config: OAuth2Config): string | null {
+	if (!config.accessTokenUrl || !config.clientId) return null;
+	return computeOAuth2CacheKey(config);
+}

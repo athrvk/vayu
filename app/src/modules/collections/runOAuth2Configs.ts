@@ -24,7 +24,7 @@
  */
 
 import { effectiveOAuth2Config } from "@/modules/request-builder/utils/auth-resolution";
-import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
+import { oauth2TokenKey } from "@/services/oauth/cache-key";
 import { keepSigningKeyReference } from "@/services/oauth/signing-key";
 import {
 	buildVariableValues,
@@ -90,9 +90,8 @@ export function distinctRunOAuth2Configs(
 			// The signing key stays the reference the config wrote: the engine
 			// resolves it, so the PEM never rides a request this app builds.
 			const config = keepSigningKeyReference(resolveStringsDeep(raw, resolveString), raw);
-			if (!config.accessTokenUrl || !config.clientId) continue;
-			const key = computeOAuth2CacheKey(config);
-			if (!byKey.has(key)) byKey.set(key, { config, collectionId });
+			const key = oauth2TokenKey(config);
+			if (key !== null && !byKey.has(key)) byKey.set(key, { config, collectionId });
 		}
 	}
 	return [...byKey].map(([key, entry]) => ({ key, ...entry }));

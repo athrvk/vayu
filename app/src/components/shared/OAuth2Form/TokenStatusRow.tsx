@@ -18,7 +18,7 @@ import {
 } from "@/queries/oauth";
 import { queryKeys } from "@/queries/keys";
 import { deferredTokens } from "@/lib/deferred-note";
-import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
+import { oauth2TokenKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
@@ -104,10 +104,7 @@ function useTokenActions(resolvedConfig: OAuth2Config, collectionId: string | nu
 	const environmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const queryClient = useQueryClient();
 
-	const cacheKey = useMemo(() => {
-		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
-		return computeOAuth2CacheKey(resolvedConfig);
-	}, [resolvedConfig]);
+	const cacheKey = useMemo(() => oauth2TokenKey(resolvedConfig), [resolvedConfig]);
 
 	// The sign-in belongs to the config, so two rows for one config share it;
 	// the last row to leave stops it.
