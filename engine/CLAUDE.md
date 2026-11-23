@@ -809,9 +809,10 @@ logged as a warning: it means a client skipped composition.
   (`ExchangeInputs::sse_limits`), a load run's inline `script.post` on either
   load path (`RunContext::sse_limits`) and the deferred replay.
   `metric.record`'s `eventJsonpath` (#3780) reads the same body through
-  `ensure_parsed_events` (`ElementContext::max_event_bytes` from the same
-  limits), never through the `events` node, whose `sseMaxStoredEvents` cap
-  drops the last event the source exists to read.
+  `ensure_parsed_events` (`ElementContext::max_event_bytes`, set from the run's
+  limits on the sequential and scenario load paths; a single-request load run
+  refuses `metric.*`), never through the `events` node, whose
+  `sseMaxStoredEvents` cap drops the last event the source exists to read.
   **A consumer worker is drained by whoever owns the manager, before the state
   it writes through goes away** (#646): `Server::stop()` calls
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its
