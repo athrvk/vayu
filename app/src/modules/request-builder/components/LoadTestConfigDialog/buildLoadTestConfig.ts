@@ -124,13 +124,13 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 		// Absent at the default, the same "absent already means what the
 		// user asked for" rule `failOnSchemaError` follows on the
 		// collection-run dialog (issue #1594).
+		...(draft.scriptsOverride !== SCRIPTS_DEFAULT
+			? { elements: { scripts: draft.scriptsOverride } }
+			: {}),
 		// Absent when off or in a mode that has no next request to hold back,
 		// so the stored config says only what the run did.
 		...(draft.retryAfterBackoff && appliesRetryAfter(profile.mode)
 			? { retryAfterBackoff: true, retryAfterMaxMs: draft.retryAfterMaxMs }
-			: {}),
-		...(draft.scriptsOverride !== SCRIPTS_DEFAULT
-			? { elements: { scripts: draft.scriptsOverride } }
 			: {}),
 	};
 
