@@ -2397,12 +2397,6 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         std::move (pre_element_outcomes);
         record.events = vayu::http::stream_trace_node (context);
         record.status = stream_run_status (context.end_reason (), response);
-        // The list parsed from the bytes the trace stores, by the rule every
-        // later reader of the trace applies (#3770), so the script and a
-        // restored response read one list rather than two that can disagree.
-        nlohmann::json script_events = vayu::http::stream_events_node (
-        response.body, !response.body_truncated, record.events);
-
         const bool has_element_output = elements && !elements->empty ();
         // An `mcp` failure fails the stream's step as an assertion does
         // (#3762), with or without an element to run.
@@ -2453,6 +2447,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                                 post_ctx.vu = vayu::core::SOLE_VIRTUAL_USER;
                                 post_ctx.iteration_count = 1;
                             }
+                            // Parsed from the bytes the trace stores, by the rule
+                            // every later reader applies (#3770), and only when a
+                            // script runs: the parse costs the held body's size.
+                            const nlohmann::json script_events =
+                            vayu::http::stream_events_node (response.body,
+                            !response.body_truncated, record.events);
                             post_ctx.response_events = &script_events;
                             return execute_script (
                             script_engine, script, post_ctx, "Post-request");
