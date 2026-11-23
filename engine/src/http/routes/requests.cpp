@@ -630,6 +630,23 @@ static RouteResult refuse_unreadable_mcp_tool (const nlohmann::json& body) {
     return {};
 }
 
+/// Stores a stated object `body` on `r`, after `apply_json_field` has taken it
+/// whole. Trust is derived on read and never stored (#2356): the `unresolved` an
+/// older client still sends is dropped here, on every writer's path.
+static RouteResult store_request_body (const nlohmann::json& json, vayu::db::Request& r) {
+    const auto body = json.find ("body");
+    if (body == json.end () || !body->is_object ()) {
+        return {};
+    }
+    if (auto outcome = refuse_unreadable_mcp_tool (*body); !outcome) {
+        return outcome;
+    }
+    nlohmann::json stored = *body;
+    vayu::json::erase_file_trust (stored);
+    r.body = stored.dump ();
+    return {};
+}
+
 /**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
@@ -696,15 +713,8 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
-    // Trust is derived on read and never stored (#2356): the `unresolved` an
-    // older client still sends is dropped here, on every writer's path.
-    if (const auto body = json.find ("body"); body != json.end () && body->is_object ()) {
-        if (auto outcome = refuse_unreadable_mcp_tool (*body); !outcome) {
-            return outcome;
-        }
-        nlohmann::json stored = *body;
-        vayu::json::erase_file_trust (stored);
-        r.body = stored.dump ();
+    if (auto outcome = store_request_body (json, r); !outcome) {
+        return outcome;
     }
     if (auto outcome = apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     !outcome) {

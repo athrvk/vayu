@@ -397,8 +397,11 @@ TEST (McpHeaderList, DerivedHeadersAreSentAndRecorded) {
     const Built built     = build (request);
     for (const auto& [name, value] :
     mcp_derived_headers (wire_body_bytes (request), request.body.mcp_tool)) {
+        std::string line = name;
+        line += ": ";
+        line += value;
         EXPECT_EQ (built.sent.at (name), value) << name;
-        EXPECT_NE (std::find (built.lines.begin (), built.lines.end (), name + ": " + value),
+        EXPECT_NE (std::find (built.lines.begin (), built.lines.end (), line),
         built.lines.end ())
         << name;
     }

@@ -776,6 +776,20 @@ std::optional<Json> file_body_of (const Json& value) {
     return std::make_optional (Json{ { "mode", "binary" }, { "file", std::move (file) } });
 }
 
+/// An `mcp` body's tool (#3762), copied onto @p out, refused on the rule a write
+/// refuses it by. False when the tool is unreadable; a body with none is fine.
+bool carry_mcp_tool (const Json& value, const std::string& mode, Json& out) {
+    const auto tool = value.find ("mcpTool");
+    if (mode != "mcp" || tool == value.end () || tool->is_null ()) {
+        return true;
+    }
+    if (!vayu::http::read_mcp_tool (nlohmann::json (*tool))) {
+        return false;
+    }
+    out["mcpTool"] = *tool;
+    return true;
+}
+
 } // namespace
 
 std::optional<Json> param_rows_of (const Json& value) {
@@ -833,13 +847,8 @@ std::optional<Json> body_of (const Json& value) {
     }
     Json out{ { "mode", mode },
         { "content", content == value.end () ? Json ("") : *content } };
-    // An `mcp` body's tool (#3762), refused on the rule a write refuses it by.
-    if (const auto tool = value.find ("mcpTool");
-    mode == "mcp" && tool != value.end () && !tool->is_null ()) {
-        if (!vayu::http::read_mcp_tool (nlohmann::json (*tool))) {
-            return std::nullopt;
-        }
-        out["mcpTool"] = *tool;
+    if (!carry_mcp_tool (value, mode, out)) {
+        return std::nullopt;
     }
     return std::make_optional (std::move (out));
 }
