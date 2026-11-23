@@ -224,6 +224,26 @@ outcome, `invalid regular expression: <reason>`, and for an `assert.*` also a fa
 with the same reason in the message. After an empty match the search resumes one byte later, so
 `-1` over a pattern that can match nothing still ends.
 
+**An assertion's expected value resolves `{{name}}` and `{{data.column}}` when it runs** (#3779):
+`assert.contains`'s `text` in `contains` and `equals` mode (never `matches`, the pattern above) and
+every string inside `assert.jsonpath`'s `expected`, at any depth of an array or object (object keys
+stay as written). It resolves through the step's own variables and, under a data-driven run, the
+row the step was bound against, the same hook `control.if` reads (`ElementContext::resolve_template`),
+so `{"text": "{{data.expect}}"}` judges each row against its own answer. A resolved string stays a
+string: `"{{n}}"` answering `5` is `"5"`, which does not equal the number `5`. A token nothing
+answers (a mistyped or missing column, an undefined variable) **fails the assertion** and is never
+compared as typed: the test fails, the element's outcome is `error`, and the message names the
+tokens only (`'text' uses {{data.exepct}}, which no variable or data column answers`). That holds
+under `negate` too, and wherever no resolver is bound, so a path that cannot resolve fails closed.
+A variable whose value still holds a `{{` after resolution counts as unanswered. The assertion's name
+and its failure message quote the text as written, never what a variable produced, since the value
+can be a secret and the message reaches whoever reads the run. This differs from the
+[pre-send failure on a missing `{{data.column}}`](../app/data-driven-runs.md#reading-a-row-datacolumn-vs-pmiterationdata),
+which stops the step before it is sent: here the request has already been sent and only the
+assertion fails. A single-request load run's `requestElements` resolve against the run's variables
+only and are not handed the bound row (`load_strategy.cpp`), so a `{{data.*}}` there is unanswered
+and fails (#3790).
+
 `assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
 one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
 either way, see below). `exists` is a boolean: `true` passes when the path has at least one match and
@@ -304,6 +324,15 @@ as a miss does. `metric.record`'s `jsonpath` source reads the same shared
 parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
+
+**An `mcp` step's body is its final JSON-RPC response** (issue #3762). Every kind that reads the
+body (the JSON-reading and text-reading kinds above, `assert.size`, `metric.record`) reads the
+final response the [reply reader](api-reference.md#the-mcp-reply) found, whether the server
+answered with one JSON object or with an event stream of notifications ending in it, so
+`assert.jsonpath` on `$.result.content[0].text` reads the tool's text on a Send, a collection run
+and both load-run shapes alike. Scripts, the stored body and `pm.response.events` keep the raw
+reply. A reply with no final response leaves the elements the raw body, and its failure class
+already fails the step as a failed assertion would (a failed `MCP reply` test).
 
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
 (a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total `value`

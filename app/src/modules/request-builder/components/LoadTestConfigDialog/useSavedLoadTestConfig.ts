@@ -48,8 +48,9 @@ export interface SavedLoadTestConfig {
 	 * cleared. A restored draft is also what tells the p99 prefill it has
 	 * already had its turn - without it, declining the SLO budget once would be
 	 * undone by the next dialog open. Partial because a Capacity run leaves the
-	 * Settings p99 seed out (`budgetsToRemember`, issue #2816): written, it would
-	 * restore as the user's own and the next capacity run would send it.
+	 * Settings p99 seed out (`budgetsToRemember`, issues #2816, #3772): written, it
+	 * would restore as the user's own and the next capacity or stream run would
+	 * send it.
 	 */
 	budgets: Partial<BudgetDraft>;
 	/**

@@ -1675,8 +1675,8 @@ enum BodyMember : std::uint8_t {
  *
  * Five names, because those are the five shapes a script can *act* on: a string
  * it can parse, a pair list, a multipart part list, a GraphQL operation and a
- * file. Vayu's other content modes - `json`, `text`, `xml`, `jsonrpc` - each
- * carry their body as one string, which is what `raw` means, so a lifted
+ * file. Vayu's other content modes - `json`, `text`, `xml`, `jsonrpc`, `mcp` -
+ * each carry their body as one string, which is what `raw` means, so a lifted
  * `body.mode === 'raw'` guard answers true for every one of them.
  *
  * `graphql` was the third name for the whole of #1003, because Postman's mode

@@ -54,6 +54,7 @@ import type {
 	ElementDef,
 	FormFieldEntry,
 	KeyValueEntry,
+	McpTool,
 	Request,
 	RequestBody,
 	UpdateRequestRequest,
@@ -234,8 +235,13 @@ function items(value: KeyValueItem[] | undefined): FormFieldEntry[] {
 	return toKeyValueEntries(value ?? []);
 }
 
-/** Build the stored body shape from the seed's flat editor fields. */
-function bodyFromSeed(request: Partial<RequestState>): RequestBody {
+/**
+ * Build the stored body shape from the seed's flat editor fields.
+ *
+ * `savedMcpTool` is the tool the saved request holds: a run records an `mcp`
+ * body's content and not its tool, so a write that carried none would clear it.
+ */
+function bodyFromSeed(request: Partial<RequestState>, savedMcpTool?: McpTool): RequestBody {
 	const mode = request.bodyMode ?? "none";
 	if (mode === "form-data") {
 		return { mode: "form-data", fields: withoutFileTrust(items(request.formData)) };
@@ -245,6 +251,9 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 	}
 	if (mode === "binary") {
 		return { mode: "binary", file: toFileRef(request.binaryFile) };
+	}
+	if (mode === "mcp" && request.body) {
+		return { mode, content: request.body, ...(savedMcpTool && { mcpTool: savedMcpTool }) };
 	}
 	if (mode !== "none" && request.body) {
 		return {
@@ -490,7 +499,8 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 /**
  * What the run's values say for the fields it can write, when the seed has
  * none of its own: the saved request's current values for an update, the
- * defaults for a new request.
+ * defaults for a new request. `body` is the saved request's, for what a run
+ * does not record of it.
  */
 type WriteFallback = Pick<
 	Request,
@@ -503,7 +513,7 @@ type WriteFallback = Pick<
 	| "disabledSystemHeaders"
 	| "disableUrlEncoding"
 	| "elements"
-> & { url: string };
+> & { url: string; body?: RequestBody };
 
 /** What a request created from a run starts from where the run says nothing. */
 const NEW_REQUEST_FALLBACK: WriteFallback = {
@@ -566,7 +576,10 @@ function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritab
 	// ad-hoc override from a script or an MCP client rather than the request's
 	// own. Writing it would pin that number onto a request that states none.
 	const request = seed.request;
-	const body = bodyFromSeed(request);
+	const body = bodyFromSeed(
+		request,
+		fallback.body?.mode === "mcp" ? fallback.body.mcpTool : undefined
+	);
 
 	const patch: RunWritable = {
 		method: request.method ?? fallback.method,

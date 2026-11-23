@@ -1951,7 +1951,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   itself, which is what lets an agent-authored script outlive the call that
   wrote it (see *Storing a request's elements* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
-  (`json` | `text` | `graphql` | `jsonrpc` | `xml` | `form-data` |
+  (`json` | `text` | `graphql` | `jsonrpc` | `mcp` | `xml` | `form-data` |
   `x-www-form-urlencoded` | `binary`, default `text`). The two form modes carry their content as **fields**, not as
   a string, so `body` is written as `key=value&key=value` and split into the
   `fields` rows the engine reads - see
@@ -1967,7 +1967,21 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   `"id":1` when the call names no id, and a frame that already declares a
   string `"jsonrpc"` is sent byte for byte - which is how an agent chooses its
   own id or sends a notification - see
-  [the `jsonrpc` envelope](api-reference.md#the-jsonrpc-envelope). An `xml`
+  [the `jsonrpc` envelope](api-reference.md#the-jsonrpc-envelope). An `mcp`
+  `body` is one call to a Model Context Protocol server (`tools/call`,
+  `tools/list` and the rest) in the same bare-call form: the engine adds
+  `params._meta` and every header the revision asks for (`Accept`,
+  `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`), so the agent sets none by
+  hand - see [the `mcp` body](api-reference.md#the-mcp-body). `mcpTool`, the
+  stored tool whose `x-mcp-header` annotations the engine mirrors into
+  `Mcp-Param-*` headers, is not an argument of `create_request` or
+  `update_request`: it is set in the app, because stating its schema in the
+  tool list costs a kilobyte of every session's `tools/list`. `update_request`
+  therefore carries the stored tool into an `mcp` body it writes (a write of
+  `body` replaces the body object whole, which would clear it) and says so in
+  its result, and an agent-authored `mcp` request sends no `Mcp-Param-*`
+  header. `run_request` and `start_load_run` take `bodyType: "mcp"` too, with
+  the same limit; their descriptions do not list it, for the same budget. An `xml`
   `body` has no envelope at all: it is stored and sent byte for byte and carries
   `application/xml` unless the agent set a Content-Type of its own, which is how
   a SOAP 1.2 endpoint gets `application/soap+xml`.
@@ -2016,7 +2030,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   examples bullet above (#3422, #3550).
 - **What actually went out** - the engine adds headers an agent never wrote: the
   body-implied `Content-Type` (a `json` body, a `graphql` body on `POST`, or a
-  `jsonrpc` body, sends `application/json`; a `graphql` body on `GET` has no
+  `jsonrpc` or `mcp` body, sends `application/json`, and an `mcp` body adds
+  its `Accept`, `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` too; a `graphql` body on `GET` has no
   body, so the engine adds no Content-Type for it at all - a `text` one
   `text/plain`, an `xml` one `application/xml`, an `x-www-form-urlencoded` one
   its own type, and a bodyless `POST` none), the

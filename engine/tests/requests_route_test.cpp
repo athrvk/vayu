@@ -593,6 +593,44 @@ TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
     EXPECT_EQ (body["order"], 1);
 }
 
+// -- An `mcp` body's `mcpTool` (#3762) ---------------------------------------
+//
+// It lives inside the body blob, so it needs no column: a PUT that leaves
+// `body` out keeps it, and every read hands it back. A tool no send could read
+// is refused where it is written.
+
+TEST_F (RequestsRouteTest, AnMcpToolSurvivesAnUpdateThatLeavesTheBodyOut) {
+    seed_collection_at ("col_p", "", 0);
+    json create = new_request ("col_p");
+    create["body"] = json{ { "mode", "mcp" }, { "content", R"({"method":"tools/call"})" },
+        { "mcpTool",
+        { { "name", "execute_sql" },
+        { "inputSchema",
+        { { "properties", { { "region", { { "x-mcp-header", "Region" } } } } } } } } } };
+    auto [created_status, created] =
+    vayu::http::routes::create_request_response (*db_, create);
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "name", "renamed" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    auto [read_status, read] = vayu::http::routes::get_request_response (*db_, id);
+    ASSERT_EQ (read_status, 200);
+    EXPECT_EQ (read["body"]["mcpTool"], create["body"]["mcpTool"]);
+}
+
+TEST_F (RequestsRouteTest, AnMcpToolNoSendCouldReadIsRefused) {
+    seed_collection_at ("col_p", "", 0);
+    json create    = new_request ("col_p");
+    create["body"] = json{ { "mode", "mcp" }, { "content", "{}" },
+        { "mcpTool", { { "name", "t" }, { "inputSchema", "not a schema" } } } };
+
+    auto [status, body] = vayu::http::routes::create_request_response (*db_, create);
+    EXPECT_EQ (status, 400) << body.dump ();
+}
+
 // -- `order` is an integer from 0 to INT_MAX (#3451) ------------------------
 //
 // Parsed from text, as a wire body is: nlohmann reads a non-negative literal

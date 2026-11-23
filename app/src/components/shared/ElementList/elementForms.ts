@@ -27,10 +27,15 @@
 import type { ComponentType } from "react";
 import { ScriptElementForm, type ScriptElementFormProps } from "./ScriptElementForm";
 import { ModeElementForm } from "./ModeElementForm";
+import type { VariableSupport } from "@/types";
 import { ELEMENT_MODES } from "./element-modes";
 
-/** What every bespoke form is handed: the script form's props carry the catalogue schema and field errors too. */
-export type ElementFormProps = ScriptElementFormProps;
+/**
+ * What every bespoke form is handed: the script form's props carry the catalogue
+ * schema and field errors too, and `variables` is the host's variable scope,
+ * which only the forms with a resolved field read (`variable-fields.ts`).
+ */
+export type ElementFormProps = ScriptElementFormProps & { variables?: VariableSupport };
 
 export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormProps>> = {
 	"script.pre": ScriptElementForm,

@@ -18,6 +18,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
@@ -223,6 +224,7 @@ std::string wire_body_bytes (const Body& body) {
     case BodyMode::Binary: return {};
     case BodyMode::GraphQL: return graphql_wire_body (body.content);
     case BodyMode::JsonRpc: return jsonrpc_wire_body (body.content);
+    case BodyMode::Mcp: return mcp_wire_body (body.content);
     default: return body.content;
     }
 }
@@ -237,7 +239,8 @@ std::string implied_content_type (const Body& body) {
     // one's envelope, and the envelope is what the header describes.
     case BodyMode::Json:
     case BodyMode::GraphQL:
-    case BodyMode::JsonRpc: return "application/json";
+    case BodyMode::JsonRpc:
+    case BodyMode::Mcp: return "application/json";
     case BodyMode::Xml: return "application/xml";
     // `text/plain` is a default, not a claim that every text body is plain
     // text (issue #2464): a typed `Content-Type` row wins (`text/csv`, a JWT's

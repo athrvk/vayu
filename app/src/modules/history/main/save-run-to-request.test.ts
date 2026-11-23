@@ -485,6 +485,49 @@ describe("applyRunToRequest", () => {
 		expect(patch.bodyType).toBe("jsonrpc");
 	});
 
+	describe("an mcp body", () => {
+		const CALL = '{"method":"tools/call","params":{"name":"execute_sql"}}';
+		const TOOL = { name: "execute_sql", inputSchema: { type: "object" } };
+		const mcpRun = run({
+			configSnapshot: {
+				method: "POST",
+				url: "https://mcp.example.test/rpc",
+				body: { mode: "mcp", content: CALL },
+			},
+		} as Partial<Run>);
+
+		it("round-trips the mode and content", () => {
+			const live = liveRequest();
+			const patch = applyRunToRequest(seedFromRun(mcpRun, live), live);
+
+			expect(patch.body).toEqual({ mode: "mcp", content: CALL });
+			expect(patch.bodyType).toBe("mcp");
+		});
+
+		// A run records the body's content and not its tool, and a PUT replaces
+		// the body whole: writing it as recorded would clear the saved tool.
+		it("keeps the saved request's tool, which the run does not record", () => {
+			const live = liveRequest({ body: { mode: "mcp", content: "{}", mcpTool: TOOL } });
+			const patch = applyRunToRequest(seedFromRun(mcpRun, live), live);
+
+			expect(patch.body).toEqual({ mode: "mcp", content: CALL, mcpTool: TOOL });
+		});
+
+		it("takes no tool from a saved body that is of another mode", () => {
+			const live = liveRequest({ body: { mode: "json", content: "{}" } });
+			const patch = applyRunToRequest(seedFromRun(mcpRun, live), live);
+
+			expect(patch.body).toEqual({ mode: "mcp", content: CALL });
+		});
+
+		it("creates a request with no tool, since there is no saved one to keep", () => {
+			expect(createFieldsFromRun(seedFromRun(mcpRun, null)).body).toEqual({
+				mode: "mcp",
+				content: CALL,
+			});
+		});
+	});
+
 	it("omits elements entirely for a run that has only the old glued string", () => {
 		const legacy = run({
 			configSnapshot: {

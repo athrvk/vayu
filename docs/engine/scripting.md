@@ -628,23 +628,57 @@ if (typeof pm.response.events === 'undefined') {
 }
 ```
 
-**A load run's deferred script reads the same list** (0.17.2). `POST /runs` with
-`"stream": true` samples its streaming responses like any other, and the
-deferred `tests` script replays against those samples - so
+**Every run that streams reads the same list.** A post-request script sees
 `pm.response.events`, `pm.response.totalEvents` and `pm.response.eventsTruncated`
-mean there exactly what they mean in design mode, and a script written for one
-behaves the same in the other. Two differences follow from what a load sample
-is, and both are visible to the script rather than assumed:
+wherever the response it runs against was a stream, so a script written for a
+design Send behaves the same in each of these:
 
-- The list is parsed back out of the sample's stored body, bounded by the same
-  `sseMaxStoredEvents`. `totalEvents` is the count taken on the wire, so it
+- a **collection run's** streaming step (a stored request with `stream` set,
+  issue #3235), sequential or under load;
+- a **load run's** post-request script, whether it runs **inline** (marked
+  `inline`, or the run's Scripts = All inline override) on a single-request run
+  with `"stream": true` or on a collection load run's streaming step (issue
+  #3769), or **deferred**, replayed after the run against its sampled responses
+  (0.17.2).
+
+Two differences follow from where those responses come from, and both are
+visible to the script rather than assumed:
+
+- The list is parsed back out of the response's buffered body, bounded by the
+  same `sseMaxStoredEvents`. `totalEvents` is the count taken on the wire, so it
   stays truthful even where the body was cut.
-- There is no `endReason` on this path. Under load a stream ends by server close
-  or by one of the two caps, and nothing per sample records which - the run
-  report's `stream.capped` carries that fact for the run as a whole.
+- There is no `endReason` on these paths. A buffered stream ends by server
+  close or by one of the two caps, and nothing per response records which - the
+  run report's `stream.capped` carries that fact for the run as a whole.
 
-A sample that did not stream still reads `undefined`, so the `typeof` check
-above is the one guard on both paths.
+A response that did not stream still reads `undefined`, so the `typeof` check
+above is the one guard on every path.
+
+### `pm.response.mcp` - an mcp reply's failure class
+
+A request whose body mode is `mcp` is answered with one JSON object or with an
+event stream ending in the final JSON-RPC response
+([the `mcp` reply](api-reference.md#the-mcp-reply)). A script reads that reply
+**as it arrived**, on every path: `pm.response.json()` and `text()` are the
+body exactly as for any other request (the JSON object, or for a buffered event
+stream its `event:`/`data:` bytes; a streamed send keeps no bytes, so `text()`
+is `""` there as above), and the frames themselves are `pm.response.events`. It
+is the declarative elements, not scripts, that read the final response in
+place of the body. What a script adds is the engine's judgement of the reply:
+
+```javascript
+pm.test('the tool call succeeded', function () {
+    pm.expect(pm.response.mcp.errorClass).to.be.undefined;
+});
+```
+
+`pm.response.mcp` is `{}` when the call succeeded and
+`{ errorClass, code, message }` when it failed: `errorClass` is `transport`,
+`protocol` or `tool`, `code` the JSON-RPC `error.code` (absent when the reply
+carried none) and `message` the sentence the failed `MCP reply` test carries.
+It is absent for every other body mode, so `typeof pm.response.mcp` tells an
+`mcp` request apart. A load run's deferred replay reads it off the sample's
+stored bytes by the same rule.
 
 A streaming send is answered `202` before its script has run, so the results go
 to the run's trace rather than into a response body - the app's Tests and
@@ -969,7 +1003,7 @@ pre-request script sees the **composed** headers - the set it is there to edit,
 and the set the write-back applies back onto the request. A test script sees the
 **sent record**: those same headers as the transfer actually issued them, which
 means the ones the engine derives at send time are there too - the body-implied
-`Content-Type` (`json`, `graphql` and `jsonrpc` -> `application/json`, `text`
+`Content-Type` (`json`, `graphql`, `jsonrpc` and `mcp` -> `application/json`, `text`
 -> `text/plain`, `xml` -> `application/xml`, `x-www-form-urlencoded` ->
 `application/x-www-form-urlencoded`; a bodyless `POST` sends none, issue #2464)
 and the
@@ -1019,8 +1053,8 @@ pm.request.body.length       // the body string's own length
 ```
 
 `.mode` reads `raw` for every content mode without a Postman name of its own -
-`json`, `text`, `xml` and `jsonrpc` all carry their body as one string, which
-is what `raw` means.
+`json`, `text`, `xml`, `jsonrpc` and `mcp` all carry their body as one string,
+which is what `raw` means.
 
 A `binary` body - one file sent as the whole body - reads `file`, Postman's
 name for it. `.file` answers `{ name, size? }`: `name` is the file name the
@@ -1293,7 +1327,7 @@ Rules worth knowing before you rely on them:
   from `options.raw.language`, so the `Content-Type` is the one the request's
   own body type implies (`text/plain` for a body added to a request that had
   none) unless the script sets the header. The mode has to be the
-  one the body already has - a `raw` body (json, text, xml, jsonrpc) takes
+  one the body already has - a `raw` body (json, text, xml, jsonrpc, mcp) takes
   `raw`, a urlencoded body `urlencoded`, a request with no body `raw`, which it
   sends as text - because the write-back keeps a request's body mode, and
   `{ mode: 'raw' }` on a urlencoded body would otherwise be parsed back into

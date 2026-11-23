@@ -17,7 +17,7 @@
  * `{"query":"{\"merchant\":\"mrc_8813\"}"}` and switching back showed *that* in
  * the JSON editor. The original payload was gone.
  *
- * **Two buckets, not eight.** `json`, `text`, `jsonrpc` and `xml` are the same
+ * **Two buckets, not eight.** `json`, `text`, `jsonrpc`, `mcp` and `xml` are the same
  * thing - a raw string body, differing only in syntax highlighting - so carrying
  * text between them is what you want. `graphql` is a structured envelope, and
  * carrying anything into or out of it is what caused the damage. `form-data`
@@ -27,11 +27,12 @@
  * mode: `initialRequest` names each only while the stored body is that mode, so
  * a save made in JSON mode does not echo them back empty (#3665).
  *
- * `jsonrpc` and `xml` share the raw bucket rather than taking one of their own
- * because nothing on this side reads their text as a structure: JSON-RPC's
- * envelope is completed engine-side at wire time and an XML body is sent byte
- * for byte, so each pane holds one plain document that a `text` pane can show
- * unchanged. GraphQL got its own bucket for the opposite reason - its editor
+ * `jsonrpc`, `mcp` and `xml` share the raw bucket rather than taking one of
+ * their own because nothing on this side reads their text as a structure: the
+ * JSON-RPC and MCP envelopes are completed engine-side at wire time and an XML
+ * body is sent byte for byte, so each pane holds one plain document that a
+ * `text` pane can show unchanged. An MCP body's `mcpTool` is not a draft: it is
+ * its own request state (`RequestState.mcpTool`), kept across a mode switch. GraphQL got its own bucket for the opposite reason - its editor
  * state is structured, and the panes parse what they are given.
  *
  * Sharing the bucket does mean XML and JSON overwrite each other's text, which
@@ -65,7 +66,15 @@ import type { BodyMode } from "../types";
 export type DraftKey = "raw" | "graphql";
 
 export function draftKey(mode: BodyMode): DraftKey | null {
-	if (mode === "json" || mode === "text" || mode === "jsonrpc" || mode === "xml") return "raw";
+	if (
+		mode === "json" ||
+		mode === "text" ||
+		mode === "jsonrpc" ||
+		mode === "xml" ||
+		mode === "mcp"
+	) {
+		return "raw";
+	}
 	if (mode === "graphql") return "graphql";
 	// `none` sends nothing; the form modes and `binary` keep their own state
 	// (`formData`, `urlEncoded`, `binaryFile`), not a body string.

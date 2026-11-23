@@ -16,6 +16,7 @@
  * response shows the text and holds the bytes the live one did.
  */
 
+import { SSE_ACCEPT } from "@/constants/request";
 import type { ResponseState } from "../types";
 
 /** How `bodyRaw` is spelled on the wire. Absent means `"utf8"`. */
@@ -91,6 +92,12 @@ export function mediaTypeOf(contentType: string): MediaType {
 		name: base.replace(/^x-/, ""),
 		suffix: plus < 0 ? "" : subtype.slice(plus + 1),
 	};
+}
+
+/** Does this Content-Type name `text/event-stream`, in any case and with any parameters? */
+export function isEventStreamType(contentType: string): boolean {
+	const { type, subtype } = mediaTypeOf(contentType);
+	return `${type}/${subtype}` === SSE_ACCEPT;
 }
 
 /** Subtype names (after `x-`) that are text under any top-level type. */

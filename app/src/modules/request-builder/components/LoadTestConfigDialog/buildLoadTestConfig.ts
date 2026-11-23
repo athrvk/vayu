@@ -44,8 +44,8 @@ export interface LoadTestDraft {
 	carriedBudgets?: readonly string[];
 	/**
 	 * Where each still-carried fixed budget came from. Beside the key list
-	 * because the Settings p99 seed is withheld from a capacity run while a memo
-	 * or typed p99 is not (issue #2816).
+	 * because the Settings p99 seed is withheld from a capacity run or a streaming
+	 * request while a memo or typed p99 is not (issues #2816, #3772).
 	 */
 	budgetSources?: CarriedBudgets["fixed"];
 	scriptsOverride: ScriptsOverride;
@@ -97,7 +97,12 @@ function carriedInThresholds(
 
 export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 	const { profile, dataFile } = draft;
-	const budgets = budgetsToSend(draft.budgets, profile.mode, draft.budgetSources);
+	const budgets = budgetsToSend(
+		draft.budgets,
+		profile.mode,
+		draft.isStreamingRequest,
+		draft.budgetSources
+	);
 	const thresholds = buildThresholds(
 		budgets,
 		draft.failRun,

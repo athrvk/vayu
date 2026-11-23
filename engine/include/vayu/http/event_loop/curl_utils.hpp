@@ -383,8 +383,11 @@ void rewind_body_source (BodySource& source);
  *
  * The one place a driver's outbound header set is decided: the request's own
  * headers minus the suppressed, plus what the engine derives - the
- * body-implied Content-Type, and the declared defaults @p policy carries for a
- * name the request does not (see `http/default_headers.hpp`). All three
+ * body-implied Content-Type, an `mcp` body's mirrored headers
+ * (`mcp_derived_headers`, #3762), and the declared defaults @p policy carries
+ * for a name the request does not (see `http/default_headers.hpp`). A derived
+ * header is added only under a name the request does not carry and does not
+ * refuse (`suppresses_default_header`). All three
  * drivers - the single-request client, the load event loop and the SSE stream
  * consumer - call this, so none of them can disagree about what goes out.
  *

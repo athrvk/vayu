@@ -304,9 +304,9 @@ export default function LoadTestConfigDialog({
 		{ budgets: initial.budgets, customBudgets: initial.customBudgets },
 		{ budgets, customBudgets }
 	);
-	// The notice and its Clear button speak only for what this mode sends: in
-	// Capacity the Settings p99 seed is dormant, so neither names it.
-	const judgedCarried = withoutUnsentSeed(carried, profile.mode);
+	// The notice and its Clear button speak only for what this run sends: in
+	// Capacity or on a stream the Settings p99 seed is dormant, so neither names it.
+	const judgedCarried = withoutUnsentSeed(carried, profile.mode, isStreamingRequest);
 	const carriedSummary = describeCarried(
 		judgedCarried,
 		budgets,
@@ -362,7 +362,7 @@ export default function LoadTestConfigDialog({
 			saveTimingBreakdown,
 			retryAfterBackoff,
 			retryAfterMaxMs,
-			budgets: budgetsToRemember(budgets, profile.mode, carried.fixed),
+			budgets: budgetsToRemember(budgets, profile.mode, isStreamingRequest, carried.fixed),
 			budgetsFrom: budgetsOriginToSave(),
 			customBudgets,
 			failRun,

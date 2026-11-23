@@ -96,6 +96,37 @@ describe("ImportModal curl paste", () => {
 		);
 	});
 
+	it("turns shell variables into {{NAME}} on the new request and names them in the notice", async () => {
+		renderModal();
+		pasteAndDetect(`curl https://x.test/a -H "Authorization: Bearer $OPENAI_API_KEY"`);
+
+		fireEvent.click(await screen.findByRole("button", { name: /Open as new request/i }));
+
+		expect(flow.newRequest).toHaveBeenCalledWith(
+			expect.objectContaining({
+				headers: [expect.objectContaining({ value: "Bearer {{OPENAI_API_KEY}}" })],
+			})
+		);
+		expect(useToastStore.getState().toasts).toEqual([
+			expect.objectContaining({
+				title: "Imported with variables",
+				message: expect.stringContaining("{{OPENAI_API_KEY}}"),
+			}),
+		]);
+	});
+
+	it("says a dropped flag in a toast of its own beside the variables", async () => {
+		renderModal();
+		pasteAndDetect(`curl https://x.test/a -H "X-Key: $KEY" --retry 3`);
+
+		fireEvent.click(await screen.findByRole("button", { name: /Open as new request/i }));
+
+		expect(useToastStore.getState().toasts.map((t) => t.title)).toEqual([
+			"Imported with variables",
+			"Imported, minus some flags",
+		]);
+	});
+
 	it("drops the offer when the text is edited", async () => {
 		renderModal();
 		pasteAndDetect(CURL);

@@ -208,8 +208,8 @@ TEST_F (ScriptRequestBodyTest, JsonParseOfRawIsTheImportedIdiomAndRoundTrips) {
  * (Postman's `file` mode, `ABinaryBodyIsPostmansFileModeAndNeverItsPath`).
  */
 TEST_F (ScriptRequestBodyTest, EveryContentModeAnswersRaw) {
-    for (const BodyMode mode :
-    { BodyMode::Json, BodyMode::Text, BodyMode::JsonRpc, BodyMode::Xml }) {
+    for (const BodyMode mode : { BodyMode::Json, BodyMode::Text,
+         BodyMode::JsonRpc, BodyMode::Xml, BodyMode::Mcp }) {
         request.body.mode    = mode;
         request.body.content = "payload";
         expect_script_passes (R"JS(

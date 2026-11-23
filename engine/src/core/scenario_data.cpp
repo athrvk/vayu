@@ -97,7 +97,7 @@ enum class FieldContext : std::uint8_t {
 /**
  * What kind of document this request's body text is.
  *
- * `Json` and `JsonRpc` always are JSON. A `graphql` body is either shape - the
+ * `Json`, `JsonRpc` and `Mcp` always are JSON. A `graphql` body is either shape - the
  * JSON envelope or a bare GraphQL document - so it is asked, through the same
  * classifier the envelope itself uses; a bare document is *not* a JSON document
  * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
@@ -112,7 +112,8 @@ enum class FieldContext : std::uint8_t {
 FieldContext body_context (const vayu::Body& body) {
     switch (body.mode) {
     case vayu::BodyMode::Json:
-    case vayu::BodyMode::JsonRpc: return FieldContext::JsonDocument;
+    case vayu::BodyMode::JsonRpc:
+    case vayu::BodyMode::Mcp: return FieldContext::JsonDocument;
     case vayu::BodyMode::Xml: return FieldContext::XmlDocument;
     case vayu::BodyMode::GraphQL:
         return vayu::http::graphql_body_is_enveloped (body.content) ?

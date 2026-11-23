@@ -66,6 +66,13 @@ describe("which modes share a body", () => {
 		expect(draftKey("xml")).toBe("raw");
 	});
 
+	// The MCP call is one JSON text with the same engine-side completion as
+	// jsonrpc, so JSON to MCP must keep the editor's document.
+	it("puts mcp in the raw bucket, and carries a json body into it", () => {
+		expect(draftKey("mcp")).toBe("raw");
+		expect(inA("json", "mcp", JSON_BODY).body).toBe(JSON_BODY);
+	});
+
 	it.each(["none", "form-data", "x-www-form-urlencoded"] as const)(
 		"gives %s none, since it does not use request.body",
 		(mode) => {

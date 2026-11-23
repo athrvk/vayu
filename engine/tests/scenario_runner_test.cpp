@@ -415,8 +415,13 @@ class ScenarioRunnerTest : public ::testing::Test {
     }
 
     /// A request in `col_1` stored with `stream` set, as the request editor
-    /// saves one, under its own @p timeout_ms (#3235).
-    void seed_streaming_request (const std::string& id, int order, const std::string& path, int timeout_ms) {
+    /// saves one, under its own @p timeout_ms (#3235), carrying @p post_script
+    /// as its `script.post` when one is given.
+    void seed_streaming_request (const std::string& id,
+    int order,
+    const std::string& path,
+    int timeout_ms,
+    const std::string& post_script = "") {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = "col_1";
@@ -428,6 +433,12 @@ class ScenarioRunnerTest : public ::testing::Test {
         r.order         = order;
         r.created_at    = 1;
         r.updated_at    = 1;
+        if (!post_script.empty ()) {
+            r.elements = json::array (
+            { { { "id", "el_post_" + id }, { "kind", "script.post" },
+            { "enabled", true }, { "config", { { "script", post_script } } } } })
+                         .dump ();
+        }
         db_->save_request (r);
     }
 
@@ -2152,6 +2163,38 @@ TEST_F (ScenarioRunnerTest, AStoredStreamingRequestRunsAsAStreamToTheServersClos
     ASSERT_EQ (status, 200) << report.dump ();
     ASSERT_TRUE (report.contains ("stream")) << report.dump ();
     EXPECT_EQ (report["stream"]["completions"].get<size_t> (), 1u);
+}
+
+// A streaming step's post-request script reads the stream's events (#3769),
+// the same node its stored trace carries. Mutation check: drop the
+// `bind_buffered_stream_events` call in `execute_exchange`'s post-request
+// callback and the script's test fails on an undefined `pm.response.events`.
+TEST_F (ScenarioRunnerTest, AStreamingStepsPostRequestScriptReadsItsEvents) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_stream", 0, "/sse-short", /*timeout_ms=*/200, R"(
+        pm.test('events are readable', function () {
+            if (typeof pm.response.events === 'undefined') {
+                throw new Error('pm.response.events was undefined');
+            }
+            pm.expect(pm.response.events.length).to.equal(3);
+            pm.expect(pm.response.events[0].data).to.equal('tick');
+            pm.expect(pm.response.totalEvents).to.equal(3);
+            pm.expect(pm.response.eventsTruncated).to.equal(false);
+        });
+    )");
+    static_assert (ScenarioMockServer::SHORT_STREAM_EVENTS == 3,
+    "the script above asserts the fixture's event count");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    const auto& trace = traces[0];
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "passed") << trace.dump ();
+    const auto& tests = trace["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 1u) << trace.dump ();
+    EXPECT_TRUE (tests[0]["passed"].get<bool> ()) << tests[0].dump ();
 }
 
 // Either cap ends a streaming step as a pass, and the run's `stream` section

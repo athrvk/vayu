@@ -27,7 +27,7 @@ supported is listed [below](#not-yet-supported).
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.responseSize` (the body's bytes, `.size().body`), `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
-| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
+| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streamed response only, on a Send and on every run that streams, see below. **Vayu-specific** |
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
@@ -1250,15 +1250,16 @@ list is bounded by the engine's `sseMaxStoredEvents`, so a script that means to
 assert over the *whole* stream has to check `eventsTruncated` first; counting a
 prefix would otherwise report a wrong number with complete confidence.
 
-**A load run's deferred `tests` script reads the same three.** `POST /runs`
-with `"stream": true` samples its streaming responses the way it samples any
-other, and the deferred script replays against those samples - so the three
-properties mean there what they mean in design mode, with two differences. The
-list is rebuilt by reparsing the sample's stored body and is bounded by
+**Every run that streams reads the same three.** A collection run's streaming
+step, a load run's inline post-request script (marked inline, or Scripts = All
+inline) on a streamed response, and a load run's deferred `tests` script
+replayed against its sampled streams all see them, so the three properties mean
+there what they mean on a design Send, with two differences. The list is
+rebuilt by reparsing the response's buffered body and is bounded by
 `sseMaxStoredEvents`, while `totalEvents` is the count taken off the wire, so
 it stays right about a stream the stored body is only a prefix of. And there is
-no per-sample end reason: whether a stream ended by a cap is a run-level fact,
-reported once as `stream.capped`.
+no per-response end reason: whether a stream ended by a cap is a run-level
+fact, reported once as `stream.capped`.
 
 All three are **absent** on an ordinary response rather than empty, so
 `typeof pm.response.events === 'undefined'` distinguishes "not a stream" from "a

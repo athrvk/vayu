@@ -25,19 +25,26 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 
+#include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
+#include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
@@ -306,6 +313,157 @@ TEST_F (LoadReplayEventsTest, TheStoredEventsSettingBoundsWhatAReplayedScriptSee
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->passed, 1u);
+}
+
+// ---------------------------------------------------------------------------
+// An inline script on a single-request load run (#3769)
+// ---------------------------------------------------------------------------
+
+/// Serves `THREE_EVENTS` as one `text/event-stream` response and closes.
+class ThreeEventServer {
+    public:
+    ThreeEventServer () {
+        svr_.new_task_queue = vayu::tests::pooled_task_queue (4);
+        svr_.Get ("/events", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body = THREE_EVENTS;
+                if (!sink.write (body.data (), body.size ())) {
+                    return false;
+                }
+                sink.done ();
+                return true;
+            });
+        });
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+    ~ThreeEventServer () {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+    ThreeEventServer (const ThreeEventServer&)            = delete;
+    ThreeEventServer& operator= (const ThreeEventServer&) = delete;
+    ThreeEventServer (ThreeEventServer&&)                 = delete;
+    ThreeEventServer& operator= (ThreeEventServer&&)      = delete;
+
+    [[nodiscard]] std::string url () const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/events";
+    }
+
+    private:
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+};
+
+class LoadInlineEventsTest : public LoadReplayEventsTest {
+    protected:
+    void SetUp () override {
+        vayu::http::global_init ();
+        LoadReplayEventsTest::SetUp ();
+        server_ = std::make_unique<ThreeEventServer> ();
+    }
+    void TearDown () override {
+        manager_.shutdown ();
+        server_.reset ();
+        LoadReplayEventsTest::TearDown ();
+        vayu::http::global_cleanup ();
+    }
+
+    /// A streaming single-request run of @p iterations whose `script.post`
+    /// runs inline through `elements.scripts: "allInline"` (the app's
+    /// Scripts = All inline), run to its end; answers the element's tally.
+    json run_inline_post_script (const std::string& script, size_t iterations) {
+        const json config{ { "method", "GET" }, { "url", server_->url () },
+            { "mode", "iterations" }, { "iterations", iterations },
+            { "concurrency", 1 }, { "timeout", 5000 }, { "stream", true },
+            { "elements", { { "scripts", "allInline" } } },
+            { "requestElements",
+            json::array (
+            { vayu::tests::script_element_json ("el_post", "script.post", script) }) } };
+
+        const std::string run_id = "run-inline-events";
+        vayu::db::Run row;
+        row.id              = run_id;
+        row.type            = vayu::RunType::Load;
+        row.status          = vayu::RunStatus::Pending;
+        row.config_snapshot = config.dump ();
+        // Now, not a fixed instant: the prune a finished run triggers deletes
+        // a row that started before `runRetentionDays`.
+        row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        db_->create_run (row);
+        EXPECT_TRUE (manager_.start_run (run_id, config, *db_));
+
+        // `retain_run` is the worker's last act, after the summary is stored.
+        EXPECT_TRUE (vayu::tests::wait_until ([&] {
+            const auto stored = db_->get_run (run_id);
+            return stored && stored->status != vayu::RunStatus::Pending &&
+            stored->status != vayu::RunStatus::Running &&
+            manager_.get_run (run_id) == nullptr;
+        }))
+        << "the run never finished";
+
+        const auto stored = db_->get_run (run_id);
+        if (!stored || stored->summary.empty ()) {
+            ADD_FAILURE () << "the run stored no summary";
+            return json::object ();
+        }
+        const auto summary = json::parse (stored->summary);
+        for (const auto& entry : summary.value ("elements", json::array ())) {
+            if (entry.value ("id", "") == "el_post") {
+                return entry;
+            }
+        }
+        ADD_FAILURE () << "no tally for el_post: " << summary.dump ();
+        return json::object ();
+    }
+
+    vayu::core::RunManager manager_;
+    std::unique_ptr<ThreeEventServer> server_;
+};
+
+// Mutation check: drop the `bind_buffered_stream_events` call in
+// `run_request_elements_after_submission` and every submission's test fails
+// on an undefined `pm.response.events`.
+TEST_F (LoadInlineEventsTest, AnInlineScriptPostReadsTheStreamsEvents) {
+    constexpr size_t ITERATIONS = 2;
+    const auto tally            = run_inline_post_script (R"(
+        pm.test('events are readable', function () {
+            if (typeof pm.response.events === 'undefined') {
+                throw new Error('pm.response.events was undefined');
+            }
+            pm.expect(pm.response.events.length).to.equal(3);
+            pm.expect(pm.response.events[1].id).to.equal('42');
+            pm.expect(pm.response.totalEvents).to.equal(3);
+            pm.expect(pm.response.eventsTruncated).to.equal(false);
+        });
+    )",
+    ITERATIONS);
+    EXPECT_EQ (tally.value ("passed", 0u), ITERATIONS) << tally.dump ();
+    EXPECT_EQ (tally.value ("failed", 0u), 0u) << tally.dump ();
+}
+
+// The run's own `sseMaxStoredEvents` bounds what the inline script reads, as
+// it bounds the replay's. Mutation check: drop the `sse_limits` copy in
+// `RunContext`'s constructor and the script reads all three events.
+TEST_F (LoadInlineEventsTest, TheStoredEventsSettingBoundsWhatAnInlineScriptSees) {
+    set_config ("sseMaxStoredEvents", "2");
+    const auto tally = run_inline_post_script (R"(
+        pm.test('bounded and disclosed', function () {
+            pm.expect(pm.response.events.length).to.equal(2);
+            pm.expect(pm.response.totalEvents).to.equal(3);
+            pm.expect(pm.response.eventsTruncated).to.equal(true);
+        });
+    )",
+    1);
+    EXPECT_EQ (tally.value ("passed", 0u), 1u) << tally.dump ();
+    EXPECT_EQ (tally.value ("failed", 0u), 0u) << tally.dump ();
 }
 
 // ---------------------------------------------------------------------------

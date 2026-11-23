@@ -207,6 +207,10 @@ export const CAPACITY_BUDGETS_NOTE =
 export const CAPACITY_SEED_HINT =
 	"Starts from Settings › Dashboard › p99 threshold, but a Capacity discovery run does not send it. Type a value to set a p99 budget for this run.";
 
+/** The same hint on a streaming request, whose latency is the stream's whole duration (issue #3772). */
+export const STREAM_SEED_HINT =
+	"Starts from Settings › Dashboard › p99 threshold, but a streaming request does not send it. Type a value to set a p99 budget for this run.";
+
 /**
  * The first budget the engine would reject, phrased for the dialog.
  *

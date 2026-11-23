@@ -13,7 +13,7 @@
  *
  * One callout per logical group rather than per `RequestState` key: the
  * fields the editor splits a request's body across (`bodyMode`, `body`,
- * `formData`, `urlEncoded`, `binaryFile`) are one thing to a user, and a
+ * `formData`, `urlEncoded`, `binaryFile`, `mcpTool`) are one thing to a user, and a
  * separate "body" callout per field would look like a bug of its own.
  */
 
@@ -28,7 +28,10 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 	{ label: "URL", fields: ["url"] },
 	{ label: "params", fields: ["params"] },
 	{ label: "headers", fields: ["headers"] },
-	{ label: "body", fields: ["bodyMode", "body", "formData", "urlEncoded", "binaryFile"] },
+	{
+		label: "body",
+		fields: ["bodyMode", "body", "formData", "urlEncoded", "binaryFile", "mcpTool"],
+	},
 	{ label: "auth", fields: ["auth"] },
 	{ label: "the elements list", fields: ["elements"] },
 	{

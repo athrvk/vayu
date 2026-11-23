@@ -1215,6 +1215,8 @@ the plain `@theme` block of `index.css`, not `@theme inline`: `inline` would
 compile `font-mono` to the literal stack, and the override would reach nothing
 but the rules that write `var(--font-mono)` by hand.
 `app/src/constants/appearance.font-tokens.test.ts` holds the declaration there.
+`VariableInput` turns ligatures off on its `<input>` and its overlay (#3783):
+Blink mis-paints a native input after typing `//` in a ligating code face.
 
 **Reflow guarantee** (#3494). The window's minimum is 1024px and the scale
 slider reaches 200%, so the smallest layout the app promises is **512 CSS px

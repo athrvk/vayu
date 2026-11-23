@@ -3480,14 +3480,17 @@ What the body modes you are not looking at were holding. A request stores
 handed the same string to a different reader. Switching from JSON to GraphQL
 therefore read the payload as a raw query string and destroyed it.
 
-Two buckets, not eight: `json`, `text`, `jsonrpc` and `xml` are one raw string
+Two buckets, not eight: `json`, `text`, `jsonrpc`, `mcp` and `xml` are one raw string
 differing only in highlighting, so text carries between them deliberately;
 `graphql` is an envelope this side parses into two panes and keeps its own; the
 two form modes use `formData` / `urlEncoded` and `binary` uses `binaryFile`, and
-none of the three touches `body`. `jsonrpc`
-and `xml` sit in the raw bucket because nothing here reads their text as a
-structure - JSON-RPC's frame is completed engine-side at wire time and an XML
-document is sent byte for byte, so each pane holds one plain document. The rule lives in
+none of the three touches `body`. `jsonrpc`,
+`mcp` and `xml` sit in the raw bucket because nothing here reads their text as a
+structure - JSON-RPC's and MCP's frames are completed engine-side at wire time
+and an XML document is sent byte for byte, so each pane holds one plain
+document. An `mcp` body's tool is not a draft: `RequestState.mcpTool` is its own
+mergeable field (`MERGEABLE_FIELDS`, the Body group of `ExternalChangeNotice`),
+kept across a mode switch like `binaryFile`. The rule lives in
 `modules/request-builder/utils/body-drafts.ts`.
 
 Two things about it are deliberate and easy to undo by accident:

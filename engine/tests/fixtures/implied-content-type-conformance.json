@@ -9,7 +9,8 @@
     { "name": "binary with no declared type or known extension", "mode": "binary", "file": { "src": "/data/upload" }, "expected": "application/octet-stream", "panelWritesRow": false },
     { "name": "graphql is its JSON envelope", "mode": "graphql", "content": "{\"query\":\"{ me }\"}", "expected": "application/json", "panelWritesRow": true },
     { "name": "jsonrpc is its JSON envelope", "mode": "jsonrpc", "content": "{\"method\":\"ping\"}", "expected": "application/json", "panelWritesRow": true },
-    { "name": "xml", "mode": "xml", "content": "<a/>", "expected": "application/xml", "panelWritesRow": true }
+    { "name": "xml", "mode": "xml", "content": "<a/>", "expected": "application/xml", "panelWritesRow": true },
+    { "name": "mcp is its JSON envelope, the engine derives the type", "mode": "mcp", "content": "{\"method\":\"tools/list\"}", "expected": "application/json", "panelWritesRow": false }
   ],
   "cases": [
     { "name": "an empty text body has nothing to describe", "mode": "text", "content": "", "expected": "" },

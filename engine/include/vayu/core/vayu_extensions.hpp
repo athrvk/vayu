@@ -262,7 +262,9 @@ const std::string& auth_query_param);
 /// carries (a form file part's or a binary body's `src`, which a hand-edited
 /// document may hold) is kept, and is sent only once picked here or under an
 /// allowed folder (`vayu/http/file_ref.hpp`); a stated `unresolved` is
-/// dropped like any member this reader does not know.
+/// dropped like any member this reader does not know. An `mcp` body keeps its
+/// `mcpTool` (#3762); one `vayu::http::read_mcp_tool` cannot read makes the
+/// body invalid.
 [[nodiscard]] std::optional<Json> body_of (const Json& value);
 
 /// An auth object naming one of Vayu's modes, or nothing. @p collection
