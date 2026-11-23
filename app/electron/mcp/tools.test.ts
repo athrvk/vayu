@@ -8306,6 +8306,24 @@ describe("inline body bounds", () => {
 			expect(declared.filter((path) => !present.has(path))).toEqual([]);
 		});
 
+		// Mutation check: drop boundExecuteResponse from the no-runId branch of
+		// runStreamingRequest and this fails.
+		test("a streamed send answered without a runId bounds its body", async () => {
+			const bodyRaw = "x".repeat(40_000);
+			const res = await send(
+				{ stream: true },
+				fakeClient({
+					executeRequest: vi
+						.fn()
+						.mockResolvedValue({ status: 200, body: bodyRaw, bodyRaw }),
+				})
+			);
+			const out = res.structuredContent as Record<string, unknown>;
+			expect(out.bodyTruncated).toBe(true);
+			expect(out.body).toBeNull();
+			expect((out.bodyRaw as string).length).toBeLessThanOrEqual(32 * 1024);
+		});
+
 		test("the text block is the structured answer, and a link-only send keeps its caveat", async () => {
 			const res = await send({ requestId: "req_1" }, executed(exchange));
 			expect(JSON.parse(firstText(res))).toEqual(res.structuredContent);

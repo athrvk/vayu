@@ -17,6 +17,7 @@ import {
 	CAPACITY_SEED_HINT,
 	STREAM_LATENCY_NOTE,
 	STREAM_LATENCY_NOTE_AFTER,
+	STREAM_SEED_HINT,
 	budgetFieldsFor,
 	summariseBudgets,
 	type BudgetDraft,
@@ -64,10 +65,11 @@ export function BudgetsSection({
 	isStreamingRequest,
 }: BudgetsSectionProps) {
 	const [open, setOpen] = useState(false);
-	const seedUnsent = isUnsentSeed(mode, budgetSources);
+	const seedUnsent = isUnsentSeed(mode, isStreamingRequest, budgetSources);
+	const unsentSeedHint = mode === "capacity" ? CAPACITY_SEED_HINT : STREAM_SEED_HINT;
 	const hintFor = (field: BudgetField) =>
 		field.key === SLO_SEEDED_KEY && seedUnsent
-			? CAPACITY_SEED_HINT
+			? unsentSeedHint
 			: (field.seededHint ?? field.hint);
 
 	return (
@@ -76,7 +78,7 @@ export function BudgetsSection({
 			onOpenChange={setOpen}
 			title="Pass/fail budgets"
 			summary={summariseBudgets(
-				budgetsToSend(budgets, mode, budgetSources),
+				budgetsToSend(budgets, mode, isStreamingRequest, budgetSources),
 				customBudgets,
 				isStreamingRequest
 			)}

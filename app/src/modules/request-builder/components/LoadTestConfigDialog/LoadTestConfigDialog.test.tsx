@@ -1796,6 +1796,76 @@ describe("pass/fail budgets", () => {
 				expect(started(second.onStart).thresholds).toBeUndefined();
 			});
 		});
+
+		/*
+		 * A stream's latency is its whole duration, which the Dashboard's threshold
+		 * was never set against, so a streaming request withholds the seed as
+		 * Capacity does (#3772).
+		 */
+		describe("the Settings p99 seed on a streaming request (#3772)", () => {
+			beforeEach(() => useClientSettingsStore.getState().setSloThresholdMs(200));
+
+			it("sends no p99 budget, and the run reads as unconfigured", () => {
+				// Mutation check: drop the `streaming` condition in `isUnsentSeed`
+				// and this reds with thresholds { latencyP99Ms: 200 }.
+				const { onStart } = open({ isStreamingRequest: true });
+				const config = started(onStart);
+				expect(config.thresholds).toBeUndefined();
+				expect(config).not.toHaveProperty("carriedBudgets");
+			});
+
+			it("still sends the seed when the request does not stream", () => {
+				const { onStart } = open({ isStreamingRequest: false });
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 200 });
+				expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+			});
+
+			it("does not announce a prefilled budget that will not be sent", () => {
+				open({ isStreamingRequest: true });
+				expect(carriedNotice()).not.toBeInTheDocument();
+				expect(trigger()).toHaveTextContent("No budgets");
+			});
+
+			it("says so beside the field, without the capacity note", () => {
+				open({ isStreamingRequest: true });
+				openBudgets();
+				expect(p99().value).toBe("200");
+				expect(
+					screen.getByText(/a streaming request does not send it/i)
+				).toBeInTheDocument();
+				expect(screen.queryByText(/judged over the whole run/i)).not.toBeInTheDocument();
+			});
+
+			it("sends a p99 the user typed", () => {
+				const { onStart } = open({ isStreamingRequest: true });
+				openBudgets();
+				fireEvent.change(p99(), { target: { value: "90" } });
+				expect(started(onStart).thresholds).toEqual({ latencyP99Ms: 90 });
+			});
+
+			it("sends a p99 the memo carried", () => {
+				seedMemo({ budgets: { latencyP99Ms: "150" } });
+				const { onStart } = open({ isStreamingRequest: true });
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 150 });
+				expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+			});
+
+			it("does not remember the seed, so a later non-streaming run still gets it as a seed", () => {
+				const first = open({ isStreamingRequest: true });
+				started(first.onStart);
+				const memo = JSON.parse(
+					localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG) ?? "{}"
+				);
+				expect(memo.budgets).not.toHaveProperty("latencyP99Ms");
+
+				cleanup();
+				const second = open({ isStreamingRequest: false });
+				expect(carriedNotice()).toHaveTextContent("Budgets prefilled: p99 latency");
+				expect(started(second.onStart).thresholds).toEqual({ latencyP99Ms: 200 });
+			});
+		});
 	});
 
 	it("hands the saved request to each budget's Copy for agent (#2047)", () => {
