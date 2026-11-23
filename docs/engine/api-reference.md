@@ -8886,17 +8886,46 @@ post-request script read the same bytes, so `assert.contains`, `assert.size`,
 collection or load run's.
 
 The bytes are stored once (issue #657). The trace's `events` node is served as
-`{items, totalEvents, eventsTruncated, endReason}` (each item `{event, data,
-sourceId?, dataTruncated?, dataBytes?, receivedAt}`), but the list is parsed
-from the stored body when the trace is read
+`{items, totalEvents, eventsTruncated, endReason, streamText?}` (each item
+`{event, data, sourceId?, dataTruncated?, dataBytes?, text?, receivedAt}`), but
+the list is parsed from the stored body when the trace is read
 ([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
 report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
-the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`,
-one arrival time per event `sseMaxStoredEvents` kept. The served list stops at
-the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when
-either the list is shorter than `totalEvents` or the body is a prefix
-(`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`). A trace stored
-before #3770 carries its `items` and is served as stored.
+the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
+streamTextPath?}`, one arrival time per event `sseMaxStoredEvents` kept. The
+served list stops at the shorter of that and `totalEvents`, and
+`eventsTruncated` is `true` when either the list is shorter than `totalEvents`
+or the body is a prefix (`bodyCapped`, or `bodyTruncated` from
+`maxTraceBodyBytes`). A trace stored before #3770 carries its `items` and is
+served as stored.
+
+**`streamTextPath` reads the reply out of the events** (issue #3773). A
+JSONPath in the subset the [elements](elements.md#kinds) read, evaluated on each
+event's `data` parsed as JSON: `$.choices[0].delta.content` for an
+OpenAI-compatible chat completion, `$.delta.text` for an Anthropic-style
+`content_block_delta`. The engine sniffs no provider; the path is declared. An
+event's `text` is the path's **first** match, a string as it is and a number or
+boolean as its JSON text. An event carries no `text` key at all (absent, not
+`""`) when the path matches nothing (a role-only chunk, a ping), matches `null`,
+an array or an object, when its `data` is not JSON (`[DONE]`), and when it was
+cut at `sseMaxEventBytes` (`dataTruncated`), whose data is only a prefix of the
+JSON. Each relayed `message` frame carries its `text` as it arrives. The stored
+sidecar keeps the path and never the text: a read derives each item's `text`
+and the node's **`streamText`**, every event's `text` joined with nothing
+between, from the stored body. `streamText` covers every event the body holds
+up to `totalEvents`, the ones past `sseMaxStoredEvents` included, so it is the
+whole reply unless the body is a prefix (`bodyCapped` / `bodyTruncated`, which
+`eventsTruncated` also reports). With no path the node has no `streamText` and
+no item has `text`.
+
+```json
+{
+  "method": "POST",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "stream": true,
+  "streamTextPath": "$.choices[0].delta.content"
+}
+```
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
@@ -8932,7 +8961,11 @@ Refused with a **400** rather than silently reinterpreted:
 - a non-boolean `stream` (`'stream' must be a boolean`);
 - `"stream": true` with `"transient": true` - a stream **is** its run row: the
   row is what `eventsUrl` names, what carries the status, and what a stop
-  finds, and a transient execution creates none.
+  finds, and a transient execution creates none;
+- a `streamTextPath` that is not a string or not in the JSONPath subset (a
+  filter, no leading `$`), and one **without** `"stream": true`, since a
+  buffered send has no events to carry `text`. [`POST /runs`](#post-runs)
+  refuses the field on every run shape: no run binds a stream's text yet.
 
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
@@ -8944,7 +8977,9 @@ parsed from the stream's bytes, the one its stored trace is served with, as
 timers included, before anything is reported, so a live per-event callback is
 not a feature that was skipped but one the runtime cannot have. The same three
 properties reach every run that streams: a collection run's streaming step and
-a load run's post-request script, inline or deferred (issue #3769). See
+a load run's post-request script, inline or deferred (issue #3769). A Send that
+declared a `streamTextPath` also binds `pm.response.streamText`, the stored
+trace's `streamText`, and each entry's `text` (issue #3773). See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output
@@ -10241,7 +10276,9 @@ carry none of the four.
 On a single-request run, `stream` is refused beside `transient` (as on a send)
 and each cap is refused without `stream` - a cap on a non-streaming run reads
 as a bound the caller expects to apply, and ignoring it is how an unbounded run
-gets mistaken for a capped one.
+gets mistaken for a capped one. `streamTextPath` is a `400` on every run shape
+(issue #3773): no run binds an event's `text` or `pm.response.streamText`, so a
+run accepting it would promise text it never produces.
 
 **A collection run (`scenario`) streams the steps whose stored request has
 `stream` set** (#3235), and only those. The plan reads the flag off each stored
@@ -13104,6 +13141,9 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
   `sseMaxEventBytes` is stored as a prefix and says so in band, with
   `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
+  A send that declared a `streamTextPath` adds `text`, what the path read off
+  this event, and leaves it off an event the path reads nothing from; see
+  [POST /execute](#post-execute) (issue #3773).
 - `complete`'s `reason` is one of `completed`, `stopped`, `shutdown`,
   `maxStreamEvents`, `maxStreamDurationMs`, `idleTimeout`, `error`; see
   [POST /execute](#post-execute). No frame carries the exchange's `warnings`

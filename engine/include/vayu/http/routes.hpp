@@ -1814,12 +1814,15 @@ struct StreamFlag {
     /// records which caps the *caller* chose.
     std::optional<int64_t> max_duration_ms;
     std::optional<int64_t> max_events;
+    /// `streamTextPath` (#3773), already checked against the JSONPath subset;
+    /// absent when the payload named none. `POST /runs` refuses it.
+    std::optional<std::string> text_path;
 };
 
 /**
- * Read `stream`, `maxStreamDurationMs` and `maxStreamEvents` off a
- * `POST /execute` or `POST /runs` payload, and refuse the combinations that
- * cannot mean anything.
+ * Read `stream`, `maxStreamDurationMs`, `maxStreamEvents` and
+ * `streamTextPath` off a `POST /execute` or `POST /runs` payload, and refuse
+ * the combinations that cannot mean anything.
  *
  * **Both endpoints read through this one function** (issue #576), so the two
  * cannot drift on what a cap is called, what type it takes or what range it

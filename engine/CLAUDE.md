@@ -780,7 +780,11 @@ logged as a warning: it means a client skipped composition.
   event), and every reader of a stored trace (`report_result_node`,
   `attach_design_result`) serves the list parsed back from the stored body by
   `expand_stored_stream_events`, the `stream_events_node` the post-request
-  script is bound to. `POST /runs` takes `stream` too (#576) through the same
+  script is bound to. A send's `streamTextPath` (#3773) is stored in that
+  sidecar, never the text: the relay, every reader and `pm.response.streamText`
+  derive each event's `text` through `sse_event_text`, on the elements' one
+  JSONPath subset (`vayu/core/json_path.hpp`), and `POST /runs` refuses the
+  field. `POST /runs` takes `stream` too (#576) through the same
   `read_stream_flag` parser; under load a stream becomes
   `Request::stream_bounds`, the event loop ends it counting with
   `SseFrameCounter` (which agrees with `SseParser` on what an event is), and

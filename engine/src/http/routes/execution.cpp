@@ -28,6 +28,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
@@ -328,6 +329,29 @@ bool read_stream_caps (const nlohmann::json& json, StreamFlag& flag) {
     sse_limits::STREAM_EVENTS_CEILING, flag.max_events, flag);
 }
 
+/// `streamTextPath` (#3773): a string inside the JSONPath subset the elements
+/// read, refused on @p flag otherwise.
+bool read_stream_text_path (const nlohmann::json& json, StreamFlag& flag) {
+    const auto field = json.find ("streamTextPath");
+    if (field == json.end () || field->is_null ()) {
+        return true;
+    }
+    if (!field->is_string ()) {
+        flag.ok    = false;
+        flag.error = "'streamTextPath' must be a string (got " +
+        std::string (field->type_name ()) + ")";
+        return false;
+    }
+    if (auto problem = vayu::core::detail::json_path_problem (
+        json, "streamTextPath", "streamTextPath")) {
+        flag.ok    = false;
+        flag.error = std::move (*problem);
+        return false;
+    }
+    flag.text_path = field->get<std::string> ();
+    return true;
+}
+
 } // namespace
 
 /**
@@ -354,19 +378,25 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         flag.value = field->get<bool> ();
     }
 
-    if (!read_stream_caps (json, flag)) {
+    if (!read_stream_caps (json, flag) || !read_stream_text_path (json, flag)) {
         return flag;
     }
 
     // A cap on a non-streaming payload is refused too. It reads as a bound the
     // caller expects to apply, and silently ignoring it is how an unbounded run
-    // gets mistaken for a capped one.
+    // gets mistaken for a capped one. A text path likewise reads as a promise
+    // of `text` that a buffered send has no events to keep.
     if (!flag.value) {
         if (flag.max_duration_ms || flag.max_events) {
             flag.ok = false;
             flag.error =
             "'maxStreamDurationMs' and 'maxStreamEvents' apply to a "
             "streaming request only - set 'stream': true, or drop them";
+        } else if (flag.text_path) {
+            flag.ok = false;
+            flag.error =
+            "'streamTextPath' applies to a streaming request only - set "
+            "'stream': true, or drop it";
         }
         return flag;
     }
@@ -1430,6 +1460,14 @@ const vayu::core::MonitorLimits& monitor_limits) {
                "only, because a run is identified by the row it creates";
     }
 
+    // Refused rather than ignored, for the reason `transient` is: no run binds
+    // a stream's `text` or `pm.response.streamText` yet (#3773), so a caller
+    // sending it would believe in text it never gets.
+    if (config.contains ("streamTextPath") && !config["streamTextPath"].is_null ()) {
+        return "'streamTextPath' is not valid on a run - it applies to a "
+               "streaming POST /execute only";
+    }
+
     // `stream` and its caps are read through the *same* parser `POST /execute`
     // uses (issue #576): one description of how a stream is declared, so the
     // two endpoints cannot drift on the spelling, the types or the ranges. It
@@ -2378,6 +2416,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     spec.default_headers = default_headers;
     spec.max_duration_ms = send.stream.max_duration_ms;
     spec.max_events      = send.stream.max_events;
+    spec.text_path       = send.stream.text_path;
     const std::vector<vayu::http::CookieWrite> jarless_writes = attach_stream_jar (
     spec, ctx.cookie_jar, send.cookie_scope, std::move (pre_cookie_writes), jar_off);
     // Persistence stays the route's decision even though it happens on

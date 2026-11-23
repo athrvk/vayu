@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -153,12 +154,17 @@ const vayu::StreamBounds& defaults);
  */
 class SseStreamContext {
     public:
-    SseStreamContext (std::string run_id, SseLimits limits);
+    SseStreamContext (std::string run_id,
+    SseLimits limits,
+    std::optional<std::string> text_path = std::nullopt);
 
     /// The run this stream belongs to. Const after construction.
     const std::string run_id;
     /// The bounds this stream was started with. Const after construction.
     const SseLimits limits;
+    /// The request's `streamTextPath` (#3773), which the trace stores so a
+    /// reader derives the same `text` again. Const after construction.
+    const std::optional<std::string> text_path;
 
     /**
      * Publish one already-built frame body under the ring's own lock, assigning
@@ -173,8 +179,9 @@ class SseStreamContext {
     void append (const std::string& event_name, const nlohmann::json& data);
 
     /**
-     * Record one parsed upstream event: count it, publish it to the ring, and
-     * keep its arrival time for the trace while the stored cap allows.
+     * Record one parsed upstream event: count it, publish it to the ring (with
+     * its `text` when the stream declares a text path), and keep its arrival
+     * time for the trace while the stored cap allows.
      *
      * The three happen together because they are three views of one arrival and
      * every one of them is read - the count by the completion record, the ring
@@ -263,6 +270,9 @@ class SseStreamContext {
     private:
     void append_locked (std::string payload);
 
+    /// `text_path` compiled once; empty when none was declared.
+    const std::optional<std::vector<vayu::core::detail::JsonPathStep>> text_steps_;
+
     mutable std::mutex mutex_;
     std::deque<std::string> ring_;
     /// Absolute index of `ring_.front()`. Guarded by `mutex_`.
@@ -290,25 +300,40 @@ class SseStreamContext {
  * @brief What a completed design stream stores as its trace's `events` node:
  *        everything about its events that its bytes cannot say (#3770).
  *
- * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`, and no
- * list. The stream's bytes are the trace's response body, so the list is parsed
- * back from them when the trace is read (`expand_stored_stream_events`) rather
- * than stored a second time (#657). `receivedAt` holds one arrival time per
- * event the stored cap kept, which also bounds how many events the parse may
- * report; `maxEventBytes` is the per-event cap the live parser ran under, so
- * the parse back cuts an event where the live one did whatever the setting
- * says by then.
+ * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
+ * streamTextPath?}`, and no list. The stream's bytes are the trace's response
+ * body, so the list is parsed back from them when the trace is read
+ * (`expand_stored_stream_events`) rather than stored a second time (#657).
+ * `receivedAt` holds one arrival time per event the stored cap kept, which
+ * also bounds how many events the parse may report; `maxEventBytes` is the
+ * per-event cap the live parser ran under, so the parse back cuts an event
+ * where the live one did whatever the setting says by then. `streamTextPath`
+ * is the declared path (#3773), so the parse back derives each `text` and the
+ * joined `streamText` from the bytes rather than from a stored copy.
  */
 [[nodiscard]] nlohmann::json stream_trace_node (const SseStreamContext& context);
 
+/**
+ * What a declared stream text path (#3773) reads off one event: the first
+ * match of @p path in the event's `data` parsed as JSON, a string as it is and
+ * any other scalar as compact JSON. Nothing for a match that is `null`, an
+ * array or an object, for no match, for data that is not JSON (`[DONE]`, a
+ * keep-alive) and for an event the per-event cap cut, whose data is a prefix
+ * of the JSON it was.
+ */
+[[nodiscard]] std::optional<std::string> sse_event_text (const SseEvent& event,
+const std::vector<vayu::core::detail::JsonPathStep>& path);
+
 /// One parsed event in the shape every stored `items` array uses - `event`,
-/// `data`, `sourceId` when the origin sent an id, and the in-band
-/// `dataTruncated` / `dataBytes` pair when the per-event cap cut it.
+/// `data`, `sourceId` when the origin sent an id, the in-band
+/// `dataTruncated` / `dataBytes` pair when the per-event cap cut it, and
+/// `text` when @p text_path is given and `sse_event_text` reads one.
 ///
 /// No `receivedAt`: only a live consumer knows when an event arrived, and
 /// `buffered_stream_events_node` adds the one it was given. A node built from
 /// bytes nobody watched arrive says nothing rather than inventing one.
-[[nodiscard]] nlohmann::json sse_event_node (const SseEvent& event);
+[[nodiscard]] nlohmann::json sse_event_node (const SseEvent& event,
+const std::vector<vayu::core::detail::JsonPathStep>* text_path = nullptr);
 
 /**
  * @brief The `events` node for a stream whose bytes were *buffered* rather than
@@ -334,10 +359,18 @@ class SseStreamContext {
  *                        `receivedAt` of each one it kept: item `i` carries
  *                        `arrivals[i]`, and the list stops at its size in place
  *                        of `max_stored_events`. Absent for a load sample.
+ * @param text_path       A design stream's compiled `streamTextPath` (#3773):
+ *                        each item carries its `text` and the node gains
+ *                        `streamText`, every event's text joined. Null for none.
  *
  * The list never holds more than @p total_events: the body can run past the
  * last event the transfer counted, because the event cap stops the transfer
  * mid-chunk and the whole chunk was already held.
+ *
+ * `streamText` joins every event the body holds up to @p total_events, the
+ * ones past the stored-events cap included, so it is the whole reply unless
+ * the body is a prefix (@p body_complete false, which `eventsTruncated` and
+ * the trace's `bodyCapped` / `bodyTruncated` already say).
  *
  * `eventsTruncated` is the union of the two ways a reader can be looking at
  * less than the whole stream - the stored-events cap and a cut body - because
@@ -353,14 +386,16 @@ class SseStreamContext {
 const SseLimits& limits,
 int64_t total_events,
 bool body_complete,
-std::optional<std::span<const int64_t>> arrivals = std::nullopt);
+std::optional<std::span<const int64_t>> arrivals               = std::nullopt,
+const std::vector<vayu::core::detail::JsonPathStep>* text_path = nullptr);
 
 /**
  * @brief The `events` node a design stream's reader sees: the list parsed from
  *        @p body, paired with what @p stored (a `stream_trace_node`) recorded.
  *
- * `{items, totalEvents, eventsTruncated, endReason}`, each item carrying its
- * `receivedAt`. The completion pass binds it for the post-request script and
+ * `{items, totalEvents, eventsTruncated, endReason, streamText?}`, each item
+ * carrying its `receivedAt`, and its `text` when @p stored names a
+ * `streamTextPath`. The completion pass binds it for the post-request script and
  * `expand_stored_stream_events` builds it again from the stored trace, so the
  * script and every later reader parse one set of bytes by one rule.
  */
@@ -416,6 +451,9 @@ struct SseStreamRequest {
     /// Per-request caps, already validated. Absent means the configured default.
     std::optional<int64_t> max_duration_ms;
     std::optional<int64_t> max_events;
+    /// `streamTextPath` (#3773), already checked against the JSONPath subset;
+    /// absent for none.
+    std::optional<std::string> text_path;
     /// The design-mode jar this transfer reads and writes, or null to send no
     /// stored cookie and keep none - the same opt-in `ClientConfig` makes.
     CookieJar* cookie_jar = nullptr;

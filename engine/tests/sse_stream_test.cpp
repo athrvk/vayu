@@ -50,6 +50,7 @@
 #include "timed_out_after.hpp"
 #include "tls_server.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
@@ -545,6 +546,40 @@ TEST (StreamFlag, AnOutOfRangeCapIsRefused) {
 TEST (StreamFlag, ACapWithoutTheFlagIsRefused) {
     const auto flag = read_stream_flag (json{ { "maxStreamEvents", 10 } });
     EXPECT_FALSE (flag.ok);
+}
+
+TEST (StreamFlag, ReadsATextPath) {
+    const auto flag = read_stream_flag (
+    json{ { "stream", true }, { "streamTextPath", "$.choices[0].delta.content" } });
+    ASSERT_TRUE (flag.ok) << flag.error;
+    ASSERT_HAS_VALUE (flag.text_path);
+    EXPECT_EQ (*flag.text_path, "$.choices[0].delta.content");
+
+    const auto none =
+    read_stream_flag (json{ { "stream", true }, { "streamTextPath", nullptr } });
+    ASSERT_TRUE (none.ok) << none.error;
+    EXPECT_FALSE (none.text_path.has_value ());
+}
+
+// A path outside the subset the elements read, or not a string at all, is a
+// 400 naming the field, never a stream whose events silently carry no text.
+TEST (StreamFlag, ATextPathOutsideTheSubsetIsRefused) {
+    for (const json& path :
+    { json ("choices[0]"), json ("$[?(@.x)]"), json (""), json (7) }) {
+        SCOPED_TRACE (path.dump ());
+        const auto flag =
+        read_stream_flag (json{ { "stream", true }, { "streamTextPath", path } });
+        EXPECT_FALSE (flag.ok);
+        EXPECT_NE (flag.error.find ("streamTextPath"), std::string::npos)
+        << flag.error;
+    }
+}
+
+// A text path on a buffered send promises `text` no event will carry.
+TEST (StreamFlag, ATextPathWithoutTheFlagIsRefused) {
+    const auto flag = read_stream_flag (json{ { "streamTextPath", "$.delta.text" } });
+    EXPECT_FALSE (flag.ok);
+    EXPECT_NE (flag.error.find ("streamTextPath"), std::string::npos) << flag.error;
 }
 
 // ---------------------------------------------------------------------------
@@ -1261,6 +1296,115 @@ TEST (SseRing, DisclosesATruncatedEventInBand) {
 }
 
 // ---------------------------------------------------------------------------
+// The stream text path (#3773)
+// ---------------------------------------------------------------------------
+
+constexpr const char* OPENAI_CONTENT = "$.choices[0].delta.content";
+
+/// An OpenAI-compatible chat completion stream, one event per chunk: a
+/// role-only chunk, two deltas around a ping, and the `[DONE]` sentinel. The
+/// declared path reads "Hello" off it and nothing off the other three.
+std::vector<std::string> chat_completion_chunks () {
+    return { "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n", "event: ping\ndata: {}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n", "data: [DONE]\n\n" };
+}
+
+std::string chat_completion_body () {
+    const auto chunks = chat_completion_chunks ();
+    return std::accumulate (chunks.begin (), chunks.end (), std::string ());
+}
+
+struct StreamTextCase {
+    const char* name;
+    const char* path;
+    const char* data;
+    bool truncated;
+    /// Null when the event carries no `text`.
+    const char* expected;
+};
+
+constexpr auto STREAM_TEXT_CASES = std::to_array<StreamTextCase> ({
+{ "AnOpenAiDelta", OPENAI_CONTENT, R"({"choices":[{"delta":{"content":"Hel"}}]})", false, "Hel" },
+{ "ARoleOnlyChunk", OPENAI_CONTENT,
+R"({"choices":[{"delta":{"role":"assistant"}}]})", false, nullptr },
+{ "TheDoneSentinel", OPENAI_CONTENT, "[DONE]", false, nullptr },
+{ "AnAnthropicDelta", "$.delta.text", R"({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}})",
+false, "lo" },
+{ "AnEmptyString", "$.t", R"({"t":""})", false, "" },
+{ "ANumber", "$.n", R"({"n":42})", false, "42" },
+{ "ABoolean", "$.b", R"({"b":true})", false, "true" },
+{ "ANull", "$.n", R"({"n":null})", false, nullptr },
+{ "AnObject", "$.o", R"({"o":{"a":1}})", false, nullptr },
+{ "AnArray", "$.a", R"({"a":[1]})", false, nullptr },
+{ "TheFirstOfSeveralMatches", "$..content",
+R"({"a":{"content":"x"},"b":{"content":"y"}})", false, "x" },
+// `12345` cut to `123` still parses, and reads a number the server never sent.
+{ "ACutEvent", "$", "123", true, nullptr },
+});
+
+class StreamTextTest : public ::testing::TestWithParam<StreamTextCase> {};
+
+// Mutation checks: drop the `event.truncated` guard in `sse_event_text` and
+// ACutEvent reads "123"; drop the null/structured guard and AnObject reads
+// `{"a":1}`.
+TEST_P (StreamTextTest, ReadsTheFirstScalarMatchOffTheEventsJson) {
+    const auto& c   = GetParam ();
+    const auto path = vayu::core::detail::parse_json_path (c.path);
+    ASSERT_HAS_VALUE (path) << c.path;
+    vayu::http::SseEvent event;
+    event.data      = c.data;
+    event.truncated = c.truncated;
+
+    const auto text = vayu::http::sse_event_text (event, *path);
+    const auto node = vayu::http::sse_event_node (event, &*path);
+    if (c.expected == nullptr) {
+        EXPECT_FALSE (text.has_value ()) << text.value_or ("");
+        EXPECT_FALSE (node.contains ("text")) << node.dump ();
+        return;
+    }
+    ASSERT_HAS_VALUE (text);
+    EXPECT_EQ (*text, c.expected);
+    EXPECT_EQ (node.value ("text", std::string ("<absent>")), c.expected);
+}
+
+INSTANTIATE_TEST_SUITE_P (StreamText,
+StreamTextTest,
+::testing::ValuesIn (STREAM_TEXT_CASES),
+[] (const ::testing::TestParamInfo<StreamTextCase>& info) {
+    return std::string (info.param.name);
+});
+
+// The live relay carries each event's `text` as it arrives, and an event the
+// path misses carries none. Mutation check: drop the `text_path` argument to
+// `sse_event_node` in `record_event` and no frame carries `text`.
+TEST (SseConsumer, EachRelayedEventCarriesTheTextItsPathReads) {
+    StreamServer server (chat_completion_chunks ());
+    SseStreamContext context ("run_test", brisk_limits (), OPENAI_CONTENT);
+    vayu::http::consume_sse_stream (
+    spec_for (server.url ("/scripted"), brisk_limits ()), context);
+
+    const auto payloads = ring_payloads (context);
+    ASSERT_EQ (payloads.size (), 6u) << "open plus five events";
+    EXPECT_FALSE (payloads[1].contains ("text")) << payloads[1].dump ();
+    EXPECT_EQ (payloads[2].value ("text", ""), "Hel");
+    EXPECT_FALSE (payloads[3].contains ("text")) << payloads[3].dump ();
+    EXPECT_EQ (payloads[4].value ("text", ""), "lo");
+    EXPECT_FALSE (payloads[5].contains ("text")) << payloads[5].dump ();
+}
+
+TEST (SseConsumer, AStreamWithNoTextPathRelaysNoText) {
+    StreamServer server (chat_completion_chunks ());
+    SseStreamContext context ("run_test", brisk_limits ());
+    vayu::http::consume_sse_stream (
+    spec_for (server.url ("/scripted"), brisk_limits ()), context);
+
+    for (const auto& payload : ring_payloads (context)) {
+        EXPECT_FALSE (payload.contains ("text")) << payload.dump ();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The trace node
 // ---------------------------------------------------------------------------
 
@@ -1305,6 +1449,27 @@ TEST_P (SseTraceTest, StoresArrivalsUpToTheCapAndNoList) {
     EXPECT_EQ (node["maxEventBytes"], 4096);
 }
 
+// The path is stored beside the arrivals, so a reader of the stored trace
+// derives the same `text` from the bytes; a stream without one stores none.
+// Mutation check: drop `streamTextPath` from `stream_trace_node` and the first
+// expectation fails.
+TEST (SseTraceNode, StoresTheDeclaredTextPathAndNoText) {
+    SseStreamContext context ("run_test", vayu::http::SseLimits{}, OPENAI_CONTENT);
+    vayu::http::SseEvent event;
+    event.data = R"({"choices":[{"delta":{"content":"Hel"}}]})";
+    context.record_event (event);
+    context.close (SseEndReason::Completed);
+
+    const auto node = vayu::http::stream_trace_node (context);
+    EXPECT_EQ (node.value ("streamTextPath", ""), OPENAI_CONTENT) << node.dump ();
+    EXPECT_FALSE (node.contains ("streamText")) << node.dump ();
+
+    SseStreamContext bare ("run_test", vayu::http::SseLimits{});
+    bare.close (SseEndReason::Completed);
+    EXPECT_FALSE (
+    vayu::http::stream_trace_node (bare).contains ("streamTextPath"));
+}
+
 INSTANTIATE_TEST_SUITE_P (SseTrace,
 SseTraceTest,
 ::testing::ValuesIn (SSE_TRACE_CASES),
@@ -1342,6 +1507,51 @@ TEST (StoredStreamEvents, AreParsedFromTheBodyAndPairedWithTheirArrivals) {
     EXPECT_EQ (events["endReason"], "completed");
     EXPECT_FALSE (events.contains ("receivedAt"));
     EXPECT_FALSE (events.contains ("maxEventBytes"));
+}
+
+/// `stored_stream_trace` of the chat completion, its sidecar naming the
+/// OpenAI path.
+json stored_chat_completion_trace (int64_t total, std::size_t kept) {
+    auto trace = stored_stream_trace (chat_completion_body (), total, kept);
+    trace["events"]["streamTextPath"] = OPENAI_CONTENT;
+    return trace;
+}
+
+// Each `text` and the joined `streamText` are derived from the stored bytes by
+// the stored path (#3773, #3801), and a sidecar with no path derives neither.
+TEST (StoredStreamEvents, DeriveTheTextTheStoredPathReads) {
+    auto trace = stored_chat_completion_trace (5, 5);
+    vayu::http::expand_stored_stream_events (trace);
+
+    const auto& events = trace["events"];
+    ASSERT_EQ (events["items"].size (), 5u) << events.dump (2);
+    EXPECT_FALSE (events["items"][0].contains ("text"));
+    EXPECT_EQ (events["items"][1].value ("text", ""), "Hel");
+    EXPECT_FALSE (events["items"][2].contains ("text"));
+    EXPECT_EQ (events["items"][3].value ("text", ""), "lo");
+    EXPECT_EQ (events.value ("streamText", "<absent>"), "Hello");
+    EXPECT_FALSE (events.contains ("streamTextPath"));
+
+    auto bare = stored_stream_trace (chat_completion_body (), 5, 5);
+    vayu::http::expand_stored_stream_events (bare);
+    EXPECT_FALSE (bare["events"].contains ("streamText")) << bare["events"].dump (2);
+    EXPECT_FALSE (bare["events"]["items"][1].contains ("text"));
+}
+
+// `streamText` is the whole reply even when `sseMaxStoredEvents` kept two
+// events, and stops where the stream's count does, as the list does.
+// Mutation check: stop the parse at the stored cap (`read_to = cap`) in
+// `buffered_stream_events_node` and the first reads "Hel".
+TEST (StoredStreamEvents, JoinTextPastTheStoredCapButNotPastTheCount) {
+    auto capped = stored_chat_completion_trace (5, 2);
+    vayu::http::expand_stored_stream_events (capped);
+    EXPECT_EQ (capped["events"]["items"].size (), 2u);
+    EXPECT_TRUE (capped["events"]["eventsTruncated"].get<bool> ());
+    EXPECT_EQ (capped["events"].value ("streamText", "<absent>"), "Hello");
+
+    auto counted = stored_chat_completion_trace (3, 3);
+    vayu::http::expand_stored_stream_events (counted);
+    EXPECT_EQ (counted["events"].value ("streamText", "<absent>"), "Hel");
 }
 
 // The arrivals the stored cap kept bound the list, as the live stored list
@@ -2964,6 +3174,42 @@ TEST_F (StreamExecuteTest, TheServedListStopsAtTheEventsTheStreamCounted) {
     EXPECT_EQ (trace["events"]["totalEvents"], 1);
     EXPECT_EQ (trace["events"]["endReason"], "maxStreamEvents");
     EXPECT_FALSE (trace["events"]["eventsTruncated"].get<bool> ());
+}
+
+// The acceptance criterion (#3773): a Send that declares the OpenAI path gets
+// each delta as its event's `text` on the relay, the same items on the served
+// trace, and the joined reply as `streamText` there and in the post-request
+// script, past `sseMaxStoredEvents` included. Mutation checks: drop the
+// `spec.text_path` line in `run_streaming_execution` and nothing carries text;
+// drop `streamTextPath` from `stream_trace_node` and the live events keep their
+// text while the served trace and the script lose it.
+TEST_F (StreamExecuteTest, ADeclaredTextPathReachesTheRelayTheTraceAndTheScript) {
+    set_config ("sseMaxStoredEvents", "2");
+    origin_ = std::make_unique<StreamServer> (chat_completion_chunks ());
+    const auto run_id = start (
+    json{ { "streamTextPath", OPENAI_CONTENT }, { "elements", script_elements ("", R"JS(
+        pm.test('the joined reply', function () {
+            pm.expect(pm.response.streamText).to.equal('Hello');
+            pm.expect(pm.response.events[1].text).to.equal('Hel');
+        });
+    )JS") } });
+    ASSERT_FALSE (run_id.empty ());
+
+    auto trace      = served_trace_for (run_id);
+    const auto live = live_events (run_id);
+    ASSERT_EQ (live.size (), 5u);
+    EXPECT_EQ (live[1].value ("text", ""), "Hel");
+    EXPECT_EQ (live[3].value ("text", ""), "lo");
+
+    const auto& items = trace["events"]["items"];
+    ASSERT_EQ (items.size (), 2u) << trace["events"].dump (2);
+    EXPECT_EQ (items[0], live[0]);
+    EXPECT_EQ (items[1], live[1]);
+    EXPECT_EQ (trace["events"].value ("streamText", "<absent>"), "Hello");
+
+    ASSERT_EQ (trace["scripts"]["testResults"].size (), 1u) << trace.dump (2);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
+    << trace["scripts"]["testResults"][0].value ("error", "");
 }
 
 // Past `maxDesignResponseBodyBytes` the body is a prefix and says so, and the

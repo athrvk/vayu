@@ -1725,7 +1725,9 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
  * separates "not a stream" from "a stream with no events", which an empty
  * array could not. Same rule as `pm.request.body` and `pm.iterationData`.
  *
- * Entries are `{ event, id?, data, dataTruncated? }`. The stored node spells
+ * Entries are `{ event, id?, data, dataTruncated?, text? }`, and a stream that
+ * declared a `streamTextPath` (#3773) also binds `streamText`, every event's
+ * `text` joined; both are absent without one. The stored node spells
  * the upstream id `sourceId` because a relay frame id sits beside it there;
  * inside a script there is only one id to mean, so it is `id`. `id` is absent
  * when the origin sent none, rather than `""` - a script comparing ids must be
@@ -1764,6 +1766,12 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
             if (item.value ("dataTruncated", false)) {
                 JS_SetPropertyStr (ctx, entry, "dataTruncated", JS_NewBool (ctx, 1));
             }
+            if (const auto text = item.find ("text");
+            text != item.end () && text->is_string ()) {
+                const auto& value = text->get_ref<const std::string&> ();
+                JS_SetPropertyStr (ctx, entry, "text",
+                JS_NewStringLen (ctx, value.data (), value.size ()));
+            }
             JS_SetPropertyUint32 (ctx, events, index++, entry);
         }
     }
@@ -1773,6 +1781,12 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
     JS_NewInt64 (ctx, node->value ("totalEvents", static_cast<int64_t> (index))));
     JS_SetPropertyStr (ctx, response, "eventsTruncated",
     JS_NewBool (ctx, node->value ("eventsTruncated", false) ? 1 : 0));
+    if (const auto text = node->find ("streamText");
+    text != node->end () && text->is_string ()) {
+        const auto& value = text->get_ref<const std::string&> ();
+        JS_SetPropertyStr (ctx, response, "streamText",
+        JS_NewStringLen (ctx, value.data (), value.size ()));
+    }
 }
 
 // One hop's received headers in the shape `pm.response.headers` has: lower-cased

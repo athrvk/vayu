@@ -571,6 +571,20 @@ nlohmann::json collection_run_config () {
 }
 } // namespace
 
+// No run binds a stream's text (#3773), so a path on either run shape is
+// refused rather than ignored. Mutation check: drop the `streamTextPath`
+// refusal in `validate_run_config` and the streaming load run is accepted.
+TEST (RunConfigValidation, AStreamTextPathIsRejectedOnEveryRunShape) {
+    auto load              = valid_config ();
+    load["stream"]         = true;
+    load["streamTextPath"] = "$.delta.text";
+    expect_rejected (load, "streamTextPath");
+
+    auto collection              = collection_run_config ();
+    collection["streamTextPath"] = "$.delta.text";
+    expect_rejected (collection, "streamTextPath");
+}
+
 TEST (RunConfigValidation, CapsWithoutStreamAreAcceptedOnACollectionRun) {
     auto config                   = collection_run_config ();
     config["maxStreamDurationMs"] = 30000;
