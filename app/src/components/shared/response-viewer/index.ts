@@ -115,6 +115,9 @@ export {
 	// a latency the way the pane states it, instead of growing a second rule for
 	// when milliseconds become seconds.
 	formatResponseTime,
+	// Milliseconds between two epoch stamps, absent when either is unknown: the
+	// Timing tab's first event reads it beside the Events rows (#3775).
+	elapsedBetween,
 	getMonacoLanguage,
 	buildRawRequest,
 	buildRawResponse,

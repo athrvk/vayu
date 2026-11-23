@@ -31,6 +31,12 @@ export const TIMING = {
 	 */
 	RELATIVE_TIME_TICK_MS: 30_000,
 	/**
+	 * How often an open stream's elapsed clock in the status bar recomputes.
+	 * The clock reads in whole milliseconds under a second and in hundredths of
+	 * a second above it, so a tick much slower than this makes it look frozen.
+	 */
+	STREAM_CLOCK_TICK_MS: 100,
+	/**
 	 * How long the "Saved" indicator stays visible after a save.
 	 *
 	 * Read in exactly one place - the window `reportSaved` opens in

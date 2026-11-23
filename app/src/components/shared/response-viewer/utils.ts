@@ -207,6 +207,24 @@ export const SCRIPT_TIME_TIP =
 export const isReportedMs = (ms: number | undefined): ms is number =>
 	typeof ms === "number" && Number.isFinite(ms) && ms >= 0;
 
+const isReportedEpoch = (ms: number | undefined): ms is number =>
+	typeof ms === "number" && Number.isFinite(ms);
+
+/**
+ * Milliseconds from @p from to @p to, both epoch ms, or undefined when either is
+ * unknown (#3775): a load run's sampled event carries no `receivedAt`, and a
+ * stream restored in a later session has no send time. Floored at 0, because a
+ * stream's send time is stamped by the renderer when the engine's `202` lands,
+ * so a local upstream's first event can carry a `receivedAt` a few ms earlier.
+ */
+export function elapsedBetween(
+	from: number | undefined,
+	to: number | undefined
+): number | undefined {
+	if (!isReportedEpoch(from) || !isReportedEpoch(to)) return undefined;
+	return Math.max(0, to - from);
+}
+
 /**
  * A duration split into its number and its unit, so a caller can style the unit
  * separately (these are rendered smaller and in `subtle-foreground` throughout).
