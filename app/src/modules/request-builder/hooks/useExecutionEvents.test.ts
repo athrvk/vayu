@@ -54,6 +54,17 @@ describe("parseMessageFrame", () => {
 		expect(parsed).toMatchObject({ dataTruncated: true, dataBytes: 9000 });
 	});
 
+	it("keeps the text the stream text path read off the event (#3773)", () => {
+		// The frame is whitelisted field by field, so a field this list does not
+		// name never reaches the Text view.
+		expect(
+			parseMessageFrame({ event: "message", data: '{"delta":{"text":"Hi"}}', text: "Hi" })
+		).toEqual({ event: "message", data: '{"delta":{"text":"Hi"}}', text: "Hi" });
+		// An event the path missed has no `text`; one that is not a string is no text.
+		expect(parseMessageFrame({ event: "ping", data: "{}" })).not.toHaveProperty("text");
+		expect(parseMessageFrame({ event: "m", data: "{}", text: 3 })).not.toHaveProperty("text");
+	});
+
 	it("keeps an event whose data is genuinely empty", () => {
 		// `""` is a payload the origin sent, not a missing one.
 		expect(parseMessageFrame({ event: "ping", data: "" })).toEqual({

@@ -795,3 +795,56 @@ export function NumberSettingRow({
 		</div>
 	);
 }
+
+interface TextSettingRowProps {
+	label: string;
+	value: string;
+	onChange: (value: string) => void;
+	placeholder?: string;
+	description?: ReactNode;
+	/** A value that is code rather than prose (a path, a pattern). */
+	monospace?: boolean;
+	/** Rendered between the field and its description - a row of presets for it. */
+	children?: ReactNode;
+}
+
+/**
+ * The free-text row: label, field, optional shortcuts, description.
+ *
+ * The sibling of {@link NumberSettingRow} for a value with no parse step, so
+ * every keystroke is the value and there is no draft to hold. The field fills
+ * a `max-w-md` track: a path is the longest thing a row here has held.
+ */
+export function TextSettingRow({
+	label,
+	value,
+	onChange,
+	placeholder,
+	description,
+	monospace = false,
+	children,
+}: TextSettingRowProps) {
+	const inputId = useId();
+	const descriptionId = `${inputId}-description`;
+	return (
+		<div className="space-y-1.5" data-setting-row={label}>
+			<Label htmlFor={inputId} className="text-sm font-medium">
+				{label}
+			</Label>
+			<Input
+				id={inputId}
+				value={value}
+				placeholder={placeholder}
+				onChange={(e) => onChange(e.target.value)}
+				className={cn("max-w-md", monospace && "font-mono")}
+				aria-describedby={description ? descriptionId : undefined}
+			/>
+			{children}
+			{description && (
+				<p id={descriptionId} className="text-xs text-muted-foreground">
+					{description}
+				</p>
+			)}
+		</div>
+	);
+}

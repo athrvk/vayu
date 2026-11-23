@@ -1769,6 +1769,27 @@ Send does not - and only the last two steps differ:
    the record from then on. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
 
+**The stream text path** (issue #3773) is the request's declared JSONPath for
+the reply inside each event's JSON `data` (`$.choices[0].delta.content`,
+`$.delta.text`). It is stored (`requests.stream_text_path`; `streamTextPath` on
+`POST`/`PUT /requests`, where `null` clears and an absent key keeps), held in
+the editor as a string (empty is none) and sent on the wire only beside
+`stream: true`. An inline `POST /compose` carries no path, so `streamTextPathOf`
+(`utils/execute-mapping.ts`) adds it to the streaming `POST /execute` and to
+the load run's `POST /runs` payload, from the request and never the load
+dialog; the buffered execute never carries one, and an empty or blank field is
+left off. The engine refuses a path outside the JSONPath subset, or one beside
+a buffered request, with a `400` that names `streamTextPath`; the streaming
+Send shows it in the pane and as a toast like any other refusal. Turning
+Event stream off empties the field (`streamPatch`) so a save never pairs a path
+with a buffered request. What the path reads comes back as `text` on each
+relayed `message` frame and each stored item, and as `streamText` on the stored
+`events` node, joined over every stored event (past the stored-items cap) and
+present only when a path was declared; a captured load sample carries both the
+same way. The renderer joins live `text` itself in `execution-events-store`
+(`streamText`), and `restore-response.ts` carries the stored string, which wins
+at the swap.
+
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the
 dashboard's, and deliberately never reconnects. This one owns its retry, for

@@ -157,6 +157,7 @@ const DRAFT: RequestState = {
 	disabledSystemHeaders: [],
 	disableUrlEncoding: true,
 	stream: false,
+	streamTextPath: "",
 };
 
 beforeEach(() => {

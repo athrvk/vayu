@@ -280,6 +280,23 @@ export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHea
 }
 
 /**
+ * The stream text path a streaming send or load run declares (issue #3773), as
+ * the wire field - or nothing at all.
+ *
+ * It rides beside the composed payload rather than through composition: an
+ * inline compose carries no path, only a by-id one reads the stored row's.
+ * Absent when the request does not stream (the engine refuses a path on a
+ * buffered send, and the editor's field is hidden then) and when the field is
+ * empty or blank, so a request that declares none sends what it always sent.
+ */
+export function streamTextPathOf(request: Pick<RequestState, "stream" | "streamTextPath">): {
+	streamTextPath?: string;
+} {
+	const path = request.streamTextPath.trim();
+	return request.stream && path ? { streamTextPath: path } : {};
+}
+
+/**
  * The string the pane's `body` holds, given the text the server sent: that text
  * indented when it is JSON (`lib/json-format.ts`), else as received.
  *

@@ -23,6 +23,7 @@ import {
 	protocolSettings,
 	responseCodeOfFailure,
 	responseFromExecuteResult,
+	streamTextPathOf,
 	toBodyPayload,
 } from "./execute-mapping";
 import { ApiError } from "@/services/http-client";
@@ -670,6 +671,32 @@ describe("protocolSettings (#1765)", () => {
 		};
 		expect(protocolSettings(request).disabledSystemHeaders).toEqual(["accept"]);
 		expect(disabledDefaults(request)).toEqual({ disabledDefaultHeaders: ["User-Agent"] });
+	});
+});
+
+// The stream text path (#3773) rides beside the composed payload, and only
+// for a request that streams. Mutation check: drop the `request.stream` gate
+// and the buffered case sends a path the engine refuses with a 400; drop the
+// trim and the blank case sends `"   "`.
+describe("streamTextPathOf", () => {
+	const OPENAI = "$.choices[0].delta.content";
+
+	it("states the path of a streaming request", () => {
+		const request = { stream: true, streamTextPath: OPENAI };
+		expect(streamTextPathOf(request)).toEqual({ streamTextPath: OPENAI });
+	});
+
+	it("states nothing for a request that does not stream, whatever the draft holds", () => {
+		const request = { stream: false, streamTextPath: OPENAI };
+		expect(streamTextPathOf(request)).toEqual({});
+	});
+
+	it("states nothing for an empty or blank field, and trims a padded one", () => {
+		expect(streamTextPathOf({ stream: true, streamTextPath: "" })).toEqual({});
+		expect(streamTextPathOf({ stream: true, streamTextPath: "   " })).toEqual({});
+		expect(streamTextPathOf({ stream: true, streamTextPath: ` ${OPENAI} ` })).toEqual({
+			streamTextPath: OPENAI,
+		});
 	});
 });
 

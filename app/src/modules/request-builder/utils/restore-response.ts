@@ -87,7 +87,10 @@ export function timingFromTrace(
  */
 export function eventsFromTrace(
 	trace: NonNullable<RunResultSample["trace"]>
-): Pick<ResponseState, "events" | "totalEvents" | "eventsTruncated" | "streamEndReason"> {
+): Pick<
+	ResponseState,
+	"events" | "totalEvents" | "eventsTruncated" | "streamEndReason" | "streamText"
+> {
 	const node = trace.events;
 	if (!node) return {};
 
@@ -100,6 +103,9 @@ export function eventsFromTrace(
 		// gets no termination banner, which is honest. Every node the current
 		// engine writes carries one.
 		...(node.endReason && { streamEndReason: node.endReason }),
+		// The engine joins it over every stored event, past the item cap, so it
+		// wins over concatenating `items` - which stops where the cap did.
+		...(typeof node.streamText === "string" && { streamText: node.streamText }),
 	};
 }
 

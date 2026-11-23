@@ -95,6 +95,22 @@ describe("execution events store", () => {
 		expect(useExecutionEventsStore.getState().events).toBe(afterSecond);
 	});
 
+	it("joins the text of every event into one string, skipping those without (#3773)", () => {
+		// Mutation check: drop the concatenation in `addEvents` and this reads "".
+		start("run_1");
+		const withText = (text: string): StreamEvent => ({ event: "message", data: "{}", text });
+		useExecutionEventsStore.getState().addEvents("run_1", [withText("Hel"), event("ping")]);
+		useExecutionEventsStore.getState().addEvents("run_1", [withText("lo")]);
+
+		expect(useExecutionEventsStore.getState().streamText).toBe("Hello");
+
+		// Another run's batch is not this stream's reply, and a new stream starts empty.
+		useExecutionEventsStore.getState().addEvents("run_2", [withText("stranger")]);
+		expect(useExecutionEventsStore.getState().streamText).toBe("Hello");
+		start("run_3");
+		expect(useExecutionEventsStore.getState().streamText).toBe("");
+	});
+
 	it("drops an event addressed to a run it is not holding", () => {
 		start("run_2");
 		useExecutionEventsStore.getState().addEvents("run_1", [event("from the old socket")]);

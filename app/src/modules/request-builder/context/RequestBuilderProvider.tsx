@@ -120,6 +120,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"disabledSystemHeaders",
 	"disableUrlEncoding",
 	"stream",
+	"streamTextPath",
 ];
 
 /**

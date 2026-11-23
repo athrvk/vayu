@@ -229,6 +229,9 @@ export class RequestTransformer {
 			// Event stream: same rule as the redirect policy - a row stored
 			// before this column existed reads as `false`, which is what it was.
 			stream: typeof raw.stream === "boolean" ? raw.stream : DEFAULT_STREAM,
+			// Its text path (#3773): a row older than the column reads as none,
+			// which is what the engine serializes for one too.
+			streamTextPath: typeof raw.streamTextPath === "string" ? raw.streamTextPath : null,
 			// Postman's protocol switches (issue #1765): same rule, a row stored
 			// before the columns existed reads as what it did - jar on, URL
 			// encoded, no automatic header suppressed.

@@ -154,6 +154,20 @@ describe("streamPatch", () => {
 		expect(off.headers).toEqual([row("r1", "X-Trace", "1")]);
 	});
 
+	// The engine refuses a text path beside a buffered request (#3773), so the
+	// toggle that ends the stream ends the path. Mutation check: drop the branch
+	// and the first case has no `streamTextPath` key.
+	it("empties a declared text path when the stream goes off, and leaves none alone", () => {
+		const path = "$.delta.text";
+		expect(streamPatch({ headers: [], streamTextPath: path }, false).streamTextPath).toBe("");
+		expect(streamPatch({ headers: [], streamTextPath: path }, true)).not.toHaveProperty(
+			"streamTextPath"
+		);
+		expect(streamPatch({ headers: [], streamTextPath: "" }, false)).not.toHaveProperty(
+			"streamTextPath"
+		);
+	});
+
 	it("keeps an Accept the user wrote, on and off", () => {
 		const theirs = [row("r1", "Accept", "application/json")];
 

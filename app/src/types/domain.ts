@@ -1064,6 +1064,13 @@ export interface Request {
 	 */
 	stream: boolean;
 	/**
+	 * The JSONPath each event's JSON `data` is read through for the reply's text
+	 * (issue #3773), such as `$.choices[0].delta.content`. Meaningful only
+	 * beside {@link stream}: the engine refuses one on a request that does not
+	 * stream. `null` (or absent, on a row older than the column) is none.
+	 */
+	streamTextPath?: string | null;
+	/**
 	 * Which saved example a mock server answers with (issue #481 phase 3).
 	 * Always present, unlike `mockExampleId` - a request stored before this
 	 * column existed reads back `"first"`, which is what it always served.
@@ -1554,6 +1561,14 @@ export interface StreamEvent {
 	receivedAt?: number;
 	dataTruncated?: boolean;
 	dataBytes?: number;
+	/**
+	 * What the request's `streamTextPath` read off this event's JSON `data`
+	 * (issue #3773). Absent, not `""`, when no path was declared, the path
+	 * matched nothing here (a role-only chunk, a ping), or the event was cut
+	 * (`dataTruncated`). The renderer never derives it: the app declares no
+	 * provider shape, the engine evaluates the path.
+	 */
+	text?: string;
 }
 
 /**
@@ -1589,6 +1604,14 @@ export interface RunResultStreamEvents {
 	totalEvents: number;
 	eventsTruncated: boolean;
 	endReason: StreamEndReason;
+	/**
+	 * Every event's `text` joined with nothing between, over **all** events the
+	 * stored body holds - the ones past the stored-items cap included, which
+	 * `items` has dropped (issue #3773). Present only when the request declared
+	 * a `streamTextPath`, `""` when it did and nothing matched. It is the whole
+	 * reply unless `eventsTruncated` is set by a cut body.
+	 */
+	streamText?: string;
 }
 
 /**
