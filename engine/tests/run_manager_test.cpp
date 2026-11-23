@@ -1558,9 +1558,9 @@ TEST (LoadStream, OnlyTheRepliesThatAnnouncedAStreamAreTheReportsStreams) {
 // `/sse-ticks` (one event a write, SSE_TICK_MS apart) and the event cap ends
 // it at its third, so every completion has gaps and a rate. Asserted as wired,
 // not timed: `APauseBetweenEventsIsTheStreamsLargestGap` holds the timing.
-// Mutation check: record a completion without `stream_completion_of` in
-// `handle_result` (load_strategy.cpp, gap and rate dropped) and both blocks
-// are absent.
+// Mutation check: drop `event_rate` from `stream_completion_of`
+// (metrics_collector.cpp), the reading `handle_result` records, and the
+// `eventRate` block is absent.
 TEST (LoadStream, ASingleRequestRunsStreamsReportTheirLargestGapAndRate) {
     constexpr int ITERATIONS  = 2;
     const std::string db_path = "test_load_stream_pace.db";

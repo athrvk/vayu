@@ -2161,8 +2161,8 @@ TEST_F (ScenarioRunnerTest, AStoredStreamingRequestRunsAsAStreamToTheServersClos
     // The sequential path's completion carries the pace too (#3776): three
     // events in three writes, so one gap and one rate. Asserted as wired, not
     // timed; `APauseBetweenEventsIsTheStreamsLargestGap` holds the timing.
-    // Mutation check: record a completion without `stream_completion_of` in
-    // `scenario_runner.cpp` (gap and rate dropped) and both blocks are absent.
+    // Mutation check: drop `event_rate` from `stream_completion_of`
+    // (metrics_collector.cpp) and the `eventRate` block is absent.
     ASSERT_TRUE (stream.contains ("maxEventGap")) << stream.dump ();
     EXPECT_EQ (stream["maxEventGap"]["count"].get<size_t> (), 1u);
     ASSERT_TRUE (stream.contains ("eventRate")) << stream.dump ();

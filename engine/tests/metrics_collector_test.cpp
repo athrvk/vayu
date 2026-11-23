@@ -2419,9 +2419,8 @@ TEST_F (MetricsCollectorTest, StreamTimeToFirstEventIsEmptyWhenNoStreamWasTimed)
 // The largest gap and the event rate (#3776) are distributions over the
 // completions that measured them, and a stream with one write measured
 // neither, so it stays out of both rather than reading as a 0. Mutation
-// checks: record `max_event_gap_ms.value_or (0)` unconditionally and the gap
-// count reads 3; read the rate histogram without `stream_rate_read` and p50
-// reads a thousand times too high.
+// check: record `max_event_gap_ms.value_or (0)` unconditionally and the gap
+// count reads 3.
 TEST_F (MetricsCollectorTest, StreamGapAndRateCountOnlyTheCompletionsThatMeasuredThem) {
     collector->record_stream_completion (
     { .events = 40, .max_event_gap_ms = 310.0, .event_rate = 40.0 });
@@ -2443,9 +2442,11 @@ TEST_F (MetricsCollectorTest, StreamGapAndRateCountOnlyTheCompletionsThatMeasure
 
 // The rate is a scaled integer in its histogram, so a slow stream keeps its
 // decimals and a runaway one (two writes a microsecond apart) is clamped into
-// the top bucket rather than refused. Mutation checks: drop the scale from
-// `stream_rate_recorded` and the slow rate reads 0; drop the clamp and the
-// count reads 1.
+// the top bucket rather than refused. The slow rate is held to half the
+// scale's resolution, which is what tells the offset was taken off. Mutation
+// checks: drop the scale from `stream_rate_recorded` and the slow rate reads
+// 0; read the histogram without `stream_rate_read` and it reads 0.018; drop
+// the clamp and the count reads 1.
 TEST_F (MetricsCollectorTest, StreamEventRateKeepsASlowStreamAndClampsARunawayOne) {
     constexpr double ONE_A_MINUTE = 1.0 / 60.0;
     collector->record_stream_completion (
@@ -2456,7 +2457,7 @@ TEST_F (MetricsCollectorTest, StreamEventRateKeepsASlowStreamAndClampsARunawayOn
     const auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
     EXPECT_EQ (totals->event_rate.count, 2u);
-    EXPECT_NEAR (totals->event_rate.min, ONE_A_MINUTE, 0.001);
+    EXPECT_NEAR (totals->event_rate.min, ONE_A_MINUTE, 0.0005);
     const double ceiling =
     static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_EVENT_RATE - 1) /
     constants::metrics_collector::STREAM_EVENT_RATE_SCALE;
