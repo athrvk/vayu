@@ -77,7 +77,9 @@ namespace vayu::db {
  *     `idx_requests_deleted_at` (#3006) joins it too;
  * 10 - `spec_declined_operations`, the operations a person declined by
  *     deleting their request (#3031);
- * 11 - `runs.outcome` (#3547).
+ * 11 - `runs.outcome` (#3547); `requests.stream_text_path` and
+ *     `result_bodies.stream_text_path` (#3773), folded into the same
+ *     unreleased version.
  */
 inline constexpr int SCHEMA_VERSION = 11;
 

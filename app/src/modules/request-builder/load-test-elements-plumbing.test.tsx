@@ -143,6 +143,7 @@ const REQUEST: RequestState = {
 	disabledSystemHeaders: [],
 	disableUrlEncoding: false,
 	stream: false,
+	streamTextPath: "",
 };
 
 function renderBuilder() {

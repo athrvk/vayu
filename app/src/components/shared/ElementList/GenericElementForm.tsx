@@ -62,6 +62,7 @@ import {
 	ICON_MOTION,
 	Input,
 	Label,
+	Textarea,
 	TooltipIconButton,
 } from "@/components/ui";
 import { FieldError } from "@/components/shared/FieldError";
@@ -138,9 +139,9 @@ function parseJsonValue(text: string): unknown {
  * string round-trips instead of being reinterpreted as a number on the next
  * edit.
  */
-function jsonValueText(value: unknown): string {
+function jsonValueText(value: unknown, indent = false): string {
 	if (value === undefined) return "";
-	if (typeof value !== "string") return JSON.stringify(value);
+	if (typeof value !== "string") return JSON.stringify(value, null, indent ? 2 : undefined);
 	return parseJson(value).ok ? JSON.stringify(value) : value;
 }
 
@@ -524,35 +525,50 @@ function StringMapField({
  * outside replaces the draft unless the draft already reads as that value.
  * Nothing is written until the user types, so loading an element never
  * rewrites it.
+ *
+ * **`multiline` is for a value that is a document, not a word** - an
+ * `assert.jsonschema` schema runs to dozens of lines, which a one-line input
+ * shows as a scrolling strip. It swaps in a resizable monospace textarea and
+ * lays a stored object out indented; what is stored is parsed from the text
+ * exactly as before.
  */
-function JsonValueField({
+export function JsonValueField({
 	label,
 	hint,
 	value,
 	error,
 	variables,
+	multiline = false,
 	onChange,
 }: {
 	label: string;
 	hint: string | undefined;
 	value: unknown;
 	error: string | undefined;
-	variables: VariableSupport | undefined;
+	variables?: VariableSupport;
+	multiline?: boolean;
 	onChange: (value: unknown) => void;
 }) {
 	const inputId = useId();
 	const kindId = useId();
 	const errorId = useId();
 	const storedText = jsonValueText(value);
-	const [draft, setDraft] = useState(storedText);
+	const [draft, setDraft] = useState(jsonValueText(value, multiline));
 	const [seenText, setSeenText] = useState(storedText);
 
 	if (storedText !== seenText) {
 		setSeenText(storedText);
-		if (jsonValueText(parseJsonValue(draft)) !== storedText) setDraft(storedText);
+		if (jsonValueText(parseJsonValue(draft)) !== storedText) {
+			setDraft(jsonValueText(value, multiline));
+		}
 	}
 
 	const kind = jsonKindName(parseJsonValue(draft));
+	const describedByIds = describedBy(error && errorId, kind && kindId);
+	const edit = (text: string) => {
+		setDraft(text);
+		onChange(parseJsonValue(text));
+	};
 
 	return (
 		<div className="space-y-1">
@@ -560,18 +576,30 @@ function JsonValueField({
 				{label}
 			</Label>
 			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-			<TextEntry
-				id={inputId}
-				label={label}
-				value={draft}
-				invalid={Boolean(error)}
-				describedBy={describedBy(error && errorId, kind && kindId)}
-				variables={variables}
-				onChange={(text) => {
-					setDraft(text);
-					onChange(parseJsonValue(text));
-				}}
-			/>
+			{multiline ? (
+				<Textarea
+					id={inputId}
+					rows={10}
+					value={draft}
+					className={cn(
+						"min-h-32 resize-y px-2 py-1 font-mono text-xs",
+						error && "border-destructive"
+					)}
+					aria-invalid={error ? true : undefined}
+					aria-describedby={describedByIds}
+					onChange={(e) => edit(e.target.value)}
+				/>
+			) : (
+				<TextEntry
+					id={inputId}
+					label={label}
+					value={draft}
+					invalid={Boolean(error)}
+					describedBy={describedByIds}
+					variables={variables}
+					onChange={edit}
+				/>
+			)}
 			<FieldError id={errorId}>{error}</FieldError>
 			{kind && (
 				<p id={kindId} className="text-xs text-muted-foreground">

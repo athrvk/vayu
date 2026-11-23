@@ -892,7 +892,7 @@ a stored `mcpTool`, no `Mcp-Param-*` header is sent. `name` must be a non-empty
 string, `inputSchema` (optional) an object, and every annotation a header-name
 token unique without regard to case: anything else is a `400` where it is
 written (`POST`/`PUT /requests`, `POST /import/apply`) and where it is sent. A
-body of another mode keeps an `mcpTool` it carries unread. An `x-vayu-request`
+body of another mode keeps an `mcpTool` it carries unread. An `outputSchema` member (#3806) is stored with the tool and never read by a send: the builder reads it to prefill an `assert.jsonschema` element. An `x-vayu-request`
 export carries it and its import reads it back; a Postman export cannot carry
 it (counted under `mcp_bodies`).
 
@@ -918,9 +918,11 @@ arrive, so an event cut at `sseMaxEventBytes` cannot be read, and the failure
 says so.
 
 **What reads it.** The element pipeline reads the final response in place of
-the body, so `assert.jsonpath`, `assert.contains`, `assert.size`,
-`extract.json`, `extract.regex` and `extract.boundary` address
-`$.result.content[0].text` whatever shape the reply took. Everything else keeps
+the body, so `assert.jsonpath`, `assert.jsonschema`, `assert.contains`,
+`assert.size`, `extract.json`, `extract.regex` and `extract.boundary` address
+`$.result.content[0].text` whatever shape the reply took; an `assert.jsonschema`
+with `source: "jsonpath"` and `path: "$.result.structuredContent"` holds a
+tool's structured result to a JSON Schema. Everything else keeps
 the raw reply: the stored and live `body`, `pm.response.text()` and `json()`,
 `pm.response.events` and the Events view. A reply with no final response
 leaves the elements the raw body.
@@ -1393,7 +1395,7 @@ governs what a run measures rather than what it keeps:
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from any of that run's scripts (inline step scripts, `script.setup` / `script.teardown`, the deferred `tests` script) may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts (a collection run's setup and teardown scripts included) may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
-| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json` or `assert.jsonpath` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all, instead of paying for - or failing on - a parse of an oversized body, and the step does not pass on it: an `assert.jsonpath` fails and a `required` `extract.json` fails the step, both with the reason, while an optional `extract.json` reports `skipped` with it. A body that parses but nests deeper than 100 levels is unreadable the same way, whatever its size, as is one that is not JSON; that depth is fixed, not a setting. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
+| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json`, `assert.jsonpath` or `assert.jsonschema` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all, instead of paying for - or failing on - a parse of an oversized body, and the step does not pass on it: an `assert.jsonpath` or `assert.jsonschema` fails and a `required` `extract.json` fails the step, both with the reason, while an optional `extract.json` reports `skipped` with it. A body that parses but nests deeper than 100 levels is unreadable the same way, whatever its size, as is one that is not JSON; that depth is fixed, not a setting. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
@@ -2216,6 +2218,7 @@ field whole, however large.
     "httpVersion": "auto",
     "verifySSL": true,
     "stream": false,
+    "streamTextPath": null,
     "disableCookies": false,
     "disabledSystemHeaders": [],
     "disableUrlEncoding": false,
@@ -2231,6 +2234,9 @@ the request's stored execution options. They are always present in the response:
 a request saved before these columns existed reads back as the engine defaults
 (`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
 had.
+`streamTextPath` is the JSONPath a stream's events are read through for its
+reply's text (issue #3773), always present, `null` when the request declares
+none - see [POST /requests](#post-requests).
 `timeout` is the request's own timeout in milliseconds (issue #2937), always
 present on a stored-row response (`GET /requests`, `GET /requests/:id` and the
 `POST` / `PUT` answers): a number, or `null` when the request states none and sends with
@@ -2276,6 +2282,7 @@ list entry, with its `ETag` (`W/"<updatedAt>"`, see
   "httpVersion": "auto",
   "verifySSL": true,
   "stream": false,
+  "streamTextPath": null,
   "createdAt": 1234567890,
   "updatedAt": 1234567890
 }
@@ -2318,6 +2325,8 @@ the null-vs-absent rule.
   "verifySSL": true,                 // Optional, verify the TLS certificate. Default true
   "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
+  "streamTextPath": null,            // Optional, the JSONPath each event's text is read
+                                      // through; needs "stream": true - see below
   "specOperation": null,             // Optional, which spec operation this request is - see below
   "methodSource": null,              // Optional, which app setting wrote `method` - see below
   "mockResponseMode": "first",       // Optional: "first" | "fixed" | "random". Default "first"
@@ -2383,8 +2392,23 @@ included.
 a property of the endpoint rather than of one send, so the app's Event stream
 toggle persists here and a bulk import carries it. The engine never acts on the
 stored value by itself: `POST /execute` reads the flag off the payload it is
-given, and the by-id compose path deliberately does not add it, so an existing
-caller that composes by id keeps getting a buffered send.
+given, which a by-id [`POST /compose`](#post-compose) always fills from this
+column (issue #3561).
+
+**`streamTextPath` is the saved half of [`POST /execute`'s
+`streamTextPath`](#post-execute)** (issue #3773): the JSONPath, in the subset
+the elements read, that each event's JSON `data` is read through for the
+reply's text, such as `$.choices[0].delta.content` (OpenAI-compatible) or
+`$.delta.text` (Anthropic-style). A value that is not a string or not in the
+subset is a `400`, and so is a path stated on a request that does not stream
+once the write lands (here, on `PUT` and in `POST /import/apply`): it reads as
+text the request will not produce. A `PUT` that only switches `stream` off
+keeps the stored path, which nothing reads until the stream is switched on
+again; `null` clears it. A by-id [`POST /compose`](#post-compose) carries it
+beside `stream: true` only, and a collection run's streaming step reads its
+events through it ([`POST /runs`](#post-runs)). An OpenAPI export carries it in
+`x-vayu-request.settings` beside `stream`; a Postman export lists it under
+`notCarried` (`event_stream`).
 
 **`timeout` is the saved half of [`POST /execute`'s `timeout`](#post-execute)**
 (issue #2937): one slow endpoint can wait longer, or a fast one fail sooner,
@@ -2586,7 +2610,10 @@ pattern RE2 does not compile (`'pattern' is not a valid regular expression -
 <reason>`, likewise `'regex'` and `'text'`, #3043), an `assert.status` with
 neither a non-empty `in` nor a `range`, an `assert.jsonpath` with none of
 `expected`, `regex` or `exists`, and one that sets `exists` beside `expected` or
-`regex` (#3049), and what the engine would otherwise accept and ignore (#3055): a
+`regex` (#3049), an `assert.jsonschema` whose `schema` is not an object or a
+boolean, whose `source` is `jsonpath` with no `path` (or a `path` beside any other
+`source`), or whose `schema` refers to itself without describing any value
+(#3806), and what the engine would otherwise accept and ignore (#3055): a
 `control.throughput` naming neither or both of `percent` and `everyN`, a
 `timer.think` with no `ms`, `gaussian` or `minMs` + `maxMs` pair, an
 `assert.contains` with an empty `text` in `contains` mode, and an `extract.*`
@@ -2708,7 +2735,7 @@ Every property of every kind's `configSchema` carries a `title` and a `descripti
 or `x-vayu-unit` (`"ms"`, `"%"` or `"B"`, a numeric suffix to render) - see
 [Elements](elements.md#schema-annotations). A property the engine gives a value when its key is
 absent also carries `default` (issue #3045), taken from the constant the kind reads - `assert.size`
-`op` is `"lte"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput`
+`op` is `"lte"`, `assert.jsonschema` `source` is `"body"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput`
 `perUser` are `true`, `timer.throughput` `perUser` is `false`. An absent key means that default; a
 client shows it without writing the key.
 
@@ -5290,7 +5317,7 @@ was before these rules.
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
-| `event_stream` | A request consumed as an event stream |
+| `event_stream` | A request consumed as an event stream, or one storing a `streamTextPath` |
 | `request_timeout` | A request with a timeout of its own (Postman has only an app-wide one) |
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
@@ -8120,7 +8147,11 @@ never re-resolved - see [POST /execute](#post-execute) and
   sends with the `defaultTimeout` setting in force at the send, issue #2937),
   its Event stream setting as `stream`, always emitted (issue #3561: a caller
   that hands the payload to `POST /execute` gets `202 {runId, eventsUrl}` for a
-  streaming request unless it states `stream` itself) and
+  streaming request unless it states `stream` itself), its stored
+  `streamTextPath` beside a `stream: true` only (issue #3773: never beside a
+  buffered send, which `POST /execute` refuses, so a request whose stream is
+  off composes none, and an inline `request` that sets `stream` to anything but
+  `true` without stating a path of its own drops the stored one) and
   its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
@@ -8886,17 +8917,46 @@ post-request script read the same bytes, so `assert.contains`, `assert.size`,
 collection or load run's.
 
 The bytes are stored once (issue #657). The trace's `events` node is served as
-`{items, totalEvents, eventsTruncated, endReason}` (each item `{event, data,
-sourceId?, dataTruncated?, dataBytes?, receivedAt}`), but the list is parsed
-from the stored body when the trace is read
+`{items, totalEvents, eventsTruncated, endReason, streamText?}` (each item
+`{event, data, sourceId?, dataTruncated?, dataBytes?, text?, receivedAt}`), but
+the list is parsed from the stored body when the trace is read
 ([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
 report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
-the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`,
-one arrival time per event `sseMaxStoredEvents` kept. The served list stops at
-the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when
-either the list is shorter than `totalEvents` or the body is a prefix
-(`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`). A trace stored
-before #3770 carries its `items` and is served as stored.
+the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
+streamTextPath?}`, one arrival time per event `sseMaxStoredEvents` kept. The
+served list stops at the shorter of that and `totalEvents`, and
+`eventsTruncated` is `true` when either the list is shorter than `totalEvents`
+or the body is a prefix (`bodyCapped`, or `bodyTruncated` from
+`maxTraceBodyBytes`). A trace stored before #3770 carries its `items` and is
+served as stored.
+
+**`streamTextPath` reads the reply out of the events** (issue #3773). A
+JSONPath in the subset the [elements](elements.md#kinds) read, evaluated on each
+event's `data` parsed as JSON: `$.choices[0].delta.content` for an
+OpenAI-compatible chat completion, `$.delta.text` for an Anthropic-style
+`content_block_delta`. The engine sniffs no provider; the path is declared. An
+event's `text` is the path's **first** match, a string as it is and a number or
+boolean as its JSON text. An event carries no `text` key at all (absent, not
+`""`) when the path matches nothing (a role-only chunk, a ping), matches `null`,
+an array or an object, when its `data` is not JSON (`[DONE]`), and when it was
+cut at `sseMaxEventBytes` (`dataTruncated`), whose data is only a prefix of the
+JSON. Each relayed `message` frame carries its `text` as it arrives. The stored
+sidecar keeps the path and never the text: a read derives each item's `text`
+and the node's **`streamText`**, every event's `text` joined with nothing
+between, from the stored body. `streamText` covers every event the body holds
+up to `totalEvents`, the ones past `sseMaxStoredEvents` included, so it is the
+whole reply unless the body is a prefix (`bodyCapped` / `bodyTruncated`, which
+`eventsTruncated` also reports). With no path the node has no `streamText` and
+no item has `text`.
+
+```json
+{
+  "method": "POST",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "stream": true,
+  "streamTextPath": "$.choices[0].delta.content"
+}
+```
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
@@ -8932,7 +8992,14 @@ Refused with a **400** rather than silently reinterpreted:
 - a non-boolean `stream` (`'stream' must be a boolean`);
 - `"stream": true` with `"transient": true` - a stream **is** its run row: the
   row is what `eventsUrl` names, what carries the status, and what a stop
-  finds, and a transient execution creates none.
+  finds, and a transient execution creates none;
+- a `streamTextPath` that is not a string or not in the JSONPath subset (a
+  filter, no leading `$`), and one **without** `"stream": true`, since a
+  buffered send has no events to carry `text`. [`POST /runs`](#post-runs)
+  reads the field the same way on a single-request run and refuses it on a
+  collection run, whose steps read their stored requests' own. A saved
+  request stores it too ([`POST /requests`](#post-requests)), and a by-id
+  [`POST /compose`](#post-compose) carries it.
 
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
@@ -8944,7 +9011,10 @@ parsed from the stream's bytes, the one its stored trace is served with, as
 timers included, before anything is reported, so a live per-event callback is
 not a feature that was skipped but one the runtime cannot have. The same three
 properties reach every run that streams: a collection run's streaming step and
-a load run's post-request script, inline or deferred (issue #3769). See
+a load run's post-request script, inline or deferred (issue #3769). A stream
+whose request declared a `streamTextPath` also binds `pm.response.streamText`,
+the stored trace's `streamText`, and each entry's `text` (issue #3773), on a
+Send and on every run that streams alike. See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output
@@ -10241,7 +10311,13 @@ carry none of the four.
 On a single-request run, `stream` is refused beside `transient` (as on a send)
 and each cap is refused without `stream` - a cap on a non-streaming run reads
 as a bound the caller expects to apply, and ignoring it is how an unbounded run
-gets mistaken for a capped one.
+gets mistaken for a capped one. `streamTextPath` (issue #3773) is read by the
+same rules as on [`POST /execute`](#post-execute) - a string in the JSONPath
+subset, beside `stream: true` - and a by-id `POST /compose` carries the saved
+request's. Each streamed response's post-request script then reads every
+event's `text` and the joined `pm.response.streamText`, inline or in the
+deferred replay, and a captured sample keeps the path so
+[`GET /runs/:runId/samples`](#get-runsrunidsamples) serves both from its bytes.
 
 **A collection run (`scenario`) streams the steps whose stored request has
 `stream` set** (#3235), and only those. The plan reads the flag off each stored
@@ -10251,7 +10327,10 @@ and bound every streaming step, each falling back to its `sse*` setting on its
 own. A step that does not stream ignores them. A top-level `stream` is a `400`
 (`invalid_run_config`) on a collection run, `true` or `false`: it cannot make a
 stored request stream or stop one streaming, so accepting it would let a caller
-believe it did either. A collection **load** run sends a streaming step through
+believe it did either. A top-level `streamTextPath` is a `400` there by the same
+argument: each streaming step reads its events through its stored request's own
+`streamTextPath`, which its scripts, its stored trace and its captured samples
+carry as on a single-request run. A collection **load** run sends a streaming step through
 the same event loop as a streaming single-request run, so the table above
 holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`), its events
 land in the report's `stream` section, its stored exchange keeps its event
@@ -10268,7 +10347,8 @@ ends the stream in flight rather than waiting out its cap (a stream the server
 had not yet answered is a cancelled step). The body is the `text/event-stream`
 bytes, held to `maxDesignResponseBodyBytes` like any step's (reaching it ends
 the stream, with `bodyCapped`); the step's stored trace carries the parsed
-`events` node (`items`, `totalEvents`, `eventsTruncated`) a load sample's does,
+`events` node (`items`, `totalEvents`, `eventsTruncated`, and `streamText` when
+the step's request declares a `streamTextPath`) a load sample's does,
 and the run's summary and report gain the same `stream` section, which its
 `stream*` budgets judge. A duration cap that passes before any status line is a
 `timeout` error naming the cap.
@@ -11982,6 +12062,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
+| `streamTextPath` | string, in the JSONPath subset the elements read | Streaming only, by `POST /execute`'s rules: refused without `stream`, outside the subset, and on a collection run, whose steps each read their stored request's own (#3773). A by-id `POST /compose` carries the saved request's. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event, time-to-first-event, largest-gap and event-rate histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `retryAfterBackoff` | boolean | Read as a bool inside the run-context constructor, the same stranded-`pending` failure `save_timing_breakdown` had. See [Retry-After back-off](#retry-after-back-off-retryafterbackoff). |
 | `retryAfterMaxMs` | `1`-`3600000` ms | The longest one virtual user waits on a `Retry-After`. Past an hour it is waiting out a quota, not pacing against a limiter; `0` would be the option turned off said another way. Read only with `retryAfterBackoff` on. |
@@ -13104,6 +13185,9 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
   `sseMaxEventBytes` is stored as a prefix and says so in band, with
   `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
+  A send that declared a `streamTextPath` adds `text`, what the path read off
+  this event, and leaves it off an event the path reads nothing from; see
+  [POST /execute](#post-execute) (issue #3773).
 - `complete`'s `reason` is one of `completed`, `stopped`, `shutdown`,
   `maxStreamEvents`, `maxStreamDurationMs`, `idleTimeout`, `error`; see
   [POST /execute](#post-execute). No frame carries the exchange's `warnings`
@@ -15030,9 +15114,12 @@ and `totalEvents` is the count taken **on the wire** - so a capture the
 `maxSampleBodyBytes` cap cut still reports the whole stream's length, with
 `eventsTruncated` covering both that cut and the stored-events cap. The events
 are parsed from the stored bytes whatever `bodyEncoding` says, and a byte in
-an event that is not UTF-8 is answered as U+FFFD. See
-[`result_bodies`](db-schema.md#result_bodies) for why the count is stored and
-the list is not.
+an event that is not UTF-8 is answered as U+FFFD. A sample whose request
+declared a `streamTextPath` (issue #3773) stored the path beside the count, so
+each item carries its `text` and the node gains `streamText`, both derived from
+the stored bytes as on a design stream's trace; a sample without one carries
+neither. See [`result_bodies`](db-schema.md#result_bodies) for why the count
+and the path are stored and the list is not.
 
 ```json
 "events": {

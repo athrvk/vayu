@@ -20,7 +20,7 @@
 #include <iterator>
 #include <random>
 
-#include "json_path.hpp"
+#include "vayu/core/json_path.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/ordered_json.hpp"

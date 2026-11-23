@@ -358,6 +358,7 @@ const std::vector<vayu::db::Collection>& chain) {
     entry.http_version       = row.http_version;
     entry.verify_ssl         = row.verify_ssl;
     entry.stream             = row.stream;
+    entry.stream_text_path   = row.stream_text_path;
     entry.folder_path        = folder_names_of (chain);
     entry.mock_response_mode = row.mock_response_mode;
     entry.order              = row.order;

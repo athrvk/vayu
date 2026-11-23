@@ -843,17 +843,18 @@ BlobIds& fresh_blob_ids) {
     for (const PendingResultBody* pending : bodies) {
         const Result& result = results.at (pending->result_index);
         ResultBody row;
-        row.result_id     = result_ids.at (pending->result_index - begin);
-        row.run_id        = result.run_id;
-        row.headers       = pending->headers;
-        row.blob_id       = pending->body_hash.empty () ?
+        row.result_id        = result_ids.at (pending->result_index - begin);
+        row.run_id           = result.run_id;
+        row.headers          = pending->headers;
+        row.blob_id          = pending->body_hash.empty () ?
         0 :
         blob_id_for (storage, *pending, result.run_id, committed_blob_ids, fresh_blob_ids);
-        row.body_bytes    = pending->body_bytes;
-        row.truncated     = pending->truncated;
-        row.is_binary     = pending->binary;
-        row.content_type  = pending->content_type;
-        row.stream_events = pending->stream_events;
+        row.body_bytes       = pending->body_bytes;
+        row.truncated        = pending->truncated;
+        row.is_binary        = pending->binary;
+        row.content_type     = pending->content_type;
+        row.stream_events    = pending->stream_events;
+        row.stream_text_path = pending->stream_text_path;
         storage.replace (row);
     }
 }

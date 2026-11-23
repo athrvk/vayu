@@ -28,6 +28,7 @@
 #include <chrono>
 #include <expected>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1184,6 +1185,25 @@ const vayu::db::ResultBody& row) {
     return cache.emplace (key, std::move (classified)).first->second;
 }
 
+/// A page's sample rows share a few `streamTextPath`s (one per streaming step
+/// at most), so each is compiled once per page.
+using TextPathCache =
+std::map<std::string, std::shared_ptr<const vayu::StreamTextPath>, std::less<>>;
+
+/// @p source compiled through @p cache; null for a row that stored none.
+std::shared_ptr<const vayu::StreamTextPath> stream_text_path_of (TextPathCache& cache,
+const std::optional<std::string>& source) {
+    if (!source) {
+        return nullptr;
+    }
+    if (const auto cached = cache.find (*source); cached != cache.end ()) {
+        return cached->second;
+    }
+    auto compiled = vayu::http::compile_stream_text_path (*source);
+    cache.emplace (*source, compiled);
+    return compiled;
+}
+
 } // namespace
 
 /**
@@ -1220,6 +1240,7 @@ int64_t offset) {
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
 
     SampleBodyCache body_cache;
+    TextPathCache text_paths;
 
     nlohmann::json data = nlohmann::json::array ();
     for (const auto& row : rows) {
@@ -1259,8 +1280,11 @@ int64_t offset) {
             // one. Derived here rather than stored a second time: the body is
             // the event list, and two copies of one fact drift.
             if (row.stream_events) {
+                const auto text_path =
+                stream_text_path_of (text_paths, row.stream_text_path);
                 response["events"] = vayu::http::buffered_stream_events_node (
-                stored.bytes, sse_limits, *row.stream_events, !row.truncated);
+                stored.bytes, sse_limits, *row.stream_events, !row.truncated,
+                std::nullopt, text_path ? &text_path->steps : nullptr);
             }
             // No blob and not binary means the run's capture budget was spent
             // before this sample: headers were kept, the body was not. Said

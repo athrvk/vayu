@@ -187,6 +187,7 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 							events={events.items}
 							totalEvents={events.totalEvents}
 							eventsTruncated={events.eventsTruncated}
+							streamText={events.streamText}
 							isStream
 						/>
 					</TabsContent>

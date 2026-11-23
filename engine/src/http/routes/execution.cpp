@@ -328,6 +328,21 @@ bool read_stream_caps (const nlohmann::json& json, StreamFlag& flag) {
     sse_limits::STREAM_EVENTS_CEILING, flag.max_events, flag);
 }
 
+/// `streamTextPath` (#3773), held to `stream_text_path_problem`, onto
+/// @p flag; refused on @p flag otherwise.
+bool read_stream_text_path (const nlohmann::json& json, StreamFlag& flag) {
+    if (auto problem = stream_text_path_problem (json)) {
+        flag.ok    = false;
+        flag.error = std::move (*problem);
+        return false;
+    }
+    if (const auto field = json.find ("streamTextPath");
+    field != json.end () && field->is_string ()) {
+        flag.text_path = field->get<std::string> ();
+    }
+    return true;
+}
+
 } // namespace
 
 /**
@@ -354,19 +369,25 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         flag.value = field->get<bool> ();
     }
 
-    if (!read_stream_caps (json, flag)) {
+    if (!read_stream_caps (json, flag) || !read_stream_text_path (json, flag)) {
         return flag;
     }
 
     // A cap on a non-streaming payload is refused too. It reads as a bound the
     // caller expects to apply, and silently ignoring it is how an unbounded run
-    // gets mistaken for a capped one.
+    // gets mistaken for a capped one. A text path likewise reads as a promise
+    // of `text` that a buffered send has no events to keep.
     if (!flag.value) {
         if (flag.max_duration_ms || flag.max_events) {
             flag.ok = false;
             flag.error =
             "'maxStreamDurationMs' and 'maxStreamEvents' apply to a "
             "streaming request only - set 'stream': true, or drop them";
+        } else if (flag.text_path) {
+            flag.ok = false;
+            flag.error =
+            "'streamTextPath' applies to a streaming request only - set "
+            "'stream': true, or drop it";
         }
         return flag;
     }
@@ -394,6 +415,15 @@ StreamFlag read_collection_run_stream_caps (const nlohmann::json& json) {
         "'stream' is not valid on a collection run - a step streams when its "
         "stored request has 'stream' set. 'maxStreamDurationMs' and "
         "'maxStreamEvents' bound those steps without it, so drop 'stream'";
+        return flag;
+    }
+    if (const auto path = json.find ("streamTextPath");
+    path != json.end () && !path->is_null ()) {
+        flag.ok = false;
+        flag.error =
+        "'streamTextPath' is not valid on a collection run - a step reads its "
+        "stream's text through its stored request's 'streamTextPath', so set "
+        "it there and drop it here";
         return flag;
     }
     read_stream_caps (json, flag);
@@ -2378,6 +2408,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     spec.default_headers = default_headers;
     spec.max_duration_ms = send.stream.max_duration_ms;
     spec.max_events      = send.stream.max_events;
+    spec.text_path       = send.stream.text_path;
     const std::vector<vayu::http::CookieWrite> jarless_writes = attach_stream_jar (
     spec, ctx.cookie_jar, send.cookie_scope, std::move (pre_cookie_writes), jar_off);
     // Persistence stays the route's decision even though it happens on

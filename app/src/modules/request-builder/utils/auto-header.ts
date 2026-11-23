@@ -38,7 +38,7 @@
  */
 
 import type { AutoHeaderSource, KeyValueEntry, KeyValueItem } from "@/types";
-import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
+import { ACCEPT_HEADER, DEFAULT_STREAM_TEXT_PATH, SSE_ACCEPT } from "@/constants/request";
 import { generateId } from "@/lib/id";
 
 /** Case-insensitive header-name match, on the trimmed key. */
@@ -117,10 +117,14 @@ export function switchAutoHeader(
 	return { headers: [...next, autoHeaderRow(name, toAdd, source)], added: toAdd };
 }
 
-/** What the Event stream setting changes on a request: the flag and its `Accept` row. */
+/**
+ * What the Event stream setting changes on a request: the flag, its `Accept`
+ * row and, going off, the stream text path (#3773).
+ */
 export interface StreamPatch {
 	stream: boolean;
 	headers: KeyValueItem[];
+	streamTextPath?: string;
 }
 
 /**
@@ -133,7 +137,15 @@ export interface StreamPatch {
  * - takes this patch rather than setting `stream` alone, which would leave the
  * request without the header a stream server negotiates on.
  */
-export function streamPatch(request: { headers: KeyValueItem[] }, on: boolean): StreamPatch {
+export function streamPatch(
+	request: { headers: KeyValueItem[]; streamTextPath?: string },
+	on: boolean
+): StreamPatch {
 	const next = switchAutoHeader(ACCEPT_HEADER, on ? SSE_ACCEPT : null, request.headers, "stream");
-	return { stream: on, headers: next.headers };
+	const patch: StreamPatch = { stream: on, headers: next.headers };
+	// A path belongs to a stream: the engine refuses one stored beside a
+	// buffered request, so the field empties with the toggle rather than the
+	// save sending a pair it would refuse.
+	if (!on && request.streamTextPath) patch.streamTextPath = DEFAULT_STREAM_TEXT_PATH;
+	return patch;
 }

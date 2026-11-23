@@ -278,8 +278,9 @@ const std::string& auth_query_param);
 
 /**
  * `settings` as the request fields it stands for (`followRedirects`,
- * `maxRedirects`, `timeout`, `httpVersion`, `verifySSL`, `stream`), or nothing
- * when any member present has the wrong type or value.
+ * `maxRedirects`, `timeout`, `httpVersion`, `verifySSL`, `stream`,
+ * `streamTextPath`), or nothing when any member present has the wrong type or
+ * value, a `streamTextPath` without `stream: true` included.
  */
 [[nodiscard]] std::optional<Json> settings_of (const Json& value);
 

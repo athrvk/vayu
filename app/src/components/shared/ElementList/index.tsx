@@ -144,6 +144,14 @@ export interface ElementListProps {
 	 * are variable-aware inputs; left out, they are plain text fields.
 	 */
 	variables?: VariableSupport;
+	/**
+	 * A kind's starting `config` where the host knows better than the kind's
+	 * blank one: an `assert.jsonschema` added to an `mcp` request starts from the
+	 * tool's `outputSchema` (#3806). Written into the element when it is added,
+	 * so the element stores what it was given and is not re-derived from the
+	 * request afterwards. Merged over the kind's own blank config.
+	 */
+	startingConfigs?: Readonly<Record<string, Record<string, unknown>>>;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -575,6 +583,7 @@ export function ElementList({
 	onOpenChange,
 	errors,
 	variables,
+	startingConfigs,
 }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
@@ -595,7 +604,7 @@ export function ElementList({
 			id: `el_${generateId()}`,
 			kind: kind.kind,
 			enabled: true,
-			config: defaultConfigFor(kind),
+			config: { ...defaultConfigFor(kind), ...startingConfigs?.[kind.kind] },
 		};
 		setJustAddedId(next.id);
 		onOpenChange?.(next.id, true);

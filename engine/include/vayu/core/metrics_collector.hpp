@@ -131,12 +131,16 @@ struct ResponseSample {
      * an empty list, which is the same distinction the live path keeps.
      */
     std::optional<size_t> stream_events;
+    /// How those events read as text (`Response::stream_text_path`, #3773):
+    /// the request's one compiled path, shared rather than copied.
+    std::shared_ptr<const StreamTextPath> stream_text_path;
 
     ResponseSample () = default;
     ResponseSample (const Response& resp, int64_t ts)
     : status_code (resp.status_code), status_text (resp.status_text),
       body (resp.body), headers (resp.headers), latency_ms (resp.timing.total_ms),
-      timestamp (ts), stream_events (resp.stream_events) {
+      timestamp (ts), stream_events (resp.stream_events),
+      stream_text_path (resp.stream_text_path) {
     }
 };
 
@@ -163,6 +167,9 @@ struct CapturedExchange {
     /// scalars' worth of hot-path cost, and the one thing a reader of the
     /// stored body cannot recover from it - see `ResultBody::stream_events`.
     std::optional<int64_t> stream_events;
+    /// `Response::stream_text_path`, shared on the hot path; the flush stores
+    /// its source as `ResultBody::stream_text_path`.
+    std::shared_ptr<const StreamTextPath> stream_text_path;
 };
 
 /**

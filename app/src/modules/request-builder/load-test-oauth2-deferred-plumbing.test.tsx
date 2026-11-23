@@ -139,6 +139,7 @@ function requestWith(auth: RequestState["auth"]): RequestState {
 		disabledSystemHeaders: [],
 		disableUrlEncoding: false,
 		stream: false,
+		streamTextPath: "",
 	};
 }
 
