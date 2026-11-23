@@ -98,13 +98,26 @@ index_items (const Json& items, const SnapshotList& list, std::string_view subje
     return indexed;
 }
 
-/// A message is one line, and a name or a pointer is a server's text.
+/// A message is one line of bounded length, and a name or a pointer is a
+/// server's text: control characters show as `?` and past
+/// `MAX_SNAPSHOT_FRAGMENT_CHARS` characters the rest is `...`. A character is
+/// counted at its UTF-8 lead byte and the cut is made before one, so a
+/// multi-byte sequence is never split.
 std::string one_line (std::string_view text) {
-    std::string line (text);
-    for (char& c : line) {
-        if (static_cast<unsigned char> (c) < 0x20 || c == 0x7F) {
-            c = '?';
+    constexpr unsigned char CONTINUATION_MASK = 0xC0;
+    constexpr unsigned char CONTINUATION      = 0x80;
+    std::string line;
+    size_t characters = 0;
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char> (c);
+        if ((byte & CONTINUATION_MASK) != CONTINUATION) {
+            if (characters == constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS) {
+                line += "...";
+                break;
+            }
+            ++characters;
         }
+        line += (byte < 0x20 || byte == 0x7F) ? '?' : c;
     }
     return line;
 }

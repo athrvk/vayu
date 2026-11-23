@@ -533,8 +533,15 @@ std::optional<std::string> assert_snapshot_problem (const nlohmann::json& config
 
 class AssertSnapshotElement final : public Element {
     public:
+    /// The config is judged once here: `assert_snapshot_problem` indexes the
+    /// whole baseline, which a step that runs many times must not repeat.
     explicit AssertSnapshotElement (nlohmann::json config)
-    : config_ (std::move (config)) {
+    : config_ (std::move (config)), problem_ (assert_snapshot_problem (config_)) {
+        if (const auto list = snapshot_list_of (config_)) {
+            list_ = *list;
+        }
+        name_ = (list_ != nullptr ? std::string (list_->method) : std::string ("the list")) +
+        " matches the snapshot";
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -542,25 +549,26 @@ class AssertSnapshotElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        const auto list = snapshot_list_of (config_);
-        const std::string name =
-        (list ? std::string ((*list)->method) : std::string ("the list")) + " matches the snapshot";
-        if (const auto problem = assert_snapshot_problem (config_)) {
-            record_unrunnable_assertion (ctx, name, "assert.snapshot: " + *problem);
+        if (problem_) {
+            record_unrunnable_assertion (ctx, name_, "assert.snapshot: " + *problem_);
             return;
         }
         const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
-            record_assertion (ctx, name, false,
+            record_assertion (ctx, name_, false,
             std::string (constants::elements::BODY_UNREADABLE_MESSAGE));
             return;
         }
-        const auto drift = snapshot_drift (**list, *body, config_.at ("baseline"));
-        record_assertion (ctx, name, !drift, drift.value_or (""));
+        // No problem means the method named a list and the baseline exists.
+        const auto drift = snapshot_drift (*list_, *body, config_.at ("baseline"));
+        record_assertion (ctx, name_, !drift, drift.value_or (""));
     }
 
     private:
     nlohmann::json config_;
+    std::optional<std::string> problem_;
+    const SnapshotList* list_ = nullptr;
+    std::string name_;
 };
 
 // ---------------------------------------------------------------------------

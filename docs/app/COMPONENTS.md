@@ -2962,7 +2962,9 @@ the request builder, not of the list**: the Elements tab renders
 reply as the baseline** button that reads the builder's current response, takes
 the list at `result.tools` / `resources` / `prompts` for the element's `method`
 (`utils/list-snapshot-baseline.ts`: the reply is one JSON-RPC object or an event
-stream whose last JSON-RPC message is the answer) and writes it into
+stream whose last `message` response is the answer; the engine matches the
+request's `id` and the app does not know it, so a stream whose responses carry
+more than one `id` is refused) and writes it into
 `config.baseline` through `updateField("elements", ...)`, the path a typed edit
 takes, so the summary and the field follow. It is disabled, with a `DisabledHint`
 saying why, before anything was sent and when the reply holds no such list (an

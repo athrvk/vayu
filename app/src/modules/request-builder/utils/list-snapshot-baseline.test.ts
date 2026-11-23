@@ -92,6 +92,45 @@ describe("baselineFromReply", () => {
 		it("has no list when the stream ends without a response", () => {
 			expect(baselineFromReply(`data: ${notification}\n\n`, "tools/list")).toBeNull();
 		});
+
+		// Mutation check: drop the distinct-id refusal in `finalReply` and the
+		// stream below answers the last response's list instead of none.
+		it("refuses a stream whose responses carry more than one id", () => {
+			const other = { jsonrpc: "2.0", id: 2, result: { tools: [{ name: "other" }] } };
+			const body = [
+				`event: message\ndata: ${JSON.stringify(REPLY)}`,
+				`event: message\ndata: ${JSON.stringify(other)}`,
+			].join("\n\n");
+
+			expect(baselineFromReply(body, "tools/list")).toBeNull();
+		});
+
+		it("reads a stream that repeats one id, the last such response winning", () => {
+			const later = { ...REPLY, result: { tools: [{ name: "later" }] } };
+			const body = [JSON.stringify(REPLY), JSON.stringify(later)]
+				.map((reply) => `event: message\ndata: ${reply}`)
+				.join("\n\n");
+
+			expect(baselineFromReply(body, "tools/list")).toEqual([{ name: "later" }]);
+		});
+
+		// Mutation check: read every event whatever it is named and the error
+		// frame's id 2 makes this stream ambiguous, so the list vanishes.
+		it("ignores an event that is not a message", () => {
+			const failure = { jsonrpc: "2.0", id: 2, error: { code: -1, message: "x" } };
+			const body = [
+				`event: message\ndata: ${JSON.stringify(REPLY)}`,
+				`event: error\ndata: ${JSON.stringify(failure)}`,
+			].join("\n\n");
+
+			expect(baselineFromReply(body, "tools/list")).toEqual(TOOLS);
+		});
+
+		it("reads an event with no event line as a message", () => {
+			expect(baselineFromReply(`data: ${JSON.stringify(REPLY)}\n\n`, "tools/list")).toEqual(
+				TOOLS
+			);
+		});
 	});
 });
 

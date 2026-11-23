@@ -1594,5 +1594,9 @@ constexpr size_t MAX_SNAPSHOT_FINDINGS = 10;
 
 /// Differing JSON Pointers one changed item names before `, and N more`.
 constexpr size_t MAX_SNAPSHOT_POINTERS = 3;
+
+/// Characters of one name or pointer an `assert.snapshot` message quotes before
+/// it ends in `...`: both are a server's text and can be any length.
+constexpr size_t MAX_SNAPSHOT_FRAGMENT_CHARS = 200;
 } // namespace elements
 } // namespace vayu::core::constants

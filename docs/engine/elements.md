@@ -384,8 +384,10 @@ reply is, so a recorded `_meta` or `icons` is harmless: a tool's `name`, `title`
 `arguments`. Items are matched by `name` (`uri` for a resource), so a server that reorders its list
 has not changed it, and the members of an object compare without regard to order for the same
 reason; an array inside a field (`required`, `enum`) compares in order, since there the order is the
-value. A baseline is refused when it is not an array, holds an item that is not an object with a
-text identity, or names one twice, each naming `baseline`. The reply is compared as it came: a
+value. A `null` is a value too: a field the baseline holds as `null` and the reply omits, or the
+reverse, is a difference, at the top of an item and inside a field alike. A baseline is refused when
+it is not an array, holds an item that is not an object with a text identity, or names one twice,
+each naming `baseline`. The reply is compared as it came: a
 server that pages its list (`nextCursor`) is compared on the page the step received.
 
 A failure is one line, `tools/list changed: removed 'a'; added 'b'; 'c' differs at
@@ -393,7 +395,8 @@ A failure is one line, `tools/list changed: removed 'a'; added 'b'; 'c' differs 
 `constants::elements::MAX_SNAPSHOT_POINTERS` (3) differing JSON Pointers (RFC 6901, `~` as `~0` and
 `/` as `~1`), `, and N more` for the rest. A rename is a removed name and an added one. At most
 `constants::elements::MAX_SNAPSHOT_FINDINGS` (10) findings are listed, then ` (N more)`; a control
-character in a name shows as `?`. A body that cannot be read, a reply with no list at the method's
+character in a name shows as `?`, and a name or pointer past
+`constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS` (200) characters ends in `...`. A body that cannot be read, a reply with no list at the method's
 place (an error response, say) and an item with no identity fail it too, never pass it. The test it
 records is named `<method> matches the snapshot`.
 

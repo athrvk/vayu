@@ -12,10 +12,13 @@
  * client reads when it compares, so nothing is trimmed here.
  *
  * The reply is the JSON-RPC envelope the Response pane holds, either one JSON
- * object or an event stream whose last JSON-RPC message is the answer. The
- * engine's own reply reader (`docs/engine/api-reference.md#the-mcp-reply`)
- * is the authority on which message that is; a recording that finds none is
- * refused rather than guessed at.
+ * object or an event stream. The engine's own reply reader
+ * (`docs/engine/api-reference.md#the-mcp-reply`) is the authority on which
+ * message is the answer: the last `message` event that is a JSON-RPC response
+ * carrying the request's `id`. The app does not know that id, so it reads a
+ * stream only when its responses all share one `id`, and skips events named
+ * anything but `message`. A recording that finds no answer, or cannot tell
+ * which one it is, is refused rather than guessed at.
  */
 
 /**
@@ -54,23 +57,45 @@ function isJsonRpcMessage(value: unknown): value is Record<string, unknown> {
 	);
 }
 
-/** The `data:` payload of each event of an event-stream body, in arrival order. */
-function eventPayloads(body: string): string[] {
-	return body.split(/\r?\n\r?\n/).map((event) =>
-		event
-			.split(/\r?\n/)
-			.filter((line) => line.startsWith("data:"))
-			.map((line) => line.slice("data:".length).replace(/^ /, ""))
-			.join("\n")
-	);
+/** The value of the first @p field line of one event, `undefined` when it has none. */
+function fieldOf(lines: string[], field: string): string | undefined {
+	const prefix = `${field}:`;
+	const line = lines.find((l) => l.startsWith(prefix));
+	return line?.slice(prefix.length).replace(/^ /, "");
 }
 
-/** The last JSON-RPC response in @p body, or `undefined` when it holds none. */
+/**
+ * The `data:` payload of each `message` event of an event-stream body, in
+ * arrival order. An event with no `event:` line is a message; an `error` or
+ * any other named event is not a JSON-RPC frame the reply reader reads.
+ */
+function messagePayloads(body: string): string[] {
+	return body
+		.split(/\r?\n\r?\n/)
+		.map((event) => event.split(/\r?\n/))
+		.filter((lines) => (fieldOf(lines, "event") ?? "message") === "message")
+		.map((lines) =>
+			lines
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice("data:".length).replace(/^ /, ""))
+				.join("\n")
+		);
+}
+
+/**
+ * The final JSON-RPC response in @p body, or `undefined` when it holds none.
+ *
+ * The engine takes the last response of an event stream that carries the
+ * request's own `id`; the app has no id to match, so a stream whose responses
+ * carry more than one distinct `id` is refused rather than guessed at.
+ */
 function finalReply(body: string): Record<string, unknown> | undefined {
 	const whole = parseJson(body);
 	if (isJsonRpcMessage(whole)) return whole;
-	const messages = eventPayloads(body).map(parseJson).filter(isJsonRpcMessage);
-	return messages[messages.length - 1];
+	const responses = messagePayloads(body).map(parseJson).filter(isJsonRpcMessage);
+	const ids = new Set(responses.map((response) => JSON.stringify(response.id ?? null)));
+	if (ids.size > 1) return undefined;
+	return responses[responses.length - 1];
 }
 
 /**

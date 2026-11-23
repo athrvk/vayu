@@ -1591,6 +1591,103 @@ TEST_F (ElementKindsTest, AssertSnapshotCapsWhatItListsAndCountsTheRest) {
     "/annotations/k2, and 2 more");
 }
 
+// A server's name or pointer key can be any length. Mutation check: return
+// the text whole from `one_line` and both lengths below blow the bound.
+TEST_F (ElementKindsTest, AssertSnapshotBoundsTheNameAndPointerItQuotes) {
+    constexpr size_t BOUND = vayu::core::constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS;
+    // Two-byte characters, so a cut by bytes would land inside one.
+    std::string long_name;
+    for (size_t i = 0; i < BOUND + 50; ++i) {
+        long_name += "\xC3\xA9";
+    }
+    std::string kept;
+    for (size_t i = 0; i < BOUND; ++i) {
+        kept += "\xC3\xA9";
+    }
+    response = ok_json_response (200,
+    list_reply ("tools", nlohmann::json::array ({ tool_item (long_name) })));
+
+    auto run = run_after_recording (one_element (
+    tools_snapshot (nlohmann::json::array ({ tool_item ("alpha") }))));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: removed 'alpha'; added '" + kept + "...'");
+
+    // The pointer is cut as a whole, so the key that overruns it is the one
+    // that is shortened.
+    const std::string long_key (BOUND + 100, 'k');
+    auto baseline = nlohmann::json::array ({ tool_item ("alpha") });
+    auto live     = baseline;
+    baseline[0]["annotations"][long_key] = 0;
+    live[0]["annotations"][long_key]     = 1;
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    run = run_after_recording (one_element (tools_snapshot (baseline)));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    const std::string pointer = ("/annotations/" + long_key).substr (0, BOUND);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: 'alpha' differs at " + pointer + "...");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotLeavesAFragmentAtTheBoundWhole) {
+    constexpr size_t BOUND = vayu::core::constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS;
+    const std::string name (BOUND, 'n');
+    response = ok_json_response (200, list_reply ("tools", nlohmann::json::array ()));
+
+    const auto run = run_after_recording (
+    one_element (tools_snapshot (nlohmann::json::array ({ tool_item (name) }))));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]), "tools/list changed: removed '" + name + "'");
+}
+
+// null is a value, so a field the baseline holds as null and the reply omits
+// (or the reverse) is a difference, at the top level and inside a field.
+// Mutation check: have `project` or `diff_objects` skip a null member and
+// each of these goes green on a changed list.
+TEST_F (ElementKindsTest, AssertSnapshotReadsNullAgainstMissingAsADifference) {
+    struct Case {
+        const char* what;
+        std::function<void (nlohmann::json&, bool)> set;
+        std::string pointer;
+    };
+    // `holds_null` says which side carries the null; the other omits it.
+    const std::vector<Case> cases = {
+        { "a field",
+        [] (auto& tool, bool holds_null) {
+            if (holds_null) {
+                tool["title"] = nullptr;
+            }
+        },
+        "/title" },
+        { "a member inside a field",
+        [] (auto& tool, bool holds_null) {
+            tool["annotations"] = nlohmann::json::object ();
+            if (holds_null) {
+                tool["annotations"]["readOnlyHint"] = nullptr;
+            }
+        },
+        "/annotations/readOnlyHint" },
+    };
+    for (const auto& c : cases) {
+        for (const bool baseline_holds_null : { true, false }) {
+            SCOPED_TRACE (std::string (c.what) +
+            (baseline_holds_null ? ", null in the baseline" : ", null in the reply"));
+            auto baseline = nlohmann::json::array ({ tool_item ("alpha") });
+            auto live     = baseline;
+            c.set (baseline[0], baseline_holds_null);
+            c.set (live[0], !baseline_holds_null);
+            response = ok_json_response (200, list_reply ("tools", live));
+
+            const auto run =
+            run_after_recording (one_element (tools_snapshot (baseline)));
+            ASSERT_EQ (run.outcomes.size (), 1u);
+            EXPECT_EQ (run.outcomes[0].status, "failed");
+            EXPECT_EQ (message_of (run.outcomes[0]),
+            "tools/list changed: 'alpha' differs at " + c.pointer);
+        }
+    }
+}
+
 TEST_F (ElementKindsTest, AssertSnapshotKeysResourcesByUriAndPromptsByName) {
     const nlohmann::json resources = nlohmann::json::array (
     { { { "uri", "file:///a" }, { "name", "A" }, { "mimeType", "text/plain" } },
