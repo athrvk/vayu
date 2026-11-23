@@ -27,6 +27,7 @@ import { useOpenElementRows } from "@/components/shared/ElementList/useOpenEleme
 import { ScriptReferencesRow } from "@/components/shared";
 import { useRequestBuilderContext } from "../../../context";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
+import { startingElementConfigs } from "../../../utils/starting-element-configs";
 import InheritedElementsNotice from "./InheritedElementsNotice";
 import LegacyScriptNotice from "./LegacyScriptNotice";
 
@@ -74,6 +75,7 @@ export default function ElementsPanel() {
 				kinds={addableKinds}
 				errors={elementErrors}
 				variables={variables}
+				startingConfigs={startingElementConfigs(request)}
 				{...openRows}
 				referenceOwner={
 					savedRequest ? { type: "request", request: savedRequest } : undefined

@@ -24,6 +24,7 @@
 #include <optional>
 #include <utility>
 
+#include "vayu/core/json_path.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -102,6 +103,18 @@ const NumericRunField& field) {
         " (got " + value.dump () + "). " + field.why;
     }
     return std::nullopt;
+}
+
+std::optional<std::string> stream_text_path_problem (const nlohmann::json& holder) {
+    const auto field = holder.find ("streamTextPath");
+    if (field == holder.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    if (!field->is_string ()) {
+        return "'streamTextPath' must be a string (got " +
+        std::string (field->type_name ()) + ")";
+    }
+    return vayu::core::detail::json_path_problem (holder, "streamTextPath", "streamTextPath");
 }
 
 int resolve_request_timeout_ms (const nlohmann::json& payload, int configured_default) {

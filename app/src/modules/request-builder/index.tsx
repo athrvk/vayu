@@ -53,6 +53,7 @@ import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver, type ColumnAuditRequest } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
+import { DEFAULT_STREAM_TEXT_PATH } from "@/constants/request";
 import { apiService, loadTestService } from "@/services";
 import { generateCurl } from "@/services/codegen";
 import type {
@@ -89,6 +90,7 @@ import { buildComposeBody, withLeftOut } from "./utils/compose-body";
 import { appendSendToConsole } from "@/modules/console";
 import {
 	disabledDefaults,
+	streamTextPathOf,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
 	responseCodeOfFailure,
@@ -185,6 +187,10 @@ function buildUpdatePayload(
 	if (changedFields.has("disableUrlEncoding"))
 		payload.disableUrlEncoding = request.disableUrlEncoding;
 	if (changedFields.has("stream")) payload.stream = request.stream;
+	// A cleared field is an explicit `null`, the `timeout` rule: an absent key
+	// keeps the stored path (#3773).
+	if (changedFields.has("streamTextPath"))
+		payload.streamTextPath = request.streamTextPath.trim() || null;
 
 	return payload;
 }
@@ -492,6 +498,7 @@ export default function RequestBuilder() {
 			disabledSystemHeaders: fetchedRequest.disabledSystemHeaders,
 			disableUrlEncoding: fetchedRequest.disableUrlEncoding,
 			stream: fetchedRequest.stream,
+			streamTextPath: fetchedRequest.streamTextPath ?? DEFAULT_STREAM_TEXT_PATH,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -730,6 +737,8 @@ export default function RequestBuilder() {
 					// Same opt-out the buffered send carries - a stream must not
 					// go out with a header set the buffered send would not.
 					...disabledDefaults(request),
+					// The inline compose carries no text path, so the send states it.
+					...streamTextPathOf(request),
 					// A stream binds a row exactly as a buffered send does - the
 					// engine reads it before the transfer starts, so the URL and
 					// headers it opens with are the bound ones (issue #601).
@@ -943,6 +952,9 @@ export default function RequestBuilder() {
 					// run has to send the header set Send sends, or it measures a
 					// different request from the one the user tried.
 					...disabledDefaults(pendingLoadTestRequest),
+					// The text path a streaming run's events are read through (#3773):
+					// from the request, like `stream` above, never the dialog.
+					...streamTextPathOf(pendingLoadTestRequest),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);

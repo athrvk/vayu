@@ -42,6 +42,10 @@ constexpr bool EXTRACT_REQUIRED = false;
 /// `assert.jsonpath` / `assert.contains` `negate`.
 constexpr bool ASSERT_NEGATE = false;
 
+/// `assert.jsonschema` `source`: the whole response body is what the schema
+/// judges unless a JSONPath names a part of it.
+constexpr const char* ASSERT_JSONSCHEMA_SOURCE = "body";
+
 /// `timer.pacing` `perUser`, and the plan scan that sizes its shared clocks.
 constexpr bool TIMER_PACING_PER_USER = true;
 

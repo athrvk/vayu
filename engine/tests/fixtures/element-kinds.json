@@ -503,6 +503,46 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "path": {
+          "description": "Locates the value to check when the source is a JSONPath, e.g. $.result.structuredContent for an MCP tool result. The first match is checked, and no match fails the assertion.",
+          "title": "JSONPath",
+          "type": "string"
+        },
+        "schema": {
+          "description": "The schema the value must conform to: an object, or true / false. Draft-07 is evaluated; a keyword from a later draft is not, and a schema that uses one fails the assertion naming it.",
+          "title": "JSON Schema"
+        },
+        "source": {
+          "default": "body",
+          "description": "What the schema judges: the whole response body, or the first value a JSONPath finds in it.",
+          "enum": [
+            "body",
+            "jsonpath"
+          ],
+          "title": "Check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step unless the response body, or the value a JSONPath finds in it, conforms to a JSON Schema.",
+    "hotPathClass": "declarative",
+    "kind": "assert.jsonschema",
+    "label": "Assert JSON Schema",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
         "field": {
           "default": "body",
           "description": "Which part of the response to check: body, headers, url or status.",

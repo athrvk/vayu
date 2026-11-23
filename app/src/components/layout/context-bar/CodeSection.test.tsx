@@ -123,6 +123,7 @@ const DRAFT: RequestState = {
 	disabledSystemHeaders: [],
 	disableUrlEncoding: false,
 	stream: false,
+	streamTextPath: "",
 };
 
 const CHAIN = [{ id: "col_1", name: "Users", elements: [] }] as unknown as Collection[];

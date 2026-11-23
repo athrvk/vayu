@@ -1155,6 +1155,237 @@ TEST_F (ElementKindsTest, AssertJsonPathNeverPassesAnUnreadableBody) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// assert.jsonschema (#3806). Mutation check: make `AssertJsonSchemaElement`
+// record every verdict as a pass and the failing-body, unevaluated-keyword,
+// no-match and unreadable-body cases below go red; drop the
+// `unevaluated_keywords` branch of `schema_verdict_failure` and the two
+// disclosure cases do.
+// ---------------------------------------------------------------------------
+
+nlohmann::json assert_jsonschema_of (nlohmann::json config) {
+    return nlohmann::json{ { "id", "s1" }, { "kind", "assert.jsonschema" },
+        { "config", std::move (config) } };
+}
+
+/// What an MCP `tools/call` reply reads as to the elements (#3762): the final
+/// JSON-RPC response, the tool's result under `result`.
+std::string mcp_tool_reply (const std::string& structured_content) {
+    return R"({"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"x"}],)"
+           R"("structuredContent":)" +
+    structured_content + "}}";
+}
+
+const nlohmann::json& temperature_schema () {
+    static const nlohmann::json schema = { { "type", "object" },
+        { "properties",
+        { { "city", { { "type", "string" } } }, { "celsius", { { "type", "number" } } } } },
+        { "required", nlohmann::json::array ({ "city", "celsius" }) } };
+    return schema;
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaPassesABodyThatConforms) {
+    response = ok_json_response (200, R"({"city": "Oslo", "celsius": 3.5})");
+    for (const auto& config : { nlohmann::json{ { "schema", temperature_schema () } },
+         nlohmann::json{ { "source", "body" }, { "schema", temperature_schema () } } }) {
+        SCOPED_TRACE (config.dump ());
+        const auto run =
+        run_after_recording (one_element (assert_jsonschema_of (config)));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "ok") << message_of (run.outcomes[0]);
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_TRUE (run.tests[0].passed);
+    }
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaFailsAWrongTypedFieldNamingItsLocation) {
+    response = ok_json_response (200, R"({"city": "Oslo", "celsius": "warm"})");
+
+    const auto run = run_after_recording (
+    one_element (assert_jsonschema_of ({ { "schema", temperature_schema () } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("/celsius: "), std::string::npos)
+    << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+    EXPECT_EQ (run.tests[0].name, "the body matches the JSON Schema");
+    EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaNamesTheRootWhenTheWholeValueIsWrong) {
+    response = ok_json_response (200, "[1, 2]");
+
+    const auto run = run_after_recording (
+    one_element (assert_jsonschema_of ({ { "schema", temperature_schema () } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("the root: "), std::string::npos)
+    << message_of (run.outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaCountsTheFailuresPastTheValidatorsCap) {
+    constexpr size_t WRONG = vayu::core::constants::schema_validation::MAX_FAILURES + 5;
+    std::string body = "[";
+    for (size_t i = 0; i < WRONG; ++i) {
+        body += (i == 0 ? "\"a\"" : ",\"a\"");
+    }
+    response = ok_json_response (200, body + "]");
+
+    const auto run = run_after_recording (one_element (assert_jsonschema_of (
+    { { "schema", { { "type", "array" }, { "items", { { "type", "integer" } } } } } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("(5 more)"), std::string::npos)
+    << message_of (run.outcomes[0]);
+    EXPECT_NE (message_of (run.outcomes[0]).find ("/0: "), std::string::npos)
+    << message_of (run.outcomes[0]);
+}
+
+// A keyword the draft-07 validator does not evaluate leaves part of the schema
+// unread, so a body it accepts is not a pass either (`pm.response.to.have
+// .jsonSchema` holds the same rule).
+TEST_F (ElementKindsTest, AssertJsonSchemaNamesAKeywordTheValidatorDoesNotEvaluate) {
+    response = ok_json_response (200, R"({"a": 1})");
+
+    const auto run = run_after_recording (one_element (assert_jsonschema_of (
+    { { "schema", { { "type", "object" }, { "unevaluatedProperties", false } } } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("unevaluatedProperties (1)"),
+    std::string::npos)
+    << message_of (run.outcomes[0]);
+    EXPECT_NE (message_of (run.outcomes[0]).find ("were not checked"), std::string::npos)
+    << message_of (run.outcomes[0]);
+    EXPECT_EQ (message_of (run.outcomes[0]).find ("first failure"), std::string::npos)
+    << "a body the checked part accepts has no failure to quote";
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaQuotesTheFirstFailureBesideAnUnevaluatedKeyword) {
+    response = ok_json_response (200, R"({"a": "x"})");
+
+    const auto run = run_after_recording (one_element (assert_jsonschema_of ({ { "schema",
+    { { "properties", { { "a", { { "type", "integer" } } } } },
+    { "prefixItems", nlohmann::json::array () } } } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("prefixItems (1)"), std::string::npos)
+    << message_of (run.outcomes[0]);
+    EXPECT_NE (message_of (run.outcomes[0]).find ("first failure is /a: "), std::string::npos)
+    << message_of (run.outcomes[0]);
+}
+
+// An MCP tool's result sits under `result.structuredContent` of the final
+// JSON-RPC response, which is the body the elements read.
+TEST_F (ElementKindsTest, AssertJsonSchemaChecksAnMcpStructuredContentByPath) {
+    const nlohmann::json config = { { "source", "jsonpath" },
+        { "path", "$.result.structuredContent" }, { "schema", temperature_schema () } };
+
+    response =
+    ok_json_response (200, mcp_tool_reply (R"({"city":"Oslo","celsius":3.5})"));
+    auto run = run_after_recording (one_element (assert_jsonschema_of (config)));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "ok") << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_EQ (run.tests[0].name, "'$.result.structuredContent' matches the JSON Schema");
+
+    response =
+    ok_json_response (200, mcp_tool_reply (R"({"city":"Oslo","celsius":"warm"})"));
+    run = run_after_recording (one_element (assert_jsonschema_of (config)));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("/celsius: "), std::string::npos)
+    << "the failure's location is inside the value, not the reply: "
+    << message_of (run.outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaFailsWhenThePathHasNoMatch) {
+    // A tool that answered with text only has no `structuredContent` to check.
+    response = ok_json_response (200,
+    R"({"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"x"}]}})");
+
+    const auto run =
+    run_after_recording (one_element (assert_jsonschema_of ({ { "source", "jsonpath" },
+    { "path", "$.result.structuredContent" }, { "schema", true } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("the path has no match"), std::string::npos)
+    << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaChecksTheFirstOfSeveralMatches) {
+    const nlohmann::json integers = { { "type", "integer" } };
+    const nlohmann::json config   = { { "source", "jsonpath" },
+        { "path", "$.items[*]" }, { "schema", integers } };
+
+    response = ok_json_response (200, R"({"items": [1, "two"]})");
+    EXPECT_EQ (run_after (one_element (assert_jsonschema_of (config)))[0].status, "ok");
+
+    response = ok_json_response (200, R"({"items": ["one", 2]})");
+    EXPECT_EQ (run_after (one_element (assert_jsonschema_of (config)))[0].status, "failed");
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaTakesABooleanSchema) {
+    response = ok_json_response (200, R"({"a": 1})");
+
+    EXPECT_EQ (
+    run_after (one_element (assert_jsonschema_of ({ { "schema", true } })))[0].status, "ok");
+    EXPECT_EQ (
+    run_after (one_element (assert_jsonschema_of ({ { "schema", false } })))[0].status, "failed");
+}
+
+TEST_F (ElementKindsTest, AssertJsonSchemaNeverPassesAnUnreadableBody) {
+    const std::vector<nlohmann::json> configs = {
+        { { "schema", true } },
+        { { "source", "jsonpath" }, { "path", "$.n" }, { "schema", true } },
+    };
+    for (const auto& [label, body] : unreadable_bodies ()) {
+        for (const auto& config : configs) {
+            SCOPED_TRACE (std::string (label) + " " + config.dump ());
+            response = ok_json_response (200, body);
+
+            const auto run =
+            run_after_recording (one_element (assert_jsonschema_of (config)));
+            ASSERT_EQ (run.outcomes.size (), 1u);
+            EXPECT_EQ (run.outcomes[0].status, "failed");
+            EXPECT_EQ (message_of (run.outcomes[0]), UNREADABLE);
+            ASSERT_EQ (run.tests.size (), 1u);
+            EXPECT_FALSE (run.tests[0].passed);
+        }
+    }
+}
+
+// Validation refuses each of these; a row stored before it did still reaches
+// the pipeline and keeps the `error` outcome with a failed test beside it.
+TEST_F (ElementKindsTest, AnAssertJsonSchemaThatCannotRunErrorsAndFailsItsTest) {
+    response = ok_json_response (200, R"({"a": 1})");
+    const std::vector<nlohmann::json> cases = {
+        nlohmann::json::object (),
+        { { "schema", "not a schema" } },
+        { { "source", "jsonpath" }, { "schema", true } },
+        { { "source", "jsonpath" }, { "path", "$[?(@.a)]" }, { "schema", true } },
+        { { "path", "$.a" }, { "schema", true } },
+        // The validator refuses a schema that loops without reaching a value.
+        { { "schema", { { "$ref", "#" } } } },
+    };
+    for (const auto& config : cases) {
+        SCOPED_TRACE (config.dump ());
+        const auto run =
+        run_after_recording (one_element (assert_jsonschema_of (config)));
+
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "error");
+        ASSERT_FALSE (message_of (run.outcomes[0]).empty ());
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+        EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
+    }
+}
+
 TEST_F (ElementKindsTest, RequiredExtractJsonFailsTheStepWhenTheBodyCannotBeRead) {
     for (const bool with_default : { false, true }) {
         for (const auto& [label, body] : unreadable_bodies ()) {

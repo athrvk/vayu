@@ -28,6 +28,14 @@
  * POST - and what it changes is how the response is *delivered*, which is
  * exactly what this tab is for.
  *
+ * **The stream text path is the reply's address inside each event** (issue
+ * #3773): a JSONPath the engine evaluates on every event's JSON `data`, which
+ * the Events tab's Text view joins. It is declared, never detected - the two
+ * presets are shortcuts for two common shapes, and the field takes any path in
+ * the subset the elements read. It is shown only while Event stream is on, and
+ * turning the stream off empties it (`streamPatch`), because the engine refuses
+ * a path stored beside a buffered request.
+ *
  * **Verification off is loud, not hidden** (issue #706). The row was withheld
  * for years on the grounds that exposing it weakens transport security; what
  * that produced was an unreachable knob and users with no way to reach an
@@ -56,7 +64,7 @@
 
 import { AlertTriangle } from "lucide-react";
 
-import { Badge, Checkbox, Eyebrow } from "@/components/ui";
+import { Badge, Checkbox, Eyebrow, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { useConfigQuery, useRequestDefaultsQuery } from "@/queries";
 import {
 	ACCEPT_HEADER,
@@ -67,11 +75,13 @@ import {
 	MIN_MAX_REDIRECTS,
 	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
+	STREAM_TEXT_PATH_PRESETS,
 	isHttpVersion,
 } from "@/constants/request";
 import {
 	NumberSettingRow,
 	SelectSettingRow,
+	TextSettingRow,
 	ToggleRow,
 } from "@/modules/settings/main/panels/SettingControls";
 import { useRequestBuilderContext } from "../../../context";
@@ -94,6 +104,7 @@ const MAX_LABEL = "Maximum redirects";
 const TIMEOUT_LABEL = "Request timeout";
 const PROTOCOL_LABEL = "Protocol";
 const STREAM_LABEL = "Event stream";
+const STREAM_TEXT_PATH_LABEL = "Stream text path";
 const VERIFY_LABEL = "Verify TLS certificate";
 const COOKIES_LABEL = "Disable cookie jar";
 const ENCODING_LABEL = "Send URL without encoding";
@@ -108,6 +119,10 @@ function listNames(keys: readonly string[]): string {
 
 export default function SettingsPanel() {
 	const { request, setRequest, updateField } = useRequestBuilderContext();
+	// The preset the field holds, or none once the path is anything else.
+	const activePreset =
+		STREAM_TEXT_PATH_PRESETS.find((preset) => preset.path === request.streamTextPath.trim())
+			?.path ?? "";
 	const followRedirects = request.followRedirects;
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 	const { data: config } = useConfigQuery();
@@ -153,6 +168,12 @@ export default function SettingsPanel() {
 	 */
 	const handleStreamChange = (checked: boolean) => {
 		setRequest(streamPatch(request, checked));
+	};
+
+	const handleTextPathPreset = (path: string) => {
+		// Radix reports "" when the active preset is pressed again; the field is
+		// what holds the path, so there is nothing to switch off.
+		if (path) updateField("streamTextPath", path);
 	};
 
 	/** Keep the stored value inside the range the engine clamps to. */
@@ -418,12 +439,37 @@ export default function SettingsPanel() {
 			 * applies to the scripts inherited from the collection chain too.
 			 */}
 			{request.stream && (
-				<p className="enter-fade text-xs text-muted-foreground">
-					Scripts run, split around the transfer: the pre-request script before the stream
-					opens, and the post-request script once after it ends, reading the whole stream
-					as <code>pm.response.events</code>. Results appear when the stream finishes, not
-					when Send returns.
-				</p>
+				<>
+					<div className="enter-fade">
+						<TextSettingRow
+							label={STREAM_TEXT_PATH_LABEL}
+							value={request.streamTextPath}
+							onChange={(path) => updateField("streamTextPath", path)}
+							placeholder={STREAM_TEXT_PATH_PRESETS[0].path}
+							monospace
+							description="A JSONPath read on each event's JSON data. What it finds is joined in the Events tab's Text view; an event it does not match, or whose data is not JSON, is skipped. Leave empty to show rows only."
+						>
+							<ToggleGroup
+								value={activePreset}
+								onValueChange={handleTextPathPreset}
+								aria-label="Stream text path presets"
+							>
+								{STREAM_TEXT_PATH_PRESETS.map((preset) => (
+									<ToggleGroupItem key={preset.path} value={preset.path}>
+										{preset.label}
+									</ToggleGroupItem>
+								))}
+							</ToggleGroup>
+						</TextSettingRow>
+					</div>
+
+					<p className="enter-fade text-xs text-muted-foreground">
+						Scripts run, split around the transfer: the pre-request script before the
+						stream opens, and the post-request script once after it ends, reading the
+						whole stream as <code>pm.response.events</code>. Results appear when the
+						stream finishes, not when Send returns.
+					</p>
+				</>
 			)}
 		</div>
 	);

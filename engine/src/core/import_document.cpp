@@ -5034,8 +5034,8 @@ int order) {
     item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
     item["auth"] = draft.at ("auth");
     for (const char* optional : { "followRedirects", "maxRedirects", "timeout",
-         "verifySSL", "httpVersion", "stream", "disableCookies", "disabledSystemHeaders",
-         "disableUrlEncoding", "postmanProtocolBehavior", "examples",
+         "verifySSL", "httpVersion", "stream", "streamTextPath", "disableCookies",
+         "disabledSystemHeaders", "disableUrlEncoding", "postmanProtocolBehavior", "examples",
          "specOperation", "elements", "mockResponseMode", "mockExampleIndex" }) {
         carry (draft, item, optional);
     }

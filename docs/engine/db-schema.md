@@ -477,7 +477,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
 | `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
 | `10` | [`spec_declined_operations`](#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them, so a sync does not re-create them. An engine at `9` does not know the table, so it would re-create every declined operation on its next sync | none: `sync_schema ()` creates the table, the migration only stamps |
-| `11` | [`runs.outcome`](#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column | none: `sync_schema ()` adds the nullable column, the migration only stamps; rows stored before it stay NULL |
+| `11` | [`runs.outcome`](#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column. [`requests.stream_text_path`](#requests) and [`result_bodies.stream_text_path`](#result_bodies) added (#3773): a stream's declared text path, on the request and on each captured sample | none: `sync_schema ()` adds the nullable columns, the migration only stamps; rows stored before them stay NULL |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -553,10 +553,19 @@ Version `10` is a bump of its own: `0.46.0` released `9`. **Merge gate:** the
 must check the tag the same way. The release that carries `10` says so under
 Changed, naming #3031.
 
-Version `11` is a bump of its own: `0.51.0`, the last release, stamps `10`.
+Version `11` is a bump of its own: `0.51.1`, the last release, stamps `10`.
 **Merge gate:** the `git grep` against the last tag must show `10`; a change
 that joins `11` later must check the tag the same way. The release that carries
 `11` says so under Changed, naming #3547.
+
+The two #3773 `stream_text_path` columns joined version `11` the way the #1817
+columns joined `5`: `0.51.1`, the last release, stamps `10`, so no released
+build has stamped `11`, and `sync_schema ()` adds the nullable columns on every
+start whatever the stamp, so a database an earlier build of `11` stamped still
+gets them. **Merge gate:** the `git grep` against the last tag must still show
+`10`; if a release shipped `11` without these columns, they need their own bump
+to `12` and a row of their own here. The release that carries `11` names #3773
+beside #3547 under Changed.
 
 ---
 
@@ -787,6 +796,7 @@ Stores individual HTTP request definitions.
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
+| `stream_text_path`    | TEXT    | The JSONPath each event's `data` is read through for the reply's text, in the elements' subset; NULL when none. Read only while `stream` is set, and kept while it is off (issue #3773, schema version 11) |
 | `disable_cookies`     | INTEGER | Boolean; keep the cookie jar out of this request's transfer; default 0 (issue #1765) |
 | `disabled_system_headers` | TEXT | JSON array of lowercased header names the engine does not add on its own; default `"[]"` (issue #1765) |
 | `disable_url_encoding` | INTEGER | Boolean; write path values and an api-key query parameter as typed; default 0 (issue #1765) |
@@ -827,11 +837,11 @@ query row's boolean `equals`.
 ```json
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"mcp"|"xml","content":"..."}
-{"mode":"mcp","content":"...","mcpTool":{"name":"...","inputSchema":{...}}}
+{"mode":"mcp","content":"...","mcpTool":{"name":"...","inputSchema":{...},"outputSchema":{...}}}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 {"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```
-An `mcp` body may carry `mcpTool`, the called tool and its input schema, whose
+An `mcp` body may carry `mcpTool`, the called tool, its input schema and optional output schema (stored, never read by a send), whose
 `x-mcp-header` annotations the send mirrors as `Mcp-Param-*` headers (#3762);
 it is part of the blob, so it needed no column and no schema version.
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
@@ -2616,6 +2626,7 @@ nothing on the report path touches it.
 | `binary`       | INTEGER    | 1 when the body was stored as a descriptor rather than as text     |
 | `content_type` | TEXT       | The response's `Content-Type`, `""` when it sent none              |
 | `stream_events` | INTEGER   | Events the transfer delivered when it was a **stream** (its reply announced `text/event-stream`, #3771); NULL otherwise, and NULL on every row written before 0.17.2 |
+| `stream_text_path` | TEXT   | The `streamTextPath` the streamed sample's request declared, so the served list derives each event's `text` and the joined `streamText` from the stored bytes; NULL for none, and on every row written before schema version 11 (issue #3773). Per row because a collection run's steps each declare their own and a sample names no step |
 
 **Which completions get a row.** Not a uniform sample - a uniform slice of a 30M-request run is
 a thousand identical 200s. Three buckets, all decided before anything is copied:

@@ -386,6 +386,10 @@ Notes on the edges:
   passes any string, where ajv would reject some of them. `require('ajv')` is
   on [the shelf](#ajv) and is the real library; `jsonSchema` stays on the
   engine's validator, and [where the two answer differently](#ajv) is pinned.
+  The declarative [`assert.jsonschema`](elements.md) element runs on the same validator, so it
+  shares all of the above: the draft-07 limit, the named unevaluated keywords (which fail it
+  rather than pass it), the refused loop and the `format` list. It is the choice when the check
+  should be a step's assertion row or run on a load run's cheap path, which a script step is not.
 - **Every public member of chai 4.4.1's `expect` API has a row** in
   `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
   one that fails, each checked against the real package. The suite holds the
@@ -590,7 +594,29 @@ Each entry is `{ event, id, data, receivedAt }`:
 | `id` | The origin's `id:`, **absent** when it sent none. Not the relay's own frame id, which is a different number and would make a comparison silently wrong. |
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
+| `text` | What the request's `streamTextPath` read off this event (issue #3773). **Absent** when no path was declared, when the path matched nothing, `null`, an array or an object, when `data` is not JSON, and when the event was cut (`dataTruncated`). |
 | `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads), so `events[0].receivedAt` against the send time is the time to first event. A **number on a design Send**, **absent** wherever the list is parsed back out of a buffered body - a load run's inline or deferred script, where it is not measured. |
+
+**`pm.response.streamText` is the reply, assembled.** A stream whose request
+declares a `streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an
+OpenAI-compatible chat completion or `$.delta.text` for an Anthropic-style one,
+see [`POST /execute`](api-reference.md#post-execute)) gets every event's `text`
+joined in order, the events the path missed skipped (a role-only chunk, a
+ping, the `[DONE]` sentinel). It covers every event the body kept, past
+`sseMaxStoredEvents` too, so it is the whole reply unless the body itself was
+cut at `maxDesignResponseBodyBytes`. It is a string whenever a path was
+declared, `""` when the path read nothing, and **absent** without one:
+
+```javascript
+pm.test('the model answered in French', function () {
+    pm.expect(pm.response.streamText || '').to.include('Bonjour');
+});
+```
+
+Every run that streams reads the same: a collection run's streaming step
+through its saved request's `streamTextPath`, a single-request load run through
+the one its payload carries (a by-id compose fills it from the saved request),
+inline and in the deferred replay alike.
 
 **Buffered, never live.** The script runs once the stream is over, and runs to
 completion - its timers and promise jobs included, see

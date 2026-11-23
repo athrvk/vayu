@@ -639,3 +639,163 @@ describe("the Events tab", () => {
 		});
 	});
 });
+
+/**
+ * The Text view (issue #3773): the reply a declared stream text path read off
+ * the events, joined. It renders what the engine put on each event as `text`
+ * and never reads `data` - the app declares no provider shape.
+ */
+describe("the Events tab's Text view", () => {
+	// The data carries no trace of the reply, so any text on screen came from `text`.
+	const token = (text: string, data = '{"choices":[{"delta":{}}]}'): StreamEvent => ({
+		event: "message",
+		data,
+		text,
+	});
+	const textOf = () => screen.getByTestId("stream-text").textContent;
+	const pick = (name: RegExp) => fireEvent.click(screen.getByRole("radio", { name }));
+
+	beforeEach(() => {
+		cleanup();
+		useExecutionEventsStore.getState().clear();
+		state.response = null;
+		state.isExecuting = false;
+		state.request = { id: "req_1" };
+	});
+
+	function startLive() {
+		state.response = okResponse();
+		useExecutionEventsStore.getState().startStream({
+			requestId: "req_1",
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+		});
+	}
+
+	it("opens on the joined text of a live stream, from the events' text and not their data", () => {
+		startLive();
+		useExecutionEventsStore.getState().addEvents("run_1", [token("Hel"), token("lo")]);
+		// A role-only chunk, a ping: no `text`, skipped.
+		useExecutionEventsStore.getState().addEvents("run_1", [event('{"ping":true}', "ping")]);
+		useExecutionEventsStore.getState().addEvents("run_1", [token(", world")]);
+
+		renderViewer();
+		openEventsTab();
+
+		expect(textOf()).toBe("Hello, world");
+	});
+
+	it("grows as batches arrive and keeps the Rows view one switch away", async () => {
+		startLive();
+		useExecutionEventsStore.getState().addEvents("run_1", [token("One")]);
+		renderViewer();
+		openEventsTab();
+		expect(textOf()).toBe("One");
+
+		act(() => useExecutionEventsStore.getState().addEvents("run_1", [token(" two")]));
+		expect(await screen.findByText("One two")).toBeTruthy();
+
+		pick(/rows/i);
+		expect(screen.queryByTestId("stream-text")).toBeNull();
+		expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(2);
+
+		pick(/text/i);
+		expect(textOf()).toBe("One two");
+	});
+
+	it("is not offered for a stream whose events carry no text, which keeps its rows", () => {
+		startLive();
+		useExecutionEventsStore.getState().addEvents("run_1", [event("plain")]);
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("plain")).toBeTruthy();
+		expect(screen.queryByRole("radio", { name: /text/i })).toBeNull();
+	});
+
+	it("reads the stored streamText over the stored items, which the item cap cut short", () => {
+		// 2 of 5 events kept: concatenating them would end at "Hel".
+		state.response = okResponse({
+			events: [token("Hel"), token("lo")],
+			totalEvents: 5,
+			eventsTruncated: true,
+			streamEndReason: "completed",
+			streamText: "Hello, world",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(textOf()).toBe("Hello, world");
+		// The engine joined it over every event, so the cap is not this view's news...
+		expect(screen.queryByText(/Events truncated for storage/i)).toBeNull();
+		expect(screen.queryByText(/stops where they do/i)).toBeNull();
+		// ... and it is still the rows' news.
+		pick(/rows/i);
+		expect(screen.getByText(/Events truncated for storage/i)).toBeTruthy();
+	});
+
+	it("says the text is partial when the list was cut and no streamText came with it", () => {
+		state.response = okResponse({
+			events: [token("Hel"), token("lo")],
+			totalEvents: 5,
+			eventsTruncated: true,
+			streamEndReason: "completed",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(textOf()).toBe("Hello");
+		expect(screen.getByText(/stops where they do/i)).toBeTruthy();
+	});
+
+	it("says no text matched when the path was declared and found nothing", () => {
+		state.response = okResponse({
+			events: [event('{"other":1}')],
+			totalEvents: 1,
+			eventsTruncated: false,
+			streamEndReason: "completed",
+			streamText: "",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText(/No event matched the stream text path/i)).toBeTruthy();
+		expect(screen.queryByTestId("stream-text")).toBeNull();
+	});
+
+	it("calls out an error event, in the Text view only, beside the end-reason note", () => {
+		state.response = okResponse({
+			events: [token("Hel"), event('{"message":"Overloaded"}', "error")],
+			totalEvents: 2,
+			eventsTruncated: false,
+			streamEndReason: "error",
+			streamText: "Hel",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("The server sent an error event")).toBeTruthy();
+		expect(screen.getByText('{"message":"Overloaded"}')).toBeTruthy();
+		expect(screen.getByText("Stream ended in an error")).toBeTruthy();
+
+		pick(/rows/i);
+		expect(screen.queryByText("The server sent an error event")).toBeNull();
+		expect(screen.getByText("Stream ended in an error")).toBeTruthy();
+	});
+
+	it("lists a few error events and counts the rest", () => {
+		const errors = Array.from({ length: 5 }, (_, i) => event(`boom ${i}`, "error"));
+		state.response = okResponse({
+			events: [token("x"), ...errors],
+			totalEvents: 6,
+			eventsTruncated: false,
+			streamEndReason: "error",
+			streamText: "x",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getAllByText("The server sent an error event")).toHaveLength(3);
+		expect(screen.getByText(/2 more error events in Rows/)).toBeTruthy();
+	});
+});

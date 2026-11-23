@@ -25,6 +25,7 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
@@ -379,6 +380,23 @@ nlohmann::json& payload) {
 }
 
 /**
+ * The bounds a step whose stored request streams runs under: the run's caps,
+ * and the row's own `streamTextPath` (#3773) compiled here, once for every
+ * response of every user. Nothing for a request that does not stream.
+ */
+std::optional<vayu::StreamBounds> step_stream_bounds (const vayu::db::Request& row,
+const vayu::StreamBounds& run_bounds) {
+    if (!row.stream) {
+        return std::nullopt;
+    }
+    vayu::StreamBounds bounds = run_bounds;
+    if (row.stream_text_path) {
+        bounds.text_path = vayu::http::compile_stream_text_path (*row.stream_text_path);
+    }
+    return bounds;
+}
+
+/**
  * One step of the plan: composed, built, and refused if it carries a token
  * nothing in this run could bind.
  *
@@ -548,9 +566,7 @@ nlohmann::json& raw_elements_out) {
     step.request    = std::move (built.request);
     // A stored stream runs as one under either executor (#3235), ended by a
     // cap or by the server's close rather than by the step's timeout.
-    if (row.stream) {
-        step.request.stream_bounds = options.stream_bounds;
-    }
+    step.request.stream_bounds = step_stream_bounds (row, options.stream_bounds);
     // The only script source since issue #1514's cut-over: `elements`
     // resolved the collection chain's and the request's own script.pre /
     // script.post entries beside every declarative kind, the same list

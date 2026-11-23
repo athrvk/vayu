@@ -94,7 +94,7 @@ export function eventsFromTrace(
 	trace: NonNullable<RunResultSample["trace"]>
 ): Pick<
 	ResponseState,
-	"events" | "totalEvents" | "eventsTruncated" | "streamEndReason" | "sentAt"
+	"events" | "totalEvents" | "eventsTruncated" | "streamEndReason" | "streamText" | "sentAt"
 > {
 	const node = trace.events;
 	if (!node) return {};
@@ -112,6 +112,9 @@ export function eventsFromTrace(
 		// time (#3805): it is the zero of the Events offsets and the Timing tab's
 		// first event. Absent on a node stored before the field existed.
 		...(typeof node.startedAt === "number" && { sentAt: node.startedAt }),
+		// The engine joins it over every stored event, past the item cap, so it
+		// wins over concatenating `items` - which stops where the cap did.
+		...(typeof node.streamText === "string" && { streamText: node.streamText }),
 	};
 }
 

@@ -66,22 +66,23 @@ ordered stored_postman_response (const std::optional<std::string>& blob) {
 vayu::core::PostmanExportRequest
 read_request (vayu::db::Database& db, const vayu::db::Request& row) {
     vayu::core::PostmanExportRequest request;
-    request.name             = row.name;
-    request.description      = row.description;
-    request.method           = vayu::to_string (row.method);
-    request.url              = row.url;
-    request.params           = column (row.params, ordered::array ());
-    request.headers          = column (row.headers, ordered::array ());
-    request.body             = column (row.body, ordered::object ());
-    request.auth             = column (row.auth, ordered::object ());
-    request.elements         = column (row.elements, ordered::array ());
-    request.follow_redirects = row.follow_redirects;
-    request.max_redirects    = row.max_redirects;
-    request.http_version     = row.http_version;
-    request.verify_ssl       = row.verify_ssl;
-    request.stream           = row.stream;
-    request.timeout_ms       = row.timeout_ms;
-    request.disable_cookies  = row.disable_cookies;
+    request.name                 = row.name;
+    request.description          = row.description;
+    request.method               = vayu::to_string (row.method);
+    request.url                  = row.url;
+    request.params               = column (row.params, ordered::array ());
+    request.headers              = column (row.headers, ordered::array ());
+    request.body                 = column (row.body, ordered::object ());
+    request.auth                 = column (row.auth, ordered::object ());
+    request.elements             = column (row.elements, ordered::array ());
+    request.follow_redirects     = row.follow_redirects;
+    request.max_redirects        = row.max_redirects;
+    request.http_version         = row.http_version;
+    request.verify_ssl           = row.verify_ssl;
+    request.stream               = row.stream;
+    request.has_stream_text_path = row.stream_text_path.has_value ();
+    request.timeout_ms           = row.timeout_ms;
+    request.disable_cookies      = row.disable_cookies;
     request.disabled_system_headers =
     column (row.disabled_system_headers, ordered::array ());
     request.disable_url_encoding = row.disable_url_encoding;

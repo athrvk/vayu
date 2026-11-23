@@ -61,6 +61,23 @@ export const MAX_REQUEST_TIMEOUT_MS = 86_400_000;
 export const DEFAULT_STREAM = false;
 
 /**
+ * The stream text path (issue #3773): the JSONPath each event's JSON `data` is
+ * read through for the reply's text. Empty is none, which is what a request
+ * reads as before it declares one.
+ */
+export const DEFAULT_STREAM_TEXT_PATH = "";
+
+/**
+ * The two shapes worth a button: an OpenAI-compatible chat completion's delta
+ * and an Anthropic-style `content_block_delta`. They are offers, not detection
+ * - the engine sniffs no provider, the path is whatever the field holds.
+ */
+export const STREAM_TEXT_PATH_PRESETS = [
+	{ label: "OpenAI-compatible", path: "$.choices[0].delta.content" },
+	{ label: "Anthropic", path: "$.delta.text" },
+] as const;
+
+/**
  * What an event-stream request declares it accepts.
  *
  * Added to the headers as a reversible side effect when the toggle goes on

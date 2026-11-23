@@ -203,7 +203,8 @@ nlohmann::json get_script_completions () {
     "The events a streaming request received, as { event, id, data, "
     "receivedAt } entries (id absent when the origin sent none; receivedAt "
     "is epoch milliseconds on a Send and absent in a load run; dataTruncated "
-    "when one event hit the per-event byte cap). Buffered, not live: a "
+    "when one event hit the per-event byte cap; text when the request's "
+    "streamTextPath read one off the event). Buffered, not live: a "
     "post-request script "
     "runs once, after the stream has terminated, over this list.\n\nAbsent - "
     "not empty - for an ordinary "
@@ -233,6 +234,19 @@ nlohmann::json get_script_completions () {
     "(!pm.response.eventsTruncated) { pm.test('exactly three events', function "
     "() { pm.expect(pm.response.events.length).to.equal(3); }); }" },
     { "sortText", "1_pm_response_eventsTruncated" } });
+
+    completions.push_back ({ { "label", "pm.response.streamText" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.streamText" }, { "detail", "string | undefined" },
+    { "documentation",
+    "The reply a stream delivered, assembled: the text the request's "
+    "streamTextPath read off every event, joined in order. Each entry of "
+    "pm.response.events carries its own part as text. Events where the path "
+    "matched nothing are skipped (a role-only chunk, a ping). Covers every "
+    "event the stored body holds, past sseMaxStoredEvents too. Absent when "
+    "the request declared no streamTextPath.\n\nExample:\npm.test('the reply "
+    "mentions Paris', function () { pm.expect(pm.response.streamText || "
+    "'').to.include('Paris'); });" },
+    { "sortText", "1_pm_response_streamText" } });
 
     completions.push_back ({ { "label", "pm.response.mcp" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.mcp" }, { "detail", "object | undefined" },

@@ -30,7 +30,7 @@ const [FIXTURE_PATH, LOAD_STRATEGY_PATH] =
 	ENGINE_READING_GUARDS.scenarioOnlyKinds.paths.map(fromRepoRoot);
 
 /**
- * The kinds a single-request run's `requestElements` accepts by name: the ten
+ * The kinds a single-request run's `requestElements` accepts by name: the eleven
  * in `REQUEST_ELEMENTS_SUPPORTED_KINDS` (`load_strategy.cpp`). Written out once,
  * here; the source scan below holds it to the C++ array. The engine also
  * accepts every kind whose `hotPathClass` is `script`, by class rather than by
@@ -40,6 +40,7 @@ const ACCEPTED_BY_NAME = [
 	"assert.contains",
 	"assert.duration",
 	"assert.jsonpath",
+	"assert.jsonschema",
 	"assert.size",
 	"assert.status",
 	"extract.boundary",

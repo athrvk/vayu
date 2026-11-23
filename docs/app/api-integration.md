@@ -143,7 +143,7 @@ the file members, and a part without it sends none. A **`binary`** body is one f
 refuse it as "no file selected" rather than send a bodiless request.
 
 An **`mcp`** body (#3762) is `{mode: "mcp", content, mcpTool?}`, where `mcpTool`
-is `{name, inputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
+is `{name, inputSchema?, outputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
 names, which the engine reads for the `Mcp-Param-*` headers it mirrors out of
 the call's arguments. It is stored **inside the body object**, so a `PUT` that
 sends `body` replaces it whole and a body sent without `mcpTool` clears the
@@ -158,6 +158,29 @@ points to. A run's stored snapshot carries the body's content and not its tool,
 so a History copy and Save to request take the saved request's tool instead. The
 engine refuses a tool with a blank `name` or a non-object `inputSchema` with a
 400, which is why the fields commit only a tool it would accept.
+
+The tool may also carry `outputSchema` (#3806), the schema a server's `tools/list`
+states for the tool's `structuredContent`. The engine stores it with the body and
+reads nothing of it; the renderer reads it. The Body panel has an **Output schema**
+editor beside the input one (the same commit rule: an object, and a name beside
+it), and a tool kept in `mcpTool` survives an edit of either schema. **Adding an
+`assert.jsonschema` element to a request in `mcp` mode whose tool has an
+`outputSchema` starts it as `{source: "jsonpath", path:
+"$.result.structuredContent", schema: <outputSchema>}`** (`startingElementConfigs`
+via `ElementList`'s `startingConfigs`): the copy is written into the element's
+`config` at add time, never re-derived from the tool, so a later edit of the tool
+leaves the stored assertion as it was. Any other body, or a tool with no
+`outputSchema`, starts the element blank. Nothing in the app populates `mcpTool`
+from a live `tools/list` yet - the fields are typed by hand until the MCP import
+(#3765) fills them.
+
+The `assert.jsonschema` element itself is the engine's (`docs/engine/elements.md`):
+`source` is `body` or `jsonpath` (with a `path`, which is refused beside `body`),
+`schema` is an object or a boolean, and a keyword the draft-07 validator does not
+evaluate fails the assertion naming it. Its failures arrive in the response's
+Elements section as any other `assert.*` outcome does. The builder offers it in the
+Assert group, with a multi-line schema field; see the Shared ElementList section of
+`COMPONENTS.md`.
 
 **`unresolved` comes back, never goes out** (#2356). The engine sends a file
 reference only when its path was picked on this machine or lies under a folder
@@ -1771,6 +1794,27 @@ Send does not - and only the last two steps differ:
    transfer began; a row stored before it, or a stream refused before it began,
    has none. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
+
+**The stream text path** (issue #3773) is the request's declared JSONPath for
+the reply inside each event's JSON `data` (`$.choices[0].delta.content`,
+`$.delta.text`). It is stored (`requests.stream_text_path`; `streamTextPath` on
+`POST`/`PUT /requests`, where `null` clears and an absent key keeps), held in
+the editor as a string (empty is none) and sent on the wire only beside
+`stream: true`. An inline `POST /compose` carries no path, so `streamTextPathOf`
+(`utils/execute-mapping.ts`) adds it to the streaming `POST /execute` and to
+the load run's `POST /runs` payload, from the request and never the load
+dialog; the buffered execute never carries one, and an empty or blank field is
+left off. The engine refuses a path outside the JSONPath subset, or one beside
+a buffered request, with a `400` that names `streamTextPath`; the streaming
+Send shows it in the pane and as a toast like any other refusal. Turning
+Event stream off empties the field (`streamPatch`) so a save never pairs a path
+with a buffered request. What the path reads comes back as `text` on each
+relayed `message` frame and each stored item, and as `streamText` on the stored
+`events` node, joined over every stored event (past the stored-items cap) and
+present only when a path was declared; a captured load sample carries both the
+same way. The renderer joins live `text` itself in `execution-events-store`
+(`streamText`), and `restore-response.ts` carries the stored string, which wins
+at the swap.
 
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the

@@ -1875,6 +1875,10 @@ Json settings_object_of (const ExportRequest& entry) {
     }
     if (entry.stream) {
         settings["stream"] = true;
+        // Only beside the stream it reads, the one shape the importer takes.
+        if (entry.stream_text_path) {
+            settings["streamTextPath"] = *entry.stream_text_path;
+        }
     }
     return settings;
 }

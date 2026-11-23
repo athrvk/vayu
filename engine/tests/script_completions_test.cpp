@@ -1139,12 +1139,14 @@ struct FullyBoundContext {
     vayu::Environment collection_variables;
     nlohmann::json row = nlohmann::json{ { "username", "ada" }, { "id", 7 } };
     /// A streamed run's stored `events` node, which binds pm.response.events
-    /// and its two markers - conditional exactly as the data row is (#575).
+    /// and its two markers - conditional exactly as the data row is (#575) -
+    /// and, with a declared text path, pm.response.streamText (#3773).
     nlohmann::json events =
     nlohmann::json{ { "items",
                     nlohmann::json::array ({ nlohmann::json{ { "event", "tick" },
                     { "data", "1" }, { "sourceId", "e0" } } }) },
-        { "totalEvents", 3 }, { "eventsTruncated", true }, { "endReason", "completed" } };
+        { "totalEvents", 3 }, { "eventsTruncated", true },
+        { "endReason", "completed" }, { "streamText", "1" } };
     /// A recorded redirect chain, which binds pm.response.redirects - absent
     /// without one (#2949).
     std::vector<vayu::RedirectHop> hops = { { 302, "Found", {},

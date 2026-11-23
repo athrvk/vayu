@@ -593,6 +593,84 @@ TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
     EXPECT_EQ (body["order"], 1);
 }
 
+// -- A stream's text path (#3773) -------------------------------------------
+//
+// Stored beside `stream` and held to `POST /execute`'s rule: a string in the
+// elements' JSONPath subset, stated only on a request that streams. Switching
+// the stream off keeps the path for the next time it is switched on.
+
+TEST_F (RequestsRouteTest, AStreamTextPathRoundTripsAndNullClearsIt) {
+    seed_collection_at ("col_p", "", 0);
+    auto create              = new_request ("col_p");
+    create["stream"]         = true;
+    create["streamTextPath"] = "$.choices[0].delta.content";
+    auto [created_status, created] =
+    vayu::http::routes::create_request_response (*db_, create);
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    EXPECT_EQ (created["streamTextPath"], "$.choices[0].delta.content");
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [get_status, got] = vayu::http::routes::get_request_response (*db_, id);
+    ASSERT_EQ (get_status, 200);
+    EXPECT_EQ (got["streamTextPath"], "$.choices[0].delta.content");
+    const auto list =
+    json::parse (vayu::http::routes::list_requests_body (*db_, "col_p"));
+    ASSERT_EQ (list.size (), 1u);
+    EXPECT_EQ (list[0]["streamTextPath"], "$.choices[0].delta.content")
+    << "the list's streaming writer and the object serializer agree";
+
+    auto [off_status, off] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "stream", false } });
+    ASSERT_EQ (off_status, 200) << off.dump ();
+    EXPECT_EQ (off["streamTextPath"], "$.choices[0].delta.content")
+    << "switching the stream off keeps the path";
+
+    auto [clear_status, cleared] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "streamTextPath", nullptr } });
+    ASSERT_EQ (clear_status, 200) << cleared.dump ();
+    EXPECT_TRUE (cleared["streamTextPath"].is_null ()) << cleared.dump ();
+
+    auto [plain_status, plain] =
+    vayu::http::routes::create_request_response (*db_, new_request ("col_p"));
+    ASSERT_EQ (plain_status, 200) << plain.dump ();
+    EXPECT_TRUE (plain["streamTextPath"].is_null ()) << plain.dump ();
+}
+
+// Mutation check: drop the `!r.stream` refusal in
+// `apply_stream_text_path_field` and the first create stores the path.
+TEST_F (RequestsRouteTest, AStreamTextPathIsRefusedWhereItCouldNotBeRead) {
+    seed_collection_at ("col_p", "", 0);
+    const auto refused = [&] (const json& body) {
+        auto request = new_request ("col_p");
+        request.update (body);
+        return vayu::http::routes::create_request_response (*db_, request);
+    };
+    const auto [buffered_status, buffered] =
+    refused (json{ { "streamTextPath", "$.a" } });
+    EXPECT_EQ (buffered_status, 400) << buffered.dump ();
+    EXPECT_NE (buffered.dump ().find ("streaming request only"), std::string::npos)
+    << buffered.dump ();
+    const auto [type_status, type] =
+    refused (json{ { "stream", true }, { "streamTextPath", 42 } });
+    EXPECT_EQ (type_status, 400) << type.dump ();
+    const auto [subset_status, subset] =
+    refused (json{ { "stream", true }, { "streamTextPath", "$.a[?(@.b)]" } });
+    EXPECT_EQ (subset_status, 400) << subset.dump ();
+    ASSERT_TRUE (
+    json::parse (vayu::http::routes::list_requests_body (*db_, "col_p")).empty ())
+    << "no refused create left a row";
+
+    // On update the rule reads the row as the write leaves it.
+    seed_request_at ("req_plain", "col_p", 0);
+    auto [update_status, update] = vayu::http::routes::update_request_response (
+    *db_, "req_plain", json{ { "streamTextPath", "$.a" } });
+    EXPECT_EQ (update_status, 400) << update.dump ();
+    auto [both_status, both] = vayu::http::routes::update_request_response (
+    *db_, "req_plain", json{ { "stream", true }, { "streamTextPath", "$.a" } });
+    EXPECT_EQ (both_status, 200) << both.dump ();
+    EXPECT_EQ (both["streamTextPath"], "$.a");
+}
+
 // -- An `mcp` body's `mcpTool` (#3762) ---------------------------------------
 //
 // It lives inside the body blob, so it needs no column: a PUT that leaves

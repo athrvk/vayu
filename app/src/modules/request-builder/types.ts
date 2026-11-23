@@ -243,6 +243,13 @@ export interface RequestState {
 	 * `GET /runs/:id/events`.
 	 */
 	stream: boolean;
+	/**
+	 * The JSONPath each event's JSON `data` is read through for the reply's text
+	 * (issue #3773). Empty is none. Only meaningful while {@link stream} is on:
+	 * turning the stream off clears it (`streamPatch`), because the engine
+	 * refuses a path on a request that does not stream.
+	 */
+	streamTextPath: string;
 }
 
 // ============================================================================
@@ -550,6 +557,12 @@ export interface ResponseState {
 	totalEvents?: number;
 	/** The stored list is a prefix - the engine's own comparison, not derived. */
 	eventsTruncated?: boolean;
+	/**
+	 * The reply the stream's text path read, joined over every event the stored
+	 * body holds - so it outlives the stored item cap that `events` is bound by
+	 * (issue #3773). Absent when the request declared no path.
+	 */
+	streamText?: string;
 	/** Why the stream ended. Named, always, rather than left to be inferred. */
 	streamEndReason?: StreamEndReason;
 }

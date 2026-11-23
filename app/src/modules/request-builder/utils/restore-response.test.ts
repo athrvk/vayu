@@ -661,6 +661,49 @@ describe("eventsFromTrace", () => {
 		expect(restored.events).toEqual([]);
 	});
 
+	it("carries the stored streamText, which outlives the cap on the items (#3773)", () => {
+		// Mutation check: drop the `streamText` spread in `eventsFromTrace` and the
+		// restored text is absent, so History would join the capped items instead.
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					...sample().trace,
+					events: {
+						items: [{ event: "message", data: "{}", text: "Hel" }],
+						totalEvents: 4,
+						eventsTruncated: true,
+						endReason: "completed",
+						streamText: "Hello world",
+					},
+				},
+			})
+		);
+		expect(restored?.streamText).toBe("Hello world");
+		// Declared and matched nothing is still declared.
+		expect(
+			eventsFromTrace({
+				events: {
+					items: [],
+					totalEvents: 0,
+					eventsTruncated: false,
+					endReason: "completed",
+					streamText: "",
+				},
+			}).streamText
+		).toBe("");
+		// No path declared: no key, so the Text view does not appear.
+		expect(
+			eventsFromTrace({
+				events: {
+					items: [],
+					totalEvents: 0,
+					eventsTruncated: false,
+					endReason: "completed",
+				},
+			})
+		).not.toHaveProperty("streamText");
+	});
+
 	it("restores an empty-but-real timeline as an empty list", () => {
 		const restored = eventsFromTrace({
 			events: { items: [], totalEvents: 0, eventsTruncated: false, endReason: "completed" },

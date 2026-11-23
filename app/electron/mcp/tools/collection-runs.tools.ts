@@ -30,7 +30,7 @@ import {
 	withCaveat,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
-import { asMcpSend, composeViaEngine, resolveEnvironmentId } from "./compose.js";
+import { asMcpSend, composeViaEngine, resolveEnvironmentId, setStreamFlag } from "./compose.js";
 import {
 	elementsTimersInput,
 	ENGINE_DEFAULT_HEADERS_POINTER,
@@ -280,8 +280,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					// Buffered whatever the row's Event stream setting, which a by-id
 					// compose carries (#3561): a row here is judged by its exchange,
 					// and a stream answers `202 {runId}` with no status to judge.
+					const buffered = { ...outgoing };
+					setStreamFlag(buffered, false);
 					const resp = ((await ctx.client.executeRequest(
-						asMcpSend({ ...outgoing, stream: false }, ctx),
+						asMcpSend(buffered, ctx),
 						signal
 					)) ?? {}) as Record<string, unknown>;
 					// The engine's own allowlist refusal of where a script

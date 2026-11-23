@@ -1896,6 +1896,7 @@ It holds **one** stream: a second Send is what closes the first's feed, so two l
   eventsUrl: string | null      // Engine-relative, exactly as the answer gave it
   open: StreamOpen | null       // What the stream connected to (the `open` frame)
   events: StreamEvent[]         // Received so far, oldest first
+  streamText: string            // Every event's `text` joined as batches land; "" until one carries it (#3773)
   totalEvents: number | null    // The engine's own count, from the `complete` frame
   isStreaming: boolean
   endReason: StreamEndReason | null
@@ -1911,6 +1912,8 @@ It holds **one** stream: a second Send is what closes the first's feed, so two l
 ```
 
 **Every write is addressed to a run, and a write for a run the store is not holding is dropped.** Not defensive tidiness: the relay replays its retained ring on connect, so a frame from a stream that has already been replaced can still arrive on a socket that has not finished closing - and those rows landing under the send that replaced it is the worst failure here, because such a timeline looks real.
+
+`streamText` is the live reply the Events tab's Text view shows: `addEvents` appends each batch's event `text` (what the request's declared stream text path read, issue #3773) as it lands, so a long stream is not re-walked per render. It is the live half only - once the run is stored the node's own `streamText` wins, because it is joined over events the stored list has capped.
 
 `totalEvents` is set only from the `complete` frame (falling back to what arrived, so it is never left null once a stream has ended). While the stream runs, the arrived-so-far count is `events.length`; reporting anything else would be a total nothing had counted. It matters because it is **not** the row count once a list has been capped, and the Events tab's truncation disclosure compares the two.
 

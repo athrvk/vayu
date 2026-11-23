@@ -2964,6 +2964,18 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsAnExtractHeaderElement) {
     EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
 }
 
+// A schema assertion reads only the response body and records a test, both
+// bound on this path (#3806). Mutation check: drop "assert.jsonschema" from
+// `REQUEST_ELEMENTS_SUPPORTED_KINDS` and this reddens on the scenario-only
+// refusal.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAnAssertJsonSchemaElement) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_schema" }, { "kind", "assert.jsonschema" },
+    { "config", { { "schema", { { "type", "object" } } } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
 // The same `stamp_default_element_ids` default `lifecycleElements` gets:
 // `Registry::validate` refuses an id-less entry outright, and a caller that
 // names no id must get one rather than a 400 asking it to invent one.

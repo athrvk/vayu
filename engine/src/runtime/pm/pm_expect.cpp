@@ -3751,14 +3751,6 @@ script_value_as_json (JSContext* ctx, JSValueConst value, const char* what) {
     return std::nullopt;
 }
 
-std::string unevaluated_keyword_list (const vayu::core::ValidationVerdict& verdict) {
-    std::string out;
-    for (const auto& [keyword, count] : verdict.unevaluated_keywords) {
-        out += (out.empty () ? "" : ", ") + std::format ("{} ({})", keyword, count);
-    }
-    return out;
-}
-
 // The first failure, by the path the validator names, and how many follow it.
 std::string first_schema_failure (const vayu::core::ValidationVerdict& verdict) {
     if (verdict.failures.empty ()) {
@@ -3807,10 +3799,8 @@ json_schema_failure (JSContext* ctx, JSValueConst document, JSValueConst schema,
     // both directions - ignored inside `not` it makes the schema stricter,
     // anywhere else looser - so neither polarity may pass on it.
     if (!verdict->unevaluated_keywords.empty ()) {
-        std::string msg = expected +
-        ", but it uses keywords the draft-07 validator does not evaluate, so "
-        "they were not checked: " +
-        unevaluated_keyword_list (*verdict);
+        std::string msg = expected + ", but it " +
+        vayu::core::unevaluated_keywords_disclosure (*verdict);
         if (!verdict->valid) {
             msg += "; of what was checked, the data fails " +
             first_schema_failure (*verdict);
