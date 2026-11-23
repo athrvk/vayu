@@ -7685,6 +7685,23 @@ name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
 proxy you configured is still used. A server on this machine may name anything
 on it.
 
+**Two known limitations of a registered client.**
+
+- A registered client is bound to the loopback redirect of the attempt that
+  registered it, port included. The next sign-in reuses its `clientId` from
+  the stored config on a new ephemeral port, so an authorization server that
+  matches redirect URIs exactly refuses it (RFC 8252 section 7.3 asks a server
+  to accept any port on a loopback redirect, and not every server does). The
+  recovery is the app's **Discover again**, which clears what discovery wrote,
+  `clientId` included, so the next sign-in registers a client for its own
+  redirect.
+- Every discovered sign-in that names no `clientId` registers a new client,
+  and the app stores its `client_id` only once the sign-in succeeds, so an
+  abandoned sign-in (cancelled, timed out or refused) leaves a client
+  registered at the authorization server that nothing will use. Vayu does not
+  delete it: it does not use RFC 7592 client management, which a server need
+  not offer.
+
 The answer's `resolved` holds what the attempt runs on, the values a client
 writes into its stored config so that a later refresh or run needs no
 discovery and keys the same [cached token](#oauth-20-token-cache) (no secret is
