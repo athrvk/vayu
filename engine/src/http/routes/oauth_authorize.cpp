@@ -262,6 +262,18 @@ const std::atomic<bool>* cancel) {
     return plan_discovered (config, std::move (server_url), *found);
 }
 
+/// Whether the attempt sends PKCE: always when it was discovered, because the
+/// MCP authorization spec requires S256 (which discovery holds the server
+/// to), so a typed `pkce: false` cannot turn it off; otherwise unless the
+/// config sets `pkce` to false.
+bool uses_pkce (const AttemptPlan& plan) {
+    if (!plan.server_url.empty ()) {
+        return true;
+    }
+    const auto pkce = plan.config.find ("pkce");
+    return pkce == plan.config.end () || !pkce->is_boolean () || pkce->get<bool> ();
+}
+
 std::expected<void, StartRefusal> require_complete (const AttemptPlan& plan) {
     const bool has_client =
     !field (plan.config, "clientId").empty () || plan.registration_endpoint;
@@ -714,11 +726,8 @@ const std::atomic<bool>* cancel) {
     attempt->deadline           = now + timings_.attempt_ttl;
     attempt->erase_at           = now + timings_.record_retention;
     const int64_t expires_at    = now_ms () + timings_.attempt_ttl.count ();
-    attempt->pkce               = [&] {
-        auto it = plan->config.find ("pkce");
-        return it == plan->config.end () || !it->is_boolean () || it->get<bool> ();
-    }();
-    attempt->state = pkce::random_token (16);
+    attempt->pkce               = uses_pkce (*plan);
+    attempt->state              = pkce::random_token (16);
     attempt->code_verifier = attempt->pkce ? pkce::random_token (32) : std::string{};
     const std::string challenge =
     attempt->pkce ? pkce::code_challenge (attempt->code_verifier) : std::string{};

@@ -7650,6 +7650,8 @@ metadata (`discover_oauth_server`, see
 [architecture](architecture.md)). `discoverUrl` is read trimmed, like the URL
 members above. Discovery **fills only what the config leaves blank**: a typed
 `authorizationUrl`, `accessTokenUrl`, `resource`, `scope` or `clientId` wins.
+A discovered attempt always sends PKCE with `S256` and its verifier, whatever
+`pkce` says, because the MCP authorization spec requires it.
 
 | Member | Filled from |
 |--------|-------------|

@@ -1053,6 +1053,32 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheCodeIsExchangedWithTheResolvedConfig) {
     EXPECT_EQ (token->access_token, "AT-DISCOVERED");
 }
 
+// The MCP spec requires PKCE, so a discovered attempt sends S256 and its
+// verifier whatever `pkce` says; an attempt that was not discovered still
+// honours `pkce: false` (`BuildAuthorizeUrl.OmitsPkceWhenDisabled`).
+//
+// Mutation check: read `pkce` alone in `uses_pkce` and neither is sent.
+TEST_F (OAuthDiscoveredAuthorizeTest, ADiscoveredAttemptUsesPkceWhateverPkceSays) {
+    json config      = embedded_discovered_config ();
+    config["pkce"]   = false;
+    const auto start = mgr_.start (*db_, config, "embedded");
+    ASSERT_TRUE (start.ok) << start.error_code << ": " << start.error_message;
+    auto q = parse_q (query_of (start.authorize_url));
+    EXPECT_EQ (q["code_challenge_method"], "S256");
+    EXPECT_FALSE (q["code_challenge"].empty ());
+
+    ASSERT_EQ (complete_with (start, iss_param ()).state, "completed");
+    auto form = vayu::tests::parse_form (server_.last_body (TOKEN_PATH));
+    EXPECT_FALSE (form["code_verifier"].empty ());
+
+    json plain              = embedded_config ();
+    plain["pkce"]           = false;
+    const auto undiscovered = mgr_.start (*db_, plain, "embedded");
+    ASSERT_TRUE (undiscovered.ok) << undiscovered.error_message;
+    EXPECT_EQ (parse_q (query_of (undiscovered.authorize_url)).count ("code_challenge"), 0U)
+    << undiscovered.authorize_url;
+}
+
 // A response from another issuer is a mix-up (RFC 9207): it fails the attempt
 // and its code never reaches a token endpoint.
 //
