@@ -251,10 +251,16 @@ bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule
     return !is_source_host (*host, authority.port, rule);
 }
 
-std::string local_peer_refusal () {
+std::string local_peer_refusal (const LocalPeerRule& rule) {
+    constexpr std::string_view HOW =
+    " - not when the URL names one and not when a host name resolves to one";
+    if (rule.source_host.empty ()) {
+        return "Vayu does not send it to a loopback or link-local address" +
+        std::string (HOW);
+    }
     return "Vayu does not fetch a reference from a loopback or link-local "
-           "address other than its source document's own host and port - not "
-           "when the URL names one and not when a host name resolves to one";
+           "address other than its source document's own host and port" +
+    std::string (HOW);
 }
 
 } // namespace vayu::http

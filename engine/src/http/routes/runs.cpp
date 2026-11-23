@@ -2163,8 +2163,9 @@ namespace {
 /**
  * One stored result as the report's `results[]` carries it, and as
  * `GET /runs/:runId/results/:resultId` answers it. The trace is served as
- * stored; one that does not parse travels as the raw string rather than
- * failing the read.
+ * stored, except that a design stream's `events` sidecar becomes the list its
+ * stored body holds (`expand_stored_stream_events`, #3770); one that does not
+ * parse travels as the raw string rather than failing the read.
  */
 nlohmann::json report_result_node (const vayu::db::Result& result) {
     nlohmann::json node;
@@ -2179,6 +2180,7 @@ nlohmann::json report_result_node (const vayu::db::Result& result) {
     if (!result.trace_data.empty ()) {
         try {
             node["trace"] = nlohmann::json::parse (result.trace_data);
+            vayu::http::expand_stored_stream_events (node["trace"]);
         } catch (...) {
             node["trace"] = result.trace_data;
         }

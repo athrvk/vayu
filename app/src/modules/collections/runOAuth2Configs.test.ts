@@ -273,4 +273,32 @@ describe("distinctRunOAuth2Configs and a jwt_bearer signing key (#3632)", () => 
 
 		expect(entry.collectionId).toBe("first");
 	});
+
+	it("keeps a config awaiting discovery under its sign-in key, so the guard can say to sign in (#3766)", () => {
+		const config = oauth2({
+			grantType: "authorization_code",
+			discoverUrl: "https://mcp.test/mcp",
+			accessTokenUrl: "",
+			clientId: "",
+		});
+		const found = distinctRunOAuth2Configs(
+			[group("c", { mode: "oauth2", config })],
+			[collection("c", null, { mode: "none" })],
+			NO_SCOPES
+		);
+
+		expect(found).toEqual([
+			{ key: "discover:https://mcp.test/mcp", config, collectionId: "c" },
+		]);
+	});
+
+	it("still leaves out a keyless config that does not discover", () => {
+		const found = distinctRunOAuth2Configs(
+			[group("c", { mode: "oauth2", config: oauth2({ clientId: "" }) })],
+			[collection("c", null, { mode: "none" })],
+			NO_SCOPES
+		);
+
+		expect(found).toEqual([]);
+	});
 });

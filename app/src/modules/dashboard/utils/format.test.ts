@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { formatClock, formatDuration, formatErrorPercent, pickByCount } from "./format";
+import { formatClock, formatDuration, formatErrorPercent, formatRate, pickByCount } from "./format";
 
 describe("pickByCount", () => {
 	const forms = { one: "1 request is", other: "N requests are" };
@@ -67,5 +67,24 @@ describe("formatErrorPercent", () => {
 	it("never prints a nonzero rate as zero: it reads below the last place", () => {
 		expect(formatErrorPercent(0.04)).toBe("<0.1");
 		expect(formatErrorPercent(0.001, 2)).toBe("<0.01");
+	});
+});
+
+describe("formatRate", () => {
+	it("keeps 2 decimals below 10 and none from 10 up, as the engine's run figure does", () => {
+		expect(formatRate(0)).toBe("0.00");
+		expect(formatRate(0.033)).toBe("0.03");
+		expect(formatRate(9.994)).toBe("9.99");
+		expect(formatRate(40.2)).toBe("40");
+		expect(formatRate(333.4)).toBe("333");
+	});
+
+	it("never prints a measured rate as zero: it reads below the last place", () => {
+		expect(formatRate(0.004)).toBe("<0.01");
+	});
+
+	it("draws a dash for a rate that is not a number", () => {
+		expect(formatRate(Number.NaN)).toBe("-");
+		expect(formatRate(Number.POSITIVE_INFINITY)).toBe("-");
 	});
 });

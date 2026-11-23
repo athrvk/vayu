@@ -1082,9 +1082,8 @@ ScenarioStepStore& store) {
         ++summary.status_codes[record.status_code];
         // Every stream that ended, success or failure, as the load path counts
         // them (`handle_result`).
-        if (const auto& events = exchange.response.stream_events) {
-            ctx.context->metrics_collector->record_stream_completion (*events,
-            exchange.response.stream_capped, exchange.response.stream_first_event_ms);
+        if (const auto completion = stream_completion_of (exchange.response)) {
+            ctx.context->metrics_collector->record_stream_completion (*completion);
         }
         if (exchange.response.http_version_downgraded) {
             ++summary.http_version_downgraded;

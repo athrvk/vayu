@@ -1398,10 +1398,11 @@ const ConnectedPeerCheck* peer_check) {
             vayu::http::reserved_target_refusal (*port);
             return error;
         }
-        if (peer_check != nullptr && peer_check->refused_local_peer) {
-            error.code = ErrorCode::InvalidUrl;
-            error.message =
-            "Cannot send this request: " + vayu::http::local_peer_refusal ();
+        if (peer_check != nullptr && peer_check->refused_local_peer &&
+        peer_check->local_peers != nullptr) {
+            error.code    = ErrorCode::InvalidUrl;
+            error.message = "Cannot send this request: " +
+            vayu::http::local_peer_refusal (*peer_check->local_peers);
             return error;
         }
     }

@@ -7,7 +7,7 @@
 
 /**
  * @file metric_record_test.cpp
- * @brief `metric.record` (issue #1500): the element kind's five source
+ * @brief `metric.record` (issue #1500): the element kind's seven source
  *        shapes, its refusal with no collector to write into, and the
  *        registry's 32-name cap. `MetricsCollector`'s own storage
  *        (`register_custom_metric` / `record_custom_metric` /
@@ -17,9 +17,12 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <tuple>
+#include <vector>
 
 #include "optional_assert.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/metrics_collector.hpp"
 
@@ -40,6 +43,30 @@ vayu::Response ok_json_response (int status, const std::string& body) {
     response.body        = body;
     response.body_size   = body.size ();
     return response;
+}
+
+/// A response the transfer counted as a stream (`Response::stream_events`
+/// set, as `StreamTally` does once the final hop announced
+/// `text/event-stream`), whose buffered body is one `data:` frame per entry.
+vayu::Response stream_response (const std::vector<std::string>& data) {
+    std::string body;
+    for (const auto& item : data) {
+        body += "data: " + item + "\n\n";
+    }
+    vayu::Response response = ok_json_response (200, body);
+    response.stream_events  = data.size ();
+    return response;
+}
+
+nlohmann::json event_trend (const std::string& path) {
+    return nlohmann::json{ { "id", "m1" }, { "kind", "metric.record" },
+        { "config",
+        { { "name", "completion_tokens" }, { "type", "trend" },
+        { "source", { { "eventJsonpath", path } } } } } };
+}
+
+std::string usage_event (int completion_tokens) {
+    return R"({"usage": {"completion_tokens": )" + std::to_string (completion_tokens) + "}}";
 }
 
 std::vector<CompiledElement> one_element (const nlohmann::json& kind_and_config) {
@@ -220,6 +247,158 @@ TEST_F (MetricRecordTest, ANonNumericSourceIsReportedMissingRatherThanRecorded) 
     auto outcomes = run_after (elements);
     ASSERT_EQ (outcomes.size (), 1u);
     EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+// ---------------------------------------------------------------------------
+// The `eventJsonpath` source (#3780): the last matching event of a stream.
+// ---------------------------------------------------------------------------
+
+// Mutation check: scan `read_last_matching_event` forwards (first match) and
+// this records 1 instead of 30.
+TEST_F (MetricRecordTest, EventJsonPathRecordsTheLastMatchingEvent) {
+    response = stream_response ({ usage_event (1), R"({"delta": "hi"})",
+    usage_event (30), R"({"delta": "!"})", "[DONE]" });
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok") << outcomes[0].message.value_or ("");
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_EQ (std::get<0> (recorded[0]), "completion_tokens");
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 30.0);
+}
+
+// `[DONE]`, a keep-alive comment and plain text are passed over, not refused.
+// Mutation check: return `read_nothing` instead of `continue` on a parse
+// failure and this reports `missing`.
+TEST_F (MetricRecordTest, EventJsonPathSkipsEventsThatAreNotJson) {
+    response = stream_response ({ usage_event (12), "not json", "[DONE]" });
+    response.body = ": keep-alive\n\n" + response.body;
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok") << outcomes[0].message.value_or ("");
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 12.0);
+}
+
+// A stream past `sseMaxStoredEvents` still reads its real last event: the list
+// a script sees is capped there, and that cap drops the tail. Mutation check:
+// stop the scan at `constants::sse::MAX_STORED_EVENTS` events and this reads 1.
+TEST_F (MetricRecordTest, EventJsonPathReadsTheLastEventOfAStreamPastTheStoredCap) {
+    std::vector<std::string> data (
+    vayu::core::constants::sse::MAX_STORED_EVENTS + 10, usage_event (1));
+    data.back () = usage_event (99);
+    response     = stream_response (data);
+
+    (void)run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 99.0);
+}
+
+TEST_F (MetricRecordTest, EventJsonPathWithNoMatchingEventIsMissing) {
+    response = stream_response ({ R"({"delta": "hi"})", "[DONE]" });
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_NE (outcomes[0].message.value_or ("").find ("no event"), std::string::npos)
+    << outcomes[0].message.value_or ("");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+TEST_F (MetricRecordTest, EventJsonPathWithANonNumericMatchIsMissing) {
+    response = stream_response ({ R"({"usage": {"completion_tokens": "many"}})" });
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+// A body that reads like a stream is not one unless the transfer said so
+// (#3771). Mutation check: drop the `stream_events` test in
+// `ensure_parsed_events` and this records 5.
+TEST_F (MetricRecordTest, EventJsonPathOnAResponseThatIsNotAStreamIsMissing) {
+    response = stream_response ({ usage_event (5) });
+    response.stream_events.reset ();
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_NE (outcomes[0].message.value_or ("").find ("not an event stream"),
+    std::string::npos)
+    << outcomes[0].message.value_or ("");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+// The last match is only the last when nothing after it was lost. Mutation
+// check: drop the `event->truncated` guard in `read_last_matching_event` and
+// this records 7.
+TEST_F (MetricRecordTest, EventJsonPathRecordsNothingWhenAnEventAfterTheMatchWasCut) {
+    response = stream_response ({ usage_event (7),
+    R"({"delta": ")" + std::string (vayu::core::constants::sse::MIN_EVENT_BYTES, 'x') + R"("})" });
+
+    std::vector<ElementOutcome> sink;
+    ElementContext ctx  = make_context ();
+    ctx.max_event_bytes = vayu::core::constants::sse::MIN_EVENT_BYTES;
+    ElementPipeline::run (Phase::StepAfter, ctx,
+    one_element (event_trend ("$.usage.completion_tokens")), sink);
+    ASSERT_EQ (sink.size (), 1u);
+    EXPECT_EQ (sink[0].status, "missing");
+    EXPECT_NE (sink[0].message.value_or ("").find ("sseMaxEventBytes"), std::string::npos)
+    << sink[0].message.value_or ("");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+// Mutation check: drop the `body_truncated` guard in `read_last_matching_event`
+// and this records 7.
+TEST_F (MetricRecordTest, EventJsonPathRecordsNothingFromACutBody) {
+    response                = stream_response ({ usage_event (7) });
+    response.body_truncated = true;
+
+    auto outcomes =
+    run_after (one_element (event_trend ("$.usage.completion_tokens")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_NE (outcomes[0].message.value_or ("").find ("cut short"), std::string::npos)
+    << outcomes[0].message.value_or ("");
+    EXPECT_TRUE (recorded.empty ());
+}
+
+// Two elements on one step share one parse of the events, and each still
+// reads its own path's last match.
+TEST_F (MetricRecordTest, TwoEventJsonPathElementsOnOneStepEachReadTheirOwnPath) {
+    response =
+    stream_response ({ R"({"usage": {"prompt_tokens": 4}})", usage_event (9) });
+    auto prompt              = event_trend ("$.usage.prompt_tokens");
+    prompt["id"]             = "m2";
+    prompt["config"]["name"] = "prompt_tokens";
+    const auto elements      = vayu::core::compile_elements (
+    nlohmann::json::array ({ event_trend ("$.usage.completion_tokens"), prompt }));
+
+    (void)run_after (elements);
+    ASSERT_EQ (recorded.size (), 2u);
+    EXPECT_EQ (std::get<0> (recorded[0]), "completion_tokens");
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 9.0);
+    EXPECT_EQ (std::get<0> (recorded[1]), "prompt_tokens");
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[1]), 4.0);
+}
+
+// A rate reads only a condition, whose fields do not include the events.
+TEST_F (MetricRecordTest, RateRefusesAnEventJsonPathSource) {
+    response      = stream_response ({ usage_event (1) });
+    auto elements = one_element (
+    metric_element ("bad", "rate", nlohmann::json{ { "eventJsonpath", "$.usage" } }));
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "error");
     EXPECT_TRUE (recorded.empty ());
 }
 

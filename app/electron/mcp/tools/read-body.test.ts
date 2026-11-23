@@ -228,6 +228,80 @@ describe("read_body windows", () => {
 	});
 });
 
+/**
+ * A streamed send's body is the stream's bytes (#3770). It was empty, and
+ * `read_body` answered `{"text":"","totalBytes":0}` for a stream that had
+ * delivered thousands of bytes. The tool reads `response.body` like any other
+ * result's and has no stream branch to forget: the answer is in what the
+ * engine stores.
+ *
+ * Mutation check: have `contentOf` answer an empty body for a response whose
+ * headers name an event stream and the first case reads `totalBytes: 0`.
+ */
+describe("read_body on a streamed result", () => {
+	const WIRE = 'event: token\ndata: {"t":"Par"}\n\nevent: token\ndata: is\n\ndata: [DONE]\n\n';
+
+	/** A streamed result as the engine serves it: the bytes, and the events parsed from them. */
+	function streamEngine(response: Record<string, unknown>) {
+		return engineWith({
+			getRunResult: vi.fn().mockResolvedValue(
+				resultRow({
+					request: { method: "POST", url: "https://h/chat" },
+					response: { headers: { "content-type": "text/event-stream" }, ...response },
+					events: {
+						items: [{ event: "token", data: "is", receivedAt: 2 }],
+						totalEvents: 3,
+						eventsTruncated: false,
+						endReason: "completed",
+					},
+				})
+			),
+		});
+	}
+
+	test("returns the stream's bytes, not an empty body", async () => {
+		const page = await readBody(RESULT, streamEngine({ body: WIRE, bodyBytes: WIRE.length }));
+
+		expect(page).toMatchObject({
+			text: WIRE,
+			totalBytes: Buffer.byteLength(WIRE),
+			encoding: "utf8",
+			done: true,
+		});
+		expect(page).not.toHaveProperty("storedTruncated");
+	});
+
+	test("finds a word the stream delivered", async () => {
+		const page = await readBody({ ...RESULT, find: "[DONE]" }, streamEngine({ body: WIRE }));
+		expect(page.matchCount).toBe(1);
+	});
+
+	test("says the store holds a prefix when the engine's read cap cut the stream", async () => {
+		const page = await readBody(
+			RESULT,
+			streamEngine({ body: WIRE, bodyBytes: 5_793, bodyCapped: true })
+		);
+
+		expect(page.totalBytes).toBe(Buffer.byteLength(WIRE));
+		expect(page.storedTruncated).toBe(true);
+	});
+
+	test("pages a stream stored as base64 in its decoded bytes", async () => {
+		const latin1 = Buffer.concat([
+			Buffer.from("data: caf"),
+			Buffer.from([0xe9]),
+			Buffer.from("\n\n"),
+		]);
+		const page = await readBody(
+			RESULT,
+			streamEngine({ body: latin1.toString("base64"), bodyEncoding: "base64" })
+		);
+
+		expect(page).toMatchObject({ encoding: "base64", totalBytes: latin1.length, done: true });
+		expect(Buffer.from(page.text!, "base64")).toEqual(latin1);
+	});
+});
+
 describe("read_body find", () => {
 	test("lists the first matches with their offsets and context, and counts them all", async () => {
 		const unit = "....needle";

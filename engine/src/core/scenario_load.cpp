@@ -866,7 +866,8 @@ const nlohmann::json* data_row) {
         [&context] (const std::string& name, vayu::core::CustomMetricType type, double value) {
             context->metrics_collector->record_custom_metric (name, type, value);
         },
-        .max_body_bytes = context->max_element_body_bytes,
+        .max_body_bytes  = context->max_element_body_bytes,
+        .max_event_bytes = context->sse_limits.max_event_bytes,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,

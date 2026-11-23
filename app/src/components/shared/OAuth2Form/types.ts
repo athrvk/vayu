@@ -40,7 +40,7 @@ export interface OAuth2FormProps {
 	 * a `{{$guid}}` in a credential answers the same thing after the host tab
 	 * has been unmounted and remounted. Omit it where nothing resolves (a host
 	 * that passes no `resolveString` has no dynamic values to hold still); see
-	 * the note above `stableConfigField` in `OAuth2Form.tsx`.
+	 * the note above `stableConfigField` in `resolve-config.ts`.
 	 */
 	resolveKey?: string;
 	/**

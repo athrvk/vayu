@@ -281,7 +281,19 @@ export interface OAuth2Config {
 	privateKeyFile?: string;
 	/** Seconds a token that states no `expires_in` is kept for; absent or 0 keeps it until replaced. */
 	fallbackExpiresIn?: number;
+	/**
+	 * `authorization_code`: the OAuth-protected MCP server a sign-in discovers
+	 * the authorization server from (#3766). The engine fills only the members
+	 * left blank; `""` is discovery switched on with no URL typed yet.
+	 */
+	discoverUrl?: string;
+	/** The members a sign-in's discovery wrote, which the form shows read-only and Discover again clears. */
+	discoveredFields?: OAuth2DiscoveredField[];
 }
+
+/** The config members discovery can fill (the engine's `resolved` minus `issuer`). */
+export type OAuth2DiscoveredField =
+	"authorizationUrl" | "accessTokenUrl" | "clientId" | "resource" | "scope";
 
 /**
  * `none` vs `noauth` - the distinction the inheritance walk turns on.
@@ -2957,8 +2969,12 @@ export interface LiveCapacityState {
 	stopReason?: string;
 }
 
-/** Milliseconds over the streams that delivered a timed first event (`count` of them). */
-export interface StreamTimeToFirstEvent {
+/**
+ * A per-stream distribution over the `count` streams that measured the figure.
+ * The unit belongs to the field that carries it: milliseconds for
+ * `timeToFirstEvent` and `maxEventGap`, events per second for `eventRate`.
+ */
+export interface StreamDistribution {
 	p50: number;
 	p95: number;
 	p99: number;
@@ -3125,7 +3141,7 @@ export interface LoadTestMetrics {
 	 * reader takes the latest frame that carries it (`utils/liveStream.ts`). Not
 	 * the First byte phase: that ends at the response headers.
 	 */
-	stream_time_to_first_event?: StreamTimeToFirstEvent;
+	stream_time_to_first_event?: StreamDistribution;
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has
@@ -3740,6 +3756,12 @@ export interface RunReport {
 	 * headers: a gateway that answers 200 at once and then thinks reads fast
 	 * there and slow here (issue #3234). It is absent when no stream delivered a
 	 * timed event, while `stream` itself is present.
+	 *
+	 * `maxEventGap` and `eventRate` (issue #3776) say how each stream paced its
+	 * events, which the whole-run `eventsPerSecond` blends away and a first-event
+	 * time never sees. Each is per stream, over the streams that had two timed
+	 * events to measure between, and absent (never 0) when none did. Report-only:
+	 * a live gate frame carries neither.
 	 */
 	stream?: {
 		completions: number;
@@ -3756,7 +3778,11 @@ export interface RunReport {
 			count: number;
 		};
 		/** Milliseconds, over the completions that delivered a timed event (`count`). */
-		timeToFirstEvent?: StreamTimeToFirstEvent;
+		timeToFirstEvent?: StreamDistribution;
+		/** Milliseconds: each stream's largest pause between two consecutive events. */
+		maxEventGap?: StreamDistribution;
+		/** Events per second: each stream's own rate, the events after its first over first to last arrival. */
+		eventRate?: StreamDistribution;
 	};
 	testValidation?: {
 		samplesTested: number;

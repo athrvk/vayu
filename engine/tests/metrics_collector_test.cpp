@@ -2316,9 +2316,9 @@ TEST_F (MetricsCollectorTest, StreamTotalsAbsentWithoutStreamCompletions) {
 }
 
 TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
-    collector->record_stream_completion (10, true, std::nullopt);
-    collector->record_stream_completion (20, true, std::nullopt);
-    collector->record_stream_completion (30, false, std::nullopt);
+    collector->record_stream_completion ({ .events = 10, .capped = true });
+    collector->record_stream_completion ({ .events = 20, .capped = true });
+    collector->record_stream_completion ({ .events = 30 });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2341,8 +2341,8 @@ TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
 // first event") a report most needs to show. Mutation check: record
 // `max (1, events)` with no offset and min, p50 and max read 1.
 TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsZeroEvents) {
-    collector->record_stream_completion (0, false, std::nullopt);
-    collector->record_stream_completion (0, false, std::nullopt);
+    collector->record_stream_completion ({ .events = 0 });
+    collector->record_stream_completion ({ .events = 0 });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2359,9 +2359,9 @@ TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsZeroEvents) {
 // real counts keep their values.
 TEST_F (MetricsCollectorTest, StreamTotalsKeepEmptyAndDeliveringStreamsApart) {
     for (int i = 0; i < 3; ++i) {
-        collector->record_stream_completion (0, false, std::nullopt);
+        collector->record_stream_completion ({ .events = 0 });
     }
-    collector->record_stream_completion (40, true, std::nullopt);
+    collector->record_stream_completion ({ .events = 40, .capped = true });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2375,7 +2375,8 @@ TEST_F (MetricsCollectorTest, StreamTotalsKeepEmptyAndDeliveringStreamsApart) {
 // histogram: a dropped record would leave `count` short of the completions.
 TEST_F (MetricsCollectorTest, StreamTotalsHoldAStreamAtTheLargestEventCap) {
     const auto ceiling = vayu::core::constants::sse::STREAM_EVENTS_CEILING;
-    collector->record_stream_completion (static_cast<size_t> (ceiling), true, std::nullopt);
+    collector->record_stream_completion (
+    { .events = static_cast<size_t> (ceiling), .capped = true });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2391,9 +2392,10 @@ TEST_F (MetricsCollectorTest, StreamTotalsHoldAStreamAtTheLargestEventCap) {
 // Mutation check: record `first_event_ms.value_or (0)` unconditionally and the
 // count reads 3; drop the record and it reads 0.
 TEST_F (MetricsCollectorTest, StreamTimeToFirstEventCountsOnlyTimedCompletions) {
-    collector->record_stream_completion (3, false, 120.0);
-    collector->record_stream_completion (3, true, 480.0);
-    collector->record_stream_completion (0, false, std::nullopt);
+    collector->record_stream_completion ({ .events = 3, .first_event_ms = 120.0 });
+    collector->record_stream_completion (
+    { .events = 3, .capped = true, .first_event_ms = 480.0 });
+    collector->record_stream_completion ({ .events = 0 });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2405,8 +2407,8 @@ TEST_F (MetricsCollectorTest, StreamTimeToFirstEventCountsOnlyTimedCompletions) 
 }
 
 TEST_F (MetricsCollectorTest, StreamTimeToFirstEventIsEmptyWhenNoStreamWasTimed) {
-    collector->record_stream_completion (0, true, std::nullopt);
-    collector->record_stream_completion (1, false, std::nullopt);
+    collector->record_stream_completion ({ .events = 0, .capped = true });
+    collector->record_stream_completion ({ .events = 1 });
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2414,12 +2416,111 @@ TEST_F (MetricsCollectorTest, StreamTimeToFirstEventIsEmptyWhenNoStreamWasTimed)
     EXPECT_EQ (totals->time_to_first_event.count, 0u);
 }
 
+// The largest gap and the event rate (#3776) are distributions over the
+// completions that measured them, and a stream with one write measured
+// neither, so it stays out of both rather than reading as a 0. Mutation
+// check: record `max_event_gap_ms.value_or (0)` unconditionally and the gap
+// count reads 3.
+TEST_F (MetricsCollectorTest, StreamGapAndRateCountOnlyTheCompletionsThatMeasuredThem) {
+    collector->record_stream_completion (
+    { .events = 40, .max_event_gap_ms = 310.0, .event_rate = 40.0 });
+    collector->record_stream_completion (
+    { .events = 40, .max_event_gap_ms = 26.0, .event_rate = 39.0 });
+    collector->record_stream_completion ({ .events = 3 });
+
+    const auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->completions, 3u);
+    EXPECT_EQ (totals->max_event_gap.count, 2u);
+    // hdr keeps three significant figures of what it records.
+    EXPECT_NEAR (totals->max_event_gap.max, 310.0, 0.5);
+    EXPECT_NEAR (totals->max_event_gap.p50, 26.0, 0.05);
+    EXPECT_EQ (totals->event_rate.count, 2u);
+    EXPECT_NEAR (totals->event_rate.p50, 39.0, 0.05);
+    EXPECT_NEAR (totals->event_rate.max, 40.0, 0.05);
+}
+
+// The rate is a scaled integer in its histogram, so a slow stream keeps its
+// decimals and a runaway one (two writes a microsecond apart) is clamped into
+// the top bucket rather than refused. The slow rate is held to half the
+// scale's resolution, which is what tells the offset was taken off. Mutation
+// checks: drop the scale from `stream_rate_recorded` and the slow rate reads
+// 0; read the histogram without `stream_rate_read` and it reads 0.018; drop
+// the clamp and the count reads 1.
+TEST_F (MetricsCollectorTest, StreamEventRateKeepsASlowStreamAndClampsARunawayOne) {
+    constexpr double ONE_A_MINUTE = 1.0 / 60.0;
+    collector->record_stream_completion (
+    { .events = 2, .max_event_gap_ms = 60000.0, .event_rate = ONE_A_MINUTE });
+    collector->record_stream_completion (
+    { .events = 2, .max_event_gap_ms = 0.001, .event_rate = 1.0e9 });
+
+    const auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->event_rate.count, 2u);
+    EXPECT_NEAR (totals->event_rate.min, ONE_A_MINUTE, 0.0005);
+    const double ceiling =
+    static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_EVENT_RATE - 1) /
+    constants::metrics_collector::STREAM_EVENT_RATE_SCALE;
+    EXPECT_NEAR (totals->event_rate.max, ceiling, ceiling / 1000.0);
+}
+
+// The summary section writes each new block only when it holds a completion,
+// in the shape `timeToFirstEvent` has. Mutation check: write both whatever
+// their count and the absent half fails.
+TEST_F (MetricsCollectorTest, TheStreamSummaryCarriesGapAndRateOnlyWhenMeasured) {
+    collector->record_stream_completion ({ .events = 3 });
+    const auto unmeasured = collector->stream_totals ();
+    ASSERT_HAS_VALUE (unmeasured);
+    const auto without = build_stream_summary_payload (*unmeasured, 1.0);
+    EXPECT_FALSE (without.contains ("maxEventGap")) << without.dump ();
+    EXPECT_FALSE (without.contains ("eventRate")) << without.dump ();
+
+    collector->record_stream_completion (
+    { .events = 3, .max_event_gap_ms = 300.0, .event_rate = 40.0 });
+    const auto measured = collector->stream_totals ();
+    ASSERT_HAS_VALUE (measured);
+    const auto with = build_stream_summary_payload (*measured, 1.0);
+    for (const auto* block : { "maxEventGap", "eventRate" }) {
+        ASSERT_TRUE (with.contains (block)) << block << ": " << with.dump ();
+        for (const auto* key : { "p50", "p95", "p99", "max", "count" }) {
+            EXPECT_TRUE (with.at (block).contains (key)) << block << "." << key;
+        }
+        EXPECT_EQ (with.at (block).at ("count").get<size_t> (), 1u) << block;
+    }
+    EXPECT_NEAR (with.at ("maxEventGap").at ("max").get<double> (), 300.0, 0.5);
+    EXPECT_NEAR (with.at ("eventRate").at ("max").get<double> (), 40.0, 0.05);
+}
+
+// One reading of a response for both run modes' completion paths: a reply
+// that was not a stream is no completion, and a stream carries every figure
+// its tally set. Mutation check: drop `event_rate` from `stream_completion_of`
+// and the last expectation fails.
+TEST (StreamCompletionOf, ReadsEveryFigureOfAStreamAndNothingOfAnOrdinaryReply) {
+    vayu::Response ordinary;
+    ordinary.status_code = 200;
+    EXPECT_FALSE (stream_completion_of (ordinary).has_value ());
+
+    vayu::Response streamed;
+    streamed.stream_events           = 4;
+    streamed.stream_capped           = true;
+    streamed.stream_first_event_ms   = 12.0;
+    streamed.stream_max_event_gap_ms = 30.0;
+    streamed.stream_event_rate       = 40.0;
+    const auto completion            = stream_completion_of (streamed);
+    ASSERT_HAS_VALUE (completion);
+    EXPECT_EQ (completion->events, 4u);
+    EXPECT_TRUE (completion->capped);
+    EXPECT_EQ (completion->first_event_ms, 12.0);
+    EXPECT_EQ (completion->max_event_gap_ms, 30.0);
+    EXPECT_EQ (completion->event_rate, 40.0);
+}
+
 TEST_F (MetricsCollectorTest, StreamMetricsOffRecordsNothing) {
     MetricsCollectorConfig config;
     config.stream_metrics = false;
     MetricsCollector off ("stream_off", config);
 
-    off.record_stream_completion (25, true, 40.0);
+    off.record_stream_completion ({ .events = 25, .capped = true, .first_event_ms = 40.0 });
 
     // Off means the report has no section at all, not a section of zeros - so
     // the counters behind it must not tick either.
@@ -2488,7 +2589,7 @@ TEST_F (MetricsCollectorTest, ATickCarriesNoStreamKeysUnlessTheRunStreamsWithStr
     MetricsCollector metrics_off ("stream_off_live", streaming_config (false));
 
     for (auto* run : { &plain, &metrics_off }) {
-        run->record_stream_completion (4, false, 25.0);
+        run->record_stream_completion ({ .events = 4, .first_event_ms = 25.0 });
         EXPECT_EQ (run->live_stream_counts (), nullptr);
         auto stats = run->get_current_stats (1, 1.0, 1);
         run->put_gate_distributions (stats);
@@ -2505,11 +2606,11 @@ TEST_F (MetricsCollectorTest, TheGateFrameCarriesTimeToFirstEventOnceAStreamComp
 
     nlohmann::json before;
     streaming.put_gate_distributions (before);
-    streaming.record_stream_completion (0, false, std::nullopt);
+    streaming.record_stream_completion ({ .events = 0 });
     streaming.put_gate_distributions (before);
     EXPECT_FALSE (before.contains ("streamTimeToFirstEvent")) << before.dump ();
 
-    streaming.record_stream_completion (3, false, 120.0);
+    streaming.record_stream_completion ({ .events = 3, .first_event_ms = 120.0 });
     nlohmann::json after;
     streaming.put_gate_distributions (after);
     ASSERT_TRUE (after.contains ("streamTimeToFirstEvent")) << after.dump ();

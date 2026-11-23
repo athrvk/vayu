@@ -16,6 +16,8 @@
 
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/oauth_discovery.hpp"
+#include "vayu/http/oauth_registration.hpp"
 #include "vayu/http/pkce.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -28,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <memory>
 #include <optional>
@@ -139,6 +142,205 @@ void refuse_start (RegistryRefusal refusal, AuthorizeStart& out) {
     " sign-ins may be in progress at once - finish or cancel one first";
 }
 
+/// A start refused before its attempt is committed.
+struct StartRefusal {
+    int http_status = 400;
+    std::string code;
+    std::string message;
+};
+
+void fail_start (const StartRefusal& refusal, AuthorizeStart& out) {
+    out.ok            = false;
+    out.http_status   = refusal.http_status;
+    out.error_code    = refusal.code;
+    out.error_message = refusal.message;
+}
+
+/// A discovery's or a registration's failure as the start's answer: no usable
+/// server URL is the caller's (400), running out of time a 504, and anything
+/// the far side answered or failed to answer a 502.
+StartRefusal upstream_refusal (std::string code, std::string message) {
+    int status = 502;
+    if (code == oauth_discovery::INVALID_SERVER_URL) {
+        status = 400;
+    } else if (code == oauth_discovery::TIMEOUT || code == oauth_registration::TIMEOUT) {
+        status = 504;
+    }
+    return StartRefusal{ status, std::move (code), std::move (message) };
+}
+
+/// The issuer a discovered attempt's authorization response must name (RFC
+/// 9207).
+struct ExpectedIssuer {
+    std::string issuer;
+    /// The metadata's `authorization_response_iss_parameter_supported`: only
+    /// then is a response without `iss` refused.
+    bool advertised = false;
+};
+
+/// The config an attempt runs on, and what its discovery recorded.
+struct AttemptPlan {
+    nlohmann::json config;
+    /// The `discoverUrl` the attempt was discovered from; empty when it was not.
+    std::string server_url;
+    std::optional<ExpectedIssuer> issuer;
+    /// The rule the code exchange runs under: the discovery's own
+    /// (`discovered_peer_rule`), none for an attempt that was not discovered.
+    std::optional<LocalPeerRule> exchange_peer_rule;
+    /// Where the attempt registers its client: set only when the config names
+    /// no `clientId` and the discovered authorization server offers
+    /// registration.
+    std::optional<std::string> registration_endpoint;
+};
+
+/// Writes @p discovered into @p member when the config leaves it blank: a
+/// value the config sets wins. Blank is what `url_field` reads as empty.
+void fill_blank (nlohmann::json& config, const char* member, const std::string& discovered) {
+    if (!discovered.empty () && oauth::url_field (config, member).empty ()) {
+        config[member] = discovered;
+    }
+}
+
+/// The MCP spec's scope selection: the 401 challenge's `scope`, else every
+/// `scopes_supported` entry of the protected resource metadata, else none.
+std::string discovered_scope (const OAuthDiscovery& found) {
+    if (found.challenge_scope && !found.challenge_scope->empty ()) {
+        return *found.challenge_scope;
+    }
+    std::string joined;
+    for (const std::string& scope : found.resource_scopes_supported) {
+        joined += (joined.empty () ? "" : " ") + scope;
+    }
+    return joined;
+}
+
+std::expected<AttemptPlan, StartRefusal> plan_discovered (const nlohmann::json& config,
+std::string server_url,
+const OAuthDiscovery& found) {
+    const AuthorizationServerMetadata& server = found.authorization_server;
+    std::optional<LocalPeerRule> exchange_peer_rule = discovered_peer_rule (server_url);
+    AttemptPlan plan{ config, std::move (server_url),
+        ExpectedIssuer{ server.issuer, server.authorization_response_iss_parameter_supported },
+        std::move (exchange_peer_rule), std::nullopt };
+    fill_blank (plan.config, "authorizationUrl", server.authorization_endpoint);
+    fill_blank (plan.config, "accessTokenUrl", server.token_endpoint);
+    fill_blank (plan.config, "resource", found.resource);
+    fill_blank (plan.config, "scope", discovered_scope (found));
+    if (!field (config, "clientId").empty ()) {
+        return plan;
+    }
+    if (!server.registration_endpoint) {
+        return std::unexpected (StartRefusal{ 400, "oauth2_client_id_required",
+        "The authorization server " + server.issuer +
+        " offers no dynamic client registration (its metadata has no "
+        "registration_endpoint) - enter the client id registered with it in "
+        "clientId" });
+    }
+    plan.registration_endpoint = *server.registration_endpoint;
+    // The registered client is public: a secret typed for another client must
+    // not authenticate it.
+    plan.config.erase ("clientSecret");
+    return plan;
+}
+
+/// @p config as it starts: unchanged, or completed from the discovery of its
+/// `discoverUrl`.
+std::expected<AttemptPlan, StartRefusal> plan_attempt (vayu::db::Database& db,
+const nlohmann::json& config,
+AuthorizationServerMetadataCache& cache,
+const std::atomic<bool>* cancel) {
+    std::string server_url = oauth::url_field (config, "discoverUrl");
+    if (server_url.empty ()) {
+        return AttemptPlan{ config, {}, std::nullopt, std::nullopt, std::nullopt };
+    }
+    auto found = discover_oauth_server (db, server_url,
+    routes::resolve_request_timeout_ms (nlohmann::json::object (), db), cancel, cache);
+    if (!found) {
+        return std::unexpected (upstream_refusal (
+        std::move (found.error ().code), std::move (found.error ().message)));
+    }
+    return plan_discovered (config, std::move (server_url), *found);
+}
+
+/// Whether the attempt sends PKCE: always when it was discovered, because the
+/// MCP authorization spec requires S256 (which discovery holds the server
+/// to), so a typed `pkce: false` cannot turn it off; otherwise unless the
+/// config sets `pkce` to false.
+bool uses_pkce (const AttemptPlan& plan) {
+    if (!plan.server_url.empty ()) {
+        return true;
+    }
+    const auto pkce = plan.config.find ("pkce");
+    return pkce == plan.config.end () || !pkce->is_boolean () || pkce->get<bool> ();
+}
+
+std::expected<void, StartRefusal> require_complete (const AttemptPlan& plan) {
+    const bool has_client =
+    !field (plan.config, "clientId").empty () || plan.registration_endpoint;
+    if (!plan.config.is_object () ||
+    oauth::url_field (plan.config, "authorizationUrl").empty () || !has_client) {
+        return std::unexpected (StartRefusal{ 400, "oauth2_invalid_config",
+        "authorizationUrl and clientId are required" });
+    }
+    return {};
+}
+
+/// Registers the plan's client for @p redirect_uri when it has none, writing
+/// the issued id into its config.
+std::expected<void, StartRefusal> register_client (vayu::db::Database& db,
+AttemptPlan& plan,
+const std::string& redirect_uri,
+const std::atomic<bool>* cancel) {
+    if (!plan.registration_endpoint) {
+        return {};
+    }
+    auto client_id = register_oauth_client (db, *plan.registration_endpoint,
+    redirect_uri, plan.server_url,
+    routes::resolve_request_timeout_ms (nlohmann::json::object (), db), cancel);
+    if (!client_id) {
+        return std::unexpected (upstream_refusal (std::move (client_id.error ().code),
+        std::move (client_id.error ().message)));
+    }
+    plan.config["clientId"] = std::move (*client_id);
+    return {};
+}
+
+ResolvedAuthorization resolved_authorization (const nlohmann::json& config,
+const ExpectedIssuer& issuer) {
+    return ResolvedAuthorization{ oauth::url_field (config, "authorizationUrl"),
+        oauth::url_field (config, "accessTokenUrl"), field (config, "clientId"),
+        field (config, "resource"), field (config, "scope"), issuer.issuer };
+}
+
+/**
+ * Whether an authorization response may be acted on by an attempt expecting
+ * @p expected (RFC 9207 section 2.4, as the MCP spec tabulates it): a present
+ * `iss` must equal the issuer byte for byte, and an absent one is refused only
+ * from a server that advertises sending it. An attempt that was not
+ * discovered expects nothing and accepts any response.
+ */
+std::expected<void, std::string> check_issuer (const std::map<std::string, std::string>& params,
+const std::optional<ExpectedIssuer>& expected) {
+    if (!expected) {
+        return {};
+    }
+    const auto iss = params.find ("iss");
+    if (iss == params.end ()) {
+        if (!expected->advertised) {
+            return {};
+        }
+        return std::unexpected (
+        "The authorization response carries no iss, and the "
+        "authorization server " +
+        expected->issuer + " advertises sending one (RFC 9207) - the response was not used");
+    }
+    if (iss->second != expected->issuer) {
+        return std::unexpected ("The authorization response names the issuer " +
+        iss->second + ", not " + expected->issuer + " (RFC 9207) - the response was not used");
+    }
+    return {};
+}
+
 } // namespace
 
 std::string build_authorize_url (const nlohmann::json& config,
@@ -214,17 +416,26 @@ const std::string& expected_state) {
 }
 
 /**
- * The outcome of a callback whose state matched: the IdP's own refusal, or the
- * token exchange this redirect exists to make, which @p cancel (when set) ends
- * early. Never throws: a claimed attempt that never publishes is never reaped.
+ * The outcome of a callback whose state matched: a response from an issuer
+ * other than @p issuer, the IdP's own refusal, or the token exchange this
+ * redirect exists to make, under @p peer_rule, which @p cancel (when set) ends
+ * early. The issuer is checked first because a refusal from the wrong issuer
+ * must not be shown as the expected one's (the MCP spec on RFC 9207). Never
+ * throws: a claimed attempt that never publishes is never reaped.
  */
 CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& code_verifier,
 const std::string& redirect_uri,
 const std::map<std::string, std::string>& params,
+const std::optional<ExpectedIssuer>& issuer,
+const std::optional<LocalPeerRule>& peer_rule,
 const std::atomic<bool>* cancel) {
     CallbackOutcome outcome;
+    if (auto issued = check_issuer (params, issuer); !issued) {
+        outcome.error = std::move (issued.error ());
+        return outcome;
+    }
     if (auto refusal = redirect_refusal (params)) {
         outcome.error = std::move (*refusal);
         return outcome;
@@ -233,7 +444,7 @@ const std::atomic<bool>* cancel) {
     outcome.heading = "Token exchange failed";
     try {
         const std::string code = params.count ("code") ? params.at ("code") : "";
-        oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
+        oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri, peer_rule };
         // Bounded by the setting: an exchange has no payload to carry a timeout.
         auto result = oauth::acquire_token (db, config, false, exchange,
         routes::resolve_request_timeout_ms (nlohmann::json::object (), db),
@@ -257,6 +468,8 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string code_verifier;
     nlohmann::json config;
     std::string redirect_uri;
+    std::optional<ExpectedIssuer> issuer;
+    std::optional<LocalPeerRule> exchange_peer_rule;
     bool pkce = true;
     Clock::time_point deadline;
     Clock::time_point erase_at;
@@ -349,10 +562,40 @@ struct OAuth2AuthorizeManager::Attempt {
             res.set_content (callback_page ("Authorization already handled"), "text/html");
             return;
         }
-        const CallbackOutcome outcome = resolve_oauth_callback (
-        db, config, code_verifier, redirect_uri, params, &stop_signal.flag ());
+        const CallbackOutcome outcome = resolve_oauth_callback (db, config, code_verifier,
+        redirect_uri, params, issuer, exchange_peer_rule, &stop_signal.flag ());
         publish (outcome.result_state, outcome.error, outcome.cache_key);
         res.set_content (callback_page (outcome.heading), "text/html");
+    }
+
+    /// Where the IdP sends this attempt's browser: @p start_config's
+    /// `callbackUrl` in embedded mode, else a one-shot 127.0.0.1 listener on
+    /// an ephemeral port.
+    std::expected<void, StartRefusal> bind_redirect (vayu::db::Database& db,
+    const std::string& attempt_id,
+    const std::string& mode,
+    const nlohmann::json& start_config) {
+        if (mode == "embedded") {
+            redirect_uri = oauth::url_field (start_config, "callbackUrl");
+            if (redirect_uri.empty ()) {
+                return std::unexpected (StartRefusal{ 400, "oauth2_invalid_config",
+                "callbackUrl is required for embedded mode" });
+            }
+            return {};
+        }
+        listener.server ().Get ("/callback",
+        [this, &db, attempt_id] (const httplib::Request& req,
+        httplib::Response& res) { answer_callback (db, attempt_id, req, res); });
+        // Ephemeral only, so the port guard never refuses this one; the label
+        // is what another listener asking for this port would be told.
+        const int port =
+        listener.start ("127.0.0.1", 0, "OAuth callback " + attempt_id).port;
+        if (port <= 0) {
+            return std::unexpected (StartRefusal{ 500, "oauth2_loopback_failed",
+            "Couldn't bind a local callback port" });
+        }
+        redirect_uri = "http://127.0.0.1:" + std::to_string (port) + "/callback";
+        return {};
     }
 
     /// Requested when the attempt's listener stops, before it is joined. The
@@ -367,8 +610,10 @@ struct OAuth2AuthorizeManager::Attempt {
     ManagedListener listener;
 };
 
-OAuth2AuthorizeManager::OAuth2AuthorizeManager (AuthorizeTimings timings)
-: timings_ (timings), attempts_ (limits::MAX_ATTEMPTS) {
+OAuth2AuthorizeManager::OAuth2AuthorizeManager (AuthorizeTimings timings,
+AuthorizationServerMetadataCache& discovery_cache)
+: timings_ (timings), discovery_cache_ (discovery_cache),
+  attempts_ (limits::MAX_ATTEMPTS) {
     reaper_ = std::thread ([this] { run_reaper (); });
 }
 
@@ -454,14 +699,17 @@ AuthorizeStatus OAuth2AuthorizeManager::settled_status (const std::string& attem
 
 AuthorizeStart OAuth2AuthorizeManager::start (vayu::db::Database& db,
 const nlohmann::json& config,
-const std::string& mode) {
+const std::string& mode,
+const std::atomic<bool>* cancel) {
     AuthorizeStart out;
 
-    if (!config.is_object () || oauth::url_field (config, "authorizationUrl").empty () ||
-    field (config, "clientId").empty ()) {
-        out.ok            = false;
-        out.error_code    = "oauth2_invalid_config";
-        out.error_message = "authorizationUrl and clientId are required";
+    auto plan = plan_attempt (db, config, discovery_cache_, cancel);
+    if (!plan) {
+        fail_start (plan.error (), out);
+        return out;
+    }
+    if (auto complete = require_complete (*plan); !complete) {
+        fail_start (complete.error (), out);
         return out;
     }
 
@@ -471,60 +719,44 @@ const std::string& mode) {
         return out;
     }
 
-    auto attempt             = std::make_unique<Attempt> ();
-    attempt->config          = config;
-    const auto now           = Clock::now ();
-    attempt->deadline        = now + timings_.attempt_ttl;
-    attempt->erase_at        = now + timings_.record_retention;
-    const int64_t expires_at = now_ms () + timings_.attempt_ttl.count ();
-    attempt->pkce            = [&] {
-        auto it = config.find ("pkce");
-        return it == config.end () || !it->is_boolean () || it->get<bool> ();
-    }();
-    attempt->state = pkce::random_token (16);
+    auto attempt                = std::make_unique<Attempt> ();
+    attempt->issuer             = plan->issuer;
+    attempt->exchange_peer_rule = plan->exchange_peer_rule;
+    const auto now              = Clock::now ();
+    attempt->deadline           = now + timings_.attempt_ttl;
+    attempt->erase_at           = now + timings_.record_retention;
+    const int64_t expires_at    = now_ms () + timings_.attempt_ttl.count ();
+    attempt->pkce               = uses_pkce (*plan);
+    attempt->state              = pkce::random_token (16);
     attempt->code_verifier = attempt->pkce ? pkce::random_token (32) : std::string{};
     const std::string challenge =
     attempt->pkce ? pkce::code_challenge (attempt->code_verifier) : std::string{};
 
     const std::string attempt_id = generate_attempt_id ();
 
-    if (mode == "embedded") {
-        const std::string callback = oauth::url_field (config, "callbackUrl");
-        if (callback.empty ()) {
-            out.ok            = false;
-            out.error_code    = "oauth2_invalid_config";
-            out.error_message = "callbackUrl is required for embedded mode";
-            return out;
-        }
-        attempt->redirect_uri = callback;
-    } else {
-        // Loopback: bind a one-shot listener on an ephemeral 127.0.0.1 port.
-        Attempt* raw = attempt.get ();
-
-        attempt->listener.server ().Get ("/callback",
-        [raw, &db, attempt_id] (const httplib::Request& req, httplib::Response& res) {
-            raw->answer_callback (db, attempt_id, req, res);
-        });
-
-        // Ephemeral only, so the port guard never refuses this one; the label
-        // is what another listener asking for this port would be told.
-        const int port =
-        attempt->listener.start ("127.0.0.1", 0, "OAuth callback " + attempt_id).port;
-        if (port <= 0) {
-            out.ok            = false;
-            out.http_status   = 500;
-            out.error_code    = "oauth2_loopback_failed";
-            out.error_message = "Couldn't bind a local callback port";
-            return out;
-        }
-        attempt->redirect_uri = "http://127.0.0.1:" + std::to_string (port) + "/callback";
+    if (auto bound = attempt->bind_redirect (db, attempt_id, mode, plan->config); !bound) {
+        fail_start (bound.error (), out);
+        return out;
     }
+    // A registration needs the redirect it registers, so it runs once that is
+    // bound. The config is written after the listener starts, which is safe
+    // because its callback reads nothing but `state` until a request carries
+    // that state, and no one has it until this returns.
+    if (auto registered = register_client (db, *plan, attempt->redirect_uri, cancel);
+    !registered) {
+        fail_start (registered.error (), out);
+        return out;
+    }
+    attempt->config = std::move (plan->config);
 
     out.attempt_id    = attempt_id;
     out.redirect_uri  = attempt->redirect_uri;
     out.expires_at    = expires_at;
-    out.authorize_url = build_authorize_url (
-    config, attempt->state, challenge, attempt->redirect_uri, attempt->pkce);
+    out.authorize_url = build_authorize_url (attempt->config, attempt->state,
+    challenge, attempt->redirect_uri, attempt->pkce);
+    if (const auto& issuer = attempt->issuer) {
+        out.resolved = resolved_authorization (attempt->config, *issuer);
+    }
 
     if (!attempts_.commit (std::move (*slot), attempt_id, std::move (attempt))) {
         out = AuthorizeStart{};
@@ -543,6 +775,8 @@ const std::string& callback_url) {
     // other attempts (the manager is shared across all in-flight authorizations).
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
+    std::optional<ExpectedIssuer> issuer;
+    std::optional<LocalPeerRule> peer_rule;
     std::shared_ptr<const std::atomic<bool>> cancel;
     const auto now      = Clock::now ();
     const auto answered = attempts_.with_entry (
@@ -556,6 +790,8 @@ const std::string& callback_url) {
         code_verifier = attempt.code_verifier;
         redirect_uri  = attempt.redirect_uri;
         config        = attempt.config;
+        issuer        = attempt.issuer;
+        peer_rule     = attempt.exchange_peer_rule;
         cancel        = attempt.completion_cancel;
         return std::nullopt;
     });
@@ -574,8 +810,8 @@ const std::string& callback_url) {
     // is read only with the attempt's own.
     CallbackOutcome outcome;
     if (redirect_refusal (params) || callback_state_matches (params, state)) {
-        outcome = resolve_oauth_callback (
-        db, config, code_verifier, redirect_uri, params, cancel.get ());
+        outcome = resolve_oauth_callback (db, config, code_verifier,
+        redirect_uri, params, issuer, peer_rule, cancel.get ());
     } else {
         outcome.error = "State mismatch (possible CSRF)";
     }

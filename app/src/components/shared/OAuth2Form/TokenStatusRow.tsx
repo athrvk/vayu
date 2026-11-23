@@ -5,8 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState, type ReactNode } from "react";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff, X } from "lucide-react";
 import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
@@ -16,18 +15,16 @@ import {
 	useFetchOAuth2TokenMutation,
 	useClearOAuth2TokenMutation,
 } from "@/queries/oauth";
-import { queryKeys } from "@/queries/keys";
 import { deferredTokens } from "@/lib/deferred-note";
-import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
-import { runInteractiveAuthorization } from "@/services/oauth/authorize";
-import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
+import { oauth2TokenKey } from "@/services/oauth/cache-key";
+import { awaitsDiscovery, discoveredValues } from "@/services/oauth/discovery";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { tokenScopeIds } from "@/services/oauth/signing-key";
 import { useSessionStore, useToastStore } from "@/stores";
-import { oauthSignin, useIsSigningIn } from "@/stores/oauth-signin-store";
 import { useNow } from "@/hooks/useNow";
-import type { OAuth2Config } from "@/types";
-import { missingOAuth2Fields } from "./missing-fields";
+import type { OAuth2Config, OAuth2DiscoveredField } from "@/types";
+import { fieldListPhrase, missingOAuth2Fields } from "./missing-fields";
+import { useOAuth2SignIn, type OAuth2SignedIn } from "./useOAuth2SignIn";
 import {
 	TOKEN_ACTION_LABELS,
 	lapseInstant,
@@ -56,16 +53,18 @@ interface TokenStatusRowProps {
 	 * environment, which resolve a `jwt_bearer` key reference (#3632).
 	 */
 	collectionId?: string | null;
+	/**
+	 * Writes what a discovered sign-in filled into the stored config (#3766).
+	 * Only a host that edits the config passes it; without it a config still
+	 * awaiting discovery cannot be signed in here, because the token would land
+	 * under a key the stored config never comes to name.
+	 */
+	onDiscovered?: (values: Partial<Record<OAuth2DiscoveredField, string>>) => void;
 }
 
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
 	return `${token.slice(0, 4)}…${token.slice(-4)}`;
-}
-
-function listPhrase(items: string[]): string {
-	if (items.length <= 1) return items[0] ?? "";
-	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function TokenExpiry({ expiry }: { expiry: TokenExpiryText }) {
@@ -81,6 +80,7 @@ export default function TokenStatusRow({
 	resolvedConfig,
 	deferredNames,
 	collectionId,
+	onDiscovered,
 }: TokenStatusRowProps) {
 	if (deferredNames && deferredNames.length > 0)
 		return (
@@ -88,10 +88,19 @@ export default function TokenStatusRow({
 				resolvedConfig={resolvedConfig}
 				names={deferredNames}
 				collectionId={collectionId}
+				onDiscovered={onDiscovered}
 			/>
 		);
-	return <CachedTokenRow resolvedConfig={resolvedConfig} collectionId={collectionId} />;
+	return (
+		<CachedTokenRow
+			resolvedConfig={resolvedConfig}
+			collectionId={collectionId}
+			onDiscovered={onDiscovered}
+		/>
+	);
 }
+
+type RowProps = Pick<TokenStatusRowProps, "resolvedConfig" | "collectionId" | "onDiscovered">;
 
 /**
  * What both rows do to the token stored for @p resolvedConfig: fetch it (the
@@ -99,67 +108,37 @@ export default function TokenStatusRow({
  * rest) and clear it. The rows differ in what they report, never in what the
  * actions do.
  */
-function useTokenActions(resolvedConfig: OAuth2Config, collectionId: string | null | undefined) {
+function useTokenActions({ resolvedConfig, collectionId, onDiscovered }: RowProps) {
 	const showToast = useToastStore((s) => s.showToast);
 	const environmentId = useSessionStore((s) => s.activeEnvironmentId);
-	const queryClient = useQueryClient();
 
-	const cacheKey = useMemo(() => {
-		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
-		return computeOAuth2CacheKey(resolvedConfig);
-	}, [resolvedConfig]);
+	const cacheKey = useMemo(() => oauth2TokenKey(resolvedConfig), [resolvedConfig]);
+	const awaiting = useMemo(() => awaitsDiscovery(resolvedConfig), [resolvedConfig]);
 
-	// The sign-in belongs to the config, so two rows for one config share it;
-	// the last row to leave stops it.
-	const authorizing = useIsSigningIn(cacheKey);
-	useEffect(() => (cacheKey ? oauthSignin.acquire(cacheKey) : undefined), [cacheKey]);
+	const writeDiscovered: OAuth2SignedIn | undefined = onDiscovered
+		? ({ resolved }, sent) => {
+				if (resolved) onDiscovered(discoveredValues(sent, resolved));
+			}
+		: undefined;
+	const signin = useOAuth2SignIn(resolvedConfig, writeDiscovered);
 
 	const fetchMutation = useFetchOAuth2TokenMutation();
 	const clearMutation = useClearOAuth2TokenMutation();
 
 	const interactive = resolvedConfig.grantType === "authorization_code";
-	const busy = fetchMutation.isPending || clearMutation.isPending || authorizing;
-	const fetching = fetchMutation.isPending || authorizing;
+	const busy = fetchMutation.isPending || clearMutation.isPending || signin.authorizing;
+	const fetching = fetchMutation.isPending || signin.authorizing;
 
 	// Which fields are absent is `missingOAuth2Fields`'s to say; this memo only
 	// keeps the list's identity still across renders that change nothing.
 	const missingFields = useMemo(() => missingOAuth2Fields(resolvedConfig), [resolvedConfig]);
 	const incomplete = missingFields.length > 0;
-
-	// Engine-hosted loopback + PKCE; opens the system browser (or the embedded
-	// window when the config opts in).
-	const signIn = async (key: string) => {
-		const signal = oauthSignin.begin(key);
-		if (!signal) return;
-		try {
-			await runInteractiveAuthorization(resolvedConfig, signal);
-			// A cancelled sign-in has nothing to report: whoever cancelled knows.
-			if (signal.aborted) return;
-			queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(key) });
-			showToast("Authorized", "success");
-			// The loopback flow puts the user in their browser by design, so
-			// this is the one success they are guaranteed not to be looking at
-			// (#1358). The click brings them back to the request they left.
-			systemNotify.post({
-				kind: NOTIFY_KINDS.signedIn,
-				title: "Signed in",
-				body: "Back to Vayu to continue.",
-			});
-		} catch (err) {
-			if (signal.aborted) return;
-			showToast(
-				err instanceof Error ? humanizeOAuth2Error(err.message) : "Authorization failed",
-				"error"
-			);
-		} finally {
-			oauthSignin.end(key, signal);
-		}
-	};
+	const discoveryElsewhere = awaiting && !onDiscovered;
 
 	const getToken = async () => {
-		if (incomplete) return;
-		if (interactive && cacheKey) {
-			await signIn(cacheKey);
+		if (incomplete || discoveryElsewhere) return;
+		if (interactive) {
+			await signin.signIn();
 			return;
 		}
 		fetchMutation.mutate(
@@ -176,10 +155,6 @@ function useTokenActions(resolvedConfig: OAuth2Config, collectionId: string | nu
 		);
 	};
 
-	const cancelSignIn = () => {
-		if (cacheKey) oauthSignin.cancel(cacheKey);
-	};
-
 	const clear = () => {
 		if (!cacheKey) return;
 		clearMutation.mutate(cacheKey);
@@ -189,11 +164,13 @@ function useTokenActions(resolvedConfig: OAuth2Config, collectionId: string | nu
 		cacheKey,
 		missingFields,
 		incomplete,
+		awaiting,
+		discoveryElsewhere,
 		busy,
 		fetching,
-		authorizing,
+		authorizing: signin.authorizing,
 		getToken,
-		cancelSignIn,
+		cancelSignIn: signin.cancel,
 		clear,
 	};
 }
@@ -280,7 +257,7 @@ function GetTokenButton({
 			size="sm"
 			variant="outline"
 			onClick={actions.getToken}
-			disabled={actions.busy || actions.incomplete}
+			disabled={actions.busy || actions.incomplete || actions.discoveryElsewhere}
 		>
 			<IconSwap
 				state={actions.fetching ? "pending" : renews ? "renew" : "fetch"}
@@ -303,16 +280,8 @@ function GetTokenButton({
  * stored settings, and for an authorization_code grant this row is the only
  * place to sign in.
  */
-function DeferredTokenRow({
-	resolvedConfig,
-	names,
-	collectionId,
-}: {
-	resolvedConfig: OAuth2Config;
-	names: readonly string[];
-	collectionId: string | null | undefined;
-}) {
-	const actions = useTokenActions(resolvedConfig, collectionId);
+function DeferredTokenRow({ names, ...row }: RowProps & { names: readonly string[] }) {
+	const actions = useTokenActions(row);
 	return (
 		<TokenRowShell
 			dotClass="bg-muted-foreground/40"
@@ -331,34 +300,44 @@ function DeferredTokenRow({
 				</>
 			}
 			below={
-				actions.incomplete && <MissingFieldsNote missingFields={actions.missingFields} />
+				actions.incomplete ? (
+					<RowNote>{missingFieldsText(actions.missingFields)}</RowNote>
+				) : (
+					actions.discoveryElsewhere && <RowNote>{DISCOVER_ELSEWHERE_TEXT}</RowNote>
+				)
 			}
 		/>
 	);
 }
 
-function MissingFieldsNote({ missingFields }: { missingFields: string[] }) {
+const missingFieldsText = (missingFields: string[]) =>
+	`Enter the ${fieldListPhrase(missingFields)} to fetch a token`;
+
+const AWAITING_DISCOVERY_TEXT = "Not signed in - Get token discovers the server's endpoints";
+
+const DISCOVER_ELSEWHERE_TEXT =
+	"Get a token from the Auth tab first - it discovers the server's endpoints";
+
+function RowNote({ children }: { children: ReactNode }) {
 	return (
 		<div className="border-t border-border px-3 py-2">
-			<p className="text-xs text-muted-foreground">
-				Enter the {listPhrase(missingFields)} to fetch a token
-			</p>
+			<p className="text-xs text-muted-foreground">{children}</p>
 		</div>
 	);
 }
 
-function NoTokenSummary({
-	state,
-	missingFields,
-}: {
-	state: NoTokenState;
-	missingFields: string[];
-}) {
+function NoTokenSummary({ state, actions }: { state: NoTokenState; actions: TokenActions }) {
 	switch (state) {
 		case "missing-fields":
 			return (
 				<span className="text-xs text-muted-foreground">
-					Enter the {listPhrase(missingFields)} to fetch a token
+					{missingFieldsText(actions.missingFields)}
+				</span>
+			);
+		case "awaiting-discovery":
+			return (
+				<span className="text-xs text-muted-foreground">
+					{actions.discoveryElsewhere ? DISCOVER_ELSEWHERE_TEXT : AWAITING_DISCOVERY_TEXT}
 				</span>
 			);
 		case "checking":
@@ -376,14 +355,8 @@ function NoTokenSummary({
 	}
 }
 
-function CachedTokenRow({
-	resolvedConfig,
-	collectionId,
-}: {
-	resolvedConfig: OAuth2Config;
-	collectionId: string | null | undefined;
-}) {
-	const actions = useTokenActions(resolvedConfig, collectionId);
+function CachedTokenRow(row: RowProps) {
+	const actions = useTokenActions(row);
 	const { cacheKey, missingFields, incomplete } = actions;
 	const [revealed, setRevealed] = useState(false);
 
@@ -402,7 +375,7 @@ function CachedTokenRow({
 	// only catches up with it on the next poll.
 	const now = useNow(lapseInstant(status));
 	const phase = tokenPhase(status, now);
-	const noToken = noTokenState(incomplete, statusQuery);
+	const noToken = noTokenState(incomplete, statusQuery, actions.awaiting);
 
 	return (
 		<TokenRowShell
@@ -415,7 +388,7 @@ function CachedTokenRow({
 						<TokenExpiry expiry={phase.expiry} />
 					</span>
 				) : (
-					<NoTokenSummary state={noToken} missingFields={missingFields} />
+					<NoTokenSummary state={noToken} actions={actions} />
 				)
 			}
 			rail={
@@ -452,7 +425,7 @@ function CachedTokenRow({
 					    omits the Authorization URL and the scope, so clearing either keeps the
 					    token on screen while the missing field disables the action. The summary slot is taken by the token, so the reason goes
 					    below rather than nowhere. */}
-					{incomplete && token && <MissingFieldsNote missingFields={missingFields} />}
+					{incomplete && token && <RowNote>{missingFieldsText(missingFields)}</RowNote>}
 
 					{/* Full token disclosure - expands below, doesn't affect the row above */}
 					{revealed && token && (

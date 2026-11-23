@@ -108,6 +108,8 @@ import type {
 	OAuth2AuthorizeStartRequest,
 	OAuth2AuthorizeStartResponse,
 	OAuth2AuthorizeStatusResponse,
+	OAuth2StepUpRequest,
+	OAuth2StepUpResponse,
 	Inbox,
 	InboxCannedResponse,
 	InboxCapturesResponse,
@@ -136,6 +138,7 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { executeBudgetMs } from "@/lib/execute-budget";
 import {
+	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	PROXIED_TIMEOUT_GRACE_MS,
 	STATS_PAGE_LIMIT,
 	RUN_SAMPLES_PAGE_LIMIT,
@@ -181,6 +184,18 @@ function proxiedRequestTimeoutMs(payload?: unknown): number {
 		defaultTimeoutMs: configuredMs("defaultTimeout"),
 		scriptTimeoutMs: configuredMs("scriptTimeout"),
 	});
+}
+
+/**
+ * The budget for an authorize start that names a `discoverUrl` (#3766): before
+ * it answers, the engine runs the discovery and then the client registration,
+ * each bounded by the `defaultTimeout` setting, so the setting counts twice.
+ */
+function discoveredStartTimeoutMs(): number {
+	return (
+		proxiedRequestTimeoutMs() +
+		(configuredMs("defaultTimeout") || ENGINE_MAX_DEFAULT_TIMEOUT_MS)
+	);
 }
 
 /**
@@ -1218,9 +1233,12 @@ export const apiService = {
 	async startOAuth2Authorize(
 		data: OAuth2AuthorizeStartRequest
 	): Promise<OAuth2AuthorizeStartResponse> {
+		// A start without discovery binds a listener and answers at once, so it
+		// keeps the default budget.
 		return await httpClient.post<OAuth2AuthorizeStartResponse>(
 			API_ENDPOINTS.OAUTH2_AUTHORIZE_START,
-			data
+			data,
+			data.config.discoverUrl ? { timeout: discoveredStartTimeoutMs() } : undefined
 		);
 	},
 
@@ -1249,5 +1267,9 @@ export const apiService = {
 		return await httpClient.get<OAuth2AuthorizeStatusResponse>(
 			API_ENDPOINTS.OAUTH2_AUTHORIZE_STATUS(attemptId)
 		);
+	},
+
+	async classifyOAuth2StepUp(data: OAuth2StepUpRequest): Promise<OAuth2StepUpResponse> {
+		return await httpClient.post<OAuth2StepUpResponse>(API_ENDPOINTS.OAUTH2_STEP_UP, data);
 	},
 };

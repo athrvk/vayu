@@ -27,6 +27,7 @@ import {
 	InteractiveAuthCancelledError,
 	EXPIRY_GRACE_MS,
 } from "./authorize";
+import { computeOAuth2CacheKey } from "./cache-key";
 import type { OAuth2Config } from "@/types";
 
 const startOAuth2Authorize = vi.fn();
@@ -147,7 +148,7 @@ describe("a window that answers is untouched by the ceiling", () => {
 		const flow = runInteractiveAuthorization(CONFIG);
 		await vi.advanceTimersByTimeAsync(0);
 
-		await expect(flow).resolves.toBe("key");
+		await expect(flow).resolves.toEqual({ cacheKey: "key" });
 		expect(completeOAuth2Authorize).toHaveBeenCalledWith(
 			"attempt_1",
 			"https://app.example.com/callback?code=xyz"
@@ -301,7 +302,7 @@ describe("the loopback branch polls until the engine's expiry", () => {
 		const flow = runInteractiveAuthorization(LOOPBACK);
 		await vi.advanceTimersByTimeAsync(3000);
 
-		await expect(flow).resolves.toBe("loopback-key");
+		await expect(flow).resolves.toEqual({ cacheKey: "loopback-key" });
 	});
 });
 
@@ -438,6 +439,69 @@ describe("a signal cancels the flow", () => {
 		const flow = runInteractiveAuthorization(LOOPBACK, controller.signal);
 		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 1);
 
-		await expect(flow).resolves.toBe("k");
+		await expect(flow).resolves.toEqual({ cacheKey: "k" });
+	});
+});
+
+describe("a config discovered from a server URL (#3766)", () => {
+	const DISCOVERING: OAuth2Config = {
+		grantType: "authorization_code",
+		discoverUrl: "https://mcp.example.com/mcp",
+		accessTokenUrl: "",
+		clientId: "",
+		useEmbeddedBrowser: true,
+	};
+	const RESOLVED = {
+		authorizationUrl: "https://auth.example.com/authorize",
+		accessTokenUrl: "https://auth.example.com/token",
+		clientId: "registered",
+		resource: "https://mcp.example.com/mcp",
+		scope: "mcp:read",
+		issuer: "https://auth.example.com",
+	};
+	const FILLED_KEY = computeOAuth2CacheKey({
+		...DISCOVERING,
+		accessTokenUrl: RESOLVED.accessTokenUrl,
+		clientId: RESOLVED.clientId,
+	});
+
+	beforeEach(() => {
+		startOAuth2Authorize.mockImplementation(() =>
+			Promise.resolve({ ...started(), resolved: RESOLVED })
+		);
+	});
+
+	it("hands back what the attempt was completed with", async () => {
+		bridge(() => Promise.resolve({ callbackUrl: "https://app.example.com/callback?code=c" }));
+
+		await expect(runInteractiveAuthorization(DISCOVERING)).resolves.toEqual({
+			cacheKey: "key",
+			resolved: RESOLVED,
+		});
+	});
+
+	it("keys the embedded window by the discovered values, not the blanks it was started with", async () => {
+		const open = vi.fn(() =>
+			Promise.resolve({ callbackUrl: "https://app.example.com/callback?code=c" })
+		);
+		bridge(open);
+		completeOAuth2Authorize.mockResolvedValue({ state: "completed" });
+
+		const result = await runInteractiveAuthorization(DISCOVERING);
+
+		expect(open).toHaveBeenCalledWith(
+			expect.objectContaining({ partition: `oauth:${FILLED_KEY}` })
+		);
+		// An engine that names no key leaves the one its exchange used.
+		expect(result.cacheKey).toBe(FILLED_KEY);
+	});
+
+	it("hands back no resolved for a config that was not discovered", async () => {
+		startOAuth2Authorize.mockImplementation(() => Promise.resolve(started()));
+		bridge(() => Promise.resolve({ callbackUrl: "https://app.example.com/callback?code=c" }));
+
+		const result = await runInteractiveAuthorization(CONFIG);
+
+		expect(result).toEqual({ cacheKey: "key" });
 	});
 });

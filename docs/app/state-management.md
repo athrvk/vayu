@@ -1992,7 +1992,12 @@ belongs to the config rather than to the `TokenStatusRow` that started it: the
 Auth tab, the context bar and the collection editor can each show a row for one
 config, and they must share one pending state and one browser tab. Modelled on
 `request-builder/context/send-tracker.ts`: the store holds only what renders, and
-the `AbortController`s and owner counts sit in module maps beside it.
+the `AbortController`s and owner counts sit in module maps beside it. The key is
+`oauth2SignInKey` (`services/oauth/discovery.ts`): the cache key, or
+`discover:<server URL>` for a config discovered from a server URL that no sign-in
+has filled yet (#3766), which has no cache key. Every surface that starts a
+sign-in goes through `useOAuth2SignIn` (`components/shared/OAuth2Form/`), which
+acquires the key while it is mounted.
 
 **State:**
 ```typescript
@@ -2849,6 +2854,12 @@ into a pane that can never load on every restart.
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
+- **`useOAuth2StepUpQuery(input)`** (`queryKeys.oauth.stepUp(wwwAuthenticate,
+  scope)`) - `POST /oauth2/step-up` for a 403's challenge (#3766), asked by the
+  response pane's step-up callout. The engine only classifies, so the answer is a
+  function of the key: `staleTime: Infinity`, no poll, disabled for a `null`
+  input. Under `oauth.all`, so the MCP feed's OAuth invalidation refetches a
+  mounted one, which answers the same
 - **`queryKeys.compose.forRequest(requestId, environmentId, source)`** - `POST /compose`
   for a request, behind `compositionOptions` (`code-composition.ts`), which the
   context bar's Code section, the Params tab's "Sends" line and the tab strip

@@ -4091,7 +4091,9 @@ describe the auth, so a member no list has heard of (Insomnia's IAM
 and `fallbackExpiresIn` are on that list; its `privateKey`, which is only ever
 one `{{variable}}` reference, stays as that reference (a key written any other
 way is blanked and counted), and its `privateKeyFile`, a path on one machine,
-is not on it and leaves blank, counted. OAuth 2.0's extra request parameter
+is not on it and leaves blank, counted. A config discovered from an MCP server
+keeps its `discoverUrl` and its `discoveredFields` list whole (#3766), so a
+re-import still knows which server it came from. OAuth 2.0's extra request parameter
 lists (`tokenParams`, `authorizationParams`, `refreshParams`) and the
 `jwt_bearer` grant's `assertionClaims` are redacted per row: a
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
@@ -4530,7 +4532,10 @@ and is fetched exactly as before, loopback and redirects included.
 - The refusal is `502` `Couldn't fetch the document: Cannot send this request:
   Vayu does not fetch a reference from a loopback or link-local address other
   than its source document's own host and port - not when the URL names one and
-  not when a host name resolves to one`, on both forms of the route.
+  not when a host name resolves to one`, on both forms of the route. With no
+  `sourceUrl` there is no source to except, and the sentence after the colon is
+  `Vayu does not send it to a loopback or link-local address - not when the URL
+  names one and not when a host name resolves to one`.
 - **The URL is judged before anything is dialled**, by the same source rule: a
   reference whose host names a loopback or link-local address in any spelling,
   `localhost` or a `*.localhost` name is refused with the same `502`, and the
@@ -5725,10 +5730,12 @@ The sections, in order:
    (`eventsPerSecond`, in `events/s`) and `Streams ended at a cap` (`capped`),
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
-   column, of the time to each stream's first event (`timeToFirstEvent`). That
-   column is left off when the document has no `timeToFirstEvent`, which the
-   engine omits when no stream delivered a timed event, so a zero never stands
-   for a figure that was not measured. A figure the document lacks reads `-`.
+   column, of the time to each stream's first event (`timeToFirstEvent`), then
+   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   off when the document lacks its block, which the engine omits when no
+   stream measured it, so a zero never stands for a figure that was not
+   measured. A figure the document lacks reads `-`.
 7. `## Capacity`, only for a run whose document has `report.capacity`: the
    stop reason in bold and what the search found (`**Latency budget exceeded**
    - Sustained 41 virtual users at 403 req/s, with a p99 of 178 ms against a
@@ -7746,7 +7753,7 @@ hands it back.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt}` |
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt, resolved?}` (`resolved` only for a [discovered](#discovered-from-an-mcp-server-url) config) |
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}`; reads only |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
@@ -7787,6 +7794,149 @@ an IdP that omits `state` on its error redirect leaves the attempt pending until
 it times out. A callback with the right `state` after `expiresAt` answers `410`.
 A loopback attempt settles once, and the first settlement wins: a later callback
 with the right `state` answers `409` and changes nothing.
+
+#### Discovered from an MCP server URL
+
+A config naming `discoverUrl` (#3766), the URL of an OAuth-protected MCP
+server, is completed from that server before the attempt starts, in the MCP
+authorization spec's order: the server's 401 challenge or its RFC 9728
+well-known document, then its authorization server's RFC 8414 or OpenID Connect
+metadata (`discover_oauth_server`, see
+[architecture](architecture.md)). `discoverUrl` is read trimmed, like the URL
+members above. Discovery **fills only what the config leaves blank**: a typed
+`authorizationUrl`, `accessTokenUrl`, `resource`, `scope` or `clientId` wins.
+A discovered attempt always sends PKCE with `S256` and its verifier, whatever
+`pkce` says, because the MCP authorization spec requires it.
+
+| Member | Filled from |
+|--------|-------------|
+| `authorizationUrl`, `accessTokenUrl` | The metadata's `authorization_endpoint` and `token_endpoint` |
+| `resource` | The protected resource metadata's `resource`, the canonical server URL; sent on the authorize URL and the token request (RFC 8707) |
+| `scope` | The 401 challenge's `scope`; without one, every `scopes_supported` entry of the protected resource metadata, space-joined; without those, no scope is sent (the MCP spec's scope selection) |
+| `clientId` | A typed `clientId` (with its `clientSecret`) is used as it is and nothing is registered. Otherwise, when the metadata has a `registration_endpoint`, a client is registered there (RFC 7591) for this attempt, and its `client_id` is used; the typed `clientSecret`, if any, is not sent with it. Otherwise the start is refused with `400` `oauth2_client_id_required`, naming why |
+
+The registration posts `{client_name: "Vayu", redirect_uris: [<redirectUri>],
+grant_types: ["authorization_code", "refresh_token"], response_types:
+["code"], token_endpoint_auth_method: "none", application_type: "native"}`: a
+public native client whose one redirect is the one this attempt uses, the
+loopback listener's ephemeral port (bound before the registration) or the
+embedded `callbackUrl`. A 2xx answer must carry a string `client_id` and
+describe a public client; one whose `token_endpoint_auth_method` is not `none`,
+or that carries a `client_secret` and states no method, is refused, and the
+secret is never logged or repeated. The discovery and the registration each go
+through the shared client and transport policy, are bounded by the request
+timeout setting, and end when the engine stops.
+
+**A server that is not on this machine reaches nothing on it.** When
+`discoverUrl` names neither a loopback nor a link-local host, a document that
+names such a URL is refused (`oauth_discovery_local_endpoint_refused`), and the
+discovery's fetches, the registration and the callback's code exchange connect
+to no loopback or link-local address, by the URL or by the address its name
+resolves to. A token endpoint that resolves to one by the time the code
+arrives never receives the code or the PKCE verifier: the attempt fails with
+`Token request failed: Cannot send this request: Vayu does not send it to a
+loopback or link-local address - not when the URL names one and not when a host
+name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
+proxy you configured is still used. A server on this machine may name anything
+on it.
+
+**Two known limitations of a registered client.**
+
+- A registered client is bound to the loopback redirect of the attempt that
+  registered it, port included. The next sign-in reuses its `clientId` from
+  the stored config on a new ephemeral port, so an authorization server that
+  matches redirect URIs exactly refuses it (RFC 8252 section 7.3 asks a server
+  to accept any port on a loopback redirect, and not every server does). The
+  recovery is the app's **Discover again**, which clears what discovery wrote,
+  `clientId` included, so the next sign-in registers a client for its own
+  redirect.
+- Every discovered sign-in that names no `clientId` registers a new client,
+  and the app stores its `client_id` only once the sign-in succeeds, so an
+  abandoned sign-in (cancelled, timed out or refused) leaves a client
+  registered at the authorization server that nothing will use. Vayu does not
+  delete it: it does not use RFC 7592 client management, which a server need
+  not offer.
+
+The answer's `resolved` holds what the attempt runs on, the values a client
+writes into its stored config so that a later refresh or run needs no
+discovery and keys the same [cached token](#oauth-20-token-cache) (no secret is
+ever in it):
+
+```json
+{
+  "authorizationUrl": "https://auth.example/authorize",
+  "accessTokenUrl": "https://auth.example/token",
+  "clientId": "registered-or-typed-client",
+  "resource": "https://mcp.example/mcp",
+  "scope": "mcp:read",
+  "issuer": "https://auth.example"
+}
+```
+
+`scope` is `""` when none was chosen. The callback (loopback or `POST
+/oauth2/authorize/complete`) exchanges its code with these values, not with
+the config as sent.
+
+A start that cannot complete the config is refused before any attempt exists:
+
+| Status | Code | When |
+|--------|------|------|
+| `400` | `oauth_discovery_invalid_server_url` | `discoverUrl` is not an absolute `http` or `https` URL |
+| `504` | `oauth_discovery_timeout`, `oauth_registration_timeout` | The discovery or the registration ran out of time |
+| `502` | any other `oauth_discovery_*` code | Discovery found no usable metadata: none answered, a document is invalid, its `resource` or `issuer` does not match, it lacks PKCE `S256`, or it names a local URL for a remote server |
+| `502` | `oauth_registration_network_error` | The registration endpoint gave no answer |
+| `502` | `oauth_registration_refused` | It answered outside 2xx; its RFC 7591 `error` and `error_description` are quoted |
+| `502` | `oauth_registration_invalid_response` | Its 2xx answer names no string `client_id`, or a client that needs a secret |
+| `400` | `oauth2_client_id_required` | No `clientId` and no `registration_endpoint` |
+
+**`iss` (RFC 9207).** A discovered attempt records the issuer, and every
+callback with the right `state` (and an embedded completion's IdP refusal,
+which is read without one) is checked against it before anything else in it
+is used, `error` included:
+
+| Metadata `authorization_response_iss_parameter_supported` | `iss` in the callback | Result |
+|--------|--------|--------|
+| `true` | equal to the issuer | Proceeds |
+| `true` | absent or different | Fails the attempt |
+| `false` or absent | absent | Proceeds |
+| `false` or absent | different | Fails the attempt |
+
+The comparison is byte for byte on the decoded value, with no case folding or
+normalisation. A failed check names the issuer it expected (and the one the
+callback named), never the response's `error` or `error_description`, and the
+code is never sent to a token endpoint. An attempt that was not discovered
+records no issuer and reads no `iss`.
+
+#### POST /oauth2/step-up
+
+Classifies the `WWW-Authenticate` of a `401` or `403` as a step-up or not
+(#3766, `classify_bearer_challenge`). It **only classifies**: it sends nothing,
+retries nothing, re-authorizes nothing and caches nothing, so a client decides
+what follows (an interactive re-authorization is a
+[`POST /oauth2/authorize/start`](#interactive-authorization-code-flow) with
+the `scope` it answers; a load run cannot take that browser step and fails
+naming the scopes instead).
+
+| Request member | Type | Meaning |
+|----------------|------|---------|
+| `wwwAuthenticate` | string or array of strings | Required. The response's `WWW-Authenticate` value, or each header line's when it carried several. An empty array or string is a response with no challenge |
+| `scope` | string | The scopes already granted or requested, space-separated. Optional, default empty |
+
+The first `Bearer` challenge, across the values in order, that names an
+`error` is read; a value that is not the RFC 9110 challenge grammar is passed
+over, never an error and never a step-up. The answer is `200`:
+
+| Member | Meaning |
+|--------|---------|
+| `stepUp` | `true` only when the challenge's `error` is exactly `insufficient_scope` (RFC 6750 codes are case-sensitive) |
+| `error` | The challenge's `error` as written: `invalid_token` and any other are reported here with `stepUp` `false`. `""` when there is none |
+| `requiredScopes` | The challenge's `scope` split on whitespace, repeats dropped, in the order written. `[]` unless `stepUp` |
+| `scope` | What a re-authorization asks for: `scope` as sent, then the `requiredScopes` it did not hold, deduplicated and space-joined. `""` unless `stepUp`; a step-up whose challenge names no `scope` answers the held ones |
+| `description` | The challenge's `error_description`, `""` when absent |
+
+A body that is not JSON, not an object, lacks `wwwAuthenticate`, or whose
+`wwwAuthenticate` or `scope` has the wrong type answers `400`
+`oauth2_invalid_config`.
 
 ### Local mock issuer
 
@@ -8716,24 +8866,37 @@ events arrive on. Nothing about a non-streaming send changes.
 ```
 
 The worker parses SSE frames into a bounded in-memory ring that
-[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
-`events` node into the run's stored trace when the stream ends, so History
-restores the timeline. The cookie `warnings` a buffered send answers with
-(issue #3315) are written to the same stored trace, at its top level; the
-`202` carries none.
+[`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes the
+stream into the run's stored trace when it ends, so History restores the
+timeline. The cookie `warnings` a buffered send answers with (issue #3315) are
+written to the same stored trace, at its top level; the `202` carries none.
 
-What the reply's bytes become depends on the final response's `Content-Type`
-(issue #3238), read per redirect hop, compared without case and without its
-parameters. A `text/event-stream` reply's bytes are its events and the stored
-`response.body` stays empty. Any other reply (a JSON `404`, NDJSON, chunked
-text) also keeps its bytes as `response.body`, up to
+The final hop's bytes are the stored `response.body`, whatever its
+`Content-Type` (issues #3238, #3770): a `text/event-stream` reply's
+`event:`/`data:` bytes, a JSON `404`, NDJSON or chunked text alike, up to
 `maxDesignResponseBodyBytes`, the bound a buffered send reads under. Past it
 the body is a prefix and the trace says so with `bodyCapped: true`, as on a
-buffered send; the stream itself still ends only by the rules below. Such a
-reply is still fed to the SSE parser, so a server that streams SSE under the
-wrong type still delivers its events. Either way the stored `response`
-carries `bodyBytes`, the body bytes the server delivered, whatever was kept:
-the relay carries no body, so the stored trace is where it lands.
+buffered send; the stream itself still ends only by the rules below, and every
+byte still reaches the SSE parser, so a server that streams SSE under the wrong
+type still delivers its events. The stored `response` carries `bodyBytes`, the
+body bytes the server delivered, whatever was kept: the relay carries no body,
+so the stored trace is where it lands. The declarative elements and the
+post-request script read the same bytes, so `assert.contains`, `assert.size`,
+`extract.regex` and `pm.response.text()` judge a streamed Send as they judge a
+collection or load run's.
+
+The bytes are stored once (issue #657). The trace's `events` node is served as
+`{items, totalEvents, eventsTruncated, endReason}` (each item `{event, data,
+sourceId?, dataTruncated?, dataBytes?, receivedAt}`), but the list is parsed
+from the stored body when the trace is read
+([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
+report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
+the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...]}`,
+one arrival time per event `sseMaxStoredEvents` kept. The served list stops at
+the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when
+either the list is shorter than `totalEvents` or the body is a prefix
+(`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`). A trace stored
+before #3770 carries its `items` and is served as stored.
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
@@ -8774,8 +8937,9 @@ Refused with a **400** rather than silently reinterpreted:
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
 buffered send, so its `pm.request` edits reach the wire. The post-request script
-runs **once, after the stream has terminated**, and reads the bounded stored
-list as `pm.response.events` with `pm.response.totalEvents` and
+runs **once, after the stream has terminated**, and reads the bounded list
+parsed from the stream's bytes, the one its stored trace is served with, as
+`pm.response.events` with `pm.response.totalEvents` and
 `pm.response.eventsTruncated` beside it - a script runs to completion, its
 timers included, before anything is reported, so a live per-event callback is
 not a feature that was skipped but one the runtime cannot have. The same three
@@ -11793,7 +11957,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event, time-to-first-event, largest-gap and event-rate histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -12764,7 +12928,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
-| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
@@ -13371,9 +13535,10 @@ bytes, which a client cannot recount from `body` because a JSON string's
 length is not its UTF-8 size. It is the length the engine held, which for a
 `bodyCapped` response is the prefix the read cap kept; a streaming run's is
 the body bytes the server delivered (issue #3238), which its `body` can be
-shorter than (an event stream stores none, any other reply at most
-`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A row
-stored before #3423 carries it only on a cut or streamed response.
+shorter than (at most `maxDesignResponseBodyBytes`, an event stream's bytes
+included since #3770; see [`POST /execute`](#post-execute)). A row stored
+before #3770 holds no body for an event stream, and one stored before #3423
+carries `bodyBytes` only on a cut or streamed response.
 
 If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
 affected `trace.request` and/or `trace.response` object carries
@@ -14142,7 +14307,9 @@ absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count
 `max`; a `"counter"` or `"rate"` entry carries `count` and `value` (a running total, or a 0-100
 percentage). `count` is always how many times the name was recorded: a trend's samples, a
 counter's records (four increments of 1024 are `count: 4, value: 4096`, never the total; #1937),
-a rate's evaluations. A counter's increments are finite and never negative - see
+a rate's evaluations, so a `metric.record` whose source is a stream's `eventJsonpath` (#3780) adds
+one sample per stream, read from the last event the path matches, never one per event. A
+counter's increments are finite and never negative - see
 [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets). The same shape rides every
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
 and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
@@ -14276,7 +14443,9 @@ failure.
   "capped": 480,
   "eventsPerSecond": 320.0,
   "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
-  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 }
+  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 },
+  "maxEventGap": { "p50": 27.1, "p95": 33.8, "p99": 41.0, "max": 312.4, "count": 480 },
+  "eventRate": { "p50": 40.0, "p95": 41.2, "p99": 41.9, "max": 42.3, "count": 480 }
 }
 ```
 
@@ -14326,6 +14495,26 @@ target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is
 absent when no completion delivered a timed event.
+
+`maxEventGap` and `eventRate` (issue #3776) are per-completion distributions
+of how each stream paced its events, in the same `{p50, p95, p99, max, count}`
+shape. `maxEventGap` is each stream's largest wait, in milliseconds, between
+two consecutive writes that delivered an event: a stall mid-reply shows at its
+`max` however fast the stream ran otherwise. `eventRate` is each stream's own
+rate in events per second, the events delivered after the first write that
+delivered one over the time from that write to the last, so 8 streams at 25 ms
+per event read a p50 near 40 beside one stream at 3 ms reading a `max` near
+333, where the whole-run `eventsPerSecond` blends them. The first write's own
+events are left out however many it carried: a backlog replayed in it took no
+measured time. Both are stamped on the write that
+completed an event, as `timeToFirstEvent` is: events that share a write share
+one time, and a proxy that buffers the stream shortens the gaps it holds back.
+A keep-alive comment is not an event and closes no gap, and the unterminated
+last frame the close completes counts toward `events` but toward neither of
+these. `count` is the completions with at least two such writes (`eventRate`
+also leaves out one whose writes all landed at one instant), so a stream whose
+events arrived in one write is in neither, and each object is absent when no
+completion measured it. Neither is on the live frames: they are report-only.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 
@@ -14790,8 +14979,9 @@ back to a character boundary, so it stays `utf8` with `bodyTruncated` set
 rather than turning the whole prefix into base64.
 
 **A streamed sample carries its events** (0.17.2). `events` is
-`{items, totalEvents, eventsTruncated}` - the same node a streaming design run
-stores on its trace, minus `endReason`: under load a stream ends by server close
+`{items, totalEvents, eventsTruncated}` - the same node a streaming design run's
+trace is served with, minus `endReason` and each item's `receivedAt`: under
+load a stream ends by server close
 or by one of two caps (`maxStreamEvents` / `maxStreamDurationMs`) and nothing
 per sample records which, so no reason is named rather than one invented. The
 list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`,
@@ -14833,9 +15023,11 @@ exchange failed, and `trace` when one was stored, without the cost of the
 whole report. The trace is served as stored: a design send's request and
 response bodies at the length `maxTraceBodyBytes` kept, and its
 `scripts.scriptRequests` holding every `pm.sendRequest` the scripts made, by
-index, in the shape [`POST /execute`](#post-execute) answers them. A trace
-that does not parse is served as its stored text, a JSON string, as the
-report serves it. Reads only.
+index, in the shape [`POST /execute`](#post-execute) answers them. A streamed
+send's `response.body` is the stream's bytes, and its `events` list is parsed
+from them as it is served, not stored (issue #3770,
+[`POST /execute`](#post-execute)). A trace that does not parse is served as its
+stored text, a JSON string, as the report serves it. Reads only.
 
 The handle is the `runId` and `resultId` a recorded buffered
 [`POST /execute`](#post-execute) answers; any `results[].id` of the report, or

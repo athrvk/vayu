@@ -1228,9 +1228,11 @@ evaluated to `undefined` would report PASS against a broken API.
 Postman has no equivalent: it has no streaming request type, so nothing in its
 `pm` surface names one. A request sent with the **Event stream** setting on gets
 three extra properties on `pm.response`, and the post-request script runs once,
-after the stream has terminated. A reply that is not `text/event-stream` (a
-JSON error, NDJSON) keeps its body, so `pm.response.text()` and `json()` read
-it; an event stream's `text()` is `""`:
+after the stream has terminated. The bytes the server delivered are the body,
+whatever their type, up to the engine's `maxDesignResponseBodyBytes`: an event
+stream's `pm.response.text()` is its `event:`/`data:` text, the same a
+collection or load run reads, and a JSON error or NDJSON reply reads through
+`text()` and `json()`:
 
 ```javascript
 const events = pm.response.events || [];
@@ -1258,12 +1260,14 @@ from a buffered body (a load run), where it is not measured.
 step, a load run's inline post-request script (marked inline, or Scripts = All
 inline) on a streamed response, and a load run's deferred `tests` script
 replayed against its sampled streams all see them, so the three properties mean
-there what they mean on a design Send, with two differences. The list is
-rebuilt by reparsing the response's buffered body and is bounded by
-`sseMaxStoredEvents`, while `totalEvents` is the count taken off the wire, so
-it stays right about a stream the stored body is only a prefix of. And there is
-no per-response end reason: whether a stream ended by a cap is a run-level
-fact, reported once as `stream.capped`.
+there what they mean on a design Send. On every path the list is parsed back out
+of the response's body and bounded by `sseMaxStoredEvents`, while `totalEvents`
+is the count taken off the wire, so it stays right about a stream the stored
+body is only a prefix of. Two differences remain. Only a design Send watched
+its events arrive, so only its History entry carries a `receivedAt` per event.
+And the other paths have no per-response end reason: whether a stream ended by a
+cap is a run-level fact, reported once as `stream.capped`, where a design Send's
+stored trace names its own `endReason`.
 
 All three are **absent** on an ordinary response rather than empty, so
 `typeof pm.response.events === 'undefined'` distinguishes "not a stream" from "a

@@ -15,7 +15,9 @@
  * A trend or counter reads a number off the response (`jsonpath`, `header`,
  * `latency`, `status` or `size` - the shared JSONPath subset for the first,
  * everything else read straight off `ElementContext::response` the way
- * `assert.size` / `assert.duration` already do). A rate reads a boolean from
+ * `assert.size` / `assert.duration` already do), or off a stream's events
+ * (`eventJsonpath`, #3780: the last event whose JSON data the path matches,
+ * one value per stream). A rate reads a boolean from
  * a small, self-contained comparison (`condition`) rather than the full
  * `control.if` grammar issue #1515 defines: that kind is not yet part of
  * this tree, and a rate's condition needs nothing beyond "does this one field
@@ -28,9 +30,12 @@
 #include "vayu/core/elements.hpp"
 
 #include <cmath>
+#include <expected>
 #include <limits>
+#include <string>
 
 #include "json_path.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::core {
 
@@ -41,6 +46,8 @@ namespace {
 /// or a response that is not there yet (`step.after` runs after the send, so
 /// this is only reachable when the pipeline was asked to run this kind
 /// before a response exists, which the caller guards against separately).
+/// `eventJsonpath` is not a field: it reads the events rather than the
+/// response, and `condition`'s `field` enum does not offer it.
 std::optional<nlohmann::json>
 read_field (ElementContext& ctx, const std::string& field, const nlohmann::json& config) {
     if (ctx.response == nullptr) {
@@ -80,6 +87,71 @@ read_field (ElementContext& ctx, const std::string& field, const nlohmann::json&
         return std::make_optional<nlohmann::json> (*matches.front ());
     }
     return std::nullopt;
+}
+
+/// What a trend or counter's source read, or why it read nothing.
+using SourceRead = std::expected<nlohmann::json, std::string>;
+
+SourceRead read_nothing (std::string why) {
+    return std::unexpected (std::move (why));
+}
+
+std::string no_numeric_value (const std::string& kind) {
+    return "no numeric value at the '" + kind + "' source";
+}
+
+/// `eventJsonpath`: @p path_text's first match in the last event whose data
+/// parses as JSON and has one, which is where a streamed completion's final
+/// `usage` sits. Read from the end, so the usual case parses one or two
+/// events rather than the whole stream.
+SourceRead read_last_matching_event (ElementContext& ctx, const std::string& path_text) {
+    const auto path = detail::parse_json_path (path_text);
+    if (!path) {
+        return read_nothing (no_numeric_value ("eventJsonpath"));
+    }
+    const auto* events = ensure_parsed_events (ctx);
+    if (events == nullptr) {
+        return read_nothing ("the response is not an event stream");
+    }
+    // A cut body ends before the stream did, so its last match need not be
+    // the stream's.
+    if (ctx.response->body_truncated) {
+        return read_nothing (
+        "the stream's body was cut short, so its last event is unknown");
+    }
+    for (auto event = events->rbegin (); event != events->rend (); ++event) {
+        // A cut event might have matched; reading on past it would report an
+        // earlier event as the last.
+        if (event->truncated) {
+            return read_nothing (
+            "an event after any match was cut at "
+            "sseMaxEventBytes, so the last match is unknown");
+        }
+        // `[DONE]`, a keep-alive or any other data that is not JSON is not an
+        // event the path can read.
+        const auto data =
+        utils::parse_ordered_json (event->data, constants::elements::MAX_BODY_DEPTH);
+        if (!data) {
+            continue;
+        }
+        const auto matches = detail::evaluate_json_path (*data, *path);
+        if (!matches.empty ()) {
+            return nlohmann::json (*matches.front ());
+        }
+    }
+    return read_nothing ("no event of the stream has a match at the path");
+}
+
+/// The value a trend or counter's @p kind of source reads.
+SourceRead
+read_source (ElementContext& ctx, const std::string& kind, const nlohmann::json& source) {
+    if (kind == "eventJsonpath") {
+        return read_last_matching_event (ctx, source.value ("eventJsonpath", ""));
+    }
+    if (auto value = read_field (ctx, kind, source)) {
+        return std::move (*value);
+    }
+    return read_nothing (no_numeric_value (kind));
 }
 
 /// @p value coerced to a double for a trend or counter - a string is parsed
@@ -165,7 +237,8 @@ CustomMetricType parse_metric_type (const std::string& type) {
 /// should already have refused (`oneOf` is not expressed here - see the
 /// kind's `config_schema` comment for why).
 std::string source_kind (const nlohmann::json& source) {
-    for (const char* key : { "jsonpath", "header", "latency", "status", "size", "condition" }) {
+    for (const char* key : { "jsonpath", "eventJsonpath", "header", "latency",
+         "status", "size", "condition" }) {
         if (source.contains (key)) {
             return key;
         }
@@ -222,15 +295,20 @@ class MetricRecordElement final : public Element {
         if (kind.empty () || kind == "condition") {
             ctx.outcome_status = "error";
             ctx.outcome_message =
-            "a trend or counter metric needs a 'jsonpath', 'header', "
-            "'latency', 'status' or 'size' source";
+            "a trend or counter metric needs a 'jsonpath', 'eventJsonpath', "
+            "'header', 'latency', 'status' or 'size' source";
             return;
         }
-        const auto raw   = read_field (ctx, kind, source);
-        const auto value = raw ? coerce_number (*raw) : std::nullopt;
+        const auto raw = read_source (ctx, kind, source);
+        if (!raw) {
+            ctx.outcome_status  = "missing";
+            ctx.outcome_message = raw.error ();
+            return;
+        }
+        const auto value = coerce_number (*raw);
         if (!value) {
-            ctx.outcome_status = "missing";
-            ctx.outcome_message = "no numeric value at the '" + kind + "' source";
+            ctx.outcome_status  = "missing";
+            ctx.outcome_message = no_numeric_value (kind);
             return;
         }
         // A counter only grows (#1937); a trend keeps its own clamp in the
@@ -279,8 +357,9 @@ nlohmann::json condition_schema () {
     };
 }
 
-/// The two places a `jsonpath` can be read from (`source` and, for a rate,
-/// the `condition`'s own), checked once the schema has accepted the shape.
+/// The three places a JSONPath can be read from (`source.jsonpath`,
+/// `source.eventJsonpath` and, for a rate, the `condition`'s own), checked
+/// once the schema has accepted the shape.
 /// A condition's path is only read when its `field` is `jsonpath`, so a stale
 /// one beside another field is not refused.
 std::optional<std::string> validate_metric_paths (const nlohmann::json& config) {
@@ -289,6 +368,10 @@ std::optional<std::string> validate_metric_paths (const nlohmann::json& config) 
         return std::nullopt;
     }
     if (auto problem = detail::json_path_problem (*source, "jsonpath", "source.jsonpath")) {
+        return problem;
+    }
+    if (auto problem = detail::json_path_problem (
+        *source, "eventJsonpath", "source.eventJsonpath")) {
         return problem;
     }
     const auto condition = source->find ("condition");
@@ -317,8 +400,8 @@ ElementKind make_metric_record_kind () {
         return std::make_unique<MetricRecordElement> (config);
     };
     kind.validate_config = validate_metric_paths;
-    // Not a strict `oneOf` across `source`'s six shapes: valijson's `oneOf`
-    // failure reports "matched N schemas", which names none of the six
+    // Not a strict `oneOf` across `source`'s seven shapes: valijson's `oneOf`
+    // failure reports "matched N schemas", which names none of the seven
     // by name, where `MetricRecordElement::apply`'s own checks report
     // exactly which source is missing what. The schema's job here is the
     // shape (an object, from a closed set of keys, each of the right type);
@@ -343,6 +426,12 @@ ElementKind make_metric_record_kind () {
           { "description",
           "Reads the metric's value from the response body at "
           "this JSONPath." } } },
+        { "eventJsonpath",
+        { { "type", "string" }, { "title", "Event JSONPath" },
+        { "description",
+        "Reads the metric's value from a streamed response: the last "
+        "event whose JSON data has a match at this JSONPath, one value "
+        "per stream." } } },
         { "header", { { "type", "string" }, { "title", "Header name" }, { "description", "Reads the metric's value from this response header." } } },
         { "latency", { { "type", "boolean" }, { "title", "Latency" }, { "description", "Records the response's latency." } } },
         { "status", { { "type", "boolean" }, { "title", "Status code" }, { "description", "Records the response's status code." } } },

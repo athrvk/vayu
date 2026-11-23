@@ -14,6 +14,10 @@
  * The load-bearing case is the first one: the section is absent for every run
  * that did not stream, and rendering zeros there would tell a user their
  * ordinary load test measured an event rate and found none.
+ *
+ * Mutation-check (#3776): drop the `maxEventGap` or `eventRate` read from the
+ * component and its present case fails; draw a row without its guard and its
+ * absent case fails.
  */
 
 import { describe, it, expect } from "vitest";
@@ -147,6 +151,78 @@ describe("StreamMetrics", () => {
 			expect(screen.queryByText("first event")).not.toBeInTheDocument();
 			// The per-stream row is untouched.
 			expect(screen.getByText("per stream")).toBeInTheDocument();
+		});
+	});
+
+	describe("pace of each stream (issue #3776)", () => {
+		const base = { completions: 4, totalEvents: 40, capped: 0, eventsPerSecond: 4, events };
+		const maxEventGap = { p50: 27, p95: 34, p99: 41, max: 312, count: 4 };
+		const eventRate = { p50: 40, p95: 41.2, p99: 41.9, max: 42.3, count: 4 };
+		const timeToFirstEvent = { p50: 412, p95: 655, p99: 803, max: 910, count: 4 };
+
+		/** The events/s row's four cells, p50 to max, as drawn. */
+		function rateCells(): (string | null)[] {
+			const row = screen.getByText("events/s").parentElement;
+			return Array.from(row?.children ?? [])
+				.slice(1)
+				.map((cell) => cell.textContent);
+		}
+
+		it("shows the largest gap in milliseconds and the rate in events per second", () => {
+			render(<StreamMetrics report={report({ ...base, maxEventGap, eventRate })} />);
+			expect(screen.getByText("max gap").parentElement).toHaveTextContent(
+				"27.0ms34.0ms41.0ms312ms"
+			);
+			expect(rateCells()).toEqual(["40", "41", "42", "42"]);
+		});
+
+		it("keeps a slow stream's measured rate off zero", () => {
+			// 0.033 events/s at one decimal read "0.0", a zero for a rate the
+			// engine measured. Mutation check: format the cells with
+			// `formatCount(value, 1)` again and this reads 0.0 twice.
+			const slow = { p50: 0.004, p95: 0.033, p99: 4.25, max: 12.6, count: 4 };
+			render(<StreamMetrics report={report({ ...base, eventRate: slow })} />);
+			expect(rateCells()).toEqual(["<0.01", "0.03", "4.25", "13"]);
+		});
+
+		it("reads a gap past a second in seconds", () => {
+			render(
+				<StreamMetrics
+					report={report({
+						...base,
+						maxEventGap: { p50: 1500, p95: 2000, p99: 2500, max: 3000, count: 4 },
+					})}
+				/>
+			);
+			expect(screen.getByText("max gap").parentElement).toHaveTextContent(
+				"1.50s2.00s2.50s3.00s"
+			);
+		});
+
+		it("draws no gap row when the report carries none, and still draws the rate", () => {
+			render(<StreamMetrics report={report({ ...base, eventRate })} />);
+			expect(screen.queryByText("max gap")).not.toBeInTheDocument();
+			expect(screen.getByText("events/s")).toBeInTheDocument();
+		});
+
+		it("draws no rate row when the report carries none, and still draws the gap", () => {
+			render(<StreamMetrics report={report({ ...base, maxEventGap })} />);
+			expect(screen.queryByText("events/s")).not.toBeInTheDocument();
+			expect(screen.getByText("max gap")).toBeInTheDocument();
+		});
+
+		it("draws neither pace row without them, and leaves the first event row alone", () => {
+			render(<StreamMetrics report={report({ ...base, timeToFirstEvent })} />);
+			expect(screen.queryByText("max gap")).not.toBeInTheDocument();
+			expect(screen.queryByText("events/s")).not.toBeInTheDocument();
+			expect(screen.getByText("first event")).toBeInTheDocument();
+		});
+
+		it("draws the pace rows without a first event row", () => {
+			render(<StreamMetrics report={report({ ...base, maxEventGap, eventRate })} />);
+			expect(screen.queryByText("first event")).not.toBeInTheDocument();
+			expect(screen.getByText("max gap")).toBeInTheDocument();
+			expect(screen.getByText("events/s")).toBeInTheDocument();
 		});
 	});
 });

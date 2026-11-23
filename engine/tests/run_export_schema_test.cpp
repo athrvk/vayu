@@ -120,7 +120,13 @@ json healthy_summary () {
         { "p95", 10 }, { "p99", 10 }, { "count", 10 } } },
         { "timeToFirstEvent",
         { { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
-        { "max", 910.0 }, { "count", 9 }, { "unlisted", "dropped" } } } } },
+        { "max", 910.0 }, { "count", 9 }, { "unlisted", "dropped" } } },
+        { "maxEventGap",
+        { { "p50", 26.0 }, { "p95", 31.0 }, { "p99", 33.0 }, { "max", 310.0 },
+        { "count", 9 }, { "unlisted", "dropped" } } },
+        { "eventRate",
+        { { "p50", 40.0 }, { "p95", 41.5 }, { "p99", 42.0 }, { "max", 42.5 },
+        { "count", 9 }, { "unlisted", "dropped" } } } } },
         { "coverage",
         { { "operationsTotal", 1 }, { "operationsCovered", 1 },
         { "declaredResponsesTotal", 1 }, { "declaredResponsesHit", 1 },
@@ -372,6 +378,22 @@ TEST_F (RunExportSchemaTest, AStreamsTimeToFirstEventIsExported) {
     EXPECT_EQ (document["report"]["stream"].value ("timeToFirstEvent", json ()),
     (json{ { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
     { "max", 910.0 }, { "count", 9 } }));
+}
+
+// #3776: a stream's largest event gap and its event rate survive the
+// allowlist the same way, each member by member. Mutation check: drop either
+// name from `STREAM_TIMED_SECTIONS` in run_export.cpp and its expectation
+// fails; drop its property from the schema and the validation does.
+TEST_F (RunExportSchemaTest, AStreamsLargestGapAndEventRateAreExported) {
+    seed ("run_gap_rate", vayu::RunStatus::Completed, healthy_summary ());
+    json document      = expect_valid (json{ { "runId", "run_gap_rate" } });
+    const json& stream = document["report"]["stream"];
+    EXPECT_EQ (stream.value ("maxEventGap", json ()),
+    (json{ { "p50", 26.0 }, { "p95", 31.0 }, { "p99", 33.0 }, { "max", 310.0 },
+    { "count", 9 } }));
+    EXPECT_EQ (stream.value ("eventRate", json ()),
+    (json{ { "p50", 40.0 }, { "p95", 41.5 }, { "p99", 42.0 }, { "max", 42.5 },
+    { "count", 9 } }));
 }
 
 // #3570: a scenario load run's pass durations go from the stored summary

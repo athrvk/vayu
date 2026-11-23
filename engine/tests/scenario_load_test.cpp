@@ -176,6 +176,25 @@ class ScenarioMockServer {
             });
         });
 
+        // A completion stream's shape (#3780): usage in the first and the
+        // last data event, the last one final, then `[DONE]`.
+        svr.Get ("/sse-usage", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/sse-usage");
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body =
+                "data: {\"usage\": {\"completion_tokens\": 1}}\n\n"
+                "data: {\"delta\": \"hi\"}\n\n"
+                "data: {\"usage\": {\"completion_tokens\": 30}}\n\n"
+                "data: [DONE]\n\n";
+                if (!sink.write (body.data (), body.size ())) {
+                    return false;
+                }
+                sink.done ();
+                return true;
+            });
+        });
+
         // A `{{data.*}}` token substitutes into the path, so the row a virtual
         // user bound is readable off the wire rather than inferred from a
         // counter the test also owns.
@@ -2323,6 +2342,37 @@ TEST_F (ScenarioLoadTest, MetricRecordProducesCustomMetricsWithTheStepsCompletio
     ASSERT_EQ (summaries->count ("ttfb2"), 1u);
     EXPECT_EQ (summaries->at ("ttfb2").type, vayu::core::CustomMetricType::Trend);
     EXPECT_EQ (summaries->at ("ttfb2").count, 5u);
+}
+
+// Issue #3780's acceptance criterion: a streaming step's `metric.record` with
+// an `eventJsonpath` source records one sample per stream, from the last event
+// the path matches. Mutation check: scan `read_last_matching_event` forwards
+// and `max` reads 1.
+TEST_F (ScenarioLoadTest, AnEventJsonPathMetricRecordsOneSamplePerStream) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/sse-usage") });
+    execution.plan.steps[0].request.stream_bounds = vayu::StreamBounds{ 5000, 100 };
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { nlohmann::json{ { "id", "el_usage" }, { "kind", "metric.record" },
+    { "config",
+    { { "name", "completion_tokens" }, { "type", "trend" },
+    { "source", { { "eventJsonpath", "$.usage.completion_tokens" } } } } } } });
+
+    constexpr size_t ITERATIONS = 3;
+    run (json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
+
+    ASSERT_EQ (server.hits_for ("/sse-usage").size (), ITERATIONS);
+    const auto summaries = context_->metrics_collector->custom_metric_summaries ();
+    ASSERT_HAS_VALUE (summaries);
+    ASSERT_EQ (summaries->count ("completion_tokens"), 1u);
+    const auto& tokens = summaries->at ("completion_tokens");
+    EXPECT_EQ (tokens.type, vayu::core::CustomMetricType::Trend);
+    EXPECT_EQ (tokens.count, ITERATIONS)
+    << "one sample per stream, not per event";
+    // The trend's histogram reads 30 back as 30.015; the first event would be 1.
+    EXPECT_NEAR (tokens.max, 30.0, 0.5);
+    EXPECT_NEAR (tokens.p50, 30.0, 0.5);
 }
 
 // A plan whose steps assert nothing gets no stores at all, which is what keeps

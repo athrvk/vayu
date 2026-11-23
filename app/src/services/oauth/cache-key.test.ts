@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeOAuth2CacheKey } from "./cache-key";
+import { computeOAuth2CacheKey, oauth2TokenKey } from "./cache-key";
 import type { OAuth2Config } from "@/types";
 
 // These vectors are shared VERBATIM with engine/tests/oauth_client_test.cpp
@@ -222,5 +222,19 @@ describe("computeOAuth2CacheKey - extra parameter rows", () => {
 		).toBe(
 			"https://idp/token\x1fcid\x1fdefault\x1fclient_credentials\x1f\x1ftokenParams:a=1\x1ea=2\x1eab=1"
 		);
+	});
+});
+
+describe("oauth2TokenKey", () => {
+	it("is the cache key for a config with a token URL and a client id", () => {
+		const config = base({ credentialsId: "ci" });
+		expect(oauth2TokenKey(config)).toBe(computeOAuth2CacheKey(config));
+	});
+
+	it.each([
+		["no access token URL", { accessTokenUrl: "" }],
+		["no client id", { clientId: "" }],
+	])("is null with %s, which the engine fetches no token for", (_case, over) => {
+		expect(oauth2TokenKey(base(over))).toBeNull();
 	});
 });

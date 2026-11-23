@@ -28,18 +28,29 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui";
-import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
-import { createStableResolve } from "@/lib/dynamic-variable-cache";
-import type { OAuth2Config, OAuth2GrantType, OAuth2ParamRow } from "@/types";
+import { DISCOVERED_FIELD_LABELS, OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
+import { withDiscoveredValues } from "@/services/oauth/discovery";
+import type { OAuth2Config, OAuth2DiscoveredField, OAuth2GrantType, OAuth2ParamRow } from "@/types";
 import { LabelledField, type LabelledControlProps } from "../LabelledField";
+import DiscoveryFields from "./DiscoveryFields";
 import JwtBearerFields from "./JwtBearerFields";
 import ParamRowsEditor from "./ParamRowsEditor";
+import { resolveOAuth2Config } from "./resolve-config";
 import SecondsInput from "./SecondsInput";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
 /** What the engine holds `fallbackExpiresIn` to (`MAX_FALLBACK_EXPIRES_IN_SECONDS`): one year. */
 const MAX_FALLBACK_EXPIRES_IN_SECONDS = 365 * 24 * 3600;
+
+/** A blank discoverable member's placeholder while discovery is on. */
+const DISCOVERY_PLACEHOLDERS: Record<OAuth2DiscoveredField, string> = {
+	authorizationUrl: "found at sign-in",
+	accessTokenUrl: "found at sign-in",
+	clientId: "blank registers a client at sign-in",
+	resource: "found at sign-in",
+	scope: "found at sign-in",
+};
 
 const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 	{ value: "client_credentials", label: "Client credentials" },
@@ -63,55 +74,6 @@ const PlainTextInput: OAuth2TextInput = ({ id, value, onChange, placeholder, typ
 			className="font-mono text-sm"
 		/>
 	);
-
-/*
- * One entry per config *field* - `<resolveKey>:clientId` and its siblings -
- * cached across this form's own unmount.
- *
- * `resolvedConfig` below is not only a display: `TokenStatusRow` derives the
- * token cache key from it (`computeOAuth2CacheKey`) and queries on that string,
- * and the same object is what a Get Token actually posts. A `{{$guid}}` in the
- * access-token URL or the client id therefore did more than flicker - the
- * builder's Auth tab is not force-mounted (`RequestTabs/index.tsx`), so a look
- * at Headers and back rebuilt this form, resolved fresh, and pointed the status
- * row at a cache key nothing had ever fetched: a token that was on screen a
- * moment ago reading as "No token cached", with nothing edited. The memo alone
- * could not answer that, because it dies with the component.
- *
- * `resolveString` comes from the request builder's provider at the one host
- * that passes it, so it outlives this form and the entry is still valid on the
- * way back in. With no `resolveKey` the cache is bypassed entirely, which is
- * the collection auth editor's case: it passes no resolver either, so every
- * field is already its own literal text.
- */
-const stableConfigField = createStableResolve();
-
-/**
- * `rows` with every key and value resolved, each under a cache entry of its
- * own (`<list>.<index>.key`). A stored list is whatever JSON the engine
- * round-tripped, so a list that is not an array, a row that is not an object
- * and a member that is not a string are all left as they are.
- */
-function resolveParamRows(
-	list: string,
-	rows: OAuth2ParamRow[] | undefined,
-	resolveField: (field: string, text: string) => string
-): OAuth2ParamRow[] | undefined {
-	if (!Array.isArray(rows)) return rows;
-	const resolveMember = (index: number, member: "key" | "value", row: OAuth2ParamRow) =>
-		typeof row[member] === "string"
-			? resolveField(`${list}.${index}.${member}`, row[member])
-			: row[member];
-	return rows.map((row, index) =>
-		typeof row === "object" && row !== null
-			? {
-					...row,
-					key: resolveMember(index, "key", row),
-					value: resolveMember(index, "value", row),
-				}
-			: row
-	);
-}
 
 export default function OAuth2Form({
 	value,
@@ -142,6 +104,8 @@ export default function OAuth2Form({
 	const isAuthCode = grant === "authorization_code";
 	const isPassword = grant === "password";
 	const isJwtBearer = grant === "jwt_bearer";
+	const discovering = isAuthCode && value.discoverUrl !== undefined;
+	const discovered = new Set(value.discoveredFields ?? []);
 
 	// The grant has no client secret, so a stored one is dropped with the field:
 	// hidden, it would still be sent as client authentication beside the assertion.
@@ -156,43 +120,13 @@ export default function OAuth2Form({
 	};
 
 	// Config with variables resolved, for the token status/actions. Each field
-	// keeps its own cache entry (see `stableConfigField` above), so the memo is
-	// what holds the object identity still and the cache is what holds the
-	// values still across a remount.
-	const resolvedConfig = useMemo<OAuth2Config>(() => {
-		const resolve = resolveString ?? ((s: string) => s);
-		const r = (field: string, s: string) =>
-			resolveKey ? stableConfigField(`${resolveKey}:${field}`, s, resolve) : resolve(s);
-		// An absent optional field stays absent: resolving it would turn every
-		// `undefined` into `""`, and the cache key tells those two apart.
-		const rz = (field: string, s?: string) => (s ? r(field, s) : s);
-		// `privateKey` is not resolved: it is one reference the engine resolves
-		// where the token is acquired, and the spread carries it through as written.
-		return {
-			...value,
-			accessTokenUrl: r("accessTokenUrl", value.accessTokenUrl ?? ""),
-			clientId: r("clientId", value.clientId ?? ""),
-			clientSecret: rz("clientSecret", value.clientSecret),
-			username: rz("username", value.username),
-			password: rz("password", value.password),
-			scope: rz("scope", value.scope),
-			subject: rz("subject", value.subject),
-			assertionAudience: rz("assertionAudience", value.assertionAudience),
-			keyId: rz("keyId", value.keyId),
-			assertionClaims: resolveParamRows("assertionClaims", value.assertionClaims, r),
-			audience: rz("audience", value.audience),
-			resource: rz("resource", value.resource),
-			authorizationUrl: rz("authorizationUrl", value.authorizationUrl),
-			refreshTokenUrl: rz("refreshTokenUrl", value.refreshTokenUrl),
-			authorizationParams: resolveParamRows(
-				"authorizationParams",
-				value.authorizationParams,
-				r
-			),
-			tokenParams: resolveParamRows("tokenParams", value.tokenParams, r),
-			refreshParams: resolveParamRows("refreshParams", value.refreshParams, r),
-		};
-	}, [value, resolveString, resolveKey]);
+	// keeps its own cache entry (see `resolveOAuth2Config`), so the memo is what
+	// holds the object identity still and the cache is what holds the values
+	// still across a remount.
+	const resolvedConfig = useMemo<OAuth2Config>(
+		() => resolveOAuth2Config(value, resolveString, resolveKey),
+		[value, resolveString, resolveKey]
+	);
 
 	const field = (
 		label: string,
@@ -203,6 +137,32 @@ export default function OAuth2Form({
 			{control}
 		</LabelledField>
 	);
+
+	// A member discovery wrote is the server's answer, shown read-only so it is
+	// not mistaken for a typed one; Discover again is how it changes. With
+	// discovery on, a blank member says it is found at sign-in, and one typed
+	// there wins over what discovery would find.
+	const discoverable = (
+		key: OAuth2DiscoveredField,
+		c: LabelledControlProps,
+		placeholder: string
+	) =>
+		discovered.has(key) ? (
+			<Input
+				id={c.id}
+				readOnly
+				value={value[key] ?? ""}
+				title={value[key]}
+				className="font-mono text-sm"
+			/>
+		) : (
+			<TextInput
+				{...c}
+				value={value[key] ?? ""}
+				onChange={(v) => set(key, v)}
+				placeholder={discovering ? DISCOVERY_PLACEHOLDERS[key] : placeholder}
+			/>
+		);
 
 	return (
 		<div className="space-y-4">
@@ -225,24 +185,18 @@ export default function OAuth2Form({
 				</Select>
 			))}
 
-			{isAuthCode &&
-				field(OAUTH2_FIELD_LABELS.authorizationUrl, (c) => (
-					<TextInput
-						{...c}
-						value={value.authorizationUrl ?? ""}
-						onChange={(v) => set("authorizationUrl", v)}
-						placeholder="https://idp.example.com/authorize"
-					/>
-				))}
+			{isAuthCode && (
+				<DiscoveryFields value={value} onChange={onChange} TextInput={TextInput} />
+			)}
 
-			{field(OAUTH2_FIELD_LABELS.accessTokenUrl, (c) => (
-				<TextInput
-					{...c}
-					value={value.accessTokenUrl}
-					onChange={(v) => set("accessTokenUrl", v)}
-					placeholder="https://idp.example.com/token"
-				/>
-			))}
+			{isAuthCode &&
+				field(OAUTH2_FIELD_LABELS.authorizationUrl, (c) =>
+					discoverable("authorizationUrl", c, "https://idp.example.com/authorize")
+				)}
+
+			{field(OAUTH2_FIELD_LABELS.accessTokenUrl, (c) =>
+				discoverable("accessTokenUrl", c, "https://idp.example.com/token")
+			)}
 
 			{isAuthCode &&
 				field(
@@ -261,14 +215,7 @@ export default function OAuth2Form({
 			<div className="grid grid-cols-2 gap-4">
 				{field(
 					OAUTH2_FIELD_LABELS.clientId,
-					(c) => (
-						<TextInput
-							{...c}
-							value={value.clientId}
-							onChange={(v) => set("clientId", v)}
-							placeholder="client id or {{var}}"
-						/>
-					),
+					(c) => discoverable("clientId", c, "client id or {{var}}"),
 					isJwtBearer ? "The assertion's iss claim." : undefined
 				)}
 				{!isJwtBearer &&
@@ -314,14 +261,9 @@ export default function OAuth2Form({
 				</div>
 			)}
 
-			{field("Scope", (c) => (
-				<TextInput
-					{...c}
-					value={value.scope ?? ""}
-					onChange={(v) => set("scope", v)}
-					placeholder="openid profile email"
-				/>
-			))}
+			{field(DISCOVERED_FIELD_LABELS.scope, (c) =>
+				discoverable("scope", c, "openid profile email")
+			)}
 
 			{isAuthCode &&
 				field("PKCE", (c) => (
@@ -422,14 +364,9 @@ export default function OAuth2Form({
 								placeholder="optional"
 							/>
 						))}
-						{field("Resource", (c) => (
-							<TextInput
-								{...c}
-								value={value.resource ?? ""}
-								onChange={(v) => set("resource", v)}
-								placeholder="optional"
-							/>
-						))}
+						{field(DISCOVERED_FIELD_LABELS.resource, (c) =>
+							discoverable("resource", c, "optional")
+						)}
 					</div>
 
 					{field("Refresh token URL", (c) => (
@@ -508,6 +445,7 @@ export default function OAuth2Form({
 					resolvedConfig={resolvedConfig}
 					deferredNames={deferredNames}
 					collectionId={collectionId}
+					onDiscovered={(found) => onChange(withDiscoveredValues(value, found))}
 				/>
 			</div>
 		</div>
