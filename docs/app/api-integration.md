@@ -182,6 +182,19 @@ Elements section as any other `assert.*` outcome does. The builder offers it in 
 Assert group, with a multi-line schema field; see the Shared ElementList section of
 `COMPONENTS.md`.
 
+**`assert.snapshot` (#3807)** holds the items a list method answers to a recorded
+`baseline`: `method` is `tools/list` (default), `resources/list` or `prompts/list`,
+`baseline` is the array the list held, and a single-request run's `requestElements`
+accepts it. The renderer sends it as any element (`config: {method?, baseline}`)
+and offers it in the Assert group with a multi-line baseline field. Its one
+app-side behaviour is the **Use the current reply as the baseline** action on the
+Elements tab: it extracts `result.<tools|resources|prompts>` from the Response
+pane's body (a JSON-RPC object or an event stream ending in one) and writes the
+list into the element's `config.baseline`; the engine is not called. A comparison
+that fails arrives as one `assert.snapshot` outcome message
+(`tools/list changed: removed 'a'; added 'b'; 'c' differs at /inputSchema/...`).
+The engine's rules are in `docs/engine/elements.md`.
+
 **`unresolved` comes back, never goes out** (#2356). The engine sends a file
 reference only when its path was picked on this machine or lies under a folder
 allowed in Settings > Files ([allowed folders](#allowed-folders)), and decides
