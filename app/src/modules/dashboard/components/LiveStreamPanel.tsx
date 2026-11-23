@@ -20,7 +20,7 @@
 
 import { memo } from "react";
 import { Card } from "@/components/ui/card";
-import type { LoadTestMetrics, StreamTimeToFirstEvent } from "@/types";
+import type { LoadTestMetrics, StreamDistribution } from "@/types";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import { formatCount } from "../utils/format";
 import { InfoChip } from "./shared";
@@ -32,7 +32,7 @@ interface LiveStreamPanelProps {
 	/** The latest frame: the cumulative figures are read from it. */
 	metrics: Pick<LoadTestMetrics, "stream_events" | "events_per_second" | "streams_open">;
 	history: LoadTestMetrics[];
-	firstEvent?: StreamTimeToFirstEvent;
+	firstEvent?: StreamDistribution;
 }
 
 function duration(ms: number): string {
