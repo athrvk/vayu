@@ -46,6 +46,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
+#include "vayu/http/sse_parser.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -484,6 +485,19 @@ struct ElementContext {
     /// `ExchangeInputs::max_element_body_bytes`) overwrites it, the way every
     /// other config-backed `ElementContext` field here does.
     size_t max_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
+
+    /// `sseMaxEventBytes`: one event's `data` is kept to this many bytes when
+    /// `ensure_parsed_events` parses a streamed body, the bound
+    /// `pm.response.events` reads the same stream with. A caller with the live
+    /// setting (`ExchangeInputs::sse_limits`, `RunContext::sse_limits`)
+    /// overwrites the default.
+    size_t max_event_bytes = vayu::core::constants::sse::MAX_EVENT_BYTES;
+    /// Every event of a streamed body, parsed once by `ensure_parsed_events`
+    /// and shared by every `metric.record` `eventJsonpath` on the step. Never
+    /// capped at `sseMaxStoredEvents`: the event a reader wants is usually the
+    /// stream's last, which a stored-events cap is the first thing to drop.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<std::vector<vayu::http::SseEvent>> parsed_events{};
 
     /// Filled by `Element::apply`, reset by `ElementPipeline::run` before each
     /// call and read back into the pushed `ElementOutcome` afterwards - the
@@ -1135,6 +1149,16 @@ std::mt19937_64* rng);
  * against whether a response is set.
  */
 [[nodiscard]] const nlohmann::ordered_json* ensure_parsed_body (ElementContext& ctx);
+
+/**
+ * The response's events, parsed from its buffered body with the `SseParser`
+ * every other stream reader uses and cached on @p ctx. Null when there is no
+ * response or it was not a stream: `Response::stream_events` is set only for a
+ * transfer whose final hop announced `text/event-stream` (#3771), so a body
+ * that merely looks like one is not read as events.
+ */
+[[nodiscard]] const std::vector<vayu::http::SseEvent>* ensure_parsed_events (
+ElementContext& ctx);
 
 /**
  * The text a `field` config names (`body`, `headers`, `url` or `status`), as

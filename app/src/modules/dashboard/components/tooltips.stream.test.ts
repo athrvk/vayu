@@ -8,7 +8,8 @@
 /**
  * The stream card's tooltips (issue #3234). The events tooltip used to say time
  * to first event "is the First byte row"; it is a figure of its own now, and a
- * sentence equating the two sends a reader to the wrong row.
+ * sentence equating the two sends a reader to the wrong row. The pace rows'
+ * tooltips (#3776) say what each figure is and what it is not.
  */
 
 import { describe, it, expect } from "vitest";
@@ -23,6 +24,20 @@ describe("stream tooltips", () => {
 		const tip = String(TOOLTIPS.streamFirstEvent);
 		expect(tip).toContain("not the First byte row");
 		expect(tip).toContain("response headers");
+	});
+
+	it("says the max-gap figure is per stream, the largest pause, and understated by a buffering proxy (issue #3776)", () => {
+		const tip = String(TOOLTIPS.streamMaxEventGap);
+		expect(tip).toMatch(/within one stream/);
+		expect(tip).toMatch(/largest pause between two consecutive events/);
+		expect(tip).toMatch(/buffers the stream/);
+	});
+
+	it("says the event-rate figure is per stream, unlike the whole-run events/sec, and that low values are the concern (issue #3776)", () => {
+		const tip = String(TOOLTIPS.streamEventRate);
+		expect(tip).toMatch(/each stream's own pace/);
+		expect(tip).toMatch(/whole-run events\/sec/);
+		expect(tip).toMatch(/low p50 means the typical stream was slow/);
 	});
 
 	it("says the live first-event tile is not the First byte row, and that open streams are not counted (issue #3236)", () => {

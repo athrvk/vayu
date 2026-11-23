@@ -590,8 +590,8 @@ TEST (RunExportHtmlTest, AStreamingRunIsASectionOfItsTotalsAndItsDistributions) 
     for (const std::string_view cell :
     { "<th scope=\"row\">Streams</th><td>120</td>", "<td>14,400</td>",
     "<td>480 events/s</td>", "<th scope=\"row\">Streams ended at a cap</th><td>4</td>",
-    "<th scope=\"col\">Time to first event (ms)</th>",
-    "<tr><th scope=\"row\">max</th><td>310</td><td>1,250</td></tr>" }) {
+    "<th scope=\"col\">Time to first event (ms)</th>", "<th scope=\"col\">Largest event gap (ms)</th>",
+    "<th scope=\"col\">Event rate (events/s)</th>", "<tr><th scope=\"row\">max</th><td>310</td><td>1,250</td><td>313</td><td>337</td></tr>" }) {
         EXPECT_NE (stream.find (cell), std::string::npos) << cell << " in:\n"
                                                           << stream;
     }

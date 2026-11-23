@@ -49,6 +49,19 @@ export function formatCount(value: number, decimals = 0): string {
 	});
 }
 
+/**
+ * A measured rate (events/s) in the reader's locale, by the engine's rule for a
+ * run figure (`format_run_figure`, `run_export_view.cpp`), so the card and an
+ * exported report spell one rate alike: 2 decimals below 10, none above, and a
+ * positive rate too small for 2 decimals reads `<0.01`, never a zero it did not
+ * measure. `-` for a non-finite value.
+ */
+export function formatRate(value: number): string {
+	if (!Number.isFinite(value)) return "-";
+	if (value > 0 && value < 0.01) return `<${formatCount(0.01, 2)}`;
+	return formatCount(value, Math.abs(value) < 10 ? 2 : 0);
+}
+
 export interface FormatDurationOptions {
 	/**
 	 * Round each component to the nearest unit instead of truncating. A

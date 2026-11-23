@@ -254,6 +254,30 @@
                 "max": {"type": "number"},
                 "count": {"type": "number"}
               }
+            },
+            "maxEventGap": {
+              "description": "Each stream's largest wait in milliseconds between two writes that delivered events; count is the completions with at least two such writes. Absent when none had.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
+            },
+            "eventRate": {
+              "description": "Each stream's own event rate in events per second: the events delivered after the first write that delivered one, over the time from that write to the last. count is the completions it was measured for. Absent when none was.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
             }
           }
         },

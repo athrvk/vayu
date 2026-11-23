@@ -833,10 +833,11 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// see docs/engine/benchmarks.md for the measured cost.
 constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 
-/// Whether a streaming load run feeds the per-completion event and
-/// time-to-first-event histograms (run config `stream_metrics`, issues #576
-/// and #3234). On by default: it is two atomic histogram records per
-/// completion, paid only by runs that stream, and it is
+/// Whether a streaming load run feeds the per-completion event,
+/// time-to-first-event, largest-gap and event-rate histograms (run config
+/// `stream_metrics`, issues #576, #3234 and #3776). On by default: it is at
+/// most four atomic histogram records per completion, paid only by runs that
+/// stream, and it is
 /// the whole point of running a stream under load - events/sec is the number
 /// such a run exists to produce.
 constexpr bool DEFAULT_STREAM_METRICS = true;
@@ -846,6 +847,15 @@ constexpr bool DEFAULT_STREAM_METRICS = true;
 /// above `sse::STREAM_EVENTS_CEILING`, the most a per-request cap can be set
 /// to, by the `static_assert` beside it.
 constexpr int64_t HISTOGRAM_MAX_EVENTS = 10000001;
+
+/// A stream's event rate (#3776) is held as an integer: events per second
+/// times this, so three decimals survive and a stream at one event a minute
+/// does not read 0.
+constexpr double STREAM_EVENT_RATE_SCALE = 1000.0;
+/// Ceiling on the rate histogram's range: a million events per second,
+/// scaled, plus the offset of one it is recorded at. A faster reading (two
+/// writes microseconds apart) is clamped into the top bucket rather than lost.
+constexpr int64_t HISTOGRAM_MAX_EVENT_RATE = 1000000000LL + 1;
 
 /// Ceiling on distinct `metric.record` / `pm.metrics` names one run may
 /// declare (issue #1500). Each name backs its own HdrHistogram (trend) or

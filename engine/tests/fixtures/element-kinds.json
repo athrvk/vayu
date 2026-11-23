@@ -1005,6 +1005,11 @@
               "title": "Condition",
               "type": "object"
             },
+            "eventJsonpath": {
+              "description": "Reads the metric's value from a streamed response: the last event whose JSON data has a match at this JSONPath, one value per stream.",
+              "title": "Event JSONPath",
+              "type": "string"
+            },
             "header": {
               "description": "Reads the metric's value from this response header.",
               "title": "Header name",

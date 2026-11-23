@@ -78,6 +78,7 @@ const KINDS: ElementKindSchema[] = [
 				title: "Source",
 				properties: {
 					jsonpath: { type: "string", title: "JSONPath" },
+					eventJsonpath: { type: "string", title: "Event JSONPath" },
 					condition: {
 						type: "object",
 						title: "Condition",
@@ -253,6 +254,14 @@ const CASES: Case[] = [
 		invalid: { name: "m", source: { jsonpath: "$." } },
 		message: JSON_PATH_MESSAGE,
 		valid: { name: "m", source: { jsonpath: "$.total" } },
+	},
+	{
+		name: "a malformed metric stream event JSONPath",
+		kind: "metric.record",
+		field: { role: "textbox", name: "Event JSONPath" },
+		invalid: { name: "m", source: { eventJsonpath: "usage.total" } },
+		message: JSON_PATH_MESSAGE,
+		valid: { name: "m", source: { eventJsonpath: "$.usage.total_tokens" } },
 	},
 	{
 		name: "a malformed metric condition JSONPath",

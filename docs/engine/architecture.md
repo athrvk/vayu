@@ -1530,7 +1530,17 @@ The two caps are enforced in the two places that can see them:
   `Response::stream_first_event_ms`. It is the report's
   `stream.timeToFirstEvent`, and it cannot be read off libcurl: the
   start-transfer time ends at the response headers, which a gateway that
-  answers `200` and then thinks sends long before its first event. Both caps,
+  answers `200` and then thinks sends long before its first event. Every
+  later write that completes an event is stamped the same way (issue #3776):
+  the tally keeps the last stamp and the largest gap between two, nothing per
+  event, and reports `Response::stream_max_event_gap_ms` and
+  `stream_event_rate` (the events delivered after the first stamp over the
+  first stamp to the last, so a backlog the first write replays does not
+  inflate it), the report's `stream.maxEventGap` and `stream.eventRate`. The
+  resolution is the chunk libcurl hands the callback, not the event: events
+  in one write share a stamp, a keep-alive comment is no arrival, the frame
+  `finish` completes at the close moves no stamp, and a proxy that buffers
+  the stream understates the gaps it holds back. Both caps,
   the stamp and what the ended stream reports live in one `StreamTally`
   (`http/stream_tally.hpp`), which the event loop's `TransferData` and `Client`
   each keep one of (#3235).

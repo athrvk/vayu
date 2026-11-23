@@ -707,9 +707,10 @@ struct ExchangeInputs {
      */
     size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
-    /// What bounds `pm.response.events` when this exchange's send was a bounded
-    /// stream (`Request::stream_bounds`, issue #3769): the run's `sse*`
-    /// settings, which the scenario runner reads once. A design send leaves the
+    /// What bounds `pm.response.events` and a `metric.record` `eventJsonpath`
+    /// (#3780) when this exchange's send was a bounded stream
+    /// (`Request::stream_bounds`, issue #3769): the run's `sse*` settings,
+    /// which the scenario runner reads once. A design send leaves the
     /// default; its buffered send is never a stream, so nothing reads it.
     vayu::http::SseLimits sse_limits;
 

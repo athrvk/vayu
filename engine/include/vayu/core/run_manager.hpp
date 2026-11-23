@@ -633,7 +633,8 @@ struct RunContext {
     /// `EngineDefaults::sse_limits`, copied in by the constructor: what bounds
     /// `pm.response.events` for an inline `script.post` on a streamed response
     /// (`vayu::http::bind_buffered_stream_events`, issue #3769), on the
-    /// single-request and the scenario load path alike.
+    /// single-request and the scenario load path alike, and the events a
+    /// scenario step's `metric.record` `eventJsonpath` reads (#3780).
     vayu::http::SseLimits sse_limits;
 
     /// The raw seed behind @ref rng (issue #1498's `elements.seed`): from the

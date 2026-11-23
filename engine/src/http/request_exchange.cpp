@@ -1480,6 +1480,7 @@ ExchangeInputs inputs) {
         .timers_override = inputs.timers_override,
         .record_metric   = inputs.record_metric,
         .max_body_bytes  = inputs.max_element_body_bytes,
+        .max_event_bytes = inputs.sse_limits.max_event_bytes,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

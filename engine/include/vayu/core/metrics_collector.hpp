@@ -1095,7 +1095,9 @@ class MetricsCollector {
      * `streamTimeToFirstEvent` is `{p50, p95, p99, max, count}` in
      * milliseconds over the streams *completed* so far (issue #3236), read
      * through its own snapshot the same way; absent until one completed with
-     * a timed event, and on every run without the live event tally.
+     * a timed event, and on every run without the live event tally. The
+     * report's `maxEventGap` and `eventRate` (#3776) are not mirrored here:
+     * they are read once, after the drain.
      */
     void put_gate_distributions (nlohmann::json& frame);
 
@@ -1130,6 +1132,12 @@ class MetricsCollector {
         /// delivered a timed event, so it is 0 for a run whose streams all
         /// stayed silent.
         Percentiles time_to_first_event;
+        /// Per-completion largest gap between two event arrivals, in
+        /// milliseconds (#3776); `count` is the completions with two arrivals.
+        Percentiles max_event_gap;
+        /// Per-completion event rate in events per second (#3776), over the
+        /// same completions as `max_event_gap` less any with a zero span.
+        Percentiles event_rate;
 
         /// The run's event rate over @p duration_s, the duration the report's
         /// `rps` is read off; 0 for a zero-length run rather than an infinity
@@ -1142,6 +1150,19 @@ class MetricsCollector {
 
     [[nodiscard]] std::optional<StreamTotals> stream_totals () const;
 
+    /// What one ended stream delivered, as its `Response` carries it
+    /// (`stream_completion_of` is the one reading). Each optional figure that
+    /// is absent leaves the completion out of that figure's distribution only.
+    /// Every member has an initializer so a caller names only what it sets
+    /// under `-Wmissing-field-initializers`.
+    struct StreamCompletion {
+        size_t events                          = 0;
+        bool capped                            = false;
+        std::optional<double> first_event_ms   = std::nullopt;
+        std::optional<double> max_event_gap_ms = std::nullopt;
+        std::optional<double> event_rate       = std::nullopt;
+    };
+
     /**
      * @brief Record one bounded stream's completion (issue #576).
      *
@@ -1149,12 +1170,8 @@ class MetricsCollector {
      * an event count, success or failure alike: a stream the target killed
      * halfway still delivered what it delivered, and excluding it would report
      * a run's throughput off the streams that happened to survive.
-     *
-     * @p first_event_ms is `Response::stream_first_event_ms`; absent, the
-     * completion counts toward everything but the time-to-first-event
-     * distribution.
      */
-    void record_stream_completion (size_t events, bool capped, std::optional<double> first_event_ms);
+    void record_stream_completion (const StreamCompletion& completion);
 
     /**
      * @brief The run's live stream counters (issues #3236, #3304), for the
@@ -1526,6 +1543,10 @@ class MetricsCollector {
     // Time to first event (issue #3234): a duration, so microseconds on the
     // latency histograms' scale. Null on the same rule as the one above.
     struct hdr_histogram* stream_first_event_histogram_ = nullptr;
+    // Each stream's largest event gap (#3776), on the same scale and rule.
+    struct hdr_histogram* stream_max_gap_histogram_ = nullptr;
+    // Each stream's event rate (#3776), as `stream_rate_recorded` scales it.
+    struct hdr_histogram* stream_rate_histogram_ = nullptr;
     // The gate frame's live read of the histogram above, on the rule
     // `phase_snapshot_` states. Allocated only beside the live tally.
     OwnedHistogram stream_first_event_snapshot_;
@@ -1760,9 +1781,17 @@ const MetricsCollector::Percentiles& interval);
  * `eventsPerSecond` is derived over @p duration_s, the run's `test_duration`
  * that the report's `rps` is read off: two rates a reader compares must come
  * off one clock. `timeToFirstEvent` (#3234) is omitted when no stream
- * delivered a timed event, on the section's own absent-not-zeros rule.
+ * delivered a timed event, and `maxEventGap` and `eventRate` (#3776) when no
+ * stream measured one, on the section's own absent-not-zeros rule.
  */
 [[nodiscard]] nlohmann::json
 build_stream_summary_payload (const MetricsCollector::StreamTotals& stream, double duration_s);
+
+/// @p response as the completion `record_stream_completion` takes; empty when
+/// it was not a stream (`Response::stream_events` unset). Both run modes'
+/// completion paths read a response through this, so a figure added to one
+/// reaches both.
+[[nodiscard]] std::optional<MetricsCollector::StreamCompletion>
+stream_completion_of (const Response& response);
 
 } // namespace vayu::core

@@ -17,8 +17,11 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <optional>
 #include <random>
 #include <span>
 #include <stdexcept>
@@ -69,6 +72,48 @@ int64_t stream_events_recorded (size_t events) {
 
 double stream_events_read (int64_t recorded) {
     return static_cast<double> (recorded - STREAM_EVENTS_OFFSET);
+}
+
+/// A stream's event rate as the rate histogram holds it: scaled to an
+/// integer, one above itself on the event count's rule, so a rate that rounds
+/// to 0 still has a bucket; clamped to the ceiling, and a NaN to the floor.
+int64_t stream_rate_recorded (double events_per_second) {
+    const double scaled = std::round (std::max (0.0, events_per_second) *
+                          constants::metrics_collector::STREAM_EVENT_RATE_SCALE) +
+    static_cast<double> (STREAM_EVENTS_OFFSET);
+    return static_cast<int64_t> (std::min (scaled,
+    static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_EVENT_RATE)));
+}
+
+double stream_rate_read (int64_t recorded) {
+    return static_cast<double> (recorded - STREAM_EVENTS_OFFSET) /
+    constants::metrics_collector::STREAM_EVENT_RATE_SCALE;
+}
+
+/// A stream histogram over [1, @p highest] at the shared precision, or null
+/// when it cannot be built: that costs the report the one figure and
+/// nothing else, so it is logged rather than thrown.
+struct hdr_histogram* new_stream_histogram (int64_t highest,
+const std::string& run_id,
+std::string_view figure,
+std::string_view consequence) {
+    struct hdr_histogram* histogram = nullptr;
+    if (hdr_init (1, highest, constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+        &histogram) != 0) {
+        vayu::utils::log_warning ("run",
+        "Run " + run_id + ": failed to initialize the stream " + std::string (figure) +
+        " histogram; the report will " + std::string (consequence));
+        return nullptr;
+    }
+    return histogram;
+}
+
+/// Record @p value into @p histogram, which workers share, unless it was
+/// never allocated.
+void record_if_allocated (struct hdr_histogram* histogram, int64_t value) {
+    if (histogram != nullptr) {
+        hdr_record_value_atomic (histogram, value);
+    }
 }
 
 /// @p histogram's percentiles, each recorded value passed through
@@ -356,30 +401,22 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
         }
     }
 
-    // Event-count histogram for a streaming run. Allocated on the same
+    // A streaming run's per-completion histograms. Allocated on the same
     // "off is a null pointer" rule as the bank above; a failure to allocate
-    // costs the distribution and nothing else, since the totals behind
+    // one costs its distribution and nothing else, since the totals behind
     // events/sec are plain counters.
     if (config_.stream_metrics) {
-        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_EVENTS,
-            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
-            &stream_events_histogram_) != 0) {
-            stream_events_histogram_ = nullptr;
-            vayu::utils::log_warning ("run",
-            "Run " + run_id_ +
-            ": failed to initialize the stream event histogram; the report "
-            "will "
-            "carry event totals only");
-        }
-        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
-            &stream_first_event_histogram_) != 0) {
-            stream_first_event_histogram_ = nullptr;
-            vayu::utils::log_warning ("run",
-            "Run " + run_id_ +
-            ": failed to initialize the stream first-event histogram; the "
-            "report will carry no time to first event");
-        }
+        using constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US;
+        stream_events_histogram_ =
+        new_stream_histogram (constants::metrics_collector::HISTOGRAM_MAX_EVENTS,
+        run_id_, "event", "carry event totals only");
+        stream_first_event_histogram_ = new_stream_histogram (HISTOGRAM_MAX_LATENCY_US,
+        run_id_, "first-event", "carry no time to first event");
+        stream_max_gap_histogram_ = new_stream_histogram (HISTOGRAM_MAX_LATENCY_US,
+        run_id_, "event gap", "carry no largest event gap");
+        stream_rate_histogram_ =
+        new_stream_histogram (constants::metrics_collector::HISTOGRAM_MAX_EVENT_RATE,
+        run_id_, "event rate", "carry no per-stream event rate");
         if (config_.streams) {
             allocate_live_stream_metrics ();
         }
@@ -445,13 +482,12 @@ MetricsCollector::~MetricsCollector () {
             histogram = nullptr;
         }
     }
-    if (stream_events_histogram_ != nullptr) {
-        hdr_close (stream_events_histogram_);
-        stream_events_histogram_ = nullptr;
-    }
-    if (stream_first_event_histogram_ != nullptr) {
-        hdr_close (stream_first_event_histogram_);
-        stream_first_event_histogram_ = nullptr;
+    for (auto* histogram : { &stream_events_histogram_, &stream_first_event_histogram_,
+         &stream_max_gap_histogram_, &stream_rate_histogram_ }) {
+        if (*histogram != nullptr) {
+            hdr_close (*histogram);
+            *histogram = nullptr;
+        }
     }
 }
 
@@ -1196,7 +1232,7 @@ const std::map<std::string, CustomMetricSummary>& metrics) {
 
 nlohmann::json build_stream_summary_payload (const MetricsCollector::StreamTotals& stream,
 double duration_s) {
-    nlohmann::json out      = { { "completions", stream.completions },
+    nlohmann::json out = { { "completions", stream.completions },
         { "totalEvents", stream.total_events }, { "capped", stream.capped },
         { "eventsPerSecond", stream.events_per_second (duration_s) },
         { "events",
@@ -1204,13 +1240,30 @@ double duration_s) {
         { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
         { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
         { "count", stream.events.count } } } };
-    const auto& first_event = stream.time_to_first_event;
-    if (first_event.count > 0) {
-        out["timeToFirstEvent"] = { { "p50", first_event.p50 },
-            { "p95", first_event.p95 }, { "p99", first_event.p99 },
-            { "max", first_event.max }, { "count", first_event.count } };
-    }
+    // Absent until a stream measured it, never zeros (#3234, #3776).
+    const auto put_measured = [&out] (const char* key,
+                              const MetricsCollector::Percentiles& figure) {
+        if (figure.count > 0) {
+            out[key] = { { "p50", figure.p50 }, { "p95", figure.p95 },
+                { "p99", figure.p99 }, { "max", figure.max }, { "count", figure.count } };
+        }
+    };
+    put_measured ("timeToFirstEvent", stream.time_to_first_event);
+    put_measured ("maxEventGap", stream.max_event_gap);
+    put_measured ("eventRate", stream.event_rate);
     return out;
+}
+
+std::optional<MetricsCollector::StreamCompletion> stream_completion_of (
+const Response& response) {
+    if (!response.stream_events) {
+        return std::nullopt;
+    }
+    return MetricsCollector::StreamCompletion{ .events = *response.stream_events,
+        .capped           = response.stream_capped,
+        .first_event_ms   = response.stream_first_event_ms,
+        .max_event_gap_ms = response.stream_max_event_gap_ms,
+        .event_rate       = response.stream_event_rate };
 }
 
 void put_interval_percentiles (nlohmann::json& stats,
@@ -1229,9 +1282,7 @@ const MetricsCollector::Percentiles& interval) {
     stats[name + "P99Ms"] = interval.p99;
 }
 
-void MetricsCollector::record_stream_completion (size_t events,
-bool capped,
-std::optional<double> first_event_ms) {
+void MetricsCollector::record_stream_completion (const StreamCompletion& completion) {
     if (!config_.stream_metrics) {
         // Off means the report has no `stream` section at all, not a section of
         // zeros - so the counters behind it must not tick either. Checked here
@@ -1240,16 +1291,21 @@ std::optional<double> first_event_ms) {
         return;
     }
     stream_completions_.fetch_add (1, std::memory_order_relaxed);
-    stream_events_total_.fetch_add (events, std::memory_order_relaxed);
-    if (capped) {
+    stream_events_total_.fetch_add (completion.events, std::memory_order_relaxed);
+    if (completion.capped) {
         stream_capped_.fetch_add (1, std::memory_order_relaxed);
     }
-    if (stream_events_histogram_ != nullptr) {
-        hdr_record_value_atomic (stream_events_histogram_, stream_events_recorded (events));
-    }
-    if (first_event_ms && stream_first_event_histogram_ != nullptr) {
-        hdr_record_value_atomic (stream_first_event_histogram_,
+    record_if_allocated (
+    stream_events_histogram_, stream_events_recorded (completion.events));
+    if (const auto& first_event_ms = completion.first_event_ms) {
+        record_if_allocated (stream_first_event_histogram_,
         histogram_latency_us (*first_event_ms, 1));
+    }
+    if (const auto& gap_ms = completion.max_event_gap_ms) {
+        record_if_allocated (stream_max_gap_histogram_, histogram_latency_us (*gap_ms, 1));
+    }
+    if (const auto& rate = completion.event_rate) {
+        record_if_allocated (stream_rate_histogram_, stream_rate_recorded (*rate));
     }
 }
 
@@ -1271,6 +1327,8 @@ std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals ()
     totals.capped       = stream_capped_.load (std::memory_order_relaxed);
     totals.events = percentiles_of (stream_events_histogram_, stream_events_read);
     totals.time_to_first_event = percentiles_of (stream_first_event_histogram_);
+    totals.max_event_gap       = percentiles_of (stream_max_gap_histogram_);
+    totals.event_rate = percentiles_of (stream_rate_histogram_, stream_rate_read);
     return totals;
 }
 

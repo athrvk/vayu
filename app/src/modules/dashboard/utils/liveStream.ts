@@ -18,7 +18,7 @@
  * it (the rule `latestScenarioProgress` follows).
  */
 
-import type { LoadTestMetrics, StreamTimeToFirstEvent } from "@/types";
+import type { LoadTestMetrics, StreamDistribution } from "@/types";
 
 /** Whether the frame belongs to a streaming run; a measured `0` still does. */
 export function isStreamFrame(frame: Pick<LoadTestMetrics, "stream_events"> | null): boolean {
@@ -28,7 +28,7 @@ export function isStreamFrame(frame: Pick<LoadTestMetrics, "stream_events"> | nu
 /** The latest time-to-first-event block in the buffer, or `undefined` before one exists. */
 export function latestStreamFirstEvent(
 	history: readonly LoadTestMetrics[]
-): StreamTimeToFirstEvent | undefined {
+): StreamDistribution | undefined {
 	for (let i = history.length - 1; i >= 0; i--) {
 		const firstEvent = history[i].stream_time_to_first_event;
 		if (firstEvent !== undefined) return firstEvent;

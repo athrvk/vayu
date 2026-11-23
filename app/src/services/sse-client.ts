@@ -23,7 +23,7 @@ import type {
 	StatusSecondEntry,
 	StepOutcome,
 	StepTestTally,
-	StreamTimeToFirstEvent,
+	StreamDistribution,
 } from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
@@ -84,7 +84,7 @@ interface RawSseMetrics {
 	streamEvents?: number;
 	streamsOpen?: number;
 	eventsPerSecond?: number;
-	streamTimeToFirstEvent?: StreamTimeToFirstEvent;
+	streamTimeToFirstEvent?: StreamDistribution;
 	/** Issue #1500 - see `LoadTestMetrics.custom_metrics`. */
 	customMetrics?: LoadTestMetrics["custom_metrics"];
 }
