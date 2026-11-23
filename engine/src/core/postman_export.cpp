@@ -100,7 +100,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "vayu_elements", "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" },
 { "script_settings", "Script names and the run-inline setting have no Postman equivalent" },
 { "jsonrpc_bodies", "JSON-RPC bodies were written as the completed frame in raw JSON" },
-{ "mcp_bodies", "MCP bodies were written as raw JSON" },
+{ "mcp_bodies", "MCP bodies were written as raw JSON, without their Mcp-* headers, _meta or mcpTool" },
 { "unsupported_bodies", "Bodies in a mode Postman lacks were left out" },
 { "unsupported_auth", "Auth in a mode Postman lacks was left out" },
 { "oauth2_settings", "Some OAuth 2.0 settings have no Postman equivalent" },

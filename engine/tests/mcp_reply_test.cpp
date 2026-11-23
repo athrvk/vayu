@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -378,8 +379,7 @@ std::shared_ptr<core::RunContext> handled (const Response& response) {
     return context;
 }
 
-// A failure under a 200 is an error of the run, under its class; one under a
-// 4xx is already an error by its status and is counted once.
+// A failure under a 200 is an error of the run, under its class.
 TEST (McpReplyLoadTally, AFailureUnderASuccessStatusIsAnErrorOfItsClass) {
     auto tool = reply (200, "application/json",
     R"({"jsonrpc":"2.0","id":1,"result":{"content":[],"isError":true}})");
@@ -392,15 +392,54 @@ TEST (McpReplyLoadTally, AFailureUnderASuccessStatusIsAnErrorOfItsClass) {
     const auto record = json::parse (errors.front ().trace_data);
     EXPECT_EQ (record["error_type"], "mcp_tool");
     EXPECT_EQ (record["mcp"]["errorClass"], "tool") << record.dump ();
+}
 
-    auto mismatch = reply (400, "application/json",
-    R"({"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch"}})");
-    attach_mcp_reply (mcp_request (), mismatch);
-    const auto counted_by_status = handled (mismatch);
-    EXPECT_EQ (counted_by_status->metrics_collector->total_errors (), 0u);
-    const auto distribution =
-    counted_by_status->metrics_collector->status_code_distribution ();
-    EXPECT_EQ (distribution.at (400), 1u);
+// One under a 400 is already an error by its status and is counted once, there;
+// the trace the run keeps for it names the cause. Mutation check: drop the
+// `stamp_mcp_failure` call in `record_successful_response` and every case
+// loses its `mcp` node.
+TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTrace) {
+    struct StatusFailure {
+        std::string content_type;
+        std::string body;
+        std::string error_class;
+        std::optional<std::int64_t> code;
+        std::string message_part;
+    };
+    const std::vector<StatusFailure> cases = {
+        { "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch"}})",
+        "protocol", -32020, "Header mismatch" },
+        { "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported","data":{"supported":["2025-11-25"]}}})",
+        "protocol", -32022, "server supports 2025-11-25; this request is" },
+        { "text/plain", "Bad Request: No valid session ID provided",
+        "transport", std::nullopt, "legacy-era" },
+    };
+    for (const auto& failure : cases) {
+        auto response = reply (400, failure.content_type, failure.body);
+        attach_mcp_reply (mcp_request (), response);
+        const auto context  = handled (response);
+        const auto& metrics = *context->metrics_collector;
+        EXPECT_EQ (metrics.total_errors (), 0u) << failure.body;
+        EXPECT_TRUE (metrics.error_type_counts ().empty ()) << failure.body;
+        EXPECT_TRUE (metrics.errors ().empty ()) << failure.body;
+        const auto distribution = metrics.status_code_distribution ();
+        EXPECT_EQ (distribution.at (400), 1u) << failure.body;
+        EXPECT_EQ (distribution.count (0), 0u) << failure.body;
+
+        const auto& kept = metrics.exemplar_results ();
+        ASSERT_EQ (kept.size (), 1u) << failure.body;
+        const auto trace = json::parse (kept.front ().trace_data);
+        const auto mcp   = trace.value ("mcp", json::object ());
+        EXPECT_EQ (mcp.value ("errorClass", ""), failure.error_class) << trace.dump ();
+        if (failure.code) {
+            EXPECT_EQ (mcp.value ("code", std::int64_t{ 0 }), *failure.code)
+            << trace.dump ();
+        } else {
+            EXPECT_FALSE (mcp.contains ("code")) << trace.dump ();
+        }
+        EXPECT_NE (mcp.value ("message", "").find (failure.message_part), std::string::npos)
+        << trace.dump ();
+    }
 }
 
 // ---------------------------------------------------------------------------

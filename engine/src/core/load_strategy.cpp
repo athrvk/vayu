@@ -50,6 +50,14 @@ void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
     }
 }
 
+/// Names a failed `mcp` reply's class, code and message on the record (#3762),
+/// whichever store keeps it; a reply that succeeded adds nothing.
+void stamp_mcp_failure (nlohmann::json& record, const vayu::Response& response) {
+    if (const auto& reply = response.mcp_reply; reply && reply->error_class) {
+        record["mcp"] = vayu::json::serialize_mcp_reply (*reply);
+    }
+}
+
 } // namespace
 
 namespace {
@@ -68,9 +76,7 @@ const ResultAnnotations& annotations) {
     nlohmann::json error_json = { { "error_code", static_cast<int> (code) },
         { "error_type", vayu::error_type_name (code) }, { "message", message },
         { "request_number", context->total_requests () } };
-    if (const auto& reply = response.mcp_reply; reply && reply->error_class) {
-        error_json["mcp"] = vayu::json::serialize_mcp_reply (*reply);
-    }
+    stamp_mcp_failure (error_json, response);
 
     annotate (error_json, annotations);
 
@@ -179,6 +185,10 @@ const ResultAnnotations& annotations) {
             timing_json["isSlow"]      = true;
             timing_json["thresholdMs"] = context->slow_threshold_ms;
         }
+        // A failed reply reaches this branch only under a status the
+        // distribution already counts as a failure; the trace kept for it
+        // names the cause, so nothing is counted twice.
+        stamp_mcp_failure (timing_json, response);
         annotate (timing_json, annotations);
 
         trace_data = timing_json.dump ();

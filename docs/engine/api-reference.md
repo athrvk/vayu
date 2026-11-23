@@ -902,8 +902,13 @@ A server answers with one JSON object or with a request-scoped
 `text/event-stream` whose progress and log notifications come before the final
 response. The **reply reader** (`vayu::http::read_mcp_reply`,
 `http/mcp_reply.hpp`) finds that final response once, where each driver hands
-its response on, on every path: Send (buffered or streamed), a collection
-run's steps, and both load-run shapes. For a JSON reply it is the body. For an
+its response on: Send (buffered or streamed), a collection run's steps, and
+both load-run shapes. Two paths are not read and keep the raw reply: a
+collection run's OpenAPI response validation (`validate_step_response` in
+`scenario_runner.cpp`), which checks the body as it arrived, and
+`pm.sendRequest`, which has no `mcp` body mode: a call it sends to an MCP server
+is a `raw` body, and its response is the raw reply with no `mcp` member and no
+failure class. For a JSON reply it is the body. For an
 event stream it is the last `message` event whose `data` is a JSON-RPC
 response (a `result` or `error` member) carrying the request's
 `id`: the envelope's own, else the constant `1` a bare call is stamped with. A
@@ -956,7 +961,10 @@ stored error record, which also carries the `mcp` node), and in a scenario run
 as its step's `httpErrors` too. Like every completion recorded with an error
 type, it is bucketed under status `0` in the status distribution. A failed
 reply under a `4xx` or `5xx` is an error by its status already and is counted
-once, there.
+once, there, with no error record or error type; the cause is named instead on
+the trace the run keeps for that completion (a status exemplar, a sampled or a
+slow result), which carries the same `mcp` node, so a `-32022` refusal or a
+legacy-era `400` still reads as one.
 
 #### File references: `binary` bodies and file parts
 
@@ -5270,7 +5278,7 @@ was before these rules.
 | `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
 | `script_settings` | A script with a name or the load-test `inline` setting |
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
-| `mcp_bodies` | An MCP body (Postman has no such mode), written as a raw JSON body holding its content as stored; its `mcpTool`, `_meta` and derived MCP headers are not written |
+| `mcp_bodies` | An MCP body (Postman has no such mode), written as a raw JSON body holding its content as stored; the `Mcp-*` headers and `params._meta` the engine derives on send, and its `mcpTool`, are not written (the phrase: "MCP bodies were written as raw JSON, without their Mcp-* headers, _meta or mcpTool") |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
 | `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, an empty header prefix, or the `jwt_bearer` grant (Postman has no RFC 7523 grant: the block is written with its endpoints, client id and scope and no `grant_type`, and the subject, claims and key are not written) (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |

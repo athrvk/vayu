@@ -619,6 +619,10 @@ TEST (PostmanExport, McpIsARawJsonBodyAndANote) {
     EXPECT_EQ (body["options"]["raw"]["language"], "json");
     EXPECT_EQ (body["raw"], call);
     EXPECT_EQ (losses (outcome), (json{ { "mcp_bodies", 1 } }));
+    ASSERT_EQ (outcome.notes.not_carried.size (), 1U);
+    EXPECT_EQ (outcome.notes.not_carried[0].message,
+    "MCP bodies were written as raw JSON, without their Mcp-* headers, _meta "
+    "or mcpTool");
 }
 
 TEST (PostmanExport, GraphqlVariablesAreThePanesText) {
