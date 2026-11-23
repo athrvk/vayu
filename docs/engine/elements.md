@@ -150,7 +150,8 @@ shipping silently mismatched.
 | `control.transaction` | transaction | `step.after` | #1515 |
 | `metric.record` | metric | `step.after` | #1500 |
 
-`extract.json`, `assert.jsonpath` and `metric.record`'s `jsonpath` source share one JSONPath subset:
+`extract.json`, `assert.jsonpath` and `metric.record`'s `jsonpath` and `eventJsonpath` sources share
+one JSONPath subset:
 `$.a.b` (any member name up to the next `.` or `[`, so `$.data.user-id` works), `$['a.b']` or
 `$["a.b"]` for a name that holds a `.`, `[` or `]` (the name runs to the next matching quote and has
 no escape for it; an empty name or an unterminated quote is refused), `[n]` (negative counts from the
@@ -321,7 +322,8 @@ per-step tally still files the extractor's `missing` under `skipped`, below) and
 per failure. An `extract.json` without `required` reports `skipped`
 with the same reason and writes nothing; required or not, it unsets what an earlier response left,
 as a miss does. `metric.record`'s `jsonpath` source reads the same shared
-parse, so it reports `missing` there. The text-reading
+parse, so it reports `missing` there; its `eventJsonpath` source parses each event of a stream
+instead (below). The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
 
@@ -340,11 +342,29 @@ beside a `count` of how many times it was recorded, #1937) or `rate`
 (share of occurrences a `condition` matched, as a percentage). A counter only grows: a source that
 reads a negative or non-finite number reports `error` (the message names the source) and records
 nothing, where a trend records the same value. A trend or counter's `source` is one
-of `{jsonpath}`, `{header}`, `{latency}`, `{status}` or
-`{size}`; a rate's is `{condition: {field, operator, value}}` - a small, self-contained comparison
+of `{jsonpath}`, `{eventJsonpath}`, `{header}`, `{latency}`, `{status}` or
+`{size}`, and when a config names more than one the first in that order is read; a rate's is
+`{condition: {field, operator, value}}` - a small, self-contained comparison
 rather than the full `control.if` grammar #1515 defines, which is not yet part of this registry and
-would be a needless dependency for what a rate condition actually needs. `metric.record` writes
-through `ElementContext::record_metric`, a callback bound only when a run's `MetricsCollector` is
+would be a needless dependency for what a rate condition actually needs.
+
+`eventJsonpath` (issue #3780) reads a streamed response's events rather than its body, one value per
+stream: the first match of the path in the **last** event whose `data` parses as JSON and has one,
+which is where a completion stream puts its final `usage` (`$.usage.completion_tokens`). Events are
+parsed from the buffered body with the same `SseParser` as `pm.response.events`, each event's data
+kept to [`sseMaxEventBytes`](api-reference.md#get-config) and parsed to the same 100-level depth
+bound as a body, and once per step however many elements read them. The list is never cut at
+`sseMaxStoredEvents`, so a stream longer than that cap still reads its real last event. `[DONE]`, a
+comment and any other data that is not JSON are passed over. It records nothing and reports
+`missing`, naming why, when the response is not a stream (`Response::stream_events` is set only for
+a transfer whose final hop announced `text/event-stream`, #3771, so a body that merely looks like
+one does not count), when no event matches, when the match is not a number, and when the last match
+cannot be known: an event after it was cut at `sseMaxEventBytes`, or the body itself was cut short.
+It is not a rate condition's `field`. On an `mcp` step whose reply was an event stream it reads the
+unwrapped final response the other body readers do, which holds no events, so it records nothing
+there.
+
+`metric.record` writes through `ElementContext::record_metric`, a callback bound only when a run's `MetricsCollector` is
 reachable (the sequential run, a scenario load run, design mode's `script.pre`/`script.post`); a
 bare design send has none, and the element reports `skipped` there rather than recording nowhere
 silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting.md`) write through the same
