@@ -1724,8 +1724,9 @@ Send does not - and only the last two steps differ:
    Events tab renders them live.
 6. **Swap to stored truth**: on the relay's `complete` frame the provider
    fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
-   `events` node onto the response, which is the record from then on. One
-   fetch is enough: the engine sends `complete` only after the post-request
+   `events` node and its `response.body` - the stream's bytes, stored once and
+   read back into that list by the engine (#3770) - onto the response, which is
+   the record from then on. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
 
 **A different `EventSource` from the `SSEClient` singleton below.** That client
@@ -2305,7 +2306,8 @@ what the server sent.
 A body's size is a **UTF-8 byte count** everywhere it is recorded. The live
 `bodySize` is one, and the stored trace carries the same number as
 `trace.response.bodyBytes` on every response (#3423; the original length when
-`bodyTruncated`, and a stream's wire count), so `responseFromRunResult` takes
+`bodyTruncated`, and a stream's wire count, which its held body falls short of
+once `bodyCapped` cut it), so `responseFromRunResult` takes
 `ResponseState.size` from it and the two funnels agree. A row stored before
 that has `bodyBytes` only when the body was cut or streamed, and the restore
 then counts the held text's UTF-8 bytes (`heldBodySize`, never `string.length`,
