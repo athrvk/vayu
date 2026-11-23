@@ -99,6 +99,15 @@ describe("noTokenState", () => {
 		expect(noTokenState(incomplete, query)).toBe("missing-fields");
 	});
 
+	it("puts a missing field over awaiting discovery", () => {
+		expect(noTokenState(true, settled, true)).toBe("missing-fields");
+	});
+
+	it("is awaiting-discovery for a config only a sign-in can key, which has nothing to check", () => {
+		expect(noTokenState(false, settled, true)).toBe("awaiting-discovery");
+		expect(noTokenState(false, settled, false)).toBe("none-cached");
+	});
+
 	it("is checking while the engine has not answered", () => {
 		expect(noTokenState(false, { isLoading: true, isError: false })).toBe("checking");
 	});

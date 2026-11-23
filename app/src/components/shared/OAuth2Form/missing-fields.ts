@@ -5,7 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
+import { DISCOVER_URL_LABEL, OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
+import { discoveryOn } from "@/services/oauth/discovery";
+import { urlText } from "@/services/oauth/cache-key";
 import type { OAuth2Config } from "@/types";
 
 /**
@@ -18,10 +20,14 @@ import type { OAuth2Config } from "@/types";
  * a second copy of it to keep in step; its 400 arrives relabelled instead
  * (`humanizeOAuth2Error`).
  *
+ * With discovery on (#3766) the server URL is what is needed: the sign-in
+ * fills both endpoints and registers a client when no client id is typed.
+ *
  * A `privateKey` counts as present whatever it holds: it is a reference the
  * engine resolves, so the renderer cannot tell an empty variable from a set one.
  */
 export function missingOAuth2Fields(config: OAuth2Config): string[] {
+	if (discoveryOn(config)) return urlText(config.discoverUrl) ? [] : [DISCOVER_URL_LABEL];
 	const missing: string[] = [];
 	if (config.grantType === "authorization_code" && !config.authorizationUrl) {
 		missing.push(OAUTH2_FIELD_LABELS.authorizationUrl);
@@ -38,4 +44,10 @@ function missingJwtBearerFields(config: OAuth2Config): string[] {
 	if (!config.assertionAudience) missing.push(OAUTH2_FIELD_LABELS.assertionAudience);
 	if (!config.privateKey && !config.privateKeyFile) missing.push(OAUTH2_FIELD_LABELS.privateKey);
 	return missing;
+}
+
+/** Field labels as one phrase: "A", "A and B", "A, B and C". */
+export function fieldListPhrase(labels: string[]): string {
+	if (labels.length <= 1) return labels[0] ?? "";
+	return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 }

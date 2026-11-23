@@ -72,18 +72,22 @@ export function tokenPhase(status: OAuth2TokenStatusResponse | undefined, now: n
 	};
 }
 
-export type NoTokenState = "missing-fields" | "checking" | "check-failed" | "none-cached";
+export type NoTokenState =
+	"missing-fields" | "awaiting-discovery" | "checking" | "check-failed" | "none-cached";
 
 /**
  * Why no token is on screen. A missing field is the most actionable and wins;
- * otherwise "none-cached" is only true once the engine has answered, so a
- * pending or failed check must not read as one (#3354).
+ * a config still awaiting discovery (#3766) has no cache key to check, so it
+ * is next; otherwise "none-cached" is only true once the engine has answered,
+ * so a pending or failed check must not read as one (#3354).
  */
 export function noTokenState(
 	incomplete: boolean,
-	query: { isLoading: boolean; isError: boolean }
+	query: { isLoading: boolean; isError: boolean },
+	awaitingDiscovery = false
 ): NoTokenState {
 	if (incomplete) return "missing-fields";
+	if (awaitingDiscovery) return "awaiting-discovery";
 	if (query.isLoading) return "checking";
 	if (query.isError) return "check-failed";
 	return "none-cached";

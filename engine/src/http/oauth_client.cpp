@@ -193,6 +193,9 @@ struct TokenRequest {
     std::vector<std::pair<std::string, std::string>> query;
     vayu::Headers headers{ { "Content-Type", "application/x-www-form-urlencoded" },
         { "Accept", "application/json" } };
+    /// `ClientConfig::local_peer_rule` for the post: an exchange's own
+    /// (`InteractiveExchange::local_peer_rule`), none for every other grant.
+    std::optional<vayu::http::LocalPeerRule> local_peer_rule;
 };
 
 // Apply client authentication per credentialsPlacement (RFC 6749 §2.3.1).
@@ -343,8 +346,9 @@ const std::atomic<bool>* cancel) {
     // execute path that proxied while token acquisition did not would fail
     // every authenticated request with an auth error rather than a proxy one.
     vayu::http::ClientConfig client_config;
-    client_config.transport = vayu::http::resolve_transport_policy (db);
-    client_config.cancel    = cancel;
+    client_config.transport       = vayu::http::resolve_transport_policy (db);
+    client_config.cancel          = cancel;
+    client_config.local_peer_rule = req.local_peer_rule;
     vayu::http::Client client (client_config);
     const auto sent_at = std::chrono::steady_clock::now ();
     auto result        = client.post (
@@ -1001,6 +1005,7 @@ TokenRequest& req) {
         if (!interactive->code_verifier.empty ()) {
             req.form.emplace_back ("code_verifier", interactive->code_verifier);
         }
+        req.local_peer_rule = interactive->local_peer_rule;
     }
     for (const char* extra : { "scope", "audience", "resource" }) {
         if (const auto value = field (config, extra); !value.empty ()) {

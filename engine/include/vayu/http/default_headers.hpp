@@ -160,6 +160,10 @@ const DefaultHeaderPolicy& policy);
  */
 [[nodiscard]] std::optional<std::string> invalid_header_token (std::string_view name);
 
+/// RFC 9110 `tchar`: what a header name, an auth-scheme and an auth-param
+/// name are built from.
+[[nodiscard]] bool is_token_char (char c);
+
 /**
  * @brief The first byte of @p name that cannot appear in a header name, spelled
  *        for a message (`' '`, or `byte 0xC3` for one that is not printable

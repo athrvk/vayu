@@ -350,5 +350,7 @@ export const queryKeys = {
 	oauth: {
 		all: ["oauth2"] as const,
 		token: (cacheKey: string) => [...queryKeys.oauth.all, "token", cacheKey] as const,
+		stepUp: (wwwAuthenticate: readonly string[], scope: string) =>
+			[...queryKeys.oauth.all, "step-up", wwwAuthenticate, scope] as const,
 	},
 } as const;

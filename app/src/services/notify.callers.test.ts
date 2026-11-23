@@ -38,7 +38,7 @@ const srcRoot = join(here, "..");
  * look like.
  */
 const ALLOWED = [
-	"components/shared/OAuth2Form/TokenStatusRow.tsx",
+	"components/shared/OAuth2Form/useOAuth2SignIn.ts",
 	"hooks/useAppUpdate.ts",
 	"hooks/useEngineRestart.ts",
 	// The one caller whose event is neither terminal nor rare, which is why it

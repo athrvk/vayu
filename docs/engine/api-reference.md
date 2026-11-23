@@ -4091,7 +4091,9 @@ describe the auth, so a member no list has heard of (Insomnia's IAM
 and `fallbackExpiresIn` are on that list; its `privateKey`, which is only ever
 one `{{variable}}` reference, stays as that reference (a key written any other
 way is blanked and counted), and its `privateKeyFile`, a path on one machine,
-is not on it and leaves blank, counted. OAuth 2.0's extra request parameter
+is not on it and leaves blank, counted. A config discovered from an MCP server
+keeps its `discoverUrl` and its `discoveredFields` list whole (#3766), so a
+re-import still knows which server it came from. OAuth 2.0's extra request parameter
 lists (`tokenParams`, `authorizationParams`, `refreshParams`) and the
 `jwt_bearer` grant's `assertionClaims` are redacted per row: a
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
@@ -4530,7 +4532,10 @@ and is fetched exactly as before, loopback and redirects included.
 - The refusal is `502` `Couldn't fetch the document: Cannot send this request:
   Vayu does not fetch a reference from a loopback or link-local address other
   than its source document's own host and port - not when the URL names one and
-  not when a host name resolves to one`, on both forms of the route.
+  not when a host name resolves to one`, on both forms of the route. With no
+  `sourceUrl` there is no source to except, and the sentence after the colon is
+  `Vayu does not send it to a loopback or link-local address - not when the URL
+  names one and not when a host name resolves to one`.
 - **The URL is judged before anything is dialled**, by the same source rule: a
   reference whose host names a loopback or link-local address in any spelling,
   `localhost` or a `*.localhost` name is refused with the same `502`, and the
@@ -7746,7 +7751,7 @@ hands it back.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt}` |
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt, resolved?}` (`resolved` only for a [discovered](#discovered-from-an-mcp-server-url) config) |
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}`; reads only |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
@@ -7787,6 +7792,149 @@ an IdP that omits `state` on its error redirect leaves the attempt pending until
 it times out. A callback with the right `state` after `expiresAt` answers `410`.
 A loopback attempt settles once, and the first settlement wins: a later callback
 with the right `state` answers `409` and changes nothing.
+
+#### Discovered from an MCP server URL
+
+A config naming `discoverUrl` (#3766), the URL of an OAuth-protected MCP
+server, is completed from that server before the attempt starts, in the MCP
+authorization spec's order: the server's 401 challenge or its RFC 9728
+well-known document, then its authorization server's RFC 8414 or OpenID Connect
+metadata (`discover_oauth_server`, see
+[architecture](architecture.md)). `discoverUrl` is read trimmed, like the URL
+members above. Discovery **fills only what the config leaves blank**: a typed
+`authorizationUrl`, `accessTokenUrl`, `resource`, `scope` or `clientId` wins.
+A discovered attempt always sends PKCE with `S256` and its verifier, whatever
+`pkce` says, because the MCP authorization spec requires it.
+
+| Member | Filled from |
+|--------|-------------|
+| `authorizationUrl`, `accessTokenUrl` | The metadata's `authorization_endpoint` and `token_endpoint` |
+| `resource` | The protected resource metadata's `resource`, the canonical server URL; sent on the authorize URL and the token request (RFC 8707) |
+| `scope` | The 401 challenge's `scope`; without one, every `scopes_supported` entry of the protected resource metadata, space-joined; without those, no scope is sent (the MCP spec's scope selection) |
+| `clientId` | A typed `clientId` (with its `clientSecret`) is used as it is and nothing is registered. Otherwise, when the metadata has a `registration_endpoint`, a client is registered there (RFC 7591) for this attempt, and its `client_id` is used; the typed `clientSecret`, if any, is not sent with it. Otherwise the start is refused with `400` `oauth2_client_id_required`, naming why |
+
+The registration posts `{client_name: "Vayu", redirect_uris: [<redirectUri>],
+grant_types: ["authorization_code", "refresh_token"], response_types:
+["code"], token_endpoint_auth_method: "none", application_type: "native"}`: a
+public native client whose one redirect is the one this attempt uses, the
+loopback listener's ephemeral port (bound before the registration) or the
+embedded `callbackUrl`. A 2xx answer must carry a string `client_id` and
+describe a public client; one whose `token_endpoint_auth_method` is not `none`,
+or that carries a `client_secret` and states no method, is refused, and the
+secret is never logged or repeated. The discovery and the registration each go
+through the shared client and transport policy, are bounded by the request
+timeout setting, and end when the engine stops.
+
+**A server that is not on this machine reaches nothing on it.** When
+`discoverUrl` names neither a loopback nor a link-local host, a document that
+names such a URL is refused (`oauth_discovery_local_endpoint_refused`), and the
+discovery's fetches, the registration and the callback's code exchange connect
+to no loopback or link-local address, by the URL or by the address its name
+resolves to. A token endpoint that resolves to one by the time the code
+arrives never receives the code or the PKCE verifier: the attempt fails with
+`Token request failed: Cannot send this request: Vayu does not send it to a
+loopback or link-local address - not when the URL names one and not when a host
+name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
+proxy you configured is still used. A server on this machine may name anything
+on it.
+
+**Two known limitations of a registered client.**
+
+- A registered client is bound to the loopback redirect of the attempt that
+  registered it, port included. The next sign-in reuses its `clientId` from
+  the stored config on a new ephemeral port, so an authorization server that
+  matches redirect URIs exactly refuses it (RFC 8252 section 7.3 asks a server
+  to accept any port on a loopback redirect, and not every server does). The
+  recovery is the app's **Discover again**, which clears what discovery wrote,
+  `clientId` included, so the next sign-in registers a client for its own
+  redirect.
+- Every discovered sign-in that names no `clientId` registers a new client,
+  and the app stores its `client_id` only once the sign-in succeeds, so an
+  abandoned sign-in (cancelled, timed out or refused) leaves a client
+  registered at the authorization server that nothing will use. Vayu does not
+  delete it: it does not use RFC 7592 client management, which a server need
+  not offer.
+
+The answer's `resolved` holds what the attempt runs on, the values a client
+writes into its stored config so that a later refresh or run needs no
+discovery and keys the same [cached token](#oauth-20-token-cache) (no secret is
+ever in it):
+
+```json
+{
+  "authorizationUrl": "https://auth.example/authorize",
+  "accessTokenUrl": "https://auth.example/token",
+  "clientId": "registered-or-typed-client",
+  "resource": "https://mcp.example/mcp",
+  "scope": "mcp:read",
+  "issuer": "https://auth.example"
+}
+```
+
+`scope` is `""` when none was chosen. The callback (loopback or `POST
+/oauth2/authorize/complete`) exchanges its code with these values, not with
+the config as sent.
+
+A start that cannot complete the config is refused before any attempt exists:
+
+| Status | Code | When |
+|--------|------|------|
+| `400` | `oauth_discovery_invalid_server_url` | `discoverUrl` is not an absolute `http` or `https` URL |
+| `504` | `oauth_discovery_timeout`, `oauth_registration_timeout` | The discovery or the registration ran out of time |
+| `502` | any other `oauth_discovery_*` code | Discovery found no usable metadata: none answered, a document is invalid, its `resource` or `issuer` does not match, it lacks PKCE `S256`, or it names a local URL for a remote server |
+| `502` | `oauth_registration_network_error` | The registration endpoint gave no answer |
+| `502` | `oauth_registration_refused` | It answered outside 2xx; its RFC 7591 `error` and `error_description` are quoted |
+| `502` | `oauth_registration_invalid_response` | Its 2xx answer names no string `client_id`, or a client that needs a secret |
+| `400` | `oauth2_client_id_required` | No `clientId` and no `registration_endpoint` |
+
+**`iss` (RFC 9207).** A discovered attempt records the issuer, and every
+callback with the right `state` (and an embedded completion's IdP refusal,
+which is read without one) is checked against it before anything else in it
+is used, `error` included:
+
+| Metadata `authorization_response_iss_parameter_supported` | `iss` in the callback | Result |
+|--------|--------|--------|
+| `true` | equal to the issuer | Proceeds |
+| `true` | absent or different | Fails the attempt |
+| `false` or absent | absent | Proceeds |
+| `false` or absent | different | Fails the attempt |
+
+The comparison is byte for byte on the decoded value, with no case folding or
+normalisation. A failed check names the issuer it expected (and the one the
+callback named), never the response's `error` or `error_description`, and the
+code is never sent to a token endpoint. An attempt that was not discovered
+records no issuer and reads no `iss`.
+
+#### POST /oauth2/step-up
+
+Classifies the `WWW-Authenticate` of a `401` or `403` as a step-up or not
+(#3766, `classify_bearer_challenge`). It **only classifies**: it sends nothing,
+retries nothing, re-authorizes nothing and caches nothing, so a client decides
+what follows (an interactive re-authorization is a
+[`POST /oauth2/authorize/start`](#interactive-authorization-code-flow) with
+the `scope` it answers; a load run cannot take that browser step and fails
+naming the scopes instead).
+
+| Request member | Type | Meaning |
+|----------------|------|---------|
+| `wwwAuthenticate` | string or array of strings | Required. The response's `WWW-Authenticate` value, or each header line's when it carried several. An empty array or string is a response with no challenge |
+| `scope` | string | The scopes already granted or requested, space-separated. Optional, default empty |
+
+The first `Bearer` challenge, across the values in order, that names an
+`error` is read; a value that is not the RFC 9110 challenge grammar is passed
+over, never an error and never a step-up. The answer is `200`:
+
+| Member | Meaning |
+|--------|---------|
+| `stepUp` | `true` only when the challenge's `error` is exactly `insufficient_scope` (RFC 6750 codes are case-sensitive) |
+| `error` | The challenge's `error` as written: `invalid_token` and any other are reported here with `stepUp` `false`. `""` when there is none |
+| `requiredScopes` | The challenge's `scope` split on whitespace, repeats dropped, in the order written. `[]` unless `stepUp` |
+| `scope` | What a re-authorization asks for: `scope` as sent, then the `requiredScopes` it did not hold, deduplicated and space-joined. `""` unless `stepUp`; a step-up whose challenge names no `scope` answers the held ones |
+| `description` | The challenge's `error_description`, `""` when absent |
+
+A body that is not JSON, not an object, lacks `wwwAuthenticate`, or whose
+`wwwAuthenticate` or `scope` has the wrong type answers `400`
+`oauth2_invalid_config`.
 
 ### Local mock issuer
 

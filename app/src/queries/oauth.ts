@@ -7,7 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
-import type { OAuth2TokenRequest } from "@/types";
+import type { OAuth2StepUpRequest, OAuth2TokenRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
@@ -44,5 +44,19 @@ export function useClearOAuth2TokenMutation() {
 		onSuccess: (_result, cacheKey) => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(cacheKey) });
 		},
+	});
+}
+
+/**
+ * Whether a response's `WWW-Authenticate` asks for more scope (#3766). The
+ * engine only classifies, so the answer is a function of the input: it is
+ * never stale and never polled. Disabled for a null input.
+ */
+export function useOAuth2StepUpQuery(input: OAuth2StepUpRequest | null) {
+	return useQuery({
+		queryKey: queryKeys.oauth.stepUp(input?.wwwAuthenticate ?? [], input?.scope ?? ""),
+		queryFn: () => apiService.classifyOAuth2StepUp(input as OAuth2StepUpRequest),
+		enabled: input !== null,
+		staleTime: Infinity,
 	});
 }

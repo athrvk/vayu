@@ -98,6 +98,38 @@ export interface OAuth2AuthorizeStartResponse {
 	redirectUri: string;
 	/** Epoch ms at which the engine fails the attempt: the one deadline both branches wait on. */
 	expiresAt: number;
+	/** What a discovered attempt (`discoverUrl`) runs on and exchanges its code with; absent otherwise. */
+	resolved?: OAuth2AuthorizeResolved;
+}
+
+/** `POST /oauth2/authorize/start`'s `resolved`: no secret is ever in it. */
+export interface OAuth2AuthorizeResolved {
+	authorizationUrl: string;
+	accessTokenUrl: string;
+	clientId: string;
+	resource: string;
+	/** `""` when discovery chose none. */
+	scope: string;
+	issuer: string;
+}
+
+/** `POST /oauth2/step-up`: classify a 401/403's challenge; the engine sends and retries nothing. */
+export interface OAuth2StepUpRequest {
+	/** Each `WWW-Authenticate` line's value, in the order received. */
+	wwwAuthenticate: string[];
+	/** The scopes already requested, space-separated. */
+	scope?: string;
+}
+
+export interface OAuth2StepUpResponse {
+	/** True only for a Bearer challenge whose `error` is exactly `insufficient_scope`. */
+	stepUp: boolean;
+	error: string;
+	/** The challenge's `scope`, split and deduplicated; `[]` unless `stepUp`. */
+	requiredScopes: string[];
+	/** What a re-authorization asks for: the held scopes plus the required ones; `""` unless `stepUp`. */
+	scope: string;
+	description: string;
 }
 
 export interface OAuth2AuthorizeStatusResponse {

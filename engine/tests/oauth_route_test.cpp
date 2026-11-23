@@ -11,6 +11,7 @@
 #include <fstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -37,6 +38,7 @@ std::pair<int, nlohmann::json>
 oauth2_token_get (vayu::db::Database& db, const std::string& key);
 std::pair<int, nlohmann::json>
 oauth2_token_delete (vayu::db::Database& db, const std::string& key);
+std::pair<int, nlohmann::json> oauth2_step_up_post (const std::string& body);
 // Declared in config.cpp; how a test sets `defaultTimeout` as a client does.
 std::pair<int, nlohmann::json>
 apply_config_update (vayu::db::Database& db, const std::string& body);
@@ -364,6 +366,83 @@ TEST_F (OAuthRouteJwtBearerTest, AKeyFileSignsWithNoScopeNamed) {
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_TRUE (jwt::verifies (
     posted_assertion (idp), jwt::public_half (jwt::keys ().p256), "ES256"));
+}
+
+// ============================================================================
+// POST /oauth2/step-up
+// ============================================================================
+
+TEST (OAuthStepUpRoute, AnInsufficientScopeAnswersTheUnionAndTheNamedScopes) {
+    const json request = { { "wwwAuthenticate",
+                           R"(Bearer error="insufficient_scope", scope="tools:write tools:read", )"
+                           R"(error_description="more")" },
+        { "scope", "tools:read openid" } };
+    const auto [status, body] =
+    vayu::http::routes::oauth2_step_up_post (request.dump ());
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body,
+    (json{ { "stepUp", true }, { "error", "insufficient_scope" },
+    { "requiredScopes", json::array ({ "tools:write", "tools:read" }) },
+    { "scope", "tools:read openid tools:write" }, { "description", "more" } }));
+}
+
+TEST (OAuthStepUpRoute, AListOfHeaderValuesAndAnOmittedScopeAreAccepted) {
+    const json request = { { "wwwAuthenticate",
+    json::array ({ R"(Basic realm="x")", R"(Bearer error="insufficient_scope", scope="a b")" }) } };
+    const auto [status, body] =
+    vayu::http::routes::oauth2_step_up_post (request.dump ());
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["stepUp"], true);
+    EXPECT_EQ (body["scope"], "a b");
+}
+
+TEST (OAuthStepUpRoute, AnInvalidTokenIsAnErrorNotAStepUp) {
+    const json request = { { "wwwAuthenticate", R"(Bearer error="invalid_token")" } };
+    const auto [status, body] =
+    vayu::http::routes::oauth2_step_up_post (request.dump ());
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["stepUp"], false);
+    EXPECT_EQ (body["error"], "invalid_token");
+    EXPECT_EQ (body["requiredScopes"], json::array ());
+    EXPECT_EQ (body["scope"], "");
+}
+
+TEST (OAuthStepUpRoute, NoChallengeAndAnEmptyListAreNotAStepUp) {
+    for (const json& field : { json (""), json::array () }) {
+        const auto [status, body] = vayu::http::routes::oauth2_step_up_post (
+        json{ { "wwwAuthenticate", field } }.dump ());
+        EXPECT_EQ (status, 200) << body.dump ();
+        EXPECT_EQ (body["stepUp"], false);
+        EXPECT_EQ (body["error"], "");
+    }
+}
+
+TEST (OAuthStepUpRoute, AMalformedChallengeIsAnAnswerNotAFailure) {
+    const auto [status, body] = vayu::http::routes::oauth2_step_up_post (
+    json{ { "wwwAuthenticate", R"(Bearer error="insufficient_scope", scope=)" } }
+    .dump ());
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["stepUp"], false);
+}
+
+TEST (OAuthStepUpRoute, AMalformedBodyIs400WithTheOAuthConfigCode) {
+    const std::vector<std::string> bodies = {
+        "not json",
+        "[]",
+        "{}",
+        R"({"wwwAuthenticate":7})",
+        R"({"wwwAuthenticate":null})",
+        R"({"wwwAuthenticate":["ok",3]})",
+        R"({"wwwAuthenticate":"Bearer","scope":4})",
+    };
+    for (const auto& text : bodies) {
+        const auto [status, body] = vayu::http::routes::oauth2_step_up_post (text);
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config") << text;
+    }
 }
 
 } // namespace
