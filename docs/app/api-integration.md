@@ -143,7 +143,7 @@ the file members, and a part without it sends none. A **`binary`** body is one f
 refuse it as "no file selected" rather than send a bodiless request.
 
 An **`mcp`** body (#3762) is `{mode: "mcp", content, mcpTool?}`, where `mcpTool`
-is `{name, inputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
+is `{name, inputSchema?, outputSchema?}` from `RequestState.mcpTool`: the tool a `tools/call`
 names, which the engine reads for the `Mcp-Param-*` headers it mirrors out of
 the call's arguments. It is stored **inside the body object**, so a `PUT` that
 sends `body` replaces it whole and a body sent without `mcpTool` clears the
@@ -158,6 +158,29 @@ points to. A run's stored snapshot carries the body's content and not its tool,
 so a History copy and Save to request take the saved request's tool instead. The
 engine refuses a tool with a blank `name` or a non-object `inputSchema` with a
 400, which is why the fields commit only a tool it would accept.
+
+The tool may also carry `outputSchema` (#3806), the schema a server's `tools/list`
+states for the tool's `structuredContent`. The engine stores it with the body and
+reads nothing of it; the renderer reads it. The Body panel has an **Output schema**
+editor beside the input one (the same commit rule: an object, and a name beside
+it), and a tool kept in `mcpTool` survives an edit of either schema. **Adding an
+`assert.jsonschema` element to a request in `mcp` mode whose tool has an
+`outputSchema` starts it as `{source: "jsonpath", path:
+"$.result.structuredContent", schema: <outputSchema>}`** (`startingElementConfigs`
+via `ElementList`'s `startingConfigs`): the copy is written into the element's
+`config` at add time, never re-derived from the tool, so a later edit of the tool
+leaves the stored assertion as it was. Any other body, or a tool with no
+`outputSchema`, starts the element blank. Nothing in the app populates `mcpTool`
+from a live `tools/list` yet - the fields are typed by hand until the MCP import
+(#3765) fills them.
+
+The `assert.jsonschema` element itself is the engine's (`docs/engine/elements.md`):
+`source` is `body` or `jsonpath` (with a `path`, which is refused beside `body`),
+`schema` is an object or a boolean, and a keyword the draft-07 validator does not
+evaluate fails the assertion naming it. Its failures arrive in the response's
+Elements section as any other `assert.*` outcome does. The builder offers it in the
+Assert group, with a multi-line schema field; see the Shared ElementList section of
+`COMPONENTS.md`.
 
 **`unresolved` comes back, never goes out** (#2356). The engine sends a file
 reference only when its path was picked on this machine or lies under a folder

@@ -60,6 +60,20 @@ function summarizeAssertJsonpath(
 	return path;
 }
 
+/**
+ * What the check is held to, never the schema itself: a schema runs to dozens
+ * of lines, and the row names the value it judges.
+ */
+function summarizeAssertJsonSchema(
+	config: Record<string, unknown>,
+	kind?: ElementKindSchema
+): string {
+	if (config.schema === undefined) return fallback(kind);
+	if (config.source !== "jsonpath") return "body matches schema";
+	const path = typeof config.path === "string" ? config.path : "";
+	return path ? `${path} matches schema` : fallback(kind);
+}
+
 function summarizeExtractJson(config: Record<string, unknown>, kind?: ElementKindSchema): string {
 	const path = typeof config.path === "string" ? config.path : "";
 	const variable = typeof config.variable === "string" ? config.variable : "";
@@ -118,6 +132,7 @@ const TEMPLATES: Readonly<
 > = {
 	"assert.status": summarizeAssertStatus,
 	"assert.jsonpath": summarizeAssertJsonpath,
+	"assert.jsonschema": summarizeAssertJsonSchema,
 	"extract.json": summarizeExtractJson,
 	"timer.think": summarizeTimerThink,
 	"timer.pacing": summarizeTimerPacing,

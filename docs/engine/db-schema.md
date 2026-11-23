@@ -827,11 +827,11 @@ query row's boolean `equals`.
 ```json
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"mcp"|"xml","content":"..."}
-{"mode":"mcp","content":"...","mcpTool":{"name":"...","inputSchema":{...}}}
+{"mode":"mcp","content":"...","mcpTool":{"name":"...","inputSchema":{...},"outputSchema":{...}}}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 {"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```
-An `mcp` body may carry `mcpTool`, the called tool and its input schema, whose
+An `mcp` body may carry `mcpTool`, the called tool, its input schema and optional output schema (stored, never read by a send), whose
 `x-mcp-header` annotations the send mirrors as `Mcp-Param-*` headers (#3762);
 it is part of the blob, so it needed no column and no schema version.
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the

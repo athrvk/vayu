@@ -1990,7 +1990,12 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   `body` replaces the body object whole, which would clear it) and says so in
   its result, and an agent-authored `mcp` request sends no `Mcp-Param-*`
   header. `run_request` and `start_load_run` take `bodyType: "mcp"` too, with
-  the same limit; their descriptions do not list it, for the same budget. An `xml`
+  the same limit; their descriptions do not list it, for the same budget. An `mcp`
+  request's tool result is held to a JSON Schema by the engine's `assert.jsonschema`
+  [element](elements.md) with `source: "jsonpath"` and `path: "$.result.structuredContent"`: the
+  elements read the final JSON-RPC response, the check is draft-07 (a 2020-12 keyword in the
+  tool's `outputSchema` fails the assertion naming it rather than passing unread), and it runs on
+  a Send, a collection run and a load run alike. An `xml`
   `body` has no envelope at all: it is stored and sent byte for byte and carries
   `application/xml` unless the agent set a Content-Type of its own, which is how
   a SOAP 1.2 endpoint gets `application/soap+xml`.

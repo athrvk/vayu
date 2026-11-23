@@ -665,6 +665,45 @@ describe("ElementList - the Add element menu", () => {
 	});
 });
 
+describe("ElementList - startingConfigs (#3806)", () => {
+	function addFirst(label: string, startingConfigs?: Record<string, Record<string, unknown>>) {
+		const onChange = vi.fn();
+		render(
+			<ElementList
+				elements={[]}
+				onChange={onChange}
+				kinds={KINDS}
+				startingConfigs={startingConfigs}
+			/>
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+		const picker = screen.getByRole("dialog", { name: "Add element" });
+		fireEvent.click(within(picker).getByText(label).closest("[cmdk-item]")!);
+		return onChange.mock.calls[0][0][0] as ElementDef;
+	}
+
+	// Mutation check: drop the `startingConfigs` spread in `addElement` and the
+	// first case reds, its `config` `{}`.
+	it("writes the host's config for the kind into the element it adds", () => {
+		const added = addFirst("Assert Status", { "assert.status": { in: [200] } });
+		expect(added.config).toEqual({ in: [200] });
+	});
+
+	it("leaves a kind the host names nothing for on its blank config", () => {
+		const added = addFirst("Extract JSON", { "assert.status": { in: [200] } });
+		expect(added.config).toEqual({});
+	});
+
+	it("adds the blank config when the host passes none", () => {
+		expect(addFirst("Extract JSON").config).toEqual({});
+	});
+
+	it("keeps a script kind's required blank script beneath the host's config", () => {
+		const added = addFirst("Pre-request script", { "script.pre": { inline: true } });
+		expect(added.config).toEqual({ script: "", inline: true });
+	});
+});
+
 describe("ElementList - rename", () => {
 	it("names the field after what it renames, not only its placeholder (#3498)", async () => {
 		renderList([extractElement("e1")]);

@@ -386,6 +386,10 @@ Notes on the edges:
   passes any string, where ajv would reject some of them. `require('ajv')` is
   on [the shelf](#ajv) and is the real library; `jsonSchema` stays on the
   engine's validator, and [where the two answer differently](#ajv) is pinned.
+  The declarative [`assert.jsonschema`](elements.md) element runs on the same validator, so it
+  shares all of the above: the draft-07 limit, the named unevaluated keywords (which fail it
+  rather than pass it), the refused loop and the `format` list. It is the choice when the check
+  should be a step's assertion row or run on a load run's cheap path, which a script step is not.
 - **Every public member of chai 4.4.1's `expect` API has a row** in
   `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
   one that fails, each checked against the real package. The suite holds the
