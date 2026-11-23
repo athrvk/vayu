@@ -48,8 +48,9 @@
 #include <nlohmann/json.hpp>
 
 namespace vayu::http {
-class ApprovedFile; // vayu/http/file_ref.hpp
-}
+class ApprovedFile;        // vayu/http/file_ref.hpp
+class StreamContentMarker; // vayu/http/stream_content_marker.hpp
+} // namespace vayu::http
 
 namespace vayu {
 
@@ -573,6 +574,10 @@ struct StreamBounds {
     /// the response it ends. Null for none, so a run that declares none
     /// copies nothing but a null pointer per transfer.
     std::shared_ptr<const StreamTextPath> text_path = nullptr;
+    /// The request's first content marker (#3774), which `StreamTally`
+    /// times as `Response::stream_first_match_ms`. Null for none, so a
+    /// stream that declares none scans nothing and pays one null check.
+    std::shared_ptr<const http::StreamContentMarker> first_content_marker = nullptr;
 };
 
 /**
@@ -1334,6 +1339,18 @@ struct Response {
      * this unset, since nothing measured when it arrived.
      */
     std::optional<double> stream_first_event_ms;
+
+    /**
+     * @brief Milliseconds from submission to the write that delivered the last
+     *        byte of the request's first content marker (issue #3774), on the
+     *        clock `stream_first_event_ms` is read from.
+     *
+     * Absent when the request declared no marker, when the marker never
+     * arrived, and on every transfer that was not a stream. The match is on
+     * the wire bytes, across event framing, so it can land in a frame's
+     * `event:` name or a comment as well as its `data`.
+     */
+    std::optional<double> stream_first_match_ms;
 
     /**
      * @brief The largest wait, in milliseconds, between two consecutive writes
