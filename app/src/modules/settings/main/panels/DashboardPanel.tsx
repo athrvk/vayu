@@ -133,7 +133,7 @@ export default function DashboardPanel() {
 					<NumberSettingRow
 						anchor={SLO_THRESHOLD.anchor}
 						label={SLO_THRESHOLD.label}
-						description="The p99 latency the Breakpoint stat and the Saturation card judge a ramp-up run against; a Capacity discovery run is judged against the SLO it was started with. It is not drawn on a run's charts: those show an SLO line only when the run set a p99 budget. It also seeds the Capacity discovery target and the p99 budget the first time you open the load-test dialog, and the dialog remembers your last values after that. A Capacity discovery run does not send that p99 budget: its search climbs past the limit on purpose, so a budget would judge how far it climbed."
+						description="The p99 latency the Breakpoint stat and the Saturation card judge a ramp-up run against; a Capacity discovery run is judged against the SLO it was started with. It is not drawn on a run's charts: those show an SLO line only when the run set a p99 budget. It also seeds the Capacity discovery target and the p99 budget the first time you open the load-test dialog, and the dialog remembers your last values after that. A Capacity discovery run does not send that p99 budget: its search climbs past the limit on purpose, so a budget would judge how far it climbed. A streaming request does not send it either: a stream's latency is its whole duration."
 						value={String(sloThresholdMs)}
 						commit="change"
 						onCommit={(next) => setSloThresholdMs(parseInt(next, 10))}

@@ -50,17 +50,20 @@ const isBlank = (value: string | undefined) => (value ?? "").trim() === "";
 export const SLO_SEEDED_KEY = "latencyP99Ms" satisfies BudgetKey;
 
 /**
- * Whether the Settings p99 seed is dormant for this mode. A capacity search
+ * Whether the Settings p99 seed is dormant for this run. A capacity search
  * climbs past the limit on purpose, and the engine judges `latencyP99Ms` over
  * the run's pooled histogram, every over-budget level included, so a verdict on
- * the seed would read how far the search climbed (issue #2816). A p99 the user
- * typed, or the memo carried, is theirs and still travels.
+ * the seed would read how far the search climbed (issue #2816). A stream's
+ * latency is its whole duration, which the dashboard's per-request threshold
+ * was never set against (issue #3772). A p99 the user typed, or the memo
+ * carried, is theirs and still travels.
  */
 export function isUnsentSeed(
 	mode: LoadTestConfig["mode"],
+	streaming: boolean,
 	fixed: CarriedBudgets["fixed"]
 ): boolean {
-	return mode === "capacity" && fixed[SLO_SEEDED_KEY] === "slo";
+	return (mode === "capacity" || streaming) && fixed[SLO_SEEDED_KEY] === "slo";
 }
 
 /**
@@ -79,37 +82,40 @@ export function carriedForRun(carried: CarriedBudgets, streaming: boolean): Carr
 	return { ...carried, fixed };
 }
 
-/** The carried set as this mode will send it: the dormant seed is not carried, it is not there. */
+/** The carried set as this run will send it: the dormant seed is not carried, it is not there. */
 export function withoutUnsentSeed(
 	carried: CarriedBudgets,
-	mode: LoadTestConfig["mode"]
+	mode: LoadTestConfig["mode"],
+	streaming: boolean
 ): CarriedBudgets {
-	if (!isUnsentSeed(mode, carried.fixed)) return carried;
+	if (!isUnsentSeed(mode, streaming, carried.fixed)) return carried;
 	const { [SLO_SEEDED_KEY]: _seed, ...fixed } = carried.fixed;
 	return { ...carried, fixed };
 }
 
-/** The budgets Start sends: the draft with the mode's dormant seed blanked. */
+/** The budgets Start sends: the draft with the run's dormant seed blanked. */
 export function budgetsToSend(
 	budgets: BudgetDraft,
 	mode: LoadTestConfig["mode"],
+	streaming: boolean,
 	fixed: CarriedBudgets["fixed"] | undefined
 ): BudgetDraft {
-	if (!isUnsentSeed(mode, fixed ?? {})) return budgets;
+	if (!isUnsentSeed(mode, streaming, fixed ?? {})) return budgets;
 	return { ...budgets, [SLO_SEEDED_KEY]: "" };
 }
 
 /**
  * The budgets the memo keeps. A dormant seed is left out rather than written:
- * a written p99 restores as the user's own (`memo`), so the next capacity run
- * would send the number this one withheld.
+ * a written p99 restores as the user's own (`memo`), so the next capacity or
+ * stream run would send the number this one withheld.
  */
 export function budgetsToRemember(
 	budgets: BudgetDraft,
 	mode: LoadTestConfig["mode"],
+	streaming: boolean,
 	fixed: CarriedBudgets["fixed"]
 ): Partial<BudgetDraft> {
-	if (!isUnsentSeed(mode, fixed)) return budgets;
+	if (!isUnsentSeed(mode, streaming, fixed)) return budgets;
 	const { [SLO_SEEDED_KEY]: _seed, ...rest } = budgets;
 	return rest;
 }
