@@ -109,10 +109,9 @@ Vayu has no price table and no model list. Prices change and differ by account,
 so cost is something you compute from the usage the API reports, with the price
 as a variable you own.
 
-Both recipes record a custom metric, and a custom metric belongs to a run: put
-the request in a collection and use **Run collection**, in design mode or under
-load. A single Send has no run to record into, and a single-request load run
-does not carry `metric.record`.
+Both recipes record a custom metric, and a custom metric belongs to a run: use
+a load run of the request, or put it in a collection and use **Run collection**.
+A single Send has no run to record into.
 
 ### Record token counts
 
