@@ -18,6 +18,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/list_page.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
@@ -615,6 +616,20 @@ apply_request_params_field (const nlohmann::json& json, vayu::db::Request& r, bo
     return reconcile_params_with_url (json, r);
 }
 
+/// An `mcp` body's `mcpTool` that no send could read (#3762), refused where it
+/// is written rather than at every send.
+static RouteResult refuse_unreadable_mcp_tool (const nlohmann::json& body) {
+    const auto mode = body.find ("mode");
+    const auto tool = body.find ("mcpTool");
+    if (mode == body.end () || *mode != "mcp" || tool == body.end () || tool->is_null ()) {
+        return {};
+    }
+    if (auto read = vayu::http::read_mcp_tool (*tool); !read) {
+        return route_error (400, read.error ());
+    }
+    return {};
+}
+
 /**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
@@ -684,6 +699,9 @@ bool is_create) {
     // Trust is derived on read and never stored (#2356): the `unresolved` an
     // older client still sends is dropped here, on every writer's path.
     if (const auto body = json.find ("body"); body != json.end () && body->is_object ()) {
+        if (auto outcome = refuse_unreadable_mcp_tool (*body); !outcome) {
+            return outcome;
+        }
         nlohmann::json stored = *body;
         vayu::json::erase_file_trust (stored);
         r.body = stored.dump ();

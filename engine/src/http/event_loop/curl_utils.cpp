@@ -35,6 +35,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -656,6 +657,17 @@ HeaderList* sent) {
     if (!suppresses_default_header (request, "Content-Type") &&
     append ("Content-Type", body_content_type_value (request))) {
         lists_content_type = true;
+    }
+
+    // What an `mcp` body mirrors into headers, read off the bytes this transfer
+    // sends (#3762).
+    if (request.body.mode == BodyMode::Mcp) {
+        for (const auto& [name, value] : vayu::http::mcp_derived_headers (
+             vayu::http::wire_body_bytes (request), request.body.mcp_tool)) {
+            if (adds_default (name)) {
+                append (name, value);
+            }
+        }
     }
 
     if (adds_default ("User-Agent")) {

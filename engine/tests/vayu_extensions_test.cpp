@@ -211,6 +211,24 @@ TEST (VayuExtensions, ReadsABinaryBodyAndDropsWhatItSaysAboutTrust) {
     EXPECT_FALSE (ext::body_of (Json::parse (R"({"mode":"binary","file":{"src":7}})")));
 }
 
+/// An `mcp` body's `mcpTool` (#3762) leaves with the export and comes back with
+/// the import; one a send could not read is refused with its body, and another
+/// mode carries none in.
+TEST (VayuExtensions, AnMcpBodyRoundTripsItsTool) {
+    const Json stored = Json::parse (R"({"mode":"mcp","content":"{\"method\":\"tools/call\"}",
+        "mcpTool":{"name":"execute_sql","inputSchema":{"properties":{"region":{"x-mcp-header":"Region"}}}}})");
+    const auto imported = ext::body_of (ext::portable_body (stored));
+    ASSERT_HAS_VALUE (imported);
+    EXPECT_EQ (*imported, stored);
+
+    EXPECT_FALSE (ext::body_of (
+    Json::parse (R"({"mode":"mcp","content":"","mcpTool":{"name":7}})")));
+    const auto other_mode = ext::body_of (
+    Json::parse (R"({"mode":"json","content":"{}","mcpTool":{"name":"t"}})"));
+    ASSERT_HAS_VALUE (other_mode);
+    EXPECT_FALSE (other_mode->contains ("mcpTool"));
+}
+
 TEST (VayuExtensions, GivesEveryRowTheFieldsTheWriteRoutesRequire) {
     // `enabled` absent reads as enabled (D17) and `value` absent as "" -
     // exactly what `apply_key_value_field` then requires to be present.

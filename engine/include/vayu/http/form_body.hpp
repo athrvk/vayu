@@ -108,8 +108,9 @@ namespace vayu::http {
  * @brief The bytes this body puts in the request's body frame.
  *
  * The one answer to "what actually goes on the wire", because it is not
- * `body.content` for three of the six modes: the form modes carry their
- * content as fields, and a `graphql` body is enveloped on the way out. Both
+ * `body.content` for several modes: the form modes carry their content as
+ * fields, and a `graphql`, `jsonrpc` or `mcp` body is enveloped on the way out
+ * (`mcp_body.hpp` adds `_meta` to the last). Both
  * HTTP drivers read it, and so does the raw-request view - a view that
  * rebuilt the body itself would show something the transfer did not send.
  *

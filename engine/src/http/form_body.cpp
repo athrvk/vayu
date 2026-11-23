@@ -18,6 +18,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
@@ -223,6 +224,7 @@ std::string wire_body_bytes (const Body& body) {
     case BodyMode::Binary: return {};
     case BodyMode::GraphQL: return graphql_wire_body (body.content);
     case BodyMode::JsonRpc: return jsonrpc_wire_body (body.content);
+    case BodyMode::Mcp: return mcp_wire_body (body.content);
     default: return body.content;
     }
 }

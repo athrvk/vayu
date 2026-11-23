@@ -111,6 +111,7 @@ add_executable(vayu_tests
     file_grants_route_test.cpp
     graphql_body_test.cpp
     jsonrpc_body_test.cpp
+    mcp_body_test.cpp
     url_parts_test.cpp
     script_request_url_test.cpp
     script_request_auth_test.cpp

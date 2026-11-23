@@ -7,6 +7,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <nlohmann/json_fwd.hpp>
+
+#include <optional>
 #include <string>
 
 /**
@@ -75,5 +78,21 @@ namespace vayu::http {
  * would give a bodiless request a body.
  */
 [[nodiscard]] std::string jsonrpc_wire_body (const std::string& content);
+
+/**
+ * @brief The bare call in @p content that `jsonrpc_wire_body` completes, or
+ *        nothing for the three inputs it passes through verbatim (and for an
+ *        empty body).
+ *
+ * The two halves of `jsonrpc_wire_body`, exposed so the `mcp` mode
+ * (`mcp_body.hpp`, #3762) adds its members to the same call and cannot disagree
+ * with this mode about which inputs are calls.
+ */
+[[nodiscard]] std::optional<nlohmann::ordered_json> bare_jsonrpc_call (
+const std::string& content);
+
+/// @p call with `"jsonrpc":"2.0"`, and `"id":1` when it names none, appended
+/// after the caller's members, as the bytes that go on the wire.
+[[nodiscard]] std::string complete_jsonrpc_call (nlohmann::ordered_json& call);
 
 } // namespace vayu::http

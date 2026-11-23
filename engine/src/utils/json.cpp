@@ -29,6 +29,7 @@
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
@@ -172,7 +173,8 @@ Json serialize (const Request& request) {
             body_json["content"] = request.body.content;
             break;
         // Verbatim for the same reason as `jsonrpc`: a body still holding
-        // `{{tokens}}` is not JSON to re-serialize.
+        // `{{tokens}}` is not JSON to re-serialize. No `mcpTool`: `Body` keeps
+        // only the annotations a send reads, not the schema they came from.
         case BodyMode::Mcp:
             body_json["mode"]    = "mcp";
             body_json["content"] = request.body.content;
@@ -1081,6 +1083,22 @@ std::optional<Error> read_body_parts (const Json& body_json, Body& body) {
     return std::nullopt;
 }
 
+/// An `mcp` body's `mcpTool` (#3762). A body of another mode is not refused
+/// for carrying one, because the editor keeps it across a mode switch; it is
+/// read only where something sends from it.
+std::optional<Error> read_mcp_tool_member (const Json& body_json, Body& body) {
+    const auto stated = body_json.find ("mcpTool");
+    if (body.mode != BodyMode::Mcp || stated == body_json.end () || stated->is_null ()) {
+        return std::nullopt;
+    }
+    auto tool = vayu::http::read_mcp_tool (*stated);
+    if (!tool) {
+        return Error{ ErrorCode::InternalError, tool.error () };
+    }
+    body.mcp_tool = std::move (*tool);
+    return std::nullopt;
+}
+
 } // namespace
 
 namespace {
@@ -1139,6 +1157,9 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
         }
 
         if (auto refusal = read_body_parts (body_json, request.body)) {
+            return refusal;
+        }
+        if (auto refusal = read_mcp_tool_member (body_json, request.body)) {
             return refusal;
         }
     }

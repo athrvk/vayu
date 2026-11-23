@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -830,8 +831,17 @@ std::optional<Json> body_of (const Json& value) {
     if (content != value.end () && !content->is_string ()) {
         return std::nullopt;
     }
-    return std::make_optional (Json{ { "mode", mode },
-    { "content", content == value.end () ? Json ("") : *content } });
+    Json out{ { "mode", mode },
+        { "content", content == value.end () ? Json ("") : *content } };
+    // An `mcp` body's tool (#3762), refused on the rule a write refuses it by.
+    if (const auto tool = value.find ("mcpTool");
+    mode == "mcp" && tool != value.end () && !tool->is_null ()) {
+        if (!vayu::http::read_mcp_tool (nlohmann::json (*tool))) {
+            return std::nullopt;
+        }
+        out["mcpTool"] = *tool;
+    }
+    return std::make_optional (std::move (out));
 }
 
 std::optional<Json> auth_of (const Json& value, bool collection) {

@@ -29,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -97,13 +98,14 @@ TEST (ImpliedContentTypeConformance, EveryModeImpliesTheTypeTheTableNames) {
 
 // `mcp` has no row in the shared table until the app's body-mode picker lists
 // it (the app side requires the two to name the same modes), so its answers
-// are pinned here: JSON on the wire, the content as written.
-TEST (ImpliedContentTypeMcp, IsJsonAndSendsItsContentAsWritten) {
+// are pinned here: JSON on the wire, the call `mcp_wire_body` completes.
+TEST (ImpliedContentTypeMcp, IsJsonAndSendsTheCompletedCall) {
     vayu::Body body;
     body.mode    = vayu::BodyMode::Mcp;
     body.content = R"({"method":"tools/list"})";
     EXPECT_EQ (vayu::http::implied_content_type (body), "application/json");
-    EXPECT_EQ (vayu::http::wire_body_bytes (body), body.content);
+    EXPECT_EQ (vayu::http::wire_body_bytes (body),
+    vayu::http::mcp_wire_body (body.content));
 
     body.content.clear ();
     EXPECT_EQ (vayu::http::implied_content_type (body), "");

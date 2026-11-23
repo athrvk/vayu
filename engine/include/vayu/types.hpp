@@ -429,17 +429,40 @@ struct FormField {
 };
 
 /**
+ * @brief One `x-mcp-header` annotation in an MCP tool's `inputSchema`: the
+ *        argument at `path` (the chain of `properties` keys leading to it) is
+ *        mirrored as the header `Mcp-Param-<header>`.
+ */
+struct McpParamHeader {
+    std::vector<std::string> path;
+    std::string header;
+};
+
+/**
+ * @brief What a send reads of an `mcp` body's stored `mcpTool`
+ *        (`{name, inputSchema}`, #3762): the tool it describes and the
+ *        arguments its schema mirrors into headers. Read by
+ *        `vayu::http::read_mcp_tool`; the stored object itself stays in the
+ *        request's body blob.
+ */
+struct McpTool {
+    std::string name;
+    std::vector<McpParamHeader> param_headers;
+};
+
+/**
  * @brief Request body
  *
  * Exactly one of `content`, `fields` and `file` carries the body: the two form
  * modes use `fields`, `Binary` uses `file`, every other content-bearing mode
- * uses `content`.
+ * uses `content`. `mcp_tool` is read for the `Mcp` mode only.
  */
 struct Body {
     BodyMode mode = BodyMode::None;
     std::string content;
     std::vector<FormField> fields;
     FileRef file;
+    std::optional<McpTool> mcp_tool;
 };
 
 /**
