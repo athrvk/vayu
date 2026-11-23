@@ -1326,11 +1326,6 @@ std::optional<double> script_ms) {
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
-        // Added *after* the body cap deliberately: `cap_trace_bodies` walks the
-        // request/response body nodes and does not reach this one, so the
-        // events list carries its own cap, applied when it was built
-        // (`stream_trace_node`). Putting it here rather than before makes that
-        // impossible to misread as covered.
         // The verdict the live response carried, stored verbatim rather than
         // recomputed at restore time: `responseFromRunResult` and
         // `responseFromExecuteResult` are the named copy-does-not-receive-the-fix
@@ -1351,6 +1346,8 @@ std::optional<double> script_ms) {
             trace["elements"] = elements;
         }
 
+        // The sidecar alone: the list is the capped body above, parsed back
+        // when the trace is read (`expand_stored_stream_events`, #3770).
         if (stream) {
             trace["events"] = stream->events;
         }
@@ -2400,6 +2397,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         std::move (pre_element_outcomes);
         record.events = vayu::http::stream_trace_node (context);
         record.status = stream_run_status (context.end_reason (), response);
+        // The list parsed from the bytes the trace stores, by the rule every
+        // later reader of the trace applies (#3770), so the script and a
+        // restored response read one list rather than two that can disagree.
+        nlohmann::json script_events = vayu::http::stream_events_node (
+        response.body, !response.body_truncated, record.events);
 
         const bool has_element_output = elements && !elements->empty ();
         // An `mcp` failure fails the stream's step as an assertion does
@@ -2451,11 +2453,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                                 post_ctx.vu = vayu::core::SOLE_VIRTUAL_USER;
                                 post_ctx.iteration_count = 1;
                             }
-                            // The node the trace is about to store, not a
-                            // copy of it: `pm.response.eventsTruncated` and
-                            // the stored marker are then the same value by
-                            // construction rather than by agreement.
-                            post_ctx.response_events = &record.events;
+                            post_ctx.response_events = &script_events;
                             return execute_script (
                             script_engine, script, post_ctx, "Post-request");
                         },

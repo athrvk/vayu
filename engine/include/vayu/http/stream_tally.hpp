@@ -47,9 +47,9 @@
 
 namespace vayu::http {
 
-/// Whether @p headers announce an event stream, whose bytes are its events
-/// rather than a body. A missing `Content-Type` is not one. The one reading
-/// of it: the design stream (`sse_stream.cpp`) and both load drivers' tallies.
+/// Whether @p headers announce an event stream. A missing `Content-Type` is
+/// not one. The one reading of it, for both load drivers' tallies; the design
+/// stream keeps and parses every reply's bytes whatever they announce (#3770).
 inline bool announces_event_stream (const Headers& headers) {
     const auto found = headers.find ("content-type");
     return found != headers.end () && vayu::core::media_type (found->second) == "text/event-stream";

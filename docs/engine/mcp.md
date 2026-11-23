@@ -1528,6 +1528,12 @@ none, are an `input` error.
 | An inbox capture | `inboxId`, `captureId` (a row's `id` in `get_inbox_captures`) | `GET /inbox/:id/requests/:captureId` (#3723), one call: the bare capture, whole, as a list row carries it |
 | A saved example | `requestId`, `exampleId` | `GET /requests/:id/examples`, the example picked by id |
 
+A streamed send's response body is the stream's bytes, its `event:`/`data:`
+lines as they arrived (#3770), so `read_body` pages them and `diff_bodies`
+compares two streams line by line like any other text. A result stored before
+#3770 holds an empty body for an event stream: its events are in the trace's
+`events` node only.
+
 An unknown run, result, inbox, capture or request is the engine's 404, worded
 as an unknown id (a capture the inbox does not hold, including another inbox's,
 is `Capture not found`); an example the request's list does not hold is a

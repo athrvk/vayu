@@ -32,6 +32,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -53,6 +54,8 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/encoding.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "verbosity_restorer.hpp"
 #include "wait_until.hpp"
@@ -994,10 +997,10 @@ TEST (SseConsumer, RecordsTheInitialResponseHeaders) {
 }
 
 // ---------------------------------------------------------------------------
-// What the reply's bytes become (issue #3238)
+// What the reply's bytes become (issues #3238, #3770)
 //
-// An event stream's bytes are its events; any other reply's are also its body,
-// up to the design bound. Every stream counts what it was delivered.
+// Every reply's bytes are its body, up to the design bound, and an event
+// stream's are its events as well. Every stream counts what it was delivered.
 // ---------------------------------------------------------------------------
 
 // Mutation check: drop the `hold_body_bytes` call in `stream_write_callback`
@@ -1019,8 +1022,37 @@ TEST (SseConsumer, AReplyThatIsNotAnEventStreamKeepsItsBody) {
     EXPECT_EQ (context.total_events (), 0);
 }
 
-// Mutation check: move the `delivered_bytes` count under the `hop_keeps_body`
-// branch and the event stream reads 0.
+// An event stream's bytes are its body too (#3770), held to the same bound,
+// and they are still its events. Mutation check: drop the `hold_body_bytes`
+// call in `stream_write_callback` and the body reads "".
+TEST (SseConsumer, AnEventStreamKeepsItsBytesAsItsBody) {
+    StreamServer server ({ "data: a\n\n", "data: bb\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/scripted"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Completed);
+    EXPECT_EQ (response.body, "data: a\n\ndata: bb\n\n");
+    EXPECT_EQ (response.body_size, response.body.size ());
+    EXPECT_FALSE (response.body_truncated);
+    EXPECT_EQ (context.total_events (), 2);
+
+    auto spec           = spec_for (server.url ("/scripted"), brisk_limits ());
+    spec.max_body_bytes = 4;
+    SseStreamContext cut_context ("run_test", brisk_limits ());
+    const auto cut = vayu::http::consume_sse_stream (spec, cut_context);
+
+    EXPECT_EQ (cut.body, "data");
+    EXPECT_EQ (cut.body_size, 4u);
+    EXPECT_TRUE (cut.body_truncated);
+    ASSERT_HAS_VALUE (cut.stream_body_bytes);
+    EXPECT_EQ (*cut.stream_body_bytes, 19u);
+    // The bound holds the body, never the stream: every event still arrives.
+    EXPECT_EQ (cut_context.total_events (), 2);
+}
+
+// Mutation check: count the bytes `hold_body_bytes` kept rather than the
+// chunk's, and the capped reply reads 4.
 TEST (SseConsumer, EveryStreamCountsWhatItWasDelivered) {
     StreamServer server ({ "data: a\n\n", "data: bb\n\n" });
     SseStreamContext context ("run_test", brisk_limits ());
@@ -1028,7 +1060,7 @@ TEST (SseConsumer, EveryStreamCountsWhatItWasDelivered) {
     spec_for (server.url ("/scripted"), brisk_limits ()), context);
 
     EXPECT_EQ (context.total_events (), 2);
-    EXPECT_TRUE (response.body.empty ());
+    EXPECT_EQ (response.body, "data: a\n\ndata: bb\n\n");
     ASSERT_HAS_VALUE (response.stream_body_bytes);
     EXPECT_EQ (*response.stream_body_bytes, 19u);
 
@@ -1046,26 +1078,12 @@ TEST (SseConsumer, EveryStreamCountsWhatItWasDelivered) {
     EXPECT_EQ (*cut.stream_body_bytes, 16u);
 }
 
-// The media type, not the header's spelling, decides. Mutation check: compare
-// the raw header value with "text/event-stream" in `announces_event_stream`
-// and the body keeps the frame.
-TEST (SseConsumer, AnEventStreamIsKnownByItsMediaTypeWhateverItsCaseOrCharset) {
-    StreamServer server;
-    server.can (200, "Text/Event-Stream; charset=UTF-8", { "data: a\n\n" });
-    SseStreamContext context ("run_test", brisk_limits ());
-    const auto response = vayu::http::consume_sse_stream (
-    spec_for (server.url ("/canned"), brisk_limits ()), context);
-
-    EXPECT_EQ (context.total_events (), 1);
-    EXPECT_TRUE (response.body.empty ()) << response.body;
-}
-
-// The final hop's type decides, not the redirect's: `/hop` answers 302 as
-// JSON and the stream it lands on is SSE. The chain discards a followed hop's
-// body before the write callback counts it, so the count is the final hop's.
-// Mutation check: drop `response.headers.clear ()` from `begin_response_hop`
-// and the folded type reads as JSON, so the event bytes are kept as a body.
-TEST (SseConsumer, TheFinalHopsContentTypeDecides) {
+// The final hop's bytes are the body, not the redirect's: `/hop` answers 302
+// with JSON and the stream it lands on is SSE. The chain discards a followed
+// hop's body before the write callback holds or counts it. Mutation check:
+// drop the `discard` return in `stream_write_callback` and the body starts
+// with the redirect's JSON.
+TEST (SseConsumer, TheFinalHopsBytesAreTheBody) {
     StreamServer server;
     server.can (200, "text/event-stream", { "data: a\n\n" });
     SseStreamContext context ("run_test", brisk_limits ());
@@ -1074,7 +1092,7 @@ TEST (SseConsumer, TheFinalHopsContentTypeDecides) {
 
     EXPECT_EQ (response.status_code, 200);
     EXPECT_EQ (context.total_events (), 1);
-    EXPECT_TRUE (response.body.empty ()) << response.body;
+    EXPECT_EQ (response.body, "data: a\n\n");
     ASSERT_HAS_VALUE (response.stream_body_bytes);
     EXPECT_EQ (*response.stream_body_bytes, 9u);
 }
@@ -1252,23 +1270,24 @@ struct SseTraceCase {
     std::size_t cap;
     SseEndReason end_reason;
     const char* expected_end_reason;
-    bool expected_truncated;
 };
 
-// The second case is truthful rather than derived from the cap: a stream that
-// fit must not be reported as truncated, or the marker means nothing.
 constexpr auto SSE_TRACE_CASES = std::to_array<SseTraceCase> ({
-{ "StoresUpToTheCapAndMarksTheRest", 9, 3, SseEndReason::MaxEvents, "maxStreamEvents", true },
-{ "AStreamThatFitIsNotMarkedTruncated", 1, sse_constants::MAX_STORED_EVENTS,
-SseEndReason::Completed, "completed", false },
+{ "KeepsArrivalsUpToTheCap", 9, 3, SseEndReason::MaxEvents, "maxStreamEvents" },
+{ "KeepsEveryArrivalOfAStreamThatFit", 1, sse_constants::MAX_STORED_EVENTS,
+SseEndReason::Completed, "completed" },
 });
 
 class SseTraceTest : public ::testing::TestWithParam<SseTraceCase> {};
 
-TEST_P (SseTraceTest, StoresUpToTheCapAndMarksTruncationTruthfully) {
+// What the trace stores is the sidecar alone (#3770): one arrival time per kept
+// event and no list, which the stored body holds. Mutation check: push an
+// arrival past the cap in `record_event` and the first case keeps nine.
+TEST_P (SseTraceTest, StoresArrivalsUpToTheCapAndNoList) {
     const auto& c = GetParam ();
     vayu::http::SseLimits limits;
     limits.max_stored_events = c.cap;
+    limits.max_event_bytes   = 4096;
     SseStreamContext context ("run_test", limits);
     for (int i = 0; i < c.event_count; ++i) {
         vayu::http::SseEvent event;
@@ -1278,11 +1297,12 @@ TEST_P (SseTraceTest, StoresUpToTheCapAndMarksTruncationTruthfully) {
     context.close (c.end_reason);
 
     const auto node = vayu::http::stream_trace_node (context);
-    EXPECT_EQ (node["items"].size (),
+    EXPECT_FALSE (node.contains ("items")) << node.dump ();
+    EXPECT_EQ (node["receivedAt"].size (),
     std::min (static_cast<std::size_t> (c.event_count), c.cap));
     EXPECT_EQ (node["totalEvents"], c.event_count);
-    EXPECT_EQ (node["eventsTruncated"].get<bool> (), c.expected_truncated);
     EXPECT_EQ (node["endReason"], c.expected_end_reason);
+    EXPECT_EQ (node["maxEventBytes"], 4096);
 }
 
 INSTANTIATE_TEST_SUITE_P (SseTrace,
@@ -1291,6 +1311,96 @@ SseTraceTest,
 [] (const ::testing::TestParamInfo<SseTraceCase>& info) {
     return std::string (info.param.name);
 });
+
+// ---------------------------------------------------------------------------
+// A stored trace's events, served (#3770)
+// ---------------------------------------------------------------------------
+
+/// A stored design-stream trace: @p body as its response and a sidecar of
+/// @p total events, the first of which arrived at 1000, 1001, ...
+json stored_stream_trace (const std::string& body, int64_t total, std::size_t kept) {
+    std::vector<int64_t> arrivals (kept);
+    std::iota (arrivals.begin (), arrivals.end (), int64_t{ 1000 });
+    return json{ { "response", { { "body", body }, { "bodyBytes", body.size () } } },
+        { "events",
+        { { "totalEvents", total }, { "endReason", "completed" },
+        { "maxEventBytes", sse_constants::MAX_EVENT_BYTES }, { "receivedAt", arrivals } } } };
+}
+
+TEST (StoredStreamEvents, AreParsedFromTheBodyAndPairedWithTheirArrivals) {
+    auto trace = stored_stream_trace ("data: a\n\nid: 7\ndata: b\n\n", 2, 2);
+    vayu::http::expand_stored_stream_events (trace);
+
+    const auto& events = trace["events"];
+    ASSERT_EQ (events["items"].size (), 2u) << events.dump (2);
+    EXPECT_EQ (events["items"][0]["data"], "a");
+    EXPECT_EQ (events["items"][0].value ("receivedAt", int64_t{ -1 }), 1000);
+    EXPECT_EQ (events["items"][1]["sourceId"], "7");
+    EXPECT_EQ (events["items"][1].value ("receivedAt", int64_t{ -1 }), 1001);
+    EXPECT_EQ (events["totalEvents"], 2);
+    EXPECT_FALSE (events["eventsTruncated"].get<bool> ());
+    EXPECT_EQ (events["endReason"], "completed");
+    EXPECT_FALSE (events.contains ("receivedAt"));
+    EXPECT_FALSE (events.contains ("maxEventBytes"));
+}
+
+// The arrivals the stored cap kept bound the list, as the live stored list
+// was bounded. Mutation check: bound the list by `max_stored_events` alone
+// and all three are served.
+TEST (StoredStreamEvents, StopAtTheArrivalsTheStoredCapKept) {
+    auto trace = stored_stream_trace ("data: a\n\ndata: b\n\ndata: c\n\n", 3, 2);
+    vayu::http::expand_stored_stream_events (trace);
+
+    EXPECT_EQ (trace["events"]["items"].size (), 2u);
+    EXPECT_EQ (trace["events"]["totalEvents"], 3);
+    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
+}
+
+// Either cut makes the stored bytes a prefix, even when the parse happens to
+// be whole. Mutation check: read only `bodyCapped` in
+// `expand_stored_stream_events` and the storage cut reads as a whole stream.
+TEST (StoredStreamEvents, ABodyCutForStorageOrAtTheBoundIsAPrefix) {
+    for (const char* cut : { "bodyCapped", "bodyTruncated" }) {
+        SCOPED_TRACE (cut);
+        auto trace             = stored_stream_trace ("data: a\n\n", 1, 1);
+        trace["response"][cut] = true;
+        vayu::http::expand_stored_stream_events (trace);
+        EXPECT_EQ (trace["events"]["items"].size (), 1u);
+        EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
+    }
+}
+
+// A body that is not UTF-8 is stored as base64 (`response_trace_node`), and
+// its events are parsed from the bytes it decodes to. Mutation check: parse
+// the stored text without decoding it and nothing is served.
+TEST (StoredStreamEvents, ABase64BodyIsDecodedBeforeItIsParsed) {
+    const std::string bytes = "data: caf\xE9\n\n";
+    auto trace = stored_stream_trace (vayu::utils::base64_encode (bytes), 1, 1);
+    trace["response"]["bodyEncoding"] = "base64";
+    vayu::http::expand_stored_stream_events (trace);
+
+    const auto expected =
+    vayu::http::buffered_stream_events_node (bytes, vayu::http::SseLimits{}, 1, true);
+    ASSERT_EQ (trace["events"]["items"].size (), 1u) << trace["events"].dump ();
+    EXPECT_EQ (trace["events"]["items"][0]["data"], expected["items"][0]["data"]);
+}
+
+// A trace stored before #3770 carries its list, and an ordinary send has no
+// events node: both are served exactly as stored.
+TEST (StoredStreamEvents, ATraceWithoutASidecarIsServedAsStored) {
+    const json legacy{ { "response", { { "body", "" } } },
+        { "events",
+        { { "items", json::array ({ { { "event", "message" }, { "data", "x" } } }) },
+        { "totalEvents", 1 }, { "eventsTruncated", false }, { "endReason", "completed" } } } };
+    auto served = legacy;
+    vayu::http::expand_stored_stream_events (served);
+    EXPECT_EQ (served, legacy);
+
+    const json ordinary{ { "response", { { "body", "{}" } } } };
+    served = ordinary;
+    vayu::http::expand_stored_stream_events (served);
+    EXPECT_EQ (served, ordinary);
+}
 
 // ---------------------------------------------------------------------------
 // The manager
@@ -1855,6 +1965,39 @@ class StreamExecuteTest : public ::testing::Test {
         return json::object ();
     }
 
+    /// The trace as `GET /runs/:runId/results/:resultId` serves it, once the
+    /// row is stored: what the app and the MCP tools read, with a stream's
+    /// event list parsed back from its stored body.
+    json served_trace_for (const std::string& run_id) {
+        if (!vayu::tests::wait_until (
+            [&] () { return !db_->get_results (run_id).empty (); })) {
+            ADD_FAILURE () << "no result row was ever stored for " << run_id;
+            return json::object ();
+        }
+        const auto result_id = std::to_string (db_->get_results (run_id)[0].id);
+        auto [status, body] =
+        vayu::http::routes::run_result_response (*db_, run_id, result_id);
+        EXPECT_EQ (status, 200) << body.dump (2);
+        return body.value ("trace", json::object ());
+    }
+
+    /// The upstream events the stream's ring published, in order: the live
+    /// list, `receivedAt` included, that the served trace must reproduce.
+    std::vector<json> live_events (const std::string& run_id) const {
+        const auto context = manager_->get (run_id);
+        if (!context) {
+            ADD_FAILURE () << "the manager holds no stream for " << run_id;
+            return {};
+        }
+        std::vector<json> events;
+        for (auto& payload : ring_payloads (*context)) {
+            if (!payload.contains ("statusCode")) {
+                events.push_back (std::move (payload));
+            }
+        }
+        return events;
+    }
+
     /// The stored trace of the most recent design run. A buffered send answers
     /// with the response rather than a run id, so its row is found by recency -
     /// safe because each test gets its own database, and unpolled because the
@@ -1950,10 +2093,11 @@ TEST_F (StreamExecuteTest, TruncationIsVisibleToTheScriptAndMatchesTheTrace) {
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
     << trace["scripts"]["testResults"][0].value ("error", "");
     // Stated twice on purpose: the assertion above proves the script saw it,
-    // and this proves the stored node the app restores from says the same.
-    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
-    EXPECT_EQ (trace["events"]["totalEvents"], 5);
-    EXPECT_EQ (trace["events"]["items"].size (), 2u);
+    // and this proves the served node the app restores from says the same.
+    auto served = served_trace_for (run_id);
+    EXPECT_TRUE (served["events"]["eventsTruncated"].get<bool> ()) << served.dump (2);
+    EXPECT_EQ (served["events"]["totalEvents"], 5);
+    EXPECT_EQ (served["events"]["items"].size (), 2u);
 }
 
 // #2522 on the streaming transport: the elements a composed send carries are
@@ -2550,7 +2694,7 @@ TEST_F (StreamExecuteTest, AStreamWithoutScriptsStoresNoScriptNode) {
 
     const auto trace = trace_for (run_id);
     EXPECT_FALSE (trace.contains ("scripts")) << trace.dump (2);
-    EXPECT_EQ (trace["events"]["items"].size (), 2u);
+    EXPECT_EQ (served_trace_for (run_id)["events"]["items"].size (), 2u);
 }
 
 // Malformed frames are the origin's problem, not the run's: the parser drops
@@ -2629,25 +2773,197 @@ std::string sse_data_frame (std::size_t payload_bytes, char fill) {
     return frame;
 }
 
-// An event stream's bytes are its events: the body stays empty and
-// `bodyBytes` says how much arrived. Mutation check: drop the stream's
-// `bodyBytes` write in `response_trace_node` and it reads 0, the held length.
-TEST_F (StreamExecuteTest, AnEventStreamStoresItsByteCountAndNoBody) {
+// An event stream's bytes are stored once, as its body (#3770): the trace's
+// `events` node keeps only what the bytes cannot say, and its size follows
+// the bytes. Stored once, the row measured 12,726 characters for these 10,200
+// bytes; with the list stored beside them it measured 27,854, so the bound
+// sits between, at one and a half times the bytes. Mutation checks: drop
+// `hold_body_bytes` and the body reads ""; store the parsed list beside the
+// sidecar in the completion pass and the `items` and the size checks fail.
+TEST_F (StreamExecuteTest, AnEventStreamStoresItsBytesOnceAsTheBody) {
     std::vector<std::string> chunks;
-    std::size_t delivered = 0;
+    std::string whole;
     for (int i = 0; i < 100; ++i) {
         chunks.push_back (sse_data_frame (94, static_cast<char> ('a' + (i % 26))));
-        delivered += chunks.back ().size ();
+        whole += chunks.back ();
     }
-    ASSERT_EQ (delivered, 10200u);
+    ASSERT_EQ (whole.size (), 10200u);
     origin_           = std::make_unique<StreamServer> (std::move (chunks));
     const auto run_id = start (json::object ());
     ASSERT_FALSE (run_id.empty ());
 
     const auto trace = trace_for (run_id);
-    EXPECT_EQ (trace["response"]["body"], "") << trace.dump (2);
-    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), delivered);
+    EXPECT_EQ (trace["response"]["body"], whole) << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), whole.size ());
+    EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
     EXPECT_EQ (trace["events"]["totalEvents"], 100);
+    EXPECT_EQ (trace["events"]["receivedAt"].size (), 100u);
+    EXPECT_FALSE (trace["events"].contains ("items"));
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_LT (rows[0].trace_data.size (), whole.size () + (whole.size () / 2));
+}
+
+// The cap on a stream's body is the design bound, and it says so; the stream
+// itself runs on and every event is still counted. Mutation check: drop the
+// `spec.max_body_bytes` line in `run_streaming_execution` and the whole
+// stream is kept, uncapped.
+TEST_F (StreamExecuteTest, AnEventStreamPastTheDesignBoundIsCappedAndSaysSo) {
+    set_config ("maxDesignResponseBodyBytes", "1024");
+    const std::vector<std::string> chunks (30, sse_data_frame (98, 'z'));
+    const std::size_t delivered = chunks.size () * chunks.front ().size ();
+    origin_                     = std::make_unique<StreamServer> (chunks);
+    const auto run_id           = start (json::object ());
+    ASSERT_FALSE (run_id.empty ());
+
+    auto trace = served_trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"].get<std::string> ().size (), 1024u)
+    << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyCapped", false), true);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), delivered);
+    EXPECT_EQ (trace["events"]["totalEvents"], 30);
+    EXPECT_TRUE (trace["events"]["eventsTruncated"].get<bool> ());
+    EXPECT_LT (trace["events"]["items"].size (), 30u);
+}
+
+/// `{"n": <i>}` events with ids, as `serve` writes them, joined.
+std::string served_bytes (int count) {
+    std::string bytes;
+    for (int i = 0; i < count; ++i) {
+        bytes += "id: e" + std::to_string (i) +
+        "\nevent: tick\ndata: {\"n\": " + std::to_string (i) + "}\n\n";
+    }
+    return bytes;
+}
+
+/// `assert.contains`, `assert.size` and `extract.regex` over the body of a
+/// three-event `serve` stream, each of which passes only on its bytes.
+json body_reading_elements () {
+    return json::array ({ { { "id", "el_contains" }, { "kind", "assert.contains" },
+                          { "config", { { "field", "body" }, { "text", "\"n\": 2" } } } },
+    { { "id", "el_size" }, { "kind", "assert.size" },
+    { "config", { { "bytes", 64 }, { "op", "gte" } } } },
+    { { "id", "el_regex" }, { "kind", "extract.regex" },
+    { "config",
+    { { "pattern", "\"n\": ([0-9]+)" }, { "template", "$1$" },
+    { "variable", "lastN" }, { "matchNo", 3 }, { "required", true } } } } });
+}
+
+/// Each element's outcome in @p node, keyed by id.
+std::map<std::string, std::string> outcomes_by_id (const json& node) {
+    std::map<std::string, std::string> out;
+    for (const auto& outcome : node) {
+        out[outcome.value ("id", "")] = outcome.value ("outcome", "");
+    }
+    return out;
+}
+
+// The issue's acceptance criterion: an element that reads the body judges a
+// streamed Send by the bytes it delivered, as the buffered transport (the one
+// a collection run and a load run read) judges the same reply. Mutation
+// check: drop the `hold_body_bytes` call in `stream_write_callback` and the
+// stream's three outcomes read failed, failed and missing.
+TEST_F (StreamExecuteTest, BodyReadingElementsJudgeAStreamAsTheBufferedSendDoes) {
+    serve (3);
+    const auto run_id = start (json{ { "elements", body_reading_elements () } });
+    ASSERT_FALSE (run_id.empty ());
+    const auto streamed = outcomes_by_id (trace_for (run_id)["elements"]);
+
+    const auto buffered = outcomes_by_id (send_buffered (
+    json{ { "elements", body_reading_elements () } })["elements"]);
+
+    const std::map<std::string, std::string> all_ok{ { "el_contains", "ok" },
+        { "el_size", "ok" }, { "el_regex", "ok" } };
+    EXPECT_EQ (streamed, all_ok);
+    EXPECT_EQ (buffered, all_ok);
+}
+
+// `pm.response.text()` over a stream is the stream's bytes, as it is over a
+// buffered reply (owner decision on #3770). Mutation check: drop the
+// `hold_body_bytes` call and the script reads "".
+TEST_F (StreamExecuteTest, ThePostRequestScriptReadsTheStreamsBytesAsText) {
+    serve (2);
+    const auto run_id = start (json{ { "elements",
+    script_elements ("",
+    "pm.test('text is the bytes', function () { "
+    "pm.expect(pm.response.text()).to.equal(" +
+    json (served_bytes (2)).dump () + "); });") } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
+    << trace["scripts"]["testResults"][0].value ("error", "");
+}
+
+// What `read_body` and `diff_bodies` read (#3770): two streams that delivered
+// different events are served as different bodies, and each served list is
+// the live one, arrival times included. Mutation checks: drop the
+// `expand_stored_stream_events` call in `report_result_node` and no `items`
+// is served; drop the `receivedAt` pairing in `buffered_stream_events_node`
+// and the items differ from the live ones.
+TEST_F (StreamExecuteTest, TheResultsRouteServesEachStreamsBytesAndItsLiveEvents) {
+    serve (3);
+    const auto first_run = start (json::object ());
+    ASSERT_FALSE (first_run.empty ());
+    auto first = served_trace_for (first_run);
+
+    serve (5);
+    const auto second_run = start (json::object ());
+    ASSERT_FALSE (second_run.empty ());
+    auto second = served_trace_for (second_run);
+
+    EXPECT_EQ (first["response"]["body"], served_bytes (3));
+    EXPECT_EQ (second["response"]["body"], served_bytes (5));
+    EXPECT_NE (first["response"]["body"], second["response"]["body"]);
+
+    for (auto [run_id, trace] : std::vector<std::pair<std::string, json>>{
+         { first_run, first }, { second_run, second } }) {
+        const auto live   = live_events (run_id);
+        const auto& items = trace["events"]["items"];
+        ASSERT_EQ (items.size (), live.size ()) << trace["events"].dump (2);
+        for (std::size_t i = 0; i < live.size (); ++i) {
+            EXPECT_TRUE (items[i].contains ("receivedAt")) << items[i].dump ();
+            EXPECT_EQ (items[i], live[i]) << "item " << i;
+        }
+        EXPECT_EQ (trace["events"]["totalEvents"], live.size ());
+        EXPECT_FALSE (trace["events"]["eventsTruncated"].get<bool> ());
+        EXPECT_EQ (trace["events"]["endReason"], "completed");
+        EXPECT_FALSE (trace["events"].contains ("receivedAt"));
+    }
+
+    // `GET /runs/:runId`'s `result`, which History seeds a design run from,
+    // serves the same list. Mutation check: drop the
+    // `expand_stored_stream_events` call in `attach_design_result`.
+    const auto run = db_->get_run (first_run);
+    ASSERT_HAS_VALUE (run);
+    json payload = json::object ();
+    vayu::json::attach_design_result (payload, *run, db_->get_results (first_run));
+    EXPECT_EQ (payload["result"]["trace"]["events"], first["events"]);
+}
+
+// The event cap stops the transfer inside a chunk that held three events, and
+// the body holds the whole chunk: the served list stops at the one the stream
+// counted. Two bounds hold it, each enough alone: one arrival is kept per
+// counted event, and the list never passes `totalEvents`. Mutation check:
+// bound the list in `buffered_stream_events_node` by `max_stored_events`
+// alone and three are served.
+TEST_F (StreamExecuteTest, TheServedListStopsAtTheEventsTheStreamCounted) {
+    origin_ = std::make_unique<StreamServer> (
+    std::vector<std::string>{ "data: a\n\ndata: b\n\ndata: c\n\n" });
+    const auto run_id = start (json{ { "maxStreamEvents", 1 } });
+    ASSERT_FALSE (run_id.empty ());
+
+    auto trace = served_trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"], "data: a\n\ndata: b\n\ndata: c\n\n");
+    const auto live = live_events (run_id);
+    ASSERT_EQ (live.size (), 1u);
+    ASSERT_EQ (trace["events"]["items"].size (), 1u) << trace["events"].dump (2);
+    EXPECT_EQ (trace["events"]["items"][0], live[0]);
+    EXPECT_EQ (trace["events"]["totalEvents"], 1);
+    EXPECT_EQ (trace["events"]["endReason"], "maxStreamEvents");
+    EXPECT_FALSE (trace["events"]["eventsTruncated"].get<bool> ());
 }
 
 // Past `maxDesignResponseBodyBytes` the body is a prefix and says so, and the
