@@ -46,6 +46,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/stream_tally.hpp"
 #include "vayu/types.hpp"
 #include "wait_until.hpp"
 
@@ -53,6 +54,10 @@ namespace {
 
 /// How long `/delayed` holds its first event after the headers.
 constexpr std::chrono::milliseconds FIRST_EVENT_DELAY{ 300 };
+
+/// How long `/paused` waits between its two events, once the client has
+/// counted the first.
+constexpr std::chrono::milliseconds EVENT_PAUSE{ 300 };
 
 /// The body of every reply that is not a stream: one event's worth of bytes
 /// under another content type.
@@ -125,6 +130,27 @@ class LoadStreamServer {
                 std::this_thread::sleep_for (FIRST_EVENT_DELAY);
                 const std::string event = "data: first\n\n";
                 sink.write (event.data (), event.size ());
+                sink.done ();
+                return true;
+            });
+        });
+
+        // One event, then EVENT_PAUSE from the moment the client's tally has
+        // counted it (`paused_live`, which the test puts on the request), then
+        // a second. Timed from the client's count rather than the first
+        // write, so a client slow to read the first event cannot shorten
+        // the gap it measures.
+        svr_.Get ("/paused", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                const std::string first = "data: a\n\n";
+                sink.write (first.data (), first.size ());
+                while (paused_live_->events.load () == 0 && !stopping_.load ()) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (1));
+                }
+                std::this_thread::sleep_for (EVENT_PAUSE);
+                const std::string second = "data: b\n\n";
+                sink.write (second.data (), second.size ());
                 sink.done ();
                 return true;
             });
@@ -238,11 +264,19 @@ class LoadStreamServer {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
 
+    /// The live counters `/paused` reads; one `/paused` request per server.
+    [[nodiscard]] std::shared_ptr<vayu::LiveStreamCounts> paused_live () const {
+        return paused_live_;
+    }
+
     private:
     httplib::Server svr_;
     std::thread thread_;
     int port_ = 0;
     std::atomic<bool> stopping_{ false };
+    // Built before the listener thread starts, so the handler reads it safely.
+    std::shared_ptr<vayu::LiveStreamCounts> paused_live_ =
+    std::make_shared<vayu::LiveStreamCounts> ();
     std::atomic<int> sse_or_429_hits_{ 0 };
 };
 
@@ -395,6 +429,134 @@ TEST (SseLoadStreamTest, AnEventOnlyTheCloseCompletedIsCountedButNotTimed) {
     ASSERT_HAS_VALUE (response.stream_events);
     EXPECT_EQ (*response.stream_events, 1u);
     EXPECT_FALSE (response.stream_first_event_ms.has_value ());
+
+    loop.stop ();
+}
+
+// ---------------------------------------------------------------------------
+// The largest event gap and the per-stream rate (issue #3776)
+// ---------------------------------------------------------------------------
+
+namespace {
+vayu::Headers event_stream_headers () {
+    vayu::Headers headers;
+    headers["Content-Type"] = "text/event-stream";
+    return headers;
+}
+} // namespace
+
+// The tally's rules on a clock the test owns. Arrivals: one event at 5 ms, a
+// keep-alive at 20 ms (no event, so no arrival), two events in one write at
+// 30 ms (one stamp), and at 100 ms the start of a frame only the close
+// completes. Healthy: first event 5 ms, largest gap 25 ms, rate (3 - 1)
+// events over 25 ms = 80/s. Mutation checks: stamp every write and the gap
+// reads 70 ms; count the frame `finish` completed into the rate and it reads
+// 120/s; stop updating the gap and both are absent.
+TEST (StreamTallyTimingTest, OnlyWritesThatCompleteAnEventAreArrivals) {
+    using std::chrono::milliseconds;
+    const auto started = vayu::http::StreamTally::Clock::now ();
+    const auto headers = event_stream_headers ();
+    vayu::http::StreamTally tally;
+    tally.start (vayu::StreamBounds{ 60000, 1000 }, started);
+
+    tally.feed ("data: a\n\n", headers, started + milliseconds (5));
+    tally.feed (": ping\n\n", headers, started + milliseconds (20));
+    tally.feed ("data: b\n\ndata: c\n\n", headers, started + milliseconds (30));
+    tally.feed ("data: d", headers, started + milliseconds (100));
+    vayu::Response response;
+    response.headers = headers;
+    tally.report (response);
+
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 4u)
+    << "the close completed the last frame";
+    ASSERT_HAS_VALUE (response.stream_first_event_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_first_event_ms, 5.0);
+    ASSERT_HAS_VALUE (response.stream_max_event_gap_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_max_event_gap_ms, 25.0);
+    ASSERT_HAS_VALUE (response.stream_event_rate);
+    EXPECT_NEAR (*response.stream_event_rate, 80.0, 1e-9);
+}
+
+// One write has no gap and no span, whatever it carried; two writes at one
+// instant have a gap of 0 and no rate, since the span is nothing to divide by.
+TEST (StreamTallyTimingTest, OneArrivalHasNoGapAndAZeroSpanHasNoRate) {
+    const auto started = vayu::http::StreamTally::Clock::now ();
+    const auto headers = event_stream_headers ();
+    vayu::Response one_write;
+    one_write.headers = headers;
+    {
+        vayu::http::StreamTally tally;
+        tally.start (vayu::StreamBounds{ 60000, 1000 }, started);
+        tally.feed ("data: a\n\ndata: b\n\ndata: c\n\n", headers, started);
+        tally.report (one_write);
+    }
+    EXPECT_FALSE (one_write.stream_max_event_gap_ms.has_value ());
+    EXPECT_FALSE (one_write.stream_event_rate.has_value ());
+
+    vayu::Response same_instant;
+    same_instant.headers = headers;
+    {
+        vayu::http::StreamTally tally;
+        tally.start (vayu::StreamBounds{ 60000, 1000 }, started);
+        tally.feed ("data: a\n\n", headers, started);
+        tally.feed ("data: b\n\n", headers, started);
+        tally.report (same_instant);
+    }
+    ASSERT_HAS_VALUE (same_instant.stream_max_event_gap_ms);
+    EXPECT_DOUBLE_EQ (*same_instant.stream_max_event_gap_ms, 0.0);
+    EXPECT_FALSE (same_instant.stream_event_rate.has_value ());
+}
+
+// One pause on the wire. `/paused` starts its EVENT_PAUSE only once the
+// tally has counted the first event, so the healthy gap is at least that
+// pause however slowly this runner reads; the broken readings are no gap at
+// all, or one near 0. A lower bound only, which a slow runner cannot fail.
+// The rate is one event over at least that span, so at most 1000 / 300 per
+// second, a bound a slow runner can only move further from.
+TEST (SseLoadStreamTest, APauseBetweenEventsIsTheStreamsLargestGap) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+    auto request = stream_request (server.url ("/paused"), 1000, 30000);
+    ASSERT_HAS_VALUE (request.stream_bounds);
+    request.stream_bounds->live = server.paused_live ();
+
+    auto result = run_one (loop, request);
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 2u);
+    ASSERT_HAS_VALUE (response.stream_max_event_gap_ms);
+    EXPECT_GE (*response.stream_max_event_gap_ms,
+    static_cast<double> (EVENT_PAUSE.count ()));
+    ASSERT_HAS_VALUE (response.stream_event_rate);
+    EXPECT_GT (*response.stream_event_rate, 0.0);
+    EXPECT_LE (*response.stream_event_rate,
+    1000.0 / static_cast<double> (EVENT_PAUSE.count ()));
+
+    loop.stop ();
+}
+
+// Three events in one write are one arrival: counted and timed to the first
+// event, with no gap and no rate. Mutation check: stamp a gap of 0 on the
+// first arrival and the gap reads 0 here.
+TEST (SseLoadStreamTest, EventsThatShareOneWriteHaveNoGapOrRate) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+
+    auto result = run_one (loop, stream_request (server.url ("/finite"), 1000, 30000));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 3u);
+    EXPECT_TRUE (response.stream_first_event_ms.has_value ());
+    EXPECT_FALSE (response.stream_max_event_gap_ms.has_value ());
+    EXPECT_FALSE (response.stream_event_rate.has_value ());
 
     loop.stop ();
 }
@@ -605,6 +767,8 @@ TEST (SseLoadStreamTest, AReplyThatDidNotAnnounceAStreamCarriesNoEventCount) {
         EXPECT_FALSE (response.stream_events.has_value ()) << path;
         EXPECT_FALSE (response.stream_capped) << path;
         EXPECT_FALSE (response.stream_first_event_ms.has_value ()) << path;
+        EXPECT_FALSE (response.stream_max_event_gap_ms.has_value ()) << path;
+        EXPECT_FALSE (response.stream_event_rate.has_value ()) << path;
         EXPECT_EQ (live->events.load (), 0u) << path;
         EXPECT_EQ (live->open.load (), 0u) << path;
     }

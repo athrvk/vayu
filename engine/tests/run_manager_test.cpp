@@ -1543,6 +1543,57 @@ TEST (LoadStream, OnlyTheRepliesThatAnnouncedAStreamAreTheReportsStreams) {
         EXPECT_EQ (stream.at ("events").at ("p50").get<int> (), 2) << stream.dump ();
         EXPECT_EQ (stream.at ("timeToFirstEvent").at ("count").get<int> (), STREAMS)
         << stream.dump ();
+        // Each stream's two events came in one write, so none has a gap or a
+        // rate to report (#3776), and neither block is written as zeros.
+        EXPECT_FALSE (stream.contains ("maxEventGap")) << stream.dump ();
+        EXPECT_FALSE (stream.contains ("eventRate")) << stream.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #3776: a single-request load run's streams report their pace. Each meets
+// `/sse-ticks` (one event a write, SSE_TICK_MS apart) and the event cap ends
+// it at its third, so every completion has gaps and a rate. Asserted as wired,
+// not timed: `APauseBetweenEventsIsTheStreamsLargestGap` holds the timing.
+// Mutation check: record a completion without `stream_completion_of` in
+// `handle_result` (load_strategy.cpp, gap and rate dropped) and both blocks
+// are absent.
+TEST (LoadStream, ASingleRequestRunsStreamsReportTheirLargestGapAndRate) {
+    constexpr int ITERATIONS  = 2;
+    const std::string db_path = "test_load_stream_pace.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.sse_ticks_url () }, { "mode", "iterations" },
+            { "iterations", ITERATIONS }, { "concurrency", 1 },
+            { "timeout", 5000 }, { "workers", 1 }, { "stream", true },
+            { "maxStreamEvents", 3 }, { "maxStreamDurationMs", 10000 } };
+        const std::string run_id = "run_load_stream_pace";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& stream = report.at ("stream");
+        EXPECT_EQ (stream.at ("completions").get<int> (), ITERATIONS) << stream.dump ();
+        for (const auto* block : { "maxEventGap", "eventRate" }) {
+            ASSERT_TRUE (stream.contains (block)) << block << ": " << stream.dump ();
+            EXPECT_EQ (stream.at (block).at ("count").get<int> (), ITERATIONS) << block;
+            EXPECT_GT (stream.at (block).at ("max").get<double> (), 0.0) << block;
+        }
 
         manager.shutdown ();
     }

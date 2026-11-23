@@ -795,7 +795,10 @@ Notes:
   section also carries the per-completion event distribution, a derived
   `eventsPerSecond` and `timeToFirstEvent` (issue #3234), the wait from submit
   to each stream's first event, which `timingBreakdown.phases.firstByte` does
-  not measure: it ends at the response headers.
+  not measure: it ends at the response headers. `maxEventGap` (each stream's
+  longest pause between events, ms) and `eventRate` (each stream's own
+  events/s) (issue #3776) are what tell a stall mid-reply or one slow stream
+  from a healthy run, where the whole-run rate blends them.
 - **`start_load_run`'s `monitor` block** scrapes the target's own metrics
   endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
   and the `series` names to read), so an agent asked why a target slowed down

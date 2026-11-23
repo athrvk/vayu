@@ -2158,6 +2158,15 @@ TEST_F (ScenarioRunnerTest, AStoredStreamingRequestRunsAsAStreamToTheServersClos
     EXPECT_EQ (stream["timeToFirstEvent"]["count"].get<size_t> (), 1u);
     // A lower bound only: the server holds the first event 150 ms.
     EXPECT_GE (stream["timeToFirstEvent"]["max"].get<double> (), 150.0);
+    // The sequential path's completion carries the pace too (#3776): three
+    // events in three writes, so one gap and one rate. Asserted as wired, not
+    // timed; `APauseBetweenEventsIsTheStreamsLargestGap` holds the timing.
+    // Mutation check: record a completion without `stream_completion_of` in
+    // `scenario_runner.cpp` (gap and rate dropped) and both blocks are absent.
+    ASSERT_TRUE (stream.contains ("maxEventGap")) << stream.dump ();
+    EXPECT_EQ (stream["maxEventGap"]["count"].get<size_t> (), 1u);
+    ASSERT_TRUE (stream.contains ("eventRate")) << stream.dump ();
+    EXPECT_EQ (stream["eventRate"]["count"].get<size_t> (), 1u);
 
     const auto [status, report] = vayu::http::routes::run_report_response (*db_, run_id);
     ASSERT_EQ (status, 200) << report.dump ();

@@ -1305,6 +1305,28 @@ struct Response {
     std::optional<double> stream_first_event_ms;
 
     /**
+     * @brief The largest wait, in milliseconds, between two consecutive writes
+     *        that completed an event of a bounded stream (issue #3776).
+     *
+     * Absent below two such writes, and wherever `stream_first_event_ms` is.
+     * Its resolution is the chunk libcurl hands over, not the event: events
+     * that share a write share a stamp, and a proxy that buffers the stream
+     * shortens the gaps it hides.
+     */
+    std::optional<double> stream_max_event_gap_ms;
+
+    /**
+     * @brief A bounded stream's own event rate (issue #3776): the events after
+     *        the first, over the time from the first write that completed an
+     *        event to the last, in events per second.
+     *
+     * Absent below two such writes or over a zero span. An unterminated last
+     * frame the close completed is not in it, for the reason it is not in
+     * `stream_first_event_ms`.
+     */
+    std::optional<double> stream_event_rate;
+
+    /**
      * @brief Body bytes the final response delivered over a design stream
      *        (`consume_sse_stream`, issue #3238); absent on every other path.
      *

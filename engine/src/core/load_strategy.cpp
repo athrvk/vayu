@@ -311,9 +311,8 @@ const ResultAnnotations& annotations) {
     // ended cleanly would read highest on the runs that failed most. Only a
     // transfer that actually streamed carries the count - see
     // `Response::stream_events` for why it is optional rather than a zero.
-    if (response.stream_events) {
-        context->metrics_collector->record_stream_completion (*response.stream_events,
-        response.stream_capped, response.stream_first_event_ms);
+    if (const auto completion = stream_completion_of (response)) {
+        context->metrics_collector->record_stream_completion (*completion);
     }
 
     if (response.has_error ()) {
