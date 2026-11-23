@@ -458,6 +458,16 @@ export interface ResponseState {
 	 */
 	receivedAt?: string;
 	/**
+	 * When a stream was started, epoch ms (#3775); the zero of the Events rows'
+	 * offsets, the status bar's running clock and the Timing tab's first event.
+	 * Set on a stream sent in this session - on the live placeholder and carried
+	 * onto the stored response at its end - and absent on every other response,
+	 * a stream restored from History included: the stored trace holds no start,
+	 * and the run's end time less its latency would be off by the post-request
+	 * script's run.
+	 */
+	sentAt?: number;
+	/**
 	 * Set only when this response was rebuilt from a stored run rather than sent
 	 * just now - a cold start, or a run opened from History. Drives the same age
 	 * chip, labelled "from run" so the two cases stay distinguishable: the

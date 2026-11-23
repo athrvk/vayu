@@ -68,10 +68,19 @@ const TIP_CLASS = "ml-1 border-rule";
 const SUMMED_TTFB_TIP =
 	"Time to first byte, summed over every request in the redirect chain - server processing + propagation at each hop. It is not one server's wait.";
 
+const FIRST_EVENT_TIP =
+	"Time from the send until the first event of the stream arrived. TTFB above is when the response headers did, which for a stream comes long before the first event.";
+
 export interface ResponseTimingTabProps {
 	timing: ResponseTiming;
 	/** The hops followed before the final response; their phases are in `timing`. */
 	redirects?: RedirectHop[];
+	/**
+	 * A stream's first event, in ms after the send (#3775). Absent unless the
+	 * stream has an event and its send time is known. A stream's TTFB is when
+	 * the headers arrived, which says nothing about when the first token did.
+	 */
+	firstEventMs?: number;
 }
 
 /** One request per followed redirect, plus the one that answered finally. */
@@ -79,7 +88,11 @@ function summedPhasesNote(redirectCount: number): string {
 	return `Phases are summed over ${redirectCount + 1} requests: ${redirectCount} ${pluralize(redirectCount, "redirect")} and the final response.`;
 }
 
-export default function ResponseTimingTab({ timing, redirects }: ResponseTimingTabProps) {
+export default function ResponseTimingTab({
+	timing,
+	redirects,
+	firstEventMs,
+}: ResponseTimingTabProps) {
 	const redirectCount = redirects?.length ?? 0;
 	const summed = redirectCount > 0;
 	const phases = phasesFromTrace(timing).map((p) =>
@@ -167,6 +180,9 @@ export default function ResponseTimingTab({ timing, redirects }: ResponseTimingT
 				)}
 				{isReportedMs(timing.scriptMs) && (
 					<TimingStat label="Scripts" value={timing.scriptMs} tip={SCRIPT_TIME_TIP} />
+				)}
+				{firstEventMs !== undefined && (
+					<TimingStat label="First event" value={firstEventMs} tip={FIRST_EVENT_TIP} />
 				)}
 				<TimingStat
 					label="Total"

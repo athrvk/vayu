@@ -27,7 +27,7 @@ supported is listed [below](#not-yet-supported).
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.responseSize` (the body's bytes, `.size().body`), `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
-| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated?, text? }`), `.totalEvents`, `.eventsTruncated` - a streamed response only, on a Send and on every run that streams; `.streamText` on a stream whose request declared a `streamTextPath`, see below. **Vayu-specific** |
+| Streamed events     | `pm.response.events` (array of `{ event, id?, data, receivedAt?, dataTruncated?, text? }`), `.totalEvents`, `.eventsTruncated` - a streamed response only, on a Send and on every run that streams; `.streamText` on a stream whose request declared a `streamTextPath`, see below. **Vayu-specific** |
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
@@ -1252,6 +1252,10 @@ the stream is still arriving. A script sees the retained list, once.
 list is bounded by the engine's `sseMaxStoredEvents`, so a script that means to
 assert over the *whole* stream has to check `eventsTruncated` first; counting a
 prefix would otherwise report a wrong number with complete confidence.
+
+Each entry's `receivedAt` is when the engine received it, in milliseconds since
+the Unix epoch: a number on a design Send, absent where the list is reparsed
+from a buffered body (a load run), where it is not measured.
 
 **`pm.response.streamText` is the streamed reply, assembled** (issue #3773). A
 streaming request that declares a `streamTextPath` (a JSONPath such as

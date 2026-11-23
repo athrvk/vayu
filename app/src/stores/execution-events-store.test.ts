@@ -17,7 +17,7 @@
  * belongs to something else.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useExecutionEventsStore } from "./execution-events-store";
 import type { LeftOutElement } from "@/lib/elements";
 import type { ExampleSentRequest, StreamEvent } from "@/types";
@@ -46,8 +46,28 @@ const start = (runId: string, requestId = "req_1") =>
 		eventsUrl: `/runs/${runId}/events`,
 	});
 
+/** The instant a test's streams start at; the store reads the clock, the test owns it. */
+const SENT_AT = 1_700_000_000_000;
+
 describe("execution events store", () => {
-	beforeEach(() => useExecutionEventsStore.getState().clear());
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(SENT_AT);
+		useExecutionEventsStore.getState().clear();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("stamps when a stream started, and forgets it with the stream (#3775)", () => {
+		expect(useExecutionEventsStore.getState().sentAt).toBeNull();
+
+		start("run_1");
+		// Mutation check: leave `sentAt` out of `startStream` and every offset,
+		// the status bar's clock and the first event lose their zero.
+		expect(useExecutionEventsStore.getState().sentAt).toBe(SENT_AT);
+
+		useExecutionEventsStore.getState().handOver("req_other");
+		expect(useExecutionEventsStore.getState().sentAt).toBeNull();
+	});
 
 	it("starts empty", () => {
 		const s = useExecutionEventsStore.getState();
@@ -269,6 +289,7 @@ describe("execution events store", () => {
 			expect(useExecutionEventsStore.getState().replacedFeeds.req_B).toEqual({
 				runId: "run_B",
 				sent,
+				sentAt: SENT_AT,
 				leftOut: LEFT_OUT,
 				finalized: false,
 			});
@@ -312,6 +333,7 @@ describe("execution events store", () => {
 				requestId: "req_1",
 				runId: "run_1",
 				sent,
+				sentAt: SENT_AT,
 				leftOut: LEFT_OUT,
 				sends: 1,
 			});

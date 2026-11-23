@@ -944,6 +944,19 @@ TEST (DeriveSpecIndexes, ARefLoopThatNeverReachesAValueIsRefusedNamingTheOperati
     EXPECT_TRUE (index.response_schemas.empty ());
 }
 
+// #3810: a loop that only a property of the response schema reaches.
+TEST (DeriveSpecIndexes, ARefLoopOnlyAPropertyReachesIsRefused) {
+    const auto index = derive_spec_indexes (
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":)"
+    R"({"application/json":{"schema":{"type":"object","properties":)"
+    R"({"pet":{"$ref":"#/components/schemas/A"}}}}}}}}}},)"
+    R"("components":{"schemas":{"A":{"allOf":[{"$ref":"#/components/schemas/A"}]}}}})",
+    INDEX_CAP);
+    EXPECT_FALSE (index.ok ());
+    EXPECT_NE (index.error.find ("GET /pets (200) refers to itself"), std::string::npos)
+    << index.error;
+}
+
 TEST (DeriveSpecIndexes, ARecursiveSchemaThroughAPropertyIsStillIndexed) {
     const auto index = derive_spec_indexes (
     R"({"openapi":"3.0.0","paths":{"/tree":{"get":{"responses":{"200":{"content":)"

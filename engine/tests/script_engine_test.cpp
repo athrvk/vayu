@@ -7991,6 +7991,11 @@ TEST_F (ScriptEngineTest, ResponseEventsCarriesEachEntrysNameIdAndData) {
         pm.test("an event the origin never named has no id at all", function() {
             pm.expect(typeof pm.response.events[1].id).to.equal("undefined");
         });
+        pm.test("each entry carries the time the engine stamped it", function() {
+            pm.expect(pm.response.events[0].receivedAt).to.equal(17);
+            pm.expect(pm.response.events[1].receivedAt).to.equal(18);
+            pm.expect(typeof pm.response.events[0].receivedAt).to.equal("number");
+        });
         pm.test("the markers mirror the node", function() {
             pm.expect(pm.response.totalEvents).to.equal(2);
             pm.expect(pm.response.eventsTruncated).to.equal(false);
@@ -7999,7 +8004,37 @@ TEST_F (ScriptEngineTest, ResponseEventsCarriesEachEntrysNameIdAndData) {
     ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (result.tests.size (), 3u);
+    ASSERT_EQ (result.tests.size (), 4u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// A load run's sampled node is built without a clock reading, and a script
+// reading a time that was never measured would compare against nothing. Absent,
+// not 0 or null: `'receivedAt' in event` is how a script tells the two apart.
+TEST_F (ScriptEngineTest, ResponseEventsOmitsReceivedAtWhenTheNodeHasNone) {
+    const nlohmann::json events{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "tick" }, { "data", "1" } },
+        nlohmann::json{ { "event", "tick" }, { "data", "2" }, { "receivedAt", "soon" } } }) },
+        { "totalEvents", 2 }, { "eventsTruncated", false }, { "endReason", "completed" }
+    };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("an unmeasured arrival time is absent", function() {
+            pm.expect(typeof pm.response.events[0].receivedAt).to.equal("undefined");
+            pm.expect("receivedAt" in pm.response.events[0]).to.equal(false);
+        });
+        pm.test("a stored value that is not a time is not passed through", function() {
+            pm.expect("receivedAt" in pm.response.events[1]).to.equal(false);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 2u);
     for (const auto& test : result.tests) {
         EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
     }

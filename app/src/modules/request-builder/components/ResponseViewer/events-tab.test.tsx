@@ -26,10 +26,11 @@
  *   must not look like one the server closed.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { useExecutionEventsStore } from "@/stores";
+import { TIMING } from "@/config/timing";
 import type { ResponseState } from "../../types";
 import { STREAM_END_REASONS, type StreamEndReason, type StreamEvent } from "@/types";
 
@@ -449,6 +450,150 @@ describe("the Events tab", () => {
 
 		const row = screen.getByRole("button", { expanded: false });
 		expect(row.className).toMatch(/\brounded-none\b/);
+	});
+
+	describe("when each event is placed in time (#3775)", () => {
+		const SENT_AT = 1_700_000_000_000;
+		const at = (offsetMs: number, data: string): StreamEvent => ({
+			...event(data, "token"),
+			receivedAt: SENT_AT + offsetMs,
+		});
+		const timingOf = {
+			totalMs: 3700,
+			dnsMs: 1,
+			connectMs: 2,
+			tlsMs: 3,
+			firstByteMs: 80,
+			downloadMs: 3600,
+		};
+		/** The three events of a stream that took 1.5 s to answer. */
+		const slowStart = () => [at(1500, "a"), at(1620, "b"), at(3620, "c")];
+		const storedStream = (overrides: Partial<ResponseState>) =>
+			okResponse({
+				events: slowStart(),
+				totalEvents: 3,
+				eventsTruncated: false,
+				streamEndReason: "completed",
+				...overrides,
+			});
+		/** What each row printed for one figure, in row order. */
+		const figures = (since: string) =>
+			screen.queryAllByTitle(since).map((el) => el.textContent);
+
+		afterEach(() => vi.useRealTimers());
+
+		it("shows each row's offset from the send and its gap from the previous event", () => {
+			state.response = storedStream({ sentAt: SENT_AT });
+			renderViewer();
+			openEventsTab();
+
+			// Mutation check: read `receivedAt` as the offset itself (skip the
+			// subtraction) and these are epoch milliseconds.
+			expect(figures("Since the send")).toEqual([
+				"+1.50 s since the send",
+				"+1.62 s since the send",
+				"+3.62 s since the send",
+			]);
+			// The first event has no previous one, so it carries no gap.
+			expect(figures("Since the previous event")).toEqual([
+				"+120 ms since the previous event",
+				"+2.00 s since the previous event",
+			]);
+		});
+
+		it("shows the gaps alone when the send time is not known", () => {
+			state.response = storedStream({});
+			renderViewer();
+			openEventsTab();
+
+			expect(figures("Since the send")).toEqual([]);
+			expect(figures("Since the previous event")).toHaveLength(2);
+		});
+
+		it("shows no figure on events that carry no arrival time, as a load run's samples do", () => {
+			state.response = storedStream({
+				sentAt: SENT_AT,
+				events: [event("a", "token"), event("b", "token")],
+				totalEvents: 2,
+			});
+			renderViewer();
+			openEventsTab();
+
+			expect(figures("Since the send")).toEqual([]);
+			expect(figures("Since the previous event")).toEqual([]);
+		});
+
+		it("counts from the moment a live stream started", () => {
+			vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+			vi.setSystemTime(SENT_AT);
+			state.response = null;
+			const store = useExecutionEventsStore.getState();
+			store.startStream({
+				requestId: "req_1",
+				runId: "run_1",
+				eventsUrl: "/runs/run_1/events",
+			});
+			store.noteOpen("run_1", { statusCode: 200, statusText: "OK", headers: {} });
+			store.addEvents("run_1", [at(800, "first token")]);
+			renderViewer();
+			openEventsTab();
+
+			// Mutation check: drop `sentAt` from the placeholder response and the
+			// live rows lose their offset while the stream is open.
+			expect(figures("Since the send")).toEqual(["+800 ms since the send"]);
+
+			// The band counts the same stream's time up. Mutation check: drop
+			// `sentAt` from the viewer's `streaming` prop and it reads the
+			// placeholder's "0 ms" for the whole stream.
+			act(() => {
+				vi.setSystemTime(SENT_AT + 2500); // plus the one tick advanced below
+				vi.advanceTimersByTime(TIMING.STREAM_CLOCK_TICK_MS);
+			});
+			expect(screen.getByText("2.60 s")).toBeTruthy();
+		});
+
+		it("never reads a negative offset when an event beats the send's own stamp", () => {
+			state.response = storedStream({ sentAt: SENT_AT, events: [at(-4, "early")] });
+			renderViewer();
+			openEventsTab();
+
+			// Mutation check: drop the floor in `elapsedBetween` and this is "+-4 ms".
+			expect(figures("Since the send")).toEqual(["+0 ms since the send"]);
+		});
+
+		describe("on the Timing tab", () => {
+			function openTimingTab() {
+				const trigger = screen.getByRole("tab", { name: /timing/i });
+				trigger.focus();
+				fireEvent.mouseDown(trigger);
+			}
+
+			it("lists the first event as the time from the send to the first row", () => {
+				state.response = storedStream({ sentAt: SENT_AT, timing: timingOf });
+				renderViewer();
+				openTimingTab();
+
+				// Mutation check: pass the viewer's `firstEventMs` as undefined and
+				// the row is gone from a stream that has one.
+				const label = screen.getByText("First event");
+				expect(label.parentElement?.textContent).toBe("First event1.50s");
+			});
+
+			it.each([
+				["has no send time", { timing: timingOf }],
+				[
+					"has no events",
+					{ sentAt: SENT_AT, timing: timingOf, events: [], totalEvents: 0 },
+				],
+			])("leaves the row out when the stream %s", (_name, overrides) => {
+				state.response = storedStream(overrides);
+				renderViewer();
+				openTimingTab();
+
+				expect(screen.getByText("Total")).toBeTruthy();
+				expect(screen.queryByText("First event")).toBeNull();
+			});
+		});
 	});
 });
 

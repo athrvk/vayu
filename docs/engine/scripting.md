@@ -582,7 +582,7 @@ pm.test('every token frame parsed', function () {
 });
 ```
 
-Each entry is `{ event, id, data }`:
+Each entry is `{ event, id, data, receivedAt }`:
 
 | Field | |
 |-------|--|
@@ -591,6 +591,7 @@ Each entry is `{ event, id, data }`:
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
 | `text` | What the request's `streamTextPath` read off this event (issue #3773). **Absent** when no path was declared, when the path matched nothing, `null`, an array or an object, when `data` is not JSON, and when the event was cut (`dataTruncated`). |
+| `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads), so `events[0].receivedAt` against the send time is the time to first event. A **number on a design Send**, **absent** wherever the list is parsed back out of a buffered body - a load run's inline or deferred script, where it is not measured. |
 
 **`pm.response.streamText` is the reply, assembled.** A stream whose request
 declares a `streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an

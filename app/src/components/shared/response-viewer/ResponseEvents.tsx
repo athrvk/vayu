@@ -64,6 +64,7 @@ import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { isEventStreamType, mediaTypeOf } from "@/modules/request-builder/utils/response-bytes";
+import { elapsedBetween, formatResponseTime } from "./utils";
 
 export interface ResponseEventsProps {
 	/** The events to render, oldest first. */
@@ -103,6 +104,13 @@ export interface ResponseEventsProps {
 	 * (issue #3238). Absent or empty keeps the generic wording.
 	 */
 	contentType?: string;
+	/**
+	 * When the stream was started, epoch ms (#3775): each row's offset is its
+	 * `receivedAt` less this. Absent for a list with no send time - a stream
+	 * restored from History, a load run's sampled capture - and those rows show
+	 * no offset rather than one measured from a guess.
+	 */
+	sentAt?: number;
 	/** A transport failure on the relay, if the live stream hit one. */
 	error?: string | null;
 	/**
@@ -268,19 +276,47 @@ function StreamTextView({
 }
 
 /**
+ * A row's "+1.50 s" / "+120 ms" figure, with the words a screen reader and a
+ * hover need to say what it is measured from.
+ */
+function EventElapsed({ ms, since }: { ms: number; since: string }) {
+	return (
+		<span
+			className="shrink-0 font-mono text-label text-muted-foreground"
+			title={`Since ${since}`}
+		>
+			+{formatResponseTime(ms)}
+			<span className="sr-only"> since {since}</span>
+		</span>
+	);
+}
+
+/**
  * One event: a summary row that expands to the full payload.
  *
  * Memoized, because a live stream re-renders the list around it (issue #1158).
  * Up to a window's worth of these are mounted while rows arrive several times a
- * second, and all but the newest render exactly what they rendered before. Both
- * props hold their identity across such a render - an event object is appended
- * once and never replaced, and `index` is a number - so the default shallow
+ * second, and all but the newest render exactly what they rendered before. Every
+ * prop holds its identity across such a render - an event object is appended
+ * once and never replaced, and the rest are numbers - so the default shallow
  * comparison is the whole requirement; a custom comparator would be a second
  * copy of that fact, free to disagree with it.
  */
-const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; index: number }) {
+const EventRow = memo(function EventRow({
+	event,
+	index,
+	sentAt,
+	previousReceivedAt,
+}: {
+	event: StreamEvent;
+	index: number;
+	sentAt?: number;
+	previousReceivedAt?: number;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const Chevron = expanded ? ChevronDown : ChevronRight;
+	const offset = elapsedBetween(sentAt, event.receivedAt);
+	const gap = elapsedBetween(previousReceivedAt, event.receivedAt);
 
 	return (
 		<div className="border-b border-rule last:border-b-0">
@@ -332,6 +368,8 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 							truncated
 						</Badge>
 					)}
+					{offset !== undefined && <EventElapsed ms={offset} since="the send" />}
+					{gap !== undefined && <EventElapsed ms={gap} since="the previous event" />}
 					{typeof event.receivedAt === "number" && (
 						<TimeValue
 							value={event.receivedAt}
@@ -368,6 +406,7 @@ export default function ResponseEvents({
 	isStreaming = false,
 	isStream = false,
 	contentType,
+	sentAt,
 	error = null,
 	listKey,
 }: ResponseEventsProps) {
@@ -493,7 +532,13 @@ export default function ResponseEvents({
 							// Index-keyed deliberately: the list only ever grows at the
 							// end, and an event carries no id of its own that is unique
 							// (`sourceId` is the origin's and repeats freely).
-							<EventRow key={i} event={event} index={i} />
+							<EventRow
+								key={i}
+								event={event}
+								index={i}
+								sentAt={sentAt}
+								previousReceivedAt={events[i - 1]?.receivedAt}
+							/>
 						))}
 						{hasMore && (
 							/*

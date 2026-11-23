@@ -47,8 +47,12 @@ export type LandStreamResponse = (requestId: string, response: ResponseState) =>
 
 /** The stored response with what only the Send knew put back on it. */
 function withSendSnapshot(stored: ResponseState, claim: FinalizationClaim): ResponseState {
-	const withSent = claim.sent ? { ...stored, sentRequest: claim.sent } : stored;
-	return claim.leftOut.length > 0 ? { ...withSent, leftOutElements: claim.leftOut } : withSent;
+	return {
+		...stored,
+		...(claim.sent && { sentRequest: claim.sent }),
+		...(claim.sentAt !== null && { sentAt: claim.sentAt }),
+		...(claim.leftOut.length > 0 && { leftOutElements: claim.leftOut }),
+	};
 }
 
 /**

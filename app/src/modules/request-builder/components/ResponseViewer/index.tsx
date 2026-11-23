@@ -49,6 +49,7 @@ import {
 	ResponseActions,
 	ResponseHeadersPanel,
 	ResponseEvents,
+	elapsedBetween,
 } from "@/components/shared/response-viewer";
 import { Callout, EmptyState, ExchangeWarnings } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
@@ -257,6 +258,7 @@ export default function ResponseViewer() {
 	);
 	const liveOpen = useExecutionEventsStore((s) => s.open);
 	const liveLeftOut = useExecutionEventsStore((s) => s.leftOut);
+	const liveSentAt = useExecutionEventsStore((s) => s.sentAt);
 	const liveEvents = useExecutionEventsStore((s) => s.events);
 	const liveStreamText = useExecutionEventsStore((s) => s.streamText);
 	// The stream's identity, for the Events tab's render window: its list grows
@@ -335,9 +337,10 @@ export default function ResponseViewer() {
 			body: "",
 			size: 0,
 			time: 0,
+			...(liveSentAt !== null ? { sentAt: liveSentAt } : {}),
 			...(liveLeftOut.length > 0 ? { leftOutElements: liveLeftOut } : {}),
 		};
-	}, [response, streamIsMine, liveOpen, liveLeftOut]);
+	}, [response, streamIsMine, liveOpen, liveSentAt, liveLeftOut]);
 
 	const shown = response ?? streamedResponse;
 
@@ -685,7 +688,9 @@ export default function ResponseViewer() {
 				// Only while it is actually live. A finished stream's band shows
 				// the exchange it completed, and the Events tab is where its
 				// count and its end reason live.
-				streaming={isStreaming ? { events: events.length } : undefined}
+				streaming={
+					isStreaming ? { events: events.length, sentAt: shown.sentAt } : undefined
+				}
 			/>
 
 			{/* Above the response it explains: an earlier run restored in its place. */}
@@ -922,7 +927,11 @@ export default function ResponseViewer() {
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 					{shown.timing ? (
-						<ResponseTimingTab timing={shown.timing} redirects={shown.redirects} />
+						<ResponseTimingTab
+							timing={shown.timing}
+							redirects={shown.redirects}
+							firstEventMs={elapsedBetween(shown.sentAt, events[0]?.receivedAt)}
+						/>
 					) : (
 						<EmptyState variant="inline" title="No timing recorded" />
 					)}
@@ -978,6 +987,7 @@ export default function ResponseViewer() {
 						isStreaming={isStreaming}
 						isStream={isStream}
 						contentType={contentTypeOf(shown.headers)}
+						sentAt={shown.sentAt}
 						error={streamIsMine ? liveError : null}
 						// Only for the live list. A stored trace arrives whole, so the
 						// row count is the identity the window wants there.

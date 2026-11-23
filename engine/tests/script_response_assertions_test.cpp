@@ -316,6 +316,17 @@ TEST_F (ResponseAssertionTest, JsonSchemaRefusesASchemaThatReferencesItself) {
     expect_pass ("pm.response.to.have.jsonSchema(" + std::string (ID_SCHEMA) + ")");
 }
 
+// #3810: a loop only a property reaches, met by a body that has the property.
+TEST_F (ResponseAssertionTest, JsonSchemaRefusesALoopOnlyAPropertyReaches) {
+    response.body = R"({"a": 1})";
+    const std::string loop =
+    R"({ properties: { a: { $ref: "#/definitions/x" } }, definitions: { x: { allOf: [{ $ref: "#/definitions/x" }] } } })";
+    expect_type_error ("pm.response.to.have.jsonSchema(" + loop + ")",
+    "refers to itself without describing any value");
+    response.body = R"({"id": 1})";
+    expect_pass ("pm.response.to.have.jsonSchema(" + std::string (ID_SCHEMA) + ")");
+}
+
 TEST_F (ResponseAssertionTest, JsonSchemaOnTheResponseJudgesTheBody) {
     const std::string schema = ID_SCHEMA;
     expect_pass ("pm.response.to.have.jsonSchema(" + schema + ")");

@@ -617,7 +617,9 @@ describe("the streaming send branch", () => {
 
 		it("forgets the record when that request sends without a stream", async () => {
 			useExecutionEventsStore.setState({
-				replacedFeeds: { B: { runId: "run_B", sent: null, leftOut: [], finalized: false } },
+				replacedFeeds: {
+					B: { runId: "run_B", sent: null, sentAt: null, leftOut: [], finalized: false },
+				},
 			});
 			const answered: ResponseState = {
 				status: 200,
@@ -791,6 +793,9 @@ describe("the streaming send branch", () => {
 			// snapshot is lost at the hand-over.
 			const storedB = useResponseStore.getState().getResponse("B") as ResponseState | null;
 			expect(storedB?.sentRequest?.url).toBeDefined();
+			// Mutation check: drop `sentAt` from `withSendSnapshot` and the stored
+			// stream has no zero for its first event and its row offsets (#3775).
+			expect(storedB?.sentAt).toBeTypeOf("number");
 			// A's live feed is untouched, and so is the pane on screen.
 			expect(useExecutionEventsStore.getState()).toMatchObject({
 				requestId: "A",
