@@ -80,14 +80,14 @@ describe("RunConfigSection", () => {
 		render(<RunConfigSection tab={TAB} />);
 
 		expect(screen.getByText("Retry-After")).toBeInTheDocument();
-		expect(screen.getByText("Waited, up to 5,000 ms")).toBeInTheDocument();
+		expect(screen.getByText("Up to 5,000 ms")).toBeInTheDocument();
 	});
 
 	it("reads the engine's default cap when the run named none (#3782)", () => {
 		run = makeRun("load", { mode: "ramp_up", concurrency: 8, retryAfterBackoff: true });
 		render(<RunConfigSection tab={TAB} />);
 
-		expect(screen.getByText("Waited, up to 30,000 ms")).toBeInTheDocument();
+		expect(screen.getByText("Up to 30,000 ms")).toBeInTheDocument();
 	});
 
 	it("draws no Retry-After row for a run that did not opt in (#3782)", () => {

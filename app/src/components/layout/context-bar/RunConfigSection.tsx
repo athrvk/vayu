@@ -172,7 +172,7 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 	if (config?.retryAfterBackoff === true) {
 		rows.push(
 			<Row key="retry-after" label="Retry-After">
-				{`Waited, up to ${formatNumber(config.retryAfterMaxMs ?? LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS)} ms`}
+				{`Up to ${formatNumber(config.retryAfterMaxMs ?? LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS)} ms`}
 			</Row>
 		);
 	}
