@@ -1586,5 +1586,13 @@ constexpr size_t MAX_BODY_DEPTH = 100;
 /// on, and `element_body_bound_test.cpp` pins it.
 constexpr std::string_view BODY_UNREADABLE_MESSAGE =
 "response body is not JSON, nests too deeply, or exceeds maxElementBodyBytes";
+
+/// Findings one `assert.snapshot` failure message lists (a removed item, an
+/// added one, a changed one), then ` (N more)`: the bounded-list discipline of
+/// `schema_validation::MAX_FAILURES`, for a list a server's own size can grow.
+constexpr size_t MAX_SNAPSHOT_FINDINGS = 10;
+
+/// Differing JSON Pointers one changed item names before `, and N more`.
+constexpr size_t MAX_SNAPSHOT_POINTERS = 3;
 } // namespace elements
 } // namespace vayu::core::constants

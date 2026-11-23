@@ -2000,7 +2000,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [element](elements.md) with `source: "jsonpath"` and `path: "$.result.structuredContent"`: the
   elements read the final JSON-RPC response, the check is draft-07 (a 2020-12 keyword in the
   tool's `outputSchema` fails the assertion naming it rather than passing unread), and it runs on
-  a Send, a collection run and a load run alike. An `xml`
+  a Send, a collection run and a load run alike. The surface a server advertises is held the same
+  way by `assert.snapshot` on a `tools/list`, `resources/list` or `prompts/list` request: it fails
+  naming the tool and the JSON Pointer that changed, and passes when the server only reorders its
+  list. An `xml`
   `body` has no envelope at all: it is stored and sent byte for byte and carries
   `application/xml` unless the agent set a Content-Type of its own, which is how
   a SOAP 1.2 endpoint gets `application/soap+xml`.
