@@ -418,22 +418,21 @@ TEST_F (OAuthDiscoveryTest, AChallengesResourceMetadataLeadsToTheAuthorizationSe
     const auto found = discover (server_.url ("/mcp"));
     ASSERT_HAS_VALUE (found) << found.error ().code << ": " << found.error ().message;
     EXPECT_EQ (found->resource, server_.url ("/mcp"));
-    EXPECT_EQ (found->resource_metadata_url, server_.url ("/custom/prm"));
-    EXPECT_TRUE (found->resource_metadata_from_challenge);
     EXPECT_EQ (found->challenge_scope, "mcp:read");
     EXPECT_EQ (found->resource_scopes_supported, std::vector<std::string>{ "mcp:read" });
 
     const auto& as = found->authorization_server;
     EXPECT_EQ (as.issuer, server_.url ("/tenant"));
-    EXPECT_EQ (as.metadata_url, server_.url (OAUTH_INSERTED));
     EXPECT_EQ (as.authorization_endpoint, server_.url ("/tenant/authorize"));
     EXPECT_EQ (as.token_endpoint, server_.url ("/tenant/token"));
     EXPECT_EQ (as.registration_endpoint, server_.url ("/tenant/register"));
-    EXPECT_EQ (as.scopes_supported, (std::vector<std::string>{ "mcp:read", "mcp:write" }));
     EXPECT_TRUE (as.authorization_response_iss_parameter_supported);
 
+    // The challenge's URL was read, and no well-known path was tried.
+    EXPECT_EQ (server_.hits ("/custom/prm"), 1);
     EXPECT_EQ (server_.hits (PRM_INSERTED), 0);
     EXPECT_EQ (server_.hits (PRM_ROOT), 0);
+    EXPECT_EQ (server_.hits (OAUTH_INSERTED), 1);
     EXPECT_EQ (server_.last_accept ("/mcp"), "application/json");
 }
 
@@ -443,9 +442,8 @@ TEST_F (OAuthDiscoveryTest, WithoutAChallengeTheInsertedWellKnownPathIsTriedFirs
 
     const auto found = discover (server_.url ("/mcp"));
     ASSERT_HAS_VALUE (found) << found.error ().message;
-    EXPECT_EQ (found->resource_metadata_url, server_.url (PRM_INSERTED));
-    EXPECT_FALSE (found->resource_metadata_from_challenge);
     EXPECT_EQ (found->challenge_scope, std::nullopt);
+    EXPECT_EQ (server_.hits (PRM_INSERTED), 1);
     EXPECT_EQ (server_.hits (PRM_ROOT), 0);
 }
 
@@ -458,10 +456,10 @@ TEST_F (OAuthDiscoveryTest, TheRootWellKnownPathIsTheFallback) {
 
     const auto found = discover (server_.url ("/mcp"));
     ASSERT_HAS_VALUE (found) << found.error ().message;
-    EXPECT_EQ (found->resource_metadata_url, server_.url (PRM_ROOT));
     EXPECT_EQ (found->resource, server_.origin ());
     EXPECT_EQ (found->challenge_scope, "mcp:write");
     EXPECT_EQ (server_.hits (PRM_INSERTED), 1);
+    EXPECT_EQ (server_.hits (PRM_ROOT), 1);
 }
 
 // Mutation check: drop the two OpenID Connect URLs from
@@ -474,8 +472,8 @@ TEST_F (OAuthDiscoveryTest, OpenIdConnectDiscoveryIsTheFallbackForRfc8414) {
 
     const auto found = discover (server_.url ("/mcp"));
     ASSERT_HAS_VALUE (found) << found.error ().message;
-    EXPECT_EQ (found->authorization_server.metadata_url, server_.url (OIDC_INSERTED));
     EXPECT_EQ (server_.hits (OAUTH_INSERTED), 1);
+    EXPECT_EQ (server_.hits (OIDC_INSERTED), 1);
     EXPECT_EQ (server_.hits (OIDC_APPENDED), 0);
 }
 
@@ -486,8 +484,8 @@ TEST_F (OAuthDiscoveryTest, TheAppendedOpenIdConnectPathIsTriedLast) {
 
     const auto found = discover (server_.url ("/mcp"));
     ASSERT_HAS_VALUE (found) << found.error ().message;
-    EXPECT_EQ (found->authorization_server.metadata_url, server_.url (OIDC_APPENDED));
     EXPECT_EQ (server_.hits (OIDC_INSERTED), 1);
+    EXPECT_EQ (server_.hits (OIDC_APPENDED), 1);
 }
 
 TEST_F (OAuthDiscoveryTest, NoMetadataAnywhereNamesEveryURLTried) {

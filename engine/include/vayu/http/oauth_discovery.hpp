@@ -231,13 +231,10 @@ struct OAuthDiscoveryError {
 /// OpenID Connect discovery.
 struct AuthorizationServerMetadata {
     std::string issuer;
-    /// The well-known URL that answered.
-    std::string metadata_url;
     std::string authorization_endpoint;
     std::string token_endpoint;
     /// Absent when the server offers no dynamic client registration.
     std::optional<std::string> registration_endpoint;
-    std::vector<std::string> scopes_supported;
     std::vector<std::string> code_challenge_methods_supported;
     /// RFC 9207: the server sends `iss` on its authorization response.
     bool authorization_response_iss_parameter_supported = false;
@@ -248,11 +245,6 @@ struct OAuthDiscovery {
     /// The protected resource metadata's `resource`, which covers the server
     /// URL: the RFC 8707 `resource` the authorize and token requests send.
     std::string resource;
-    /// Where the protected resource metadata was read.
-    std::string resource_metadata_url;
-    /// True when the 401's challenge named that URL, false when a well-known
-    /// path answered.
-    bool resource_metadata_from_challenge = false;
     /// The 401 challenge's `scope`, when it stated one.
     std::optional<std::string> challenge_scope;
     /// The protected resource metadata's `scopes_supported`.

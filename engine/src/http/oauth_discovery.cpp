@@ -671,10 +671,8 @@ const nlohmann::json& doc) {
 }
 
 std::expected<AuthorizationServerMetadata, std::string>
-read_authorization_server (const FetchedDocument& document) {
-    const nlohmann::json& doc = document.body;
+read_authorization_server (const nlohmann::json& doc) {
     AuthorizationServerMetadata metadata;
-    metadata.metadata_url = document.url;
     std::string registration_endpoint;
     MemberReader reader;
     reader.read (url_member (doc, "issuer", Presence::Required), metadata.issuer);
@@ -684,7 +682,6 @@ read_authorization_server (const FetchedDocument& document) {
     metadata.token_endpoint);
     reader.read (url_member (doc, "registration_endpoint", Presence::Optional),
     registration_endpoint);
-    reader.read (string_array_member (doc, "scopes_supported"), metadata.scopes_supported);
     reader.read (string_array_member (doc, "code_challenge_methods_supported"),
     metadata.code_challenge_methods_supported);
     reader.read (bool_member (doc, "authorization_response_iss_parameter_supported"),
@@ -729,7 +726,6 @@ locate_protected_resource (DiscoverySession& session, OAuthDiscovery& found) {
         session.refuse_local ("The 401 challenge's `resource_metadata`", *named)) {
         return std::unexpected (std::move (*refusal));
     }
-    found.resource_metadata_from_challenge = true;
     return fetch_first_document (session, { *named }, PROTECTED_RESOURCE_METADATA);
 }
 
@@ -786,7 +782,7 @@ AuthorizationServerMetadataCache& cache) {
     if (!fetched) {
         return std::unexpected (std::move (fetched.error ()));
     }
-    auto metadata = read_authorization_server (*fetched);
+    auto metadata = read_authorization_server (fetched->body);
     if (!metadata) {
         return refuse (oauth_discovery::INVALID_AUTHORIZATION_SERVER_METADATA,
         invalid_document (AUTHORIZATION_SERVER_METADATA, fetched->url, metadata.error ()));
@@ -1016,8 +1012,7 @@ AuthorizationServerMetadataCache& cache) {
     if (!fetched) {
         return std::unexpected (std::move (fetched.error ()));
     }
-    found.resource_metadata_url = fetched->url;
-    auto resource               = accept_protected_resource (session, *fetched);
+    auto resource = accept_protected_resource (session, *fetched);
     if (!resource) {
         return std::unexpected (std::move (resource.error ()));
     }
