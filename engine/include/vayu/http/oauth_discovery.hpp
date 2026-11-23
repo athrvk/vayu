@@ -43,6 +43,8 @@
  * holds every fetch off Vayu's own ports.
  */
 
+#include "vayu/http/loopback_guard.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -315,6 +317,17 @@ const std::string& server_url,
 int timeout_ms,
 const std::atomic<bool>* cancel         = nullptr,
 AuthorizationServerMetadataCache& cache = shared_authorization_server_cache ());
+
+/**
+ * @brief The connect-time rule every request made on behalf of a discovery of
+ *        @p server_url runs under: an empty `LocalPeerRule` when the server
+ *        URL names neither a loopback nor a link-local host, else none.
+ *
+ * The one place that decides it, so the discovery's fetches, its client
+ * registration and the attempt's code exchange (`InteractiveExchange`) cannot
+ * disagree about whether the server is on this machine.
+ */
+[[nodiscard]] std::optional<LocalPeerRule> discovered_peer_rule (const std::string& server_url);
 
 namespace detail {
 

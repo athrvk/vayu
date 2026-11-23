@@ -357,14 +357,12 @@ std::unexpected<OAuthDiscoveryError> refuse (std::string_view code, std::string 
 
 vayu::http::ClientConfig discovery_client_config (vayu::db::Database& db,
 const std::atomic<bool>* cancel,
-bool local_server) {
+const std::string& server_url) {
     vayu::http::ClientConfig config;
     config.transport = resolve_transport_policy (db);
     config.cancel    = cancel;
     config.max_response_bytes = vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES;
-    if (!local_server) {
-        config.local_peer_rule = LocalPeerRule{};
-    }
+    config.local_peer_rule = discovered_peer_rule (server_url);
     return config;
 }
 
@@ -379,7 +377,7 @@ class DiscoverySession {
     : server_url_ (server_url), server_location_ (std::move (server_location)),
       local_server_ (names_local_host (server_url)), timeout_ms_ (timeout_ms),
       deadline_ (std::chrono::steady_clock::now () + std::chrono::milliseconds (timeout_ms)),
-      cancel_ (cancel), client_ (discovery_client_config (db, cancel, local_server_)) {
+      cancel_ (cancel), client_ (discovery_client_config (db, cancel, server_url)) {
     }
 
     [[nodiscard]] const std::string& server_url () const {
@@ -1027,6 +1025,13 @@ AuthorizationServerMetadataCache& cache) {
     found.resource_scopes_supported = std::move (resource->document.scopes_supported);
     found.authorization_server = std::move (*metadata);
     return found;
+}
+
+std::optional<LocalPeerRule> discovered_peer_rule (const std::string& server_url) {
+    if (names_local_host (server_url)) {
+        return std::nullopt;
+    }
+    return LocalPeerRule{};
 }
 
 bool detail::resource_covers (const std::string& resource, const std::string& server_url) {

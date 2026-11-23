@@ -7670,6 +7670,19 @@ secret is never logged or repeated. The discovery and the registration each go
 through the shared client and transport policy, are bounded by the request
 timeout setting, and end when the engine stops.
 
+**A server that is not on this machine reaches nothing on it.** When
+`discoverUrl` names neither a loopback nor a link-local host, a document that
+names such a URL is refused (`oauth_discovery_local_endpoint_refused`), and the
+discovery's fetches, the registration and the callback's code exchange connect
+to no loopback or link-local address, by the URL or by the address its name
+resolves to. A token endpoint that resolves to one by the time the code
+arrives never receives the code or the PKCE verifier: the attempt fails with
+`Token request failed: Cannot send this request: Vayu does not send it to a
+loopback or link-local address - not when the URL names one and not when a host
+name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
+proxy you configured is still used. A server on this machine may name anything
+on it.
+
 The answer's `resolved` holds what the attempt runs on, the values a client
 writes into its stored config so that a later refresh or run needs no
 discovery and keys the same [cached token](#oauth-20-token-cache) (no secret is

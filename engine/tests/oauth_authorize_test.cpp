@@ -26,8 +26,10 @@
 #include "oauth_discovery_server.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
+#include "proxy_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/oauth_discovery.hpp"
@@ -1154,6 +1156,98 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheStartRouteAnswersTheResolvedConfig) {
     EXPECT_EQ (refused_status, 400);
     EXPECT_EQ (refused["error"].value ("code", ""), vayu::http::oauth_discovery::INVALID_SERVER_URL)
     << refused.dump ();
+}
+
+/// The same MCP server and authorization server, named as hosts that are not
+/// on this machine and reached through a proxy that stands for one that can
+/// resolve them: every document the fixture serves names those hosts, so the
+/// attempt is discovered from a remote server and its exchange runs under the
+/// discovery's `LocalPeerRule`.
+class RemoteDiscoveredAuthorizeTest : public OAuthDiscoveredAuthorizeTest {
+    protected:
+    static constexpr const char* REMOTE_MCP = "http://mcp.example.test/mcp";
+    static constexpr const char* REMOTE_ISSUER =
+    "http://auth.example.test/tenant";
+
+    void SetUp () override {
+        OAuthDiscoveredAuthorizeTest::SetUp ();
+        proxy_.forward_every_target_to (server_.origin ());
+        set_config ("proxyMode", "manual");
+        set_config ("proxyUrl", proxy_.url ());
+        challenge_with (R"(Bearer resource_metadata="http://mcp.example.test/custom/prm")");
+        server_.answer ("/custom/prm",
+        json_answer ({ { "resource", REMOTE_MCP },
+        { "authorization_servers", json::array ({ REMOTE_ISSUER }) } }));
+        const std::string issuer = REMOTE_ISSUER;
+        serve_metadata ({ { "issuer", issuer },
+        { "authorization_endpoint", issuer + "/authorize" },
+        { "token_endpoint", issuer + "/token" }, { "registration_endpoint", issuer + "/register" },
+        { "code_challenge_methods_supported", json::array ({ "S256" }) } });
+    }
+
+    void set_config (const std::string& key, const std::string& value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_HAS_VALUE (entry) << key << " is not seeded";
+        entry->value = value;
+        db_->save_config_entry (*entry);
+    }
+
+    [[nodiscard]] static json remote_config () {
+        return { { "grantType", "authorization_code" },
+            { "discoverUrl", REMOTE_MCP }, { "callbackUrl", CALLBACK_URL } };
+    }
+
+    vayu::tests::MockProxy proxy_;
+};
+
+// The rule passes the proxy the user configured, so a remote server's flow
+// still completes, its code exchanged at the discovered token endpoint.
+TEST_F (RemoteDiscoveredAuthorizeTest, ARemoteServersCodeIsExchangedThroughTheProxy) {
+    const auto start = mgr_.start (*db_, remote_config (), "embedded");
+    ASSERT_TRUE (start.ok) << start.error_code << ": " << start.error_message;
+    const auto st = complete_with (start, "");
+    EXPECT_EQ (st.state, "completed") << st.error;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 1);
+}
+
+// The code and verifier of an attempt discovered from a server that is not on
+// this machine go to no loopback or link-local peer. The endpoint here is a
+// typed loopback literal, because discovery already refuses a document that
+// names one and no host name resolves to loopback on every runner without
+// also being a loopback name; the rule that refuses it is the one the
+// connected address is judged by, so a name that resolves to loopback at
+// exchange time is refused alike. A server on this machine is not held to it
+// (`TheCodeIsExchangedWithTheResolvedConfig`, loopback throughout).
+//
+// Mutation check: leave `local_peer_rule` out of the exchange (in
+// `plan_discovered`, `build_grant_request` or `post_token_request`) and both
+// codes reach the token endpoint; leave it out of one caller of
+// `resolve_oauth_callback` and that mode's does.
+TEST_F (RemoteDiscoveredAuthorizeTest, ARemoteServersCodeIsNeverSentToALoopbackTokenEndpoint) {
+    json config              = remote_config ();
+    config["accessTokenUrl"] = server_.url (TOKEN_PATH);
+    const std::string refusal =
+    vayu::http::local_peer_refusal (vayu::http::LocalPeerRule{});
+
+    const auto embedded = mgr_.start (*db_, config, "embedded");
+    ASSERT_TRUE (embedded.ok) << embedded.error_code << ": " << embedded.error_message;
+    const auto st = complete_with (embedded, "");
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_NE (st.error.find (refusal), std::string::npos) << st.error;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+
+    const auto loopback = mgr_.start (*db_, config, "loopback");
+    ASSERT_TRUE (loopback.ok) << loopback.error_code << ": " << loopback.error_message;
+    httplib::Client callback (callback_origin (loopback));
+    const auto answered =
+    callback.Get ("/callback?code=AUTHCODE&state=" + state_of (loopback));
+    ASSERT_TRUE (answered != nullptr);
+    EXPECT_NE (answered->body.find ("Token exchange failed"), std::string::npos)
+    << answered->body;
+    const auto status = mgr_.status (loopback.attempt_id);
+    EXPECT_EQ (status.state, "failed");
+    EXPECT_NE (status.error.find (refusal), std::string::npos) << status.error;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
 }
 
 } // namespace

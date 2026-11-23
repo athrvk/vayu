@@ -16,7 +16,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/json_depth.hpp"
 #include "vayu/http/client.hpp"
-#include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/oauth_discovery.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/logger.hpp"
@@ -48,11 +48,7 @@ const std::atomic<bool>* cancel) {
     config.transport = resolve_transport_policy (db);
     config.cancel    = cancel;
     config.max_response_bytes = vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES;
-    // What an empty rule refuses by the URL's text is what decides whether
-    // the server is on this machine, as discovery decided it.
-    if (!is_refused_reference_url (server_url, LocalPeerRule{})) {
-        config.local_peer_rule = LocalPeerRule{};
-    }
+    config.local_peer_rule = discovered_peer_rule (server_url);
     return config;
 }
 

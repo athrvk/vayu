@@ -177,8 +177,11 @@ struct ClientConfig {
      * @brief The connect-time rule for a fetch a document asked for, or none
      *        (issue #2364).
      *
-     * Set only by `/import/fetch` for a `$ref` (`"reference": true`), which
-     * also sends that request with redirects off. Judged on the URL before
+     * Set by `/import/fetch` for a `$ref` (`"reference": true`), which also
+     * sends that request with redirects off, and by every request an OAuth
+     * discovery of a server not on this machine makes: its fetches, its client
+     * registration and its code exchange (`discovered_peer_rule`, #3766).
+     * Judged on the URL before
      * anything is dialled (`is_refused_reference_url`), then on the address
      * each connection reached, beside the reserved-port check every transfer
      * runs; with a proxy in force that address is the proxy's, which the rule

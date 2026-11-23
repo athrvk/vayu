@@ -37,10 +37,12 @@ struct UrlAuthority {
  * The single-request client builds one per send, and the event loop keeps one
  * on every `TransferData`; the SSE consumer keeps one for the count, which
  * tells its idle rule each hop's connection is made (#2835, #3241). Only a
- * `/import/fetch` reference sets `local_peers` (#2364).
+ * single-request transfer whose `ClientConfig::local_peer_rule` is set (a
+ * `/import/fetch` reference, #2364, an OAuth discovery's requests, #3766) sets
+ * `local_peers`.
  */
 struct ConnectedPeerCheck {
-    /// The rule a reference fetch runs under, or null for none.
+    /// The transfer's `LocalPeerRule`, or null for none.
     const LocalPeerRule* local_peers = nullptr;
     /// The proxy the transfer names (`configured_proxy`), written by
     /// `apply_transport_policy`. `local_peers` does not refuse it (#2605).
