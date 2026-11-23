@@ -997,6 +997,15 @@ export interface StartScenarioRunRequest {
 	 */
 	maxStreamDurationMs?: number;
 	maxStreamEvents?: number;
+	/**
+	 * Scenario load run only: hold a virtual user for a 429's or 503's
+	 * `Retry-After` (capped by `retryAfterMaxMs`) before its next step, so the
+	 * run does not hammer a limiter (#3782, #3799). **Omitted when off**: absent
+	 * already means off, and the cap is sent only with it.
+	 */
+	retryAfterBackoff?: boolean;
+	/** The longest one wait, 1-3600000 ms; the engine defaults it to 30000. */
+	retryAfterMaxMs?: number;
 	scenario: {
 		/**
 		 * The discriminator for a future stored scenario. `"collection"` is the
