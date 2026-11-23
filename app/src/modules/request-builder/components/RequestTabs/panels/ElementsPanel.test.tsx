@@ -60,6 +60,7 @@ const KINDS: ElementKindSchema[] = [
 	CONTAINS_KIND,
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
+	kindSchema("assert.jsonschema", "Assert JSON Schema", "assert"),
 	kindSchema("script.pre", "Pre-request script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
 	// script.setup / script.teardown (issue #1499): collection-only, so a
@@ -255,6 +256,49 @@ describe("ElementsPanel", () => {
 			"elements",
 			expect.arrayContaining([expect.objectContaining({ kind: "extract.json" })])
 		);
+	});
+
+	// #3806: the element is stored data, so the default is in its `config` the
+	// moment it is added. Mutation check: drop `startingConfigs` from
+	// `ElementsPanel`'s `<ElementList>` and the first case reds, its `config`
+	// `{}` - the tool's schema never reaches `config.schema`.
+	describe("an assert.jsonschema added to a request (#3806)", () => {
+		const outputSchema = { type: "object", properties: { rows: { type: "array" } } };
+
+		async function addJsonSchemaElement(request: Record<string, unknown>) {
+			setContext({
+				request: { id: "req_1", collectionId: null, elements: [], ...request } as never,
+			});
+			render(<ElementsPanel />);
+			fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+			fireEvent.click(
+				(await screen.findByText("Assert JSON Schema")).closest("[cmdk-item]")!
+			);
+			return updateField.mock.lastCall?.[1] as ElementDef[];
+		}
+
+		it("starts from the mcp tool's outputSchema, read from the result's structuredContent", async () => {
+			const [added] = await addJsonSchemaElement({
+				bodyMode: "mcp",
+				mcpTool: { name: "run_query", outputSchema },
+			});
+
+			expect(added.kind).toBe("assert.jsonschema");
+			expect(added.config).toEqual({
+				source: "jsonpath",
+				path: "$.result.structuredContent",
+				schema: outputSchema,
+			});
+		});
+
+		it.each([
+			["a tool with no outputSchema", { bodyMode: "mcp", mcpTool: { name: "t" } }],
+			["a json body", { bodyMode: "json", mcpTool: { name: "t", outputSchema } }],
+		])("starts blank for %s", async (_name, request) => {
+			const [added] = await addJsonSchemaElement(request);
+
+			expect(added.config).toEqual({});
+		});
 	});
 
 	// Mutation check: drop the `!kind.collectionOnly` filter in ElementsPanel

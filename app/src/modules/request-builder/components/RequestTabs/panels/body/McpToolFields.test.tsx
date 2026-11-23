@@ -79,12 +79,16 @@ function reversedMembers(tool: McpTool | undefined): McpTool | undefined {
 }
 
 const SCHEMA = '{"type":"object","properties":{"region":{"x-mcp-header":"Region"}}}';
+const OUTPUT = '{"type":"object","properties":{"rows":{"type":"array"}}}';
 
 function setName(value: string) {
 	fireEvent.change(screen.getByLabelText("MCP tool"), { target: { value } });
 }
 function setSchema(value: string) {
 	fireEvent.change(screen.getByLabelText("MCP tool input schema"), { target: { value } });
+}
+function setOutputSchema(value: string) {
+	fireEvent.change(screen.getByLabelText("MCP tool output schema"), { target: { value } });
 }
 
 describe("McpToolFields", () => {
@@ -177,6 +181,52 @@ describe("McpToolFields", () => {
 		setSchema("[]");
 
 		expect(group).toHaveAccessibleDescription("The input schema must be a JSON object.");
+	});
+
+	it("stores the output schema, and keeps it through an edit of the name or the input schema", () => {
+		const writes: Array<McpTool | undefined> = [];
+		render(<Harness writes={writes} initial={{ name: "t" }} />);
+
+		setOutputSchema(OUTPUT);
+		setName("t2");
+		setSchema(SCHEMA);
+
+		const output = JSON.parse(OUTPUT);
+		expect(writes).toEqual([
+			{ name: "t", outputSchema: output },
+			{ name: "t2", outputSchema: output },
+			{ name: "t2", inputSchema: JSON.parse(SCHEMA), outputSchema: output },
+		]);
+	});
+
+	it("shows a stored output schema, and clears it when it is emptied", () => {
+		const writes: Array<McpTool | undefined> = [];
+		render(
+			<Harness writes={writes} initial={{ name: "t", outputSchema: JSON.parse(OUTPUT) }} />
+		);
+
+		expect(
+			JSON.parse(
+				(screen.getByLabelText("MCP tool output schema") as HTMLTextAreaElement).value
+			)
+		).toEqual(JSON.parse(OUTPUT));
+
+		setOutputSchema("");
+		expect(writes).toEqual([{ name: "t" }]);
+	});
+
+	it("says what is wrong with an output schema that is not an object, on its own group", () => {
+		const writes: Array<McpTool | undefined> = [];
+		render(<Harness writes={writes} initial={{ name: "t" }} />);
+		const group = screen.getByRole("group", { name: "Output schema" });
+
+		setOutputSchema("[]");
+
+		expect(writes).toEqual([]);
+		expect(group).toHaveAccessibleDescription("The output schema must be a JSON object.");
+		expect(screen.getByRole("group", { name: "Input schema" })).not.toHaveAttribute(
+			"aria-describedby"
+		);
 	});
 
 	it("takes a tool another writer stored", () => {

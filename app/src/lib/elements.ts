@@ -209,6 +209,13 @@ const JSON_PATH_MESSAGE = "Start with $, then use .name, ['name'], [n] or [*]";
  */
 export const JSON_PATH_FIELDS: readonly JsonPathField[] = [
 	{ kind: "assert.jsonpath", path: ["path"] },
+	// `assert_jsonschema_shape_problem` reads `path` only for `source: jsonpath`
+	// and refuses one beside any other source.
+	{
+		kind: "assert.jsonschema",
+		path: ["path"],
+		onlySiblingEquals: { key: "source", value: "jsonpath" },
+	},
 	{ kind: "extract.json", path: ["path"] },
 	{ kind: "metric.record", path: ["source", "jsonpath"] },
 	{
@@ -326,8 +333,9 @@ export function errorsWithin(
  * this table restates it, and `element-kinds.conformance.test.tsx` holds every
  * name here to a property the live catalogue declares. That guard cannot see
  * the C++ rule itself: a change to `assert_status_problem`,
- * `assert_jsonpath_problem`, `control_throughput_problem`, `timer_think_problem`
- * or `assert_contains_problem` needs a hand edit here. A rule gates on the
+ * `assert_jsonpath_problem`, `control_throughput_problem`, `timer_think_problem`,
+ * `assert_jsonschema_shape_problem` or `assert_contains_problem` needs a hand
+ * edit here. A rule gates on the
  * operand being missing; a mix the engine also refuses (`percent` beside
  * `everyN`, `exists` beside `expected`) is one the mode picker never writes, and
  * reaches the row through the engine's own refusal (`parseElementRefusal`).
@@ -341,14 +349,20 @@ interface OperandRule {
 	 * field leaves as `""`).
 	 */
 	judgesValue?: true;
-	/** What the row's "Needs ..." chip asks for. */
-	needs: string;
+	/**
+	 * What the row's "Needs ..." chip asks for. A function when the answer
+	 * depends on which operand is unmet (`assert.jsonschema`).
+	 */
+	needs: string | ((config: Record<string, unknown>) => string);
 	isMet: (config: Record<string, unknown>) => boolean;
 }
 
 const hasKey = (config: Record<string, unknown>, key: string) => config[key] !== undefined;
 
 const JSONPATH_OPERANDS = ["expected", "regex", "exists"] as const;
+
+/** A JSON Schema is an object, or `true` / `false`; the engine reads nothing else. */
+const isSchemaValue = (value: unknown) => isPlainObject(value) || typeof value === "boolean";
 
 export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 	// `assert_status_problem`: a non-empty `in` array, or a `range` key. An
@@ -384,6 +398,21 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 			hasKey(config, "gaussian") ||
 			(hasKey(config, "minMs") && hasKey(config, "maxMs")),
 	},
+	// `assert_jsonschema_shape_problem`: a `schema` that is an object or a
+	// boolean (typed text that is not one is stored as a string), and a `path`
+	// once `source` is `jsonpath`. An absent `schema` is `missingRequiredKeys`'
+	// to report, so it is not unmet here.
+	"assert.jsonschema": {
+		properties: ["schema", "source", "path"],
+		judgesValue: true,
+		needs: (config) =>
+			isSchemaValue(config.schema)
+				? "a JSONPath for the value to check"
+				: "a JSON Schema object (or true or false)",
+		isMet: (config) =>
+			(config.schema === undefined || isSchemaValue(config.schema)) &&
+			(config.source !== "jsonpath" || hasKey(config, "path")),
+	},
 	// `assert_contains_problem`: `contains` (the default mode) with an empty
 	// `text`. `equals` and `matches` read an empty text as a value, and an
 	// absent `text` is `missingRequiredKeys`' to report.
@@ -405,7 +434,7 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 export function missingOperand(element: Pick<ElementDef, "kind" | "config">): string | null {
 	const rule = OPERAND_RULES[element.kind];
 	if (!rule || rule.isMet(element.config)) return null;
-	return rule.needs;
+	return typeof rule.needs === "function" ? rule.needs(element.config) : rule.needs;
 }
 
 /**

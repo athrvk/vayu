@@ -21,6 +21,11 @@
  * the note says in that state because nothing else on screen would. The fields
  * are typed by hand; importing an MCP server is what will fill them (#3765).
  *
+ * The output schema is the one input the engine never reads: the builder does,
+ * to prefill an `assert.jsonschema` element for this tool's `structuredContent`
+ * (#3806). It lives beside the input schema because both are what `tools/list`
+ * states about the tool, and an edit of either must not drop the other.
+ *
  * The schema editor is not a native control, so `LabelledField`'s
  * `<label for>` cannot name it; the label and the error reach it through a
  * named group instead, the shape `GenericElementForm`'s map field uses.
@@ -32,7 +37,7 @@ import { Callout } from "@/components/shared/Callout";
 import { FieldError } from "@/components/shared/FieldError";
 import { LabelledField } from "@/components/shared/LabelledField";
 import type { McpTool } from "@/types";
-import { requestModelPath } from "../../../../utils/editor-models";
+import { requestModelPath, type EditorPane } from "../../../../utils/editor-models";
 import { describes, fieldsOf, readFields, type McpToolFields as Fields } from "./mcp-tool";
 
 export interface McpToolFieldsProps {
@@ -45,6 +50,8 @@ export interface McpToolFieldsProps {
 const NAME_ERROR_ID = "mcp-tool-name-error";
 const SCHEMA_LABEL_ID = "mcp-tool-schema-label";
 const SCHEMA_ERROR_ID = "mcp-tool-schema-error";
+const OUTPUT_LABEL_ID = "mcp-tool-output-schema-label";
+const OUTPUT_ERROR_ID = "mcp-tool-output-schema-error";
 
 export default function McpToolFields({ tool, onToolChange, requestId }: McpToolFieldsProps) {
 	const [fields, setFields] = useState<Fields>(() => fieldsOf(tool));
@@ -56,7 +63,7 @@ export default function McpToolFields({ tool, onToolChange, requestId }: McpTool
 	 */
 	if (!describes(fields, tool)) setFields(fieldsOf(tool));
 
-	const { nameError, schemaError } = readFields(fields);
+	const { nameError, schemaError, outputSchemaError } = readFields(fields);
 
 	const edit = (next: Fields) => {
 		setFields(next);
@@ -95,28 +102,84 @@ export default function McpToolFields({ tool, onToolChange, requestId }: McpTool
 					)}
 				</LabelledField>
 
-				<div
-					role="group"
-					aria-labelledby={SCHEMA_LABEL_ID}
-					aria-describedby={schemaError ? SCHEMA_ERROR_ID : undefined}
-					className="space-y-2"
-				>
-					<p id={SCHEMA_LABEL_ID} className="text-sm font-medium leading-none">
-						Input schema
-					</p>
-					<div className="h-28 overflow-hidden rounded-md border border-input">
-						<CodeEditor
-							height="100%"
-							language="json"
-							ariaLabel="MCP tool input schema"
-							path={requestModelPath(requestId, "mcp-input-schema")}
-							value={fields.schema}
-							onChange={(v) => edit({ ...fields, schema: v ?? "" })}
-						/>
-					</div>
-					<FieldError id={SCHEMA_ERROR_ID}>{schemaError}</FieldError>
+				<div className="space-y-3">
+					<SchemaEditor
+						labelId={SCHEMA_LABEL_ID}
+						errorId={SCHEMA_ERROR_ID}
+						label="Input schema"
+						ariaLabel="MCP tool input schema"
+						modelName="mcp-input-schema"
+						requestId={requestId}
+						value={fields.schema}
+						error={schemaError}
+						onChange={(schema) => edit({ ...fields, schema })}
+					/>
+					<SchemaEditor
+						labelId={OUTPUT_LABEL_ID}
+						errorId={OUTPUT_ERROR_ID}
+						label="Output schema"
+						hint="What the tool's structuredContent conforms to. A new Assert JSON Schema element starts from it."
+						ariaLabel="MCP tool output schema"
+						modelName="mcp-output-schema"
+						requestId={requestId}
+						value={fields.outputSchema}
+						error={outputSchemaError}
+						onChange={(outputSchema) => edit({ ...fields, outputSchema })}
+					/>
 				</div>
 			</div>
+		</div>
+	);
+}
+
+interface SchemaEditorProps {
+	labelId: string;
+	errorId: string;
+	label: string;
+	hint?: string;
+	ariaLabel: string;
+	/** The editor's model name; one per schema so the two never share an undo stack. */
+	modelName: EditorPane;
+	requestId: string | null;
+	value: string;
+	error: string | null;
+	onChange: (value: string) => void;
+}
+
+function SchemaEditor({
+	labelId,
+	errorId,
+	label,
+	hint,
+	ariaLabel,
+	modelName,
+	requestId,
+	value,
+	error,
+	onChange,
+}: SchemaEditorProps) {
+	return (
+		<div
+			role="group"
+			aria-labelledby={labelId}
+			aria-describedby={error ? errorId : undefined}
+			className="space-y-2"
+		>
+			<p id={labelId} className="text-sm font-medium leading-none">
+				{label}
+			</p>
+			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+			<div className="h-28 overflow-hidden rounded-md border border-input">
+				<CodeEditor
+					height="100%"
+					language="json"
+					ariaLabel={ariaLabel}
+					path={requestModelPath(requestId, modelName)}
+					value={value}
+					onChange={(v) => onChange(v ?? "")}
+				/>
+			</div>
+			<FieldError id={errorId}>{error}</FieldError>
 		</div>
 	);
 }

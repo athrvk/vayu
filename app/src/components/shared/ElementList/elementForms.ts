@@ -22,11 +22,16 @@
  * `assert.status`, `assert.jsonpath`, `timer.think`, `control.throughput`,
  * `metric.record`. They are spread from `ELEMENT_MODES` rather than listed
  * again here, so that table stays the one place a kind is on this list.
+ *
+ * The third is `assert.jsonschema`'s {@link JsonSchemaElementForm} (#3806): its
+ * `path` exists only for one value of `source`, and its schema is a document
+ * that wants a multi-line field.
  */
 
 import type { ComponentType } from "react";
 import { ScriptElementForm, type ScriptElementFormProps } from "./ScriptElementForm";
 import { ModeElementForm } from "./ModeElementForm";
+import { JsonSchemaElementForm } from "./JsonSchemaElementForm";
 import type { VariableSupport } from "@/types";
 import { ELEMENT_MODES } from "./element-modes";
 
@@ -42,5 +47,6 @@ export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormPro
 	"script.post": ScriptElementForm,
 	"script.setup": ScriptElementForm,
 	"script.teardown": ScriptElementForm,
+	"assert.jsonschema": JsonSchemaElementForm,
 	...Object.fromEntries(Object.keys(ELEMENT_MODES).map((kind) => [kind, ModeElementForm])),
 };

@@ -179,6 +179,12 @@ export interface FileRoot {
 export interface McpTool {
 	name: string;
 	inputSchema?: Record<string, unknown>;
+	/**
+	 * What the tool's `structuredContent` conforms to, as a server's `tools/list`
+	 * states it. The engine stores it with the body and reads nothing of it; the
+	 * builder reads it to prefill an `assert.jsonschema` element (#3806).
+	 */
+	outputSchema?: Record<string, unknown>;
 }
 
 /**
