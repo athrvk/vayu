@@ -693,6 +693,47 @@ describe("eventsFromTrace", () => {
 		expect(restored?.events).toHaveLength(1);
 		expect(restored?.streamEndReason).toBe("error");
 	});
+
+	describe("the stored start (#3805)", () => {
+		const node = {
+			items: [{ event: "token", data: "hi", receivedAt: 1_700_000_001_500 }],
+			totalEvents: 1,
+			eventsTruncated: false,
+			endReason: "completed" as const,
+		};
+
+		it("comes back as the response's sentAt, as stored", () => {
+			// Mutation check: drop the `sentAt` spread in `eventsFromTrace` and this
+			// reads undefined.
+			const restored = responseFromRunResult(
+				sample({
+					trace: { ...sample().trace, events: { ...node, startedAt: 1_700_000_000_000 } },
+				})
+			);
+
+			expect(restored?.sentAt).toBe(1_700_000_000_000);
+			expect(
+				eventsFromTrace({ events: { ...node, startedAt: 1_700_000_000_000 } }).sentAt
+			).toBe(1_700_000_000_000);
+		});
+
+		it("leaves sentAt unset on a node stored before the field existed", () => {
+			const restored = responseFromRunResult(
+				sample({ trace: { ...sample().trace, events: node } })
+			);
+
+			expect(restored?.events).toHaveLength(1);
+			expect(restored).not.toHaveProperty("sentAt");
+		});
+
+		it("leaves sentAt unset when the stored start is not a number", () => {
+			const restored = eventsFromTrace({
+				events: { ...node, startedAt: "1700000000000" as unknown as number },
+			});
+
+			expect(restored).not.toHaveProperty("sentAt");
+		});
+	});
 });
 
 /**

@@ -62,8 +62,8 @@ interface SendSnapshot {
 	/**
 	 * Epoch ms the stream was started at (#3775): the zero of the Events rows'
 	 * offsets, the status bar's clock and the Timing tab's first event. Null for
-	 * a stream not started in this session; the stored run carries no start the
-	 * app could subtract from an event's `receivedAt` without error.
+	 * a stream not started in this session, whose stored trace's `startedAt`
+	 * (#3805) stands in as `ResponseState.sentAt` instead.
 	 */
 	sentAt: number | null;
 }

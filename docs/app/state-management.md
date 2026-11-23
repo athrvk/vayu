@@ -1902,7 +1902,7 @@ It holds **one** stream: a second Send is what closes the first's feed, so two l
   error: string | null          // A transport failure on the relay
   leftOut: LeftOutElement[]     // Draft elements this Send left out (#3066)
   sent: ExampleSentRequest | null // This Send's snapshot (#1763), put on the stored response
-  sentAt: number | null         // Epoch ms `startStream` ran (#3775): the zero of row offsets, the status clock and the first event
+  sentAt: number | null         // Epoch ms `startStream` ran (#3775): the zero of row offsets, the status clock and the first event. A stream reopened from History has none here; its stored `events.startedAt` fills `ResponseState.sentAt` instead (#3805)
   finalized: boolean            // Claimed by its finalisation: fetching or landed (#3382)
   replacedFeeds: Record<string, { runId; sent; sentAt; leftOut; finalized }> // Request id -> run whose live feed another request's stream took over
   sendCounts: Record<string, number> // Sends begun per request; a newer one overtakes a late finalisation
