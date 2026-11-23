@@ -254,8 +254,8 @@ different failure from the one above: the request is already sent, so a column t
 stop the step, it fails that assertion, with a message naming the token
 (`'text' uses {{data.exepct}}, which no variable or data column answers`), never comparing the template
 as typed. A `matches` pattern is never resolved, and a failing assertion quotes the text as written, not
-the row's value. In a single-request load test the row is bound to each request but not handed to the
-assertion, so a `{{data.column}}` there fails the same way (#3790). See [Elements](../engine/elements.md).
+the row's value. A single-request load test hands each assertion the row its request was sent with, as
+a collection run does (#3790). See [Elements](../engine/elements.md).
 
 A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as

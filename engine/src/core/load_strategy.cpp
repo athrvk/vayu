@@ -807,23 +807,29 @@ class SubmissionRequest {
     size_t cursor_            = 0;
 };
 
+/// The data row @p annotations claimed, or null for a run with no data set. It
+/// points into the run's own set, which outlives every submission of the run.
+const nlohmann::json* submission_row (const RunContext& context,
+const ResultAnnotations& annotations) {
+    const LoadDataSet* data = context.load_data.get ();
+    if (data == nullptr || !annotations.data_row_index) {
+        return nullptr;
+    }
+    return &data->rows.at (*annotations.data_row_index);
+}
+
 /// This submission's request, iteration, virtual user and row, for `pm.info`
 /// and `pm.iterationData` inside an inline script (#3124, #3460) - what the
 /// deferred replay binds off the stored record (`run_manager.cpp`), read here
-/// off the live submission. The row points into the run's own set, which
-/// outlives every script of the run; `iteration_count` stays unset, as it does
-/// there.
+/// off the live submission. `iteration_count` stays unset, as it does there.
 void bind_submission_identity (vayu::runtime::ScriptContext& script_ctx,
 const RunContext& context,
 const ResultAnnotations& annotations) {
-    script_ctx.request_id   = context.script_request_id;
-    script_ctx.request_name = context.script_request_name;
-    script_ctx.iteration    = annotations.iteration;
-    script_ctx.vu           = annotations.vu;
-    const LoadDataSet* data = context.load_data.get ();
-    if (data != nullptr && annotations.data_row_index) {
-        script_ctx.iteration_data = &data->rows.at (*annotations.data_row_index);
-    }
+    script_ctx.request_id     = context.script_request_id;
+    script_ctx.request_name   = context.script_request_name;
+    script_ctx.iteration      = annotations.iteration;
+    script_ctx.vu             = annotations.vu;
+    script_ctx.iteration_data = submission_row (context, annotations);
 }
 
 /**
@@ -838,6 +844,7 @@ void run_request_elements_step_before (const std::shared_ptr<RunContext>& contex
 vayu::Request& request,
 vayu::http::routes::ScopeOverlay& overlay,
 const ResultAnnotations& annotations) {
+    const nlohmann::json* row = submission_row (*context, annotations);
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult pre_result;
     vayu::ScriptResult unused_post_result;
@@ -874,11 +881,14 @@ const ResultAnnotations& annotations) {
             return overlay.unset (scope, name, context->lifecycle_scopes);
         },
         .should_stop = nullptr,
+        // The submission's row under `data.*`, its local scope above the row
+        // (#2564), as `scenario_load.cpp` resolves a step's (#3790).
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = context->step_base_vars;
             overlay.apply_onto (vars, context->lifecycle_scopes);
-            return vayu::http::resolve_template (text, vars);
+            return vayu::http::resolve_template_with_optional_row (
+            text, vars, row, overlay.local_values ());
         },
         .blocking_allowed = false, // An event-loop worker must never block here.
         .timers_override = &context->timers_override,
@@ -925,6 +935,7 @@ vayu::Request& request,
 const vayu::Response& response,
 vayu::http::routes::ScopeOverlay& overlay,
 const ResultAnnotations& annotations) {
+    const nlohmann::json* row = submission_row (*context, annotations);
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult unused_pre_result;
     vayu::ScriptResult post_result;
@@ -970,11 +981,14 @@ const ResultAnnotations& annotations) {
             return overlay.unset (scope, name, context->lifecycle_scopes);
         },
         .should_stop = nullptr,
+        // The submission's row under `data.*`, its local scope above the row
+        // (#2564), as `scenario_load.cpp` resolves a step's (#3790).
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = context->step_base_vars;
             overlay.apply_onto (vars, context->lifecycle_scopes);
-            return vayu::http::resolve_template (text, vars);
+            return vayu::http::resolve_template_with_optional_row (
+            text, vars, row, overlay.local_values ());
         },
         .blocking_allowed = false,
         .record_metric =
