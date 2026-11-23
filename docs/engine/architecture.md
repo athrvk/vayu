@@ -900,7 +900,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `discoverUrl`. The same unit's `classify_bearer_challenge` is the one
   reader of a 401/403 `Bearer` challenge's step-up facts (`insufficient_scope`
   with its scopes unioned into the held ones, `invalid_token` reported but
-  not a step-up); it is pure, and `POST /oauth2/step-up` is its route.
+  not a step-up); it is pure, and `POST /oauth2/step-up` is its route. Its
+  one other caller is the `mcp` reply reader (`mcp_reply.cpp`, #3795), which
+  names the required scopes in the message of a 401/403 reply, still reading
+  only: no retry, no refresh.
 - **`oauth_registration`** (`register_oauth_client`, #3766) - dynamic client
   registration (RFC 7591) of a public native client (`token_endpoint_auth_method`
   `none`, `application_type` `native`) for the one redirect an attempt uses,
