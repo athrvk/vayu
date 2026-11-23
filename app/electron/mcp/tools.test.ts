@@ -8887,6 +8887,92 @@ describe("dispatchTool", () => {
 				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
 			});
 
+			/*
+			 * #3818: an ad-hoc send has no stored path to carry, so the call states
+			 * one. The default fake composes as the engine does for an inline request,
+			 * copying its keys onto the payload.
+			 */
+			describe("stated on an ad-hoc send", () => {
+				const adHoc = (extra: Record<string, unknown>) => {
+					const events = tokens(12);
+					const read = { events, completed: true, capReached: false };
+					const client = fakeClient({
+						executeRequest: vi.fn().mockResolvedValue(started),
+						consumeStreamEvents: vi.fn().mockResolvedValue(read),
+					});
+					return {
+						client,
+						events,
+						result: dispatchTool(
+							"run_request",
+							{ url: "https://api.example.com/chat", method: "POST", ...extra },
+							ctxWith(client, allow)
+						),
+					};
+				};
+				const joined = (events: Array<Record<string, unknown>>) =>
+					events.map((e) => ("text" in e ? e.text : "")).join("");
+
+				// Mutation check: drop the `streamTextPath` line from the ad-hoc branch
+				// of `composeTarget` and neither the payload nor `text` carries it.
+				test("a streamed send with a path returns `text`, and `events: false` drops the rows", async () => {
+					const full = adHoc({ stream: true, streamTextPath: PATH });
+					const res = await full.result;
+					expect(res.isError).toBeFalsy();
+					expect(res.structuredContent).toMatchObject({
+						text: joined(full.events),
+						eventCount: 12,
+					});
+					expect((res.structuredContent as { events: unknown[] }).events).toHaveLength(
+						12
+					);
+					expect(executedPayload(full.client)).toMatchObject({
+						stream: true,
+						streamTextPath: PATH,
+					});
+
+					const rowless = adHoc({ stream: true, streamTextPath: PATH, events: false });
+					const out = (await rowless.result).structuredContent as Record<string, unknown>;
+					expect(out).not.toHaveProperty("events");
+					expect(out).toMatchObject({ text: joined(rowless.events), eventCount: 12 });
+				});
+
+				// Mutation check: take the `delete payload.streamTextPath` out of
+				// `setStreamFlag` and the buffered payload keeps the path.
+				test.each([
+					["stream: false", { stream: false }],
+					["no stream argument", {}],
+				])(
+					"the path is dropped from a send that does not stream (%s)",
+					async (_, extra) => {
+						const sent = adHoc({ ...extra, streamTextPath: PATH });
+						const res = await sent.result;
+						expect(res.isError).toBeFalsy();
+						const payload = executedPayload(sent.client);
+						expect(payload).toMatchObject({ stream: false });
+						expect(payload).not.toHaveProperty("streamTextPath");
+						expect(sent.client.consumeStreamEvents).not.toHaveBeenCalled();
+					}
+				);
+
+				test("a streamed send with no path has no `text`, and none is sent", async () => {
+					const sent = adHoc({ stream: true });
+					const res = await sent.result;
+					expect(res.structuredContent).not.toHaveProperty("text");
+					expect(res.structuredContent).toHaveProperty("events");
+					expect(executedPayload(sent.client)).not.toHaveProperty("streamTextPath");
+				});
+
+				test("the schema takes a string and refuses null and numbers", () => {
+					const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema
+						.streamTextPath;
+					expect(schema.safeParse(PATH).success).toBe(true);
+					expect(schema.safeParse(undefined).success).toBe(true);
+					expect(schema.safeParse(null).success).toBe(false);
+					expect(schema.safeParse(7).success).toBe(false);
+				});
+			});
+
 			test("`events` is declared on run_request alone and is boolean", () => {
 				const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema.events;
 				expect(schema.safeParse(false).success).toBe(true);
