@@ -232,6 +232,19 @@ nlohmann::json get_script_completions () {
     "() { pm.expect(pm.response.events.length).to.equal(3); }); }" },
     { "sortText", "1_pm_response_eventsTruncated" } });
 
+    completions.push_back ({ { "label", "pm.response.mcp" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.mcp" }, { "detail", "object | undefined" },
+    { "documentation",
+    "The engine's judgement of an mcp request's reply: {} when the call "
+    "succeeded, { errorClass, code, message } when it failed. errorClass is "
+    "\"transport\", \"protocol\" or \"tool\"; code is the JSON-RPC error.code, "
+    "absent when the reply carried none; message is the sentence the failed "
+    "MCP reply test carries.\n\nAbsent for every other body mode, so typeof "
+    "separates an mcp request from the rest.\n\nExample:\n"
+    "pm.test('the tool call succeeded', function () { "
+    "pm.expect(pm.response.mcp.errorClass).to.be.undefined; });" },
+    { "sortText", "1_pm_response_mcp" } });
+
     completions.push_back ({ { "label", "pm.response.redirects" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.redirects" }, { "detail", "object[] | undefined" },
     { "documentation",
@@ -1193,8 +1206,9 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Postman's mode name: \"urlencoded\", \"formdata\", \"graphql\", "
     "\"file\" for a binary body, or \"raw\" for every other content mode - "
-    "json, text, xml and jsonrpc all carry their body as one string, which is "
-    "what raw means. Read-only; the mode follows the request's body type." },
+    "json, text, xml, jsonrpc and mcp all carry their body as one string, "
+    "which is what raw means. Read-only; the mode follows the request's body "
+    "type." },
     { "sortText", "2_pm_request_body_mode" } });
 
     completions.push_back ({ { "label", "pm.request.body.raw" }, { "kind", KIND_FIELD },

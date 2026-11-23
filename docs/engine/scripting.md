@@ -995,7 +995,7 @@ pre-request script sees the **composed** headers - the set it is there to edit,
 and the set the write-back applies back onto the request. A test script sees the
 **sent record**: those same headers as the transfer actually issued them, which
 means the ones the engine derives at send time are there too - the body-implied
-`Content-Type` (`json`, `graphql` and `jsonrpc` -> `application/json`, `text`
+`Content-Type` (`json`, `graphql`, `jsonrpc` and `mcp` -> `application/json`, `text`
 -> `text/plain`, `xml` -> `application/xml`, `x-www-form-urlencoded` ->
 `application/x-www-form-urlencoded`; a bodyless `POST` sends none, issue #2464)
 and the
@@ -1045,8 +1045,8 @@ pm.request.body.length       // the body string's own length
 ```
 
 `.mode` reads `raw` for every content mode without a Postman name of its own -
-`json`, `text`, `xml` and `jsonrpc` all carry their body as one string, which
-is what `raw` means.
+`json`, `text`, `xml`, `jsonrpc` and `mcp` all carry their body as one string,
+which is what `raw` means.
 
 A `binary` body - one file sent as the whole body - reads `file`, Postman's
 name for it. `.file` answers `{ name, size? }`: `name` is the file name the
@@ -1319,7 +1319,7 @@ Rules worth knowing before you rely on them:
   from `options.raw.language`, so the `Content-Type` is the one the request's
   own body type implies (`text/plain` for a body added to a request that had
   none) unless the script sets the header. The mode has to be the
-  one the body already has - a `raw` body (json, text, xml, jsonrpc) takes
+  one the body already has - a `raw` body (json, text, xml, jsonrpc, mcp) takes
   `raw`, a urlencoded body `urlencoded`, a request with no body `raw`, which it
   sends as text - because the write-back keeps a request's body mode, and
   `{ mode: 'raw' }` on a urlencoded body would otherwise be parsed back into
