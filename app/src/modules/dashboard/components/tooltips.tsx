@@ -134,6 +134,10 @@ export const TOOLTIPS = {
 		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. Only replies that announced text/event-stream are streams: a 429 or a JSON answer counts in the status codes, not here. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended.",
 	streamFirstEvent:
 		"How long each stream took to deliver its first event, counted from submitting the request. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. Only streams that delivered an event are counted.",
+	streamMaxEventGap:
+		"The largest pause between two consecutive events within one stream, as a distribution over the run's streams: the p50 is the worst pause of a typical stream and the max is the longest pause any stream had. Measured when each chunk arrives, so a proxy that buffers the stream and releases it in bursts hides the pauses it holds back and reads lower than the server's own. Only streams with at least two timed events are counted.",
+	streamEventRate:
+		"How fast each stream delivered its events, in events per second: the events delivered after the first write, over the time from that write to the last, so a backlog replayed at the start does not inflate it. Unlike the whole-run events/sec above, which blends every stream into one rate, this is each stream's own pace, so a low p50 means the typical stream was slow, however high the run's total reads. A stream whose events all arrived at one instant is not counted.",
 	liveStream:
 		"Events delivered by the run's streams so far, counted as they arrive rather than when a stream finishes, so a run of long streams does not read zero until the first one ends. Events/sec is the rate over the last second or more; open streams is how many transfers are streaming right now.",
 	liveStreamFirstEvent:

@@ -2581,11 +2581,18 @@ than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
 the request to each stream's first event. That is not `phases.firstByte`, which
 ends at the response headers: a gateway that answers `200` at once and then
 thinks reads fast there and slow here. It is absent when no stream delivered a
-timed event. `StreamMetrics` (`modules/dashboard/components/charts`) renders
-it, as its own first-event row, and says plainly when *every* stream was capped, because those counts then
-measure the caps rather than the target. The section is `undefined` for a run
-that did not stream, which is not the same claim as a stream that delivered
-nothing, so a report without it renders exactly as it did before.
+timed event. Two more optional blocks (issue #3776) say how each stream paced
+its events, each a `StreamDistribution` (`{p50, p95, p99, max, count}`) over the
+streams that had two timed events to measure between: `maxEventGap`, the
+largest pause between two consecutive events in a stream, in milliseconds, and
+`eventRate`, the stream's own events per second. Each is absent, never `0`,
+when no stream measured it, and neither rides a live gate frame. `StreamMetrics`
+(`modules/dashboard/components/charts`) renders them as a row each beside the
+first-event row, every row drawn only when its field is present, and says
+plainly when *every* stream was capped, because those counts then measure the
+caps rather than the target. The section is `undefined` for a run that did not
+stream, which is not the same claim as a stream that delivered nothing, so a
+report without it renders exactly as it did before.
 
 **Budgets and the verdict.** `LoadTestConfig.thresholds` (`RunThresholds`) rides
 through to `POST /runs` under the engine's own camelCase metric names, and the

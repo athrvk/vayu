@@ -5730,10 +5730,12 @@ The sections, in order:
    (`eventsPerSecond`, in `events/s`) and `Streams ended at a cap` (`capped`),
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
-   column, of the time to each stream's first event (`timeToFirstEvent`). That
-   column is left off when the document has no `timeToFirstEvent`, which the
-   engine omits when no stream delivered a timed event, so a zero never stands
-   for a figure that was not measured. A figure the document lacks reads `-`.
+   column, of the time to each stream's first event (`timeToFirstEvent`), then
+   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   off when the document lacks its block, which the engine omits when no
+   stream measured it, so a zero never stands for a figure that was not
+   measured. A figure the document lacks reads `-`.
 7. `## Capacity`, only for a run whose document has `report.capacity`: the
    stop reason in bold and what the search found (`**Latency budget exceeded**
    - Sustained 41 virtual users at 403 req/s, with a p99 of 178 ms against a
@@ -11955,7 +11957,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event, time-to-first-event, largest-gap and event-rate histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -12926,7 +12928,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
-| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
@@ -14439,7 +14441,9 @@ failure.
   "capped": 480,
   "eventsPerSecond": 320.0,
   "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
-  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 }
+  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 },
+  "maxEventGap": { "p50": 27.1, "p95": 33.8, "p99": 41.0, "max": 312.4, "count": 480 },
+  "eventRate": { "p50": 40.0, "p95": 41.2, "p99": 41.9, "max": 42.3, "count": 480 }
 }
 ```
 
@@ -14489,6 +14493,26 @@ target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is
 absent when no completion delivered a timed event.
+
+`maxEventGap` and `eventRate` (issue #3776) are per-completion distributions
+of how each stream paced its events, in the same `{p50, p95, p99, max, count}`
+shape. `maxEventGap` is each stream's largest wait, in milliseconds, between
+two consecutive writes that delivered an event: a stall mid-reply shows at its
+`max` however fast the stream ran otherwise. `eventRate` is each stream's own
+rate in events per second, the events delivered after the first write that
+delivered one over the time from that write to the last, so 8 streams at 25 ms
+per event read a p50 near 40 beside one stream at 3 ms reading a `max` near
+333, where the whole-run `eventsPerSecond` blends them. The first write's own
+events are left out however many it carried: a backlog replayed in it took no
+measured time. Both are stamped on the write that
+completed an event, as `timeToFirstEvent` is: events that share a write share
+one time, and a proxy that buffers the stream shortens the gaps it holds back.
+A keep-alive comment is not an event and closes no gap, and the unterminated
+last frame the close completes counts toward `events` but toward neither of
+these. `count` is the completions with at least two such writes (`eventRate`
+also leaves out one whose writes all landed at one instant), so a stream whose
+events arrived in one write is in neither, and each object is absent when no
+completion measured it. Neither is on the live frames: they are report-only.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 
