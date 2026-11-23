@@ -196,8 +196,11 @@ class StreamTally {
             first_arrival_           = now;
             events_at_first_arrival_ = counter_.events ();
         } else {
-            max_gap_ = std::max (
-            max_gap_.value_or (Clock::duration::zero ()), now - last_arrival_);
+            // Parenthesized: the test target includes `windows.h` without
+            // `NOMINMAX` (`core/constants.hpp` says why), whose `max` macro
+            // would otherwise break this line with MSVC's C2589.
+            max_gap_ = (std::max)(max_gap_.value_or (Clock::duration::zero ()),
+            now - last_arrival_);
         }
         last_arrival_           = now;
         events_at_last_arrival_ = counter_.events ();
