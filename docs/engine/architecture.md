@@ -876,8 +876,9 @@ applied to the outgoing request rather than being left to the UI. This lives in
   anyone polls (#3347). Owned by the `Server` for a clean shutdown. A config
   naming `discoverUrl` (#3766) is completed by `oauth_discovery` before the
   attempt starts (blanks only, a typed value wins), registers a client through
-  `oauth_registration` when it names no `clientId`, and answers what it
-  resolved so the app stores it.
+  `oauth_registration` when it names no `clientId`, answers what it resolved
+  so the app stores it, and checks the callback's `iss` against the
+  discovered issuer (RFC 9207) before the code is exchanged.
 - **`oauth_discovery`** (`discover_oauth_server`, #3766) - finds the
   authorization server of an MCP server URL in the MCP authorization spec's
   order: an unauthenticated `GET` whose 401 `Bearer` challenge names

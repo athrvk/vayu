@@ -4,7 +4,7 @@
  *        validation, embedded completion, a full in-process loopback flow
  *        (simulated IdP redirect → token exchange against a mock token server),
  *        and an attempt discovered from an MCP server URL (#3766): its
- *        endpoints, resource and scope, and client registration.
+ *        endpoints, resource and scope, client registration and `iss`.
  */
 
 // First, before anything that includes <httplib.h>: see the header.
@@ -714,6 +714,26 @@ TEST_F (OAuthAuthorizeTest, CancelStopsAttempt) {
     EXPECT_EQ (mgr.status (start.attempt_id).state, "not_found");
 }
 
+// An attempt that was not discovered expects no issuer, so an `iss` it was not
+// told to expect changes nothing (#3766).
+TEST_F (OAuthAuthorizeTest, AnAttemptThatWasNotDiscoveredIgnoresIss) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    json config              = embedded_config ();
+    config["grantType"]      = "authorization_code";
+    config["accessTokenUrl"] = idp.url ("/token");
+    const auto start         = mgr.start (*db_, config, "embedded");
+    ASSERT_TRUE (start.ok) << start.error_message;
+    EXPECT_FALSE (start.resolved.has_value ());
+
+    const auto st = mgr.complete (*db_, start.attempt_id,
+    "https://app/"
+    "callback?code=AUTHCODE&iss=https%3A%2F%2Felsewhere.example&state=" +
+    state_of (start));
+    EXPECT_EQ (st.state, "completed") << st.error;
+    EXPECT_EQ (idp.hits (), 1);
+}
+
 // ============================================================================
 // A discovered attempt (#3766)
 // ============================================================================
@@ -810,6 +830,9 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
     const std::string& extra) {
         return mgr_.complete (*db_, start.attempt_id,
         std::string (CALLBACK_URL) + "?code=AUTHCODE&state=" + state_of (start) + extra);
+    }
+    [[nodiscard]] std::string iss_param () const {
+        return "&iss=" + vayu::utils::url_encode (issuer ());
     }
 
     DiscoveryServer server_;
@@ -1007,7 +1030,7 @@ TEST_F (OAuthDiscoveredAuthorizeTest, ARegistrationThatCannotCompleteTheFlowIsRe
 // than the resolved one, and the exchange has no token endpoint.
 TEST_F (OAuthDiscoveredAuthorizeTest, TheCodeIsExchangedWithTheResolvedConfig) {
     const auto start = start_embedded ();
-    const auto st    = complete_with (start, "");
+    const auto st    = complete_with (start, iss_param ());
     ASSERT_EQ (st.state, "completed") << st.error;
     EXPECT_EQ (server_.hits (TOKEN_PATH), 1);
 
@@ -1026,6 +1049,82 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheCodeIsExchangedWithTheResolvedConfig) {
     const auto token = db_->get_oauth_token (st.cache_key);
     ASSERT_HAS_VALUE (token);
     EXPECT_EQ (token->access_token, "AT-DISCOVERED");
+}
+
+// A response from another issuer is a mix-up (RFC 9207): it fails the attempt
+// and its code never reaches a token endpoint.
+//
+// Mutation check: drop the comparison in `check_issuer` and the code is
+// exchanged.
+TEST_F (OAuthDiscoveredAuthorizeTest, AMismatchedIssIsRejectedAndTheCodeNeverExchanged) {
+    const auto start = start_embedded ();
+    const auto st    = complete_with (start, "&iss=https%3A%2F%2Fevil.example");
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_NE (st.error.find ("https://evil.example"), std::string::npos) << st.error;
+    EXPECT_NE (st.error.find (issuer ()), std::string::npos) << st.error;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+}
+
+// The MCP spec: on a mismatch the client must not act on or display the
+// response's `error` either, so the refusal is not attributed to the server.
+TEST_F (OAuthDiscoveredAuthorizeTest, AMismatchedIssOnAnErrorResponseHidesItsError) {
+    const auto start = start_embedded ();
+    const auto st    = mgr_.complete (*db_, start.attempt_id,
+    std::string (CALLBACK_URL) + "?error=access_denied&error_description=Trust%20me&iss=https%3A%2F%2Fevil.example&state=" +
+    state_of (start));
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_NE (st.error.find ("RFC 9207"), std::string::npos) << st.error;
+    EXPECT_EQ (st.error.find ("access_denied"), std::string::npos) << st.error;
+    EXPECT_EQ (st.error.find ("Trust me"), std::string::npos) << st.error;
+}
+
+TEST_F (OAuthDiscoveredAuthorizeTest, AnAbsentIssIsRejectedFromAServerThatAdvertisesIt) {
+    const auto start = start_embedded ();
+    const auto st    = complete_with (start, "");
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_NE (st.error.find ("carries no iss"), std::string::npos) << st.error;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+}
+
+// A server that does not advertise `iss` may omit it, but one it sends is
+// still compared (the MCP spec's third row).
+TEST_F (OAuthDiscoveredAuthorizeTest, AServerThatDoesNotAdvertiseIssMayOmitItButNotMisstateIt) {
+    json doc                                              = metadata ();
+    doc["authorization_response_iss_parameter_supported"] = false;
+    serve_metadata (doc);
+
+    const auto omitted = start_embedded ();
+    EXPECT_EQ (complete_with (omitted, "").state, "completed");
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 1);
+
+    const auto misstated = start_embedded ();
+    EXPECT_EQ (complete_with (misstated, "&iss=https%3A%2F%2Fevil.example").state, "failed");
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 1);
+}
+
+// The loopback callback runs the same check as an embedded completion.
+TEST_F (OAuthDiscoveredAuthorizeTest, TheLoopbackCallbackChecksIss) {
+    const auto mismatched = mgr_.start (*db_, discovered_config (), "loopback");
+    ASSERT_TRUE (mismatched.ok) << mismatched.error_code << ": " << mismatched.error_message;
+    httplib::Client wrong (callback_origin (mismatched));
+    const auto refused =
+    wrong.Get ("/callback?code=AUTHCODE&state=" + state_of (mismatched) +
+    "&iss=https%3A%2F%2Fevil.example");
+    ASSERT_TRUE (refused != nullptr);
+    EXPECT_NE (refused->body.find ("Authorization failed"), std::string::npos)
+    << refused->body;
+    EXPECT_EQ (mgr_.status (mismatched.attempt_id).state, "failed");
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+
+    const auto matching = mgr_.start (*db_, discovered_config (), "loopback");
+    ASSERT_TRUE (matching.ok) << matching.error_code << ": " << matching.error_message;
+    httplib::Client right (callback_origin (matching));
+    const auto accepted = right.Get (
+    "/callback?code=AUTHCODE&state=" + state_of (matching) + iss_param ());
+    ASSERT_TRUE (accepted != nullptr);
+    EXPECT_EQ (accepted->status, 200);
+    EXPECT_EQ (mgr_.status (matching.attempt_id).state, "completed");
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 1);
 }
 
 // The route answers `resolved` for a discovered attempt and only for one.

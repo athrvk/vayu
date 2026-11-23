@@ -7697,6 +7697,24 @@ A start that cannot complete the config is refused before any attempt exists:
 | `502` | `oauth_registration_invalid_response` | Its 2xx answer names no string `client_id`, or a client that needs a secret |
 | `400` | `oauth2_client_id_required` | No `clientId` and no `registration_endpoint` |
 
+**`iss` (RFC 9207).** A discovered attempt records the issuer, and every
+callback with the right `state` (and an embedded completion's IdP refusal,
+which is read without one) is checked against it before anything else in it
+is used, `error` included:
+
+| Metadata `authorization_response_iss_parameter_supported` | `iss` in the callback | Result |
+|--------|--------|--------|
+| `true` | equal to the issuer | Proceeds |
+| `true` | absent or different | Fails the attempt |
+| `false` or absent | absent | Proceeds |
+| `false` or absent | different | Fails the attempt |
+
+The comparison is byte for byte on the decoded value, with no case folding or
+normalisation. A failed check names the issuer it expected (and the one the
+callback named), never the response's `error` or `error_description`, and the
+code is never sent to a token endpoint. An attempt that was not discovered
+records no issuer and reads no `iss`.
+
 ### Local mock issuer
 
 A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -

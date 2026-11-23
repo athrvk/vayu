@@ -39,7 +39,7 @@ struct ResolvedAuthorization {
     std::string resource;
     /// Empty when no scope was typed, challenged or listed.
     std::string scope;
-    /// The discovered authorization server.
+    /// The authorization server whose `iss` the callback must carry.
     std::string issuer;
 };
 

@@ -169,14 +169,21 @@ StartRefusal upstream_refusal (std::string code, std::string message) {
     return StartRefusal{ status, std::move (code), std::move (message) };
 }
 
+/// The issuer a discovered attempt's authorization response must name (RFC
+/// 9207).
+struct ExpectedIssuer {
+    std::string issuer;
+    /// The metadata's `authorization_response_iss_parameter_supported`: only
+    /// then is a response without `iss` refused.
+    bool advertised = false;
+};
+
 /// The config an attempt runs on, and what its discovery recorded.
 struct AttemptPlan {
     nlohmann::json config;
     /// The `discoverUrl` the attempt was discovered from; empty when it was not.
     std::string server_url;
-    /// The discovered authorization server; empty when the attempt was not
-    /// discovered.
-    std::string issuer;
+    std::optional<ExpectedIssuer> issuer;
     /// Where the attempt registers its client: set only when the config names
     /// no `clientId` and the discovered authorization server offers
     /// registration.
@@ -208,7 +215,9 @@ std::expected<AttemptPlan, StartRefusal> plan_discovered (const nlohmann::json& 
 std::string server_url,
 const OAuthDiscovery& found) {
     const AuthorizationServerMetadata& server = found.authorization_server;
-    AttemptPlan plan{ config, std::move (server_url), server.issuer, std::nullopt };
+    AttemptPlan plan{ config, std::move (server_url),
+        ExpectedIssuer{ server.issuer, server.authorization_response_iss_parameter_supported },
+        std::nullopt };
     fill_blank (plan.config, "authorizationUrl", server.authorization_endpoint);
     fill_blank (plan.config, "accessTokenUrl", server.token_endpoint);
     fill_blank (plan.config, "resource", found.resource);
@@ -238,7 +247,7 @@ AuthorizationServerMetadataCache& cache,
 const std::atomic<bool>* cancel) {
     std::string server_url = oauth::url_field (config, "discoverUrl");
     if (server_url.empty ()) {
-        return AttemptPlan{ config, {}, {}, std::nullopt };
+        return AttemptPlan{ config, {}, std::nullopt, std::nullopt };
     }
     auto found = discover_oauth_server (db, server_url,
     routes::resolve_request_timeout_ms (nlohmann::json::object (), db), cancel, cache);
@@ -281,10 +290,39 @@ const std::atomic<bool>* cancel) {
 }
 
 ResolvedAuthorization resolved_authorization (const nlohmann::json& config,
-const std::string& issuer) {
+const ExpectedIssuer& issuer) {
     return ResolvedAuthorization{ oauth::url_field (config, "authorizationUrl"),
         oauth::url_field (config, "accessTokenUrl"), field (config, "clientId"),
-        field (config, "resource"), field (config, "scope"), issuer };
+        field (config, "resource"), field (config, "scope"), issuer.issuer };
+}
+
+/**
+ * Whether an authorization response may be acted on by an attempt expecting
+ * @p expected (RFC 9207 section 2.4, as the MCP spec tabulates it): a present
+ * `iss` must equal the issuer byte for byte, and an absent one is refused only
+ * from a server that advertises sending it. An attempt that was not
+ * discovered expects nothing and accepts any response.
+ */
+std::expected<void, std::string> check_issuer (const std::map<std::string, std::string>& params,
+const std::optional<ExpectedIssuer>& expected) {
+    if (!expected) {
+        return {};
+    }
+    const auto iss = params.find ("iss");
+    if (iss == params.end ()) {
+        if (!expected->advertised) {
+            return {};
+        }
+        return std::unexpected (
+        "The authorization response carries no iss, and the "
+        "authorization server " +
+        expected->issuer + " advertises sending one (RFC 9207) - the response was not used");
+    }
+    if (iss->second != expected->issuer) {
+        return std::unexpected ("The authorization response names the issuer " +
+        iss->second + ", not " + expected->issuer + " (RFC 9207) - the response was not used");
+    }
+    return {};
 }
 
 } // namespace
@@ -362,17 +400,25 @@ const std::string& expected_state) {
 }
 
 /**
- * The outcome of a callback whose state matched: the IdP's own refusal, or the
- * token exchange this redirect exists to make, which @p cancel (when set) ends
- * early. Never throws: a claimed attempt that never publishes is never reaped.
+ * The outcome of a callback whose state matched: a response from an issuer
+ * other than @p issuer, the IdP's own refusal, or the token exchange this
+ * redirect exists to make, which @p cancel (when set) ends early. The issuer
+ * is checked first because a refusal from the wrong issuer must not be shown
+ * as the expected one's (the MCP spec on RFC 9207). Never throws: a claimed
+ * attempt that never publishes is never reaped.
  */
 CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& code_verifier,
 const std::string& redirect_uri,
 const std::map<std::string, std::string>& params,
+const std::optional<ExpectedIssuer>& issuer,
 const std::atomic<bool>* cancel) {
     CallbackOutcome outcome;
+    if (auto issued = check_issuer (params, issuer); !issued) {
+        outcome.error = std::move (issued.error ());
+        return outcome;
+    }
     if (auto refusal = redirect_refusal (params)) {
         outcome.error = std::move (*refusal);
         return outcome;
@@ -405,6 +451,7 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string code_verifier;
     nlohmann::json config;
     std::string redirect_uri;
+    std::optional<ExpectedIssuer> issuer;
     bool pkce = true;
     Clock::time_point deadline;
     Clock::time_point erase_at;
@@ -497,8 +544,8 @@ struct OAuth2AuthorizeManager::Attempt {
             res.set_content (callback_page ("Authorization already handled"), "text/html");
             return;
         }
-        const CallbackOutcome outcome = resolve_oauth_callback (
-        db, config, code_verifier, redirect_uri, params, &stop_signal.flag ());
+        const CallbackOutcome outcome = resolve_oauth_callback (db, config,
+        code_verifier, redirect_uri, params, issuer, &stop_signal.flag ());
         publish (outcome.result_state, outcome.error, outcome.cache_key);
         res.set_content (callback_page (outcome.heading), "text/html");
     }
@@ -655,6 +702,7 @@ const std::atomic<bool>* cancel) {
     }
 
     auto attempt             = std::make_unique<Attempt> ();
+    attempt->issuer          = plan->issuer;
     const auto now           = Clock::now ();
     attempt->deadline        = now + timings_.attempt_ttl;
     attempt->erase_at        = now + timings_.record_retention;
@@ -690,8 +738,8 @@ const std::atomic<bool>* cancel) {
     out.expires_at    = expires_at;
     out.authorize_url = build_authorize_url (attempt->config, attempt->state,
     challenge, attempt->redirect_uri, attempt->pkce);
-    if (!plan->issuer.empty ()) {
-        out.resolved = resolved_authorization (attempt->config, plan->issuer);
+    if (const auto& issuer = attempt->issuer) {
+        out.resolved = resolved_authorization (attempt->config, *issuer);
     }
 
     if (!attempts_.commit (std::move (*slot), attempt_id, std::move (attempt))) {
@@ -711,6 +759,7 @@ const std::string& callback_url) {
     // other attempts (the manager is shared across all in-flight authorizations).
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
+    std::optional<ExpectedIssuer> issuer;
     std::shared_ptr<const std::atomic<bool>> cancel;
     const auto now      = Clock::now ();
     const auto answered = attempts_.with_entry (
@@ -724,6 +773,7 @@ const std::string& callback_url) {
         code_verifier = attempt.code_verifier;
         redirect_uri  = attempt.redirect_uri;
         config        = attempt.config;
+        issuer        = attempt.issuer;
         cancel        = attempt.completion_cancel;
         return std::nullopt;
     });
@@ -743,7 +793,7 @@ const std::string& callback_url) {
     CallbackOutcome outcome;
     if (redirect_refusal (params) || callback_state_matches (params, state)) {
         outcome = resolve_oauth_callback (
-        db, config, code_verifier, redirect_uri, params, cancel.get ());
+        db, config, code_verifier, redirect_uri, params, issuer, cancel.get ());
     } else {
         outcome.error = "State mismatch (possible CSRF)";
     }
