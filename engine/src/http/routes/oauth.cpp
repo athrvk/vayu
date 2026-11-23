@@ -175,8 +175,8 @@ oauth2_token_delete (vayu::db::Database& db, const std::string& key) {
 /**
  * Start an interactive authorization attempt for the `{config, mode?}` in
  * @p request_body. Separated from the route for unit testing; @p cancel is the
- * route's `RouteContext::server_stopping`, which ends a discovery the start
- * makes.
+ * route's `RouteContext::server_stopping`, which ends a discovery or a client
+ * registration the start makes.
  */
 std::pair<int, nlohmann::json> oauth2_authorize_start (OAuth2AuthorizeManager& manager,
 vayu::db::Database& db,

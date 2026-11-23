@@ -3,14 +3,14 @@
 /**
  * @file oauth_discovery_server.hpp
  * @brief An in-process MCP server and authorization server for the OAuth
- *        discovery and authorize tests (#3766).
+ *        discovery, registration and authorize tests (#3766).
  *
  * Every `GET` and `POST` is answered from a table the test fills by path (the
  * method and the query are not part of the key), and every path counts its
  * requests: `hits` is how a test tells a cached document from a fetched one,
  * and an unlisted path is a 404, which is what moves discovery on to its next
  * well-known URL. A path's last request body is kept, so a test reads what a
- * token request sent.
+ * registration or a token request sent.
  */
 
 #include "task_queue.hpp"

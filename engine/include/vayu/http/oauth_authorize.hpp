@@ -34,6 +34,7 @@ namespace vayu::http {
 struct ResolvedAuthorization {
     std::string authorization_url;
     std::string access_token_url;
+    /// The config's `clientId`, or the one dynamic client registration issued.
     std::string client_id;
     std::string resource;
     /// Empty when no scope was typed, challenged or listed.
@@ -120,9 +121,11 @@ class OAuth2AuthorizeManager {
     //
     // A config naming `discoverUrl` is first completed from the discovery of
     // that MCP server (`discover_oauth_server`): its authorization and token
-    // endpoints, `resource` and scope fill what the config leaves blank. The
-    // discovery is bounded by the request timeout setting and ends on
-    // @p cancel (the route's `RouteContext::server_stopping`).
+    // endpoints, `resource` and scope fill what the config leaves blank, and
+    // with no `clientId` a client is registered (`register_oauth_client`) for
+    // this attempt's redirect. Each network step is bounded by the request
+    // timeout setting and ends on @p cancel (the route's
+    // `RouteContext::server_stopping`).
     AuthorizeStart start (vayu::db::Database& db,
     const nlohmann::json& config,
     const std::string& mode,

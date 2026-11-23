@@ -17,6 +17,7 @@
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/oauth_discovery.hpp"
+#include "vayu/http/oauth_registration.hpp"
 #include "vayu/http/pkce.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -155,14 +156,14 @@ void fail_start (const StartRefusal& refusal, AuthorizeStart& out) {
     out.error_message = refusal.message;
 }
 
-/// A discovery's failure as the start's answer: no usable server URL is the
-/// caller's (400), running out of time a 504, and anything the far side
-/// answered or failed to answer a 502.
+/// A discovery's or a registration's failure as the start's answer: no usable
+/// server URL is the caller's (400), running out of time a 504, and anything
+/// the far side answered or failed to answer a 502.
 StartRefusal upstream_refusal (std::string code, std::string message) {
     int status = 502;
     if (code == oauth_discovery::INVALID_SERVER_URL) {
         status = 400;
-    } else if (code == oauth_discovery::TIMEOUT) {
+    } else if (code == oauth_discovery::TIMEOUT || code == oauth_registration::TIMEOUT) {
         status = 504;
     }
     return StartRefusal{ status, std::move (code), std::move (message) };
@@ -171,9 +172,15 @@ StartRefusal upstream_refusal (std::string code, std::string message) {
 /// The config an attempt runs on, and what its discovery recorded.
 struct AttemptPlan {
     nlohmann::json config;
+    /// The `discoverUrl` the attempt was discovered from; empty when it was not.
+    std::string server_url;
     /// The discovered authorization server; empty when the attempt was not
     /// discovered.
     std::string issuer;
+    /// Where the attempt registers its client: set only when the config names
+    /// no `clientId` and the discovered authorization server offers
+    /// registration.
+    std::optional<std::string> registration_endpoint;
 };
 
 /// Writes @p discovered into @p member when the config leaves it blank: a
@@ -197,19 +204,29 @@ std::string discovered_scope (const OAuthDiscovery& found) {
     return joined;
 }
 
-std::expected<AttemptPlan, StartRefusal>
-plan_discovered (const nlohmann::json& config, const OAuthDiscovery& found) {
+std::expected<AttemptPlan, StartRefusal> plan_discovered (const nlohmann::json& config,
+std::string server_url,
+const OAuthDiscovery& found) {
     const AuthorizationServerMetadata& server = found.authorization_server;
-    AttemptPlan plan{ config, server.issuer };
+    AttemptPlan plan{ config, std::move (server_url), server.issuer, std::nullopt };
     fill_blank (plan.config, "authorizationUrl", server.authorization_endpoint);
     fill_blank (plan.config, "accessTokenUrl", server.token_endpoint);
     fill_blank (plan.config, "resource", found.resource);
     fill_blank (plan.config, "scope", discovered_scope (found));
-    if (field (config, "clientId").empty ()) {
-        return std::unexpected (StartRefusal{ 400, "oauth2_client_id_required",
-        "Enter the client id registered with the authorization server " +
-        server.issuer + " in clientId" });
+    if (!field (config, "clientId").empty ()) {
+        return plan;
     }
+    if (!server.registration_endpoint) {
+        return std::unexpected (StartRefusal{ 400, "oauth2_client_id_required",
+        "The authorization server " + server.issuer +
+        " offers no dynamic client registration (its metadata has no "
+        "registration_endpoint) - enter the client id registered with it in "
+        "clientId" });
+    }
+    plan.registration_endpoint = *server.registration_endpoint;
+    // The registered client is public: a secret typed for another client must
+    // not authenticate it.
+    plan.config.erase ("clientSecret");
     return plan;
 }
 
@@ -219,9 +236,9 @@ std::expected<AttemptPlan, StartRefusal> plan_attempt (vayu::db::Database& db,
 const nlohmann::json& config,
 AuthorizationServerMetadataCache& cache,
 const std::atomic<bool>* cancel) {
-    const std::string server_url = oauth::url_field (config, "discoverUrl");
+    std::string server_url = oauth::url_field (config, "discoverUrl");
     if (server_url.empty ()) {
-        return AttemptPlan{ config, {} };
+        return AttemptPlan{ config, {}, {}, std::nullopt };
     }
     auto found = discover_oauth_server (db, server_url,
     routes::resolve_request_timeout_ms (nlohmann::json::object (), db), cancel, cache);
@@ -229,16 +246,37 @@ const std::atomic<bool>* cancel) {
         return std::unexpected (upstream_refusal (
         std::move (found.error ().code), std::move (found.error ().message)));
     }
-    return plan_discovered (config, *found);
+    return plan_discovered (config, std::move (server_url), *found);
 }
 
 std::expected<void, StartRefusal> require_complete (const AttemptPlan& plan) {
+    const bool has_client =
+    !field (plan.config, "clientId").empty () || plan.registration_endpoint;
     if (!plan.config.is_object () ||
-    oauth::url_field (plan.config, "authorizationUrl").empty () ||
-    field (plan.config, "clientId").empty ()) {
+    oauth::url_field (plan.config, "authorizationUrl").empty () || !has_client) {
         return std::unexpected (StartRefusal{ 400, "oauth2_invalid_config",
         "authorizationUrl and clientId are required" });
     }
+    return {};
+}
+
+/// Registers the plan's client for @p redirect_uri when it has none, writing
+/// the issued id into its config.
+std::expected<void, StartRefusal> register_client (vayu::db::Database& db,
+AttemptPlan& plan,
+const std::string& redirect_uri,
+const std::atomic<bool>* cancel) {
+    if (!plan.registration_endpoint) {
+        return {};
+    }
+    auto client_id = register_oauth_client (db, *plan.registration_endpoint,
+    redirect_uri, plan.server_url,
+    routes::resolve_request_timeout_ms (nlohmann::json::object (), db), cancel);
+    if (!client_id) {
+        return std::unexpected (upstream_refusal (std::move (client_id.error ().code),
+        std::move (client_id.error ().message)));
+    }
+    plan.config["clientId"] = std::move (*client_id);
     return {};
 }
 
@@ -465,14 +503,15 @@ struct OAuth2AuthorizeManager::Attempt {
         res.set_content (callback_page (outcome.heading), "text/html");
     }
 
-    /// Where the IdP sends this attempt's browser: the config's `callbackUrl`
-    /// in embedded mode, else a one-shot 127.0.0.1 listener on an ephemeral
-    /// port.
+    /// Where the IdP sends this attempt's browser: @p start_config's
+    /// `callbackUrl` in embedded mode, else a one-shot 127.0.0.1 listener on
+    /// an ephemeral port.
     std::expected<void, StartRefusal> bind_redirect (vayu::db::Database& db,
     const std::string& attempt_id,
-    const std::string& mode) {
+    const std::string& mode,
+    const nlohmann::json& start_config) {
         if (mode == "embedded") {
-            redirect_uri = oauth::url_field (config, "callbackUrl");
+            redirect_uri = oauth::url_field (start_config, "callbackUrl");
             if (redirect_uri.empty ()) {
                 return std::unexpected (StartRefusal{ 400, "oauth2_invalid_config",
                 "callbackUrl is required for embedded mode" });
@@ -616,14 +655,13 @@ const std::atomic<bool>* cancel) {
     }
 
     auto attempt             = std::make_unique<Attempt> ();
-    attempt->config          = std::move (plan->config);
     const auto now           = Clock::now ();
     attempt->deadline        = now + timings_.attempt_ttl;
     attempt->erase_at        = now + timings_.record_retention;
     const int64_t expires_at = now_ms () + timings_.attempt_ttl.count ();
     attempt->pkce            = [&] {
-        auto it = attempt->config.find ("pkce");
-        return it == attempt->config.end () || !it->is_boolean () || it->get<bool> ();
+        auto it = plan->config.find ("pkce");
+        return it == plan->config.end () || !it->is_boolean () || it->get<bool> ();
     }();
     attempt->state = pkce::random_token (16);
     attempt->code_verifier = attempt->pkce ? pkce::random_token (32) : std::string{};
@@ -632,10 +670,20 @@ const std::atomic<bool>* cancel) {
 
     const std::string attempt_id = generate_attempt_id ();
 
-    if (auto bound = attempt->bind_redirect (db, attempt_id, mode); !bound) {
+    if (auto bound = attempt->bind_redirect (db, attempt_id, mode, plan->config); !bound) {
         fail_start (bound.error (), out);
         return out;
     }
+    // A registration needs the redirect it registers, so it runs once that is
+    // bound. The config is written after the listener starts, which is safe
+    // because its callback reads nothing but `state` until a request carries
+    // that state, and no one has it until this returns.
+    if (auto registered = register_client (db, *plan, attempt->redirect_uri, cancel);
+    !registered) {
+        fail_start (registered.error (), out);
+        return out;
+    }
+    attempt->config = std::move (plan->config);
 
     out.attempt_id    = attempt_id;
     out.redirect_uri  = attempt->redirect_uri;

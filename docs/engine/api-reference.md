@@ -7651,12 +7651,19 @@ members above. Discovery **fills only what the config leaves blank**: a typed
 | `authorizationUrl`, `accessTokenUrl` | The metadata's `authorization_endpoint` and `token_endpoint` |
 | `resource` | The protected resource metadata's `resource`, the canonical server URL; sent on the authorize URL and the token request (RFC 8707) |
 | `scope` | The 401 challenge's `scope`; without one, every `scopes_supported` entry of the protected resource metadata, space-joined; without those, no scope is sent (the MCP spec's scope selection) |
+| `clientId` | A typed `clientId` (with its `clientSecret`) is used as it is and nothing is registered. Otherwise, when the metadata has a `registration_endpoint`, a client is registered there (RFC 7591) for this attempt, and its `client_id` is used; the typed `clientSecret`, if any, is not sent with it. Otherwise the start is refused with `400` `oauth2_client_id_required`, naming why |
 
-A discovered config still needs a `clientId` (with its `clientSecret` when the
-client has one); without one the start is refused with `400`
-`oauth2_client_id_required`. The discovery is bounded by the request timeout
-setting, goes through the shared client and transport policy, and ends when
-the engine stops.
+The registration posts `{client_name: "Vayu", redirect_uris: [<redirectUri>],
+grant_types: ["authorization_code", "refresh_token"], response_types:
+["code"], token_endpoint_auth_method: "none", application_type: "native"}`: a
+public native client whose one redirect is the one this attempt uses, the
+loopback listener's ephemeral port (bound before the registration) or the
+embedded `callbackUrl`. A 2xx answer must carry a string `client_id` and
+describe a public client; one whose `token_endpoint_auth_method` is not `none`,
+or that carries a `client_secret` and states no method, is refused, and the
+secret is never logged or repeated. The discovery and the registration each go
+through the shared client and transport policy, are bounded by the request
+timeout setting, and end when the engine stops.
 
 The answer's `resolved` holds what the attempt runs on, the values a client
 writes into its stored config so that a later refresh or run needs no
@@ -7667,7 +7674,7 @@ ever in it):
 {
   "authorizationUrl": "https://auth.example/authorize",
   "accessTokenUrl": "https://auth.example/token",
-  "clientId": "typed-client",
+  "clientId": "registered-or-typed-client",
   "resource": "https://mcp.example/mcp",
   "scope": "mcp:read",
   "issuer": "https://auth.example"
@@ -7683,9 +7690,12 @@ A start that cannot complete the config is refused before any attempt exists:
 | Status | Code | When |
 |--------|------|------|
 | `400` | `oauth_discovery_invalid_server_url` | `discoverUrl` is not an absolute `http` or `https` URL |
-| `504` | `oauth_discovery_timeout` | The discovery ran out of time |
+| `504` | `oauth_discovery_timeout`, `oauth_registration_timeout` | The discovery or the registration ran out of time |
 | `502` | any other `oauth_discovery_*` code | Discovery found no usable metadata: none answered, a document is invalid, its `resource` or `issuer` does not match, it lacks PKCE `S256`, or it names a local URL for a remote server |
-| `400` | `oauth2_client_id_required` | No `clientId` |
+| `502` | `oauth_registration_network_error` | The registration endpoint gave no answer |
+| `502` | `oauth_registration_refused` | It answered outside 2xx; its RFC 7591 `error` and `error_description` are quoted |
+| `502` | `oauth_registration_invalid_response` | Its 2xx answer names no string `client_id`, or a client that needs a secret |
+| `400` | `oauth2_client_id_required` | No `clientId` and no `registration_endpoint` |
 
 ### Local mock issuer
 

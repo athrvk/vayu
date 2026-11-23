@@ -4,7 +4,7 @@
  *        validation, embedded completion, a full in-process loopback flow
  *        (simulated IdP redirect → token exchange against a mock token server),
  *        and an attempt discovered from an MCP server URL (#3766): its
- *        endpoints, resource and scope.
+ *        endpoints, resource and scope, and client registration.
  */
 
 // First, before anything that includes <httplib.h>: see the header.
@@ -31,6 +31,7 @@
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/oauth_discovery.hpp"
+#include "vayu/http/oauth_registration.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "wait_until.hpp"
 
@@ -727,14 +728,15 @@ DiscoveryAnswer json_answer (const json& body, int status = 200) {
 
 /// An MCP server at `/mcp` whose 401 names its protected resource metadata at
 /// a path no well-known rule builds, and the authorization server `/tenant`
-/// that protects it, with its authorize and token endpoints, all on one
-/// in-process fixture.
+/// that protects it, with its authorize, token and registration endpoints, all
+/// on one in-process fixture.
 class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
     protected:
     static constexpr const char* METADATA_PATH =
     "/.well-known/oauth-authorization-server/tenant";
-    static constexpr const char* TOKEN_PATH   = "/tenant/token";
-    static constexpr const char* CALLBACK_URL = "https://app/callback";
+    static constexpr const char* REGISTER_PATH = "/tenant/register";
+    static constexpr const char* TOKEN_PATH    = "/tenant/token";
+    static constexpr const char* CALLBACK_URL  = "https://app/callback";
 
     void SetUp () override {
         OAuthAuthorizeTest::SetUp ();
@@ -753,6 +755,9 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
         { "authorization_servers", json::array ({ issuer () }) },
         { "scopes_supported", json::array ({ "mcp:read", "mcp:write" }) } }));
         serve_metadata (metadata ());
+        server_.answer (REGISTER_PATH,
+        json_answer (
+        { { "client_id", "dcr-client" }, { "token_endpoint_auth_method", "none" } }, 201));
         server_.answer (TOKEN_PATH,
         json_answer ({ { "access_token", "AT-DISCOVERED" },
         { "token_type", "Bearer" }, { "expires_in", 3600 } }));
@@ -771,6 +776,7 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
         return { { "issuer", issuer () },
             { "authorization_endpoint", issuer () + "/authorize" },
             { "token_endpoint", issuer () + "/token" },
+            { "registration_endpoint", issuer () + "/register" },
             { "code_challenge_methods_supported", json::array ({ "S256" }) },
             { "authorization_response_iss_parameter_supported", true } };
     }
@@ -786,7 +792,7 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
 
     [[nodiscard]] json discovered_config () const {
         return { { "grantType", "authorization_code" },
-            { "discoverUrl", server_.url ("/mcp") }, { "clientId", "typed-client" } };
+            { "discoverUrl", server_.url ("/mcp") } };
     }
     [[nodiscard]] json embedded_discovered_config () const {
         json config           = discovered_config ();
@@ -811,42 +817,93 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
     vayu::http::OAuth2AuthorizeManager mgr_{ {}, cache_ };
 };
 
-// Given the MCP server URL and a client id, the attempt finds every endpoint
-// and sends the browser to the discovered authorization endpoint with
-// `resource` and S256.
+// Given only the MCP server URL, the attempt finds every endpoint, registers
+// a client and sends the browser to the discovered authorization endpoint
+// with `resource`, S256 and the registered client.
 //
 // Mutation check: leave `resolved` unset in `start` and the resolved block
 // fails.
-TEST_F (OAuthDiscoveredAuthorizeTest, DiscoveryFillsTheAuthorizeUrl) {
+TEST_F (OAuthDiscoveredAuthorizeTest, DiscoveryFillsTheAuthorizeUrlAndRegistersAClient) {
     const auto start = mgr_.start (*db_, discovered_config (), "loopback");
     ASSERT_TRUE (start.ok) << start.error_code << ": " << start.error_message;
 
     EXPECT_EQ (start.authorize_url.rfind (issuer () + "/authorize?", 0), 0U)
     << start.authorize_url;
     auto q = parse_q (query_of (start.authorize_url));
-    EXPECT_EQ (q["client_id"], "typed-client");
+    EXPECT_EQ (q["client_id"], "dcr-client");
     EXPECT_EQ (decoded (q["resource"]), server_.url ("/mcp"));
     EXPECT_EQ (q["code_challenge_method"], "S256");
     EXPECT_FALSE (q["code_challenge"].empty ());
     EXPECT_EQ (decoded (q["scope"]), "mcp:read");
     EXPECT_EQ (decoded (q["redirect_uri"]), start.redirect_uri);
+    EXPECT_EQ (server_.hits (REGISTER_PATH), 1);
 
     ASSERT_HAS_VALUE (start.resolved);
     EXPECT_EQ (start.resolved->authorization_url, issuer () + "/authorize");
     EXPECT_EQ (start.resolved->access_token_url, issuer () + "/token");
-    EXPECT_EQ (start.resolved->client_id, "typed-client");
+    EXPECT_EQ (start.resolved->client_id, "dcr-client");
     EXPECT_EQ (start.resolved->resource, server_.url ("/mcp"));
     EXPECT_EQ (start.resolved->scope, "mcp:read");
     EXPECT_EQ (start.resolved->issuer, issuer ());
 }
 
-TEST_F (OAuthDiscoveredAuthorizeTest, NoClientIdIsRefused) {
-    json config = discovered_config ();
-    config.erase ("clientId");
-    const auto start = mgr_.start (*db_, config, "loopback");
+/// The registration body the fixture received, or a failure naming it.
+json registration_body (const DiscoveryServer& server, const char* path) {
+    const json body = json::parse (server.last_body (path), nullptr, false);
+    EXPECT_TRUE (body.is_object ()) << server.last_body (path);
+    return body;
+}
+
+// The registration is a public native client for the redirect this attempt
+// uses: the loopback listener's ephemeral port, known only once it is bound.
+TEST_F (OAuthDiscoveredAuthorizeTest, RegistrationIsANativePublicClientForTheRedirectInUse) {
+    const auto start = mgr_.start (*db_, discovered_config (), "loopback");
+    ASSERT_TRUE (start.ok) << start.error_code << ": " << start.error_message;
+
+    const json body = registration_body (server_, REGISTER_PATH);
+    EXPECT_EQ (body.value ("application_type", ""), "native");
+    EXPECT_EQ (body.value ("token_endpoint_auth_method", ""), "none");
+    EXPECT_EQ (body.value ("client_name", ""), "Vayu");
+    EXPECT_EQ (body["redirect_uris"], json::array ({ start.redirect_uri }));
+    EXPECT_EQ (body["grant_types"], json::array ({ "authorization_code", "refresh_token" }));
+    EXPECT_EQ (body["response_types"], json::array ({ "code" }));
+}
+
+TEST_F (OAuthDiscoveredAuthorizeTest, AnEmbeddedAttemptRegistersItsCallbackUrl) {
+    const auto start = start_embedded ();
+    EXPECT_EQ (start.redirect_uri, CALLBACK_URL);
+    EXPECT_EQ (registration_body (server_, REGISTER_PATH)["redirect_uris"],
+    json::array ({ CALLBACK_URL }));
+}
+
+// The MCP spec's priority: a pre-registered client wins over registration.
+//
+// Mutation check: register in `plan_discovered` whatever `clientId` says and
+// the registration endpoint is hit.
+TEST_F (OAuthDiscoveredAuthorizeTest, APreRegisteredClientSkipsRegistration) {
+    json config            = embedded_discovered_config ();
+    config["clientId"]     = "typed-client";
+    config["clientSecret"] = "typed-secret";
+    const auto start       = mgr_.start (*db_, config, "embedded");
+    ASSERT_TRUE (start.ok) << start.error_code << ": " << start.error_message;
+
+    EXPECT_EQ (server_.hits (REGISTER_PATH), 0);
+    EXPECT_EQ (parse_q (query_of (start.authorize_url))["client_id"], "typed-client");
+    ASSERT_HAS_VALUE (start.resolved);
+    EXPECT_EQ (start.resolved->client_id, "typed-client");
+}
+
+TEST_F (OAuthDiscoveredAuthorizeTest, NoClientIdAndNoRegistrationEndpointIsRefused) {
+    json doc = metadata ();
+    doc.erase ("registration_endpoint");
+    serve_metadata (doc);
+
+    const auto start = mgr_.start (*db_, discovered_config (), "loopback");
     EXPECT_FALSE (start.ok);
     EXPECT_EQ (start.http_status, 400);
     EXPECT_EQ (start.error_code, "oauth2_client_id_required");
+    EXPECT_NE (start.error_message.find ("registration_endpoint"), std::string::npos)
+    << start.error_message;
     EXPECT_NE (start.error_message.find ("clientId"), std::string::npos)
     << start.error_message;
 }
@@ -903,6 +960,7 @@ TEST_F (OAuthDiscoveredAuthorizeTest, ADiscoveryFailureRefusesTheStartWithItsCod
     EXPECT_NE (
     start.error_message.find ("/.well-known/oauth-protected-resource"), std::string::npos)
     << start.error_message;
+    EXPECT_EQ (server_.hits (REGISTER_PATH), 0);
 
     const auto invalid = mgr_.start (*db_,
     json{ { "grantType", "authorization_code" }, { "discoverUrl", "not a url" } },
@@ -911,7 +969,39 @@ TEST_F (OAuthDiscoveredAuthorizeTest, ADiscoveryFailureRefusesTheStartWithItsCod
     EXPECT_EQ (invalid.error_code, vayu::http::oauth_discovery::INVALID_SERVER_URL);
 }
 
-// The code is exchanged at the discovered token endpoint, with `resource`, and cached under the key the resolved values give.
+TEST_F (OAuthDiscoveredAuthorizeTest, ARegistrationRefusalRefusesTheStartWithItsReason) {
+    server_.answer (REGISTER_PATH,
+    json_answer ({ { "error", "invalid_redirect_uri" }, { "error_description", "no loopback here" } },
+    400));
+    const auto start = mgr_.start (*db_, discovered_config (), "loopback");
+    EXPECT_FALSE (start.ok);
+    EXPECT_EQ (start.http_status, 502);
+    EXPECT_EQ (start.error_code, vayu::http::oauth_registration::REFUSED);
+    EXPECT_NE (
+    start.error_message.find ("invalid_redirect_uri (no loopback here)"), std::string::npos)
+    << start.error_message;
+}
+
+// A response that names no usable public client is refused, and the secret a
+// confidential registration carried is never repeated.
+TEST_F (OAuthDiscoveredAuthorizeTest, ARegistrationThatCannotCompleteTheFlowIsRefused) {
+    for (const std::string& body :
+    { std::string ("not json"), std::string ("{}"), std::string (R"({"client_id":7})"),
+    std::string (R"({"client_id":"c","token_endpoint_auth_method":"client_secret_basic","client_secret":"S3CRET"})"),
+    std::string (R"({"client_id":"c","client_secret":"S3CRET"})") }) {
+        server_.answer (
+        REGISTER_PATH, DiscoveryAnswer{ 201, body, "application/json", {} });
+        const auto start = mgr_.start (*db_, discovered_config (), "loopback");
+        EXPECT_FALSE (start.ok) << body;
+        EXPECT_EQ (start.error_code, vayu::http::oauth_registration::INVALID_RESPONSE)
+        << body;
+        EXPECT_EQ (start.error_message.find ("S3CRET"), std::string::npos)
+        << start.error_message;
+    }
+}
+
+// The code is exchanged at the discovered token endpoint, as the registered
+// client, with `resource`, and cached under the key the resolved values give.
 //
 // Mutation check: give the attempt the config as the caller sent it rather
 // than the resolved one, and the exchange has no token endpoint.
@@ -923,7 +1013,7 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheCodeIsExchangedWithTheResolvedConfig) {
 
     auto form = vayu::tests::parse_form (server_.last_body (TOKEN_PATH));
     EXPECT_EQ (decoded (form["resource"]), server_.url ("/mcp"));
-    EXPECT_EQ (form["client_id"], "typed-client");
+    EXPECT_EQ (form["client_id"], "dcr-client");
     EXPECT_EQ (form["code"], "AUTHCODE");
     EXPECT_FALSE (form["code_verifier"].empty ());
     EXPECT_EQ (decoded (form["redirect_uri"]), CALLBACK_URL);
@@ -949,7 +1039,7 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheStartRouteAnswersTheResolvedConfig) {
     ASSERT_EQ (status, 200) << body.dump ();
     const json expected = { { "authorizationUrl", issuer () + "/authorize" },
         { "accessTokenUrl", issuer () + "/token" },
-        { "clientId", "typed-client" }, { "resource", server_.url ("/mcp") },
+        { "clientId", "dcr-client" }, { "resource", server_.url ("/mcp") },
         { "scope", "mcp:read" }, { "issuer", issuer () } };
     EXPECT_EQ (body.value ("resolved", json ()), expected) << body.dump ();
 

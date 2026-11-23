@@ -875,7 +875,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
   the browser. Its reaper thread expires attempts at their TTL whether or not
   anyone polls (#3347). Owned by the `Server` for a clean shutdown. A config
   naming `discoverUrl` (#3766) is completed by `oauth_discovery` before the
-  attempt starts (blanks only, a typed value wins) and answers what it
+  attempt starts (blanks only, a typed value wins), registers a client through
+  `oauth_registration` when it names no `clientId`, and answers what it
   resolved so the app stores it.
 - **`oauth_discovery`** (`discover_oauth_server`, #3766) - finds the
   authorization server of an MCP server URL in the MCP authorization spec's
@@ -894,6 +895,11 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `oauth_discovery_*` code, and validated metadata is cached by issuer for
   five minutes. `POST /oauth2/authorize/start` calls it for a config naming
   `discoverUrl`.
+- **`oauth_registration`** (`register_oauth_client`, #3766) - dynamic client
+  registration (RFC 7591) of a public native client (`token_endpoint_auth_method`
+  `none`, `application_type` `native`) for the one redirect an attempt uses,
+  posted through the shared client like a token request; a response that needs
+  a secret is refused, and no secret is kept or reported.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity
