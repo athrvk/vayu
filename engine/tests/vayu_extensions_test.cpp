@@ -299,6 +299,17 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     const auto timed = ext::settings_of (Json::parse (R"({"timeout":2500})"));
     ASSERT_HAS_VALUE (timed);
     EXPECT_EQ ((*timed)["timeout"], 2500);
+    // A `streamTextPath` the request applier would refuse (#3773): outside the
+    // subset, not a string, or with no stream to read.
+    for (const char* bad : { R"({"stream":true,"streamTextPath":"$.a[?(@.b)]"})",
+         R"({"stream":true,"streamTextPath":7})", R"({"streamTextPath":"$.a"})",
+         R"({"stream":false,"streamTextPath":"$.a"})" }) {
+        EXPECT_FALSE (ext::settings_of (Json::parse (bad))) << bad;
+    }
+    const auto streamed = ext::settings_of (
+    Json::parse (R"({"stream":true,"streamTextPath":"$.delta.text"})"));
+    ASSERT_HAS_VALUE (streamed);
+    EXPECT_EQ ((*streamed)["streamTextPath"], "$.delta.text");
     // An interim status is refused at create (#3117), so the reader drops the
     // piece instead of handing the applier a row it would reject.
     for (const char* bad : { R"([{"name":"x","status":42}])",

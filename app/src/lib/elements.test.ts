@@ -121,6 +121,10 @@ const CONSTRAINED_KINDS: ElementKindSchema[] = [
 		required: ["path"],
 		properties: { path: { type: "string" }, exists: { type: "boolean" } },
 	}),
+	constrained("assert.jsonschema", {
+		required: ["schema"],
+		properties: { source: { type: "string" }, path: { type: "string" }, schema: null },
+	}),
 	constrained("extract.json", {
 		required: ["path", "variable"],
 		properties: { path: { type: "string" }, variable: { type: "string", minLength: 1 } },
@@ -409,6 +413,11 @@ describe("missingOperand", () => {
 		["assert.status", {}],
 		["assert.status", { in: [] }],
 		["assert.jsonpath", { path: "$.id" }],
+		["assert.jsonschema", { source: "jsonpath", schema: {} }],
+		["assert.jsonschema", { schema: "not json" }],
+		["assert.jsonschema", { schema: "" }],
+		["assert.jsonschema", { schema: null }],
+		["assert.jsonschema", { schema: [] }],
 		["control.throughput", {}],
 		["control.throughput", { perUser: false }],
 		["timer.think", {}],
@@ -431,6 +440,12 @@ describe("missingOperand", () => {
 		["assert.jsonpath", { path: "$.id", expected: null }],
 		["assert.jsonpath", { path: "$.id", regex: "^a" }],
 		["assert.jsonpath", { path: "$.id", exists: false }],
+		["assert.jsonschema", { schema: { type: "object" } }],
+		["assert.jsonschema", { source: "body", schema: {} }],
+		["assert.jsonschema", { source: "jsonpath", path: "$.result", schema: true }],
+		["assert.jsonschema", { schema: false }],
+		// An absent `schema` is `missingRequiredKeys`' to report, not this rule's.
+		["assert.jsonschema", {}],
 		["control.throughput", { percent: 50 }],
 		["control.throughput", { everyN: 2, perUser: false }],
 		["timer.think", { ms: 0 }],
@@ -444,6 +459,16 @@ describe("missingOperand", () => {
 		["assert.contains", {}],
 	])("is satisfied by a %s with %j", (kind, config) => {
 		expect(missingOperand({ kind, config })).toBeNull();
+	});
+
+	it("asks for the part of an assert.jsonschema that is unmet, the schema before the path", () => {
+		const needs = (config: Record<string, unknown>) =>
+			missingOperand({ kind: "assert.jsonschema", config });
+		expect(needs({ source: "jsonpath", schema: {} })).toBe("a JSONPath for the value to check");
+		expect(needs({ schema: "{" })).toBe("a JSON Schema object (or true or false)");
+		expect(needs({ source: "jsonpath", schema: "{" })).toBe(
+			"a JSON Schema object (or true or false)"
+		);
 	});
 
 	it("has no opinion on a kind without an operand rule", () => {
@@ -641,6 +666,11 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 	/** Each kind's JSONPath field, as a config that carries only that field. */
 	const SITES: [string, string, (path: string) => Record<string, unknown>][] = [
 		["assert.jsonpath", "path", (path) => ({ path, exists: true })],
+		[
+			"assert.jsonschema",
+			"path",
+			(path) => ({ source: "jsonpath", path, schema: { type: "object" } }),
+		],
 		["extract.json", "path", (path) => ({ path, variable: "token" })],
 		["metric.record", "source.jsonpath", (path) => ({ name: "m", source: { jsonpath: path } })],
 		[
@@ -673,6 +703,17 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 			expect(validate(kind, configFor(undefined as unknown as string))).toEqual({});
 			expect(validate(kind, configFor(7 as unknown as string))).toEqual({});
 		});
+	});
+
+	it("reads an assert.jsonschema's path only while its source is jsonpath", () => {
+		const config = (source?: string) => ({
+			...(source && { source }),
+			path: "foo",
+			schema: {},
+		});
+		expect(validate("assert.jsonschema", config())).toEqual({});
+		expect(validate("assert.jsonschema", config("body"))).toEqual({});
+		expect(validate("assert.jsonschema", config("jsonpath"))).toEqual({ path: MESSAGE });
 	});
 
 	it("reads a metric condition's path only while its field is jsonpath", () => {

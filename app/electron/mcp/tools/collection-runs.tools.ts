@@ -19,6 +19,7 @@ import type { McpTool } from "./contract.js";
 import {
 	engineErrorResult,
 	errorResult,
+	isRecord,
 	jsonResult,
 	optionalOffset,
 	optionalPageLimit,
@@ -30,7 +31,7 @@ import {
 	withCaveat,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
-import { asMcpSend, composeViaEngine, resolveEnvironmentId } from "./compose.js";
+import { asMcpSend, composeViaEngine, resolveEnvironmentId, setStreamFlag } from "./compose.js";
 import {
 	elementsTimersInput,
 	ENGINE_DEFAULT_HEADERS_POINTER,
@@ -82,6 +83,29 @@ function engineErrorOf(resp: Record<string, unknown>): { error: string } | undef
 	if (!code) return undefined;
 	const message = typeof resp.errorMessage === "string" ? resp.errorMessage : "";
 	return { error: message ? `${code}: ${message}` : code };
+}
+
+/**
+ * An `mcp` request's failure as the engine reports it (`mcp: {errorClass, code?,
+ * message}`, `{}` on success), as a row's `mcp` (#3809). Absent when the node
+ * names no class, which is every success and every non-`mcp` request, and when
+ * the exchange itself failed: `engineErrorOf` already says so, and the engine
+ * files that under `transport` too. `message` is server-controlled text,
+ * masked with the row's other strings by the projection `runOutputShape` returns.
+ */
+function mcpFailureOf(
+	resp: Record<string, unknown>
+): { mcp: { errorClass: string; code?: number; message: string } } | undefined {
+	if (engineErrorOf(resp) !== undefined) return undefined;
+	const node = resp.mcp;
+	if (!isRecord(node) || typeof node.errorClass !== "string") return undefined;
+	return {
+		mcp: {
+			errorClass: node.errorClass,
+			...(typeof node.code === "number" ? { code: node.code } : {}),
+			message: typeof node.message === "string" ? node.message : "",
+		},
+	};
 }
 
 /**
@@ -280,8 +304,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					// Buffered whatever the row's Event stream setting, which a by-id
 					// compose carries (#3561): a row here is judged by its exchange,
 					// and a stream answers `202 {runId}` with no status to judge.
+					const buffered = { ...outgoing };
+					setStreamFlag(buffered, false);
 					const resp = ((await ctx.client.executeRequest(
-						asMcpSend({ ...outgoing, stream: false }, ctx),
+						asMcpSend(buffered, ctx),
 						signal
 					)) ?? {}) as Record<string, unknown>;
 					// The engine's own allowlist refusal of where a script
@@ -334,6 +360,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						ok,
 						statusCode: code,
 						...engineErrorOf(resp),
+						...mcpFailureOf(resp),
 						...(schema ? { schema } : {}),
 						...(tests ? { tests } : {}),
 					});

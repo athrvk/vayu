@@ -60,6 +60,38 @@ describe("summarizeElement - assert.status", () => {
 	});
 });
 
+describe("summarizeElement - assert.jsonschema", () => {
+	const k = kind({ kind: "assert.jsonschema" });
+	// Large enough that printing it would be the whole row.
+	const schema = { type: "object", properties: { rows: { type: "array" } } };
+
+	it("names the body for the default source, never the schema", () => {
+		const summary = summarizeElement(element("assert.jsonschema", { schema }), k);
+		expect(summary).toBe("body matches schema");
+		expect(summary).not.toContain("rows");
+	});
+
+	it("names the path for a JSONPath source", () => {
+		expect(
+			summarizeElement(
+				element("assert.jsonschema", {
+					source: "jsonpath",
+					path: "$.result.structuredContent",
+					schema,
+				}),
+				k
+			)
+		).toBe("$.result.structuredContent matches schema");
+	});
+
+	it("falls back to the kind's description until there is a schema, or a path to name", () => {
+		expect(summarizeElement(element("assert.jsonschema", {}), k)).toBe(k.description);
+		expect(
+			summarizeElement(element("assert.jsonschema", { source: "jsonpath", schema }), k)
+		).toBe(k.description);
+	});
+});
+
 describe("summarizeElement - assert.jsonpath", () => {
 	const k = kind({ kind: "assert.jsonpath" });
 

@@ -1640,7 +1640,7 @@ declare const pm: {
 		 */
 		errorMessage: string | undefined;
 		/**
-		 * The events a streaming request received, as { event, id, data, receivedAt } entries (id absent when the origin sent none; receivedAt is epoch milliseconds on a Send and absent in a load run; dataTruncated when one event hit the per-event byte cap). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
+		 * The events a streaming request received, as { event, id, data, receivedAt } entries (id absent when the origin sent none; receivedAt is epoch milliseconds on a Send and absent in a load run; dataTruncated when one event hit the per-event byte cap; text when the request's streamTextPath read one off the event). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
 		 * 
 		 * Absent - not empty - for an ordinary response, so typeof separates 'not a stream' from 'a stream with no events'. The list is bounded by sseMaxStoredEvents; check eventsTruncated before asserting over it as a whole.
 		 * 
@@ -1755,6 +1755,13 @@ declare const pm: {
 		 * The status line's reason phrase ('OK', 'Not Found') - the same string pm.response.reason() answers, and Postman's meaning for this name. The number is pm.response.code.
 		 */
 		status: string;
+		/**
+		 * The reply a stream delivered, assembled: the text the request's streamTextPath read off every event, joined in order. Each entry of pm.response.events carries its own part as text. Events where the path matched nothing are skipped (a role-only chunk, a ping). Covers every event the stored body holds, past sseMaxStoredEvents too. Absent when the request declared no streamTextPath.
+		 * 
+		 * Example:
+		 * pm.test('the reply mentions Paris', function () { pm.expect(pm.response.streamText || '').to.include('Paris'); });
+		 */
+		streamText: string | undefined;
 		/**
 		 * Return the response body as a string.
 		 */

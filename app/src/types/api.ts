@@ -243,6 +243,8 @@ export interface CreateRequestRequest {
 	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/** See {@link Request.streamTextPath}. Needs `stream: true`; absent or `null` stores none. */
+	streamTextPath?: string | null;
 	/** Skip the cookie jar - see {@link Request.disableCookies}. */
 	disableCookies?: boolean;
 	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
@@ -292,6 +294,11 @@ export interface UpdateRequestRequest {
 	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/**
+	 * See {@link Request.streamTextPath}. Absent keeps the stored path; `null`
+	 * clears it. A string needs `stream: true` once the write lands.
+	 */
+	streamTextPath?: string | null;
 	/** Skip the cookie jar - see {@link Request.disableCookies}. */
 	disableCookies?: boolean;
 	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
@@ -582,6 +589,14 @@ export interface ExecuteRequestRequest {
 	 * the post-request script ran.
 	 */
 	stream?: boolean;
+	/**
+	 * The JSONPath each event's JSON `data` is read through for the reply's
+	 * text (issue #3773). An inline compose carries none, so a send states it
+	 * here, beside `stream: true` only: the engine refuses a path on a buffered
+	 * send, and refuses one outside the JSONPath subset with a message that
+	 * names the field. Absent means no text is read.
+	 */
+	streamTextPath?: string;
 	/**
 	 * One data row to bind before the request goes out (issue #601).
 	 *
@@ -879,6 +894,8 @@ export interface StartLoadTestRequest {
 	 * property of the request, and only the bounds below belong to the run.
 	 */
 	stream?: boolean;
+	/** See {@link ExecuteRequestRequest.streamTextPath}; read off the request, like `stream`. */
+	streamTextPath?: string;
 	/**
 	 * Wall-clock ceiling on one stream, in ms; omitted takes the engine's
 	 * `sseMaxStreamDurationMs`. Under load a stream is bounded by construction -

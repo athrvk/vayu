@@ -47,6 +47,7 @@ describe("isRequestSettingsNonDefault", () => {
 		httpVersion: DEFAULT_HTTP_VERSION,
 		verifySSL: true,
 		stream: false,
+		streamTextPath: "",
 		disableCookies: false,
 		disabledSystemHeaders: [] as string[],
 		disableUrlEncoding: false,
@@ -89,6 +90,12 @@ describe("isRequestSettingsNonDefault", () => {
 		// stream is the largest change this tab can make, and it must badge
 		// even though every other setting is untouched.
 		expect(isRequestSettingsNonDefault({ ...defaults, stream: true })).toBe(true);
+	});
+
+	it("is true when a stream text path is declared and nothing else differs", () => {
+		expect(isRequestSettingsNonDefault({ ...defaults, streamTextPath: "$.delta.text" })).toBe(
+			true
+		);
 	});
 
 	// Postman's protocol switches (issue #1765): each one alone badges the tab,

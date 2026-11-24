@@ -102,6 +102,13 @@ interface ExecutionEventsState {
 	/** Events received so far, oldest first. */
 	events: StreamEvent[];
 	/**
+	 * The `text` of every event received so far, joined in order (issue #3773).
+	 * Kept beside `events` rather than derived from them at render, so a
+	 * 100,000-event stream does not re-walk its list on every batch. `""` until
+	 * an event carries one, which is also what a request with no path reads as.
+	 */
+	streamText: string;
+	/**
 	 * Every event the engine has seen, which is what the `complete` frame
 	 * reports. Only ever set from that frame: while the stream runs, the
 	 * arrived-so-far count is `events.length` and pretending otherwise would
@@ -211,6 +218,7 @@ const EMPTY = {
 	eventsUrl: null,
 	open: null,
 	events: [],
+	streamText: "",
 	totalEvents: null,
 	isStreaming: false,
 	endReason: null,
@@ -220,6 +228,11 @@ const EMPTY = {
 	sentAt: null,
 	finalized: false,
 } satisfies StreamFields;
+
+/** The `text` of @p events joined with nothing between, as the engine joins it. */
+function joinedText(events: readonly StreamEvent[]): string {
+	return events.map((event) => event.text ?? "").join("");
+}
 
 /** The feed to hold once the stream in `s` gives way to one `nextRequestId` starts. */
 function displacedByHandOver(
@@ -357,7 +370,14 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set, get) =
 	 * `services/throttled-batcher.ts` - never empty, per that helper's contract.
 	 */
 	addEvents: (runId, events) =>
-		set((s) => (s.runId === runId ? { events: [...s.events, ...events] } : s)),
+		set((s) =>
+			s.runId === runId
+				? {
+						events: [...s.events, ...events],
+						streamText: s.streamText + joinedText(events),
+					}
+				: s
+		),
 
 	endStream: (runId, reason, totalEvents) =>
 		set((s) =>

@@ -177,14 +177,17 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		expect(withBespoke.length + generic.length).toBe(fixture.length);
 		// Every `script.*` kind gets the bespoke Monaco form: `script.pre` /
 		// `script.post` since #1512, `script.setup` / `script.teardown` since
-		// #1499. The other five are the mutually-exclusive-strategy kinds
+		// #1499. Five more are the mutually-exclusive-strategy kinds
 		// (`element-modes.ts`), whose schemas declare several alternative
 		// strategies as independent optional siblings and which therefore need
-		// a mode picker rather than every alternative's fields at once. This
+		// a mode picker rather than every alternative's fields at once. The
+		// last, `assert.jsonschema`, reads `path` only for one `source` and
+		// holds a multi-line document (#3806). This
 		// fails loudly if the catalogue ever drops one or either map is edited
 		// without this suite noticing.
 		expect(withBespoke.sort()).toEqual([
 			"assert.jsonpath",
+			"assert.jsonschema",
 			"assert.status",
 			"control.throughput",
 			"metric.record",
@@ -358,6 +361,15 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			"assert.contains": {
 				unmet: { text: "" },
 				met: [{ text: "x" }, { text: "", mode: "equals" }],
+			},
+			// A `jsonpath` source with no path; a `schema` that is no object.
+			"assert.jsonschema": {
+				unmet: { source: "jsonpath", schema: {} },
+				met: [
+					{ schema: {} },
+					{ source: "body", schema: true },
+					{ source: "jsonpath", path: "$.result", schema: {} },
+				],
 			},
 		};
 		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {

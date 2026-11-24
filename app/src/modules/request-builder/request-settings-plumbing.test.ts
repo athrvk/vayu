@@ -183,6 +183,33 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(hops(source ?? "", "request", "stream")).toBe(2);
 	});
 
+	/**
+	 * The stream text path (issue #3773) has the stream flag's load and save
+	 * hops, and an execute hop of its own: the inline compose carries no path,
+	 * so the streaming Send and the load run each state it beside the payload
+	 * through `streamTextPathOf`, which also withholds it from a request that
+	 * does not stream. The buffered execute never carries it.
+	 */
+	it("loads the stream text path from the saved request and persists it on save", () => {
+		expect(hops(source ?? "", "fetchedRequest", "streamTextPath")).toBe(1);
+		expect(hops(source ?? "", "request", "streamTextPath")).toBe(1);
+	});
+
+	it("states the stream text path on the streaming send and the load run, never the buffered one", () => {
+		const src = source ?? "";
+		const sends = src.match(/\.\.\.streamTextPathOf\((\w+)\)/g) ?? [];
+		expect(sends.sort()).toEqual([
+			"...streamTextPathOf(pendingLoadTestRequest)",
+			"...streamTextPathOf(request)",
+		]);
+		const buffered = src.slice(
+			src.indexOf("const handleExecute = "),
+			src.indexOf("const handleExecuteStream")
+		);
+		expect(buffered.length).toBeGreaterThan(500);
+		expect(buffered).not.toContain("streamTextPathOf");
+	});
+
 	it("declares stream on the buffered execute rather than letting it default", () => {
 		expect(source).toContain("stream: false");
 	});

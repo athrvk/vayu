@@ -135,6 +135,7 @@ const REQUEST: RequestState = {
 	disabledSystemHeaders: [],
 	disableUrlEncoding: false,
 	stream: false,
+	streamTextPath: "",
 };
 
 const LOAD_CONFIG: LoadTestConfig = { mode: "constant_rps", duration_seconds: 10, rps: 5 };

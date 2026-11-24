@@ -1208,6 +1208,21 @@ nlohmann::json stored_body (const std::string& blob) {
     return body;
 }
 
+/// A stored `streamTextPath` (#3773) rides with the stored stream: an inline
+/// overlay that switches the stream off and states no path of its own takes
+/// the stored one with it, which `POST /execute` would refuse beside a
+/// buffered send.
+void drop_stored_text_path_without_stream (const nlohmann::json& overlay,
+nlohmann::json& payload) {
+    if (!overlay.contains ("stream") || overlay.contains ("streamTextPath")) {
+        return;
+    }
+    const auto& stream = overlay["stream"];
+    if (!stream.is_boolean () || !stream.get<bool> ()) {
+        payload.erase ("streamTextPath");
+    }
+}
+
 // Build the unresolved execute-ready payload for a saved request - the by-id
 // half of composition. Everything here is raw; resolution happens afterwards,
 // through the same code the inline path uses.
@@ -1257,6 +1272,12 @@ const std::vector<vayu::db::Collection>& chain) {
     // stream setting, so an omitted `true` would buffer a stream that never
     // ends. Inline composition carries no such key; its client states its own.
     payload["stream"] = request.stream;
+    // The stream's text path (issue #3773) rides with it, and only with it:
+    // `POST /execute` refuses a path beside a buffered send, and a row keeps
+    // its path while its stream is switched off.
+    if (request.stream && request.stream_text_path) {
+        payload["streamTextPath"] = *request.stream_text_path;
+    }
     // Postman's per-request protocol settings (issue #1765), always emitted
     // for the same reason: each defaults to off engine-side, so an omitted
     // `true` would send the jar, the header or the encoding the user turned
@@ -2014,6 +2035,7 @@ VariableDeferral deferral) {
         for (const auto& [key, value] : body["request"].items ()) {
             payload[key] = value;
         }
+        drop_stored_text_path_without_stream (body["request"], payload);
     }
 
     // Decided here, after the overlay and before the first field resolves, so

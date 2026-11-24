@@ -10,14 +10,12 @@
 /**
  * @file json_path.hpp
  * @brief A hand-written JSONPath subset - `$.a.b`, `['a b']` / `["a b"]`,
- *        `[n]`, `[*]`, `..name` - shared by `extract.json`, `assert.jsonpath`
- *        and `metric.record` (issue #1514), so the kinds cannot come to read
+ *        `[n]`, `[*]`, `..name` - shared by `extract.json`, `assert.jsonpath`,
+ *        `metric.record` (issue #1514) and a stream's `streamTextPath`
+ *        (`http/sse_stream.hpp`, #3773), so no two readers can come to read
  *        one path expression two ways. A quoted name runs to the next matching
  *        quote and has no escape for it. The tree the subset walks is built by
  *        `vayu::utils::parse_ordered_json` (`vayu/utils/ordered_json.hpp`).
- *
- * Source-tree-local (not under `include/vayu/`): nothing outside
- * `engine/src/core/elements/` needs this subset.
  */
 
 #include <cstddef>

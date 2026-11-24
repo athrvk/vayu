@@ -38,11 +38,13 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/ordered_json.hpp"
 #include "vayu/utils/parse.hpp"
 
 namespace vayu::http {
 
 namespace constants = vayu::core::constants;
+using vayu::core::detail::JsonPathStep;
 
 namespace {
 /// Wall-clock milliseconds, matching what the run rows and the routes stamp.
@@ -107,6 +109,15 @@ vayu::StreamBounds default_stream_bounds (const SseLimits& limits) {
     return bounds;
 }
 
+std::shared_ptr<const vayu::StreamTextPath> compile_stream_text_path (std::string_view path) {
+    auto steps = vayu::core::detail::parse_json_path (path);
+    if (!steps) {
+        return nullptr;
+    }
+    return std::make_shared<const vayu::StreamTextPath> (
+    vayu::StreamTextPath{ std::string (path), std::move (*steps) });
+}
+
 vayu::StreamBounds resolve_stream_bounds (const nlohmann::json& config,
 const vayu::StreamBounds& defaults) {
     const auto cap = [&config] (const char* key, int64_t fallback) {
@@ -124,8 +135,12 @@ const vayu::StreamBounds& defaults) {
 // SseStreamContext
 // ---------------------------------------------------------------------------
 
-SseStreamContext::SseStreamContext (std::string id, SseLimits stream_limits)
-: run_id (std::move (id)), limits (stream_limits) {
+SseStreamContext::SseStreamContext (std::string id,
+SseLimits stream_limits,
+std::optional<std::string> stream_text_path)
+: run_id (std::move (id)), limits (stream_limits),
+  text_path (std::move (stream_text_path)),
+  text_steps_ (text_path ? vayu::core::detail::parse_json_path (*text_path) : std::nullopt) {
 }
 
 void SseStreamContext::append (const std::string& event_name, const nlohmann::json& data) {
@@ -152,8 +167,8 @@ void SseStreamContext::append_locked (std::string payload) {
 
 void SseStreamContext::record_event (const SseEvent& event) {
     const int64_t received_at = now_ms ();
-    nlohmann::json payload    = sse_event_node (event);
-    payload["receivedAt"]     = received_at;
+    nlohmann::json payload = sse_event_node (event, text_steps_ ? &*text_steps_ : nullptr);
+    payload["receivedAt"] = received_at;
 
     total_events_.fetch_add (1, std::memory_order_acq_rel);
     {
@@ -271,7 +286,31 @@ nlohmann::json stream_completion_json (const SseStreamContext& context) {
     return out;
 }
 
-nlohmann::json sse_event_node (const SseEvent& event) {
+std::optional<std::string>
+sse_event_text (const SseEvent& event, const std::vector<JsonPathStep>& path) {
+    if (event.truncated) {
+        // A prefix of JSON can still parse (`12345` cut to `123`), and what
+        // it reads is not what the server sent.
+        return std::nullopt;
+    }
+    const auto data =
+    vayu::utils::parse_ordered_json (event.data, constants::elements::MAX_BODY_DEPTH);
+    if (!data) {
+        return std::nullopt;
+    }
+    const auto matches = vayu::core::detail::evaluate_json_path (*data, path);
+    if (matches.empty ()) {
+        return std::nullopt;
+    }
+    const auto& first = *matches.front ();
+    if (first.is_null () || first.is_structured ()) {
+        return std::nullopt;
+    }
+    return vayu::core::detail::json_value_to_string (first);
+}
+
+nlohmann::json sse_event_node (const SseEvent& event,
+const std::vector<JsonPathStep>* text_path) {
     nlohmann::json payload;
     payload["event"] = event.event;
     payload["data"]  = event.data;
@@ -288,6 +327,11 @@ nlohmann::json sse_event_node (const SseEvent& event) {
         payload["dataTruncated"] = true;
         payload["dataBytes"]     = event.data_bytes;
     }
+    if (text_path) {
+        if (auto text = sse_event_text (event, *text_path)) {
+            payload["text"] = std::move (*text);
+        }
+    }
     return payload;
 }
 
@@ -295,23 +339,36 @@ nlohmann::json buffered_stream_events_node (std::string_view body,
 const SseLimits& limits,
 int64_t total_events,
 bool body_complete,
-std::optional<std::span<const int64_t>> arrivals) {
+std::optional<std::span<const int64_t>> arrivals,
+const std::vector<JsonPathStep>* text_path) {
     nlohmann::json items = nlohmann::json::array ();
+    const auto counted = static_cast<std::size_t> (std::max<int64_t> (total_events, 0));
     const std::size_t kept = arrivals ? arrivals->size () : limits.max_stored_events;
-    const std::size_t cap =
-    std::min (kept, static_cast<std::size_t> (std::max<int64_t> (total_events, 0)));
+    const std::size_t cap = std::min (kept, counted);
+    // The list stops at the stored cap; `streamText` reads on to the count, so
+    // it is the whole reply whatever `sseMaxStoredEvents` kept.
+    const std::size_t read_to = text_path ? counted : cap;
+    std::string stream_text;
+    std::size_t seen = 0;
 
     // Fed in one call and finished, because the whole body is already here -
     // the incremental path exists for a socket, not for a string. `finish()`
     // still matters: a capture cut mid-frame, or a server that closed without
     // the terminating blank line, leaves a dispatchable event behind.
     SseParser parser (limits.max_event_bytes);
-    const auto append = [&items, &arrivals, cap] (const std::vector<SseEvent>& parsed) {
+    const auto append = [&] (const std::vector<SseEvent>& parsed) {
         for (const auto& event : parsed) {
-            if (items.size () >= cap) {
+            if (seen == read_to) {
                 return;
             }
-            nlohmann::json item = sse_event_node (event);
+            ++seen;
+            nlohmann::json item = sse_event_node (event, text_path);
+            if (const auto text = item.find ("text"); text != item.end ()) {
+                stream_text += text->get_ref<const std::string&> ();
+            }
+            if (items.size () == cap) {
+                continue;
+            }
             if (arrivals) {
                 item["receivedAt"] = (*arrivals)[items.size ()];
             }
@@ -323,6 +380,9 @@ std::optional<std::span<const int64_t>> arrivals) {
 
     nlohmann::json node;
     node["items"] = std::move (items);
+    if (text_path) {
+        node["streamText"] = std::move (stream_text);
+    }
     // The wire count, not the parsed one: a body cut by the capture budget
     // still delivered every event the counter saw, and reporting the shorter
     // number would make a truncated capture read as a shorter stream.
@@ -339,8 +399,10 @@ nlohmann::json& slot) {
     if (!response.stream_events) {
         return;
     }
-    slot = buffered_stream_events_node (response.body, limits,
-    static_cast<int64_t> (*response.stream_events), !response.body_truncated);
+    const auto& text_path = response.stream_text_path;
+    slot                  = buffered_stream_events_node (response.body, limits,
+    static_cast<int64_t> (*response.stream_events), !response.body_truncated,
+    std::nullopt, text_path ? &text_path->steps : nullptr);
     script_ctx.response_events = &slot;
 }
 
@@ -350,8 +412,26 @@ nlohmann::json stream_trace_node (const SseStreamContext& context) {
     node["endReason"]     = to_string (context.end_reason ());
     node["maxEventBytes"] = context.limits.max_event_bytes;
     node["receivedAt"]    = context.stored_arrivals ();
+    if (context.text_path) {
+        node["streamTextPath"] = *context.text_path;
+    }
     return node;
 }
+
+namespace {
+
+/// The `streamTextPath` @p stored names, compiled. A path outside the subset
+/// can only come from a hand-edited row and reads as none, as it would have
+/// live (`SseStreamContext` compiles it the same way).
+std::optional<std::vector<JsonPathStep>> stored_text_path (const nlohmann::json& stored) {
+    const auto path = stored.find ("streamTextPath");
+    if (path == stored.end () || !path->is_string ()) {
+        return std::nullopt;
+    }
+    return vayu::core::detail::parse_json_path (path->get_ref<const std::string&> ());
+}
+
+} // namespace
 
 nlohmann::json stream_events_node (std::string_view body,
 bool body_complete,
@@ -359,9 +439,10 @@ const nlohmann::json& stored) {
     const auto arrivals = stored.at ("receivedAt").get<std::vector<int64_t>> ();
     SseLimits limits;
     limits.max_event_bytes = stored.value ("maxEventBytes", limits.max_event_bytes);
-    nlohmann::json node = buffered_stream_events_node (body, limits,
+    const auto text_path = stored_text_path (stored);
+    nlohmann::json node  = buffered_stream_events_node (body, limits,
     stored.value ("totalEvents", int64_t{ 0 }), body_complete,
-    std::span<const int64_t> (arrivals));
+    std::span<const int64_t> (arrivals), text_path ? &*text_path : nullptr);
     node["endReason"] =
     stored.value ("endReason", std::string (to_string (SseEndReason::Error)));
     return node;
@@ -1086,7 +1167,8 @@ void SseStreamManager::shutdown () {
 }
 
 std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest request) {
-    auto context = std::make_shared<SseStreamContext> (request.run_id, request.limits);
+    auto context = std::make_shared<SseStreamContext> (
+    request.run_id, request.limits, request.text_path);
 
     std::lock_guard<std::mutex> lock (mutex_);
     if (shutting_down_) {

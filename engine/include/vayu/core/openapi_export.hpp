@@ -206,6 +206,8 @@ struct ExportRequest {
     std::string http_version = "auto";
     bool verify_ssl          = true;
     bool stream              = false;
+    /// The stream's text path (#3773); written only beside `stream`.
+    std::optional<std::string> stream_text_path;
     /// The chain of folder (sub-collection) names from directly under the
     /// exported root down to this request, root excluded. Empty for a
     /// request the root owns directly.

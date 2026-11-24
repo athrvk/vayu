@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "json_path.hpp"
+#include "vayu/core/json_path.hpp"
 
 #include <cctype>
 #include <format>

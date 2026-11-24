@@ -271,6 +271,22 @@ export const DEFAULT_STREAM_BUDGET_MS = 5_000;
 export const MAX_STREAM_BUDGET_MS = 60_000;
 
 /**
+ * Set the stream flag on a composed payload. A `streamTextPath` rides only
+ * beside `stream: true` (the engine refuses it on a buffered send, #3773), and
+ * a by-id compose carries the saved request's, so forcing the flag off drops
+ * the path with it.
+ */
+export function setStreamFlag(payload: Record<string, unknown>, stream: boolean): void {
+	payload.stream = stream;
+	if (!stream) delete payload.streamTextPath;
+}
+
+/** The reply the request's stream text path read: each event's `text`, in order, joined with nothing between. */
+function joinedEventText(events: ReadonlyArray<Record<string, unknown>>): string {
+	return events.map((event) => (typeof event.text === "string" ? event.text : "")).join("");
+}
+
+/**
  * Start a streaming execute and read its events under the caller's bounds
  * (issue #575).
  *
@@ -335,6 +351,9 @@ export async function runStreamingRequest(
 
 	const withhold = await runOutputShape(ctx, signal, [payload.auth]);
 	const budgetExhausted = !consumed.completed && !consumed.capReached;
+	// Declared by the request, not inferred from the events: a path that read
+	// nothing yet is an empty reply, and no path is no `text` at all.
+	const declaresText = typeof payload.streamTextPath === "string";
 	return structuredResult({
 		runId,
 		eventsUrl: started.eventsUrl,
@@ -348,7 +367,8 @@ export async function runStreamingRequest(
 		...(consumed.endReason !== undefined && { endReason: consumed.endReason }),
 		...(consumed.totalEvents !== undefined && { totalEvents: consumed.totalEvents }),
 		eventCount: consumed.events.length,
-		events: withhold(consumed.events),
+		...(declaresText && { text: withhold(joinedEventText(consumed.events)) }),
+		...(args.events !== false && { events: withhold(consumed.events) }),
 		nextStep: consumed.completed
 			? "The stream has ended. get_run_report has the stored events and any test results."
 			: "The run is still streaming engine-side. get_run says whether it is done and get_run_report reads the events stored so far; end it with stop_run.",

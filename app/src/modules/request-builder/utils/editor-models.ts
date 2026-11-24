@@ -28,7 +28,8 @@
 import type { MonacoApi } from "@/lib/monaco-api";
 import { UNSAVED_AUTO_KEY } from "../context/auto-record-slot";
 
-export type EditorPane = "body" | "graphql-query" | "graphql-variables" | "mcp-input-schema";
+export type EditorPane =
+	"body" | "graphql-query" | "graphql-variables" | "mcp-input-schema" | "mcp-output-schema";
 
 const SCHEME = "inmemory";
 const AUTHORITY = "request";

@@ -55,6 +55,7 @@ import {
 	MAX_SUCCESS_SAMPLE_PERIOD,
 	readLoadParams,
 	resolveLoadShape,
+	setStreamFlag,
 } from "./compose.js";
 import {
 	asOn,
@@ -553,7 +554,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// what "the caller said nothing" means here, as in the app's load
 			// run; an ad-hoc compose carries none, and the engine reads absent
 			// as false (issue #576).
-			if (typeof args.stream === "boolean") payload.stream = args.stream;
+			if (typeof args.stream === "boolean") setStreamFlag(payload, args.stream);
 			// Forwarded verbatim, rows and all: the engine validates the set
 			// before the run row exists and its refusal names the field, so a
 			// second copy of those rules here could only drift (issue #993).

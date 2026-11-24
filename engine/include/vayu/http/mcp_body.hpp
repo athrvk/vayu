@@ -126,7 +126,8 @@ mcp_derived_headers (std::string_view wire_body, const std::optional<McpTool>& t
 
 /**
  * @brief A stored `mcpTool` object (`{name, inputSchema?}`) as what a send
- *        reads of it, or why it cannot be one.
+ *        reads of it, or why it cannot be one. An `outputSchema` member stays
+ *        in the blob and is not read here.
  *
  * `name` is a non-empty string and `inputSchema`, when present, an object.
  * Every `x-mcp-header` reached through a chain of `properties` keys is a

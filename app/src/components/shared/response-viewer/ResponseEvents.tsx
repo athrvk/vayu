@@ -34,15 +34,28 @@
  * grow as the end is scrolled to, and a row that has not changed does not
  * re-render because the ones after it arrived.
  *
+ * **A Text view beside the rows** (issue #3773) when the request declared a
+ * stream text path: the events' `text`, joined, as the reply reads. It renders
+ * what the engine put on each event and never reads `data` - no provider shape
+ * is known here, so there is no finish-reason callout either, only what the
+ * stream itself says: an event named `error` and the end reason.
+ *
  * **Every disclosure is in band.** A stream that ended by a cap and one the
  * server closed are different facts, and a list of 100 rows out of 4,000
  * received is a different thing from a complete list of 100. Neither is left to
  * be inferred from the row count.
  */
 
-import { memo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui";
+import { memo, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Rows3, TextAlignStart } from "lucide-react";
+import {
+	Badge,
+	Button,
+	Collapsible,
+	CollapsibleContent,
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
@@ -63,6 +76,15 @@ export interface ResponseEventsProps {
 	totalEvents?: number;
 	/** The list is a prefix of what arrived. */
 	eventsTruncated?: boolean;
+	/**
+	 * The reply the stream text path read, joined over every event - the
+	 * engine's own string for a stored run, the store's running one for a live
+	 * stream. It outranks joining `events`, whose list the stored-items cap can
+	 * cut short. Absent when the request declared no path (or, live, nothing
+	 * has matched yet); the Text view then appears only if an event carries
+	 * `text`.
+	 */
+	streamText?: string;
 	/** Why the stream ended, or undefined while it is still open. */
 	endReason?: StreamEndReason;
 	/** The stream is still open and rows are still arriving. */
@@ -178,6 +200,79 @@ function emptyTitle(isStreaming: boolean, otherMediaType: string | undefined): R
 	return isStreaming
 		? "Waiting for the first event. The stream is open and nothing has arrived yet."
 		: "No events received. The stream opened but the server sent no events before it ended.";
+}
+
+type EventsView = "rows" | "text";
+
+/** Error events past this many are counted, not listed. */
+const MAX_ERROR_CALLOUTS = 3;
+/** Longest stretch of an error event's data shown in its callout. */
+const ERROR_DATA_PREVIEW = 400;
+
+/** Whether the Text view has anything to be about: a joined string or an event's `text`. */
+function hasStreamText(events: readonly StreamEvent[], streamText: string | undefined): boolean {
+	return streamText !== undefined || events.some((event) => event.text !== undefined);
+}
+
+/** The reply as the Text view shows it: the engine's joined string, else the kept events'. */
+function replyText(events: readonly StreamEvent[], streamText: string | undefined): string {
+	return streamText ?? events.map((event) => event.text ?? "").join("");
+}
+
+/**
+ * Events the server itself named `error`: the one mid-stream failure the app
+ * can read without knowing a provider's shape, since SSE gives the event a name.
+ */
+function errorEventsOf(events: readonly StreamEvent[]): StreamEvent[] {
+	return events.filter((event) => event.event === "error");
+}
+
+/** The reply, and what the stream said went wrong while it was being written. */
+function StreamTextView({
+	text,
+	errors,
+	isStreaming,
+}: {
+	text: string;
+	errors: readonly StreamEvent[];
+	isStreaming: boolean;
+}) {
+	const unlisted = errors.length - MAX_ERROR_CALLOUTS;
+	return (
+		<div className="space-y-3 p-4">
+			{errors.slice(0, MAX_ERROR_CALLOUTS).map((event, i) => (
+				<Callout key={i} severity="warning" title="The server sent an error event">
+					<span className="font-mono break-all">
+						{event.data.length > ERROR_DATA_PREVIEW
+							? `${event.data.slice(0, ERROR_DATA_PREVIEW)}…`
+							: event.data}
+					</span>
+				</Callout>
+			))}
+			{unlisted > 0 && (
+				<p className="text-xs text-muted-foreground">
+					{unlisted.toLocaleString()} more {pluralize(unlisted, "error event")} in Rows.
+				</p>
+			)}
+			{text === "" ? (
+				<EmptyState
+					variant="inline"
+					title={
+						isStreaming
+							? "Waiting for text. No event has matched the stream text path yet."
+							: "No text. No event matched the stream text path."
+					}
+				/>
+			) : (
+				<p
+					data-testid="stream-text"
+					className="text-sm leading-relaxed whitespace-pre-wrap break-words"
+				>
+					{text}
+				</p>
+			)}
+		</div>
+	);
 }
 
 /**
@@ -306,6 +401,7 @@ export default function ResponseEvents({
 	events,
 	totalEvents,
 	eventsTruncated,
+	streamText,
 	endReason,
 	isStreaming = false,
 	isStream = false,
@@ -327,6 +423,18 @@ export default function ResponseEvents({
 		listKey ?? events.length
 	);
 
+	// The user's pick, or none: Text opens by default once there is any, because
+	// a request that declared a path is asking for the reply, not the frames.
+	const [chosenView, setChosenView] = useState<EventsView | null>(null);
+	const hasText = useMemo(() => hasStreamText(events, streamText), [events, streamText]);
+	const view: EventsView = hasText ? (chosenView ?? "text") : "rows";
+	const showText = view === "text";
+	const text = useMemo(
+		() => (showText ? replyText(events, streamText) : ""),
+		[showText, events, streamText]
+	);
+	const errorEvents = useMemo(() => (showText ? errorEventsOf(events) : []), [showText, events]);
+
 	// Two different absences, two different answers. A response that was never a
 	// stream has no timeline to show and never will; a stream that has produced
 	// nothing yet is still going to.
@@ -344,6 +452,9 @@ export default function ResponseEvents({
 	// engine's own and outranks the row count whenever it is there.
 	const received = totalEvents ?? events.length;
 	const otherMediaType = nonEventStreamType(contentType);
+	// The engine joins `streamText` over every stored event, so a capped list
+	// does not shorten it; without one, the text is only as long as the list.
+	const showCutNotice = !!eventsTruncated && !(showText && streamText !== undefined);
 
 	return (
 		<div className="flex h-full flex-col">
@@ -361,10 +472,30 @@ export default function ResponseEvents({
 					{received.toLocaleString()} {pluralize(received, "event")}
 					{eventsTruncated && ` - showing ${events.length.toLocaleString()}`}
 				</span>
+				{hasText && (
+					<ToggleGroup
+						value={view}
+						// Radix clears the value when the active item is pressed again;
+						// a view has no "off".
+						onValueChange={(next) => next && setChosenView(next as EventsView)}
+						size="xs"
+						aria-label="Events view"
+						className="ml-auto"
+					>
+						<ToggleGroupItem value="rows">
+							<Rows3 className="size-icon-sm" />
+							Rows
+						</ToggleGroupItem>
+						<ToggleGroupItem value="text">
+							<TextAlignStart className="size-icon-sm" />
+							Text
+						</ToggleGroupItem>
+					</ToggleGroup>
+				)}
 			</div>
 
 			<div className="min-h-0 flex-1 overflow-auto">
-				{(error || note || eventsTruncated) && (
+				{(error || note || showCutNotice) && (
 					<div className="space-y-2 p-4 pb-0">
 						{error && (
 							<Callout severity="warning" title="Lost the live stream">
@@ -379,20 +510,24 @@ export default function ResponseEvents({
 								{note.detail}
 							</Callout>
 						)}
-						{eventsTruncated && (
+						{showCutNotice && (
 							<Callout severity="warning" title="Events truncated for storage">
 								{received.toLocaleString()} events were received and the first{" "}
-								{events.length.toLocaleString()} were kept. Raise Stream events
-								stored per run in Settings to keep more.
+								{events.length.toLocaleString()} were kept.{" "}
+								{showText &&
+									"The text below joins only those, so it stops where they do. "}
+								Raise Stream events stored per run in Settings to keep more.
 							</Callout>
 						)}
 					</div>
 				)}
 
-				{events.length === 0 ? (
+				{showText ? (
+					<StreamTextView text={text} errors={errorEvents} isStreaming={isStreaming} />
+				) : events.length === 0 ? (
 					<EmptyState variant="inline" title={emptyTitle(isStreaming, otherMediaType)} />
 				) : (
-					<div className={cn(error || note || eventsTruncated ? "pt-2" : undefined)}>
+					<div className={cn(error || note || showCutNotice ? "pt-2" : undefined)}>
 						{events.slice(0, visible).map((event, i) => (
 							// Index-keyed deliberately: the list only ever grows at the
 							// end, and an event carries no id of its own that is unique

@@ -4124,6 +4124,101 @@ TEST_F (DatabaseTest, AVersionTenDatabaseGainsTheRunOutcomeColumnAndReadsNoVerdi
     EXPECT_FALSE (legacy->outcome.has_value ()) << "no backfill";
 }
 
+// The two `stream_text_path` columns (#3773) joined version 11. A database
+// stamped 10 and one an earlier build of 11 stamped have neither;
+// `sync_schema ()` adds both, a stored request and a stored sample keep their
+// rows and read no path, and a path written afterwards round-trips. Mutation
+// check: unmap `requests.stream_text_path` in `make_vayu_storage` and the
+// column assertion and the round trip fail.
+TEST_F (DatabaseTest, ADatabaseWithoutTheStreamTextPathColumnsGainsThemAndReadsNone) {
+    for (const int stamped : { 10, 11 }) {
+        SCOPED_TRACE ("stamped " + std::to_string (stamped));
+        vayu::tests::remove_database_files (TEST_DB_PATH);
+        {
+            Database db (TEST_DB_PATH);
+            db.init ();
+            Collection col;
+            col.id   = "col_1";
+            col.name = "C";
+            db.create_collection (col);
+            Request r;
+            r.id            = "req_legacy";
+            r.collection_id = "col_1";
+            r.name          = "Legacy";
+            r.url           = "https://example.test/";
+            r.stream        = true;
+            db.save_request (r);
+            seed_running_run (db, "run_legacy", now_ms ());
+            Result result;
+            result.run_id     = "run_legacy";
+            result.trace_data = "{}";
+            PendingResultBody body;
+            body.headers       = "{}";
+            body.stream_events = 2;
+            db.add_results_batch ({ result }, { body });
+        }
+        {
+            sqlite3* handle = nullptr;
+            ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+            for (const char* sql :
+            { "ALTER TABLE requests DROP COLUMN stream_text_path",
+            "ALTER TABLE result_bodies DROP COLUMN stream_text_path" }) {
+                char* err = nullptr;
+                ASSERT_EQ (sqlite3_exec (handle, sql, nullptr, nullptr, &err), SQLITE_OK)
+                << (err != nullptr ? err : "(no message)");
+                sqlite3_free (err);
+            }
+            sqlite3_close (handle);
+        }
+        ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "stream_text_path"))
+        << "test setup did not remove the column";
+        set_user_version (TEST_DB_PATH, stamped);
+
+        Database db (TEST_DB_PATH);
+        db.init ();
+        EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+        EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "stream_text_path"));
+        EXPECT_TRUE (table_has_column (TEST_DB_PATH, "result_bodies", "stream_text_path"));
+
+        auto legacy = db.get_request ("req_legacy");
+        ASSERT_HAS_VALUE (legacy)
+        << "a request stored before the column did not survive";
+        EXPECT_TRUE (legacy->stream);
+        EXPECT_FALSE (legacy->stream_text_path.has_value ()) << "no backfill";
+        const auto samples = db.get_result_bodies_paginated ("run_legacy", 10, 0);
+        ASSERT_EQ (samples.size (), 1u)
+        << "a sample stored before the column did not survive";
+        EXPECT_FALSE (samples[0].stream_text_path.has_value ());
+
+        legacy->stream_text_path = "$.delta.text";
+        db.save_request (*legacy);
+        const auto reread = db.get_request ("req_legacy");
+        ASSERT_HAS_VALUE (reread);
+        EXPECT_EQ (reread->stream_text_path.value_or (""), "$.delta.text");
+    }
+}
+
+// A captured sample's `stream_text_path` is written with its row, beside its
+// event count.
+TEST_F (DatabaseTest, AResultBodyKeepsItsStreamTextPath) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    seed_running_run (db, "run_1", now_ms ());
+    Result result;
+    result.run_id     = "run_1";
+    result.trace_data = "{}";
+    PendingResultBody body;
+    body.headers          = "{}";
+    body.stream_events    = 3;
+    body.stream_text_path = "$.choices[0].delta.content";
+    db.add_results_batch ({ result }, { body });
+
+    const auto rows = db.get_result_bodies_paginated ("run_1", 10, 0);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].stream_text_path.value_or (""), "$.choices[0].delta.content");
+    EXPECT_EQ (rows[0].stream_events.value_or (0), 3);
+}
+
 // Version 8 added `collections.spec_file` / `data_file` (#2765). A version-7
 // database has neither; `sync_schema ()` adds both, a stored collection keeps
 // its row and reads back bound to no file, and the migration only stamps.
