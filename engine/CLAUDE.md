@@ -120,22 +120,18 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   (#2750; `ctest -R VendorJs`; [recipe](../docs/engine/building.md#upgrading-a-vendored-library)).
 - **A new `tests/*_test.cpp` is listed in `add_executable(vayu_tests ...)`** in
   `engine/tests/CMakeLists.txt`, never a glob; a guard fails configure naming an
-  unregistered file (#668). The list is there, not in `engine/CMakeLists.txt`,
-  because that file is a `sanitizers.yml` trigger path (#970).
+  unregistered file (#668). The list is not in `engine/CMakeLists.txt`: a
+  `sanitizers.yml` trigger path (#970).
 - **A suite that outgrows one file keeps its name** and moves its fixture to a
-  header (`script_engine_fixture.hpp`, `runs_route_fixture.hpp`,
-  `database_fixture.hpp`, `scenario_load_fixture.hpp`,
-  `scenario_runner_fixture.hpp`, `load_strategy_fixture.hpp`,
-  `sse_stream_fixture.hpp`; cases in `script_engine_*_test.cpp` and kin, #3852).
-  A suite of plain `TEST`s (`import_parse*_test.cpp`, `run_manager*_test.cpp`)
-  needs no fixture class, only a helper header.
-  The suite name is what `vayu_scratch_database_suites`, ctest regexes and
-  `--gtest_filter` key on, so a rename makes them silently stop matching. A
-  helper two files read goes in that header; the fixture class stays out of an
-  anonymous namespace (gtest refuses a suite whose `TEST_F`s name different classes).
-  Give each header a namespace of its own (`vayu::tests::scenario_load`): in one
-  shared namespace two headers' `ScenarioMockServer` or `TEST_DB_PATH` fold into one
-  definition with no linker error, and the cases run against the other file's class.
+  header (`engine/tests/*_fixture.hpp`; cases in `script_engine_*_test.cpp` and
+  kin, #3852; a suite of plain `TEST`s needs only a helper header). The suite name
+  is what `vayu_scratch_database_suites`, ctest regexes and `--gtest_filter` key
+  on, so a rename makes them silently stop matching. A helper two files read goes
+  in that header; the fixture class stays out of an anonymous namespace (gtest
+  refuses a suite whose `TEST_F`s name different classes). Give each header a
+  namespace of its own (`vayu::tests::scenario_load`): in one shared namespace two
+  headers' `ScenarioMockServer` or `TEST_DB_PATH` fold into one definition with no
+  linker error, and the cases run against the other file's class.
 - **A test waits on a condition with `vayu::tests::wait_until`**
   (`tests/wait_until.hpp`), never on a `sleep_for` followed by an assertion; its
   20s deadline only bounds how long a broken build takes to report, under the
@@ -178,17 +174,14 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   field bounded through `bounded_log_text` (#2359). The request line is
   `install_request_logger`'s alone (#1510): a route logs only what the hook
   cannot know, and `request_log_test.cpp` scans for the old per-route shape.
-- **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In the
-  cloud dev environment a `vcpkg_from_github` port fails on a cold cache with
-  `curl operation failed with response code 403`: run `vcpkg-fix-port <port>` (no
-  arguments re-does the manifest), which rewrites it to `vcpkg_from_git` as an
-  overlay, then build again. A port whose portfile pulls extra archives (`c4core`
-  under `ryml` fetches three) needs those rewritten by hand. A checkout at an
-  older tag wants older ports than `/opt/vcpkg-overlay-ports` pins: copy the
-  overlay and run `VAYU_ENGINE_DIR=<checkout>/engine VCPKG_OVERLAY_PORTS=<copy>
-  vcpkg-fix-port <ports>`, then `touch engine/vcpkg.json`. CI needs none of it.
-- **The git hooks install themselves** with `python build.py --setup` (also run by
-  `.claude/hooks/session-start.sh`); on Windows use `bash scripts/install-git-hooks.sh`.
+- **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. The
+  cloud environment's 403 on a `vcpkg_from_github` port is cured by
+  `vcpkg-fix-port <port>` (root `CLAUDE.md`, "Build"); a port whose portfile pulls
+  extra archives (`c4core` under `ryml` fetches three) needs those rewritten by
+  hand. A checkout at an older tag wants older ports than `/opt/vcpkg-overlay-ports`
+  pins: copy the overlay and run `VAYU_ENGINE_DIR=<checkout>/engine
+  VCPKG_OVERLAY_PORTS=<copy> vcpkg-fix-port <ports>`, then `touch engine/vcpkg.json`.
+- **The git hooks install themselves** with `python build.py --setup` (Windows: `bash scripts/install-git-hooks.sh`).
 
 ## Formatting and linting
 
