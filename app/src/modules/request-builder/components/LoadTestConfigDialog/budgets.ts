@@ -142,7 +142,18 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		min: 0,
 		minInclusive: false,
 		max: MAX_LATENCY_MS,
-		hint: "From sending the request to a stream's first event, so a server that answers at once and then waits still counts. Streams that never delivered an event are left out.",
+		hint: "From sending the request to a stream's first event, so a server that answers at once and then waits still counts. Streams that never delivered an event are left out. An API that opens with a preamble event (Anthropic's message_start, an OpenAI role-only chunk) reads near zero, so this is not time to first token and a budget on it passes falsely. Budget the first match instead, with a first content marker on the request.",
+		streamOnly: true,
+	},
+	{
+		key: "streamTimeToFirstMatchP95Ms",
+		id: "lt-budget-stream-first-match",
+		label: "Time to first match p95 at most",
+		unit: "ms",
+		min: 0,
+		minInclusive: false,
+		max: MAX_LATENCY_MS,
+		hint: "From sending the request to the first appearance of the request's first content marker, which is the first token of an API that opens with a preamble event. Needs the marker set on the request: a run where no stream matched has no figure, and the budget fails.",
 		streamOnly: true,
 	},
 	{
@@ -187,6 +198,7 @@ export function emptyBudgetDraft(): BudgetDraft {
 		minThroughputRps: "",
 		maxAssertionFailureRatePct: "",
 		streamTimeToFirstEventP95Ms: "",
+		streamTimeToFirstMatchP95Ms: "",
 		streamEventsPerSecondMin: "",
 	};
 }

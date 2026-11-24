@@ -3710,6 +3710,7 @@ describe("document CRUD parity", () => {
 			["httpVersion", "http2"],
 			["stream", true],
 			["streamTextPath", "$.delta.text"],
+			["streamFirstContentMarker", "content_block_delta"],
 			["verifySSL", false],
 		] as const)("update_request forwards %s on its own", async (key, value) => {
 			const client = fakeClient();
@@ -3770,6 +3771,58 @@ describe("document CRUD parity", () => {
 			);
 			expect(callArgs(cleared.updateRequest)[1]).toEqual({ streamTextPath: null });
 			expect(schemaOf("update_request", "streamTextPath").safeParse(7).success).toBe(false);
+		});
+
+		// Mutation check: take "streamFirstContentMarker" out of
+		// REQUEST_SETTINGS_KEYS and neither verb sends it.
+		test("streamFirstContentMarker is forwarded by create_request, and null reaches update_request to clear it", async () => {
+			const marker = '"delta":{"content":"';
+			const created = fakeClient();
+			await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "Chat",
+					url: "https://api.example.com/chat",
+					stream: true,
+					streamFirstContentMarker: marker,
+				},
+				ctxWith(created, { allowWrites: true })
+			);
+			expect(callArgs(created.createRequest)[0]).toMatchObject({
+				stream: true,
+				streamFirstContentMarker: marker,
+			});
+
+			const cleared = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", streamFirstContentMarker: null },
+				ctxWith(cleared, { allowWrites: true })
+			);
+			expect(callArgs(cleared.updateRequest)[1]).toEqual({ streamFirstContentMarker: null });
+			expect(
+				schemaOf("update_request", "streamFirstContentMarker").safeParse(7).success
+			).toBe(false);
+		});
+
+		test("the marker is stated once, on create_request, and update_request points there", () => {
+			expect(schemaOf("create_request", "streamFirstContentMarker").description).toContain(
+				"content_block_delta"
+			);
+			expect(schemaOf("update_request", "streamFirstContentMarker").description).toBe(
+				"As on `create_request`; null clears it."
+			);
+		});
+
+		test("update_request's no-field refusal lists the marker among the fields it takes", async () => {
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1" },
+				ctxWith(fakeClient(), { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("streamFirstContentMarker");
 		});
 
 		test("the path is stated once, on create_request, and update_request points there", () => {
@@ -5227,6 +5280,7 @@ describe("run_collection_smoke", () => {
 				url: "https://api.example.com/chat",
 				stream: true,
 				streamTextPath: "$.choices[0].delta.content",
+				streamFirstContentMarker: "content_block_delta",
 			}),
 			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
 		});
@@ -5238,6 +5292,7 @@ describe("run_collection_smoke", () => {
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(outgoing).toMatchObject({ stream: false });
 		expect(outgoing).not.toHaveProperty("streamTextPath");
+		expect(outgoing).not.toHaveProperty("streamFirstContentMarker");
 	});
 
 	test("a request that fails to compose is reported failed, not dropped", async () => {
@@ -8919,6 +8974,7 @@ describe("dispatchTool", () => {
 						url: "https://api.example.com/chat",
 						stream: true,
 						streamTextPath: PATH,
+						streamFirstContentMarker: "content_block_delta",
 						...composed,
 					}),
 					executeRequest: vi.fn().mockResolvedValue(started),
@@ -9021,6 +9077,7 @@ describe("dispatchTool", () => {
 				const sent = executedPayload(client);
 				expect(sent).toMatchObject({ stream: false });
 				expect(sent).not.toHaveProperty("streamTextPath");
+				expect(sent).not.toHaveProperty("streamFirstContentMarker");
 				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
 			});
 
@@ -9863,9 +9920,16 @@ describe("dispatchTool", () => {
 		expect(stream({ streamEventsPerSecondMin: 200 }).thresholds).toEqual({
 			streamEventsPerSecondMin: 200,
 		});
+		// Mutation check: drop the key from the schema and the catchall takes the
+		// 0 below as a number, so the engine's 400 is the only refusal.
+		expect(stream({ streamTimeToFirstMatchP95Ms: 900 }).thresholds).toEqual({
+			streamTimeToFirstMatchP95Ms: 900,
+		});
 		const refused: Record<string, number>[] = [
 			{ streamTimeToFirstEventP95Ms: 0 },
 			{ streamTimeToFirstEventP95Ms: 86_400_001 },
+			{ streamTimeToFirstMatchP95Ms: 0 },
+			{ streamTimeToFirstMatchP95Ms: 86_400_001 },
 			{ streamEventsPerSecondMin: 0 },
 			{ streamEventsPerSecondMin: -1 },
 			{ streamEventsPerSecondMin: 1_000_000_001 },
@@ -9883,6 +9947,8 @@ describe("dispatchTool", () => {
 		>;
 		const description = shape.thresholds.description ?? "";
 		expect(description).toContain("streamTimeToFirstEventP95Ms");
+		expect(description).toContain("streamTimeToFirstMatchP95Ms");
+		expect(description).toContain("streamFirstContentMarker");
 		expect(description).toContain("streamEventsPerSecondMin");
 		expect(description).toContain("not evaluated and count as failed");
 	});
@@ -11105,6 +11171,31 @@ describe("dispatchTool", () => {
 		const buffered = await sent({ stream: false });
 		expect(buffered).toMatchObject({ stream: false });
 		expect(buffered).not.toHaveProperty("streamTextPath");
+	});
+
+	// Mutation check: drop the marker's `delete` from setStreamFlag and it
+	// rides a buffered run, which POST /runs refuses.
+	test("start_load_run keeps a stored first content marker beside stream, and drops it when stream is forced off (#3774)", async () => {
+		const sent = async (extra: Record<string, unknown>) => {
+			const client = savedRequestClient({
+				stream: true,
+				streamFirstContentMarker: "content_block_delta",
+			});
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true, ...extra },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+		expect(await sent({})).toMatchObject({
+			stream: true,
+			streamFirstContentMarker: "content_block_delta",
+		});
+		const buffered = await sent({ stream: false });
+		expect(buffered).toMatchObject({ stream: false });
+		expect(buffered).not.toHaveProperty("streamFirstContentMarker");
 	});
 
 	test("start_load_run composes a saved request; the chain's assertions fold into `requestElements`", async () => {

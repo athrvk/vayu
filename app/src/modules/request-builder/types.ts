@@ -250,6 +250,12 @@ export interface RequestState {
 	 * refuses a path on a request that does not stream.
 	 */
 	streamTextPath: string;
+	/**
+	 * The literal a load run's stream is timed to (issue #3774), matched byte
+	 * for byte and so never trimmed. Empty is none. Cleared with
+	 * {@link streamTextPath} when the stream goes off (`streamPatch`).
+	 */
+	streamFirstContentMarker: string;
 }
 
 // ============================================================================
@@ -461,10 +467,10 @@ export interface ResponseState {
 	 * When a stream was started, epoch ms (#3775); the zero of the Events rows'
 	 * offsets, the status bar's running clock and the Timing tab's first event.
 	 * Set on a stream sent in this session - on the live placeholder and carried
-	 * onto the stored response at its end - and absent on every other response,
-	 * a stream restored from History included: the stored trace holds no start,
-	 * and the run's end time less its latency would be off by the post-request
-	 * script's run.
+	 * onto the stored response at its end - and, on a stream restored from
+	 * History, from the stored trace's `startedAt` (#3805; engine clock). Absent
+	 * on every response that is not a stream, and on a restored stream whose row
+	 * predates the field.
 	 */
 	sentAt?: number;
 	/**

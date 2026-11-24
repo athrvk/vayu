@@ -136,6 +136,7 @@ const REQUEST: RequestState = {
 	disableUrlEncoding: false,
 	stream: false,
 	streamTextPath: "",
+	streamFirstContentMarker: "",
 };
 
 const LOAD_CONFIG: LoadTestConfig = { mode: "constant_rps", duration_seconds: 10, rps: 5 };

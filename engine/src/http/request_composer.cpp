@@ -1208,18 +1208,23 @@ nlohmann::json stored_body (const std::string& blob) {
     return body;
 }
 
-/// A stored `streamTextPath` (#3773) rides with the stored stream: an inline
-/// overlay that switches the stream off and states no path of its own takes
-/// the stored one with it, which `POST /execute` would refuse beside a
-/// buffered send.
-void drop_stored_text_path_without_stream (const nlohmann::json& overlay,
+/// A stored `streamTextPath` (#3773) and `streamFirstContentMarker` (#3774)
+/// ride with the stored stream: an inline overlay that switches the stream off
+/// takes each one it states no value of its own for with it, which
+/// `POST /execute` would refuse beside a buffered send.
+void drop_stored_stream_settings_without_stream (const nlohmann::json& overlay,
 nlohmann::json& payload) {
-    if (!overlay.contains ("stream") || overlay.contains ("streamTextPath")) {
+    if (!overlay.contains ("stream")) {
         return;
     }
     const auto& stream = overlay["stream"];
-    if (!stream.is_boolean () || !stream.get<bool> ()) {
-        payload.erase ("streamTextPath");
+    if (stream.is_boolean () && stream.get<bool> ()) {
+        return;
+    }
+    for (const char* key : { "streamTextPath", "streamFirstContentMarker" }) {
+        if (!overlay.contains (key)) {
+            payload.erase (key);
+        }
     }
 }
 
@@ -1277,6 +1282,10 @@ const std::vector<vayu::db::Collection>& chain) {
     // its path while its stream is switched off.
     if (request.stream && request.stream_text_path) {
         payload["streamTextPath"] = *request.stream_text_path;
+    }
+    // Its first content marker (issue #3774) by the same rule.
+    if (request.stream && request.stream_first_content_marker) {
+        payload["streamFirstContentMarker"] = *request.stream_first_content_marker;
     }
     // Postman's per-request protocol settings (issue #1765), always emitted
     // for the same reason: each defaults to off engine-side, so an omitted
@@ -2035,7 +2044,7 @@ VariableDeferral deferral) {
         for (const auto& [key, value] : body["request"].items ()) {
             payload[key] = value;
         }
-        drop_stored_text_path_without_stream (body["request"], payload);
+        drop_stored_stream_settings_without_stream (body["request"], payload);
     }
 
     // Decided here, after the overlay and before the first field resolves, so

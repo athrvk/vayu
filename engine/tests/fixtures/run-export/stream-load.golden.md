@@ -50,12 +50,12 @@ The Latency table above is each stream's full duration, not the time to its firs
 | Events per second      | 480 events/s |
 | Streams ended at a cap | 4            |
 
-| Measure | Events per stream | Time to first event (ms) | Largest event gap (ms) | Event rate (events/s) |
-| ------- | ----------------- | ------------------------ | ---------------------- | --------------------- |
-| p50     | 118               | 43                       | 28                     | 40                    |
-| p95     | 200               | 180                      | 34                     | 41                    |
-| p99     | 290               | 640                      | 120                    | 42                    |
-| max     | 310               | 1,250                    | 313                    | 337                   |
+| Measure | Events per stream | Time to first event (ms) | Time to first match (ms) | Largest event gap (ms) | Event rate (events/s) |
+| ------- | ----------------- | ------------------------ | ------------------------ | ---------------------- | --------------------- |
+| p50     | 118               | 43                       | 1,204                    | 28                     | 40                    |
+| p95     | 200               | 180                      | 1,388                    | 34                     | 41                    |
+| p99     | 290               | 640                      | 1,911                    | 120                    | 42                    |
+| max     | 310               | 1,250                    | 2,481                    | 313                    | 337                   |
 
 ---
 

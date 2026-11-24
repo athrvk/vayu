@@ -777,7 +777,9 @@ logged as a warning: it means a client skipped composition.
   of the held length), which `cap_trace_bodies` keeps (#3423). The bytes are
   stored once: the trace's `events` node is a sidecar (`stream_trace_node`:
   `totalEvents`, `endReason`, `maxEventBytes`, one `receivedAt` per kept
-  event), and every reader of a stored trace (`report_result_node`,
+  event, and `startedAt` - the transfer's start, stamped before the first hop
+  by `note_transfer_start`, absent when unknown and never `0`, #3805), and
+  every reader of a stored trace (`report_result_node`,
   `attach_design_result`) serves the list parsed back from the stored body by
   `expand_stored_stream_events`, the `stream_events_node` the post-request
   script is bound to. A send's `streamTextPath` (#3773) is stored in that
@@ -816,6 +818,17 @@ logged as a warning: it means a client skipped composition.
   longer reads it, #3770): the tally counts nothing for any other reply, leaves its
   `stream_events` absent, and a duration cap that ends one is a `Timeout`
   (`StreamTally::unannounced_cap_error`), never a capped success.
+  A first content marker (#3774) is `StreamBounds::first_content_marker`, a
+  `StreamContentMarker` (`http/stream_content_marker.hpp`) compiled once and
+  shared: the tally scans an announced reply's raw bytes with it until the
+  first match, keeping one integer of state, and stamps
+  `Response::stream_first_match_ms`, the report's `stream.timeToFirstMatch`
+  and the `streamTimeToFirstMatchP95Ms` budget. It is stored and read exactly
+  as `streamTextPath` is (`requests.stream_first_content_marker`, held to
+  `stream_first_content_marker_problem`; a by-id compose carries it beside
+  `stream: true`; `compile_stream_content_marker` builds it per step in
+  `step_stream_bounds` and per run in `single_request_stream_bounds`; a
+  collection run refuses a top-level one). A design send only checks it.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
   body already *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`

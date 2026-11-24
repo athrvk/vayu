@@ -477,7 +477,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
 | `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
 | `10` | [`spec_declined_operations`](#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them, so a sync does not re-create them. An engine at `9` does not know the table, so it would re-create every declined operation on its next sync | none: `sync_schema ()` creates the table, the migration only stamps |
-| `11` | [`runs.outcome`](#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column. [`requests.stream_text_path`](#requests) and [`result_bodies.stream_text_path`](#result_bodies) added (#3773): a stream's declared text path, on the request and on each captured sample | none: `sync_schema ()` adds the nullable columns, the migration only stamps; rows stored before them stay NULL |
+| `11` | [`runs.outcome`](#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column. [`requests.stream_text_path`](#requests) and [`result_bodies.stream_text_path`](#result_bodies) added (#3773): a stream's declared text path, on the request and on each captured sample. [`requests.stream_first_content_marker`](#requests) added (#3774): the literal a run times its stream to | none: `sync_schema ()` adds the nullable columns, the migration only stamps; rows stored before them stay NULL |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -558,14 +558,15 @@ Version `11` is a bump of its own: `0.51.1`, the last release, stamps `10`.
 that joins `11` later must check the tag the same way. The release that carries
 `11` says so under Changed, naming #3547.
 
-The two #3773 `stream_text_path` columns joined version `11` the way the #1817
-columns joined `5`: `0.51.1`, the last release, stamps `10`, so no released
-build has stamped `11`, and `sync_schema ()` adds the nullable columns on every
-start whatever the stamp, so a database an earlier build of `11` stamped still
-gets them. **Merge gate:** the `git grep` against the last tag must still show
-`10`; if a release shipped `11` without these columns, they need their own bump
-to `12` and a row of their own here. The release that carries `11` names #3773
-beside #3547 under Changed.
+The two #3773 `stream_text_path` columns and the #3774
+`requests.stream_first_content_marker` column joined version `11` the way the
+#1817 columns joined `5`: `0.51.1`, the last release, stamps `10`, so no
+released build has stamped `11`, and `sync_schema ()` adds the nullable columns
+on every start whatever the stamp, so a database an earlier build of `11`
+stamped still gets them. **Merge gate:** the `git grep` against the last tag
+must still show `10`; if a release shipped `11` without these columns, they
+need their own bump to `12` and a row of their own here. The release that
+carries `11` names #3773 and #3774 beside #3547 under Changed.
 
 ---
 
@@ -797,6 +798,7 @@ Stores individual HTTP request definitions.
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
 | `stream_text_path`    | TEXT    | The JSONPath each event's `data` is read through for the reply's text, in the elements' subset; NULL when none. Read only while `stream` is set, and kept while it is off (issue #3773, schema version 11) |
+| `stream_first_content_marker` | TEXT | The literal byte string (1-256 bytes, no NUL) a run's stream is watched for, timed as `stream.timeToFirstMatch`; NULL when none. Read only while `stream` is set, and kept while it is off (issue #3774, schema version 11) |
 | `disable_cookies`     | INTEGER | Boolean; keep the cookie jar out of this request's transfer; default 0 (issue #1765) |
 | `disabled_system_headers` | TEXT | JSON array of lowercased header names the engine does not add on its own; default `"[]"` (issue #1765) |
 | `disable_url_encoding` | INTEGER | Boolean; write path values and an api-key query parameter as typed; default 0 (issue #1765) |
@@ -2492,14 +2494,17 @@ carry: **`events`**, a sidecar holding only what the bytes cannot say -
 `totalEvents` (every event received, whatever was kept), `endReason`,
 `maxEventBytes` (the per-event cap the live parser ran under) and `receivedAt`,
 an array of one arrival time (epoch milliseconds) per event, for the first
-`sseMaxStoredEvents` events. The list is not stored (#657): every route that
+`sseMaxStoredEvents` events, plus **`startedAt`** (#3805): when the transfer
+began, in epoch milliseconds on the clock `receivedAt` reads, stamped before the
+first redirect hop. It is absent for a stream refused before its transfer began
+and for a row stored before the key, never written as `0`. The list is not stored (#657): every route that
 serves a stored trace parses it back from `response.body` with the same
 `SseParser` (`expand_stored_stream_events`) and serves `events` as `items`
 (each `event` / `data` / optional `sourceId` / `receivedAt`, and
 `dataTruncated` + `dataBytes` on one that hit the per-event cap, at most one
 per `receivedAt` and never past `totalEvents`), `totalEvents`,
 `eventsTruncated` (true when the list is shorter than `totalEvents` or the body
-is a prefix) and `endReason`. A row stored before #3770 holds an empty body and
+is a prefix), `endReason` and `startedAt` when the row has one. A row stored before #3770 holds an empty body and
 the `items` list itself, and is served as stored.
 
 A design send or a scenario step whose scripts called `pm.sendRequest` carries

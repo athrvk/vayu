@@ -186,10 +186,11 @@ constexpr auto STREAM_KEYS = std::to_array<std::string_view> (
 { "completions", "totalEvents", "capped", "eventsPerSecond" });
 constexpr auto STREAM_EVENTS_KEYS = std::to_array<std::string_view> (
 { "min", "max", "p50", "p90", "p95", "p99", "count" });
-// `timeToFirstEvent` (ms), `maxEventGap` (ms) and `eventRate` (events/s):
-// one shape, each absent when no stream measured it (#3234, #3776).
-constexpr auto STREAM_TIMED_SECTIONS =
-std::to_array<const char*> ({ "timeToFirstEvent", "maxEventGap", "eventRate" });
+// `timeToFirstEvent` (ms), `timeToFirstMatch` (ms), `maxEventGap` (ms) and
+// `eventRate` (events/s): one shape, each absent when no stream measured it
+// (#3234, #3774, #3776).
+constexpr auto STREAM_TIMED_SECTIONS = std::to_array<const char*> (
+{ "timeToFirstEvent", "timeToFirstMatch", "maxEventGap", "eventRate" });
 constexpr auto STREAM_TIMED_KEYS =
 std::to_array<std::string_view> ({ "p50", "p95", "p99", "max", "count" });
 constexpr auto SLOW_REQUESTS_KEYS = std::to_array<std::string_view> (

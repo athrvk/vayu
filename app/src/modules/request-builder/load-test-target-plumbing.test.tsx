@@ -133,6 +133,7 @@ const REQUEST: RequestState = {
 	disableUrlEncoding: false,
 	stream: false,
 	streamTextPath: "",
+	streamFirstContentMarker: "",
 };
 
 function renderBuilder() {

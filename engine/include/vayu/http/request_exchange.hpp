@@ -1104,6 +1104,16 @@ check_numeric_field (const nlohmann::json& payload, const NumericRunField& field
 const nlohmann::json& holder);
 
 /**
+ * Why @p holder's `streamFirstContentMarker` (#3774) cannot be stored or sent:
+ * a value that is not a string, an empty one (it would match before any byte
+ * arrived), one past `constants::sse::MAX_FIRST_CONTENT_MARKER_BYTES`, or one
+ * holding a NUL byte. Nothing when it is absent, `null` or usable. Whether the
+ * request streams is the caller's rule, as for `stream_text_path_problem`.
+ */
+[[nodiscard]] std::optional<std::string> stream_first_content_marker_problem (
+const nlohmann::json& holder);
+
+/**
  * The timeout a request or run payload sends with: its own numeric `timeout`
  * when it carries one, otherwise `configured_default`. Absent and `null` both
  * mean "use the default". Reads, never validates: every route range-checks

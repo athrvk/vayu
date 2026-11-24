@@ -270,6 +270,18 @@
                 "count": {"type": "number"}
               }
             },
+            "timeToFirstMatch": {
+              "description": "Milliseconds from submission to the write that delivered the last byte of each stream's first content marker; count is the completions whose marker arrived. Absent when none did.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
+            },
             "maxEventGap": {
               "description": "Each stream's largest wait in milliseconds between two writes that delivered events; count is the completions with at least two such writes. Absent when none had.",
               "type": "object",

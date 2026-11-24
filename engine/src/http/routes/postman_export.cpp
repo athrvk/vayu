@@ -86,6 +86,7 @@ read_request (vayu::db::Database& db, const vayu::db::Request& row) {
     request.disabled_system_headers =
     column (row.disabled_system_headers, ordered::array ());
     request.disable_url_encoding = row.disable_url_encoding;
+    request.has_stream_first_content_marker = row.stream_first_content_marker.has_value ();
     // `{}` is kept, unlike a saved response's: an item that said
     // `protocolProfileBehavior: {}` is written back saying it.
     if (row.postman_protocol_behavior) {

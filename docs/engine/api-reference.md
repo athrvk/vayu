@@ -2251,6 +2251,7 @@ field whole, however large.
     "verifySSL": true,
     "stream": false,
     "streamTextPath": null,
+    "streamFirstContentMarker": null,
     "disableCookies": false,
     "disabledSystemHeaders": [],
     "disableUrlEncoding": false,
@@ -2267,8 +2268,9 @@ a request saved before these columns existed reads back as the engine defaults
 (`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
 had.
 `streamTextPath` is the JSONPath a stream's events are read through for its
-reply's text (issue #3773), always present, `null` when the request declares
-none - see [POST /requests](#post-requests).
+reply's text (issue #3773), and `streamFirstContentMarker` the literal a run's
+stream is timed to (issue #3774); both always present, `null` when the request
+declares none - see [POST /requests](#post-requests).
 `timeout` is the request's own timeout in milliseconds (issue #2937), always
 present on a stored-row response (`GET /requests`, `GET /requests/:id` and the
 `POST` / `PUT` answers): a number, or `null` when the request states none and sends with
@@ -2315,6 +2317,7 @@ list entry, with its `ETag` (`W/"<updatedAt>"`, see
   "verifySSL": true,
   "stream": false,
   "streamTextPath": null,
+  "streamFirstContentMarker": null,
   "createdAt": 1234567890,
   "updatedAt": 1234567890
 }
@@ -2359,6 +2362,8 @@ the null-vs-absent rule.
                                       // Default false - see below
   "streamTextPath": null,            // Optional, the JSONPath each event's text is read
                                       // through; needs "stream": true - see below
+  "streamFirstContentMarker": null,  // Optional, the literal a run times its stream to;
+                                      // needs "stream": true - see below
   "specOperation": null,             // Optional, which spec operation this request is - see below
   "methodSource": null,              // Optional, which app setting wrote `method` - see below
   "mockResponseMode": "first",       // Optional: "first" | "fixed" | "random". Default "first"
@@ -2439,6 +2444,20 @@ keeps the stored path, which nothing reads until the stream is switched on
 again; `null` clears it. A by-id [`POST /compose`](#post-compose) carries it
 beside `stream: true` only, and a collection run's streaming step reads its
 events through it ([`POST /runs`](#post-runs)). An OpenAPI export carries it in
+`x-vayu-request.settings` beside `stream`; a Postman export lists it under
+`notCarried` (`event_stream`).
+
+**`streamFirstContentMarker` is the saved half of the marker a
+[single-request run](#post-runs) takes** (issue #3774): a literal byte string,
+such as `content_block_delta` (Anthropic-style) or `"delta":{"content":"`
+(OpenAI-compatible), that a run's stream is watched for, so the report's
+`stream.timeToFirstMatch` times the first content rather than a preamble
+event. It is stored under `streamTextPath`'s rules: a value that is not a
+string, is empty, is longer than 256 bytes or holds a NUL byte is a `400`, and
+so is a marker stated on a request that does not stream once the write lands;
+a `PUT` that only switches `stream` off keeps it, `null` clears it. A by-id
+[`POST /compose`](#post-compose) carries it beside `stream: true` only, and a
+collection run's streaming step is timed to it. An OpenAPI export carries it in
 `x-vayu-request.settings` beside `stream`; a Postman export lists it under
 `notCarried` (`event_stream`).
 
@@ -4123,7 +4142,8 @@ and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `timeout`,
-`httpVersion`, `verifySSL`, `stream`), every saved example with its headers and its `origin`
+`httpVersion`, `verifySSL`, `stream`, and beside `stream` its `streamTextPath`
+and `streamFirstContentMarker`), every saved example with its headers and its `origin`
 (`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
 and a document with none, as an older Vayu wrote, imports as `"import"`), and
 the mock mode with the index of a `fixed` target. At the root,
@@ -5350,7 +5370,7 @@ was before these rules.
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
-| `event_stream` | A request consumed as an event stream, or one storing a `streamTextPath` |
+| `event_stream` | A request consumed as an event stream, or one storing a `streamTextPath` or a `streamFirstContentMarker` |
 | `request_timeout` | A request with a timeout of its own (Postman has only an app-wide one) |
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
@@ -5799,8 +5819,9 @@ The sections, in order:
    then a table with a p50, p95, p99 and max row of the events each stream
    delivered (`events`, whole counts) and, as a `Time to first event (ms)`
    column, of the time to each stream's first event (`timeToFirstEvent`), then
-   a `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
-   (events/s)` column (`eventRate`, #3776). Each of those three columns is left
+   a `Time to first match (ms)` column (`timeToFirstMatch`, #3774), a
+   `Largest event gap (ms)` column (`maxEventGap`) and an `Event rate
+   (events/s)` column (`eventRate`, #3776). Each of those four columns is left
    off when the document lacks its block, which the engine omits when no
    stream measured it, so a zero never stands for a figure that was not
    measured. A figure the document lacks reads `-`.
@@ -8198,7 +8219,8 @@ never re-resolved - see [POST /execute](#post-execute) and
   `streamTextPath` beside a `stream: true` only (issue #3773: never beside a
   buffered send, which `POST /execute` refuses, so a request whose stream is
   off composes none, and an inline `request` that sets `stream` to anything but
-  `true` without stating a path of its own drops the stored one) and
+  `true` without stating a path of its own drops the stored one), its stored
+  `streamFirstContentMarker` by the same rule (issue #3774) and
   its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
@@ -8964,14 +8986,18 @@ post-request script read the same bytes, so `assert.contains`, `assert.size`,
 collection or load run's.
 
 The bytes are stored once (issue #657). The trace's `events` node is served as
-`{items, totalEvents, eventsTruncated, endReason, streamText?}` (each item
+`{items, totalEvents, eventsTruncated, endReason, streamText?, startedAt?}` (each item
 `{event, data, sourceId?, dataTruncated?, dataBytes?, text?, receivedAt}`), but
 the list is parsed from the stored body when the trace is read
 ([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
 report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
 the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
-streamTextPath?}`, one arrival time per event `sseMaxStoredEvents` kept. The
-served list stops at the shorter of that and `totalEvents`, and
+streamTextPath?, startedAt?}`, one arrival time per event `sseMaxStoredEvents`
+kept. `startedAt` (issue #3805) is when the transfer began, in epoch
+milliseconds on the clock `receivedAt` reads, so `receivedAt[0] - startedAt` is
+the wait for the first event; it is absent - never `0` - for a stream refused
+before its transfer began and for a row stored before the key, and is served as
+stored. The served list stops at the shorter of that and `totalEvents`, and
 `eventsTruncated` is `true` when either the list is shorter than `totalEvents`
 or the body is a prefix (`bodyCapped`, or `bodyTruncated` from
 `maxTraceBodyBytes`). A trace stored before #3770 carries its `items` and is
@@ -9046,7 +9072,13 @@ Refused with a **400** rather than silently reinterpreted:
   reads the field the same way on a single-request run and refuses it on a
   collection run, whose steps read their stored requests' own. A saved
   request stores it too ([`POST /requests`](#post-requests)), and a by-id
-  [`POST /compose`](#post-compose) carries it.
+  [`POST /compose`](#post-compose) carries it;
+- a `streamFirstContentMarker` (issue #3774) that is not a string, is empty,
+  is longer than 256 bytes or holds a NUL byte, and one **without**
+  `"stream": true`. A Send checks it and times nothing with it, so a by-id
+  compose's payload sends as it is: each relayed event carries its own
+  `receivedAt`. A run times its stream to it
+  ([`POST /runs`](#post-runs), `stream.timeToFirstMatch`).
 
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
@@ -10365,6 +10397,11 @@ request's. Each streamed response's post-request script then reads every
 event's `text` and the joined `pm.response.streamText`, inline or in the
 deferred replay, and a captured sample keeps the path so
 [`GET /runs/:runId/samples`](#get-runsrunidsamples) serves both from its bytes.
+`streamFirstContentMarker` (issue #3774) is read by the same rules (a
+non-empty string of at most 256 bytes with no NUL, beside `stream: true`), and
+a by-id `POST /compose` carries the saved request's: compiled once for the
+run, it is watched for on every transfer, and the report's
+[`stream.timeToFirstMatch`](#get-runsrunidreport) times each stream to it.
 
 **A collection run (`scenario`) streams the steps whose stored request has
 `stream` set** (#3235), and only those. The plan reads the flag off each stored
@@ -10377,7 +10414,9 @@ stored request stream or stop one streaming, so accepting it would let a caller
 believe it did either. A top-level `streamTextPath` is a `400` there by the same
 argument: each streaming step reads its events through its stored request's own
 `streamTextPath`, which its scripts, its stored trace and its captured samples
-carry as on a single-request run. A collection **load** run sends a streaming step through
+carry as on a single-request run. A top-level `streamFirstContentMarker` is a
+`400` there too: each streaming step is timed to its stored request's own
+(issue #3774). A collection **load** run sends a streaming step through
 the same event loop as a streaming single-request run, so the table above
 holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`), its events
 land in the report's `stream` section, its stored exchange keeps its event
@@ -10497,6 +10536,7 @@ its report has no such section at all.
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
     "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
     "streamTimeToFirstEventP95Ms": 800, // ceiling, ms, streaming runs; > 0 and <= 86400000
+    "streamTimeToFirstMatchP95Ms": 900, // ceiling, ms, streams with a first content marker; > 0 and <= 86400000
     "streamEventsPerSecondMin": 200,    // floor, events per second, streaming runs; > 0
     "failRun": true            // a missed budget sets status "failed"; default false
   }
@@ -10558,7 +10598,19 @@ prints. Both are unevaluated, and so count toward `failed`, on a run with no
 `stream` section (one that did not stream, or ran with `stream_metrics: false`),
 because a run that streamed nothing measured neither; a floor read as `0`
 there would fail for the wrong reason. The time-to-first-event budget is also
-unevaluated when no completion delivered a timed event.
+unevaluated when no completion delivered a timed event. It judges the first
+event of any kind, so an API that opens with a preamble event (Anthropic's
+`message_start`, an OpenAI role-only chunk) reads near zero on it and passes
+whatever its first token costs.
+
+`streamTimeToFirstMatchP95Ms` (issue #3774) is the budget for that first
+token: it judges `stream.timeToFirstMatch.p95`, the wait for a request's
+first content marker (`streamFirstContentMarker`), the same figure the report
+prints. It is unevaluated, and so counts toward `failed`, whenever no
+completion's marker arrived: on a run with no `stream` section, on one whose
+requests declare no marker, and on one whose content never came. A
+stream that never matched is no measurement, never a fast one, so this budget
+cannot pass on a run that did not measure it.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
@@ -12110,6 +12162,7 @@ default, and whose message names the offending field and why the bound exists:
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
 | `streamTextPath` | string, in the JSONPath subset the elements read | Streaming only, by `POST /execute`'s rules: refused without `stream`, outside the subset, and on a collection run, whose steps each read their stored request's own (#3773). A by-id `POST /compose` carries the saved request's. |
+| `streamFirstContentMarker` | string, `1`-`256` bytes, no NUL | Streaming only, by `POST /execute`'s rules: refused without `stream`, empty (it would match before any byte arrived), and on a collection run, whose steps are each timed to their stored request's own (#3774). A by-id `POST /compose` carries the saved request's. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event, time-to-first-event, largest-gap and event-rate histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `retryAfterBackoff` | boolean | Read as a bool inside the run-context constructor, the same stranded-`pending` failure `save_timing_breakdown` had. See [Retry-After back-off](#retry-after-back-off-retryafterbackoff). |
 | `retryAfterMaxMs` | `1`-`3600000` ms | The longest one virtual user waits on a `Retry-After`. Past an hour it is waiting out a quota, not pacing against a limiter; `0` would be the option turned off said another way. Read only with `retryAfterBackoff` on. |
@@ -13086,7 +13139,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
-| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame. The report's `stream.timeToFirstMatch` (#3774), `stream.maxEventGap` and `stream.eventRate` (#3776) have no live counterpart: they are read once, after the drain |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
@@ -14620,6 +14673,7 @@ failure.
   "eventsPerSecond": 320.0,
   "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
   "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 },
+  "timeToFirstMatch": { "p50": 1204.0, "p95": 1388.0, "p99": 1910.0, "max": 2480.0, "count": 476 },
   "maxEventGap": { "p50": 27.1, "p95": 33.8, "p99": 41.0, "max": 312.4, "count": 480 },
   "eventRate": { "p50": 40.0, "p95": 41.2, "p99": 41.9, "max": 42.3, "count": 480 }
 }
@@ -14666,11 +14720,35 @@ to the write that completed the first frame carrying a `data` field. It is not
 `timingBreakdown.phases.firstByte`, which ends at the response headers: an LLM
 gateway answers `200` at once and then thinks, so its wait lands in the
 download phase and `firstByte` reads fast for a stream whose first token was
-slow. `count` is the completions that delivered an event, so a stream the
+slow. Nor is it time to first token: an API that opens a stream with a preamble
+event (Anthropic's `message_start`, an OpenAI chunk that carries only the role)
+delivers that event at once, so `timeToFirstEvent` reads near zero however late
+the first token comes, and a budget on it passes falsely for such an API.
+`count` is the completions that delivered an event, so a stream the
 target closed before its first event, a silent one a cap ended, and one whose
 only event was an unterminated frame the close completed are all left out (the
 last arrived at the close, and no time for it was measured). The object is
 absent when no completion delivered a timed event.
+
+`timeToFirstMatch` (issue #3774) is the figure for that first token: the
+per-completion distribution, in milliseconds from the same submission, of the
+wait for a request's first content marker (`streamFirstContentMarker`), a
+literal byte string such as `content_block_delta` or `"delta":{"content":"`,
+which a saved request stores ([`POST /requests`](#post-requests)) and a
+single-request run's payload states ([`POST /runs`](#post-runs)).
+Each stream is timed at the write that delivered the marker's last byte, on
+the clock `timeToFirstEvent` reads, so the two compare: a preamble API reads
+near zero on the first and its real wait on the second. The match is on the
+stream's wire bytes, not its parsed events: it runs across the SSE framing, so
+a marker can match in an `event:` name or a comment as well as in `data`, and
+a partial match carries across writes however the server chunked them. It is
+not JSON-aware: a marker containing a quote matches only the escaping the
+server writes, which differs between APIs (`"text":"` against one server is
+`"text": "` against another). Only a reply that announced `text/event-stream`
+is scanned, and only until its first match. `count` is the completions whose
+marker arrived; a stream that never matched, and one whose request declared no
+marker, are left out rather than read as 0, and the object is absent when no
+completion matched. It is report-only, with no live counterpart.
 
 `maxEventGap` and `eventRate` (issue #3776) are per-completion distributions
 of how each stream paced its events, in the same `{p50, p95, p99, max, count}`

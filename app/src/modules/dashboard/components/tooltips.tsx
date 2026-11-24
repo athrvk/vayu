@@ -133,7 +133,9 @@ export const TOOLTIPS = {
 	streamEvents:
 		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. Only replies that announced text/event-stream are streams: a 429 or a JSON answer counts in the status codes, not here. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended.",
 	streamFirstEvent:
-		"How long each stream took to deliver its first event, counted from submitting the request. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. Only streams that delivered an event are counted.",
+		"How long each stream took to deliver its first event, counted from submitting the request. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. An API that opens a stream with a preamble event (Anthropic's message_start, an OpenAI role-only chunk) reads near zero here, so this is not time to first token: set a first content marker on the request and read First match. Only streams that delivered an event are counted.",
+	streamFirstMatch:
+		"How long each stream took to deliver the request's first content marker, counted from submitting the request on the same clock as the first event, so the two compare. The marker is matched against the stream's raw bytes, not its parsed events, so it can match in an event name or a comment as well as in data. Only streams where it appeared are counted: one that never carried it is left out rather than read as zero.",
 	streamMaxEventGap:
 		"The largest pause between two consecutive events within one stream, as a distribution over the run's streams: the p50 is the worst pause of a typical stream and the max is the longest pause any stream had. Measured when each chunk arrives, so a proxy that buffers the stream and releases it in bursts hides the pauses it holds back and reads lower than the server's own. Only streams with at least two timed events are counted.",
 	streamEventRate:
@@ -141,7 +143,7 @@ export const TOOLTIPS = {
 	liveStream:
 		"Events delivered by the run's streams so far, counted as they arrive rather than when a stream finishes, so a run of long streams does not read zero until the first one ends. Events/sec is the rate over the last second or more; open streams is how many transfers are streaming right now.",
 	liveStreamFirstEvent:
-		"How long each finished stream took to deliver its first event, counted from submitting the request. A stream still open is not counted, so the tile appears once one has finished and delivered an event. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here.",
+		"How long each finished stream took to deliver its first event, counted from submitting the request. A stream still open is not counted, so the tile appears once one has finished and delivered an event. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. An API that opens a stream with a preamble event (Anthropic's message_start, an OpenAI role-only chunk) reads near zero here, so this is not time to first token.",
 } satisfies Record<string, ReactNode>;
 
 export type TooltipKey = keyof typeof TOOLTIPS;

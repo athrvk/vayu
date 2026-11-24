@@ -154,6 +154,38 @@ describe("StreamMetrics", () => {
 		});
 	});
 
+	describe("time to the first content marker (issue #3774)", () => {
+		const base = { completions: 4, totalEvents: 40, capped: 0, eventsPerSecond: 4, events };
+		const timeToFirstEvent = { p50: 2, p95: 4, p99: 5, max: 6, count: 4 };
+		const timeToFirstMatch = { p50: 1204, p95: 1388, p99: 1910, max: 2480, count: 4 };
+
+		it("shows the first match beside a near-zero first event, so the two compare", () => {
+			render(
+				<StreamMetrics report={report({ ...base, timeToFirstEvent, timeToFirstMatch })} />
+			);
+			expect(screen.getByText("first event").parentElement).toHaveTextContent(
+				"2.00ms4.00ms5.00ms6.00ms"
+			);
+			expect(screen.getByText("first match").parentElement).toHaveTextContent(
+				"1.20s1.39s1.91s2.48s"
+			);
+		});
+
+		// Mutation check: draw the row unconditionally and a run with no marker
+		// reads a first match of NaN.
+		it("draws no row when the report carries none, and leaves the first event row alone", () => {
+			render(<StreamMetrics report={report({ ...base, timeToFirstEvent })} />);
+			expect(screen.queryByText("first match")).not.toBeInTheDocument();
+			expect(screen.getByText("first event")).toBeInTheDocument();
+		});
+
+		it("draws the row without a first event row, since each is its own figure", () => {
+			render(<StreamMetrics report={report({ ...base, timeToFirstMatch })} />);
+			expect(screen.getByText("first match")).toBeInTheDocument();
+			expect(screen.queryByText("first event")).not.toBeInTheDocument();
+		});
+	});
+
 	describe("pace of each stream (issue #3776)", () => {
 		const base = { completions: 4, totalEvents: 40, capped: 0, eventsPerSecond: 4, events };
 		const maxEventGap = { p50: 27, p95: 34, p99: 41, max: 312, count: 4 };

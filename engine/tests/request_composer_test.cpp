@@ -771,8 +771,8 @@ TEST_F (RequestComposerTest, AStoredStreamFlagIsAlwaysComposed) {
 // beside a buffered send, which `POST /execute` would refuse: not for a row
 // whose stream is off, and not under an overlay that switches it off. Mutation
 // checks: drop the `streamTextPath` emit in `payload_from_stored` and the
-// first expectation fails; drop `drop_stored_text_path_without_stream` and the
-// overlay's payload keeps the path.
+// first expectation fails; drop `drop_stored_stream_settings_without_stream`
+// and the overlay's payload keeps the path.
 TEST_F (RequestComposerTest, AStoredStreamTextPathIsComposedOnlyBesideItsStream) {
     seed_collection ("root", "");
     auto streaming             = make_request ("req_stream", "root");
@@ -812,6 +812,51 @@ TEST_F (RequestComposerTest, AStoredStreamTextPathIsComposedOnlyBesideItsStream)
     { "request", { { "streamTextPath", "$.delta.text" } } } });
     ASSERT_EQ (own_status, 200) << own_payload.dump ();
     EXPECT_EQ (own_payload.value ("streamTextPath", ""), "$.delta.text");
+}
+
+// A by-id compose carries the saved request's `streamFirstContentMarker`
+// (#3774) under the text path's rule: beside its stream only, dropped by an
+// overlay that switches the stream off, kept by one that states its own.
+// Mutation checks: drop the `streamFirstContentMarker` emit in
+// `payload_from_stored` and the first expectation fails; drop the marker from
+// `drop_stored_stream_settings_without_stream` and the overlay's payload keeps
+// it, which `read_stream_flag` refuses.
+TEST_F (RequestComposerTest, AStoredFirstContentMarkerIsComposedOnlyBesideItsStream) {
+    seed_collection ("root", "");
+    auto streaming                        = make_request ("req_stream", "root");
+    streaming.stream                      = true;
+    streaming.stream_first_content_marker = "content_block_delta";
+    db_->save_request (streaming);
+    auto off                        = make_request ("req_off", "root");
+    off.stream_first_content_marker = "content_block_delta";
+    db_->save_request (off);
+
+    auto [stream_status, stream_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_stream" } });
+    ASSERT_EQ (stream_status, 200) << stream_payload.dump ();
+    EXPECT_EQ (stream_payload.value ("streamFirstContentMarker", ""), "content_block_delta")
+    << stream_payload.dump ();
+    EXPECT_TRUE (vayu::http::routes::read_stream_flag (stream_payload).ok)
+    << "POST /execute takes the composed payload as it is";
+
+    auto [off_status, off_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_off" } });
+    ASSERT_EQ (off_status, 200) << off_payload.dump ();
+    EXPECT_FALSE (off_payload.contains ("streamFirstContentMarker"))
+    << off_payload.dump ();
+
+    auto [overlay_status, overlay_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_stream" }, { "request", { { "stream", false } } } });
+    ASSERT_EQ (overlay_status, 200) << overlay_payload.dump ();
+    EXPECT_FALSE (overlay_payload.contains ("streamFirstContentMarker"))
+    << overlay_payload.dump ();
+    EXPECT_TRUE (vayu::http::routes::read_stream_flag (overlay_payload).ok);
+
+    auto [own_status, own_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_stream" },
+    { "request", { { "streamFirstContentMarker", "\"text\":\"" } } } });
+    ASSERT_EQ (own_status, 200) << own_payload.dump ();
+    EXPECT_EQ (own_payload.value ("streamFirstContentMarker", ""), "\"text\":\"");
 }
 
 // The same chain with no pre-request script anywhere above the request: every

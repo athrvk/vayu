@@ -2095,6 +2095,43 @@ TEST_F (RunsRouteTest, ReportCarriesAStreamsLargestGapAndEventRate) {
     EXPECT_FALSE (unmeasured.contains ("eventRate")) << unmeasured.dump ();
 }
 
+// #3774: the time to the first content marker reaches the report beside the
+// time to first event, and stays out of it when no stream's marker arrived.
+// Mutation check: drop the `timeToFirstMatch` write in
+// `build_stream_summary_payload` and the first block fails; write it whatever
+// the count and the last expectation fails.
+TEST_F (RunsRouteTest, ReportCarriesAStreamsTimeToFirstMatch) {
+    vayu::core::MetricsCollector::StreamTotals stream;
+    stream.completions               = 4;
+    stream.total_events              = 40;
+    stream.time_to_first_event.count = 4;
+    stream.time_to_first_event.p95   = 3.9;
+    stream.time_to_first_match.count = 3;
+    stream.time_to_first_match.p50   = 1180.0;
+    stream.time_to_first_match.p95   = 1240.0;
+    stream.time_to_first_match.max   = 1310.0;
+    auto inputs                      = summary_inputs ();
+    inputs.stream                    = stream;
+    seed ({ .id = "run_stream_match", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_stream_match", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_stream_match");
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto& reported = body["stream"];
+    ASSERT_TRUE (reported.contains ("timeToFirstMatch")) << reported.dump ();
+    const auto& first_match = reported["timeToFirstMatch"];
+    EXPECT_DOUBLE_EQ (first_match.value ("p50", -1.0), 1180.0);
+    EXPECT_DOUBLE_EQ (first_match.value ("p95", -1.0), 1240.0);
+    EXPECT_DOUBLE_EQ (first_match.value ("max", -1.0), 1310.0);
+    EXPECT_EQ (first_match.value ("count", 0), 3);
+
+    stream.time_to_first_match = {};
+    inputs.stream              = stream;
+    EXPECT_FALSE (vayu::core::build_run_summary_payload (inputs)["stream"].contains (
+    "timeToFirstMatch"));
+}
+
 // #3127: the deferred replay's console lines reach the report, on the run's
 // `testValidation` and on a scenario step's `tests`, each with its dropped
 // count, and a line logged more than once with its `count`. Mutation check:

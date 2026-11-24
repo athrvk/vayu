@@ -82,6 +82,7 @@ const PRESET_FIELDS = {
 	verifySSL: true,
 	stream: true,
 	streamTextPath: true,
+	streamFirstContentMarker: true,
 	disableCookies: true,
 	disabledSystemHeaders: true,
 	disableUrlEncoding: true,

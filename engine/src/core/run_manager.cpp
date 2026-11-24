@@ -960,9 +960,10 @@ bool plan_streams (const std::shared_ptr<const ScenarioExecution>& scenario) {
 }
 
 /// A single-request run's stream bounds: its caps over @p defaults, and its
-/// `streamTextPath` (#3773), compiled once for every response. Nothing when
-/// the run does not stream. `read_stream_flag` has already checked both in
-/// the route, so a value here is usable.
+/// `streamTextPath` (#3773) and `streamFirstContentMarker` (#3774), each
+/// compiled once for every transfer. Nothing when the run does not stream.
+/// `read_stream_flag` has already checked all of them in the route, so a value
+/// here is usable.
 std::optional<vayu::StreamBounds> single_request_stream_bounds (const nlohmann::json& config,
 const vayu::http::SseLimits& defaults) {
     if (!config.value ("stream", false)) {
@@ -974,6 +975,11 @@ const vayu::http::SseLimits& defaults) {
     path != config.end () && path->is_string ()) {
         bounds.text_path =
         vayu::http::compile_stream_text_path (path->get_ref<const std::string&> ());
+    }
+    if (const auto marker = config.find ("streamFirstContentMarker");
+    marker != config.end () && marker->is_string ()) {
+        bounds.first_content_marker = vayu::http::compile_stream_content_marker (
+        marker->get_ref<const std::string&> ());
     }
     return bounds;
 }

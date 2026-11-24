@@ -117,6 +117,32 @@ std::optional<std::string> stream_text_path_problem (const nlohmann::json& holde
     return vayu::core::detail::json_path_problem (holder, "streamTextPath", "streamTextPath");
 }
 
+std::optional<std::string> stream_first_content_marker_problem (const nlohmann::json& holder) {
+    const auto field = holder.find ("streamFirstContentMarker");
+    if (field == holder.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    if (!field->is_string ()) {
+        return "'streamFirstContentMarker' must be a string (got " +
+        std::string (field->type_name ()) + ")";
+    }
+    const auto& marker = field->get_ref<const std::string&> ();
+    if (marker.empty ()) {
+        return std::string ("'streamFirstContentMarker' cannot be empty - it "
+                            "would match before any byte arrived");
+    }
+    constexpr std::size_t LIMIT = vayu::core::constants::sse::MAX_FIRST_CONTENT_MARKER_BYTES;
+    if (marker.size () > LIMIT) {
+        return "'streamFirstContentMarker' must be at most " + std::to_string (LIMIT) +
+        " bytes (got " + std::to_string (marker.size ()) + ")";
+    }
+    if (marker.find ('\0') != std::string::npos) {
+        return std::string (
+        "'streamFirstContentMarker' cannot hold a NUL byte");
+    }
+    return std::nullopt;
+}
+
 int resolve_request_timeout_ms (const nlohmann::json& payload, int configured_default) {
     const auto timeout = payload.find ("timeout");
     if (timeout != payload.end () && timeout->is_number ()) {

@@ -1077,6 +1077,13 @@ export interface Request {
 	 */
 	streamTextPath?: string | null;
 	/**
+	 * The literal a load run's stream is timed to (issue #3774): the report's
+	 * `stream.timeToFirstMatch` is the wait for these bytes, such as
+	 * `content_block_delta`. Meaningful only beside {@link stream}. `null` (or
+	 * absent, on a row older than the column) is none.
+	 */
+	streamFirstContentMarker?: string | null;
+	/**
 	 * Which saved example a mock server answers with (issue #481 phase 3).
 	 * Always present, unlike `mockExampleId` - a request stored before this
 	 * column existed reads back `"first"`, which is what it always served.
@@ -1610,6 +1617,13 @@ export interface RunResultStreamEvents {
 	totalEvents: number;
 	eventsTruncated: boolean;
 	endReason: StreamEndReason;
+	/**
+	 * When the stream's transfer began, epoch ms on the engine's clock - the same
+	 * clock as `StreamEvent.receivedAt`, so an event's offset is `receivedAt -
+	 * startedAt` (#3805). Absent on a node written before the field existed and
+	 * on a stream that never began a transfer.
+	 */
+	startedAt?: number;
 	/**
 	 * Every event's `text` joined with nothing between, over **all** events the
 	 * stored body holds - the ones past the stored-items cap included, which
@@ -2426,6 +2440,13 @@ export interface RunThresholdBudgets {
 	 * reports it not evaluated, which counts as failed.
 	 */
 	streamTimeToFirstEventP95Ms?: number;
+	/**
+	 * Ceiling on the p95 of `RunReport.stream.timeToFirstMatch`, in ms (issue
+	 * #3774): the wait for the request's first content marker. Streaming runs
+	 * only, and a run whose streams never matched (no marker declared, or none
+	 * seen) has no figure, which the engine reports not evaluated, so failed.
+	 */
+	streamTimeToFirstMatchP95Ms?: number;
 	/**
 	 * Floor on `RunReport.stream.eventsPerSecond` (issue #3234). Streaming
 	 * runs only, judged like {@link streamTimeToFirstEventP95Ms}.
@@ -3832,6 +3853,12 @@ export interface RunReport {
 	 * time never sees. Each is per stream, over the streams that had two timed
 	 * events to measure between, and absent (never 0) when none did. Report-only:
 	 * a live gate frame carries neither.
+	 *
+	 * `timeToFirstMatch` (issue #3774) is `timeToFirstEvent`'s clock stopped at
+	 * the request's first content marker instead of its first event, so a
+	 * preamble API's first token reads as its real wait. Absent, never 0, when
+	 * no stream matched, including every run whose request declares no marker.
+	 * Report-only: the live gate frame carries no match.
 	 */
 	stream?: {
 		completions: number;
@@ -3849,6 +3876,8 @@ export interface RunReport {
 		};
 		/** Milliseconds, over the completions that delivered a timed event (`count`). */
 		timeToFirstEvent?: StreamDistribution;
+		/** Milliseconds, over the completions whose stream carried the first content marker (`count`). */
+		timeToFirstMatch?: StreamDistribution;
 		/** Milliseconds: each stream's largest pause between two consecutive events. */
 		maxEventGap?: StreamDistribution;
 		/** Events per second: each stream's own rate, the events after its first over first to last arrival. */
@@ -4386,7 +4415,7 @@ export interface RunSample {
 		 * cap. No `endReason`: under load a stream ends by server close or by
 		 * one of two caps, and nothing per sample says which.
 		 */
-		events?: Omit<RunResultStreamEvents, "endReason">;
+		events?: Omit<RunResultStreamEvents, "endReason" | "startedAt">;
 	};
 }
 

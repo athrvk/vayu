@@ -2491,10 +2491,47 @@ TEST_F (MetricsCollectorTest, TheStreamSummaryCarriesGapAndRateOnlyWhenMeasured)
     EXPECT_NEAR (with.at ("eventRate").at ("max").get<double> (), 40.0, 0.05);
 }
 
+// Time to first match (#3774) counts only the completions whose marker
+// arrived: a stream that timed its first event but never matched, and one
+// that declared no marker, read the same and stay out. Its summary block is
+// absent until one matched. Mutation checks: record
+// `first_match_ms.value_or (0)` unconditionally and the count reads 3; drop
+// the `timeToFirstMatch` write in `build_stream_summary_payload` and the
+// block is missing.
+TEST_F (MetricsCollectorTest, StreamTimeToFirstMatchCountsOnlyTheStreamsThatMatched) {
+    collector->record_stream_completion ({ .events = 3, .first_event_ms = 2.0 });
+    const auto unmatched = collector->stream_totals ();
+    ASSERT_HAS_VALUE (unmatched);
+    EXPECT_EQ (unmatched->time_to_first_match.count, 0u);
+    EXPECT_FALSE (build_stream_summary_payload (*unmatched, 1.0).contains ("timeToFirstMatch"));
+
+    collector->record_stream_completion (
+    { .events = 9, .first_event_ms = 3.0, .first_match_ms = 1200.0 });
+    collector->record_stream_completion (
+    { .events = 9, .first_event_ms = 4.0, .first_match_ms = 900.0 });
+
+    const auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->completions, 3u);
+    EXPECT_EQ (totals->time_to_first_event.count, 3u);
+    EXPECT_EQ (totals->time_to_first_match.count, 2u);
+    // hdr keeps three significant figures of the microseconds recorded.
+    EXPECT_NEAR (totals->time_to_first_match.p50, 900.0, 2.0);
+    EXPECT_NEAR (totals->time_to_first_match.max, 1200.0, 2.0);
+    const auto summary = build_stream_summary_payload (*totals, 1.0);
+    ASSERT_TRUE (summary.contains ("timeToFirstMatch")) << summary.dump ();
+    const auto& first_match = summary.at ("timeToFirstMatch");
+    for (const auto* key : { "p50", "p95", "p99", "max", "count" }) {
+        EXPECT_TRUE (first_match.contains (key)) << key;
+    }
+    EXPECT_EQ (first_match.at ("count").get<size_t> (), 2u);
+    EXPECT_NEAR (first_match.at ("max").get<double> (), 1200.0, 2.0);
+}
+
 // One reading of a response for both run modes' completion paths: a reply
 // that was not a stream is no completion, and a stream carries every figure
-// its tally set. Mutation check: drop `event_rate` from `stream_completion_of`
-// and the last expectation fails.
+// its tally set. Mutation check: drop `event_rate` (or `first_match_ms`) from
+// `stream_completion_of` and its expectation fails.
 TEST (StreamCompletionOf, ReadsEveryFigureOfAStreamAndNothingOfAnOrdinaryReply) {
     vayu::Response ordinary;
     ordinary.status_code = 200;
@@ -2504,6 +2541,7 @@ TEST (StreamCompletionOf, ReadsEveryFigureOfAStreamAndNothingOfAnOrdinaryReply) 
     streamed.stream_events           = 4;
     streamed.stream_capped           = true;
     streamed.stream_first_event_ms   = 12.0;
+    streamed.stream_first_match_ms   = 640.0;
     streamed.stream_max_event_gap_ms = 30.0;
     streamed.stream_event_rate       = 40.0;
     const auto completion            = stream_completion_of (streamed);
@@ -2511,6 +2549,7 @@ TEST (StreamCompletionOf, ReadsEveryFigureOfAStreamAndNothingOfAnOrdinaryReply) 
     EXPECT_EQ (completion->events, 4u);
     EXPECT_TRUE (completion->capped);
     EXPECT_EQ (completion->first_event_ms, 12.0);
+    EXPECT_EQ (completion->first_match_ms, 640.0);
     EXPECT_EQ (completion->max_event_gap_ms, 30.0);
     EXPECT_EQ (completion->event_rate, 40.0);
 }
