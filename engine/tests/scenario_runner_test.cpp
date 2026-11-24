@@ -4430,7 +4430,7 @@ TEST_F (ScenarioRunnerTest, APreRequestAssertionIsListedCountedAndNamedTogether)
 // Data-driven iterations - pm.iterationData (issue #356, phase 5)
 // ============================================================================
 //
-// The binding itself is pinned in script_engine_test.cpp; what these pin is
+// The binding itself is pinned in script_engine_execution_test.cpp; what these pin is
 // the wiring only a run can show: which row an iteration binds, how many
 // iterations a data set implies, and that the record says which row produced
 // it. The marker header is the proof the row reached the *wire* rather than
