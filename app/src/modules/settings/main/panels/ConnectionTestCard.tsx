@@ -6,8 +6,6 @@
  */
 
 /**
- * ConnectionTestCard
- *
  * One send through the settings on this screen, reported as which hop answered
  * (issue #708). It exists because every other way of finding out that a proxy
  * URL is wrong, or that a corporate CA is missing, is a failed request in the

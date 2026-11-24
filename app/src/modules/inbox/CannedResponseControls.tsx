@@ -61,9 +61,8 @@ const MAX_RESPONSE_DELAY_MS = 30000;
  * The served header set as editor rows, with the trailing blank row the table
  * always keeps.
  *
- * `KeyValueEditor` is the app's key/value table and these rows used to be a
- * hand-rolled pair of `Input`s, because `KeyValueRow` threw outside
- * `RequestBuilderProvider` (#564). No `variables` is passed: a canned reply has
+ * `KeyValueEditor` is the app's key/value table (#564). No `variables` is
+ * passed: a canned reply has
  * no variable scope, so nothing resolves and no `{{` autocomplete opens - which
  * is what a header set the engine echoes verbatim actually is.
  */

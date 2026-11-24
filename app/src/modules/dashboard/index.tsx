@@ -418,7 +418,7 @@ export default function LoadTestDashboard() {
 
 			{/*
 			 * Where this screen sits (#1691). The dashboard is reached from a run in
-			 * History or from starting a load test, and nothing on it used to say
+			 * History or from starting a load test, and nothing on it says
 			 * so - the header names the run, not the place. "History" reveals the
 			 * run list rather than toggling it, so a crumb pressed from here always
 			 * shows the list it points at.
