@@ -8,7 +8,7 @@
  */
 
 /**
- * @brief The factory around the vendored `moment` (engine/vendor/moment, #2652).
+ * The factory around the vendored `moment` (engine/vendor/moment, #2652).
  *
  * `MOMENT_GLUE_OPEN + MOMENT_JS + MOMENT_GLUE_CLOSE` is the source the shelf
  * evaluates. The library is npm's `min/moment.min.js`, unchanged: the English
