@@ -26,7 +26,8 @@
  * plain `400` a legacy-era server answers a modern request with, or a `403`
  * naming the scope the token lacks.
  * `reply_in_turn` gives each call its own outcome from a list, for a run that
- * has to mix them.
+ * has to mix them, and `delay_tool` holds every call of one tool back, for a
+ * run whose tools have to differ in latency.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -36,8 +37,10 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -99,6 +102,9 @@ class McpFixtureServer {
             McpReplyShape shape     = McpReplyShape::Json;
             McpReplyOutcome outcome = McpReplyOutcome::Result;
             const std::size_t call  = requests_++;
+            if (const auto delay = delay_for (req.body); delay.count () > 0) {
+                std::this_thread::sleep_for (delay);
+            }
             {
                 std::lock_guard<std::mutex> lock (mutex_);
                 headers_ = req.headers;
@@ -143,6 +149,12 @@ class McpFixtureServer {
         shape_      = shape;
         turns_      = std::move (turns);
         turns_from_ = requests_.load ();
+    }
+
+    /// Every `tools/call` of @p tool from now on answered @p delay late.
+    void delay_tool (std::string tool, std::chrono::milliseconds delay) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        tool_delays_[std::move (tool)] = delay;
     }
 
     /// Calls answered so far.
@@ -236,6 +248,20 @@ class McpFixtureServer {
             }
         }
         return std::nullopt;
+    }
+
+    /// How long `delay_tool` holds back the call @p body makes.
+    std::chrono::milliseconds delay_for (const std::string& body) const {
+        const auto call = nlohmann::json::parse (body, nullptr, false);
+        if (!call.is_object () ||
+        string_at (call, nlohmann::json::json_pointer ("/method")) != "tools/call") {
+            return std::chrono::milliseconds{ 0 };
+        }
+        const auto tool = string_at (call, nlohmann::json::json_pointer ("/params/name"));
+        std::lock_guard<std::mutex> lock (mutex_);
+        const auto found = tool ? tool_delays_.find (*tool) : tool_delays_.end ();
+        return found == tool_delays_.end () ? std::chrono::milliseconds{ 0 } :
+                                              found->second;
     }
 
     static nlohmann::json response_frame (const nlohmann::json& id, McpReplyOutcome outcome) {
@@ -341,6 +367,7 @@ class McpFixtureServer {
     McpReplyOutcome outcome_ = McpReplyOutcome::Result;
     std::vector<McpReplyOutcome> turns_;
     std::size_t turns_from_ = 0; // the call turns_[0] answers
+    std::map<std::string, std::chrono::milliseconds> tool_delays_;
     std::atomic<std::size_t> requests_{ 0 };
 };
 

@@ -152,6 +152,12 @@ struct ScenarioStep {
     /// (#3248). Empty for a hand-built step, which reads no collection scope.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string collection_id{};
+    /// An `mcp` step's `<method> <tool>` (`http::mcp_step_label`, #3829), read
+    /// off the composed body once here so the breakdown row can say which
+    /// call its latency measures. Empty for every other mode, and `name`
+    /// stays the `setNextRequest` target either way.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string mcp_label{};
 };
 
 /** An ordered, immutable sequence of composed steps. */

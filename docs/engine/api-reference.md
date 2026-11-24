@@ -5631,7 +5631,8 @@ is absent here until it is added on purpose:
    and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
-   display name, step, transaction, metric and series names) is carried as
+   display name, step, transaction, metric and series names, and an `mcp`
+   step's `label`, the method and tool name read from its body) is carried as
    written.
 5. Within a section a value is copied only when it is a scalar or a list of
    scalars; anything deeper is named member by member.
@@ -5897,7 +5898,9 @@ The sections, in order:
    miss of a `required` extractor added to the failed count because it failed
    the step; `deferred to a post-run replay` for a script
    the engine only replays afterwards; `-` for a step that asserts nothing) and
-   its p50, p95 and p99. Step names are free text and escaped as every name is.
+   its p50, p95 and p99. An `mcp` step's name is followed by its call in
+   parentheses (`Search (tools/call search)`, the step's `label`, #3829).
+   Step names and labels are free text and escaped as every name is.
 10. `## Transactions`, only when the run declared any: name, count, errors and
     p50, p95 and p99 per `report.scenario.transactions[]` entry.
 11. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
@@ -12177,6 +12180,19 @@ at 0. A miss is filed under its element's `missing` too (or `skipped`, for an
 optional `extract.json` that could not read the body), and a miss a `default`
 answered is neither: the rule is in
 [`elements.md`](elements.md#kinds).
+
+`label` (#3829) is present only on a step whose body mode is `mcp`, and says
+which call the row's latency measures: `<method> <name>`, the name being what
+the request's `Mcp-Name` header mirrors (`params.name` for `tools/call` and
+`prompts/get`, `params.uri` for `resources/read`), so `tools/call search` for a
+call of the `search` tool. A method with no such member, and a name still
+holding a `{{token}}` (one a data row or the iteration binds) or empty, is
+labelled by the method alone (`tools/list`, `tools/call`); a body that is not
+one JSON object when the run is planned carries no `label`. It is read once,
+from the composed body, when the run is planned. `name` stays the stored
+request's name either way, because it is the `setNextRequest` target. Two
+steps calling two tools are two rows, each with its own percentiles, so a
+per-tool latency needs no `control.transaction`.
 
 **Response:**
 ```json

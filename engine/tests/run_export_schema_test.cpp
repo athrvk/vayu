@@ -75,10 +75,10 @@ json healthy_summary () {
         { { "count", 10 }, { "mean", 83.0 }, { "min", 80.0 }, { "p50", 82.0 },
         { "p95", 90.0 }, { "p99", 95.0 }, { "max", 96.0 }, { "unlisted", "dropped" } } },
         { "steps",
-        json::array ({ { { "index", 0 }, { "name", "login" }, { "requestId", "req_1" },
-        { "method", "POST" }, { "executed", 10 }, { "errors", 0 },
-        { "httpErrors", 0 }, { "noResponse", 0 }, { "unresolvedTokens", 0 },
-        { "extractorMisses", 1 }, { "preRequestScript", "skipped" },
+        json::array ({ { { "index", 0 }, { "name", "login" },
+        { "label", "tools/call sign_in" }, { "requestId", "req_1" }, { "method", "POST" },
+        { "executed", 10 }, { "errors", 0 }, { "httpErrors", 0 }, { "noResponse", 0 },
+        { "unresolvedTokens", 0 }, { "extractorMisses", 1 }, { "preRequestScript", "skipped" },
         { "latency", { { "min", 1 }, { "p50", 2 }, { "p95", 3 }, { "p99", 4 }, { "max", 5 } } },
         { "elements",
         json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "passed", 10 }, { "failed", 0 },
@@ -344,6 +344,10 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // validation does.
     EXPECT_EQ (
     document["report"]["scenario"]["steps"].at (0).value ("extractorMisses", -1), 1);
+    // An `mcp` step's call (#3829). Mutation check: drop "label" from
+    // STEP_KEYS and this fails; from the schema and the validation does.
+    EXPECT_EQ (document["report"]["scenario"]["steps"].at (0).value ("label", ""),
+    "tools/call sign_in");
     // A tally row names its element and counts a miss and an error apart
     // (#3051). Mutation check: drop "missing" from ELEMENT_TALLY_KEYS, or the
     // origin pick in `element_tallies`, and the matching assertion fails; drop

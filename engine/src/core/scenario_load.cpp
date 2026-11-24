@@ -396,7 +396,11 @@ ScriptsOverrideMode scripts_mode) {
             { { "min", percentiles.min }, { "p50", percentiles.p50 },
             { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
             { "max", percentiles.max } } } };
-        auto element_outcomes  = elements.build (plan, i);
+        // Absent off the `mcp` mode, like `elements` (#3829).
+        if (!plan.steps[i].mcp_label.empty ()) {
+            entry["label"] = plan.steps[i].mcp_label;
+        }
+        auto element_outcomes = elements.build (plan, i);
         // Kept as the field's pre-#1495 meaning for a step whose `script.pre`
         // is still left behind; one that ran inline reports its real outcome
         // in `elements` instead of this fixed string, which would otherwise
