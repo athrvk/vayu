@@ -106,7 +106,7 @@ Its History row updates as usual.
 The tool's answer is the same either way.
 `run_collection_smoke` sends its requests one at a time through `POST /execute` and has no run to watch, so its `run` event carries nothing extra.
 
-The renderer side, including which query keys each family maps to, is in [`docs/app/state-management.md`](../../app/state-management.md).
+The renderer side, including which query keys each family maps to, is in [`docs/app/state-management/index.md`](../../app/state-management/index.md).
 
 Declaring the families per tool rather than deriving them from `category` is deliberate: an `execute` tool writes a run row and refills the cookie jar without being a "write", and the field is required, so a new tool cannot ship silently invisible to the UI.
 

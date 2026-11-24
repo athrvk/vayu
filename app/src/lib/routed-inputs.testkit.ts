@@ -185,7 +185,7 @@ export const DOC_READING_GUARDS = {
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [
-			"docs/app/state-management.md",
+			"docs/app/state-management/",
 			"docs/app/architecture.md",
 			"docs/app/api-integration.md",
 		],

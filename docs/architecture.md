@@ -159,7 +159,7 @@ from the last id it saw and the engine replays what was missed; a resume the eng
 from before an engine restart) opens with `reset` instead, and the Manager
 refetches everything the feed describes. The stream is open only while the
 health poll says the engine is connected. The renderer side is described in
-[State management](app/state-management.md), and the route in the
+[State management](app/state-management/index.md), and the route in the
 [API reference](engine/api-reference/changes.md#change-feed).
 
 ### Load Test Flow
@@ -580,7 +580,7 @@ which case the app picks a fallback (below).
   (`useEngineRestart`) alike - both invalidate every query and then flush
   every registered save context. A failed auto-save's own retry can be backed
   off up to a minute behind either, and nothing else pokes it sooner; see
-  `docs/app/state-management.md`'s `save-store.ts` section for the retry and
+  `docs/app/state-management/save-and-drafts.md`'s `save-store.ts` section for the retry and
   the Dock's persistent "Not saved" state a failure short of that leaves on
   screen.
 - **A quit or window-close asks before discarding a flush that did not land**
