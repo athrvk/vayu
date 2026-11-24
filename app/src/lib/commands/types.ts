@@ -21,6 +21,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
+import type { RequestPreset } from "@/hooks/useNewRequest";
 import type { Chord } from "@/lib/platform";
 import type { RunExportAction } from "@/lib/run-export-formats";
 import type { Tab } from "@/stores";
@@ -52,8 +53,13 @@ export type CommandGroup = "action" | "settings";
  * why they are optional even for a host that offers everything it owns.
  */
 export interface CommandSurfaces {
-	/** Create a request, asking which collection when that is ambiguous. */
-	newRequest: () => void;
+	/**
+	 * Create a request, asking which collection when that is ambiguous - blank,
+	 * or from `preset` (a template). Type-only import of the preset: the hook
+	 * imports the stores this module's callers also reach, and a value import
+	 * would close a cycle.
+	 */
+	newRequest: (preset?: RequestPreset) => void;
 	/** Open the run dialog for a collection. */
 	runCollection: (collection: Collection) => void;
 	/** Flip the app between light and dark. */

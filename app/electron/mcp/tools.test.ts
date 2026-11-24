@@ -5908,6 +5908,107 @@ describe("run_collection_smoke", () => {
 		});
 	});
 
+	describe("an mcp request's failure on a row (#3809)", () => {
+		const smokeWith = (answer: Record<string, unknown>, overrides = {}) =>
+			dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1" },
+				ctxWith(
+					fakeClient({
+						listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+						composeRequest: vi.fn().mockResolvedValue({
+							method: "POST",
+							url: "https://api.example.com/mcp",
+						}),
+						executeRequest: vi.fn().mockResolvedValue(answer),
+						...overrides,
+					}),
+					{ allowlist: ["api.example.com"] }
+				)
+			);
+		const rowOf = (res: Awaited<ReturnType<typeof smokeWith>>) =>
+			(res.structuredContent as { results: Array<Record<string, unknown>> }).results[0];
+		const failedTest = [{ name: "mcp", passed: false, error: "tool failure" }];
+
+		test("a tool-class failure behind HTTP 200 names its class and message, and no code", async () => {
+			const res = await smokeWith({
+				status: 200,
+				testResults: failedTest,
+				mcp: { errorClass: "tool", message: "quota exceeded" },
+			});
+			const row = rowOf(res);
+			expect(row).toMatchObject({
+				ok: false,
+				statusCode: 200,
+				mcp: { errorClass: "tool", message: "quota exceeded" },
+			});
+			expect(row.mcp).not.toHaveProperty("code");
+			// The SDK refuses an undeclared row member, and zod's parse strips it,
+			// so a row member the schema does not declare is gone after the parse.
+			const parsed = TOOLS.find(
+				(t) => t.name === "run_collection_smoke"
+			)!.outputSchema!.parse(res.structuredContent) as {
+				results: Array<Record<string, unknown>>;
+			};
+			expect(parsed.results[0].mcp).toEqual(row.mcp);
+		});
+
+		test("a protocol failure carries the JSON-RPC code", async () => {
+			const row = rowOf(
+				await smokeWith({
+					status: 200,
+					testResults: failedTest,
+					mcp: { errorClass: "protocol", code: -32601, message: "Method not found" },
+				})
+			);
+			expect(row.mcp).toEqual({
+				errorClass: "protocol",
+				code: -32601,
+				message: "Method not found",
+			});
+		});
+
+		test("a success carries no mcp member, the engine's empty node included", async () => {
+			expect(
+				rowOf(await smokeWith({ status: 200, testResults: [], mcp: {} }))
+			).not.toHaveProperty("mcp");
+			expect(rowOf(await smokeWith({ status: 200, testResults: [] }))).not.toHaveProperty(
+				"mcp"
+			);
+		});
+
+		test("a transfer that failed is reported once, as the row's error", async () => {
+			const row = rowOf(
+				await smokeWith({
+					status: 0,
+					errorCode: "TIMEOUT",
+					errorMessage: "no response",
+					mcp: { errorClass: "transport", message: "no response" },
+				})
+			);
+			expect(row.error).toBe("TIMEOUT: no response");
+			expect(row).not.toHaveProperty("mcp");
+		});
+
+		test("the message is masked like the row's other server text", async () => {
+			const getGlobals = vi.fn().mockResolvedValue({
+				id: "globals",
+				variables: { api_key: { value: "SECRETVALUE", secret: true, enabled: true } },
+			});
+			const row = rowOf(
+				await smokeWith(
+					{
+						status: 200,
+						testResults: failedTest,
+						mcp: { errorClass: "tool", message: "bad key SECRETVALUE" },
+					},
+					{ getGlobals }
+				)
+			);
+			expect((row.mcp as { message: string }).message).toBe(`bad key ${REDACTED_MARKER}`);
+		});
+	});
+
 	test("a collection bound to no document reports no schema field at all", async () => {
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
@@ -8364,6 +8465,7 @@ describe("inline body bounds", () => {
 			rawRequest: `POST /x HTTP/1.1\r\nHost: api.example.com\r\n\r\n${huge}`,
 			runId: "run_d",
 			resultId: 7,
+			mcp: { errorClass: "protocol", code: -32601, message: "Method not found" },
 		});
 		const capped = executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyCapped: true });
 		const base64 = executeAnswer({ bodyRaw: base64PastCap, bodyEncoding: "base64" });
@@ -8423,6 +8525,41 @@ describe("inline body bounds", () => {
 			const declared = declaredPaths(advertisedOutputSchema("run_request"));
 			expect(declared.length).toBeGreaterThan(10);
 			expect(declared.filter((path) => !present.has(path))).toEqual([]);
+		});
+
+		// Mutation check: drop `mcp` from runRequestResultSchema and the declared
+		// -member lookups below throw. The answer is a loose object, so only a
+		// lookup of the advertised schema sees the member go (#3809).
+		test.each([
+			["tool", { errorClass: "tool", message: "quota exceeded" }, false],
+			[
+				"protocol",
+				{ errorClass: "protocol", code: -32601, message: "Method not found" },
+				true,
+			],
+		])("a %s-class mcp failure reaches the agent", async (_name, mcp, hasCode) => {
+			const res = await send(
+				{},
+				fakeClient({ executeRequest: vi.fn().mockResolvedValue(executeAnswer({ mcp })) })
+			);
+			expect(schema().safeParse(res.structuredContent).success).toBe(true);
+			const node = (res.structuredContent as { mcp: Record<string, unknown> }).mcp;
+			expect(node).toEqual(mcp);
+			expect("code" in node).toBe(hasCode);
+			for (const member of ["mcp", "mcp.errorClass", "mcp.code", "mcp.message"]) {
+				expect(outputMemberDescription("run_request", member)).toBeDefined();
+			}
+		});
+
+		test("an mcp request that succeeded carries the engine's empty node", async () => {
+			const res = await send(
+				{},
+				fakeClient({
+					executeRequest: vi.fn().mockResolvedValue(executeAnswer({ mcp: {} })),
+				})
+			);
+			expect(schema().safeParse(res.structuredContent).success).toBe(true);
+			expect((res.structuredContent as { mcp: unknown }).mcp).toEqual({});
 		});
 
 		// Mutation check: drop boundExecuteResponse from the no-runId branch of

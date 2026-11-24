@@ -11,7 +11,7 @@ import type { LoadTestLimits } from "@/constants/load-test";
 import { Label, Switch } from "@/components/ui";
 import { NumberField } from "@/components/shared";
 import { DisclosureCard } from "./DisclosureCard";
-import { appliesRetryAfter } from "./profile";
+import { RetryAfterFields } from "./RetryAfterFields";
 
 interface RecordingSectionProps {
 	mode: LoadTestConfig["mode"];
@@ -134,42 +134,15 @@ export function RecordingSection({
 				/>
 			</div>
 
-			{appliesRetryAfter(mode) && (
-				<>
-					<div className="flex items-start justify-between gap-3">
-						<Label
-							htmlFor="lt-retry-after"
-							className="text-xs font-normal leading-snug"
-						>
-							Wait out Retry-After
-							<span className="block text-label text-muted-foreground">
-								After a 429 or 503 that names a delay, that virtual user waits
-								before its next request. The response still counts, nothing is
-								retried. Off, a rate-limited run sends as fast as the 429s come
-								back.
-							</span>
-						</Label>
-						<Switch
-							id="lt-retry-after"
-							checked={retryAfterBackoff}
-							onCheckedChange={onRetryAfterBackoffChange}
-						/>
-					</div>
-
-					{retryAfterBackoff && (
-						<NumberField
-							id="lt-retry-after-max"
-							label="Longest Retry-After wait"
-							unit="ms"
-							value={retryAfterMaxMs}
-							onChange={(raw) => onRetryAfterMaxMsChange(Number(raw))}
-							min={limits.RETRY_AFTER_MAX_MS.MIN}
-							max={limits.RETRY_AFTER_MAX_MS.MAX}
-							hint="A longer Retry-After is cut to this. The run then measures the rate the target's limiter allows, not what it does under the load you asked for."
-						/>
-					)}
-				</>
-			)}
+			<RetryAfterFields
+				mode={mode}
+				limits={limits}
+				idPrefix="lt"
+				backoff={retryAfterBackoff}
+				onBackoffChange={onRetryAfterBackoffChange}
+				maxMs={retryAfterMaxMs}
+				onMaxMsChange={onRetryAfterMaxMsChange}
+			/>
 		</DisclosureCard>
 	);
 }
