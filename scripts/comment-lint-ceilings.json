@@ -7,8 +7,6 @@
     "app/electron/main.ts": 3,
     "app/electron/mcp/engine-client.ts": 2,
     "app/electron/mcp/listener.ts": 1,
-    "app/electron/mcp/resources.ts": 1,
-    "app/electron/mcp/server.ts": 1,
     "app/electron/mcp/status.ts": 1,
     "app/electron/mcp/tools/collection-runs.tools.ts": 1,
     "app/electron/mcp/tools/compose.ts": 1,
