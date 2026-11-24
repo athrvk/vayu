@@ -5,10 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Implementation of response schema validation (issue #628). See the
- *        header for the storage shape and the dialect-honesty rule.
- */
+/// Response schema validation (#628); the header gives the storage shape and
+/// the dialect-honesty rule.
 
 #include "vayu/core/schema_validation.hpp"
 
@@ -54,14 +52,10 @@ std::string trim (const std::string& value) {
     return value.substr (first, last - first + 1);
 }
 
-/**
- * The media type of a `Content-Type` header - `application/json` out of
- * `application/json; charset=utf-8`.
- *
- * Lower-cased because media types are case-insensitive and the index stores
- * them lower-cased too, so the comparison is between two normalised forms
- * rather than one normalised and one as-typed.
- */
+/// The media type of a `Content-Type` header (`application/json` out of
+/// `application/json; charset=utf-8`), lower-cased: media types are
+/// case-insensitive and the index stores them lower-cased, so both sides of the
+/// comparison are normalised.
 std::string media_type_of (const std::string& content_type) {
     return vayu::utils::ascii_lower (
     trim (content_type.substr (0, content_type.find (';'))));
@@ -76,16 +70,15 @@ std::string method_path_key (const std::string& method, const std::string& path)
 /**
  * Keywords a draft-07 validator does not evaluate, and what each is from.
  *
- * The first group is JSON Schema 2019-09/2020-12 - what an OpenAPI **3.1**
- * document may legally use, and what this validator has never heard of. The
- * second is OpenAPI's own vocabulary: the app normalises `nullable` and
- * `discriminator` away when it extracts a 3.0 schema, so one arriving here is a
- * bug in that normalisation - and disclosing it is how the bug surfaces as a
- * named gap rather than as a body wrongly reported clean (or, for `nullable`,
- * wrongly reported broken).
+ * The first group is JSON Schema 2019-09/2020-12: what an OpenAPI **3.1**
+ * document may legally use and this validator has never heard of. The second is
+ * OpenAPI's own vocabulary: the app normalises `nullable` and `discriminator`
+ * away when it extracts a 3.0 schema, so one arriving here is a bug there, and
+ * disclosing it surfaces the bug as a named gap rather than a body wrongly
+ * reported clean (or, for `nullable`, wrongly broken).
  *
- * `propertyNames` is not here: it is draft-07, and valijson evaluates it at the
- * schema's root only, so whether it is a gap depends on where it sits
+ * `propertyNames` is not here: it is draft-07, and valijson evaluates it only
+ * at the schema's root, so whether it is a gap depends on where it sits
  * (`collect_unevaluated_keywords`).
  */
 const std::unordered_set<std::string>& unevaluatable_keywords () {
@@ -117,11 +110,11 @@ const std::vector<std::string>& subschema_keys () {
     return keys;
 }
 
-/// Where a keyword holds a *map* of subschemas keyed by names that are data,
-/// not keywords - walking these as if their keys were keywords is how a
-/// property legitimately called "nullable" would be reported as a dialect gap.
-/// A draft-07 `dependencies` value is a subschema or, as an array, a list of
-/// property names; `queue_subschemas` follows only the object-valued ones.
+/// Keywords holding a *map* of subschemas keyed by data, not keywords: walking
+/// these keys as keywords would report a property legitimately called
+/// "nullable" as a dialect gap. A draft-07 `dependencies` value is a subschema
+/// or, as an array, a list of property names; `queue_subschemas` follows only
+/// the object-valued ones.
 const std::vector<std::string>& subschema_map_keys () {
     static const std::vector<std::string> keys = { "properties", "patternProperties",
         "definitions", "$defs", "dependentSchemas", "dependencies" };
@@ -134,9 +127,9 @@ const std::vector<std::string>& subschema_list_keys () {
     return keys;
 }
 
-/// Resolve an in-document JSON Pointer (`#/components/schemas/Pet`) against the
-/// merged validation root. Anything else - an external ref, a malformed pointer
-/// - resolves to nothing, and the walk simply stops there rather than guessing.
+/// Resolves an in-document JSON Pointer (`#/components/schemas/Pet`) against
+/// the merged validation root. Anything else (an external ref, a malformed
+/// pointer) resolves to nothing, and the walk stops there rather than guessing.
 const nlohmann::json* resolve_pointer (const nlohmann::json& root, const std::string& ref) {
     if (ref.empty () || ref.front () != '#') {
         return nullptr;
@@ -152,14 +145,10 @@ const nlohmann::json* resolve_pointer (const nlohmann::json& root, const std::st
     }
 }
 
-/**
- * The validation root: the schema with the document's shared ref subtrees
- * merged in beside it, so `#/components/schemas/Pet` resolves.
- *
- * The schema's own keys win on a collision. A schema that itself declares a
- * `components` member is not a shape OpenAPI produces, and if one ever arrives
- * its own value is the one it meant.
- */
+/// The schema with the document's shared ref subtrees merged in beside it, so
+/// `#/components/schemas/Pet` resolves. The schema's own keys win a collision:
+/// a schema declaring its own `components` is not a shape OpenAPI produces, and
+/// if one arrives its own value is the one it meant.
 nlohmann::json validation_root (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
     if (!schema.is_object () || !ref_roots.is_object () || ref_roots.empty ()) {
         return schema;
@@ -171,12 +160,9 @@ nlohmann::json validation_root (const nlohmann::json& schema, const nlohmann::js
     return root;
 }
 
-/**
- * valijson reports a location as context segments - `<root>`, `["child"]`,
- * `[0]` - and a verdict reports a JSON Pointer, because that is what every
- * other path in this codebase is and what a reader can paste into a body
- * viewer. `<root>["child"]["name"]` becomes `/child/name`.
- */
+/// valijson's context segments (`<root>`, `["child"]`, `[0]`) as a JSON
+/// Pointer, the form of every other path here and what a reader can paste into
+/// a body viewer: `<root>["child"]["name"]` becomes `/child/name`.
 std::string pointer_of_context (const std::vector<std::string>& context) {
     std::string pointer;
     for (const auto& segment : context) {
@@ -211,23 +197,20 @@ std::string json_pointer_token (const std::string& name) {
 }
 
 /**
- * The prefixes valijson gives its *structural* errors - the ones that say a
- * parent failed because a child did, once per level, alongside the leaf error
- * that actually names the problem. Counting them would report one bad array
- * item, `allOf` branch or additional property as two problems (#3033).
- * `anyOf`, `oneOf` and `if`/`then`/`else` summaries are not listed: they are
- * the only line naming the combinator that refused the value.
+ * The prefixes of valijson's *structural* errors: a parent failed because a
+ * child did, once per level, beside the leaf error that names the problem.
+ * Counting them would report one bad array item, `allOf` branch or additional
+ * property as two problems (#3033). `anyOf`, `oneOf` and `if`/`then`/`else`
+ * summaries are not listed: they are the only line naming the combinator that
+ * refused the value.
  *
- * Dropping them is cosmetic and deliberately allowed to break: if an upstream
- * release rewords one, a verdict gains its wrapper lines back and reads
- * noisier. `StructuralWrapperTest` pins each against the vcpkg-pinned valijson.
- * Checked against `error.description` directly, never
- * `SchemaFailure::message` (built below by `humanize_schema_error`, which can
- * read differently from the raw description it started from): a structural
- * error's own wrapper text matches no keyword that function recognizes, so it
- * always passes through unchanged, but pinning the check to the untranslated
- * string is what keeps that true by construction rather than by happening not
- * to collide today.
+ * Dropping them is cosmetic and allowed to break: if an upstream release
+ * rewords one, a verdict gains its wrapper lines back and reads noisier.
+ * `StructuralWrapperTest` pins each against the vcpkg-pinned valijson. Matched
+ * against `error.description`, never `SchemaFailure::message` (built by
+ * `humanize_schema_error`, which can reword it): a wrapper's text matches no
+ * keyword that function recognizes today, and matching the untranslated string
+ * keeps that true by construction.
  */
 constexpr auto STRUCTURAL_ERROR_PREFIXES = std::to_array<std::string_view> ({
 "Failed to validate against schema associated with", // properties, patternProperties
@@ -266,9 +249,9 @@ nlohmann::json build_validation_payload (const ValidationVerdict& verdict) {
     nlohmann::json node;
     node["checked"] = verdict.checked;
     if (!verdict.checked) {
-        // No `valid` key at all when nothing was checked: `valid: false` on an
-        // unchecked response is the exact confusion this whole node exists to
-        // avoid - a reader would show it as a contract failure.
+        // No `valid` key when nothing was checked: `valid: false` on an
+        // unchecked response is the confusion this node exists to avoid, read
+        // as a contract failure.
         node["reason"] = verdict.reason ? to_string (*verdict.reason) :
                                           to_string (UncheckedReason::NoIndex);
         return node;
@@ -307,9 +290,9 @@ int status) {
     ++sampled;
 
     if (!verdict.checked) {
-        // Counted by reason rather than as a failure. A body a JSON Schema
-        // cannot speak about is not a body that broke its contract, and folding
-        // the two would make every HTML error page look like a schema failure.
+        // Counted by reason, not as a failure: a body a JSON Schema cannot
+        // speak about did not break its contract, and folding the two would
+        // make every HTML error page a schema failure.
         ++unchecked_reasons[to_string (verdict.reason.value_or (UncheckedReason::NoIndex))];
         return;
     }
@@ -328,9 +311,8 @@ int status) {
         }
     }
 
-    // The run-wide total counts every failure the verdicts found, including the
-    // ones each verdict's own cap already hid - so the "shown of found" figure
-    // is honest about both caps rather than only this one.
+    // The run-wide total counts every failure found, including those each
+    // verdict's own cap hid, so "shown of found" is honest about both caps.
     failures_total += verdict.failures_total;
     for (const auto& failure : verdict.failures) {
         const bool step_represented = std::ranges::any_of (failure_examples,
@@ -421,12 +403,9 @@ std::vector<SchemaNode>& pending) {
     }
 }
 
-/**
- * Every subschema of @p node, queued for the walk.
- *
- * `items` is a subschema in draft-07 and a list in draft-04's tuple form; both
- * spellings reach schemas, so both are followed.
- */
+/// Queues every subschema of @p node for the walk. `items` is a subschema in
+/// draft-07 and a list in draft-04's tuple form; both reach schemas, so both
+/// are followed.
 void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending) {
     for (const auto& key : subschema_keys ()) {
         if (auto found = node.schema->find (key);
@@ -458,13 +437,13 @@ void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending)
 
 /**
  * Calls @p visit (object subschema, its pointer in the validation root) for
- * every subschema reachable from @p schema, `$ref` targets included, each
- * target found by @p resolve (the ref text to a node, or null).
+ * every subschema reachable from @p schema, `$ref` targets included, each found
+ * by @p resolve (ref text to node, or null).
  *
- * Iterative rather than recursive: a schema arrives from outside the engine,
- * and a deeply nested one must cost stack the process does not have. The
- * visited set covers `$ref` cycles; the node budget covers a schema that is
- * merely enormous.
+ * Iterative, not recursive: a schema arrives from outside the engine, and a
+ * deeply nested one must not cost stack the process does not have. The visited
+ * set covers `$ref` cycles; the node budget covers a schema that is merely
+ * enormous.
  */
 template <typename Resolve, typename Visit>
 void walk_schema_with (const nlohmann::json& schema, Resolve&& resolve, Visit&& visit) {
@@ -638,13 +617,10 @@ cycle_back_to (const std::vector<OpenNode>& path, const std::string& at) {
     return loop;
 }
 
-/**
- * The same-value cycle reachable from @p start, or nothing.
- *
- * A depth-first search with the path held on the heap, so the check itself
- * cannot overflow on the schema it is guarding against; every node it expands
- * counts against the one `MAX_SCHEMA_NODES` budget in @p search.
- */
+/// The same-value cycle reachable from @p start, or nothing. A depth-first
+/// search with its path on the heap, so the check cannot overflow on the schema
+/// it guards against; every node it expands counts against the one
+/// `MAX_SCHEMA_NODES` budget in @p search.
 std::optional<std::vector<std::string>> same_value_cycle_from (const SameValueFrame& start,
 const nlohmann::json& schema_root,
 const nlohmann::json& ref_roots,
@@ -687,17 +663,17 @@ SameValueSearch& search) {
 
 /**
  * The locations of a cycle in which every step applies to the same value, or
- * nothing when there is none.
+ * nothing.
  *
- * Following such a cycle never reaches a value, so valijson recurses through it
- * until the stack runs out and the engine dies, which no `catch` stops. A cycle
- * through a keyword that steps into a child (a tree node's `properties`) is a
- * legitimate recursive schema and is not one of these.
+ * Following one never reaches a value, so valijson recurses until the stack
+ * runs out and the engine dies, which no `catch` stops. A cycle through a
+ * keyword that steps into a child (a tree node's `properties`) is a legitimate
+ * recursive schema and not one of these.
  *
- * The search starts from every subschema, not only the root: a cycle that only
- * a child step reaches (`properties/a` `$ref`-ing into a loop, #3810) is
- * found all the same. The marks are shared across starts, so the whole
- * search expands each node once.
+ * The search starts from every subschema, not only the root, so a cycle only a
+ * child step reaches (`properties/a` `$ref`-ing into a loop, #3810) is found.
+ * The marks are shared across starts, so the whole search expands each node
+ * once.
  */
 std::optional<std::vector<std::string>>
 find_same_value_cycle (const nlohmann::json& root, const nlohmann::json& ref_roots) {
@@ -753,8 +729,8 @@ collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json
         // That holds at the root (#2719) and passes every body below it: in
         // `properties`, `items`, an `allOf` member or a `$ref` target (#2729).
         // The root is the empty pointer, which a `$ref` back to `#` shares: the
-        // first visit is the root itself, any later one is the same keyword
-        // reached from below, where it is ignored too.
+        // first visit is the root itself, a later one is the keyword reached
+        // from below, ignored too.
         const bool is_root = at.empty ();
         root_visits += is_root ? 1 : 0;
         if (node.contains ("propertyNames") && (!is_root || root_visits > 1)) {
@@ -847,13 +823,12 @@ const nlohmann::json& root) {
 }
 
 /**
- * The failure for a body the validator refused without recording why.
- *
- * Its data path is the body itself: a constraint that records nothing also
- * leaves no context to point at. The schema is what can still be named, and
- * `propertyNames` is the keyword valijson refuses silently, so its occurrences
- * are listed. A `false` schema, or a `$ref` into a document the walk cannot
- * read, has none; the message then claims no keyword.
+ * The failure for a body the validator refused without recording why. Its data
+ * path is the body itself: a constraint that records nothing leaves no context
+ * to point at. The schema can still be named, and `propertyNames` is the
+ * keyword valijson refuses silently, so its occurrences are listed. A `false`
+ * schema, or a `$ref` into a document the walk cannot read, has none; the
+ * message then claims no keyword.
  */
 SchemaFailure unrecorded_failure (const nlohmann::json& schema, const nlohmann::json& root) {
     SchemaFailure failure;
@@ -876,12 +851,10 @@ SchemaFailure unrecorded_failure (const nlohmann::json& schema, const nlohmann::
     return failure;
 }
 
-/**
- * One validator run, shared by both public entry points: the verdict, or the
- * validator's own reason when it refused the schema (at parse time, or at
- * validation time for a constraint it only reads then, such as a `pattern`).
- * What a refusal means is the caller's to decide - see the two below.
- */
+/// One validator run for both public entry points: the verdict, or the
+/// validator's reason for refusing the schema (at parse time, or at validation
+/// time for a constraint it reads only then, such as a `pattern`). What a
+/// refusal means is each caller's to decide.
 std::expected<ValidationVerdict, std::string> run_validator (const nlohmann::json& schema,
 const nlohmann::json& ref_roots,
 const nlohmann::json& body) {
@@ -932,9 +905,9 @@ const nlohmann::json& body) {
         }
     }
 
-    // Every error was a structural wrapper: report them rather than a body that
-    // failed with nothing to show. This is the guard that keeps the cosmetic
-    // filter above from ever costing a reader the reason.
+    // Every error was a structural wrapper: report them rather than a failed
+    // body with nothing to show, so the cosmetic filter above never costs a
+    // reader the reason.
     if (verdict.failures_total == 0 && !structural.empty ()) {
         verdict.failures_total = structural.size ();
         structural.resize (std::min (structural.size (), limits::MAX_FAILURES));
@@ -942,10 +915,10 @@ const nlohmann::json& body) {
     }
 
     // Validity is the validator's verdict, not the errors it recorded: a
-    // constraint can refuse the body and record nothing (#2719, valijson's
-    // `propertyNames`), and a verdict read from the errors alone would pass it.
-    // This block makes a refusal always leave a failure, so the count below is
-    // the whole rule.
+    // constraint can refuse and record nothing (#2719, valijson's
+    // `propertyNames`), and a verdict read from the errors would pass it. A
+    // refusal therefore always leaves a failure, so the count below is the
+    // whole rule.
     if (!accepted && verdict.failures_total == 0) {
         verdict.failures_total = 1;
         verdict.failures.push_back (unrecorded_failure (schema, root));
@@ -965,10 +938,10 @@ const nlohmann::json& body) {
     if (verdict) {
         return std::move (*verdict);
     }
-    // A schema the validator refuses is not a body that failed: the contract
-    // could not be read, so nothing was checked. Reported as `no_index` - the
-    // index is there but unusable - with the reason in the log, because the
-    // fix belongs to whoever wrote the index.
+    // A schema the validator refuses is not a failed body: the contract could
+    // not be read, so nothing was checked. Reported as `no_index` (the index is
+    // there but unusable) with the reason in the log, since the fix belongs to
+    // whoever wrote the index.
     vayu::utils::log_warning (
     "http", "Response schema rejected by the validator: " + verdict.error ());
     ValidationVerdict unchecked;
@@ -992,13 +965,11 @@ std::string unevaluated_keywords_disclosure (const ValidationVerdict& verdict) {
 }
 
 /**
- * The responses one indexed operation declares.
- *
- * A row with a status and a media type but no schema is the status-only row
- * `response_schemas_of` writes for a status with nothing to check (#3028): the
- * status is a candidate, and no body is judged against it. Any other row
- * missing a status, a media type or a schema declares nothing and is skipped
- * rather than costing the document its index.
+ * The responses one indexed operation declares. A row with a status and a media
+ * type but no schema is the status-only row `response_schemas_of` writes for a
+ * status with nothing to check (#3028): the status is a candidate, no body is
+ * judged against it. Any other row missing a status, media type or schema
+ * declares nothing and is skipped, not costing the document its index.
  */
 void ResponseSchemaIndex::read_declared_responses (const nlohmann::json& row,
 IndexedOperation& operation) {
@@ -1072,9 +1043,9 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
         read_declared_responses (row, operation);
 
         const size_t at = index.operations_.size ();
-        // First writer wins in both maps, the rule `OperationIndex` states: a
-        // document declaring one identity twice is malformed, and resolving to
-        // whichever row came last would make a verdict depend on write order.
+        // First writer wins in both maps, `OperationIndex`'s rule: a document
+        // declaring one identity twice is malformed, and taking the last row
+        // would make a verdict depend on write order.
         if (auto id = row.find ("operationId"); id != row.end () &&
         id->is_string () && !id->get<std::string> ().empty ()) {
             index.by_operation_id_.emplace (id->get<std::string> (), at);
@@ -1086,14 +1057,9 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
     return index;
 }
 
-/**
- * Which indexed operation a stamp names.
- *
- * `operationId` first and `METHOD path` second - the rule
- * `core/operation_match.hpp` applies when binding and `OperationIndex` applies
- * when counting coverage, stated once more here because all three must answer a
- * rename the same way.
- */
+/// Which indexed operation a stamp names: `operationId` first, `METHOD path`
+/// second, the rule `core/operation_match.hpp` binds by and `OperationIndex`
+/// counts coverage by. All three must answer a rename the same way.
 std::optional<size_t> resolve_stamped_operation (const std::string& spec_operation,
 const std::unordered_map<std::string, size_t>& by_operation_id,
 const std::unordered_map<std::string, size_t>& by_method_path) {
@@ -1126,14 +1092,10 @@ const std::unordered_map<std::string, size_t>& by_method_path) {
     return at;
 }
 
-/**
- * The declaration that answers for @p media under @p status.
- *
- * A wildcard declaration - "any media type", or "any subtype of this type" -
- * which OpenAPI allows and generators emit, answers for a media type nothing
- * else claimed. It is considered only after every exact match has been tried,
- * so a document declaring both keeps the specific one.
- */
+/// The declaration that answers for @p media under @p status. A wildcard ("any
+/// media type", or "any subtype of this type"), which OpenAPI allows and
+/// generators emit, is tried only after every exact match, so a document
+/// declaring both keeps the specific one.
 const ResponseSchemaIndex::DeclaredSchema* ResponseSchemaIndex::select_declared_schema (
 const std::vector<DeclaredSchema>& responses,
 const std::string& status,
@@ -1169,10 +1131,7 @@ const std::string& body) const {
         return verdict;
     }
 
-    // Identity resolution, `operationId` first and `METHOD path` second - the
-    // rule `core/operation_match.hpp` applies when binding and `OperationIndex`
-    // applies when counting coverage, stated once more here because all three
-    // must answer a rename the same way.
+    // `resolve_stamped_operation`'s order, `operationId` first.
     const std::optional<size_t> at =
     resolve_stamped_operation (spec_operation, by_operation_id_, by_method_path_);
     if (spec_operation.empty ()) {
@@ -1186,10 +1145,9 @@ const std::string& body) const {
 
     const auto& operation = operations_[*at];
 
-    // Which status pattern answers, decided by the same function coverage
-    // counts with, over every status the operation declares - one that declares
-    // no schema included, so a wildcard cannot judge a body the spec names an
-    // exact status for.
+    // The status pattern that answers, by the function coverage counts with,
+    // over every declared status (schema-less ones included), so a wildcard
+    // cannot judge a body the spec names an exact status for.
     const auto matched = match_status_pattern (operation.statuses, status_code);
     if (!matched) {
         verdict.reason = UncheckedReason::NoSchemaForStatus;
@@ -1216,16 +1174,15 @@ const std::string& body) const {
     try {
         parsed_body = nlohmann::json::parse (body);
     } catch (const std::exception&) {
-        // The contract declares a JSON schema and the server did not send
-        // JSON. That is a finding, but it is not one a JSON Schema can state,
-        // so it is reported as unchecked with the reason rather than as a
-        // schema failure invented here.
+        // The contract declares a JSON schema and the server sent something
+        // else: a finding, but not one a JSON Schema can state, so it is
+        // unchecked with the reason rather than a schema failure invented here.
         verdict.reason = UncheckedReason::BodyNotJson;
         return verdict;
     }
-    // nlohmann parses a body of any depth iteratively, but valijson validates
-    // it recursively: a deep enough body overflows the worker's stack (#2413).
-    // Past the bound it is treated as not JSON, as the element pipeline does.
+    // nlohmann parses any depth iteratively, but valijson validates
+    // recursively: a deep enough body overflows the worker's stack (#2413).
+    // Past the bound it is not JSON, as in the element pipeline.
     if (!json_within_depth (parsed_body, constants::elements::MAX_BODY_DEPTH)) {
         verdict.reason = UncheckedReason::BodyNotJson;
         return verdict;
