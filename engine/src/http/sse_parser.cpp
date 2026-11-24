@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The `text/event-stream` line protocol (issue #573).
- */
+/** The `text/event-stream` line protocol (issue #573). */
 
 #include "vayu/http/sse_parser.hpp"
 
