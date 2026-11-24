@@ -6,18 +6,16 @@
  */
 
 /**
- * @brief `timer.think` (issue #1514, gaussian and the run override added by
- *        #1498): a fixed, uniform-random or gaussian-random wait between
- *        this step and the next.
+ * `timer.think` (#1514; gaussian and the run override from #1498): a fixed,
+ * uniform-random or gaussian-random wait between this step and the next.
  *
- * Runs in `step.between`, never `step.before` - the whole point is that the
- * wait does not count against this step's own latency. The sequential run's
- * wait polls `ElementContext::should_stop` on a short interval rather than
- * sleeping the whole span in one call, so a run stop lands within that
- * interval instead of at the end of a multi-second think time. A scenario
- * load run never blocks a thread for this wait at all: it reads
- * `scheduled_ready_delay_ms` instead and defers the VU through
- * `VirtualUser::ready_at_ms`, so `apply` there only records the outcome.
+ * Runs in `step.between`, never `step.before`, so the wait does not count
+ * against the step's latency. The sequential run polls
+ * `ElementContext::should_stop` on a short interval rather than sleeping the
+ * whole span, so a stop lands within that interval, not after a multi-second
+ * think. A scenario load run never blocks a thread on it: `apply` only reports
+ * the wait, and `finish_step` defers the VU by it through
+ * `VirtualUser::ready_at_ms`.
  */
 
 #include "vayu/core/elements.hpp"
@@ -68,19 +66,16 @@ class TimerThinkElement final : public Element {
                 POLL_INTERVAL, deadline - now));
             }
         }
-        // Under load (`!ctx.blocking_allowed`) the wait already happened
-        // through `scheduled_ready_delay_ms` deferring the VU before this
-        // step was dispatched at all - this call reports the outcome only.
+        // Under load (`!ctx.blocking_allowed`) nothing waits here:
+        // `finish_step` defers the VU by the `waited_ms` reported below.
         ctx.outcome_status    = "ok";
         ctx.outcome_waited_ms = wait_ms;
     }
 
-    // No `scheduled_ready_delay_ms` override: unlike `timer.pacing`,
-    // `timer.think` runs at `step.between`, which the load path dispatches
-    // (with `blocking_allowed = false`) at the same point it would need to
-    // pre-schedule anyway - `finish_step` sums the `StepBetween` outcomes'
-    // `waited_ms` straight into `VirtualUser::ready_at_ms` itself, so no
-    // kind-specific pre-scheduling hook is needed for this one.
+    // No `scheduled_ready_delay_ms` override, unlike `timer.pacing`: the load
+    // path dispatches `step.between` (with `blocking_allowed = false`) where it
+    // would pre-schedule anyway, and `finish_step` sums the `StepBetween`
+    // outcomes' `waited_ms` into `VirtualUser::ready_at_ms`.
 
     private:
     [[nodiscard]] long resolve_own_wait_ms (std::mt19937_64* rng) const {
@@ -107,9 +102,8 @@ class TimerThinkElement final : public Element {
         return config_.value ("ms", 0L);
     }
 
-    /// Unseeded, thread-local fallback for a caller with no run to be
-    /// reproducible against (a design send) - the behaviour of every draw without
-    /// `ElementContext::rng` (#1498).
+    /// Unseeded, thread-local fallback for a caller with no run to reproduce (a
+    /// design send): every draw without `ElementContext::rng` (#1498).
     static std::mt19937& fallback_rng () {
         static thread_local std::mt19937 rng{ std::random_device{}() };
         return rng;
