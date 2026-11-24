@@ -18,6 +18,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -837,6 +838,25 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
         return "&iss=" + vayu::utils::url_encode (issuer ());
     }
 
+    /// A token whose lifetime ended an hour ago and which holds a refresh
+    /// token: the next `acquire_token` for @p config posts a refresh.
+    void seed_expired_token (const json& config) {
+        vayu::db::OAuthToken row;
+        row.cache_key     = vayu::http::oauth::cache_key (config);
+        row.access_token  = "EXPIRED";
+        row.token_type    = "Bearer";
+        row.refresh_token = "RT_OLD";
+        row.expires_in    = 60;
+        row.created_at    = now_ms () - (int64_t{ 3600 } * 1000);
+        db_->save_oauth_token (row);
+    }
+    /// What `acquire_token` answers for @p config headlessly, as `/execute`
+    /// and `/runs` ask it.
+    [[nodiscard]] std::variant<vayu::db::OAuthToken, vayu::http::oauth::TokenError>
+    acquire_headless (const json& config) {
+        return vayu::http::oauth::acquire_token (*db_, config, false, std::nullopt, 10'000);
+    }
+
     DiscoveryServer server_;
     vayu::http::AuthorizationServerMetadataCache cache_;
     vayu::http::OAuth2AuthorizeManager mgr_{ {}, cache_ };
@@ -1187,8 +1207,8 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheStartRouteAnswersTheResolvedConfig) {
 /// The same MCP server and authorization server, named as hosts that are not
 /// on this machine and reached through a proxy that stands for one that can
 /// resolve them: every document the fixture serves names those hosts, so the
-/// attempt is discovered from a remote server and its exchange runs under the
-/// discovery's `LocalPeerRule`.
+/// attempt is discovered from a remote server and each token request of its
+/// config runs under the discovery's `LocalPeerRule`.
 class RemoteDiscoveredAuthorizeTest : public OAuthDiscoveredAuthorizeTest {
     protected:
     static constexpr const char* REMOTE_MCP = "http://mcp.example.test/mcp";
@@ -1245,10 +1265,8 @@ TEST_F (RemoteDiscoveredAuthorizeTest, ARemoteServersCodeIsExchangedThroughThePr
 // exchange time is refused alike. A server on this machine is not held to it
 // (`TheCodeIsExchangedWithTheResolvedConfig`, loopback throughout).
 //
-// Mutation check: leave `local_peer_rule` out of the exchange (in
-// `plan_discovered`, `build_grant_request` or `post_token_request`) and both
-// codes reach the token endpoint; leave it out of one caller of
-// `resolve_oauth_callback` and that mode's does.
+// Mutation check: make `token_peer_rule` (`oauth_client.cpp`) return none, or
+// drop it from `post_token_request`, and both codes reach the token endpoint.
 TEST_F (RemoteDiscoveredAuthorizeTest, ARemoteServersCodeIsNeverSentToALoopbackTokenEndpoint) {
     json config              = remote_config ();
     config["accessTokenUrl"] = server_.url (TOKEN_PATH);
@@ -1274,6 +1292,83 @@ TEST_F (RemoteDiscoveredAuthorizeTest, ARemoteServersCodeIsNeverSentToALoopbackT
     EXPECT_EQ (status.state, "failed");
     EXPECT_NE (status.error.find (refusal), std::string::npos) << status.error;
     EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+}
+
+// The refresh token is the long-lived secret, and a refresh and every
+// headless use (`/execute`, `/runs`, `POST /oauth2/token`) post it with no
+// exchange to carry a rule, so the rule is derived from the config's
+// `discoverUrl` (#3800). The refresh endpoint here is a typed loopback
+// literal for the reason `ARemoteServersCodeIsNeverSentToALoopbackTokenEndpoint`
+// gives.
+//
+// Mutation check: drop the rule from the post a refresh makes
+// (`post_token_request` ignoring `token_peer_rule`) and the token endpoint is
+// hit and the call answers a token.
+TEST_F (RemoteDiscoveredAuthorizeTest,
+ARemoteServersRefreshTokenIsNeverSentToALoopbackRefreshEndpoint) {
+    json config               = remote_config ();
+    config["clientId"]        = "cid";
+    config["accessTokenUrl"]  = std::string (REMOTE_ISSUER) + "/token";
+    config["refreshTokenUrl"] = server_.url (TOKEN_PATH);
+    seed_expired_token (config);
+
+    const auto answer = acquire_headless (config);
+    const auto* err   = std::get_if<vayu::http::oauth::TokenError> (&answer);
+    ASSERT_NE (err, nullptr) << "a refresh reached a loopback endpoint";
+    EXPECT_NE (
+    err->message.find (vayu::http::local_peer_refusal (vayu::http::LocalPeerRule{})),
+    std::string::npos)
+    << err->message;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+    const auto kept = db_->get_oauth_token (vayu::http::oauth::cache_key (config));
+    ASSERT_HAS_VALUE (kept);
+    EXPECT_EQ (kept->refresh_token, "RT_OLD");
+}
+
+// Every grant is held to it, not only the refresh: a `client_credentials`
+// config that names a loopback token endpoint is refused alike.
+TEST_F (RemoteDiscoveredAuthorizeTest,
+ARemoteServersHeadlessGrantIsNeverSentToALoopbackTokenEndpoint) {
+    json config              = remote_config ();
+    config["grantType"]      = "client_credentials";
+    config["clientId"]       = "cid";
+    config["accessTokenUrl"] = server_.url (TOKEN_PATH);
+
+    const auto answer = acquire_headless (config);
+    const auto* err   = std::get_if<vayu::http::oauth::TokenError> (&answer);
+    ASSERT_NE (err, nullptr) << "a grant reached a loopback endpoint";
+    EXPECT_NE (
+    err->message.find (vayu::http::local_peer_refusal (vayu::http::LocalPeerRule{})),
+    std::string::npos)
+    << err->message;
+    EXPECT_EQ (server_.hits (TOKEN_PATH), 0);
+}
+
+// A config the rule does not reach refreshes as before: one discovered from a
+// server on this machine, and one with no `discoverUrl` (its endpoints are
+// what the user typed). The second also holds the empty `discoverUrl` out of
+// `discovered_peer_rule`, which reads an empty URL as a remote server.
+//
+// Mutation check: have `token_peer_rule` return a rule for an empty
+// `discoverUrl` and the second case is refused.
+TEST_F (OAuthDiscoveredAuthorizeTest, ARefreshOfAConfigTheRuleDoesNotReachIsUnchanged) {
+    json local               = discovered_config ();
+    local["clientId"]        = "cid";
+    local["accessTokenUrl"]  = server_.url (TOKEN_PATH);
+    local["refreshTokenUrl"] = server_.url (TOKEN_PATH);
+    json typed = { { "grantType", "authorization_code" }, { "clientId", "cid" },
+        { "accessTokenUrl", server_.url (TOKEN_PATH) } };
+
+    for (const json* config : { &local, &typed }) {
+        seed_expired_token (*config);
+        const int before  = server_.hits (TOKEN_PATH);
+        const auto answer = acquire_headless (*config);
+        const auto* token = std::get_if<vayu::db::OAuthToken> (&answer);
+        ASSERT_NE (token, nullptr)
+        << std::get<vayu::http::oauth::TokenError> (answer).message;
+        EXPECT_EQ (token->access_token, "AT-DISCOVERED");
+        EXPECT_EQ (server_.hits (TOKEN_PATH), before + 1);
+    }
 }
 
 } // namespace

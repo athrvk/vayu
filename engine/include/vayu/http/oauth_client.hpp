@@ -8,7 +8,6 @@
  */
 
 #include "vayu/db/database.hpp"
-#include "vayu/http/loopback_guard.hpp"
 #include "vayu/types.hpp"
 
 #include <array>
@@ -122,12 +121,6 @@ struct InteractiveExchange {
     std::string code;
     std::string code_verifier; // empty when PKCE disabled
     std::string redirect_uri;
-    /// The connect-time rule the exchange runs under, or none. Set for an
-    /// attempt discovered from a server that is not on this machine
-    /// (`discovered_peer_rule`, #3766): its token endpoint came from that
-    /// server's metadata, so the code and verifier go to no loopback or
-    /// link-local peer, whatever the endpoint's name resolves to by then.
-    std::optional<LocalPeerRule> local_peer_rule = std::nullopt;
 };
 
 /**

@@ -1424,12 +1424,16 @@ Notes:
 - **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
   own tokens: `start_mock_issuer` stands up a
   [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
-  `issuerId`, `tokenUrl`, `authorizeUrl` and `signingKey`, so the agent can
-  point a request's `oauth2` auth at the token URL, `run_request` it, and assert
-  on what the target received - offline, with no real provider's 2FA prompts or
+  `issuerId`, `tokenUrl`, `authorizeUrl`, `metadataUrl`, `discoverUrl` and
+  `signingKey`, so the agent can point a request's `oauth2` auth at the token
+  URL (or set its `discoverUrl` to the returned one and type no endpoint),
+  `run_request` it, and assert on what the target received - offline, with no real provider's 2FA prompts or
   rate limits in the loop. `expiresInSeconds` plus `issueRefreshTokens` is how
-  the 401-then-refresh path is exercised, and `failureMode` is how retry
-  handling is. **No allowlist entry is needed and none is checked**: the engine
+  the 401-then-refresh path is exercised, `failureMode` is how retry handling is
+  (`slow`, `server_error` and `invalid_client` break `/token`;
+  `metadata_not_found`, `registration_refused` and `wrong_iss` break discovery,
+  registration and the authorize redirect's `iss`), and `resourceScope` is the
+  scope the protected resource at `discoverUrl` requires of a token. **No allowlist entry is needed and none is checked**: the engine
   binds every issuer to `127.0.0.1` and takes no host for it, so an issuer is
   unreachable off the machine; the per-tool switch is what turns these off. The
   start body is forwarded verbatim under the engine's own key names, and the
@@ -1445,8 +1449,8 @@ Notes:
   issuer, flip it to `server_error` to watch the client retry, and flip it back
   without the token URL under test moving or the signing key changing. Those two
   are the only settings a bound listener will take - the engine refuses `port`,
-  `clients`, `claims` and `issueRefreshTokens` with "stop it and start a new
-  one", so the tool does not offer them at all rather than offering a call that
+  `clients`, `claims`, `issueRefreshTokens` and `resourceScope` with "stop it
+  and start a new one", so the tool does not offer them at all rather than offering a call that
   always fails. `expiresInSeconds` is mutable engine-side and is also left out:
   a token's lifetime is fixed when it is minted, so changing it says nothing
   about the tokens an agent already holds. An empty patch is refused here rather

@@ -180,7 +180,8 @@ struct ClientConfig {
      * Set by `/import/fetch` for a `$ref` (`"reference": true`), which also
      * sends that request with redirects off, and by every request an OAuth
      * discovery of a server not on this machine makes: its fetches, its client
-     * registration and its code exchange (`discovered_peer_rule`, #3766).
+     * registration and each token request of its config (`discovered_peer_rule`,
+     * #3766, #3800).
      * Judged on the URL before
      * anything is dialled (`is_refused_reference_url`), then on the address
      * each connection reached, beside the reserved-port check every transfer

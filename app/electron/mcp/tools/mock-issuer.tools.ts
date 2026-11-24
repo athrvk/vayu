@@ -12,6 +12,7 @@
 
 import { z } from "zod";
 import type { McpTool } from "./contract.js";
+import { asOn } from "./as-on.js";
 import { callEngine, callEngineStructured, requireStr, ToolArgError } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
 import { mockIssuerListSchema } from "./output-schemas.js";
@@ -31,7 +32,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 		// MCP-started issuer appears without waiting out the drawer's poll.
 		invalidates: ["service"],
 		description:
-			"Start a local OAuth 2.0 mock issuer and return its id, token URL, authorize URL and signing key. Use it to test an auth flow offline: start an issuer, point a request's oauth2 auth at the returned tokenUrl, run it with run_request, and assert on what the target received - no real identity provider, so no 2FA prompts, provider rate limits or account lockouts in the loop. It needs no allowlist entry: the engine binds every issuer to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. The access token is an HS256 JWT signed with the returned signingKey - hand that key to the service under test and it can verify the mock's tokens. Set a short expiresInSeconds (with issueRefreshTokens) to exercise the 401-then-refresh path, and failureMode to exercise retry handling. At most 8 issuers run at once; stop yours with stop_mock_issuer when you are done.",
+			"Start a local OAuth 2.0 mock issuer and return its id, token URL, authorize URL, discoverUrl and signing key. Use it to test an auth flow offline: start an issuer, point a request's oauth2 auth at the returned tokenUrl (or set its discoverUrl to the returned one and type no endpoint), run it with run_request, and assert on what the target received - no real identity provider, so no 2FA prompts, provider rate limits or account lockouts in the loop. It needs no allowlist entry: the engine binds every issuer to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. The access token is an HS256 JWT signed with the returned signingKey - hand that key to the service under test and it can verify the mock's tokens. Set a short expiresInSeconds (with issueRefreshTokens) to exercise the 401-then-refresh path, and failureMode to exercise retry handling. At most 8 issuers run at once; stop yours with stop_mock_issuer when you are done.",
 		annotations: {
 			title: "Start mock OAuth issuer",
 			readOnlyHint: false,
@@ -81,7 +82,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				.enum(MOCK_ISSUER_FAILURE_MODES)
 				.optional()
 				.describe(
-					'How /token misbehaves: "none" (default), "slow" (answers after slowMs), "server_error" (500), "invalid_client" (401).'
+					'How the issuer misbehaves: "none" (default), "slow" (/token answers after slowMs), "server_error" (/token 500), "invalid_client" (/token 401), "metadata_not_found" (RFC 8414 document 404), "registration_refused" (/register 400), "wrong_iss" (wrong iss on the authorize redirect).'
 				),
 			slowMs: z
 				.number()
@@ -94,6 +95,12 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				.optional()
 				.describe(
 					"Return a refresh_token alongside the access token, so a refresh grant can be tested. A refresh rotates its token - the presented one is spent."
+				),
+			resourceScope: z
+				.string()
+				.optional()
+				.describe(
+					"Space-separated scopes the protected resource at discoverUrl requires of a token. Default none."
 				),
 		},
 		handler: (args, ctx, signal) =>
@@ -142,7 +149,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 		invalidates: ["service"],
 		notFound: { ...ID_KINDS.mockIssuer, idArg: "issuerId" },
 		description:
-			"Change how a running OAuth 2.0 mock issuer's /token endpoint behaves, live: its failure mode and its slow-mode delay. Use it to walk a client through a sequence - mint a token against a healthy issuer, flip it to server_error to see the retry, flip it back - without stopping the issuer, which would invalidate the token URL the request under test is already pointed at and change the signing key. This is a merge-patch: a field you omit keeps its current value. Only these two settings can change under a running issuer; the port, client list, claims and refresh-token setting are fixed when it starts, and asking to change one is an error telling you to start a new issuer.",
+			"Change how a running OAuth 2.0 mock issuer misbehaves, live: its failure mode and its slow-mode delay. Use it to walk a client through a sequence - mint a token against a healthy issuer, flip it to server_error to see the retry, flip it back - without stopping the issuer, which would invalidate the token URL the request under test is already pointed at and change the signing key. This is a merge-patch: a field you omit keeps its current value. Only these two settings can change under a running issuer; the port, client list, claims, refresh-token setting and resource scope are fixed when it starts, and asking to change one is an error telling you to start a new issuer.",
 		annotations: {
 			title: "Update mock OAuth issuer",
 			readOnlyHint: false,
@@ -158,7 +165,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				.enum(MOCK_ISSUER_FAILURE_MODES)
 				.optional()
 				.describe(
-					'How /token should misbehave from now on: "none" (healthy), "slow" (answers after slowMs), "server_error" (500), "invalid_client" (401). Omit to leave it unchanged.'
+					asOn("start_mock_issuer", "applies from now on. Omit to leave it unchanged.")
 				),
 			slowMs: z
 				.number()

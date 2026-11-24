@@ -582,6 +582,21 @@ function IssuerRow({
 			    same treatment the settings cookie rows and the console panes use. */}
 			<CollapsibleContent>
 				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mt-1 mb-2">
+					{/* The one URL an OAuth config's "Discover from the server URL"
+					    field takes: it needs no endpoint typed, which is why it
+					    leads the rows. */}
+					<IssuerDetailRow
+						label="Discover"
+						value={issuer.discoverUrl}
+						copyLabel="Copy discovery URL for an OAuth config"
+						copyWhat="Discovery URL"
+					/>
+					<IssuerDetailRow
+						label="Metadata"
+						value={issuer.metadataUrl}
+						copyLabel="Copy metadata URL"
+						copyWhat="Metadata URL"
+					/>
 					<IssuerDetailRow
 						label="Token"
 						value={issuer.tokenUrl}

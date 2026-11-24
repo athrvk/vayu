@@ -1376,7 +1376,8 @@ export class EngineClient {
 	/**
 	 * Start a mock issuer: `POST /mock-issuer/start`. The engine assigns the id
 	 * and, for `port: 0`, the port; the reply carries `issuerId`, `issuerUrl`,
-	 * `tokenUrl`, `authorizeUrl` and the per-issuer `signingKey`.
+	 * `tokenUrl`, `authorizeUrl`, `metadataUrl`, `discoverUrl` and the per-issuer
+	 * `signingKey`.
 	 */
 	startMockIssuer(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/mock-issuer/start", payload, signal);

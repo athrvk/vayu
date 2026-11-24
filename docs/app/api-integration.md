@@ -455,9 +455,23 @@ to respect: `startMockIssuer` answers with the URLs and the signing key **only**
 not the full record, so the list is refetched rather than patched; and a stopped
 issuer leaves the list altogether, unlike an inbox, which stays listed with
 `running: false`. `updateMockIssuer` accepts only `expiresInSeconds`,
-`failureMode` and `slowMs` - a port, client list or claim set cannot move under a
-bound listener and the engine refuses one with a `400` rather than half-applying
-it.
+`failureMode` and `slowMs` - a port, client list, claim set or `resourceScope`
+cannot move under a bound listener and the engine refuses one with a `400`
+rather than half-applying it.
+
+The start answer and each list entry carry `metadataUrl` (the RFC 8414
+document) and `discoverUrl` (`<issuerUrl>/resource`, a protected resource whose
+`401` leads to that metadata). **`discoverUrl` is what to paste into an OAuth
+config's "Discover from the server URL" field**: sign-in then finds the
+authorize, token and registration endpoints itself, so no endpoint is typed. The
+Services drawer's expanded issuer row shows it (Discover) beside the metadata
+URL, each with its own copy button. `failureMode` is `none`, `slow`,
+`server_error`, `invalid_client` (all `/token` only), `metadata_not_found` (the
+RFC 8414 document answers `404`), `registration_refused` (`/register` answers
+`400`) or `wrong_iss` (the authorize redirect carries a wrong `iss`, which a
+discovered sign-in refuses). `StartMockIssuerRequest.resourceScope` is the
+space-separated scope `/resource` requires of a token; the start dialog sends
+it only when filled in and shows the engine's `400` when the scope is not valid.
 
 #### Collection mock server
 
@@ -1504,7 +1518,8 @@ blank, and once the sign-in succeeds the form writes exactly those into the stor
 config (`discoveredValues` and `withDiscoveredValues`, `services/oauth/discovery.ts`)
 and names them in `discoveredFields`. From then on the stored config holds ordinary
 endpoints and a client id, so the cache key, a refresh, a Send and a run read it like
-any other and need no discovery; `cache-key.ts` is unchanged. `issuer` is not stored.
+any other and need no discovery (while `discoverUrl` stays on, a refresh and a run still
+refuse a token endpoint that is, or resolves to, a loopback or link-local address, #3800; choosing another grant in the form drops `discoverUrl` and `discoveredFields`); `cache-key.ts` is unchanged. `issuer` is not stored.
 A config with discovery on and no cache key yet (`awaitsDiscovery`) has no token to
 look up: the token row offers the sign-in under `oauth2SignInKey` (`discover:<url>`),
 and the load-test guards say to sign in first. `missingOAuth2Fields` asks such a config
