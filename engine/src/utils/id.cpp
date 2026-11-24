@@ -52,7 +52,7 @@ std::mt19937_64& thread_rng () {
 // So the 3rd group always begins with '4' (version) and the 4th with one of
 // 8/9/a/b (variant). Those 6 fixed bits are the only non-random ones, leaving
 // 128 - 4 - 2 = 122 bits of entropy - the number behind the vanishing collision
-// probability that replaces the old millisecond-timestamp scheme.
+// probability.
 //
 // mt19937_64 is a statistical PRNG, not a CSPRNG: these IDs are database keys
 // (they must be unique, not secret), so an adversary predicting them is out of

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/sse_parser.cpp
  * @brief The `text/event-stream` line protocol (issue #573).
  */
 

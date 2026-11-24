@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/workspace.cpp
  * @brief `POST /workspace/backup` - a snapshot of the workspace the user owns
  *        (issue #987).
  *
