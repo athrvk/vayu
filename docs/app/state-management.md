@@ -3181,7 +3181,7 @@ The entity list is duplicated across the process boundary
 `app/src`; `data-changed.conformance.test.ts` is what keeps the copies equal,
 and the map above is a `Record` over the union so a new family fails to compile
 until it names a reader. The emitting side is documented in
-[`docs/engine/mcp.md`](../engine/mcp.md).
+[`docs/engine/mcp/`](../engine/mcp/index.md).
 
 **Writes from any client: the engine's change feed.** `mcp:data-changed` covers
 only the MCP server the app itself hosts. The stdio MCP CLI, `vayu-cli`, a

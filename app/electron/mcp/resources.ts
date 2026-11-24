@@ -21,7 +21,7 @@
  *        catalogue the same way (issue #1517), so an agent building an
  *        `elements` list reads the current kinds and config schemas rather
  *        than guessing them.
- *        All read-only; no allowlist/caps apply. See docs/engine/mcp.md.
+ *        All read-only; no allowlist/caps apply. See docs/engine/mcp/resources-and-prompts.md.
  */
 
 import {

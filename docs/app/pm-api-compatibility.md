@@ -390,7 +390,7 @@ inside a script, which passes neither. Rather than leave a hole in
 a control the user configured in Settings, the engine refuses script-issued
 requests unless the caller explicitly asks for them: Vayu's own Send and load
 runs ask, and the MCP server never does. See
-[`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface).
+[`docs/engine/mcp/resources-and-prompts.md`](../engine/mcp/resources-and-prompts.md#the-script-sandbox-surface).
 
 Three body modes are supported: `raw`, `urlencoded` and `formdata` (#2563). The
 rest of Postman's - `file` and `graphql` - are refused by name rather than sent
@@ -2362,7 +2362,7 @@ secrets to agents off, those two tools refuse a script the agent supplies (#1834
 So the MCP server re-serves this endpoint as the `vayu://scripting/completions` resource
 (`app/electron/mcp/resources.ts`), trimmed to `label` / `detail` / `documentation`, and as
 the `get_script_api` tool (#3559) for a client that reads no resources - see
-[`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface). The reason it reads
+[`docs/engine/mcp/resources-and-prompts.md`](../engine/mcp/resources-and-prompts.md#the-script-sandbox-surface). The reason it reads
 the endpoint rather than describing the surface in its own prose is the one this page
 already demonstrates: a hand-written copy drifts, and the app's own pre-request quick
 reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" before

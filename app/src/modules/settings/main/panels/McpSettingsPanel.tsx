@@ -23,7 +23,7 @@
  * surfaces as a toast and a Retry, with the editors disabled, rather than an
  * empty allowlist the next click would persist over the real one.
  *
- * See docs/engine/mcp.md and SECURITY.md.
+ * See docs/engine/mcp/index.md and SECURITY.md.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

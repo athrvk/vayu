@@ -79,7 +79,7 @@ never held back, and never leaves a run, a trace or a History entry behind. A
 header you typed by hand is not part of the schema's identity, so after editing
 an `Authorization` row directly, press Refresh.
 
-A coding agent connected over the [MCP server](../engine/mcp.md) reads the same
+A coding agent connected over the [MCP server](../engine/mcp/index.md) reads the same
 schema with `get_graphql_schema`: the request composed the same way and
 introspected with the same auth, so it sees the types the editor sees.
 

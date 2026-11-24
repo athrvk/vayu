@@ -100,7 +100,7 @@ run as an ordered scenario, in design mode or under load, with per-step results
 and threshold verdicts. While it runs you watch throughput, latency percentiles
 and error counters stream live over SSE rather than reading a summary after the
 fact, and every run stays in the history sidebar to be
-[compared against another](../engine/mcp.md).
+[compared against another](../engine/mcp/index.md).
 
 ## When to choose k6
 

@@ -205,7 +205,7 @@ via a Model Context Protocol (MCP) server hosted in the Electron main process
 over Streamable HTTP at `http://127.0.0.1:9877/mcp` (9877 is the default port;
 Settings can change it). Because an agent driving a
 load-test tool can generate real traffic against real targets, the MCP layer
-ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
+ships with safe-by-default guardrails. See `docs/engine/mcp/safety.md` for the design.
 
 **Controls enforced by the MCP layer:**
 
@@ -248,7 +248,7 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   returns a preview and proceeds only when called again with `confirmed: true`,
   which is agent-side: the same model can send the second call. Neither is a
   substitute for the caps/allowlist, which are the enforcement. Which clients
-  are asked: `docs/engine/mcp.md`, "What is live on each transport".
+  are asked: `docs/engine/mcp/transports.md`, "What is live on each transport".
 - **Data writes off by default.** The data-mutating tools (`create_request`,
   `update_environment`, `update_engine_config`) are refused unless the user
   enables write access in Settings. Traffic-sending tools (`run_request`,

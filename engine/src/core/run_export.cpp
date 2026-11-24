@@ -659,9 +659,9 @@ std::string utc_time (int64_t epoch_ms, const char* format) {
     return vayu::utils::format_utc_time (static_cast<std::time_t> (epoch_ms / 1000), format);
 }
 
-/// The `Copy for agent` run line (`docs/engine/mcp.md`, "Naming what the user
-/// means"), with the start as ISO-8601 UTC: a file is read away from the
-/// locale and zone that would otherwise print it.
+/// The `Copy for agent` run line (`docs/engine/mcp/runs-and-reports.md`,
+/// "Naming what the user means"), with the start as ISO-8601 UTC: a file is
+/// read away from the locale and zone that would otherwise print it.
 std::string run_reference (const RunExportRun& run) {
     const std::string title = run_title (run);
     std::string details     = "load test";

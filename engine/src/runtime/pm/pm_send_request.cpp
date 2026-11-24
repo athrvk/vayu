@@ -1005,7 +1005,8 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         "checked by the MCP server before it calls the engine, so a request "
         "issued from inside a script would bypass a control you configured in "
         "Settings; script-issued requests are refused unless the caller asks "
-        "for them, and the MCP server never does. See docs/engine/mcp.md.");
+        "for them, and the MCP server never does. See "
+        "docs/engine/mcp/resources-and-prompts.md.");
     }
 
     if (argc < 1) {

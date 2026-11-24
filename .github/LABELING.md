@@ -200,7 +200,7 @@ exception: kept and restyled as manual-only companions to `component:ci` /
 | Database schema migration | `component:engine`, `component:database` | `type:enhancement`, `documentation` (if adding schema docs) |
 | Perf improvement to the request scheduler | `component:engine`, `area:http` | `type:perf`, `priority:high` |
 | Test for the QuickJS sandbox | `component:engine`, `area:scripting` | `type:test` |
-| New tool added to the MCP server | `component:app`, `area:mcp` | `type:feature`, `documentation` (if updating `docs/engine/mcp.md`) |
+| New tool added to the MCP server | `component:app`, `area:mcp` | `type:feature`, `documentation` (if updating `docs/engine/mcp/`) |
 
 ## Applying Labels to the Repository
 

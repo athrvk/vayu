@@ -2479,7 +2479,7 @@ request never passes that gate. The engine therefore refuses script-issued
 requests unless the caller explicitly asks for them (`allowScriptRequests` on
 `POST /execute` / `POST /runs`); Vayu's own Send and load runs ask, and the MCP
 server never does. Calling it from an agent-started run throws a message saying
-so. See [MCP](mcp.md#the-script-sandbox-surface).
+so. See [MCP](mcp/resources-and-prompts.md#the-script-sandbox-surface).
 
 The flag is a property of **who asked for the execution**, not of the shape its
 answer comes back in: `POST /execute` reads it before it branches on `stream`,

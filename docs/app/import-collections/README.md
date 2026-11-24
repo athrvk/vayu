@@ -17,7 +17,7 @@ the renderer's stack was the *second* reader of a document, which is what
 [#853](https://github.com/athrvk/vayu/issues/853) set out to end - and while it
 existed, an agent over MCP could bind, diff, sync and export a spec but could
 not import one. It can now (`import_document`, see
-[mcp.md](../../engine/mcp.md)).
+[mcp/load-and-specs.md](../../engine/mcp/load-and-specs.md)).
 
 **Code:** `engine/src/core/import_document.cpp` (the parse),
 `app/src/services/importers/` (the batch ledger, the temp ids and the apply).

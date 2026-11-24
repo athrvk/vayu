@@ -1645,7 +1645,7 @@ fields too. Add a script destination to `compose_elements` /
 | `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
 | `docs/engine/elements.md` | An element kind, its phase, or the pipeline that runs one |
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
-| `docs/engine/mcp.md` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`) |
+| `docs/engine/mcp/` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`); `tools.md` is generated from the registry, so a new tool changes it by `pnpm docs:mcp-tools` from `app/` and no hand-written page |
 | `docs/engine/cli.md` | Flags or subcommands |
 | `docs/engine/logging.md` | The log record, categories, redaction, file names |
 | `docs/engine/benchmarks.md` | Load generation or measurement |

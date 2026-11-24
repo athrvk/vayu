@@ -8,7 +8,7 @@
 /**
  * @file config.ts
  * @brief MCP safety configuration - the guardrails that keep an LLM-driven
- *        client from generating unbounded real traffic. See docs/engine/mcp.md
+ *        client from generating unbounded real traffic. See docs/engine/mcp/safety.md
  *        ("Safety model"). Enforced entirely in this MCP layer; the engine is
  *        never modified.
  */

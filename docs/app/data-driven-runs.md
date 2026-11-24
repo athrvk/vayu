@@ -526,7 +526,7 @@ run:
   request's own and the collection chain's, which run around every step - and
   the panel says so: a column name a script computes at run time cannot be seen
   from here.
-- **An agent can read them too.** Over [MCP](../engine/mcp.md),
+- **An agent can read them too.** Over [MCP](../engine/mcp/index.md),
   `list_collections` (asked for `fields: "full"`) and `vayu://collections`
   carry a declaring collection's `dataSchema` (columns, file name, when it was
   declared), so an agent building the `data` rows for `run_collection` or `start_load_run` knows which columns

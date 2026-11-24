@@ -482,7 +482,7 @@ at runtime:
   import graph
 - **@modelcontextprotocol/server**, **@modelcontextprotocol/node** and
   **zod**: the MCP server, its Node HTTP adapter and its tool schemas, loaded by
-  the first request (see `docs/engine/mcp.md`). `@modelcontextprotocol/client`
+  the first request (see `docs/engine/mcp/`). `@modelcontextprotocol/client`
   is a devDependency: only the protocol tests drive the server as a client
 - **graphql**: `get_graphql_schema`'s introspection query and SDL printer,
   loaded by the first call of that tool; the renderer bundles its own copy
