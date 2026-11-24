@@ -37,13 +37,9 @@ export interface ImportApi {
  * Flattens a parsed import into the single `POST /import/apply` payload and
  * sends it.
  *
- * This used to walk the tree issuing one POST per collection, per request and
- * per environment - a 500-request import was ~500 sequential localhost round
- * trips - and, because any of them could fail halfway, it carried a best-effort
- * `rollback()` that deleted the roots it had already created. The engine call is
- * atomic now (issue #96), so both the loop and the rollback are gone: either the
- * whole tree lands or nothing does, and a failure is the engine's 400 naming the
- * item that broke.
+ * The engine call is atomic (issue #96): either the whole tree lands or nothing
+ * does, so there is no loop and no rollback, and a failure is the engine's 400
+ * naming the item that broke.
  *
  * Globals are the one part that `/import/apply` does not carry: they are an
  * engine singleton behind `POST /globals`, not a tree item with a temp id, so
@@ -55,8 +51,8 @@ export class ImportOrchestrator {
 	/**
 	 * Drafts must already carry temp ids (see assignTempIds).
 	 *
-	 * Returns the engine's temp-id -> real-id map. It used to be checked and
-	 * dropped; a spec-bound import needs it, because the collection the spec's
+	 * Returns the engine's temp-id -> real-id map. A spec-bound import needs it,
+	 * because the collection the spec's
 	 * file path is remembered under does not have an id until this call answers
 	 * (issue #638).
 	 */

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file control_loop.cpp
  * @brief `control.loop` (issue #1515): walks a folder's members `count`
  *        times per iteration.
  *

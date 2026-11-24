@@ -1639,7 +1639,6 @@ size_t concurrency,
 int timeout_ms,
 int configured_workers,
 int default_max_per_host) {
-    // Configure EventLoop
     vayu::http::EventLoopConfig loop_config;
     loop_config.num_workers = static_cast<size_t> (configured_workers); // Already resolved (see resolve_worker_count)
     loop_config.max_concurrent = std::max (concurrency, size_t{ 100 });
@@ -2645,7 +2644,6 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     const auto failures = vayu::count_status_failures (
     context->metrics_collector->status_code_distribution ());
 
-    // Calculate percentiles using MetricsCollector (HdrHistogram)
     auto percentiles = context->metrics_collector->calculate_percentiles ();
 
     // Batch flush all results to database (errors and sampled successes)
@@ -2700,7 +2698,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     auto teardown_outcomes =
     run_collection_teardown (db, context, scenario_state, run_summary_info);
 
-    // Store the whole-run summary: everything the report used to rebuild by
+    // Store the whole-run summary: everything the report would otherwise rebuild by
     // scanning the run's metric rows, written once, here. Hoisted out of the
     // try so the terminal-status decision below can read its verdict - the
     // budgets this run just measured, never a second query for them (a core

@@ -8,7 +8,6 @@
  */
 
 /**
- * @file pacing_math.hpp
  * @brief The start-to-start interval arithmetic `timer.pacing` (issue #1498)
  *        and `timer.throughput` (issue #1571) share: a node's next entry is
  *        its previous entry plus a fixed interval, whatever the node's own

@@ -82,9 +82,7 @@ export function dispatchChord(chord: Chord): void {
  * Enter for the two send chords, because Monaco owns Enter and `ownsEnterKey`
  * excludes editors from the window handler on purpose (#938).
  *
- * ⌘I for the opposite reason, and it is the correction of what this comment
- * used to claim - that "everything else in the map is a letter or a digit
- * Monaco does not claim". I is claimed: the standalone editor binds CtrlCmd+I
+ * ⌘I for the opposite reason: I is claimed. The standalone editor binds CtrlCmd+I
  * as a secondary keybinding for `triggerSuggest` on every platform, and its
  * keybinding service calls `preventDefault` *and* `stopPropagation` for any
  * binding it resolves, so the context-bar toggle died at the editor instead of

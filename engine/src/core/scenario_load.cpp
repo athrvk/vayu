@@ -1033,8 +1033,8 @@ class ScenarioLoadDriver {
         // over what it (and the bind above) left unresolved (issue #1495) -
         // against this VU's own scope, so a token an earlier step's inline
         // `extract.*` wrote for this VU resolves here. Never refused, only
-        // counted: the load path's rule since #1503 is "send it regardless",
-        // which this keeps - a real resolution attempt now runs first, but a
+        // counted: the load path's rule (#1503) is "send it regardless", which this
+        // keeps - a real resolution attempt runs first, but a
         // name still unanswered, or a header-name collision the attempt
         // itself produced, is exactly as survivable as one composition alone
         // left behind. Auth that waited on the scripts (issue #2473) is

@@ -75,7 +75,7 @@ function toOpenApiBinding(raw: unknown): CollectionOpenApiBinding {
  * is no location at all. Dropping it is right where repairing it is not -
  * there is nothing to repair a path *to*, and the picker is one click away.
  * The engine's `{}` for "no file" lands here too. Exported for the one-time
- * import of the locations the app used to keep in `localStorage`.
+ * import of the locations held in `localStorage`.
  */
 export function toSpecFileLocation(raw: unknown): SpecFileLocation | undefined {
 	const record = asRecord(raw);

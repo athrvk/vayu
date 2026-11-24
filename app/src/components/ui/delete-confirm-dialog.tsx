@@ -6,8 +6,6 @@
  */
 
 /**
- * DeleteConfirmDialog
- *
  * Reusable confirmation dialog for destructive delete actions.
  *
  * Keyboard behaviour is deliberate. `DialogContent` renders a close "X" as its
