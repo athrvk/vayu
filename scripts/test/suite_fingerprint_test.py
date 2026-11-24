@@ -60,7 +60,7 @@ except ValueError:
 print("the filters block of pr-tests.yml")
 text = WORKFLOW.read_text(encoding="utf-8")
 filters = sf.read_filters(text, "area")
-for name in ("app", "app_doc_fixtures", "app_engine_inputs", "app_root_inputs", "engine"):
+for name in ("app", "app_doc_fixtures", "app_engine_inputs", "app_root_inputs", "engine", "engine_doc_fixtures"):
     check(f"'{name}' is read with patterns", bool(filters.get(name)), str(filters.get(name)))
 try:
     import yaml

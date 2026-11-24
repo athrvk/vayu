@@ -113,6 +113,7 @@ jobs:
       app_engine_inputs: ${{ steps.area.outputs.app_engine_inputs }}
       app_root_inputs: ${{ steps.area.outputs.app_root_inputs }}
       engine: ${{ steps.area.outputs.engine }}
+      engine_doc_fixtures: ${{ steps.area.outputs.engine_doc_fixtures }}
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
       scripts: ${{ steps.area.outputs.scripts }}
@@ -402,6 +403,29 @@ jobs:
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
               - '!**/*.md'
+            # The files under `docs/` that a suite in `engine/` reads. The mirror
+            # of `app_doc_fixtures` above, for the same reason: `engine` ends in
+            # `!**/*.md` and `code` rejects `docs/**`, so an edit to one of these
+            # ran no engine test and surfaced on the next unrelated C++ change,
+            # attributed to it. `script_chai_conformance_test.cpp` holds the
+            # `pm.response.to` words and `.` names the page lists to what the
+            # runtime accepts, and the two schemas are what the run-export and
+            # log-record tests validate real output against.
+            #
+            # A separate filter, ORed into the `engine` job's condition below,
+            # for the reason `app_doc_fixtures` is separate: an exclusion in
+            # `some-with-excludes` is final, so a positive entry placed in
+            # `engine` is dead for any `.md` however it is ordered. It is
+            # fingerprinted with the engine suite, or a reused pass would skip
+            # the run an edit to one of these asked for.
+            #
+            # Only the files a test reads. `ENGINE_DOC_READING_GUARDS` in
+            # `app/src/lib/routed-inputs.testkit.ts` names the same paths, and
+            # `routed-inputs.test.ts` holds this block equal to it.
+            engine_doc_fixtures:
+              - 'docs/app/pm-api-compatibility.md'
+              - 'docs/engine/run-export.schema.json'
+              - 'docs/engine/log-record.schema.json'
             build_script:
               - 'build.py'
               # The suite fingerprint reads this file's filters (the `changes`
@@ -517,7 +541,7 @@ jobs:
           set -euo pipefail
           wf=.github/workflows/pr-tests.yml
           app=$(python3 scripts/suite-fingerprint.py "$wf" area app app_doc_fixtures app_engine_inputs app_root_inputs)
-          engine=$(python3 scripts/suite-fingerprint.py "$wf" area engine)
+          engine=$(python3 scripts/suite-fingerprint.py "$wf" area engine engine_doc_fixtures)
           echo "app=$app" >> "$GITHUB_OUTPUT"
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
 
@@ -807,10 +831,17 @@ jobs:
     needs: changes
     # `!cancelled()` because `changes` is skipped on a push, and a job whose
     # need was skipped is skipped too unless its condition says otherwise.
+    #
+    # The `engine_doc_fixtures` clause is bare, not ANDed with `code`, for the
+    # reason `app_doc_fixtures` is on the app job: every path it lists is
+    # prose or a schema under `docs/`, which `code` rejects, so an AND would
+    # answer false on exactly the edits the clause exists for. The reuse test
+    # applies to both clauses; the engine fingerprint covers these files.
     if: >-
       ${{ !cancelled()
       && (github.event_name == 'push'
-          || (needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
+          || (((needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true')
+               || needs.changes.outputs.engine_doc_fixtures == 'true')
               && needs.changes.outputs.engine_reuse != 'true')) }}
     permissions:
       contents: read

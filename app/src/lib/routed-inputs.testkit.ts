@@ -24,6 +24,10 @@
  * workflow lists the union per filter, and `routed-inputs.test.ts` compares the
  * two - so a path added to a guard is red until it is routed, and a path routed
  * that no guard reads is red too.
+ *
+ * The engine suite has the same defect for the pages and schemas under `docs/`
+ * that its tests open (`ENGINE_DOC_READING_GUARDS`, #3846); those readers are
+ * C++, so the registry is the only part of the mechanism they share.
  */
 
 import { fileURLToPath } from "node:url";
@@ -589,6 +593,40 @@ export const ROOT_READING_GUARDS = {
 	},
 } as const satisfies Record<string, ReadingGuard>;
 
+/**
+ * Every engine test that reads a file under `docs/`, with the files it reads.
+ *
+ * The engine mirror of `DOC_READING_GUARDS`, for the same defect (#3846): the
+ * `engine` filter excludes Markdown and routes nothing under `docs/`, so an
+ * edit to one of these ran no C++ test and failed on the next unrelated engine
+ * change. A reader here is C++ and cannot import this module, so
+ * `routed-inputs.test.ts` holds it to naming each file it reads instead.
+ */
+export const ENGINE_DOC_READING_GUARDS = {
+	/* Holds the `pm.response.to` words and `.` names the page lists to what the
+	   runtime accepts. */
+	pmApiCompatibility: {
+		reader: "engine/tests/script_chai_conformance_test.cpp",
+		paths: ["docs/app/pm-api-compatibility.md"],
+	},
+	/* The run-report export is validated against its schema by the schema test
+	   and, through this header, by the Markdown and HTML export tests. */
+	runExportSchema: {
+		reader: "engine/tests/run_export_schema_support.hpp",
+		paths: ["docs/engine/run-export.schema.json"],
+	},
+	/* The same schema `DOC_READING_GUARDS` routes to the app, read by the
+	   engine's own log tests. */
+	logRecordSchema: {
+		reader: "engine/tests/log_record_schema_test.cpp",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
+	logCapture: {
+		reader: "engine/tests/log_capture.hpp",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
+} as const satisfies Record<string, ReadingGuard>;
+
 function union(guards: Record<string, ReadingGuard>): readonly string[] {
 	return [...new Set(Object.values(guards).flatMap((guard) => guard.paths))];
 }
@@ -600,6 +638,7 @@ function union(guards: Record<string, ReadingGuard>): readonly string[] {
 export const ROUTED_DOC_PAGES = union(DOC_READING_GUARDS);
 export const ROUTED_ENGINE_PATHS = union(ENGINE_READING_GUARDS);
 export const ROUTED_ROOT_PATHS = union(ROOT_READING_GUARDS);
+export const ROUTED_ENGINE_DOC_PAGES = union(ENGINE_DOC_READING_GUARDS);
 
 export const WORKFLOW_PATH = fromRepoRoot(".github/workflows/pr-tests.yml");
 
@@ -610,11 +649,40 @@ export const WORKFLOW_PATH = fromRepoRoot(".github/workflows/pr-tests.yml");
  * #1121) and the root half later still (#1130), and the table is what made the
  * third kind of input cost an entry here rather than a third copy of the same
  * assertions.
+ *
+ * `suite` is the one whose job reads the filter, and so whose fingerprint has to
+ * cover it. `readers` is how a reader proves it is the guard's own list: an app
+ * test imports this module, a C++ test names the file it opens.
  */
 export const ROUTED_INPUTS = [
-	{ filter: "app_doc_fixtures", guards: DOC_READING_GUARDS, routed: ROUTED_DOC_PAGES },
-	{ filter: "app_engine_inputs", guards: ENGINE_READING_GUARDS, routed: ROUTED_ENGINE_PATHS },
-	{ filter: "app_root_inputs", guards: ROOT_READING_GUARDS, routed: ROUTED_ROOT_PATHS },
+	{
+		filter: "app_doc_fixtures",
+		suite: "app",
+		readers: "import",
+		guards: DOC_READING_GUARDS,
+		routed: ROUTED_DOC_PAGES,
+	},
+	{
+		filter: "app_engine_inputs",
+		suite: "app",
+		readers: "import",
+		guards: ENGINE_READING_GUARDS,
+		routed: ROUTED_ENGINE_PATHS,
+	},
+	{
+		filter: "app_root_inputs",
+		suite: "app",
+		readers: "import",
+		guards: ROOT_READING_GUARDS,
+		routed: ROUTED_ROOT_PATHS,
+	},
+	{
+		filter: "engine_doc_fixtures",
+		suite: "engine",
+		readers: "name",
+		guards: ENGINE_DOC_READING_GUARDS,
+		routed: ROUTED_ENGINE_DOC_PAGES,
+	},
 ] as const;
 
 /**

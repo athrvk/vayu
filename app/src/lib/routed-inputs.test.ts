@@ -25,6 +25,7 @@
 
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import {
 	ROUTED_INPUTS,
 	TESTKIT_MODULE,
@@ -36,7 +37,7 @@ import {
 
 const workflow = readFileSync(WORKFLOW_PATH, "utf8");
 
-describe.each(ROUTED_INPUTS)("$filter", ({ filter, guards, routed }) => {
+describe.each(ROUTED_INPUTS)("$filter", ({ filter, suite, readers, guards, routed }) => {
 	/*
 	 * A version of this that found no filter block, or no guards, would pass
 	 * forever while comparing nothing - the empty-string failure mode this
@@ -61,6 +62,21 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, guards, routed }) => {
 		expect(workflow).toContain(`needs.changes.outputs.${filter} == 'true'`);
 	});
 
+	/*
+	 * A suite's pass is reused when its fingerprint repeats, and the fingerprint
+	 * hashes the files its filters name. A filter the fingerprint does not name
+	 * routes the job and then skips it again off the earlier pass, so an edit to
+	 * one of these files would run nothing (#3846).
+	 */
+	it("is in the fingerprint of the suite that reads it", () => {
+		const fingerprints = [
+			...workflow.matchAll(/suite-fingerprint\.py "\$wf" area ([^)]*)\)/g),
+		].map((match) => match[1].trim().split(/\s+/));
+		const named = fingerprints.find((names) => names[0] === suite);
+		expect(named, `a fingerprint for the ${suite} suite`).toBeDefined();
+		expect(named, `${filter} in the ${suite} fingerprint`).toContain(filter);
+	});
+
 	it("names paths that exist", () => {
 		for (const path of routed) {
 			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
@@ -79,8 +95,20 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, guards, routed }) => {
 		for (const [name, guard] of Object.entries(guards)) {
 			const path = fromRepoRoot(guard.reader);
 			expect(existsSync(path), guard.reader).toBe(true);
-			expect(readFileSync(path, "utf8"), name).toContain(`from "${TESTKIT_MODULE}"`);
 			expect(guard.paths.length, name).toBeGreaterThan(0);
+			const source = readFileSync(path, "utf8");
+			if (readers === "import") {
+				expect(source, name).toContain(`from "${TESTKIT_MODULE}"`);
+				continue;
+			}
+			/*
+			 * A C++ reader cannot import the list, so it is held to the next best
+			 * thing: it opens each file the entry says it does. The path is built
+			 * from `/` segments there, so the file name is what the source carries.
+			 */
+			for (const read of guard.paths) {
+				expect(source, `${guard.reader} reads ${read}`).toContain(basename(read));
+			}
 		}
 	});
 });
