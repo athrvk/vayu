@@ -393,6 +393,6 @@ A property the engine gives a value when its key is absent also carries `default
 `assert.size` `op` is `"lte"`, `assert.jsonschema` `source` is `"body"`, `assert.snapshot` `method` is `"tools/list"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput` `perUser` are `true`, `timer.throughput` `perUser` is `false`.
 An absent key means that default; a client shows it without writing the key.
 
-Phase 0 also registers `script.pre` and `script.post`, validate-only like `inherit.disable` - so a request or collection the startup fold migrated (`docs/engine/db-schema.md`) can be read back and written as-is without its own `elements` failing the registry that produced them - plus, in the test build only, a `test.echo` kind proving the registration path.
+Phase 0 also registers `script.pre` and `script.post`, validate-only like `inherit.disable` - so a request or collection the startup fold migrated (`docs/engine/db-schema/startup-and-recovery.md`) can be read back and written as-is without its own `elements` failing the registry that produced them - plus, in the test build only, a `test.echo` kind proving the registration path.
 `collectionOnly` (issue #1499) is `true` only for `script.setup` / `script.teardown` - the app's Add menu on a request hides a kind marked so, and the registry itself refuses one on a request's own `elements` with a `400`.
 See [Elements](../elements.md) for the full kind table.

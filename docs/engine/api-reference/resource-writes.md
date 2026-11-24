@@ -134,7 +134,7 @@ The engine's copy is `engine/include/vayu/db/sibling_order.hpp`; the app's `comp
 A recursive [collection run](load-runs.md#the-scenario-block-collection-runs) walks the same merged list depth-first, a request where it sits and a sub-collection's whole subtree where the sub-collection sits, pinned across both consumers by `engine/tests/fixtures/recursive-run-order-conformance.json`; a mock server's route table and `POST /specs/export` list a subtree in that order too.
 
 A workspace from before schema version 7 numbered the two kinds apart, each from `0`, and showed every sub-collection above every request.
-The version-7 migration moves each collection's requests past its highest sub-collection `order`, so that display survives (`docs/engine/db-schema.md`, Schema versions); rows still tied at the legacy `0` keep it through the tie rule.
+The version-7 migration moves each collection's requests past its highest sub-collection `order`, so that display survives (`docs/engine/db-schema/schema-versions.md`); rows still tied at the legacy `0` keep it through the tie rule.
 
 **Writing.**
 `order` defaults to "append after the current siblings" - one past the highest `order` any sibling of either kind holds:

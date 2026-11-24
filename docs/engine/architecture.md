@@ -1168,7 +1168,7 @@ immutable, fully composed plan **before the run row exists**, then answers
    here is a 400 and leaves no run row behind
    ↓
 3. Create Run record (type: Scenario). config_snapshot carries the step
-   manifest, never the composed plan (see db-schema.md)
+   manifest, never the composed plan (see db-schema/runs.md)
    ↓
 4. Start worker thread (execute_scenario_run). No event loop, no metrics thread
    ↓
