@@ -42,7 +42,7 @@ Nothing else is read from the database, so a large body, header set, auth block 
 ```
 
 **Response** (no `fields`): An array of request objects, each in the same shape as a `GET /requests/:id` response:
-`params`/`headers` are arrays of `{key, value, enabled}` entries and `body` is a JSON discriminated union (see the `requests` table in [db-schema.md](../db-schema.md)) - with one deliberate exception (issue #1485):
+`params`/`headers` are arrays of `{key, value, enabled}` entries and `body` is a JSON discriminated union (see the `requests` table in [db-schema/index.md](../db-schema/index.md)) - with one deliberate exception (issue #1485):
 a row whose `params` / `headers` / `body` / `auth` is over the engine's [field cap](resource-writes.md#a-stored-json-field-has-a-write-time-cap) carries that field's documented default here instead of the stored value, and names which fields were substituted in `truncatedFields` (omitted when nothing was).
 `GET /requests/:id` never substitutes - it answers with the field whole, however large.
 ```json
@@ -312,7 +312,7 @@ or whose `schema` refers to itself without describing any value (#3806), an `ass
 a `control.throughput` naming neither or both of `percent` and `everyN`, a `timer.think` with no `ms`, `gaussian` or `minMs` + `maxMs` pair, an `assert.contains` with an empty `text` in `contains` mode, and an `extract.*` `variable` no `{{name}}` can read (a brace in it, whitespace at an edge, the `data.` namespace, `$vu` or `$iteration`).
 The only script source - `GET /requests/:id` and every full list response carry it and no longer carry `preRequestScript` / `postRequestScript` at all.
 
-**`auth.postman`**, the Postman block an import kept beside the mapped auth (see [`db-schema.md`](../db-schema.md)), is kept on a write only while mapping it through the Postman importer still gives the auth being written; otherwise it is dropped.
+**`auth.postman`**, the Postman block an import kept beside the mapped auth (see [`db-schema/index.md`](../db-schema/index.md)), is kept on a write only while mapping it through the Postman importer still gives the auth being written; otherwise it is dropped.
 So a changed credential never leaves the old one behind in the stored block, whichever client wrote it, and a save that changed nothing keeps it.
 `POST /requests`, `POST /collections`, `PUT /collections/:id` and `POST /import/apply` apply the same rule.
 
@@ -393,6 +393,6 @@ A property the engine gives a value when its key is absent also carries `default
 `assert.size` `op` is `"lte"`, `assert.jsonschema` `source` is `"body"`, `assert.snapshot` `method` is `"tools/list"`, an `extract.*` `scope` is `"collection"`, `timer.pacing` and `control.throughput` `perUser` are `true`, `timer.throughput` `perUser` is `false`.
 An absent key means that default; a client shows it without writing the key.
 
-Phase 0 also registers `script.pre` and `script.post`, validate-only like `inherit.disable` - so a request or collection the startup fold migrated (`docs/engine/db-schema.md`) can be read back and written as-is without its own `elements` failing the registry that produced them - plus, in the test build only, a `test.echo` kind proving the registration path.
+Phase 0 also registers `script.pre` and `script.post`, validate-only like `inherit.disable` - so a request or collection the startup fold migrated (`docs/engine/db-schema/startup-and-recovery.md`) can be read back and written as-is without its own `elements` failing the registry that produced them - plus, in the test build only, a `test.echo` kind proving the registration path.
 `collectionOnly` (issue #1499) is `true` only for `script.setup` / `script.teardown` - the app's Add menu on a request hides a kind marked so, and the registry itself refuses one on a request's own `elements` with a `400`.
 See [Elements](../elements.md) for the full kind table.

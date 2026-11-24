@@ -225,7 +225,7 @@ being written. If something else still holds the
 database when an engine starts (a `sqlite3` shell left in a transaction, a sync
 agent), the engine waits for it (10 s on each connection it opens), then exits 1 naming the database
 and leaves every file as it was, rather than treating the held file as corrupt
-([db-schema.md](engine/db-schema.md#startup-validation-backup-and-recovery)).
+([db-schema/startup-and-recovery.md](engine/db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)).
 Because the lock is held before the database opens, the startup reconcile that
 marks `running` and `pending` runs as failed only ever meets runs a dead engine
 left behind; the lock is the whole ownership check, and run rows carry no owner.

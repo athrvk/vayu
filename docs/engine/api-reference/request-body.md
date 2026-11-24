@@ -287,7 +287,7 @@ A path composition or a data row fills in is held to the same rule as a literal 
 **Scripts can never choose a path**: the residual pass after the pre-request script resolves a reference's `fileName` and `contentType` but never `src`.
 
 **`unresolved` is derived on read.**
-No stored body carries the key: the request writes (`POST`/`PUT /requests`, `POST /import/apply`, `POST /specs/sync`) and a run's `configSnapshot` drop it, and the [schema version 6 migration](../db-schema.md#the-file-grants-migration-schema-version-6) removed it from every body stored before.
+No stored body carries the key: the request writes (`POST`/`PUT /requests`, `POST /import/apply`, `POST /specs/sync`) and a run's `configSnapshot` drop it, and the [schema version 6 migration](../db-schema/startup-and-recovery.md#the-file-grants-migration-schema-version-6) removed it from every body stored before.
 Every read that hands a body to an editor writes it back as the engine's answer for this machine now: `GET /requests`, `GET /requests/:id`, the `POST`/`PUT /requests` responses, `POST /reorder`'s request rows, `GET /runs/:id`'s `configSnapshot.body` and `POST /import/parse`.
 `true` means a concrete path that is neither under an allowed folder nor picked, which the send would refuse; `false` means an allowed path or one still holding `{{` (decided after composition).
 A reference with no path carries no `unresolved` at all.

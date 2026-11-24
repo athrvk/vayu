@@ -572,7 +572,7 @@ The response is a **nested** object; conditional sections appear only when relev
 
 Each section's fields, and the per-step verdicts a collection run adds, are documented in [Collection run verdicts](collection-runs.md).
 
-The whole-run aggregates come from the run's stored `summary` (written once when the run reaches a terminal status - see [db-schema.md](../db-schema.md#runs)), combined with the sampled `results` rows for the timing breakdown and the `results[]` array (at most 100 rows, failures first - see "`results[]` is not a uniform sample" in [Collection run verdicts](collection-runs.md)).
+The whole-run aggregates come from the run's stored `summary` (written once when the run reaches a terminal status - see [db-schema/runs.md](../db-schema/runs.md#runs)), combined with the sampled `results` rows for the timing breakdown and the `results[]` array (at most 100 rows, failures first - see "`results[]` is not a uniform sample" in [Collection run verdicts](collection-runs.md)).
 A run with no summary has either not reached a terminal status yet (`metadata.status` is `pending` or `running`) or failed without writing one; its report is built without it rather than erroring.
 **The response shape is the same either way.**
 A load run the engine died under is marked `failed` at the next start and given the totals of its last persisted tick instead (see "A run the engine died under" below).
@@ -581,7 +581,7 @@ A report read while the run is `pending` or `running` is therefore **partial**: 
 Read `metadata.status` before treating a report as final.
 
 A design or scenario run stores its `results` rows just before its status flips, and a client fetching once in that gap needs them with their traces, so its partial report is built from the rows stored so far.
-A partial report of a **load** run reads no `results` row at all (issue #2659): it is the one a client re-reads on a timer, and a load run writes its rows only as it finishes, in chunks (see [`results`](../db-schema.md#results)), so a report built from them is all zeros while the run sends and a growing prefix of the flush after.
+A partial report of a **load** run reads no `results` row at all (issue #2659): it is the one a client re-reads on a timer, and a load run writes its rows only as it finishes, in chunks (see [`results`](../db-schema/run-artifacts.md#results)), so a report built from them is all zeros while the run sends and a growing prefix of the flush after.
 Its figures come from the run's in-memory counters instead,
 the ones the [live stream](live-metrics.md#get-runsrunidlive) reads:
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` / `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and `errors.byStatusCode`, `droppedRequests`, `skippedRequests`, `stalledMs`, `peakConcurrency`,
@@ -591,7 +591,7 @@ the ones the [live stream](live-metrics.md#get-runsrunidlive) reads:
 In the moment between the summary write and the status flip the aggregates are the summary's, as for a finished run, still with no row read.
 A run whose row says `running` but which the engine no longer holds answers the same shape with every count at zero.
 
-**A run the engine died under** (issue #2895) is marked `failed` when the next engine starts (`reconcile_orphaned_runs`, see [db-schema.md](../db-schema.md#runs)).
+**A run the engine died under** (issue #2895) is marked `failed` when the next engine starts (`reconcile_orphaned_runs`, see [db-schema/runs.md](../db-schema/runs.md#runs)).
 A load run that persisted at least one [metric tick](metrics.md#get-runsrunidmetrics) is given a summary built from its last one, and its report carries **`summary.partial: true`**.
 The figures are the run's up to that tick:
 `totalRequests`, the success/failure split, `errorRate`, `statusCodes` and `errors.byStatusCode` (all from the tick's cumulative status distribution), `cancelledRequests`, `testDuration` (the tick's elapsed seconds), `avgRps` (completions over that time, not the tick's trailing rate), `sendRate`, `throughput`, `droppedRequests`, `skippedRequests`, `stalledMs`, `bytesSent` and `bytesReceived`.
@@ -688,7 +688,7 @@ So the bodies live in their own tables and are fetched here, per page, only when
 | `limit`  | `50`    | Capped at 500; a non-numeric value falls back to the default |
 | `offset` | `0`     | Floored at 0                              |
 
-**What a run captures** - and does not - is described under [`result_bodies`](../db-schema.md#result_bodies): every error, the slow outliers, and the first three of each distinct status code, within `maxSampleBodyBytes` per body and `maxSampleBytes` for the run.
+**What a run captures** - and does not - is described under [`result_bodies`](../db-schema/run-artifacts.md#result_bodies): every error, the slow outliers, and the first three of each distinct status code, within `maxSampleBodyBytes` per body and `maxSampleBytes` for the run.
 A uniformly sampled success carries no body by design.
 
 **Response:**
@@ -730,7 +730,7 @@ The rest is conditional, and each key means something the bytes alone cannot say
 | `bodyEncoding`  | Not binary   | `"utf8"`: `body` is the stored text. `"base64"`: the stored bytes are not valid UTF-8 text (or hold a NUL) and `body` is their standard, padded base64 |
 | `bodyTruncated` | `true` only  | `body` is a prefix; the response was larger than `maxSampleBodyBytes`. Same convention design-mode traces use |
 | `bodyDropped`   | `true` only  | The run's `maxSampleBytes` budget was spent before this sample: headers kept, body not. **Distinct from an empty response body** |
-| `binary`        | `true` only  | Stored as a descriptor - `bodyBytes` and `contentType`, no bytes. See [`result_bodies`](../db-schema.md#result_bodies) for why a binary body is never stored as text |
+| `binary`        | `true` only  | Stored as a descriptor - `bodyBytes` and `contentType`, no bytes. See [`result_bodies`](../db-schema/run-artifacts.md#result_bodies) for why a binary body is never stored as text |
 | `contentType`   | Non-empty    | The response's `Content-Type`                                           |
 | `events`        | Streams only | What the stream delivered, in the trace's `events` shape (see below). Absent for every sample that did not stream |
 
@@ -744,7 +744,7 @@ A body the `maxSampleBodyBytes` cap cut inside a multi-byte character is first t
 The list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`, and `totalEvents` is the count taken **on the wire** - so a capture the `maxSampleBodyBytes` cap cut still reports the whole stream's length, with `eventsTruncated` covering both that cut and the stored-events cap.
 The events are parsed from the stored bytes whatever `bodyEncoding` says, and a byte in an event that is not UTF-8 is answered as U+FFFD.
 A sample whose request declared a `streamTextPath` (issue #3773) stored the path beside the count, so each item carries its `text` and the node gains `streamText`, both derived from the stored bytes as on a design stream's trace; a sample without one carries neither.
-See [`result_bodies`](../db-schema.md#result_bodies) for why the count and the path are stored and the list is not.
+See [`result_bodies`](../db-schema/run-artifacts.md#result_bodies) for why the count and the path are stored and the list is not.
 
 ```json
 "events": {

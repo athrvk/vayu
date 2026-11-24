@@ -26,7 +26,7 @@ component:engine:
 # under a `db/` directory, so instead of enumerating them by name (a new
 # db_*_test.cpp silently earning no label until someone remembers to add it
 # here), match the `db_` naming convention every db test already follows.
-# Kept strictly inside `engine/**` - a doc-only change to db-schema.md is
+# Kept strictly inside `engine/**` - a doc-only change to the db-schema pages is
 # `documentation`, not `component:database`, so it doesn't earn a component
 # label its content never touched.
 component:database:

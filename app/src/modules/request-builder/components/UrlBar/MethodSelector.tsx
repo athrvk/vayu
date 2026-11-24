@@ -10,11 +10,9 @@
  *
  * HTTP method dropdown, colour-coded, living *inside* the URL field.
  *
- * It used to be a separate bordered control at a fixed `w-[76px]` - a width
- * sized for OPTIONS, so GET wasted about 40px of it on every request, and the
- * row paid for a second border and a second gap on top. Since the two are one
- * thought ("this request"), it now sits in the URL field's own border, the way
- * a browser's protocol chip does, and sizes to its label.
+ * Since the method and the URL are one thought ("this request"), it sits in the
+ * URL field's own border, the way a browser's protocol chip does, and sizes to
+ * its label.
  *
  * It stays a real dropdown rather than becoming a coloured rail with a text
  * label: the method is changed often, and dropping the caret would make a
@@ -82,10 +80,7 @@ export default function MethodSelector() {
 					"[&>svg]:size-icon-sm"
 				)}
 				// Inline `hsl()` from `getMethodColor`, matching `MethodBadge` - the
-				// one way method colour is applied in this app. This file used to
-				// carry its own `METHOD_COLORS` map of `.method-*` utility classes,
-				// a second source of truth for the same seven colours, and the kind
-				// that quietly stops matching.
+				// one way method colour is applied in this app.
 				style={{ color: `hsl(${getMethodColor(request.method)})` }}
 			>
 				<SelectValue />

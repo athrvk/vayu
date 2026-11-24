@@ -339,8 +339,8 @@ function ElementRow({
 
 	const actions: RowAction[] = [
 		{ label: "Rename", icon: Pencil, onSelect: startRename },
-		// A one-element list offers both and neither works, and until #1690 the
-		// row gave no reason for either: the reason rides the item, because a
+		// A one-element list offers both and neither works, (#1690): the
+		// reason rides the item, because a
 		// tooltip inside the menu's focus trap would fight it for the keyboard.
 		{
 			label: "Move up",

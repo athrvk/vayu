@@ -345,7 +345,7 @@ What the exemplar claim decides is whether the response **body** is captured, wh
 `capture_response_bodies` (boolean, default `true`) decides whether the retained samples carry their response headers and body.
 On by default is only defensible because capture is failure-and-outlier-shaped rather than uniform - errors, slow outliers and the per-status exemplars, never the 1-in-N slice - so a healthy run captures a handful of exchanges.
 Set it to `false` and the collector is byte-for-byte what it was before capture existed: no gate is consulted, no exemplar is claimed, nothing is copied, and no rows are written.
-What is captured is read back with [GET /runs/:runId/samples](runs.md#get-runsrunidsamples) and described in [`result_bodies`](../db-schema.md#result_bodies).
+What is captured is read back with [GET /runs/:runId/samples](runs.md#get-runsrunidsamples) and described in [`result_bodies`](../db-schema/run-artifacts.md#result_bodies).
 
 **Shutdown refuses new runs.**
 Once the daemon has begun draining its run workers, `POST /runs` answers `503` with the message `Engine is shutting down` rather than accepting a run nothing will ever execute.

@@ -9,14 +9,6 @@
  * The dense timing breakdown: one small tile per network phase, label over
  * value, wrapped in an auto-fitting grid.
  *
- * This is the shape the sampled-exchange views wanted - the dashboard's live
- * sample rows (gone since #2220) and the history card's stored ones - and it
- * was implemented twice. The two copies had diverged in every respect that matters to a reader:
- * the dashboard formatted through `formatPhaseDuration` and carried the
- * per-phase tooltips, while the history copy (`history/main/components/
- * TimingBreakdown.tsx`, now deleted) had the tooltips missing and painted each
- * tile with a raw Tailwind pastel.
- *
  * **The tiles are deliberately neutral.** Colour is an encoding in the two
  * chart-like renderers - the builder's timeline segments and the dashboard's
  * waterfall bars, where the bar's hue is how you tell the phases apart - and

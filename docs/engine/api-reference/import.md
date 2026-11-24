@@ -147,7 +147,7 @@ An `x-vayu-collection` / `x-vayu-folder` `variables` object carrying such a name
 A hand-built `POST /import/apply` tree is not repaired: a padded name in it is the same `400`, and the whole atomic apply fails.
 
 **A Postman variable carries its file position as `createdAt` (#3252).**
-A stored variables object keeps its keys in name order, and the app lists a scope by `createdAt` ([VariableValue shape](../db-schema.md#variablevalue-shape)), so every row of a Postman `variable[]` or `values[]` is stamped with one clock reading per parse plus its position in the array: strictly ascending in the file's order, in epoch milliseconds.
+A stored variables object keeps its keys in name order, and the app lists a scope by `createdAt` ([VariableValue shape](../db-schema/indexes.md#variablevalue-shape)), so every row of a Postman `variable[]` or `values[]` is stamped with one clock reading per parse plus its position in the array: strictly ascending in the file's order, in epoch milliseconds.
 
 **Request:**
 ```json

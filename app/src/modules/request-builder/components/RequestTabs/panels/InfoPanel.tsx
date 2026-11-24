@@ -8,13 +8,6 @@
 /**
  * InfoPanel - the request's own documentation.
  *
- * **This used to be a band above the tabs.** `RequestDescription` drew a
- * full-width row between the URL bar and the tab strip, with its own background
- * and its own rule, and it drew it whether or not a description existed - so
- * every request in the app paid ~30px permanently for a button reading "Add
- * description…". Together with the URL bar that was 80px of chrome for one
- * logical header.
- *
  * It is now the first request tab, which costs nothing when unused and gives
  * the description the whole pane when it is. First position rather than last is
  * the part that makes it work: as a trailing tab it is a footnote you scroll
@@ -27,10 +20,6 @@
  * (F2 or the row menu) and shown only in the tab strip, so the one surface
  * calling itself the request's information had nothing to say about what the
  * request was called.
- *
- * The old component also carried a `open` flag, an auto-open-on-content effect
- * and a close-on-blur-when-empty rule, none of which has anywhere to live now.
- * They are deleted rather than ported.
  */
 
 import { Input, MarkdownEditor } from "@/components/ui";

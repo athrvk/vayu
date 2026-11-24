@@ -58,7 +58,7 @@ It is resolved once at startup and always present:
 | `quarantinedPath` | Where the engine moved the unopenable database, readable with `sqlite3 <path> .recover`. **Optional** - absent for `deleted_corrupt` and for markers written before #984, so test for it rather than deriving it from `outcome` |
 
 The node is read from a marker file beside the database and stands until a later recovery overwrites it, so a client that has already told the user about an event should key off `at` rather than expecting the node to disappear.
-See [db-schema.md](../db-schema.md#the-recovery-marker-issue-922).
+See [db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-recovery-marker).
 
 ### POST /shutdown
 
@@ -69,7 +69,7 @@ The response is sent **before** shutdown begins, so the client always receives t
 The handler sets the body and then calls the shutdown callback inline, which only wakes the daemon's main loop; the teardown cannot overtake the response, because stopping the server joins the worker that is writing it.
 The daemon then stops the server (and with it every mock server, inbox, mock issuer and OAuth callback listener, a paced answer going out at once and a callback's token exchange cancelled), ends and joins every streaming design run (the run ends `stopped` and its trace's `endReason` is `shutdown`, never a user's `stopped`, #3342),
 stops and joins active runs (a run still sending ends `stopped`; one in its natural-end drain has the drain cut short, its in-flight transfers counted as `cancelled`, and keeps its own end, as for [a Stop](runs.md#post-runsrunidstop), issue #3341), refreshes the recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by what is left of the app's 5 s window;
-on a timeout the previous backup stands, see [db-schema.md](../db-schema.md#startup-validation-backup-and-recovery)), closes the database, releases the lock file, flushes the logs and exits.
+on a timeout the previous backup stands, see [db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)), closes the database, releases the lock file, flushes the logs and exits.
 
 **Response:** `200`
 ```json
@@ -469,7 +469,7 @@ Copying `vayu.db` by hand is not: the `-wal` beside it holds committed transacti
 Two concurrent copies would each write a whole second database - unbounded disk for a button someone double-clicked - and the second would race the first's retention pass.
 Anything else that goes wrong is a `500` naming what SQLite or the filesystem refused; there is no success response with an empty path.
 
-**Retention only removes files Vayu wrote**: this endpoint's `vayu-<stamp>.db`, and the `vayu-<stamp>-pre-v<N>.db` an update saves before it migrates the workspace, which counts toward the same `maxBackupsRetained` ([db-schema.md](../db-schema.md#the-copy-before-a-migration-issue-2426)).
+**Retention only removes files Vayu wrote**: this endpoint's `vayu-<stamp>.db`, and the `vayu-<stamp>-pre-v<N>.db` an update saves before it migrates the workspace, which counts toward the same `maxBackupsRetained` ([db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-copy-before-a-migration)).
 A copy you put in that directory yourself is left where it is.
 `0` keeps every snapshot.
 

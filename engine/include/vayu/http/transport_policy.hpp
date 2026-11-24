@@ -246,7 +246,7 @@ struct ClientCertRule {
     ClientCertFormat format = ClientCertFormat::Pem;
 
     /// The key's passphrase, empty when it has none. Stored plaintext - see the
-    /// struct comment and `docs/engine/db-schema.md`.
+    /// struct comment and `docs/engine/db-schema/credentials-and-files.md`.
     std::string passphrase;
 };
 
