@@ -38,6 +38,7 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/diagnostics.hpp"
 #include "wait_until.hpp"
 
 #include "scenario_load_fixture.hpp"
@@ -1001,6 +1002,11 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
 // run stores no trace per request to keep one on. The one-line summary stays
 // on the step's element row. Mutation check: call `record_script_requests` on
 // the `script_config` `execute_scenario_load` builds and the flag reads true.
+//
+// GCC 15 at `-O3` reports `-Wnull-dereference` inside nlohmann's `is_string`
+// once the console loop is inlined; the element is never null (see
+// utils/diagnostics.hpp).
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 TEST_F (ScenarioLoadTest, AStepScriptsSendRequestBuildsNoRecordAndKeepsItsLine) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
@@ -1024,6 +1030,7 @@ TEST_F (ScenarioLoadTest, AStepScriptsSendRequestBuildsNoRecordAndKeepsItsLine) 
         << row.dump ();
     }
 }
+VAYU_DIAGNOSTIC_POP
 
 // ============================================================================
 // Flow control is read the same on both run kinds (#2974)
