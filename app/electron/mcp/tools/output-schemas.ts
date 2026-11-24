@@ -305,6 +305,14 @@ export const runRequestResultSchema = z.looseObject({
 	),
 	runId: optStr.describe("Absent, with `resultId`, when nothing was stored."),
 	resultId: optNum,
+	mcp: z
+		.looseObject({
+			errorClass: optStr.describe('"transport", "protocol" or "tool" (HTTP 200, isError).'),
+			code: optNum.describe("The JSON-RPC error code, when the failure has one."),
+			message: optStr,
+		})
+		.optional()
+		.describe("An `mcp` request's failure; `{}` on success. A buffered send only."),
 });
 
 export const runStatusSchema = z.looseObject({
@@ -560,6 +568,19 @@ export const smokeResultSchema = z.object({
 			skipped: z.boolean().optional(),
 			reason: z.string().optional(),
 			error: z.string().optional(),
+			/*
+			 * An `mcp` request's own failure (#3809): present only when the engine
+			 * named a class. A tool-class failure answers HTTP 200, so `statusCode`
+			 * alone reads as success. Absent for a request that is not `mcp`, one
+			 * that succeeded, and one whose exchange failed (`error` says so).
+			 */
+			mcp: z
+				.object({
+					errorClass: z.string(),
+					code: z.number().optional(),
+					message: z.string(),
+				})
+				.optional(),
 			/*
 			 * What the collection's bound OpenAPI document says about this
 			 * response (issue #681). Absent for a collection bound to nothing -

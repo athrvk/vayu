@@ -420,6 +420,14 @@ export const ENGINE_READING_GUARDS = {
 		paths: ["engine/tests/fixtures/element-kinds.json"],
 	},
 	/*
+	 * The same fixture, read to hold the LLM request templates' elements to the
+	 * schema of the kind each one names (#3778).
+	 */
+	llmRequestPresets: {
+		reader: "app/src/modules/welcome/llm-request-presets.test.ts",
+		paths: ["engine/tests/fixtures/element-kinds.json"],
+	},
+	/*
 	 * The same fixture, read for the load dialog's list of scenario-only kinds
 	 * (#3050), a renderer copy of the engine's single-request whitelist. The
 	 * whitelist itself (#3070) is the other input, so the test holds its own

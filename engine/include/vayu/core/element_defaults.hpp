@@ -46,6 +46,9 @@ constexpr bool ASSERT_NEGATE = false;
 /// judges unless a JSONPath names a part of it.
 constexpr const char* ASSERT_JSONSCHEMA_SOURCE = "body";
 
+/// `assert.snapshot` `method`: the list compared when none is named.
+constexpr const char* ASSERT_SNAPSHOT_METHOD = "tools/list";
+
 /// `timer.pacing` `perUser`, and the plan scan that sizes its shared clocks.
 constexpr bool TIMER_PACING_PER_USER = true;
 

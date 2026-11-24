@@ -15,6 +15,7 @@
  * configured properties as `key: value`.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
 function asDisplay(value: unknown): string {
@@ -72,6 +73,22 @@ function summarizeAssertJsonSchema(
 	if (config.source !== "jsonpath") return "body matches schema";
 	const path = typeof config.path === "string" ? config.path : "";
 	return path ? `${path} matches schema` : fallback(kind);
+}
+
+/**
+ * How many items the check is held to, never the baseline itself: a recorded
+ * list runs to hundreds of lines. The method is the catalogue's default until
+ * the element names another (#3807).
+ */
+function summarizeAssertSnapshot(
+	config: Record<string, unknown>,
+	kind?: ElementKindSchema
+): string {
+	if (!Array.isArray(config.baseline)) return fallback(kind);
+	const method = config.method || catalogueDefault(kind, "method");
+	if (typeof method !== "string") return fallback(kind);
+	const count = config.baseline.length;
+	return `${method} - ${count} ${pluralize(count, "item")}`;
 }
 
 function summarizeExtractJson(config: Record<string, unknown>, kind?: ElementKindSchema): string {
@@ -133,6 +150,7 @@ const TEMPLATES: Readonly<
 	"assert.status": summarizeAssertStatus,
 	"assert.jsonpath": summarizeAssertJsonpath,
 	"assert.jsonschema": summarizeAssertJsonSchema,
+	"assert.snapshot": summarizeAssertSnapshot,
 	"extract.json": summarizeExtractJson,
 	"timer.think": summarizeTimerThink,
 	"timer.pacing": summarizeTimerPacing,

@@ -12,14 +12,18 @@
  * What the extracted sections do at their own prop boundary. The dialog's
  * suite drives them through the whole form with `isStarting` always false, so
  * the one branch it cannot reach - a section told it is disabled - is pinned
- * here.
+ * here. `RetryAfterFields` is shared by two dialogs, so its own contract (the
+ * mode guard, the ids, the cap's visibility) is pinned here rather than through
+ * either.
  */
 
 import type { ComponentProps } from "react";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { screen, fireEvent, cleanup } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { BudgetsSection } from "./BudgetsSection";
+import { RetryAfterFields } from "./RetryAfterFields";
+import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 import {
 	CAPACITY_BUDGETS_NOTE,
 	CAPACITY_SEED_HINT,
@@ -227,5 +231,78 @@ describe("BudgetsSection", () => {
 			expect(closedCard()).toHaveTextContent("1 budget active");
 			expect(screen.queryByText(STREAM_SEED_HINT)).not.toBeInTheDocument();
 		});
+	});
+});
+
+describe("RetryAfterFields (#3799)", () => {
+	function renderFields({
+		mode = "constant_concurrency",
+		backoff = false,
+		idPrefix = "x",
+		onBackoffChange = vi.fn(),
+		onMaxMsChange = vi.fn(),
+	}: {
+		mode?: LoadTestConfig["mode"];
+		backoff?: boolean;
+		idPrefix?: string;
+		onBackoffChange?: (value: boolean) => void;
+		onMaxMsChange?: (value: number) => void;
+	} = {}) {
+		render(
+			<RetryAfterFields
+				mode={mode}
+				limits={LOAD_TEST_LIMITS}
+				idPrefix={idPrefix}
+				backoff={backoff}
+				onBackoffChange={onBackoffChange}
+				maxMs={2500}
+				onMaxMsChange={onMaxMsChange}
+			/>
+		);
+	}
+	const toggle = () => screen.queryByRole("switch", { name: /wait out retry-after/i });
+
+	it.each(["constant_concurrency", "iterations", "ramp_up", "capacity"] as const)(
+		"offers the switch in %s",
+		(mode) => {
+			renderFields({ mode });
+			expect(toggle()).toBeInTheDocument();
+		}
+	);
+
+	it("offers nothing in constant_rps, which the engine would only skip with a warning", () => {
+		renderFields({ mode: "constant_rps", backoff: true });
+		expect(toggle()).toBeNull();
+		expect(screen.queryByLabelText(/longest retry-after wait/i)).toBeNull();
+	});
+
+	it("shows the cap only with the switch on", () => {
+		renderFields({ backoff: false });
+		expect(screen.queryByLabelText(/longest retry-after wait/i)).toBeNull();
+		cleanup();
+
+		renderFields({ backoff: true });
+		expect(screen.getByLabelText(/longest retry-after wait/i)).toHaveValue(2500);
+	});
+
+	it("reports the switch and the typed cap", () => {
+		const onBackoffChange = vi.fn();
+		const onMaxMsChange = vi.fn();
+		renderFields({ backoff: true, onBackoffChange, onMaxMsChange });
+		fireEvent.click(toggle()!);
+		expect(onBackoffChange).toHaveBeenCalledWith(false);
+		fireEvent.change(screen.getByLabelText(/longest retry-after wait/i), {
+			target: { value: "4000" },
+		});
+		expect(onMaxMsChange).toHaveBeenCalledWith(4000);
+	});
+
+	it("prefixes both ids, so two dialogs' controls never collide", () => {
+		renderFields({ backoff: true, idPrefix: "run-collection" });
+		expect(toggle()).toHaveAttribute("id", "run-collection-retry-after");
+		expect(screen.getByLabelText(/longest retry-after wait/i)).toHaveAttribute(
+			"id",
+			"run-collection-retry-after-max"
+		);
 	});
 });

@@ -97,7 +97,7 @@ carries `"%"`, `assert.size.bytes` carries `"B"`. A new kind's schema ships `tit
 
 An enum or boolean property whose absence the engine reads as a value also carries the standard
 `default` keyword (issue #3045; a numeric or free-text fallback such as `matchNo` or `template` does
-not yet): `assert.size.op` is `lte`, `assert.jsonschema.source` is `body`, every `extract.*` `scope` is `collection`,
+not yet): `assert.size.op` is `lte`, `assert.jsonschema.source` is `body`, `assert.snapshot.method` is `tools/list`, every `extract.*` `scope` is `collection`,
 `timer.pacing.perUser` and `control.throughput.perUser` are `true`, `timer.throughput.perUser` is
 `false`, and a boolean flag that is simply off (`negate`, an extractor's `required`, a script's
 `inline`, `control.transaction`'s `includeTimers`) says `false`. The value is not retyped in the schema: it is a named constant in
@@ -133,6 +133,7 @@ shipping silently mismatched.
 | `assert.status` | assert | `step.after` | #1514 |
 | `assert.jsonpath` | assert | `step.after` | #1514 |
 | `assert.jsonschema` | assert | `step.after` | #3806 |
+| `assert.snapshot` | assert | `step.after` | #3807 |
 | `assert.contains` | assert | `step.after` | #1514 |
 | `assert.duration` | assert | `step.after` | #1514 |
 | `assert.size` | assert | `step.after` | #1514 |
@@ -259,7 +260,7 @@ value (`"7"`) to force a string (#3046). `assert.contains` compares a `field` (`
 `contains` mode (the default), which finds it in every response so the verdict never depends on one
 (#3055); `equals` against `""` and `matches` with an empty pattern stay valid;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
-an `op`. `assert.jsonschema` is described after the body-read rules, below. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
+an `op`. `assert.jsonschema` and `assert.snapshot` are described after the body-read rules, below. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
 {meanMs, deviationMs}` (both required, issue #1498) for a normally-distributed one, drawn from
 `std::normal_distribution` and clamped to zero (a draw below it would be a negative wait, which
 means nothing) then rounded to the nearest millisecond. A config must name a wait (#3055): `ms`, or
@@ -305,7 +306,7 @@ balance beside a timestamp, which no single compare-exchange can swap as a unit.
 (non-load) run there is only one implicit user, so `perUser: true` and `perUser: false` behave
 identically, same as `timer.pacing`.
 
-The JSON-reading kinds (`extract.json`, `assert.jsonpath`, `assert.jsonschema`) share one parse of the response body per
+The JSON-reading kinds (`extract.json`, `assert.jsonpath`, `assert.jsonschema`, `assert.snapshot`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot, which keeps every object's members in the order
 the body wrote them (`nlohmann::ordered_json`, issue #2459) and costs time linear in the body
 however wide its objects are - a body over the
@@ -313,7 +314,7 @@ however wide its objects are - a body over the
 is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
 recurse over it, and a hostile server chooses its shape). A body that cannot be read, whether it is
 not JSON, empty, too deep or too big, is not a pass: the reason is `response body is not JSON, nests
-too deeply, or exceeds maxElementBodyBytes`, and `assert.jsonpath` and `assert.jsonschema` **fail** with it, whatever
+too deeply, or exceeds maxElementBodyBytes`, and `assert.jsonpath`, `assert.jsonschema` and `assert.snapshot` **fail** with it, whatever
 `negate` says (a body nothing can be read from satisfies neither "exists" nor "does not exist"),
 and so does an `extract.json` with `required: true`, which reports `missing` and fails the step
 like any other required miss, even when it has a `default` (that stands in for a path that did not
@@ -367,6 +368,37 @@ part of which went unread. The schema is self-contained: a `$ref` resolves insid
 (`#/definitions/...`). One the validator refuses is refused when the element is written if it loops
 through `$ref` without describing any value; any other refusal reports `error` with a failed test
 and the validator's reason when the assertion runs.
+
+`assert.snapshot` (#3807) holds the items a list method answers to a recorded `baseline`, so a
+server that renames a tool, drops one or changes its `inputSchema` fails the step instead of
+surprising whoever calls it. `method` is `tools/list` (the default), `resources/list` or
+`prompts/list`, and `baseline` (required) is the array of items the list held when it was recorded.
+It is a generic kind rather than an MCP-only one because the registry has no protocol gate; it
+reads `result.tools`, `result.resources` or `result.prompts` of the final JSON-RPC response the
+elements read (above), so it belongs on an `mcp` request that sends the matching list method.
+
+Only the fields a client reads are compared, and the baseline is cut to them the same way the
+reply is, so a recorded `_meta` or `icons` is harmless: a tool's `name`, `title`, `description`,
+`inputSchema`, `outputSchema` and `annotations`; a resource's `uri`, `name`, `title`,
+`description`, `mimeType` and `annotations`; a prompt's `name`, `title`, `description` and
+`arguments`. Items are matched by `name` (`uri` for a resource), so a server that reorders its list
+has not changed it, and the members of an object compare without regard to order for the same
+reason; an array inside a field (`required`, `enum`) compares in order, since there the order is the
+value. A `null` is a value too: a field the baseline holds as `null` and the reply omits, or the
+reverse, is a difference, at the top of an item and inside a field alike. A baseline is refused when
+it is not an array, holds an item that is not an object with a text identity, or names one twice,
+each naming `baseline`. The reply is compared as it came: a
+server that pages its list (`nextCursor`) is compared on the page the step received.
+
+A failure is one line, `tools/list changed: removed 'a'; added 'b'; 'c' differs at
+/inputSchema/properties/x/type`: removed names, added names, then each changed item with the first
+`constants::elements::MAX_SNAPSHOT_POINTERS` (3) differing JSON Pointers (RFC 6901, `~` as `~0` and
+`/` as `~1`), `, and N more` for the rest. A rename is a removed name and an added one. At most
+`constants::elements::MAX_SNAPSHOT_FINDINGS` (10) findings are listed, then ` (N more)`; a control
+character in a name shows as `?`, and a name or pointer past
+`constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS` (200) characters ends in `...`. A body that cannot be read, a reply with no list at the method's
+place (an error response, say) and an item with no identity fail it too, never pass it. The test it
+records is named `<method> matches the snapshot`.
 
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
 (a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total `value`

@@ -33,7 +33,7 @@ import {
 	useToastStore,
 } from "@/stores";
 import { apiService } from "@/services/api";
-import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
+import { DEFAULT_LOAD_TEST_CEILINGS, LOAD_TEST_DEFAULTS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import type { Collection, Environment, OAuth2Config, Request, RequestAuth } from "@/types";
 import {
@@ -1041,6 +1041,118 @@ describe("the load profile of a sequence", () => {
 		const seed = useDashboardStore.getState().loadTestConfig;
 		expect(seed).toMatchObject({ mode: "iterations", iterations: 60 });
 		expect(seed?.duration).toBeUndefined();
+	});
+
+	describe("Retry-After back-off (#3799)", () => {
+		const toggle = () => screen.getByRole("switch", { name: /wait out retry-after/i });
+		const cap = () => screen.getByLabelText(/longest retry-after wait/i) as HTMLInputElement;
+
+		it("is off by default and sends neither key", () => {
+			openLoad();
+			expect(toggle()).not.toBeChecked();
+			expect(screen.queryByLabelText(/longest retry-after wait/i)).toBeNull();
+			run();
+
+			const payload = mutate.mock.calls[0][0];
+			expect(payload).not.toHaveProperty("retryAfterBackoff");
+			expect(payload).not.toHaveProperty("retryAfterMaxMs");
+		});
+
+		it("sends the option and the cap the user typed once switched on", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			expect(cap().value).toBe(String(LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS));
+			fireEvent.change(cap(), { target: { value: "2500" } });
+			run();
+
+			expect(mutate.mock.calls[0][0]).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 2500,
+			});
+		});
+
+		it("sends the engine's default cap when the user only switches it on", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			run();
+
+			expect(mutate.mock.calls[0][0]).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
+			});
+		});
+
+		it("is offered in every mode a scenario accepts", () => {
+			openLoad();
+			for (const mode of [/ramp-up/i, /fixed passes/i, /constant virtual users/i]) {
+				pick(mode);
+				expect(toggle()).toBeInTheDocument();
+			}
+		});
+
+		it("keeps what was typed through a mode change, and sends nothing once switched back off", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			fireEvent.change(cap(), { target: { value: "4000" } });
+			pick(/ramp-up/i);
+			expect(toggle()).toBeChecked();
+			expect(cap().value).toBe("4000");
+
+			fireEvent.click(toggle());
+			run();
+			const payload = mutate.mock.calls[0][0];
+			expect(payload).not.toHaveProperty("retryAfterBackoff");
+			expect(payload).not.toHaveProperty("retryAfterMaxMs");
+		});
+
+		it("blocks Run on a cap the engine would refuse", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			fireEvent.change(cap(), { target: { value: "3600001" } });
+
+			expect(screen.getByText(/Longest Retry-After wait must be/)).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+			expect(mutate).not.toHaveBeenCalled();
+		});
+
+		it("is not offered, and not sent, on a design-mode run", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			enableLoadTest();
+			expect(screen.queryByRole("switch", { name: /wait out retry-after/i })).toBeNull();
+			run();
+
+			const payload = mutate.mock.calls[0][0];
+			expect(payload).not.toHaveProperty("retryAfterBackoff");
+			expect(payload).not.toHaveProperty("retryAfterMaxMs");
+		});
+
+		it("seeds the dashboard with what it sent, so the run's page shows the option", () => {
+			openLoad();
+			fireEvent.click(toggle());
+			fireEvent.change(cap(), { target: { value: "2500" } });
+			run();
+			succeedWith("run_retry_after_1");
+
+			expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+				retryAfterBackoff: true,
+				retryAfterMaxMs: 2500,
+			});
+		});
+
+		it("starts off again on the next open", () => {
+			const first = render(
+				<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
+			);
+			enableLoadTest();
+			fireEvent.click(toggle());
+			first.unmount();
+
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			enableLoadTest();
+			expect(toggle()).not.toBeChecked();
+		});
 	});
 
 	it("describes the run per switch position and per mode", () => {

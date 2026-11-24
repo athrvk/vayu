@@ -2976,6 +2976,18 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsAnAssertJsonSchemaElement
     EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
 }
 
+// A snapshot assertion reads only the response body and records a test, both
+// bound on this path (#3807). Mutation check: drop "assert.snapshot" from
+// `REQUEST_ELEMENTS_SUPPORTED_KINDS` and this reddens on the scenario-only
+// refusal.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAnAssertSnapshotElement) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_snapshot" }, { "kind", "assert.snapshot" },
+    { "config", { { "baseline", nlohmann::json::array ({ { { "name", "a" } } }) } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
 // The same `stamp_default_element_ids` default `lifecycleElements` gets:
 // `Registry::validate` refuses an id-less entry outright, and a caller that
 // names no id must get one rather than a 400 asking it to invent one.
