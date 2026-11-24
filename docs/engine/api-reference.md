@@ -943,6 +943,23 @@ reads `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`, and
 a `400` with no JSON-RPC error says the server looks legacy-era and to send an
 explicit `initialize` request first.
 
+A `401` or `403` whose `WWW-Authenticate` is a `Bearer` challenge with
+`error="insufficient_scope"` (RFC 6750 section 3.1) stays `transport` and names
+what the token lacks (#3795): `insufficient_scope: needs "db:read db:write"`
+from the challenge's `scope`, or `insufficient_scope: the token lacks a scope
+the server did not name` when it gives none. The challenge is read by
+`classify_bearer_challenge`, the classifier behind
+[`POST /oauth2/step-up`](#post-oauth2step-up); the run never retries, refreshes
+or re-authorizes, and its status counts are the ones the `403` always had.
+A collection run carries the message as the step's error; a load run counts the
+`403` as a status, not an error (an error record would move it to status 0), so
+the message is on the kept trace's `mcp` node (the status exemplars, the sample
+and the slow ones), not in the run's error list. `invalid_token`, any other
+challenge and a refusal with no `WWW-Authenticate` keep
+`HTTP <status> with no JSON-RPC response` (`HTTP <status> answered with a
+JSON-RPC result` when the body is a result). A JSON-RPC `error` body is the
+server's own answer and stays `protocol`.
+
 A failed class **fails the step as a failed assertion does**, with or without an
 element on it: the exchange gains a failed test named `MCP reply`, whose error
 is `<errorClass> failure: <message>`. A collection run's step is `failed`, and

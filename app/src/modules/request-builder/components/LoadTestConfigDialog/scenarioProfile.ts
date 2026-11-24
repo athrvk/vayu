@@ -26,7 +26,7 @@ import {
 	validateStartConcurrency,
 	validateStartConcurrencyFloor,
 } from "../../utils/loadTestValidation";
-import { profileParams } from "./profile";
+import { profileParams, retryAfterCapError } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
@@ -39,7 +39,16 @@ export const SCENARIO_LOAD_MODES = ["constant_concurrency", "iterations", "ramp_
 
 export type ScenarioLoadMode = (typeof SCENARIO_LOAD_MODES)[number];
 
-export type ScenarioLoadProfile = LoadTestProfile & { mode: ScenarioLoadMode };
+/**
+ * The Retry-After pair lives here and not in `LoadTestProfile`: the request
+ * dialog keeps its own copy beside the recording fields, and only a scenario
+ * edits it with the profile.
+ */
+export type ScenarioLoadProfile = LoadTestProfile & {
+	mode: ScenarioLoadMode;
+	retryAfterBackoff: boolean;
+	retryAfterMaxMs: number;
+};
 
 export function isScenarioLoadMode(mode: string): mode is ScenarioLoadMode {
 	return (SCENARIO_LOAD_MODES as readonly string[]).includes(mode);
@@ -67,6 +76,8 @@ export const SCENARIO_PROFILE_DEFAULTS: ScenarioLoadProfile = {
 	sloMs: LOAD_TEST_LIMITS.SLO_MS.MIN,
 	streamDuration: LOAD_TEST_DEFAULTS.STREAM_DURATION_S,
 	streamMaxEvents: LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS,
+	retryAfterBackoff: LOAD_TEST_DEFAULTS.RETRY_AFTER_BACKOFF,
+	retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
 };
 
 /**
@@ -88,14 +99,26 @@ export function scenarioStreamCaps(profile: ScenarioLoadProfile): ScenarioStream
 	};
 }
 
-/** The load half of a scenario payload, and the dashboard's seed for the run. */
+/**
+ * The load half of a scenario payload, and the dashboard's seed for the run.
+ * The Retry-After pair rides along only when the option is on, and the cap only
+ * with it: absent already means off, as in the single-request payload.
+ */
 export type ScenarioLoadFields = Pick<
 	StartScenarioRunRequest,
-	"mode" | "duration" | "concurrency" | "startConcurrency" | "rampUpDuration" | "iterations"
+	| "mode"
+	| "duration"
+	| "concurrency"
+	| "startConcurrency"
+	| "rampUpDuration"
+	| "iterations"
+	| "retryAfterBackoff"
+	| "retryAfterMaxMs"
 > & { mode: ScenarioLoadMode; concurrency: number };
 
 export function scenarioLoadFields(profile: ScenarioLoadProfile): ScenarioLoadFields {
 	const { duration, iterations, rampDuration, startConcurrency } = profileParams(profile);
+	const { retryAfterBackoff, retryAfterMaxMs } = profile;
 	return {
 		mode: profile.mode,
 		// Every mode a scenario accepts runs virtual users.
@@ -104,6 +127,7 @@ export function scenarioLoadFields(profile: ScenarioLoadProfile): ScenarioLoadFi
 		...(iterations !== undefined && { iterations }),
 		...(startConcurrency !== undefined && { startConcurrency }),
 		...(rampDuration !== undefined && { rampUpDuration: `${rampDuration}s` }),
+		...(retryAfterBackoff && { retryAfterBackoff: true, retryAfterMaxMs }),
 	};
 }
 
@@ -116,7 +140,7 @@ export function scenarioProfileError(
 	profile: ScenarioLoadProfile,
 	limits: LoadTestLimits
 ): string | null {
-	const { mode, duration, concurrency, iterations } = profile;
+	const { mode, duration, concurrency, iterations, retryAfterBackoff, retryAfterMaxMs } = profile;
 	return (
 		rangeError(CONCURRENCY_LABEL, concurrency, limits.CONCURRENCY, { whole: true }) ??
 		(mode === "iterations"
@@ -124,7 +148,8 @@ export function scenarioProfileError(
 					whole: true,
 				})
 			: rangeError("Duration", duration, limits.DURATION_S, { whole: false })) ??
-		(mode === "ramp_up" ? rampError(profile, limits) : null)
+		(mode === "ramp_up" ? rampError(profile, limits) : null) ??
+		retryAfterCapError(mode, limits, retryAfterBackoff, retryAfterMaxMs)
 	);
 }
 

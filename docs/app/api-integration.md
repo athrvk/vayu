@@ -1126,7 +1126,9 @@ the three closed-loop modes: `constant_concurrency` and `ramp_up` send
 `duration` (and, for the ramp, `startConcurrency` and `rampUpDuration`, camelCase
 with `"Ns"` strings), while `iterations` sends the top-level total of passes and
 no `duration`; the top-level `iterations` is distinct from `scenario.iterations`,
-which is sent only when Load test is off. `constant_rps`, and
+which is sent only when Load test is off. Top-level `retryAfterBackoff` and `retryAfterMaxMs` (#3799, the
+engine's wait-out-`Retry-After` option) ride the load fields too, as a pair and
+only when the dialog's **Wait out Retry-After** switch is on. `constant_rps`, and
 any non-zero `rps`/`targetRps` on any mode, is a `400`: an open-loop arrival
 rate over a multi-step sequence is an arrival-rate executor the engine does not
 implement, and it is refused rather than quietly run closed-loop. Such a run's
@@ -2786,8 +2788,21 @@ back, so the controls are hidden in that mode (`appliesRetryAfter` in
 closed-loop run. The cap range, 1-3600000, is the engine's exactly
 (`load-test.engine-parity.test.ts`) and a value outside it blocks Start. The
 run's `RunConfigSection` reads the snapshot back as a **Retry-After** row ("Waited,
-up to N ms"), shown only when the option was on. `RunCollectionDialog` has no
-control for it; a collection run gets it through MCP's `start_load_run`.
+up to N ms"), shown only when the option was on.
+
+`RunCollectionDialog` offers the same two controls once **Load test** is on
+(`#run-collection-retry-after`, `#run-collection-retry-after-max`;
+[#3799](https://github.com/athrvk/vayu/issues/3799)). Both dialogs draw them
+from one component, `RetryAfterFields.tsx`, which owns the `appliesRetryAfter`
+guard and takes an `idPrefix` so the ids never collide. The scenario's pair
+lives in its profile state (`ScenarioLoadProfile`), starting at
+`LOAD_TEST_DEFAULTS` on every open like the rest of that dialog, and
+`scenarioLoadFields` puts `retryAfterBackoff: true` and `retryAfterMaxMs` in the
+top-level payload only while the switch is on, so the dashboard's seed carries
+them and `RunConfigSection` shows the row for a collection run too. The cap's
+range check is `retryAfterCapError` (`profile.ts`), shared by both dialogs'
+validation. A design-mode collection run sends neither key. MCP's
+`start_load_run` is the other writer.
 
 #### Dialog ceilings are a user setting
 

@@ -58,6 +58,7 @@ import {
 	requestHeadersInput,
 	streamBudgetMsInput,
 	streamInput,
+	streamTextPathSendInput,
 	validationScriptAliasInput,
 	validationScriptInput,
 	verifySSLSendInput,
@@ -116,12 +117,16 @@ function composeTarget(
 	const fields = requestFields(args, ctx);
 	if (url !== undefined) {
 		const elements = adHocElements(args);
+		// Ad hoc only: a by-id compose carries the saved request's own path, and
+		// `setStreamFlag` drops it again when this send does not stream.
+		const streamTextPath = str(args, "streamTextPath");
 		return {
 			request: {
 				...fields,
 				url,
 				method: fields.method ?? "GET",
 				...(elements.length > 0 ? { elements } : {}),
+				...(streamTextPath !== undefined ? { streamTextPath } : {}),
 			},
 		};
 	}
@@ -252,6 +257,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere, and alongside any preRequestScript/postRequestScript given on the same call rather than replacing them. A `script.*` entry is a script, and is refused while Reveal secrets to agents is off. List the kinds and each one's config with list_element_kinds (or the `vayu://elements/kinds` resource)."
 				),
 			stream: streamInput,
+			streamTextPath: streamTextPathSendInput,
 			maxStreamEvents: maxStreamEventsInput,
 			streamBudgetMs: streamBudgetMsInput,
 			events: eventsInput,

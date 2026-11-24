@@ -152,7 +152,7 @@ const HAND_WRAPPED: Record<string, number> = {
 	"components/shared/RowActionsMenu.tsx": 1,
 	"components/shared/TimeValue/TimeMarker.tsx": 1,
 	"components/shared/response-viewer/ResponseActions.tsx": 2,
-	"modules/collections/CollectionTree.tsx": 3,
+	"modules/collections/CollectionTree.tsx": 4,
 };
 
 describe("icon-only buttons have accessible names", () => {
