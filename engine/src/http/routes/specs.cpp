@@ -6,19 +6,17 @@
  */
 
 /**
- * @brief OpenAPI documents - stored once, bound by collections (issue #637).
+ * OpenAPI documents, stored once and bound by collections (#637). Several
+ * collections may bind one document and unbinding one must leave it for the
+ * others, so it is a top-level resource no cascade reaches, kept safe by one
+ * rule here: `DELETE /specs/:id` refuses while any collection names it, saying
+ * which. Cascading the bindings away would silently detach collections the
+ * caller never mentioned.
  *
- * A spec is not owned by a collection: several may bind the same document, and
- * unbinding one must leave it there for the others. So it is a top-level
- * resource with no cascade reaching it, and the one rule that keeps that safe
- * lives here - `DELETE /specs/:id` refuses while any collection still names it,
- * saying which. The alternative, cascading the bindings to unbound, would
- * silently detach collections the caller never mentioned.
- *
- * The document is stored **verbatim** and its hash is computed here on every
+ * The document is stored **verbatim** and its hash computed here on every
  * write, never taken from the caller: a run stamps the hash it planned against,
- * and that stamp only means something if both sides were computed by this code
- * on these bytes.
+ * which means something only if both sides were computed by this code on these
+ * bytes.
  */
 
 #include "vayu/core/constants.hpp"
@@ -41,17 +39,12 @@
 namespace vayu::http::routes {
 
 /**
- * The live cap on a stored document, in bytes.
- *
- * Read fresh on every write from the `maxSpecDocumentBytes` config entry rather
- * than cached, exactly as `http_version_seed` reads its default: a user who
- * raises the limit must be able to import the document that was refused, without
- * restarting the engine. A non-positive stored value falls back to the compiled
- * default rather than disabling the cap - a tampered or zeroed row must not be
- * able to turn the bound off.
- *
- * Shared with `POST /import/apply`, which writes spec rows of its own; declared
- * in routes.hpp so the two paths cannot come to enforce different limits.
+ * The live cap on a stored document, in bytes, read from `maxSpecDocumentBytes`
+ * on every write (never cached, as `http_version_seed` reads its default), so a
+ * raised limit admits the refused document without a restart. A non-positive
+ * stored value falls back to the compiled default: a tampered or zeroed row
+ * must not turn the bound off. Shared with `POST /import/apply`, which writes
+ * spec rows too (declared in routes.hpp), so the paths enforce one limit.
  */
 size_t spec_size_cap (vayu::db::Database& db) {
     const int configured = db.get_config_int ("maxSpecDocumentBytes",
@@ -63,11 +56,9 @@ size_t spec_size_cap (vayu::db::Database& db) {
 }
 
 /**
- * Hex-encoded SHA-256 of a document's text - the value stored in
- * `spec_documents.hash` and stamped onto a run's snapshot.
- *
- * Non-static so specs_route_test.cpp can assert the two agree on the same bytes;
- * declared in routes.hpp for the same reason.
+ * Hex SHA-256 of a document's text: `spec_documents.hash` and the stamp on a
+ * run's snapshot. Non-static and in routes.hpp so `specs_route_test.cpp` can
+ * assert the two agree on the same bytes.
  */
 std::string spec_content_hash (const std::string& content) {
     const auto digest = vayu::utils::sha256 (content);
@@ -78,22 +69,18 @@ std::string spec_content_hash (const std::string& content) {
  * Puts the `operations` (#629) and `responseSchemas` (#628) indexes onto
  * @p spec, both derived from the document about to be stored.
  *
- * **Neither is taken from the caller**, for the reason `hash` is not: an index a
- * client worked out is a claim about a document nobody verified, and a wrong one
- * does not merely go unread - coverage resolves a stamp by `operationId` first,
- * so a row claiming an id the document does not declare claims whichever
- * operation happens to share it. The engine reading the document is what #761's
- * phase B moved here (#853 for the operations, #860 for the schemas), and this
- * is the write path's whole use of it: `core::derive_spec_indexes` reads the
- * bytes about to be stored, once, and answers what they declare.
+ * **Neither is taken from the caller**, for `hash`'s reason: a client's index
+ * is a claim about a document nobody verified, and a wrong one does not merely
+ * go unread: coverage resolves a stamp by `operationId` first, so a row
+ * claiming an id the document lacks claims whichever operation shares it. The
+ * engine reads the document (#761 phase B; #853, #860): `core::read_document`
+ * once, then `core::spec_indexes_of` over that DOM.
  *
- * One read for both is what makes the two agree. They describe the same
- * operations by the same identity rules, so a schema index carrying a status the
- * operation index does not list would be a contract disagreeing with itself -
- * which is what two extractors, in two languages, produced before this. The DOM
- * is handed out rather than dropped for that same reason: a sync writes the
- * examples the document it stores documents (issue #869), and reading those
- * bytes a second time would be a second answer about them.
+ * One read for both keeps them agreeing: they describe the same operations by
+ * the same identity rules, and a schema index with a status the operation index
+ * lacks would be a contract disagreeing with itself. The DOM is handed out for
+ * the same reason: a sync writes the examples the stored document documents
+ * (#869), and a second read would be a second answer.
  */
 std::optional<std::string> read_spec_indexes (const nlohmann::json& item,
 vayu::db::SpecDocument& spec,
@@ -122,16 +109,13 @@ nlohmann::ordered_json* document_out) {
 }
 
 /**
- * A draft's documented responses, as the example rows a write of them takes.
- *
- * One definition of that shape for the two routes that have one: `POST
- * /specs/diff` reports it, so a caller can see what an apply would write, and
- * `POST /specs/sync` writes it (issue #869), so a caller cannot state examples the
- * document does not describe.
- *
- * `documented` is the field that decides whether the row carries a
- * `Content-Type` at all: a `204 No Content` documents nothing and still becomes
- * an example, because a mock server has to be able to answer with it.
+ * A draft's documented responses as the example rows a write takes, one shape
+ * for the two routes using it: `POST /specs/diff` reports it, so a caller sees
+ * what an apply would write, and `POST /specs/sync` writes it (#869), so a
+ * caller cannot state examples the document does not describe. `documented`
+ * decides whether a row carries a `Content-Type`: a `204 No Content` documents
+ * nothing and still becomes an example, because a mock server must be able to
+ * answer with it.
  */
 nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& examples) {
     nlohmann::json rows = nlohmann::json::array ();
@@ -156,20 +140,15 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
 }
 
 /**
- * Resolve what a single request's response should be validated against
- * (issue #628).
- *
- * The binding lives on the collection an import created, and requests live in
- * its *tag sub-collections*, so this walks the ancestry and takes the nearest
- * bound collection - `core::nearest_spec_binding`, over the same chain
- * `POST /compose` walks for inherited auth, cycle guard included, and the same
- * function a scenario run resolves through. A request whose ancestry binds
- * nothing is not part of a contract: `bound` stays false and the caller writes
- * **no verdict at all**, which is the distinction the whole node rests on - a
- * response that was never judged against a contract did not fail one.
- *
- * Every other outcome is bound-but-unjudgeable and carries the reason, because
- * a chip that silently never appears is how a broken index stays broken.
+ * What a single request's response is validated against (#628). The binding
+ * lives on the collection an import created and requests in its tag
+ * sub-collections, so the ancestry is walked to the nearest bound collection
+ * (`core::nearest_spec_binding`: `POST /compose`'s inherited-auth chain, cycle
+ * guard included, and a scenario run's resolver). A request whose ancestry
+ * binds nothing is in no contract: `bound` stays false and the caller writes
+ * **no verdict**, the distinction the node rests on, since a response never
+ * judged did not fail. Every other outcome is bound-but-unjudgeable and carries
+ * its reason: a chip that silently never appears keeps a broken index broken.
  */
 DesignSchemaResolution resolve_design_schema_index (vayu::db::Database& db,
 const std::optional<std::string>& request_id) {
@@ -184,10 +163,9 @@ const std::optional<std::string>& request_id) {
     }
     resolved.spec_operation = request->spec_operation.value_or (std::string ());
 
-    // The same walk `resolve_scenario` uses, through the same function: the two
-    // paths disagreeing about what "bound" means is what left a tag
-    // sub-collection's run measuring nothing while a Send of the same request
-    // was checked (issue #716).
+    // `resolve_scenario`'s walk, through the same function: two answers to
+    // "bound" would leave a tag sub-collection's run measuring nothing while a
+    // Send of the same request is checked (#716).
     const auto bound = vayu::core::nearest_spec_binding (db, request->collection_id);
     if (!bound) {
         return resolved;
@@ -198,10 +176,9 @@ const std::optional<std::string>& request_id) {
     resolved.bound      = true;
     const auto document = db.get_spec_document (spec_id);
     if (!document) {
-        // The write path refuses a binding naming a document that will not
-        // exist (`reject_unbindable_spec`), so this is a database edited from
-        // outside. There is nothing to validate against, which is what
-        // `no_index` says.
+        // The write path refuses a binding to a document that will not exist
+        // (`reject_unbindable_spec`), so this is a database edited from
+        // outside: nothing to validate against, which `no_index` says.
         resolved.reason = vayu::core::UncheckedReason::NoIndex;
         return resolved;
     }
@@ -224,11 +201,9 @@ const std::optional<std::string>& request_id) {
 
 /**
  * The verdict one design-mode response gets, or `std::nullopt` for a request
- * that is not bound to a contract at all (issue #628).
- *
- * The whole of the design-mode hook, in one function, so the `/execute` handler
- * states it once and the collection-run and load hooks that follow can call the
- * same thing rather than a second arrangement of the same three steps.
+ * bound to no contract (#628): the whole design-mode hook in one function, so
+ * `/execute` states it once and the collection-run and load hooks call the same
+ * thing.
  */
 std::optional<vayu::core::ValidationVerdict> validate_design_response (vayu::db::Database& db,
 const std::optional<std::string>& request_id,
@@ -267,17 +242,12 @@ const vayu::Response& response) {
 
 /**
  * Refuses a collection write whose `openapi` binding names a spec that will not
- * exist when the write lands.
- *
- * A binding that resolves to nothing is the worst of the states this table can
- * be in: the collection reads back as spec-bound, its runs stamp a `specId`
- * nobody can fetch, and #627's sync has nothing to re-fetch *from*. So it is
- * refused at the write rather than discovered by a later reader.
- *
- * @p pending is what the caller is about to write in the same transaction and
- * cannot look up yet - `POST /import/apply`'s own spec section. Every other
- * write path passes an empty set, because everything it may bind is already
- * stored.
+ * exist when the write lands: a binding to nothing reads back as spec-bound,
+ * stamps runs with a `specId` nobody can fetch, and leaves #627's sync nothing
+ * to re-fetch from, so it is refused at the write, not found by a later reader.
+ * @p pending is what the caller writes in the same transaction and cannot look
+ * up yet (`POST /import/apply`'s spec section); every other path passes an
+ * empty set.
  */
 RouteResult reject_unbindable_spec (vayu::db::Database& db,
 const std::string& openapi,
@@ -300,13 +270,10 @@ const std::unordered_set<std::string>& pending) {
 }
 
 /**
- * Completes a binding the caller wrote without a version (issue #709), from the
- * document already in the store.
- *
- * The rule itself is `vayu::core::stamp_spec_binding`; this is the store's
- * answer to its one question. `syncedAt` is *now* rather than the document's
- * `fetched_at`: this write is the moment the collection was bound to that
- * version, which is what the Spec tab's "Bound" reports and what a later sync
+ * Completes a binding written without a version (#709) from the stored
+ * document; the rule is `vayu::core::stamp_spec_binding`. `syncedAt` is now,
+ * not the document's `fetched_at`: this write is when the collection was bound
+ * to that version, what the Spec tab's "Bound" reports and a later sync
  * compares against.
  */
 void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
@@ -324,20 +291,17 @@ void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
 }
 
 /**
- * Testable core of POST /specs - store one OpenAPI document, returning
- * {http_status, json_body}.
+ * Testable core of POST /specs, storing one OpenAPI document, {http_status,
+ * json_body}. Create only: the engine mints the id (#97), so a body `id` is a
+ * 400. There is no `PUT /specs/:id`: a changed document is a different
+ * document, and rewriting one in place would invalidate the hash every bound
+ * collection's runs were stamped with; a re-fetch (#627) stores a new one and
+ * moves the binding.
  *
- * Create only, like every other resource here: the engine mints the id (#97), so
- * a body `id` is a 400. There is deliberately no `PUT /specs/:id` - a document
- * that changed is a *different* document, and rewriting one in place would
- * invalidate the hash every run of every collection bound to it was stamped
- * with. Phase 2 (#627) re-fetches by storing a new one and moving the binding.
- *
- * `hash`, `fetchedAt` and both indexes are engine-computed and rejected in the
- * body for the same reason `id` is: each would otherwise be a claim about bytes
- * nobody verified. The indexes come from `core::derive_spec_indexes` (issues
- * #853 and #860), which is also what makes an unreadable document a `400` here
- * rather than a row nothing downstream can read.
+ * `hash`, `fetchedAt` and both indexes are engine-computed and refused in the
+ * body for `id`'s reason: each would be a claim about bytes nobody verified.
+ * The indexes come from `read_spec_indexes` (#853, #860), which also makes an
+ * unreadable document a 400 here rather than a row nothing downstream reads.
  */
 std::pair<int, nlohmann::json>
 create_spec_document_response (vayu::db::Database& db, const nlohmann::json& json) {
@@ -374,8 +338,8 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     if (auto reason = read_spec_indexes (json, spec, cap)) {
         return { 400, error_body (400, *reason) };
     }
-    // When it was taken, not when the row was written - they are the same
-    // instant here, and #627 will re-stamp it on every re-fetch.
+    // When it was taken, the instant this row is written; a re-fetch (#627)
+    // stores a new row with its own stamp.
     spec.fetched_at = now_ms ();
 
     if (json.contains ("sourceUrl") && !json["sourceUrl"].is_null ()) {
@@ -407,19 +371,13 @@ get_spec_document_response (vayu::db::Database& db, const std::string& id) {
 }
 
 /**
- * Testable core of GET /specs/:id/meta - what the document *is*, without the
- * document (issue #712).
- *
- * Exists because the Spec tab's card needs `sourceUrl` and `fetchedAt` and
- * nothing else, and those live on the row rather than on the collection's
- * binding - so painting a URL and a date cost a transfer of the whole document
- * (12 MB for Stripe's spec) on every first open. Readers that need the text -
- * export, the sync comparison, `$ref` resolution - still read the full route,
- * on an action rather than on a tab opening.
- *
- * A missing id answers the **same** 404 body as the full read: the two are one
- * resource seen two ways, and a client that fell back from one to the other
- * must not have to know two shapes of "not found".
+ * Testable core of GET /specs/:id/meta: what the document is, without it
+ * (#712). The Spec tab's card needs only `sourceUrl` and `fetchedAt`, which
+ * live on the row, so painting them cost the whole document (12 MB for Stripe's
+ * spec) per first open. Readers needing the text (export, the sync comparison,
+ * `$ref` resolution) read the full route on an action, not a tab opening. A
+ * missing id answers the full read's 404 body: one resource seen two ways, so a
+ * client falling back between them knows one "not found".
  */
 std::pair<int, nlohmann::json>
 get_spec_document_meta_response (vayu::db::Database& db, const std::string& id) {
@@ -443,12 +401,11 @@ get_spec_document_meta_response (vayu::db::Database& db, const std::string& id) 
  */
 std::pair<int, nlohmann::json>
 delete_spec_document_response (vayu::db::Database& db, const std::string& id) {
-    // Read-decide-write, so the whole of it is one lock scope (issue #386's
-    // rule): between "nobody binds this" and the delete, a concurrent collection
-    // write could bind it and be left pointing at a document that is gone. The
-    // writes that bind (POST /collections, /import/apply, /specs/bind) hold the
-    // lock across their own check-and-write, so the two composites serialize
-    // against each other rather than interleaving.
+    // Read-decide-write, one lock scope (#386's rule): between "nobody binds
+    // this" and the delete, a concurrent write could bind it and point at a
+    // deleted document. The binding writes (POST /collections, /import/apply,
+    // /specs/bind) hold the lock across their own check-and-write, so the two
+    // serialize.
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
         if (!db.get_spec_document (id).has_value ()) {
@@ -490,9 +447,9 @@ void register_spec_routes (RouteContext& ctx) {
      * changed document is a new one (see the core above).
      * Body params: content (required, non-empty, at most `maxSpecDocumentBytes`,
      * and readable as JSON or YAML), sourceUrl (optional; null or absent means
-     * it did not come from a URL), responseSchemas (optional, issue #628).
-     * `id`, `hash`, `fetchedAt` and `operations` are engine-owned and a 400 if
-     * sent - the operation index is read off the document here.
+     * it did not come from a URL). `id`, `hash`, `fetchedAt`, `operations` and
+     * `responseSchemas` are engine-owned and a 400 if sent - both indexes are
+     * read off the document here.
      * Returns: the stored document, or 400.
      */
     ctx.server.Post ("/specs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
