@@ -7,9 +7,9 @@
  *
  * The suite is split by subject across those files and keeps one name, so
  * `--gtest_filter=DatabaseTest.*`, the scratch-database RESOURCE_LOCK list and the ctest
- * regexes see it whole. The class is defined here, once, in a named namespace, so each
- * translation unit sees the same type; gtest refuses a suite whose `TEST_F`s name different
- * fixture classes, which an anonymous namespace per file would be.
+ * regexes see it whole. The class is defined here, once, outside an anonymous namespace, so
+ * each translation unit sees the same type; gtest refuses a suite whose `TEST_F`s name
+ * different fixture classes, which an anonymous namespace per file would be.
  */
 
 #include <gtest/gtest.h>

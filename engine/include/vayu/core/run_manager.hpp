@@ -1807,8 +1807,8 @@ struct RunSummaryInputs {
  * @brief Serialize whole-run results into the object stored in `runs.summary`.
  *
  * The report route reads exactly these keys (`http/routes/runs.cpp`), so the two
- * sides are locked together by runs_route_test.cpp's summary round-trip rather
- * than by convention.
+ * sides are locked together by runs_route_report_summary_test.cpp's summary
+ * round-trip rather than by convention.
  */
 [[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
