@@ -6,12 +6,9 @@
  */
 
 /**
- * The line a user wrote about a run when they started it (#2270), under the
- * run's title, labelled "Comment". Drawn by the History run header and the live
- * dashboard's header, so a run's comment reads the same on both and the label
- * is spelled once.
- *
- * Renders nothing for an empty comment, so a caller need not gate it.
+ * The line a user wrote about a run when starting it (#2270), under its title, labelled "Comment",
+ * drawn by the History run header and the live dashboard's so it reads the same and the label is
+ * spelled once. Renders nothing for an empty comment, so callers need not gate it.
  */
 
 import type { ComponentProps } from "react";

@@ -5,12 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Shared Components
- *
- * Reusable components used across multiple features in the application.
- */
-
 // Response Viewer
 export * from "./response-viewer";
 
@@ -27,8 +21,8 @@ export * from "./Callout";
 export * from "./SentBodyFileNote";
 export * from "./callout-severity";
 
-// "Someone else changed this while you were editing" - collection tabs and
-// the request builder's per-field merge (#1436, #1437)
+// "Someone else changed this while you were editing": collection tabs and the request builder's
+// per-field merge (#1436, #1437).
 export * from "./ExternalChangeCallout";
 
 // "12 requests cancelled by Stop" - outside every error and request count
@@ -131,8 +125,8 @@ export * from "./EmptyState";
 // ...and the one way to say the load failed, which is not the same thing
 export * from "./ErrorState";
 
-// ...and the one way to say a single field will not take what you typed. The
-// three levels of error presentation are the rule in docs/design-system/component-patterns.md.
+// ...and the one way to say a field will not take what you typed; the three error levels are the
+// rule in docs/design-system/component-patterns.md.
 export * from "./FieldError";
 
 // "Allowed origins" - the CORS policy box on the mock and inbox start forms (#2367)
@@ -150,8 +144,8 @@ export * from "./DetailSkeleton";
 // The insertable templates under a script editor, for both script hosts
 export * from "./ScriptSnippets";
 
-// "Names mentioned:" - the variable-reference chip row above a script.pre/
-// script.post element's editor, for both script hosts
+// "Names mentioned:", the variable-reference chips above a script.pre/script.post editor, for both
+// script hosts.
 export * from "./ScriptReferencesRow";
 
 // The same row actions on right-click, for rows that carry a "⋯" menu
@@ -162,7 +156,7 @@ export * from "./row-actions";
 // The 2px line a drag draws at the edge it would drop on, either axis
 export * from "./DropIndicator";
 
-// "SEQUENCE" where a method would sit, and the step cells a scenario load run's
-// table is drawn from - History's Steps tab and the live dashboard's sequence panel (#2823)
+// "SEQUENCE" where a method would sit, and the step cells of a scenario load run's table: History's
+// Steps tab and the live dashboard's sequence panel (#2823).
 export * from "./SequenceBadge";
 export * from "./ScenarioStepCells";

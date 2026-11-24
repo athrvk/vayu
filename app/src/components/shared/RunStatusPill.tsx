@@ -23,10 +23,9 @@ interface RunStatusProps {
 
 interface RunStatusPillProps extends RunStatusProps {
 	/**
-	 * Replaces the status's word, keeping its glyph and family. For a state that
-	 * is a refinement of a status and not a status of its own: a running run
-	 * draining its in-flight requests reads "Finishing" (#3568), and `Run["status"]`
-	 * has no such value for the engine to store.
+	 * Replaces the status's word, keeping glyph and family, for a refinement that is no status of
+	 * its own: a running run draining its in-flight requests reads "Finishing" (#3568), which
+	 * `Run["status"]` cannot store.
 	 */
 	label?: string;
 }

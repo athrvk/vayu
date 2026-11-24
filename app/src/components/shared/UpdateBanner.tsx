@@ -25,8 +25,8 @@ import { useCopy } from "@/hooks/useCopy";
 import type { UpdateVerificationFailure } from "@/types/electron";
 
 /**
- * The line the banner prints. A failure wins over every other state: it is
- * the one outcome the user has to act on, and its reason is what they need.
+ * The banner's line; a failure beats every other state, being the one outcome the user must act on,
+ * its reason what they need.
  */
 function bannerMessage(
 	update: { version: string },
@@ -54,23 +54,21 @@ function bannerMessage(
 			: `Vayu ${update.version} is available.`;
 	}
 	const percent = Math.round(downloadProgress * 100);
-	// The bytes are in but `verified` waits on the attestation check,
-	// which takes seconds: a bar parked at 100% reads as a hang.
+	// The bytes are in, and `verified` waits on the seconds-long attestation check: a bar at 100%
+	// reads as a hang.
 	if (percent >= 100) return `Verifying Vayu ${update.version}…`;
 	return `Downloading Vayu ${update.version}… ${percent}%`;
 }
 
 /**
- * Slim banner that appears when a newer Vayu release is available.
+ * Slim banner for a newer Vayu release:
  *
- *   - silent platforms (Windows, Linux AppImage): shows a progress bar while
- *     the update downloads in the background, says "Verifying" once the bytes
- *     are in and the installer's build-provenance attestation is being checked,
- *     then a restart-to-install. When the attestation does not verify (issue
- *     #2372) it says why instead and offers the release page; nothing is
- *     installed and there is no restart button.
- *   - macOS (ad-hoc signed): offer to copy the one-line installer command, and
- *     to quit so the command can replace the app it is pasted for.
+ *   - silent platforms (Windows, Linux AppImage): a progress bar while the update downloads in the
+ *     background, "Verifying" while the installer's build-provenance attestation is checked, then
+ *     restart-to-install. When the attestation fails (#2372) it says why and offers the release
+ *     page; nothing installs and there is no restart button.
+ *   - macOS (ad-hoc signed): copy the one-line installer command, and quit so it can replace the
+ *     app.
  *   - other notify platforms (.deb): link to the release page.
  */
 function UpdateBanner() {
@@ -98,8 +96,8 @@ function UpdateBanner() {
 		downloadFailure,
 	});
 
-	// The result is the Settings card's to show; the banner follows the download
-	// state the check starts moving.
+	// The result is the Settings card's to show; the banner follows the download state the check
+	// moves.
 	const retryDownload = () => {
 		void window.electronAPI?.checkForUpdates();
 	};
@@ -110,14 +108,14 @@ function UpdateBanner() {
 	};
 
 	return (
-		// One line at every density (issue #1670): `h-banner` (issue #1679) rather
-		// than stacking a second row for the download progress bar. The bar still shows - as a thin
-		// strip along the bottom edge, absolutely positioned so it adds no
-		// height of its own.
+		// One line at every density (#1670): `h-banner` (#1679), with the progress bar as a thin
+		// strip along the bottom edge, absolutely positioned so it adds no height.
 		<div className="enter-fade relative flex h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 text-sm">
 			<ArrowUpCircle className="size-icon shrink-0 text-primary" />
-			{/* `title` carries the whole line: the reason is what the user needs
-			    and `truncate` would clip it on a narrow window. */}
+			{/*
+			 * `title` carries the whole line: the reason is what the user needs, and `truncate`
+			 * clips it on a narrow window.
+			 */}
 			<span className="flex-1 truncate text-secondary-foreground" title={message}>
 				{message}
 			</span>
@@ -153,12 +151,10 @@ function UpdateBanner() {
 						/>
 					</Button>
 					{/*
-					 * The installer cannot replace a bundle whose processes are
-					 * still running, so it quits Vayu itself - but from a
-					 * terminal that is an Apple Event, which macOS gates behind
-					 * an Automation consent prompt. Quitting from here needs no
-					 * permission and runs the normal shutdown, so the paste
-					 * lands on an app that is already closed.
+					 * The installer cannot replace a bundle with running processes, so it quits
+					 * Vayu itself, but from a terminal that is an Apple Event macOS gates behind an
+					 * Automation consent prompt. Quitting here needs no permission and runs the
+					 * normal shutdown, so the paste lands on a closed app.
 					 */}
 					<Button size="sm" variant="ghost" onClick={quitForUpdate}>
 						<Power className="size-icon" />
@@ -172,8 +168,7 @@ function UpdateBanner() {
 				</Button>
 			)}
 
-			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
-			    no `size-7` override needed, the way one was before it existed. */}
+			{/* `size="icon"` gives the `target` floor (#1679), so no size override. */}
 			<TooltipIconButton
 				onClick={dismiss}
 				label="Dismiss update notification"

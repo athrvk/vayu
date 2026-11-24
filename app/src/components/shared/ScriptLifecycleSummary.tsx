@@ -6,15 +6,10 @@
  */
 
 /**
- * What `script.setup` / `script.teardown` did, once each, at the run's own
- * boundary rather than at any step (issue #1499).
- *
- * Two surfaces show it - the history detail's Overview and a scenario run's
- * own live view - so it lives here once, on the same terms `ContractCoverage`
- * and `SampledSchemaValidation` beside it do. **Silent when the run's
- * collection declared neither kind**: an absent `lifecycle` is a different
- * claim from "declared one and it did nothing", and is the reason a run
- * without either renders exactly as it did before this block existed.
+ * What `script.setup` / `script.teardown` did, once each, at the run's boundary rather than a step
+ * (#1499). Shared by the history Overview and a scenario run's live view, as `ContractCoverage` and
+ * `SampledSchemaValidation` are. **Silent when the collection declared neither**: an absent
+ * `lifecycle` claims something other than "declared one and it did nothing".
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -34,8 +29,8 @@ export interface ScriptLifecycleSummaryProps {
 }
 
 /**
- * `skipped` is the run's Stop cancelling the script's `pm.sendRequest`: the
- * run ended under it, so it is neither a pass nor a failure (#3371).
+ * `skipped` is the run's Stop cancelling the script's `pm.sendRequest`: the run ended under it, so
+ * neither pass nor failure (#3371).
  */
 function isFailure(outcome: LifecycleElementOutcome): boolean {
 	return outcome.outcome !== "ok" && outcome.outcome !== "skipped";
@@ -56,8 +51,8 @@ function LifecycleRow({
 }) {
 	const ran = outcome.outcome === "ok";
 	const tone = ROW_TONES[ran ? "ran" : isFailure(outcome) ? "failed" : "skipped"];
-	// A passing script has nothing to say; the other two carry the engine's
-	// reason, and a blank one reads as no reason at all (#3455).
+	// A passing script has nothing to say; the other two carry the engine's reason, and a blank one
+	// reads as none (#3455).
 	const reason = outcome.message?.trim();
 	const label = ran || !reason ? tone.fallback : reason;
 	return (
@@ -67,8 +62,10 @@ function LifecycleRow({
 				<span className={cn("font-medium", tone.className)}>{label}</span>
 			</div>
 			<ElementMessages element={outcome} />
-			{/* The `console` sample folds repeats, so no line can stand in for
-			    a record: they are listed on their own, in call order (#3633). */}
+			{/*
+			 * Listed apart, in call order: the `console` sample folds repeats, so no line stands
+			 * for a record (#3633).
+			 */}
 			{outcome.scriptRequests && outcome.scriptRequests.length > 0 && (
 				<ul aria-label={`${PHASE_LABELS[phase]} script requests`} className="mt-1">
 					{outcome.scriptRequests.map((record, index) => (
@@ -94,9 +91,10 @@ export function ScriptLifecycleSummary({ lifecycle, className }: ScriptLifecycle
 			</CardHeader>
 			<CardContent>
 				<ul className="space-y-1.5">
-					{/* A collection may declare more than one setup or teardown
-					    element; each gets its own row rather than folding the
-					    collection's ordered list into one verdict. */}
+					{/*
+					 * A collection may declare several setup or teardown elements; each gets a row,
+					 * not one folded verdict.
+					 */}
 					{lifecycle.setup?.map((outcome, index) => (
 						<LifecycleRow key={`setup-${index}`} phase="setup" outcome={outcome} />
 					))}

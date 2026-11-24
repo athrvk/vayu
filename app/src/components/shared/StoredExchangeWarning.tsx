@@ -6,27 +6,17 @@
  */
 
 /**
- * "The steps below were stored verbatim" - the design-mode counterpart of
- * `CapturedDataWarning` (issue #731).
- *
- * A collection run writes one `results` row per step execution carrying the
- * whole exchange - the composed request, the headers as sent (`sentHeaders`),
- * the raw request line libcurl produced, both bodies - capped only by
- * `maxTraceBodyBytes` and kept until run pruning. That is the same
- * deliberately-unredacted material the load-mode capture notice covers, so the
- * two disclosures are a pair: change one and read the other.
- *
- * The `dataBound` half is what makes this more than symmetry. The Data tab and
- * `docs/app/data-driven-runs.md` promise the *file* is never read by the engine
- * and the *contract* stores no cells, and a reader took that for "no cell of my
- * credentials CSV is ever written down" - which is false of every cell that
- * reached a request, since bind-before-auth (#591) builds the `Authorization`
- * header out of the row before it is encoded. Where rows were bound, the notice
- * says so rather than leaving the reader to reconcile two true-sounding claims.
- *
- * Silent when the surface lists no steps: with nothing on screen there is
- * nothing to disclose, the same absent-vs-zero rule `SampleRetentionNote` and
- * `CapturedDataWarning` follow.
+ * "The steps below were stored verbatim", the design-mode counterpart of `CapturedDataWarning`
+ * (#731). A collection run writes one `results` row per step execution with the whole exchange (the
+ * composed request, the headers as sent (`sentHeaders`), libcurl's raw request line, both bodies),
+ * capped only by `maxTraceBodyBytes` and kept until run pruning: the same deliberately unredacted
+ * material the load-mode capture notice covers, so the two are a pair: change one, read the other.
+ * The `dataBound` half matters most: the Data tab and `docs/app/data-driven-runs.md` promise the
+ * engine never reads the *file* and the *contract* stores no cells, which a reader took as "no cell
+ * of my credentials CSV is written down", false for every cell reaching a request, as
+ * bind-before-auth (#591) builds `Authorization` from the row before it is encoded. Where rows were
+ * bound, the notice says so. Silent with no steps listed, the absent-vs-zero rule
+ * `SampleRetentionNote` and `CapturedDataWarning` follow.
  */
 
 import { Callout } from "./Callout";
@@ -35,15 +25,13 @@ export interface StoredExchangeWarningProps {
 	/** How many step executions the surface is listing. Silent at zero. */
 	steps: number;
 	/**
-	 * Whether this run bound a data set - any listed step carrying a row index.
-	 * Both step sources carry it, so the sentence does not appear only once the
-	 * run has finished.
+	 * Whether this run bound a data set (a listed step carrying a row index); both step sources
+	 * carry it, so the sentence does not wait for the run to finish.
 	 */
 	dataBound: boolean;
 	/**
-	 * The bound file's display name (issue #2051), named in the sentence when
-	 * the run's snapshot recorded one. Absent for a run recorded before the
-	 * field, which keeps the unnamed sentence.
+	 * The bound file's display name (#2051), named in the sentence when the snapshot recorded one;
+	 * absent for runs older than the field, which keep the unnamed sentence.
 	 */
 	dataFileName?: string;
 	className?: string;
