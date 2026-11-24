@@ -1,0 +1,189 @@
+{
+  "reference_pages": [
+    "docs/engine/api-reference.md",
+    "docs/engine/mcp.md",
+    "docs/engine/db-schema.md"
+  ],
+  "pages": {
+    "docs/app/COMPONENTS.md": {
+      "lines": 4134,
+      "max_line": 17143,
+      "long_lines": 278,
+      "max_cell": 17111,
+      "history": 54
+    },
+    "docs/app/api-integration.md": {
+      "lines": 3095,
+      "max_line": 425,
+      "long_lines": 1,
+      "max_cell": 379,
+      "history": 6
+    },
+    "docs/app/architecture.md": {
+      "max_line": 2047,
+      "long_lines": 25,
+      "history": 2
+    },
+    "docs/app/building.md": {
+      "lines": 656,
+      "history": 2
+    },
+    "docs/app/data-driven-runs.md": {
+      "lines": 693,
+      "history": 1
+    },
+    "docs/app/graphql.md": {
+      "history": 2
+    },
+    "docs/app/import-collections/README.md": {
+      "lines": 751,
+      "max_cell": 234,
+      "history": 5
+    },
+    "docs/app/import-collections/insomnia-v4.md": {
+      "max_line": 1085,
+      "long_lines": 17,
+      "max_cell": 838,
+      "history": 1
+    },
+    "docs/app/import-collections/insomnia-v5.md": {
+      "max_line": 600,
+      "long_lines": 3
+    },
+    "docs/app/import-collections/jmeter.md": {
+      "max_line": 2111,
+      "long_lines": 25,
+      "max_cell": 2004
+    },
+    "docs/app/import-collections/openapi-v2.md": {
+      "max_line": 1815,
+      "long_lines": 23,
+      "max_cell": 564,
+      "history": 1
+    },
+    "docs/app/import-collections/openapi-v3.md": {
+      "max_line": 1408,
+      "long_lines": 40,
+      "max_cell": 672,
+      "history": 8
+    },
+    "docs/app/import-collections/postman-environment.md": {
+      "max_line": 828,
+      "long_lines": 5,
+      "max_cell": 249
+    },
+    "docs/app/import-collections/postman.md": {
+      "lines": 664,
+      "max_line": 2911,
+      "long_lines": 31,
+      "max_cell": 1130,
+      "history": 5
+    },
+    "docs/app/openapi.md": {
+      "lines": 1106,
+      "max_cell": 233,
+      "history": 3
+    },
+    "docs/app/pm-api-compatibility.md": {
+      "lines": 2388,
+      "max_line": 840,
+      "long_lines": 3,
+      "max_cell": 814,
+      "history": 7
+    },
+    "docs/app/state-management.md": {
+      "lines": 4217,
+      "max_line": 3951,
+      "long_lines": 55,
+      "max_cell": 1327,
+      "history": 22
+    },
+    "docs/app/variable-resolution.md": {
+      "lines": 1406,
+      "history": 13
+    },
+    "docs/architecture.md": {
+      "lines": 982,
+      "history": 3
+    },
+    "docs/building.md": {
+      "max_cell": 313
+    },
+    "docs/design-system.md": {
+      "lines": 4754,
+      "max_line": 1764,
+      "long_lines": 25,
+      "max_cell": 1091,
+      "history": 26
+    },
+    "docs/engine/api-reference.md": {
+      "lines": 15738,
+      "max_line": 1075,
+      "long_lines": 45,
+      "max_cell": 1060,
+      "history": 31
+    },
+    "docs/engine/architecture.md": {
+      "lines": 2269,
+      "history": 3
+    },
+    "docs/engine/benchmarks.md": {
+      "lines": 1244,
+      "max_line": 401,
+      "long_lines": 1,
+      "max_cell": 366,
+      "history": 6
+    },
+    "docs/engine/building.md": {
+      "lines": 1972,
+      "max_line": 1693,
+      "long_lines": 8,
+      "max_cell": 1682,
+      "history": 11
+    },
+    "docs/engine/cli.md": {
+      "max_cell": 316,
+      "history": 3
+    },
+    "docs/engine/db-schema.md": {
+      "lines": 3041,
+      "max_line": 2580,
+      "long_lines": 12,
+      "max_cell": 2518,
+      "history": 17
+    },
+    "docs/engine/elements.md": {
+      "lines": 894,
+      "history": 1
+    },
+    "docs/engine/logging.md": {
+      "max_cell": 277
+    },
+    "docs/engine/mcp.md": {
+      "lines": 3887,
+      "max_line": 2783,
+      "long_lines": 60,
+      "max_cell": 2653,
+      "history": 4
+    },
+    "docs/engine/scripting.md": {
+      "lines": 4765,
+      "max_line": 712,
+      "long_lines": 4,
+      "max_cell": 696,
+      "history": 12
+    },
+    "docs/lock-file-handling.md": {
+      "history": 2
+    },
+    "docs/request-storage-design.md": {
+      "history": 3
+    },
+    "docs/ux-writing.md": {
+      "max_line": 1352,
+      "long_lines": 8,
+      "max_cell": 1129,
+      "history": 1
+    }
+  }
+}

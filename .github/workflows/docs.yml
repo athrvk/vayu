@@ -39,6 +39,8 @@ on:
       # script would silently fall behind master.
       - 'install.sh'
       - 'requirements-docs.txt'
+      - 'scripts/docs-lint.py'
+      - 'scripts/docs-lint-ceilings.json'
       - '.github/workflows/docs.yml'
   pull_request:
     branches:
@@ -51,6 +53,8 @@ on:
       - 'shared/icon_png/**'
       - 'install.sh'
       - 'requirements-docs.txt'
+      - 'scripts/docs-lint.py'
+      - 'scripts/docs-lint-ceilings.json'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -84,6 +88,29 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+
+      # Page size and shape (scripts/docs-lint.py), before the MkDocs install
+      # because it needs none and a budget failure should not wait on one. A
+      # page over a budget is held to the ceiling in scripts/docs-lint-ceilings.json,
+      # and that file may only shrink, which is checked against the base
+      # branch's copy: a pull request cannot raise a ceiling to make room.
+      #
+      # Only a pull request has a base to compare with. A base without the file
+      # (the pull request that introduces it) has nothing to hold the ceilings
+      # to, so the check runs without a baseline.
+      - name: Lint page size and shape
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          args=()
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "$BASE_REF"
+            if git cat-file -e FETCH_HEAD:scripts/docs-lint-ceilings.json 2>/dev/null; then
+              git show FETCH_HEAD:scripts/docs-lint-ceilings.json > "$RUNNER_TEMP/base-ceilings.json"
+              args+=(--baseline "$RUNNER_TEMP/base-ceilings.json")
+            fi
+          fi
+          python3 scripts/docs-lint.py "${args[@]}"
 
       - name: Cache pip wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6

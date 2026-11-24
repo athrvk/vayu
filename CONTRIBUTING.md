@@ -408,6 +408,7 @@ from `.github/mkdocs.yml`.
 pip install -r requirements-docs.txt
 mkdocs serve -f .github/mkdocs.yml            # live preview
 mkdocs build --strict -f .github/mkdocs.yml   # exactly what CI runs
+python3 scripts/docs-lint.py                  # page size and shape; no install needed
 ```
 
 `-f` is not optional: the config lives in `.github/`, so bare `mkdocs serve`
@@ -440,6 +441,17 @@ Two rules when you add or change a doc:
   `## Shared Auth Fields (components/shared/AuthFields/)` slugifies to
   `#shared-auth-fields-componentssharedauthfields` - the parenthetical is part of
   the anchor.
+
+Pages have a size and shape budget, held by `scripts/docs-lint.py` in the same
+`Docs site` run: 600 lines a page (1,000 for a reference page), 400 characters
+a line, 200 characters a table cell, a front-matter `description:`, and no
+history narration (`used to`, `until #N`, `since #N landed`, `formerly`,
+`previously`, `was renamed|moved|removed|replaced`, an issue number in a
+heading). A page that is over a budget today has a ceiling in
+`scripts/docs-lint-ceilings.json`; a ceiling can be lowered and never raised,
+and one whose page is now within budget fails as stale, so delete it. The lint
+prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
+the ceilings file the current tree needs, for lowering it after a cleanup.
 
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
 absolute `https://github.com/athrvk/vayu/blob/master/...` URLs: those files are

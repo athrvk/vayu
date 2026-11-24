@@ -269,6 +269,16 @@ Repo-level docs:
 | `CONTRIBUTING.md` | PR process or style rules |
 | `docs/compare/*.md` | Any capability claim a comparison page makes: timers, correlation, controllers, import formats, scripting |
 
+**A doc page stays within its size and shape budget, and states what is, not
+what was.** 600 lines a page (1,000 for a reference page), 400 characters a
+line, 200 a table cell, a front-matter `description:`, and no history
+narration (`used to`, `until #N`, `since #N landed`, an issue number in a
+heading; rationale is allowed). `scripts/docs-lint.py` holds this in the
+`Docs site` workflow. A page already over a budget has a ceiling in
+`scripts/docs-lint-ceilings.json` that may only be lowered, and a stale one
+fails; split or trim the page instead of raising a ceiling. `CONTRIBUTING.md`
+has the local command.
+
 **Deferred work is filed as a GitHub issue in the same commit that defers it.**
 There is no backlog file; the tracker is the only backlog. A comment saying
 "later" with no issue number behind it is the thing this rule exists to prevent.

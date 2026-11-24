@@ -44,6 +44,13 @@ heading anchor, so:
   strict build does not check for it - a page without one silently inherits
   `site_description`, which describes the product rather than the page. New
   pages get one in the same commit.
+- **Every page stays within the docs-lint budgets.** `scripts/docs-lint.py` runs
+  in `docs.yml` before the MkDocs build: 600 lines (1,000 for a reference page),
+  400 characters a line, 200 a table cell, no history narration. A page over a
+  budget has a ceiling in `scripts/docs-lint-ceilings.json`, which may only be
+  lowered; a ceiling whose page is now within budget fails as stale. A reference
+  page is one matching `reference_pages` in that file, so a new one is added
+  there. `CONTRIBUTING.md` has the rules and the local command.
 - **One social card for the whole site.** `og:image` / `twitter:image` point at
   `docs/images/social-card.png`, a designed 1200x630 asset wired in
   `.github/overrides/main.html`. Its source and the exact regeneration command
