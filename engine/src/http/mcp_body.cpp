@@ -300,10 +300,12 @@ std::string mcp_step_label (std::string_view content) {
     if (method == nullptr || method->empty () || is_bound_later (*method)) {
         return {};
     }
+    // `resources/read`'s `uri` is what `Mcp-Name` mirrors too, but it names no
+    // tool and can carry a credential (`user:pass@`, a token query).
     const std::string_view source = name_source (*method);
     const auto* params            = object_member (*parsed, "params");
     const auto* name =
-    source.empty () || params == nullptr ? nullptr : string_member (*params, source);
+    source != "name" || params == nullptr ? nullptr : string_member (*params, source);
     if (name == nullptr || name->empty () || is_bound_later (*name)) {
         return *method;
     }

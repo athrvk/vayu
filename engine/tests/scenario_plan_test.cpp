@@ -491,6 +491,31 @@ TEST_F (ScenarioPlanTest, AnUnscriptedStepResolvesItsNamesAndAuthIntoThePlan) {
     EXPECT_FALSE (step.auth_after_scripts);
 }
 
+// An `mcp` step's label is exported unredacted (#3829), so it is read off the
+// stored body: a tool name a secret environment variable answers is sent
+// substituted, and labelled by the method alone. Mutation check: label the
+// step from `step.request.body.content` in `resolve_step`
+// (`scenario_plan.cpp`) and this reddens.
+TEST_F (ScenarioPlanTest, AnMcpStepsLabelNeverCarriesASubstitutedValue) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", /*order=*/0, "https://mcp.example.test/mcp",
+    /*auth=*/"", /*post_script=*/"", /*created_at=*/1, /*headers=*/"",
+    json{ { "mode", "mcp" }, { "content", R"({"method":"tools/call","params":{"name":"{{secret_tool}}"}})" } }
+    .dump ());
+    seed_environment ("env",
+    R"({"secret_tool":{"value":"s3cret-tool","enabled":true,"secret":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps.at (0);
+    // The premise: what is sent carries the value.
+    ASSERT_NE (step.request.body.content.find ("s3cret-tool"), std::string::npos)
+    << step.request.body.content;
+    EXPECT_EQ (step.mcp_label, "tools/call");
+}
+
 // --- A plan with a step that writes a variable (#2521) ------------------------
 //
 // One answer for the whole plan: an earlier step's extractor or test script can

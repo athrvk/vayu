@@ -153,9 +153,10 @@ struct ScenarioStep {
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string collection_id{};
     /// An `mcp` step's `<method> <tool>` (`http::mcp_step_label`, #3829), read
-    /// off the composed body once here so the breakdown row can say which
-    /// call its latency measures. Empty for every other mode, and `name`
-    /// stays the `setNextRequest` target either way.
+    /// once here so the breakdown row can say which call its latency
+    /// measures. Read off the stored body, never `request`'s substituted one,
+    /// because it is exported unredacted. Empty for every other mode, and
+    /// `name` stays the `setNextRequest` target either way.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string mcp_label{};
 };

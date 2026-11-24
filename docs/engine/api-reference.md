@@ -5631,9 +5631,10 @@ is absent here until it is added on purpose:
    and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
-   display name, step, transaction, metric and series names, and an `mcp`
-   step's `label`, the method and tool name read from its body) is carried as
-   written.
+   display name, and step, transaction, metric and series names) is carried as
+   written, and so is an `mcp` step's `label`: the method and tool name as
+   literally stored in the request's body, never text a `{{variable}}`
+   resolved to.
 5. Within a section a value is copied only when it is a scalar or a list of
    scalars; anything deeper is named member by member.
 
@@ -12182,14 +12183,16 @@ answered is neither: the rule is in
 [`elements.md`](elements.md#kinds).
 
 `label` (#3829) is present only on a step whose body mode is `mcp`, and says
-which call the row's latency measures: `<method> <name>`, the name being what
-the request's `Mcp-Name` header mirrors (`params.name` for `tools/call` and
-`prompts/get`, `params.uri` for `resources/read`), so `tools/call search` for a
-call of the `search` tool. A method with no such member, and a name still
-holding a `{{token}}` (one a data row or the iteration binds) or empty, is
-labelled by the method alone (`tools/list`, `tools/call`); a body that is not
-one JSON object when the run is planned carries no `label`. It is read once,
-from the composed body, when the run is planned. `name` stays the stored
+which call the row's latency measures: `<method> <name>`, the name being
+`params.name` of a `tools/call` or `prompts/get`, so `tools/call search` for a
+call of the `search` tool. It is read once, when the run is planned, from the
+request's *stored* body, never the composed one, so no value a `{{variable}}`
+resolves to (a secret's included) can reach it: a name spelled with a
+`{{token}}` (one an environment, a data row or the iteration answers), an
+empty one, and every other method are labelled by the method alone
+(`tools/call`, `tools/list`, `resources/read`, whose `params.uri` names no
+tool and can carry a credential). A stored body that is not one JSON object,
+or whose method is itself a token, carries no `label`. `name` stays the stored
 request's name either way, because it is the `setNextRequest` target. Two
 steps calling two tools are two rows, each with its own percentiles, so a
 per-tool latency needs no `control.transaction`.

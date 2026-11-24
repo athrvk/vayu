@@ -403,6 +403,27 @@ const vayu::StreamBounds& run_bounds) {
 }
 
 /**
+ * An `mcp` step's label (#3829), read off the row's *stored* body rather than
+ * the composed one: composition has substituted every `{{variable}}`, a
+ * secret's value included, and the label is exported unredacted. A name still
+ * spelled as a token here is one `mcp_step_label` leaves out. The content is
+ * read as `read_request_body` reads it, so the label describes what is sent.
+ */
+std::string stored_mcp_label (const vayu::db::Request& row) {
+    const auto body =
+    nlohmann::json::parse (row.body, nullptr, /*allow_exceptions=*/false);
+    if (!body.is_object ()) {
+        return {};
+    }
+    const auto content = body.find ("content");
+    if (content == body.end () || content->is_null ()) {
+        return {};
+    }
+    return vayu::http::mcp_step_label (
+    content->is_string () ? content->get_ref<const std::string&> () : content->dump ());
+}
+
+/**
  * One step of the plan: composed, built, and refused if it carries a token
  * nothing in this run could bind.
  *
@@ -586,7 +607,7 @@ nlohmann::json& raw_elements_out) {
     step.data_template  = std::move (data_template);
     step.collection_id  = row.collection_id;
     if (step.request.body.mode == vayu::BodyMode::Mcp) {
-        step.mcp_label = vayu::http::mcp_step_label (step.request.body.content);
+        step.mcp_label = stored_mcp_label (row);
     }
     // A deferred step reaches an executor with a row behind it whenever it
     // needs one: the refusal above returns for a credential carrying a *data*

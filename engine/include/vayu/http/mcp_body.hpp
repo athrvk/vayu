@@ -127,15 +127,16 @@ mcp_derived_headers (std::string_view wire_body, const std::optional<McpTool>& t
 /**
  * @brief The label a scenario load run's step breakdown gives an `mcp` step
  *        (#3829): `<method> <name>`, e.g. `tools/call search`, the name being
- *        the member `Mcp-Name` mirrors (`params.name` for `tools/call` and
- *        `prompts/get`, `params.uri` for `resources/read`).
+ *        `params.name` of a `tools/call` or `prompts/get`.
  *
- * The method alone for a method with no such member, and for a name that is
- * absent, not a non-empty string, or still holds a `{{` token: such a name is
- * bound per iteration, so no one value describes the step. Empty when
- * @p content is not one JSON object (an unresolved token outside a string, a
- * call past `constants::request_body::MAX_JSON_DEPTH`) or has no string
- * `method` free of `{{`.
+ * @p content is the request's *stored* body text, never the composed one: a
+ * name or method still spelled `{{token}}` is left out, so no substituted
+ * value (a secret's included) can reach the label. The method alone for every
+ * other method (`resources/read` too: its `params.uri` names no tool and can
+ * carry a credential), and for a name that is absent, not a non-empty string,
+ * or holds a `{{` token. Empty when @p content is not one JSON object (a token
+ * outside a string, a call past `constants::request_body::MAX_JSON_DEPTH`) or
+ * has no string `method` free of `{{`.
  */
 [[nodiscard]] std::string mcp_step_label (std::string_view content);
 
