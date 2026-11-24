@@ -41,6 +41,7 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			"disabledSystemHeaders",
 			"disableUrlEncoding",
 			"streamTextPath",
+			"streamFirstContentMarker",
 			"postmanProtocolBehavior",
 		]) {
 			expect(key in fields).toBe(false);
@@ -60,6 +61,7 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			disableUrlEncoding: true,
 			stream: true,
 			streamTextPath: "$.delta.text",
+			streamFirstContentMarker: "content_block_delta",
 			postmanProtocolBehavior: carrier,
 		});
 		expect(fields).toMatchObject({
@@ -68,6 +70,7 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 			disableUrlEncoding: true,
 			stream: true,
 			streamTextPath: "$.delta.text",
+			streamFirstContentMarker: "content_block_delta",
 			postmanProtocolBehavior: carrier,
 		});
 	});

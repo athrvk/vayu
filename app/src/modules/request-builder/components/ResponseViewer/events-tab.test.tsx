@@ -32,6 +32,7 @@ import { TooltipProvider } from "@/components/ui";
 import { useExecutionEventsStore } from "@/stores";
 import { TIMING } from "@/config/timing";
 import type { ResponseState } from "../../types";
+import { responseFromRunResult } from "../../utils/restore-response";
 import { STREAM_END_REASONS, type StreamEndReason, type StreamEvent } from "@/types";
 
 // Monaco does not run under jsdom; the body panel is not what this asserts on.
@@ -567,6 +568,48 @@ describe("the Events tab", () => {
 				trigger.focus();
 				fireEvent.mouseDown(trigger);
 			}
+
+			it("shows the first event and the row offsets of a stream reopened from History (#3805)", () => {
+				// Through the restore funnel, as History does: the stored node's start
+				// is the only zero the pane has.
+				const restored = responseFromRunResult({
+					timestamp: SENT_AT + 4000,
+					statusCode: 200,
+					statusText: "OK",
+					latencyMs: 3700,
+					trace: {
+						request: { method: "GET", url: "https://api.example.test/sse" },
+						response: { headers: { "content-type": "text/event-stream" }, body: "" },
+						dnsMs: 1,
+						connectMs: 2,
+						tlsMs: 3,
+						firstByteMs: 80,
+						downloadMs: 3600,
+						events: {
+							items: slowStart(),
+							totalEvents: 3,
+							eventsTruncated: false,
+							endReason: "completed",
+							startedAt: SENT_AT,
+						},
+					},
+				});
+				expect(restored).not.toBeNull();
+				state.response = restored;
+				renderViewer();
+
+				// Mutation check: drop the `sentAt` spread in `eventsFromTrace` and
+				// neither the offsets nor the first-event row has a zero to count from.
+				openEventsTab();
+				expect(figures("Since the send")).toEqual([
+					"+1.50 s since the send",
+					"+1.62 s since the send",
+					"+3.62 s since the send",
+				]);
+				openTimingTab();
+				const label = screen.getByText("First event");
+				expect(label.parentElement?.textContent).toBe("First event1.50s");
+			});
 
 			it("lists the first event as the time from the send to the first row", () => {
 				state.response = storedStream({ sentAt: SENT_AT, timing: timingOf });

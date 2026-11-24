@@ -53,7 +53,7 @@ import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver, type ColumnAuditRequest } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import { DEFAULT_STREAM_TEXT_PATH } from "@/constants/request";
+import { DEFAULT_STREAM_FIRST_CONTENT_MARKER, DEFAULT_STREAM_TEXT_PATH } from "@/constants/request";
 import { apiService, loadTestService } from "@/services";
 import { generateCurl } from "@/services/codegen";
 import type {
@@ -90,6 +90,7 @@ import { buildComposeBody, withLeftOut } from "./utils/compose-body";
 import { appendSendToConsole } from "@/modules/console";
 import {
 	disabledDefaults,
+	streamFirstContentMarkerOf,
 	streamTextPathOf,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
@@ -191,6 +192,8 @@ function buildUpdatePayload(
 	// keeps the stored path (#3773).
 	if (changedFields.has("streamTextPath"))
 		payload.streamTextPath = request.streamTextPath.trim() || null;
+	if (changedFields.has("streamFirstContentMarker"))
+		payload.streamFirstContentMarker = request.streamFirstContentMarker || null;
 
 	return payload;
 }
@@ -499,6 +502,8 @@ export default function RequestBuilder() {
 			disableUrlEncoding: fetchedRequest.disableUrlEncoding,
 			stream: fetchedRequest.stream,
 			streamTextPath: fetchedRequest.streamTextPath ?? DEFAULT_STREAM_TEXT_PATH,
+			streamFirstContentMarker:
+				fetchedRequest.streamFirstContentMarker ?? DEFAULT_STREAM_FIRST_CONTENT_MARKER,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -955,6 +960,9 @@ export default function RequestBuilder() {
 					// The text path a streaming run's events are read through (#3773):
 					// from the request, like `stream` above, never the dialog.
 					...streamTextPathOf(pendingLoadTestRequest),
+					// The literal the run times its streams to (#3774): a load run
+					// only, a Send would carry a field nothing reads.
+					...streamFirstContentMarkerOf(pendingLoadTestRequest),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);

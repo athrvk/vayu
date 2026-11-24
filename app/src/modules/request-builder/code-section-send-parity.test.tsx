@@ -158,6 +158,7 @@ const DRAFT: RequestState = {
 	disableUrlEncoding: true,
 	stream: false,
 	streamTextPath: "",
+	streamFirstContentMarker: "",
 };
 
 beforeEach(() => {

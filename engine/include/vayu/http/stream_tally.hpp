@@ -44,6 +44,7 @@
 
 #include "vayu/core/sample_capture.hpp"
 #include "vayu/http/sse_frame_counter.hpp"
+#include "vayu/http/stream_content_marker.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -79,6 +80,7 @@ class StreamTally {
         max_duration_ms_ = bounds.max_duration_ms;
         live_            = bounds.live;
         text_path_       = bounds.text_path;
+        content_marker_  = bounds.first_content_marker;
         started_at_      = started_at;
         deadline_ = started_at + std::chrono::milliseconds (bounds.max_duration_ms);
         if (live_ != nullptr) {
@@ -104,8 +106,9 @@ class StreamTally {
      * nothing and never reaches the cap.
      *
      * A chunk that completed an event is an arrival, stamped at @p now: the
-     * first one times the first event, and each later one closes a gap.
-     * Callers pass nothing; a test passes its own clock.
+     * first one times the first event, and each later one closes a gap. The
+     * chunk that completes the first content marker is stamped at @p now
+     * too. Callers pass nothing; a test passes its own clock.
      */
     bool feed (std::string_view chunk,
     const Headers& headers,
@@ -122,6 +125,7 @@ class StreamTally {
         if (counter_.events () > before) {
             note_arrival (now);
         }
+        scan_for_marker (chunk, now);
         return std::cmp_greater_equal (counter_.events (), max_events_);
     }
 
@@ -179,7 +183,8 @@ class StreamTally {
         close_live ();
         response.stream_events           = counter_.events ();
         response.stream_capped           = cap_reached_;
-        response.stream_first_event_ms   = first_event_ms ();
+        response.stream_first_event_ms   = since_start_ms (first_arrival_);
+        response.stream_first_match_ms   = since_start_ms (first_match_);
         response.stream_max_event_gap_ms = max_event_gap_ms ();
         response.stream_event_rate       = event_rate ();
         response.stream_text_path        = text_path_;
@@ -208,11 +213,24 @@ class StreamTally {
         events_at_last_arrival_ = counter_.events ();
     }
 
-    [[nodiscard]] std::optional<double> first_event_ms () const {
-        if (!first_arrival_) {
+    /// Watch @p chunk for the request's first content marker until it has
+    /// matched once (#3774). A stream that declares none stops at the null
+    /// check, and one that has matched at the stamp.
+    void scan_for_marker (std::string_view chunk, Clock::time_point now) {
+        if (content_marker_ == nullptr || first_match_) {
+            return;
+        }
+        if (content_marker_->advance (marker_matched_, chunk)) {
+            first_match_ = now;
+        }
+    }
+
+    [[nodiscard]] std::optional<double> since_start_ms (
+    const std::optional<Clock::time_point>& at) const {
+        if (!at) {
             return std::nullopt;
         }
-        return Milliseconds (*first_arrival_ - started_at_).count ();
+        return Milliseconds (*at - started_at_).count ();
     }
 
     /// Absent below two arrivals: one write has no gap to measure.
@@ -273,6 +291,12 @@ class StreamTally {
     std::shared_ptr<LiveStreamCounts> live_;
     /// The request's `streamTextPath`, handed to the response `report` ends.
     std::shared_ptr<const StreamTextPath> text_path_;
+    /// The request's first content marker; null for none.
+    std::shared_ptr<const StreamContentMarker> content_marker_;
+    /// The marker bytes the chunks so far ended on, `advance`'s state.
+    std::size_t marker_matched_ = 0;
+    /// The write that completed the marker; empty until one has.
+    std::optional<Clock::time_point> first_match_;
     Clock::time_point started_at_;
     Clock::time_point deadline_;
     SseFrameCounter counter_;

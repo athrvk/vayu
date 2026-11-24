@@ -36,6 +36,7 @@
 import {
 	Activity,
 	Braces,
+	Camera,
 	Clock,
 	FileCheck,
 	FileJson,
@@ -135,6 +136,7 @@ const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
 	"assert.status": Hash,
 	"assert.jsonpath": Braces,
 	"assert.jsonschema": FileCheck,
+	"assert.snapshot": Camera,
 	"assert.contains": Type,
 	"assert.duration": Clock,
 	"assert.size": Ruler,

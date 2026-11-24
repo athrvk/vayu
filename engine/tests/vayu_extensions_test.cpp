@@ -310,6 +310,17 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     Json::parse (R"({"stream":true,"streamTextPath":"$.delta.text"})"));
     ASSERT_HAS_VALUE (streamed);
     EXPECT_EQ ((*streamed)["streamTextPath"], "$.delta.text");
+    // A `streamFirstContentMarker` (#3774) by the same rule: empty, not a
+    // string, or with no stream to watch.
+    for (const char* bad : { R"({"stream":true,"streamFirstContentMarker":""})",
+         R"({"stream":true,"streamFirstContentMarker":7})",
+         R"({"streamFirstContentMarker":"delta"})" }) {
+        EXPECT_FALSE (ext::settings_of (Json::parse (bad))) << bad;
+    }
+    const auto marked = ext::settings_of (Json::parse (
+    R"({"stream":true,"streamFirstContentMarker":"content_block_delta"})"));
+    ASSERT_HAS_VALUE (marked);
+    EXPECT_EQ ((*marked)["streamFirstContentMarker"], "content_block_delta");
     // An interim status is refused at create (#3117), so the reader drops the
     // piece instead of handing the applier a row it would reject.
     for (const char* bad : { R"([{"name":"x","status":42}])",

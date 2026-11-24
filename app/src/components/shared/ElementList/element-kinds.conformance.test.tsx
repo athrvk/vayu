@@ -43,6 +43,10 @@ import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { resolvesVariables } from "./variable-fields";
 import { ElementList } from "./index";
+import {
+	DEFAULT_SNAPSHOT_METHOD,
+	SNAPSHOT_RESULT_KEYS,
+} from "@/modules/request-builder/utils/list-snapshot-baseline";
 import { GenericElementForm } from "./GenericElementForm";
 import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
 import type { ElementConfigProperty, ElementDef, ElementKindSchema } from "@/types";
@@ -181,13 +185,16 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		// (`element-modes.ts`), whose schemas declare several alternative
 		// strategies as independent optional siblings and which therefore need
 		// a mode picker rather than every alternative's fields at once. The
-		// last, `assert.jsonschema`, reads `path` only for one `source` and
-		// holds a multi-line document (#3806). This
+		// two last are the document kinds: `assert.jsonschema` reads `path` only
+		// for one `source` and holds a multi-line schema (#3806), and
+		// `assert.snapshot` holds an array of objects the generic array field
+		// cannot (#3807). This
 		// fails loudly if the catalogue ever drops one or either map is edited
 		// without this suite noticing.
 		expect(withBespoke.sort()).toEqual([
 			"assert.jsonpath",
 			"assert.jsonschema",
+			"assert.snapshot",
 			"assert.status",
 			"control.throughput",
 			"metric.record",
@@ -345,6 +352,18 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		}
 	});
 
+	it("holds the snapshot recorder's list methods and default to the catalogue's (#3807)", () => {
+		// `list-snapshot-baseline.ts` restates which result key each `method` is
+		// read from; a method the engine adds, or a default it changes, would
+		// leave the "Use the current reply" action reading the wrong list.
+		// Mutation check: rename a key of `SNAPSHOT_RESULT_KEYS` and this reds.
+		const method = fixture.find((k) => k.kind === "assert.snapshot")!.configSchema.properties
+			?.method;
+		expect(method?.enum, "assert.snapshot declares no method enum").toBeTruthy();
+		expect(Object.keys(SNAPSHOT_RESULT_KEYS).sort()).toEqual([...method!.enum!].sort());
+		expect(DEFAULT_SNAPSHOT_METHOD).toBe(method!.default);
+	});
+
 	it("flags a fresh element of each rule's kind as incomplete, and a satisfied one as not", () => {
 		// A kind whose operand is not "any one listed key" names its own shapes:
 		// `timer_think_problem` wants both bounds of a range, and
@@ -370,6 +389,11 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 					{ source: "body", schema: true },
 					{ source: "jsonpath", path: "$.result", schema: {} },
 				],
+			},
+			// A `baseline` typed as text that is not a list.
+			"assert.snapshot": {
+				unmet: { baseline: "[" },
+				met: [{ baseline: [] }, { method: "prompts/list", baseline: [{ name: "a" }] }],
 			},
 		};
 		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {

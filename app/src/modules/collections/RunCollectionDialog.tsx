@@ -70,6 +70,12 @@
  * (a `400` on a collection run) and carries only the two caps, top-level, which
  * bound the streaming steps and nothing else.
  *
+ * **Wait out Retry-After** is the ninth (issue #3799), the same engine option the
+ * request dialog offers, in load mode only: the design-mode runner has no virtual
+ * user to hold back. It is drawn by the shared `RetryAfterFields`, lives in the
+ * profile state (reset on every mount, like the rest), and rides the payload only
+ * while on.
+ *
  * Only the three closed-loop modes exist for a scenario (`SCENARIO_LOAD_MODES`),
  * so the load profile is the request dialog's own `ProfilePicker` and
  * `ProfileFields` narrowed to them. `constant_rps` is a `400` engine-side - an
@@ -147,6 +153,7 @@ import OAuth2LoadTestGuard from "@/modules/request-builder/components/OAuth2Load
 import { OAUTH2_GATE_REASON } from "@/modules/request-builder/components/oauth2-load-test-coverage";
 import { usesDuration } from "@/modules/request-builder/components/LoadTestConfigDialog/profile";
 import { ProfileFields } from "@/modules/request-builder/components/LoadTestConfigDialog/ProfileFields";
+import { RetryAfterFields } from "@/modules/request-builder/components/LoadTestConfigDialog/RetryAfterFields";
 import { StreamCapFields } from "@/modules/request-builder/components/LoadTestConfigDialog/StreamCapFields";
 import {
 	ProfilePicker,
@@ -724,6 +731,20 @@ export default function RunCollectionDialog({
 									{profileError ?? streamCapsError}
 								</Callout>
 							)}
+
+							<RetryAfterFields
+								mode={profile.mode}
+								limits={limits}
+								idPrefix="run-collection"
+								backoff={profile.retryAfterBackoff}
+								onBackoffChange={(retryAfterBackoff) =>
+									setProfile((prev) => ({ ...prev, retryAfterBackoff }))
+								}
+								maxMs={profile.retryAfterMaxMs}
+								onMaxMsChange={(retryAfterMaxMs) =>
+									setProfile((prev) => ({ ...prev, retryAfterMaxMs }))
+								}
+							/>
 
 							<div className="flex items-center justify-between gap-4">
 								<span className="block text-sm font-medium leading-snug">

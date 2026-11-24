@@ -15,13 +15,16 @@
  * emptied by the toggle going off, since the engine refuses a path stored
  * beside a buffered request. The presets are shortcuts for the two declared
  * shapes - they write the field, and the field is the only source of truth.
+ *
+ * The first content marker (issue #3774) sits beside it under the same rules,
+ * and is kept verbatim: it is matched byte for byte, so nothing is trimmed.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
-import { STREAM_TEXT_PATH_PRESETS } from "@/constants/request";
+import { STREAM_FIRST_CONTENT_MARKER_PRESETS, STREAM_TEXT_PATH_PRESETS } from "@/constants/request";
 
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
@@ -147,5 +150,84 @@ describe("the stream text path field", () => {
 
 		expect(h.request.stream).toBe(false);
 		expect(h.request.streamTextPath).toBe("");
+	});
+});
+
+const markerField = () => screen.queryByRole("textbox", { name: /first content marker/i });
+const CONTENT_BLOCK_DELTA = "content_block_delta";
+const OPENAI_CONTENT = '"delta":{"content":"';
+
+describe("the first content marker field", () => {
+	it("is absent while Event stream is off, and present once it is on", () => {
+		const ui = mount(harness());
+		expect(markerField()).toBeNull();
+		expect(screen.queryByRole("radio", { name: CONTENT_BLOCK_DELTA })).toBeNull();
+
+		fireEvent.click(screen.getByRole("switch", { name: /event stream/i }));
+		ui.rerender();
+
+		expect(markerField()).not.toBeNull();
+		expect(screen.getByRole("radio", { name: CONTENT_BLOCK_DELTA })).toBeTruthy();
+	});
+
+	it("shows the stored marker and says it is matched against the raw stream", () => {
+		mount(harness({ stream: true, streamFirstContentMarker: CONTENT_BLOCK_DELTA }));
+		expect((markerField() as HTMLInputElement).value).toBe(CONTENT_BLOCK_DELTA);
+		expect(screen.getByText(/matched against the raw stream/i)).toBeTruthy();
+	});
+
+	it("writes what is typed into the request, spaces and all", () => {
+		const h = harness({ stream: true });
+		mount(h);
+
+		fireEvent.change(markerField() as HTMLInputElement, { target: { value: ' "text": "' } });
+
+		expect(h.request.streamFirstContentMarker).toBe(' "text": "');
+	});
+
+	it("offers the two literals as presets, each writing its marker", () => {
+		expect([...STREAM_FIRST_CONTENT_MARKER_PRESETS]).toEqual([
+			CONTENT_BLOCK_DELTA,
+			OPENAI_CONTENT,
+		]);
+		const h = harness({ stream: true });
+		const ui = mount(h);
+
+		fireEvent.click(screen.getByRole("radio", { name: CONTENT_BLOCK_DELTA }));
+		expect(h.request.streamFirstContentMarker).toBe(CONTENT_BLOCK_DELTA);
+
+		ui.rerender();
+		fireEvent.click(screen.getByRole("radio", { name: OPENAI_CONTENT }));
+		expect(h.request.streamFirstContentMarker).toBe(OPENAI_CONTENT);
+	});
+
+	it("marks the preset the field holds, and none once the marker is hand-written", () => {
+		const h = harness({ stream: true, streamFirstContentMarker: CONTENT_BLOCK_DELTA });
+		const ui = mount(h);
+		const preset = () => screen.getByRole("radio", { name: CONTENT_BLOCK_DELTA });
+		expect(preset().getAttribute("aria-checked")).toBe("true");
+
+		h.ctx.updateField("streamFirstContentMarker", "custom");
+		ui.rerender();
+		expect(preset().getAttribute("aria-checked")).toBe("false");
+	});
+
+	it("keeps the marker when the active preset is pressed again", () => {
+		const h = harness({ stream: true, streamFirstContentMarker: CONTENT_BLOCK_DELTA });
+		mount(h);
+
+		fireEvent.click(screen.getByRole("radio", { name: CONTENT_BLOCK_DELTA }));
+
+		expect(h.request.streamFirstContentMarker).toBe(CONTENT_BLOCK_DELTA);
+	});
+
+	it("empties with the toggle, so no marker is saved beside a buffered request", () => {
+		const h = harness({ stream: true, streamFirstContentMarker: CONTENT_BLOCK_DELTA });
+		mount(h);
+
+		fireEvent.click(screen.getByRole("switch", { name: /event stream/i }));
+
+		expect(h.request.stream).toBe(false);
+		expect(h.request.streamFirstContentMarker).toBe("");
 	});
 });

@@ -61,6 +61,7 @@ const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("assert.jsonschema", "Assert JSON Schema", "assert"),
+	kindSchema("assert.snapshot", "Assert list snapshot", "assert"),
 	kindSchema("script.pre", "Pre-request script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
 	// script.setup / script.teardown (issue #1499): collection-only, so a
@@ -298,6 +299,90 @@ describe("ElementsPanel", () => {
 			const [added] = await addJsonSchemaElement(request);
 
 			expect(added.config).toEqual({});
+		});
+	});
+
+	// #3807: the baseline is recorded from the builder's own response and written
+	// through the list's `updateField("elements", ...)`, as a typed edit is.
+	describe("an assert.snapshot's Use the current reply as the baseline (#3807)", () => {
+		const TOOLS = [
+			{ name: "search", inputSchema: { type: "object" } },
+			{ name: "fetch", inputSchema: { type: "object" } },
+		];
+		const BUTTON = "Use the current reply as the baseline";
+
+		function snapshotElement(config: Record<string, unknown>): ElementDef {
+			return { id: "s1", kind: "assert.snapshot", enabled: true, config };
+		}
+
+		function renderSnapshotRow(config: Record<string, unknown>, body?: string) {
+			setContext({
+				request: {
+					id: "req_1",
+					collectionId: null,
+					elements: [extractElement("e1"), snapshotElement(config), extractElement("e2")],
+				} as never,
+				response: body === undefined ? null : ({ body } as never),
+			});
+			render(<ElementsPanel />);
+			expandRow("Assert list snapshot");
+		}
+
+		// Mutation check: drop `baseline` from `recordBaseline`'s spread and the
+		// element's config comes back without it, so the first expectation reds.
+		it("writes the reply's list into the element and leaves the other elements alone", () => {
+			renderSnapshotRow(
+				{ method: "tools/list" },
+				JSON.stringify({ jsonrpc: "2.0", id: 1, result: { tools: TOOLS } })
+			);
+
+			fireEvent.click(screen.getByRole("button", { name: BUTTON }));
+
+			const written = updateField.mock.lastCall?.[1] as ElementDef[];
+			expect(updateField.mock.lastCall?.[0]).toBe("elements");
+			expect(written.map((el) => el.id)).toEqual(["e1", "s1", "e2"]);
+			expect(written[1].config).toEqual({ method: "tools/list", baseline: TOOLS });
+			expect(written[0].config).toEqual({});
+		});
+
+		it("reads the list the element's own method names", () => {
+			renderSnapshotRow(
+				{ method: "prompts/list" },
+				JSON.stringify({
+					result: { tools: TOOLS, prompts: [{ name: "summarise" }] },
+				})
+			);
+
+			fireEvent.click(screen.getByRole("button", { name: BUTTON }));
+
+			expect((updateField.mock.lastCall?.[1] as ElementDef[])[1].config.baseline).toEqual([
+				{ name: "summarise" },
+			]);
+		});
+
+		it("is disabled, and says why, before anything was sent", async () => {
+			renderSnapshotRow({});
+
+			expect(screen.getByRole("button", { name: BUTTON })).toBeDisabled();
+			fireEvent.focus(document.querySelector('[data-slot="disabled-hint"]')!);
+			expect((await screen.findAllByText(/Send the request first/)).length).toBeGreaterThan(
+				0
+			);
+		});
+
+		it("is disabled when the reply holds no such list", async () => {
+			renderSnapshotRow(
+				{ method: "resources/list" },
+				JSON.stringify({ result: { tools: TOOLS } })
+			);
+
+			expect(screen.getByRole("button", { name: BUTTON })).toBeDisabled();
+			fireEvent.focus(document.querySelector('[data-slot="disabled-hint"]')!);
+			expect((await screen.findAllByText(/holds no resources list/)).length).toBeGreaterThan(
+				0
+			);
+			fireEvent.click(screen.getByRole("button", { name: BUTTON }));
+			expect(updateField).not.toHaveBeenCalled();
 		});
 	});
 

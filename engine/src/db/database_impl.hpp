@@ -317,6 +317,9 @@ inline auto make_vayu_storage (const std::string& path) {
     // no default, on the `spec_operation` precedent below: NULL is "declares
     // none", and every pre-existing row backfills to it.
     make_column ("stream_text_path", &Request::stream_text_path),
+    // The stream's first content marker (issue #3774, schema version 11),
+    // nullable for the same reason.
+    make_column ("stream_first_content_marker", &Request::stream_first_content_marker),
     // Postman's per-request protocol settings (issue #1765, schema version
     // 2). The three typed ones are NOT NULL + default_value for the same
     // reason `stream` is: sync_schema ALTERs them onto an existing requests

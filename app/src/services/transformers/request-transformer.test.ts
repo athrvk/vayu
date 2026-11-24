@@ -358,6 +358,30 @@ describe("RequestTransformer Postman protocol switches (#1765)", () => {
  * editor's warning displays it - and invents none: a reference the engine
  * answered nothing for (an empty path) stays without the key.
  */
+describe("RequestTransformer stream settings (#3773, #3774)", () => {
+	it("reads a row that states neither as none, which is what the engine serializes", () => {
+		const req = RequestTransformer.toFrontend({ ...base });
+		expect(req.streamTextPath).toBeNull();
+		expect(req.streamFirstContentMarker).toBeNull();
+	});
+
+	it("carries a stored first content marker", () => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			stream: true,
+			streamFirstContentMarker: "content_block_delta",
+		});
+		expect(req.streamFirstContentMarker).toBe("content_block_delta");
+	});
+
+	it("reads a non-string marker as none rather than coercing it", () => {
+		expect(
+			RequestTransformer.toFrontend({ ...base, streamFirstContentMarker: 7 })
+				.streamFirstContentMarker
+		).toBeNull();
+	});
+});
+
 describe("RequestTransformer file trust flag", () => {
 	it.each([[undefined], [true], [false]])("a binary file read with %s keeps it", (derived) => {
 		const file = derived === undefined ? { src: "" } : { src: "/a.bin", unresolved: derived };

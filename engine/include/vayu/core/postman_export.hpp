@@ -72,6 +72,8 @@ struct PostmanExportRequest {
     /// Whether the request stores a `streamTextPath` (#3773), which Postman
     /// cannot carry either.
     bool has_stream_text_path = false;
+    /// Whether it stores a `streamFirstContentMarker` (#3774), likewise.
+    bool has_stream_first_content_marker = false;
     /// The request's own timeout (issue #2937). A Postman item has no
     /// timeout member, so a stated one is only counted in `notCarried`.
     std::optional<int> timeout_ms;

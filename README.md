@@ -98,7 +98,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 
 - **Native load testing** - multi-worker C++ event loop sustains tens of thousands of req/s with metrics streamed over SSE in real time; no second tool needed
 - **REST + GraphQL request builder** - GET, POST, PUT, PATCH, DELETE and more; JSON, XML, JSON-RPC, form-data, URL-encoded, raw text, and GraphQL bodies
-- **SSE / streaming requests** - consume `text/event-stream` endpoints as a first-class request type, with a live Events view, a Stop control, the event list restored from history, and a declared JSONPath that joins the reply's text (an LLM's tokens, say) into a Text view as it streams
+- **SSE / streaming requests** - consume `text/event-stream` endpoints as a first-class request type, with a live Events view, a Stop control, the event list restored from history, and a declared JSONPath that joins the reply's text (an LLM's tokens, say) into a Text view as it streams; templates for an OpenAI-compatible chat completion and an Anthropic-style messages call start the request with its auth, body and stream text path already set
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
 - **Scenario collection runs** - run a collection as an ordered scenario, in design mode or under load, with per-step results and threshold verdicts
 - **Data-driven runs** - drive a collection from a CSV, TSV, JSON or JSONL file; columns arrive as `{{data.column}}` tokens and `pm.iterationData`, declared up front on the collection's Data tab
