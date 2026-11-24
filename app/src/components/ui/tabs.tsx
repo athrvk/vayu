@@ -6,51 +6,33 @@
  */
 
 /**
- * Tabs - Vayu's section tabs.
+ * Vayu's section tabs, "ghost": no band rule, no fill, no pill. The active trigger is
+ * `--primary-text` at 600, the rest `--muted-foreground` at 500.
  *
- * The look is "ghost": no band rule, no fill, no pill. The active trigger is
- * `--primary-text` at weight 600; the rest are `--muted-foreground` at 500.
+ * **`--primary-text`, not `--primary`**: active and inactive differ almost only in *saturation*
+ * (measured on `--card`, 1.01-1.56 contrast in every accent scheme), fine for a saturated accent
+ * (55-95% against an inactive 4-5%) and grey on grey for `graphite`, the desaturated one. The token
+ * carries that exception (see `index.css`).
  *
- * **Why `--primary-text` and not `--primary`.** What separates an active tab
- * from an inactive one here is almost entirely *saturation*, not lightness -
- * measured on `--card`, the two sit within a 1.01-1.56 contrast ratio in every
- * accent scheme, which is to say the same brightness. That is fine while the
- * accent is saturated (55-95% against an inactive 4-5%) and fails completely
- * for `graphite`, the one desaturated scheme, where it is grey on grey. The
- * token carries that exception; see the note in `index.css`.
+ * **The labels are wrapped**: a bare `data-[state=active]:font-semibold` widens the trigger and
+ * shoves its neighbours (`CollectionDetail` shipped that), so `TabLabel` reserves the bold width in
+ * the primitive. `MARK_TRACK` answers the same for a count or error dot, whose track animates open
+ * from zero instead of jumping.
  *
- * **Why the labels are wrapped.** The active state is partly a weight change,
- * and a bare `data-[state=active]:font-semibold` widens the trigger, so
- * switching tab shoves its neighbours sideways. `CollectionDetail` shipped that
- * bug. `TabLabel` reserves the bold width up front, in the primitive, so no
- * call site can reintroduce it. `MARK_TRACK` further down answers the same
- * problem for the other half of a trigger's width: a count or an error dot
- * that mounts at full width widens its trigger and shoves its neighbours, so
- * the mark's own track animates open from zero instead of jumping.
+ * **The strip's chrome is a required `variant`**, with no default, so a new strip says which it is
+ * rather than inheriting the first caller's (seven call sites had seven recipes):
  *
- * **The strip's chrome is a `variant`, and it is required.** The triggers were
- * shared while the band around them was not: seven call sites carried seven
- * recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5` with a
- * `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
- * `px-3 py-1.5 border-b border-rule bg-muted/30`. Three chromes exist, and the
- * prop has no default so a new strip has to say which one it is rather than
- * inheriting whichever happened to be first:
+ * - `pane` - the strip *is* the pane's chrome band: `bg-panel px-4` with the bottom rule the
+ *   content hangs from. The dashboard, Collection Detail, the response viewer.
+ * - `inset` - inside already-padded content, so only enough padding (`px-1`) to keep the first
+ *   trigger's focus ring off the edge. The request strip, the import dialog, the load-test detail.
+ * - `bare` - the band belongs to a parent row holding other things (the response strip shares its
+ *   row with status and actions), so the list adds no fill, rule or padding: `pane`, drawn by the
+ *   row's owner.
  *
- * - `pane` - the strip *is* the pane's chrome band: `bg-panel px-4` with the
- *   bottom rule the content hangs from. The dashboard, Collection Detail and
- *   the unified response viewer.
- * - `inset` - a strip inside content that is already padded, so it carries
- *   only enough padding to keep the first trigger's focus ring off the edge
- *   (`px-1`). The request strip, the import dialog, the load-test detail.
- * - `bare` - the band belongs to a parent row that holds other things beside
- *   the tabs (the response pane's strip shares its row with the status and the
- *   actions), so the list adds no fill, no rule and no padding of its own.
- *   Not a fourth look: it is `pane`, drawn by whoever owns the row.
- *
- * `border-rule` rather than a border token, and no surface class beside it:
- * `bg-panel` is the `:root` default surface, which is the one case where the
- * fallback value is the right answer (`docs/design-system/surfaces.md`, "`border-rule`:
- * let the surface pick the token").
+ * `border-rule`, with no surface class beside it: `bg-panel` is the `:root` default surface, the
+ * one case where the fallback is right (`docs/design-system/surfaces.md`, "`border-rule`: let the
+ * surface pick the token").
  */
 
 import * as React from "react";
@@ -66,15 +48,11 @@ const Tabs = TabsPrimitive.Root;
 type TabSize = "xs" | "sm";
 
 /*
- * `px-2`, not `px-2.5`. Measured when the response strip had seven tabs: 465px
- * of triggers at `px-2.5` and 437px at `px-2`, and the request strip 532px
- * against 500px. Both carry eight now and neither fits a ~430px pane, which is
- * why they fit-and-overflow (`useFittedTabs`) rather than scroll; the saved
- * pixels are tabs that stay out of the "+N" menu. `naturalTriggerWidth` budgets this
- * padding, so the two move together.
- *
- * Vertical padding is untouched: `xs` is still a 24px band and `sm` a 28px one,
- * which is the step the rest of the app is built on.
+ * `px-2`, not `px-2.5`: measured at seven tabs, 465px against 437px of triggers on the response
+ * strip, 532px against 500px on the request strip. Both carry eight and neither fits a ~430px pane,
+ * so they fit-and-overflow (`useFittedTabs`) rather than scroll, and the saved pixels are tabs kept
+ * out of the "+N" menu. `naturalTriggerWidth` budgets this padding, so the two move together.
+ * Vertical padding is unchanged: `xs` a 24px band, `sm` 28px, the app's step.
  */
 const SIZE: Record<TabSize, string> = {
 	xs: "px-2 py-1",
@@ -84,8 +62,8 @@ const SIZE: Record<TabSize, string> = {
 const TabsSizeContext = React.createContext<TabSize>("xs");
 
 /**
- * The strip's chrome. See the file comment for what each one is for; the prop
- * is required, so there is no "whatever the first caller wanted" default.
+ * The strip's chrome (the file header says what each is for); required, so there is no first-caller
+ * default.
  */
 type TabsVariant = "pane" | "inset" | "bare";
 
@@ -134,34 +112,24 @@ function TabsTrigger({
 				"text-xs font-medium text-muted-foreground",
 				"ring-offset-background transition-colors",
 				"hover:text-foreground",
-				// `ring-inset`, because a trigger fills its list's height exactly and
-				// the strips are `overflow-hidden` - an outward ring had
-				// no room and rendered as two clipped vertical strokes. Inset also
-				// keeps the fix on the trigger, where the ring is, rather than
-				// asking every present and future tab strip to leave room for it.
+				// `ring-inset`: a trigger fills its list's height and the strips are
+				// `overflow-hidden`, so an outward ring rendered as two clipped strokes. Inset
+				// keeps the fix on the trigger, not on every strip leaving room.
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 				"disabled:pointer-events-none disabled:opacity-50",
-				// Every state change here is a `data-[state=]` variant rather than a
-				// swapped class, so the class list is identical either way and only
-				// the attribute moves. Paired with TabLabel, activating a tab
-				// changes nothing that affects layout.
+				// Every state change is a `data-[state=]` variant, not a swapped class, so only the
+				// attribute moves; with TabLabel, activating a tab changes nothing affecting
+				// layout.
 				"data-[state=active]:text-primary-text data-[state=active]:font-semibold",
-				// The indicator. Absolutely positioned inside the existing bottom
-				// padding, so it adds no height - the band stays 24px.
-				//
-				// Colour and weight alone are not enough, and graphite is the proof:
-				// its accent is a neutral, so the active label differs from an
-				// inactive one only in lightness, and 12px at 600 against 500 is a
-				// difference you have to go looking for. A rule is a *shape*, which
-				// no accent scheme can wash out. `--primary` rather than
-				// `--primary-text` because this is an indicator, not a label - the
-				// split the design system already draws.
+				// The indicator, absolutely positioned in the bottom padding, so the band stays
+				// 24px. Colour and weight are not enough: graphite's accent is a neutral, so the
+				// active label differs only in lightness, and 12px at 600 against 500 is hard to
+				// see. A rule is a *shape* no scheme washes out. `--primary`, not `--primary-text`:
+				// an indicator, not a label.
 				"after:absolute after:inset-x-1.5 after:-bottom-px after:h-[2px] after:rounded-full",
-				// `after:transition-colors` on its own: the trigger's own
-				// `transition-colors` above only covers the trigger's own box, not
-				// this pseudo-element's separately painted background - without it
-				// the underline pops in/out instantly on tab switch instead of
-				// fading with everything else.
+				// `after:transition-colors` of its own: the trigger's `transition-colors` covers
+				// its box, not this pseudo-element's background, which would otherwise pop on a
+				// switch.
 				"after:bg-transparent after:transition-colors data-[state=active]:after:bg-primary",
 				SIZE[size ?? inherited],
 				className
@@ -177,26 +145,17 @@ function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPr
 			data-slot="tabs-content"
 			className={cn(
 				"ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-				// Radix's `forceMount` means "always present", not "present but
-				// hidden": it makes `present` unconditionally true and the panel's
-				// `hidden` attribute is `!present`, so a force-mounted inactive
-				// panel carries no `hidden` and paints straight over the selected
-				// one. Collection Detail force-mounts four panels to keep unsaved
-				// drafts alive and stacked all of them on screen at once.
-				//
-				// Hiding belongs here rather than at the call site for the same
-				// reason TabLabel's width reservation does - a caller reaching for
-				// `forceMount` is thinking about the draft it is protecting, not
-				// about Radix's presence model. Inert for a panel that is not
-				// force-mounted, since Radix never renders one.
+				// Radix's `forceMount` means "always present", not "present but hidden": `present`
+				// is true and `hidden` is `!present`, so a force-mounted inactive panel paints over
+				// the selected one (Collection Detail force-mounts four to keep drafts alive).
+				// Hidden here, not per call site, as with TabLabel: a caller reaching for
+				// `forceMount` is thinking of its draft, not Radix's presence model. Inert for a
+				// panel not force-mounted, which Radix never renders.
 				"data-[state=inactive]:hidden",
-				// `.enter-fade` here is `display: none -> block`, not a fresh DOM
-				// node - `@starting-style` fires on either, per spec ("a change of
-				// display type, such as from none to something else"), so switching
-				// back to an already-visited tab fades in exactly like the first
-				// visit. A force-mounted panel (Collection Detail's four) gets this
-				// too: it never truly unmounts, only its `hidden` attribute flips,
-				// which is the same display-type change.
+				// `.enter-fade` here is `display: none -> block`, not a fresh node:
+				// `@starting-style` fires on either (per spec, "a change of display type"), so a
+				// revisited tab fades like the first visit, and a force-mounted panel, whose
+				// `hidden` only flips, does too.
 				"enter-fade",
 				className
 			)}
@@ -206,16 +165,10 @@ function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPr
 }
 
 /**
- * A tab label that always occupies the width of its own bold form.
- *
- * The visible text and a hidden `font-semibold` copy share one grid cell, so
- * the column is sized by the wider of the two - which is the bold one, in every
- * state. Without this, `data-[state=active]:font-semibold` makes the active
- * trigger grow and every trigger to its right jump.
- *
- * Takes a `string` rather than `ReactNode` on purpose: the reservation only
- * works if the hidden copy renders the same text, and a node could carry its
- * own state or side effects when duplicated.
+ * A tab label occupying its bold form's width: the text and a hidden `font-semibold` copy share one
+ * grid cell, sized by the bold one in every state, so the active trigger never grows and shifts the
+ * rest. A `string`, not `ReactNode`: the hidden copy must render the same text, and a duplicated
+ * node could carry its own state or effects.
  */
 function TabLabel({ children }: { children: string }) {
 	return (
@@ -233,38 +186,18 @@ function TabLabel({ children }: { children: string }) {
 }
 
 /*
- * The track a trailing mark on a trigger animates into - the count, the error
- * dot.
- *
- * **Why this animates a track instead of reserving one.** A mark is a flex
- * item on the trigger; the trigger is `shrink-0` inside a `flex-nowrap` list.
- * So a mark that *mounts* at its full width widens its own trigger instantly
- * and every trigger to its right jumps along with it - and so does whatever
- * else shares the row (the request strip's `Table` toggle). Typing the first
- * character into an empty Params table moved the seven tabs after Params and
- * the toggle past them. This is the same defect `TabLabel` above fixes for
- * the active weight, arriving through content instead of through a class.
- *
- * An earlier version fixed the jump by holding a `min-w-[1ch]` slot open at
- * all times - it worked, but every countable tab then paid that width (plus
- * the trigger's `gap-1.5` before it) permanently, on every tab strip in the
- * app, whether or not anything was ever counted. That is dead space a strip
- * that already overflows at seven or eight tabs (see SIZE) cannot afford to
- * spend on tabs that usually show nothing.
- *
- * The replacement is the `grid-template-columns: 0fr -> 1fr` technique
- * (industry-standard for animating an element's own contribution to its
- * container's size without a fixed target width: `0fr` is exactly zero,
- * `1fr` resolves to the content's intrinsic width, and both are real track
- * sizes a transition can interpolate between - unlike animating to `auto`,
- * which cannot transition at all). `MARK_TRACK` is the wrapper: `grid-cols-*`
- * carries the width, `overflow-hidden` clips the content mid-transition, and
- * `-ms-1.5`/`ms-0` cancels and restores the trigger's own `gap-1.5` in step
- * with the width so an empty mark costs nothing, not even its own gap - the
- * two `transition-[...]` properties move together for exactly that reason.
- * `TabLabel`'s hidden-copy trick does not transfer here: a count has no
- * "widest state" to reserve, it is a number, not one string rendered two
- * ways.
+ * The track a trigger's trailing mark (the count, the error dot) animates into. A mark is a flex
+ * item on a `shrink-0` trigger in a `flex-nowrap` list, so one *mounting* at full width widens its
+ * trigger and jumps every trigger to its right and whatever shares the row (the request strip's
+ * `Table` toggle): typing into an empty Params table moved seven tabs and the toggle. `TabLabel`'s
+ * defect, through content. A reserved `min-w-[1ch]` slot (plus the trigger's `gap-1.5`) would
+ * charge every countable tab on every strip, room a strip already overflowing at seven or eight
+ * tabs (see SIZE) cannot spare. So the track animates `grid-template-columns: 0fr -> 1fr`: `0fr` is
+ * zero, `1fr` the content's width, both real track sizes a transition interpolates, unlike `auto`.
+ * `grid-cols-*` carries the width, `overflow-hidden` clips mid-transition, and `-ms-1.5`/`ms-0`
+ * cancels and restores the trigger's `gap-1.5` in step, so an empty mark costs nothing, not even
+ * its gap; the two `transition-[...]` properties move together for that. `TabLabel`'s hidden copy
+ * does not transfer: a count has no widest state.
  */
 const MARK_TRACK =
 	"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out";
@@ -281,52 +214,29 @@ function PresenceDot() {
 }
 
 /**
- * The small superscript count on a tab.
+ * The small superscript count on a tab, not a `Badge` pill, whose `h-5` 20px floor no 24px band
+ * holds; it sets no height. 10px is the micro step (`type-scale.test.ts` rejects nudged half-pixel
+ * sizes).
  *
- * A superscript, not a `Badge` pill: the pill's `h-5` set a 20px floor that no
- * 24px band can accommodate. This sets no height at all.
+ * **Zero and `undefined` render nothing**, here so no call site must remember: `0` says "none",
+ * which the tab's empty state says better. A caller wanting a zero passes `"0"`. Nothing
+ * *perceptible*: the `<sup>` stays at a `grid-cols-[0fr]` track (`MARK_TRACK`) and only its
+ * contents and track size change, so a count grows in, costs nothing at rest, and adds no text to
+ * the accessible name ("Params", not "Params 0").
  *
- * 10px is the documented micro step - see type-scale.test.ts, which rejects the
- * half-pixel sizes that come from nudging a number until it looks right.
+ * **Going empty is held** (`useHeldValue`, `TIMING.MARK_FADE_MS`): the last count stays one track
+ * duration while opacity takes it out, so exit mirrors entry rather than the track collapsing
+ * around an emptied box.
  *
- * **Zero renders nothing, and so does `undefined`.** A count is there to say
- * "there are this many"; a `0` says "there are none", which the tab's own empty
- * state already says at more length and without asking you to read a
- * superscript to find out there is nothing to read.
+ * So callers render `TabCount` **unconditionally** on a tab that can carry a count, passing
+ * `undefined` for none; gating the element brings the shift back. A tab that never carries one
+ * renders none and pays no width.
  *
- * Handled here rather than at each call site, each of which would have to remember it.
- * A caller that genuinely wants to show a zero can pass
- * the string `"0"`.
- *
- * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
- * `<sup>` is always here, at a `grid-cols-[0fr]` track (see `MARK_TRACK`);
- * only its contents and its own track size come and go, so a count appearing
- * grows in rather than popping and costs nothing at rest. It is empty, not
- * `0` and not a placeholder glyph, so it contributes no text to the trigger's
- * accessible name and a screen reader reads "Params", not "Params 0".
- *
- * **Going empty is held, not instant** (`useHeldValue`,
- * `TIMING.MARK_FADE_MS`). The contents used to clear in the same commit that
- * put the track back to `0fr`, so the track spent 150ms collapsing around a
- * box that was already empty and the digit itself was cut - the appearance
- * animates and the disappearance did not, which the track's own motion made
- * easy to miss. The last count now stays in the node for one track duration
- * while an opacity transition takes it out, so the two halves of the mark's
- * life are mirror images.
- *
- * The contract that follows for callers: render `TabCount` **unconditionally**
- * on any tab that can carry a count, passing `undefined` when it has none -
- * gating the element is what reintroduces the shift. A tab that can never
- * carry one renders no `TabCount` at all and pays no width, ever.
- *
- * **`presence` draws a dot instead of the value** (#2199). A tab that has
- * "something here" but nothing to count - Info, Body, Auth, Settings - used to
- * pass `1`, which read as a count of one beside Params and Headers, whose
- * numbers are real. With `presence`, any non-empty `value` means present and
- * the cell holds a dot, so the digit can never be mistaken for a quantity. Same
- * track, same held exit, same unconditional-render contract; the dot is
- * `aria-hidden` and the cell carries no text, so the trigger's accessible name
- * stays the bare label (a screen reader loses nothing a digit never said).
+ * **`presence` draws a dot instead of the value** (#2199), for a tab with "something here" and
+ * nothing to count (Info, Body, Auth, Settings), so it is not read as a count of one beside Params'
+ * and Headers' real numbers. Any non-empty `value` means present. Same track, held exit and render
+ * contract; the dot is `aria-hidden` and the cell holds no text, so the accessible name stays the
+ * bare label.
  */
 function TabCount({
 	value,
@@ -339,9 +249,8 @@ function TabCount({
 }) {
 	const live = value === 0 || value === undefined || value === null ? null : value;
 	/*
-	 * The track reads `live`, the text reads `shown`: the collapse starts on
-	 * time while the digit it is collapsing around is still there to fade. See
-	 * `useHeldValue`.
+	 * The track reads `live`, the text `shown`, so the collapse starts on time while the digit it
+	 * collapses around is still there to fade (`useHeldValue`).
 	 */
 	const { shown, fading } = useHeldValue(live, TIMING.MARK_FADE_MS);
 
@@ -357,18 +266,14 @@ function TabCount({
 			<span
 				className={cn(
 					"min-w-0 text-center font-mono text-micro leading-none tabular-nums text-primary-text",
-					// `shown === null` as well as `fading`, so an empty cell rests at
-					// zero rather than transitioning back up to full opacity behind
-					// a collapsed track - invisible either way, but a transition
-					// running on an empty box is the thing this whole fix is about.
-					// It also makes the entry a mirror of the exit: a count
-					// arriving fades up while its track opens. Not on first paint,
-					// where `shown` starts at the live value and the class never
-					// changes.
+					// `shown === null` as well as `fading`, so an empty cell rests at zero rather
+					// than transitioning to full opacity behind a collapsed track, and entry
+					// mirrors exit (a count fades up as its track opens). Not on first paint, where
+					// `shown` starts live.
 					"transition-opacity duration-150 ease-out",
 					shown === null || fading ? "opacity-0" : "opacity-100",
-					// `1em` is the line a digit would occupy (`leading-none` at the
-					// micro step), so the dot sits where the digit's centre would.
+					// `1em` is a digit's line (`leading-none` at the micro step), so the dot sits
+					// at its centre.
 					presence && "flex h-[1em] items-center justify-center",
 					className
 				)}
@@ -380,20 +285,11 @@ function TabCount({
 }
 
 /**
- * An error mark on a tab.
- *
- * Deliberately *not* a `TabCount`. The response Console tab used to draw its
- * script-error state in the count slot, so turning counts off would have
- * silently deleted the only signal that a script failed. Keeping the mark its
- * own element means the two can be controlled separately.
- *
- * It shares `MARK_TRACK` with the count, but unlike `TabCount` it is not kept
- * mounted at rest - its one call site swaps it in for a `TabCount` outright
- * (`hasScriptError ? <TabErrorDot /> : <TabCount .../>`), a real mount, not a
- * prop flip on an already-present node. `transition-*` only animates a value
- * that changes on an element already in the DOM, so a genuine mount needs
- * `starting:` (`@starting-style`) to have a "before" frame to animate from -
- * the same mechanism `.enter-fade` uses for the same reason.
+ * An error mark on a tab, not a `TabCount`, so turning counts off cannot delete the only sign a
+ * script failed. It shares `MARK_TRACK` but is not kept mounted: its call sites mount it outright
+ * (the response Console tab swaps it in for a `TabCount`, the overflow menu adds it when a hidden
+ * tab needs attention). `transition-*` animates only a change on an element already in the DOM, so
+ * a real mount needs `starting:` (`@starting-style`) for a "before" frame, as `.enter-fade` does.
  */
 function TabErrorDot({
 	label = "Script error",
