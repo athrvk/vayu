@@ -50,8 +50,8 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
 	const rovingTabIndex = isRovingStop ? 0 : -1;
 	const Icon = descriptor.icon;
-	// Drag-to-reorder state arrives by context, so `tabItemPropsEqual` is untouched
-	// (`TabStripDnd`).
+	// Drag-to-reorder state arrives by context, not props, so `tabItemPropsEqual` is
+	// untouched: the value changes only while a drag is live.
 	const dnd = useContext(TabStripDndContext);
 	const isDragging = dnd?.draggingId === tab.id;
 	const dropEdge = dnd?.dropTabId === tab.id ? dnd.dropEdge : null;
