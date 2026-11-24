@@ -393,15 +393,19 @@ def page_text_lines(cfg: Split, lines: list[str], layout) -> dict[str, list[str]
     return body
 
 
-def owners(page_lines: dict[str, list[str]]) -> dict[str, str]:
-    """Anchor -> page, for every heading in the source; each anchor once."""
-    owner: dict[str, str] = {}
+def owners(page_lines: dict[str, list[str]]) -> dict[str, str | None]:
+    """Anchor -> page, for every heading in the source.
+
+    Two headings with one text (`### Features` under two clients) share a slug: the
+    site numbers the second `-1`. Split onto two pages each is the first of its
+    page, so the anchor means two places and a link to it cannot be aimed: it maps
+    to None, and a link that uses it stops the split.
+    """
+    owner: dict[str, str | None] = {}
     for page, lines in page_lines.items():
         for _, _, text in headings_of(lines):
             anchor = slug(text)
-            if anchor in owner:
-                raise SplitError(f"anchor #{anchor} names two headings")
-            owner[anchor] = page
+            owner[anchor] = None if anchor in owner else page
     return owner
 
 
@@ -421,19 +425,25 @@ def page_shift(cfg: Split, page: str, lines: list[str]) -> tuple[bool, int]:
     return False, max(0, top - TITLED_TOP_LEVEL)
 
 
-def aim_target(target: str, page: str, owner: dict[str, str]) -> str:
+def home_of(owner: dict[str, str | None], anchor: str, where: str) -> str:
+    """The page an anchor lives on; a link to a missing or a doubled one stops the split."""
+    if anchor not in owner:
+        raise SplitError(f"{where}: no heading for the link #{anchor}")
+    if owner[anchor] is None:
+        raise SplitError(f"{where}: #{anchor} names two headings, so a link to it cannot be aimed")
+    return owner[anchor]
+
+
+def aim_target(target: str, page: str, owner: dict[str, str | None]) -> str:
     if _URL.match(target):
         return target
     if target.startswith("#"):
-        anchor = target[1:]
-        home = owner.get(anchor)
-        if home is None:
-            raise SplitError(f"{page}: no heading for the link {target}")
+        home = home_of(owner, target[1:], page)
         return target if home == page else f"{home}.md{target}"
     return f"../{target}"
 
 
-def transform(cfg: Split, page: str, lines: list[str], owner: dict[str, str]) -> list[str]:
+def transform(cfg: Split, page: str, lines: list[str], owner: dict[str, str | None]) -> list[str]:
     """The page's lines with heading levels and link targets changed."""
     promote, shift = page_shift(cfg, page, lines)
     flags = fenced(lines)
@@ -517,16 +527,17 @@ def tracked_markdown(cfg: Split, root: Path) -> list[str]:
     return [path for path in out.split("\n") if path and not path.startswith(cfg.out_dir + "/")]
 
 
-def aim_inbound(cfg: Split, file: str, owner: dict[str, str], missing: list[str]):
+def aim_inbound(cfg: Split, file: str, owner: dict[str, str | None], missing: list[str]):
     def change(target: str) -> str:
         if _URL.match(target) or target.startswith("#"):
             return target
         path, _, fragment = target.partition("#")
         if posixpath.normpath(posixpath.join(posixpath.dirname(file), path)) != cfg.source:
             return target
-        home = "index" if not fragment else owner.get(fragment)
-        if home is None:
-            missing.append(f"{file}: no heading for #{fragment}")
+        try:
+            home = "index" if not fragment else home_of(owner, fragment, file)
+        except SplitError as error:
+            missing.append(str(error))
             return target
         new = posixpath.relpath(f"{cfg.out_dir}/{home}.md", posixpath.dirname(file) or ".")
         return new + (f"#{fragment}" if fragment else "")
@@ -570,7 +581,7 @@ def reshaped(old: str, new: str) -> list[str]:
     return refit(new)
 
 
-def rewrite_inbound(cfg: Split, root: Path, owner: dict[str, str], write: bool) -> tuple[list[str], list[str]]:
+def rewrite_inbound(cfg: Split, root: Path, owner: dict[str, str | None], write: bool) -> tuple[list[str], list[str]]:
     """(files that change, links with no heading) for every markdown file but the pages."""
     changed: list[str] = []
     missing: list[str] = []
@@ -674,9 +685,18 @@ def verify(cfg: Split, root: Path, source: str) -> list[str]:
     for anchors in found.values():
         for anchor in anchors:
             seen[anchor] = seen.get(anchor, 0) + 1
-    findings += [f"anchor #{anchor} appears {count} times" for anchor, count in seen.items() if count != 1]
+    was: dict[str, int] = {}
+    for _, _, text in headings_of(lines):
+        was[slug(text)] = was.get(slug(text), 0) + 1
     findings += [
-        f"anchor #{anchor} is not on {home}.md" for anchor, home in owner.items() if anchor not in found[home]
+        f"anchor #{anchor} appears {seen.get(anchor, 0)} times, not {count}"
+        for anchor, count in was.items()
+        if seen.get(anchor, 0) != count
+    ]
+    findings += [
+        f"anchor #{anchor} is not on {home}.md"
+        for anchor, home in owner.items()
+        if home is not None and anchor not in found[home]
     ]
 
     anchors = {name: set(values) for name, values in found.items()}
