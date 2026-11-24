@@ -8,7 +8,6 @@
 #pragma once
 
 /**
- * @file seed.hpp
  * @brief What every category file under `config_seeds/` shares (issue #1611).
  *
  * `Database::seed_default_config` used to be one 990-line function; this

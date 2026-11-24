@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_config.cpp
  * @brief Structured config entries: CRUD, the typed getters, and the call
  * into the per-category seeders #1611 split out (issue #1614).
  */

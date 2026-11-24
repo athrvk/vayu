@@ -8,7 +8,6 @@
  */
 
 /**
- * @file database_impl.hpp
  * @brief The sqlite_orm storage mapping and `Database::Impl`, shared by
  *        every translation unit under `engine/src/db/` (issue #1614).
  *

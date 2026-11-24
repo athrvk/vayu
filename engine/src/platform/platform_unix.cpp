@@ -6,7 +6,6 @@
  */
 
 /**
- * @file platform_unix.cpp
  * @brief Unix/macOS/Linux platform implementations
  */
 

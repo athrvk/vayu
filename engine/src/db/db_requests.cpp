@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_requests.cpp
  * @brief Requests and their saved examples (issue #481), plus bulk import
  * (issue #96) (issue #1614).
  */

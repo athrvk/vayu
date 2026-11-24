@@ -6,7 +6,6 @@
  */
 
 /**
- * @file platform_windows.cpp
  * @brief Windows platform implementations
  */
 

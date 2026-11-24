@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_maintenance.cpp
  * @brief Startup: schema migration, corruption recovery, `init ()`'s repair
  * passes, workspace backup and the startup page-reclamation pass (issue
  * #1614). `migrate_before_sync`, `has_sqlite_header`, `copy_db_files` and
