@@ -6,7 +6,6 @@
  */
 
 /**
- * @file examples.ts
  * @brief Saved example responses: the body bound, the write payload and the
  *        delete prompt's wording.
  */

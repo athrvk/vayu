@@ -6,7 +6,6 @@
  */
 
 /**
- * @file compose.ts
  * @brief The request an execute or load tool sends: argument overrides,
  *        engine-side composition, the streaming read, the agent-script gate and
  *        the load-run payload with its bounds.

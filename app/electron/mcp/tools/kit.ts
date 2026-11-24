@@ -6,7 +6,6 @@
  */
 
 /**
- * @file kit.ts
  * @brief The helpers every tool shares: result builders, argument coercion and
  *        the write and confirmation gates.
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file contract.ts
  * @brief What a tool is, what it is handed and what it answers: the registry's
  *        types, the elicitation seam and the data families a call can change.
  */
