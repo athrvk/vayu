@@ -748,8 +748,7 @@ SampleIdentity identity) {
 
     // Claim a slot before copying anything. Past capacity most candidates are
     // refused, and a refusal costs neither the body-sized copy below nor the
-    // mutex - which the old hard stop took on every sampled completion for the
-    // rest of the run, purely to find the buffer full.
+    // mutex.
     const size_t seen = response_seen_.fetch_add (1, std::memory_order_relaxed);
     const ReservoirSlot slot = reservoir_slot (seen, capacity, next_random ());
     if (!slot.accepted) {
@@ -1690,8 +1689,8 @@ const Percentiles* window_percentiles) const {
     stats["requestsSent"]     = requests_sent;
     stats["requestsExpected"] = requests_expected;
 
-    // Status code class breakdown. The dedicated class atomics were removed to
-    // keep the hot path a single increment; classes are derived here. Code 0
+    // Status code class breakdown, derived here to keep the hot path a single
+    // increment. Code 0
     // (transport errors) and out-of-range codes belong to no class bucket.
     size_t s2xx = 0, s3xx = 0, s4xx = 0, s5xx = 0;
     for (const auto& [code, count] : dist) {

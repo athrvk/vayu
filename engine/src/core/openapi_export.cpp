@@ -533,8 +533,7 @@ Json examples_map_of (Json& media) {
  * one - a media object already answering with a map gains an entry and keeps
  * every entry it had, and a single `example` becomes a map only when a second
  * example has to go somewhere, carrying the declared value in rather than
- * dropping it. Erasing an `examples` map to write one `example` is what this
- * used to do, and what took the other examples of a user's own contract with it.
+ * dropping it.
  */
 void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& notes, ExportDirection direction) {
     const std::vector<const ExportExample*>& writing = write.examples;

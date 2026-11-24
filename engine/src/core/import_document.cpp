@@ -531,7 +531,7 @@ json with_required_content_type (json headers, const json& body, bool refused = 
 /**
  * `joinExec(event)`: a Postman `event` entry's script lines, joined. A `script`
  * that is itself a string is the script's text - Postman's SDK reads one as
- * `{exec: [text]}` - and used to import as nothing at all.
+ * `{exec: [text]}`.
  */
 std::string join_exec (const json* event) {
     const json* script = prop (event, "script");
@@ -1476,8 +1476,7 @@ std::string host_path_url (const json* url) {
     }
 
     const bool has_path = append_postman_path (url, out);
-    // Neither part contributed anything: there is no URL to assemble, the same
-    // answer an absent `raw` used to give.
+    // Neither part contributed anything: there is no URL to assemble.
     return host.empty () && !has_path ? std::string () : out;
 }
 
@@ -1580,8 +1579,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     return { std::move (split.base), std::move (params) };
 }
 
-/// `pmEvents(node)`: the `event[]` entries that are objects. A `null` in that
-/// array used to throw on `e.listen`.
+/// `pmEvents(node)`: the `event[]` entries that are objects.
 std::vector<const json*> pm_events (const json* node) {
     std::vector<const json*> events;
     const json* declared = prop (node, "event");
@@ -1867,9 +1865,7 @@ std::optional<int> saved_response_status (const json* code) {
 /**
  * `pmExamples(item)`: Postman's saved responses (`item.response[]`).
  *
- * Read by nothing until the engine had a table to hold them, so importing a
- * collection whose whole value was its documented responses produced one with
- * none. A saved response with no `code` documents a 200, which is what Postman
+ * A saved response with no `code` documents a 200, which is what Postman
  * shows for one. What no column models - the request it was recorded against,
  * the status text, preview settings, cookies, response time, the header rows
  * as written - rides along as `postmanResponse` for the Postman export.
@@ -2232,8 +2228,7 @@ json pm_folder (const json* node, const json& inherited, PostmanCounts& counts) 
         for (const json& child : *items) {
             // A `null` or scalar entry - hand-edited or script-filtered JSON,
             // which the v2.0 detector's permissive fallback happily accepts -
-            // used to throw a bare TypeError naming no item and no format,
-            // failing an otherwise well-formed file whole.
+            // is counted as malformed rather than failing an otherwise well-formed file.
             const json* entry = as_record (&child);
             if (entry == nullptr) {
                 counts.skipped_malformed += 1;
@@ -2896,10 +2891,9 @@ json insomnia_body (const json* body, InsomniaCounts& counts) {
     if (mime == "application/graphql") {
         return json{ { "mode", "graphql" }, { "content", to_graphql_envelope (text) } };
     }
-    // Both spellings a client sends XML under. They used to fall through to the
-    // unlisted branch, which keeps the text as `text` - readable, but a mode
-    // that requires no Content-Type, so the imported request sent its SOAP
-    // envelope as `x-www-form-urlencoded`.
+    // Both spellings a client sends XML under. Falling through to the unlisted
+    // branch would keep the text as `text`, a mode that requires no Content-Type,
+    // so the request would send its SOAP envelope as `x-www-form-urlencoded`.
     if (mime == "application/xml" || mime == "text/xml") {
         return json{ { "mode", "xml" }, { "content", text } };
     }
