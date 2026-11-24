@@ -681,11 +681,9 @@ function dataColumnNames(data: unknown): string[] {
  * run-level `timers`/`scripts` override object `args.elements` becomes. So the
  * composed list is renamed onto the payload rather than copied verbatim.
  *
- * **`script.pre` can reach the wire now, but only when marked.** Before issue
- * #1594, `POST /runs` ran no element pipeline at all, so a saved request's
- * pre-request script never applied under load - `droppedPreRequestScripts`
- * existed to say so. Now a `script.pre` element runs inline, per submission,
- * when its own `config.inline` is set or the run's `elements.scripts`
+ * **`script.pre` can reach the wire now, but only when marked.** A
+ * `script.pre` element runs inline, per submission, when its own
+ * `config.inline` is set or the run's `elements.scripts`
  * override forces it; left `asMarked` with no per-element mark, it still
  * never runs (there is no pre-request replay to defer it to, unlike
  * `script.post`). `droppedPreRequestScripts` folds `args.elements.scripts`
@@ -745,12 +743,7 @@ export async function composeLoadRunRequest(
 	// run's own `elements.scripts` override, when present, decides for every
 	// `script.pre` element regardless of its own `config.inline` - "allInline"
 	// runs every one of them, "allDeferred" runs none, and only the absence of
-	// an override falls back to each element's own mark. Reading only
-	// `config.inline` here (as an earlier version of this function did) missed
-	// the "allDeferred" case: a request whose `script.pre` was individually
-	// marked inline would count as not dropped, when the override forces it
-	// deferred anyway - the caveat below would then say nothing about a script
-	// that, in fact, never ran.
+	// an override falls back to each element's own mark.
 	const scriptsOverride =
 		isRecord(args.elements) && typeof args.elements.scripts === "string"
 			? args.elements.scripts
