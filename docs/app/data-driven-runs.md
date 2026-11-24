@@ -215,7 +215,7 @@ Both read the same row. They differ in _when_:
 - **`{{data.column}}`** is substituted into the request - URL, headers, body,
   form fields - immediately before the send. Use it to make each iteration hit a
   different endpoint or send a different payload. See the
-  [`{{data.column}}` contract](../engine/api-reference.md#post-runs) in the
+  [`{{data.column}}` contract](../engine/api-reference/load-runs.md#post-runs) in the
   engine's HTTP API reference.
 - **`pm.iterationData`** is read by scripts, _after_ the step's request was
   composed, so it cannot change where the request goes. Use it for assertions

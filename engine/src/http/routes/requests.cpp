@@ -77,7 +77,7 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
  * The rows arrive already ordered by `order`, then `created_at`, then `id`
  * (the `get_request*_in_*` reads have the ORDER BY), matching the ordering contract
  * collections have had all along - see the ordering section of
- * `docs/engine/api-reference.md` for why the tiebreak is part of the contract
+ * `docs/engine/api-reference/resource-writes.md` for why the tiebreak is part of the contract
  * rather than a detail.
  *
  * Each row is serialized into its own buffer inside the try, so a row

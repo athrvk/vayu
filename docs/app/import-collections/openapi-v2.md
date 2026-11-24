@@ -28,7 +28,7 @@ dialects are read by that one port, so a 2.0 rule changed here changes there too
 > `engine/tests/fixtures/import-conformance.json` was recorded from the parser
 > this replaced and is asserted against on every build - it is simply read by
 > `engine/src/core/import_document.cpp` now, behind
-> [`POST /import/parse`](../../engine/api-reference.md#post-importparse), rather
+> [`POST /import/parse`](../../engine/api-reference/import.md#post-importparse), rather
 > than in the renderer. Module names in C++ style below name that file's
 > functions; the app holds no parser.
 

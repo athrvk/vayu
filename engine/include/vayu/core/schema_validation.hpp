@@ -121,7 +121,7 @@ namespace vayu::core {
 /**
  * Why a response was not checked. A code rather than a sentence: the app owns
  * the wording it shows a user, and a sentence built here would be a second
- * place to change it. `docs/engine/api-reference.md` lists them all.
+ * place to change it. `docs/engine/api-reference/execute.md` lists them all.
  *
  * Absent-vs-`checked:false` is the distinction that matters and it is decided
  * by the caller, not here: a collection bound to no document produces **no

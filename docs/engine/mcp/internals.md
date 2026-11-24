@@ -177,4 +177,4 @@ That file also fails on any `Withheld` or `<redacted>` in a description of a ses
 
 - [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) · [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 - Client docs: [Claude Code](https://code.claude.com/docs/en/mcp) · [Codex](https://developers.openai.com/codex/mcp) · [Cursor](https://cursor.com/docs/mcp)
-- Engine API surface: [`api-reference.md`](.././api-reference.md) · Threat model: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md)
+- Engine API surface: [`api-reference/index.md`](../api-reference/index.md) · Threat model: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md)

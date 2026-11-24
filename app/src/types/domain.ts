@@ -955,7 +955,7 @@ export interface ElementOrigin {
  * that ran, beside the existing script test results.
  *
  * `origin` is absent for an inline send with no `requestId` to resolve a
- * chain from (`docs/engine/api-reference.md`'s Elements section).
+ * chain from (`docs/engine/api-reference/execute.md`, the `elements` entries).
  */
 export interface ElementOutcome {
 	id: string;
@@ -1560,7 +1560,7 @@ export type StreamEndReason = (typeof STREAM_END_REASONS)[number];
  *
  * `sourceId` is the **origin's** own `id:` field, not the relay frame id the
  * `lastEventId` resume takes - conflating the two would make one of the two
- * resumes silently wrong (see `docs/engine/api-reference.md`). An event larger
+ * resumes silently wrong (see `docs/engine/api-reference/live-metrics.md`). An event larger
  * than `sseMaxEventBytes` arrives as a prefix with `dataTruncated` set and
  * `dataBytes` holding the size as sent, never silently cut.
  */
@@ -1781,7 +1781,7 @@ export interface RunResultTrace {
 		 * written before that change and on a step that sent nothing, which is
 		 * why `restore-response.ts`'s `sentSide` keeps `buildRawRequest` as its
 		 * fallback. Values are **not redacted** - same contract as the live
-		 * field (see `docs/engine/api-reference.md`).
+		 * field (see `docs/engine/api-reference/execute.md`).
 		 *
 		 * Its body half is capped at `maxTraceBodyBytes` like `body` is; the
 		 * header block is never cut.
@@ -2483,7 +2483,7 @@ export interface RunThresholds extends RunThresholdBudgets {
 	 * and a mistyped fixed key is still a type error rather than being swallowed
 	 * as "some other threshold". The engine checks the *shape* of these keys and
 	 * not that `<name>` is one this run records, so neither does this
-	 * (`docs/engine/api-reference.md`, the thresholds block).
+	 * (`docs/engine/api-reference/load-runs.md`, the thresholds block).
 	 */
 	[key: `custom.${string}`]: number | undefined;
 }

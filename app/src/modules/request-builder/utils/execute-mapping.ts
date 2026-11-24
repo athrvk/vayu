@@ -354,7 +354,7 @@ export function authProvenance(
  * The response codes a refusal's rule code stands for. A buffered send answers
  * a refused file as a response carrying `UNSENDABLE_FILE`; a streaming one has
  * no response yet, so the engine refuses it with a `400` under the rule's own
- * code (`unsendable_file`, documented in `docs/engine/api-reference.md`) and
+ * code (`unsendable_file`, documented in `docs/engine/api-reference/request-body.md`) and
  * `ClientErrorView` only knows the response spelling (#3693).
  */
 const RESPONSE_CODE_OF_RULE: Readonly<Record<string, string>> = {

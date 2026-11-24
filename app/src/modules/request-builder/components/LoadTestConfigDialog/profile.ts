@@ -14,7 +14,7 @@ import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 /**
  * Duration is meaningless in `iterations`: the engine stops on
  * `requests_sent < iterations` and its branch in `load_strategy.cpp` never
- * reads duration - `docs/engine/api-reference.md` documents the field as
+ * reads duration - `docs/engine/api-reference/load-runs.md` documents the field as
  * "constant_rps / constant_concurrency / ramp_up". The old dialog showed it
  * anyway, second on screen, and persisted whatever you typed. It already
  * half-knew: the OAuth guard is handed `null` in this mode precisely because

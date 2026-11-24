@@ -11,7 +11,7 @@ are detected, parsed into Vayu's internal draft model, and persisted.
 **The parse is the engine's** since issue
 [#877](https://github.com/athrvk/vayu/issues/877). Every format below is read by
 `engine/src/core/import_document.cpp`, behind
-[`POST /import/parse`](../../engine/api-reference.md#post-importparse), and the
+[`POST /import/parse`](../../engine/api-reference/import.md#post-importparse), and the
 app calls it. There is no parser in `app/src` any more, and that is the point:
 the renderer's stack was the *second* reader of a document, which is what
 [#853](https://github.com/athrvk/vayu/issues/853) set out to end - and while it
@@ -68,7 +68,7 @@ fewer than the documents picked whenever one could not be read or was inlined
 into another.
 
 An agent has no dialog, so it takes the whole of that in one call:
-[`POST /import`](../../engine/api-reference.md#post-import) is the parse, the
+[`POST /import`](../../engine/api-reference/import.md#post-import) is the parse, the
 flattening and the apply together. The app deliberately does not use it - a
 person picks which files of a batch to import and toggles two options between
 the parse and the apply.
@@ -252,7 +252,7 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 
 `ImportOrchestrator` takes an injected `ImportApi` (easy to fake in tests) and exposes
 `run(result, opts)`, which flattens the draft tree into **one**
-[`POST /import/apply`](../../engine/api-reference.md#post-importapply) call:
+[`POST /import/apply`](../../engine/api-reference/import.md#post-importapply) call:
 
 - Collections are flattened depth-first - **collection → its requests → child
   collections** - carrying `parentTempId` (`null` for a root) and, below a root,
@@ -276,7 +276,7 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   payload, then one transaction), so a *rejected* payload persisted nothing and the error
   the modal shows is the engine's, naming the item that broke. The engine names it by
   `tempId` (inside the error object - see
-  [api-reference](../../engine/api-reference.md));
+  [api-reference](../../engine/api-reference/index.md));
   `importFailureMessage` (`services/importers/failure-message.ts`) resolves that back to
   the name shown in the preview, since `c37` means nothing to whoever chose the file.
   The old per-item loop needed
@@ -361,7 +361,7 @@ imported without its examples looks exactly like a document that documented none
 One renderer path still needs a document as a *tree*: `ref-bundler.ts`, which
 inlines the files a multi-file OpenAPI document references before anything is
 parsed or stored (issue #649). It reads through
-[`POST /import/document`](../../engine/api-reference.md#post-importdocument) -
+[`POST /import/document`](../../engine/api-reference/import.md#post-importdocument) -
 `core::read_document` and nothing else - so it holds no parser of its own, and
 `js-yaml` is gone from production `src/`.
 

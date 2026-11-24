@@ -496,7 +496,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 The daemon listens on `http://127.0.0.1:9876` and serves no browser: it sends
 no CORS header, and the request gate in `server.cpp` refuses any `Origin` and
 any `Host` that is not a loopback name for its own port, before routing
-(`docs/engine/api-reference.md`, "Who may call the API"). The Electron shell
+(`docs/engine/api-reference/index.md`, "Who may call the API"). The Electron shell
 strips the renderer's `Origin` and supplies its CORS headers.
 
 **A `GET` route must never have a side effect, because any web page can make
@@ -557,7 +557,7 @@ Key endpoints:
 
 The pre-consolidation paths (`POST /request`, `POST /run`, `/run/:id...`,
 `GET /metrics/live/:runId`, `GET /stats/:runId`) are removed and answer `404`;
-`docs/engine/api-reference.md` (Removed route aliases) maps each to its
+`docs/engine/api-reference/index.md` (Removed route aliases) maps each to its
 replacement. An unresolved
 `{"mode":"inherit"}` reaching an execution endpoint is treated as no auth and
 logged as a warning: it means a client skipped composition.
@@ -1345,7 +1345,7 @@ logged as a warning: it means a client skipped composition.
   transaction commits, never inside it - taking that lock from inside
   `import_apply_response`'s own would deadlock. A candidate that route would
   refuse (an unreadable file, a `(host, port)` collision) is silently skipped,
-  not surfaced as a `400`; see `docs/engine/api-reference.md`'s
+  not surfaced as a `400`; see `docs/engine/api-reference/import.md`'s
   `POST /import/apply` section. The app sends only the candidates the user
   ticked, and each registration is logged at info (`host`, `port`, `certPath`;
   never the passphrase or the key).
@@ -1651,7 +1651,7 @@ fields too. Add a script destination to `compose_elements` /
 
 | Doc | Update it when you change… |
 |-----|----------------------------|
-| `docs/engine/api-reference.md` | **Any** endpoint, payload, or status code |
+| `docs/engine/api-reference/` | **Any** endpoint, payload, or status code: one page per group of `src/http/routes/*.cpp` files, and the table in `index.md` names the page for each route file |
 | `docs/engine/run-export.schema.json` | A member of the run-report export (`core/run_export.cpp`, its comparison `core/run_compare.cpp`); `run_export_schema_test.cpp` validates against it |
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
 | `docs/engine/elements.md` | The element registry, a kind's config or phase, the pipeline |

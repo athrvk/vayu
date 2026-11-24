@@ -16,7 +16,7 @@
  * tick with the latency percentiles, `current_concurrency` and `backpressure`
  * replaced by the bucket's max and `current_rps` by its mean, and `status_seconds`
  * (#2866) by every entry of the bucket merged into one. A rule change
- * there is a change here too; `docs/engine/api-reference.md` ("Downsampling
+ * there is a change here too; `docs/engine/api-reference/metrics.md` ("Downsampling
  * with `maxPoints`") is the contract both follow. The monitor series' fold
  * (#2611, `foldLikeEngineMonitor`) restates the same engine file's
  * `MonitorSampleBucket`: the last sample's timestamp and each name's max.

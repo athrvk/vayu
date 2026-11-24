@@ -685,7 +685,7 @@ const std::function<void ()>& before_write) {
  *
  * Semantics are merge-patch: absent fields keep their stored value. We use PUT
  * loosely rather than adding a separate PATCH verb (documented in
- * api-reference.md) because that is what the update branch has always done and
+ * docs/engine/api-reference/resource-writes.md) because that is what the update branch has always done and
  * what every renderer call site expects. A body `id` that disagrees with the
  * path is a 400 (#97); the path is the identity.
  *

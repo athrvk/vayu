@@ -273,7 +273,7 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `iteration` | The 0-based pass this response was sent in - a collection run's pass, the iteration a load run's sampled response carried, or `0` for a send that bound a row, which is row 0 of 1 | An ordinary Send, which is one request rather than a pass of anything |
 | `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations, and `1` for a send that bound a row, beside its iteration `0` | An ordinary Send |
 | `iterationCount` | How many passes that run will make - a collection run's total, and `1` for a send that bound a row, which is row 0 of 1 | An ordinary Send, and a load run |
-| `run` | A run summary (issue #1499): `{requestsSent, errorRate, assertionsPassed, assertionsFailed}`, whole run; a load run's `errorRate` is the report's, by the [one error definition](../engine/api-reference.md#what-counts-as-an-error) | Every hook except `script.teardown` - the one script that runs after there is a run to summarize |
+| `run` | A run summary (issue #1499): `{requestsSent, errorRate, assertionsPassed, assertionsFailed}`, whole run; a load run's `errorRate` is the report's, by the [one error definition](../engine/api-reference/metrics.md#what-counts-as-an-error) | Every hook except `script.teardown` - the one script that runs after there is a run to summarize |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {
@@ -1847,7 +1847,7 @@ request has already gone out, so nothing is written back and a mutation there is
 The two hooks therefore read **different header sets**, matching Postman: a pre-request
 script sees the composed headers it is there to edit, and a test script sees the ones that
 were actually sent - including the `Content-Type` the engine derives from the body mode and
-the [headers the engine adds itself](../engine/api-reference.md#default-request-headers): the
+the [headers the engine adds itself](../engine/api-reference/health-config.md#default-request-headers): the
 default `User-Agent`, the negotiated `Accept-Encoding`, and a correlation id where one is
 switched on. None of those exists yet when the pre-request script runs (#483, #1229). A `form-data` `Content-Type` appears in neither, because libcurl writes that one
 itself with the boundary.
@@ -2293,7 +2293,7 @@ type-check (#463).
 The declarations reach it as `engine/tests/fixtures/script-typedefs.d.ts`, checked in and
 pinned to the generator by the engine suite - vitest cannot run the C++ generator, and
 ctest has no TypeScript compiler, so the two halves meet at one artifact. See
-[`api-reference.md`](../engine/api-reference.md#the-declarations-are-compiled-not-just-grepped)
+[`api-reference/scripting.md`](../engine/api-reference/scripting.md#the-declarations-are-compiled-not-just-grepped)
 for the regeneration command.
 
 A consequence worth knowing before editing either page: a `pm.*` example here is now
