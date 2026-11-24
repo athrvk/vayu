@@ -6,14 +6,10 @@
  */
 
 /**
- * Why a response was not checked against its schema, in words (issue #628).
- *
- * The engine sends codes and this side owns the wording - one sentence per
- * code, in one place, rather than a sentence built engine-side that every
- * client would then have to match. Beside the component rather than inside it
- * for the reason `save-as-example.ts` sits beside its dialog: the rule outlives
- * the rendering, and a component file that also exports constants costs the
- * whole module its fast refresh.
+ * Why a response was not schema-checked, in words (#628). The engine sends codes and this side owns
+ * the wording, one sentence per code in one place, not engine-built sentences every client must
+ * match. Beside the component, as `save-as-example.ts` is beside its dialog: the rule outlives the
+ * rendering, and a component file exporting constants loses fast refresh.
  */
 
 import type { ValidationUncheckedReason } from "@/types";
@@ -34,8 +30,8 @@ export const UNCHECKED_REASONS: Record<ValidationUncheckedReason, string> = {
 };
 
 /**
- * An unknown code - an engine newer than this app - falls back to the honest
- * generic rather than rendering a raw identifier at a user.
+ * An unknown code (an engine newer than the app) falls back to the honest generic, not a raw
+ * identifier.
  */
 export function uncheckedReasonText(reason: ValidationUncheckedReason | undefined): string {
 	return (reason && UNCHECKED_REASONS[reason]) || "This response was not checked.";

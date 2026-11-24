@@ -6,20 +6,13 @@
  */
 
 /**
- * The five network phases - DNS -> Connect -> TLS -> TTFB -> Download - as one
- * ordered descriptor list.
- *
- * Five components render these same five numbers: the request-builder's timing
- * tab, the dashboard's per-sample tiles, the dashboard's run-level averages
- * card, the dashboard's timing waterfall, and the history sample card.
- *
- * Colour is an *encoding* in the two chart-like renderers (waterfall bars,
- * timeline segments) and decoration in the tiles, so `cssVar` below is the
- * single source for the former and the tiles stay neutral. Every phase is a
- * fixed categorical hue - never `--primary` or `--chart-1`, both of which
+ * The five network phases (DNS -> Connect -> TLS -> TTFB -> Download) as one ordered descriptor
+ * list, read by the request builder's timing tab, the dashboard's per-sample tiles, run-level
+ * averages card and timing waterfall, and the history sample card: a phase added here reaches all
+ * five. Colour *encodes* the phase in the chart-like renderers (waterfall bars, timeline segments)
+ * and would be decoration in the tiles, so `cssVar` is the former's single source and the tiles
+ * stay neutral. Every phase is a fixed categorical hue, never `--primary` or `--chart-1`, which
  * follow the accent.
- *
- * Add a phase here and all five renderers pick it up.
  */
 
 import { PHASE_TIPS } from "./phase-tips";
@@ -34,12 +27,9 @@ export type TimingPhaseAverageKey =
 	"avgDnsMs" | "avgConnectMs" | "avgTlsMs" | "avgFirstByteMs" | "avgDownloadMs";
 
 /**
- * Key on a run report's `timingBreakdown.phases` (per-run percentiles).
- *
- * Not the same spelling as {@link TimingPhaseKey}: the engine writes the phase's
- * wire name, and TTFB's is `firstByte`. Keeping both on the descriptor is what
- * stops a renderer from reaching for `phases[phase.key]` and silently finding
- * nothing for TTFB.
+ * The key on a report's `timingBreakdown.phases` (per-run percentiles), spelled apart from
+ * {@link TimingPhaseKey}: the engine writes the wire name, TTFB's being `firstByte`. Both on the
+ * descriptor, so no renderer reaches for `phases[phase.key]` and finds nothing for TTFB.
  */
 export type TimingPhasePercentileKey = "dns" | "connect" | "tls" | "firstByte" | "download";
 
@@ -48,13 +38,13 @@ export interface TimingPhase {
 	/** What tiles, legend rows and waterfall rows print. */
 	label: string;
 	/**
-	 * Spelled-out label for the run-level averages card, which has the width for
-	 * it and has always read "First Byte" where the dense renderers read "TTFB".
+	 * The spelled-out label for the run-level averages card, which has the width and reads "First
+	 * Byte" where dense renderers read "TTFB".
 	 */
 	longLabel: string;
 	/**
-	 * Fixed categorical hue for the renderers where colour *is* the encoding.
-	 * Never an accent-tracking token - see the file header.
+	 * A fixed categorical hue for renderers where colour *is* the encoding, never an
+	 * accent-tracking token (see the header).
 	 */
 	cssVar: string;
 	tip: string;
@@ -139,11 +129,9 @@ export interface MaybeResolvedTimingPhase extends TimingPhase {
 }
 
 /**
- * The phases a single request actually reported, in wire order.
- *
- * Absent phases are dropped rather than rendered as zero: a trace with no TLS
- * is plain HTTP, which is not the same statement as "the TLS handshake took
- * 0ms". A reported zero is kept, for the same reason read the other way.
+ * The phases one request reported, in wire order. Absent phases are dropped, not zeroed: a trace
+ * with no TLS is plain HTTP, not "the handshake took 0ms"; a reported zero is kept, for the same
+ * reason.
  */
 export function phasesFromTrace(
 	source: TimingPhaseSource | null | undefined
@@ -154,11 +142,9 @@ export function phasesFromTrace(
 }
 
 /**
- * All five phases from a run report's averages.
- *
- * Unlike a trace, this never filters: the averages card and the waterfall both
- * render a fixed five rows so the card does not resize when a run starts
- * reporting, and show "-" for a value that is not there yet.
+ * All five phases from a report's averages, never filtered: the averages card and waterfall draw a
+ * fixed five rows so the card does not resize when a run starts reporting, with "-" for a value not
+ * there yet.
  */
 export function phasesFromAverages(
 	source: TimingAverageSource | null | undefined
@@ -167,14 +153,10 @@ export function phasesFromAverages(
 }
 
 /**
- * Whether a `timingBreakdown` carries the averages half at all.
- *
- * `timingBreakdown` holds two independently-present halves - averages (the
- * phase histograms' means, or the retained trace sample's when the run has none)
- * and `phases` percentiles over every completion - so the object existing says
- * nothing about the averages. Every renderer of the
- * averages asks this instead of testing the object, which is what keeps a
- * phases-only report from painting five zeroed bars and a "0 ms" total.
+ * Whether a `timingBreakdown` carries the averages half. It holds two independently present halves,
+ * averages (the phase histograms' means, or the retained trace sample's without them) and `phases`
+ * percentiles over every completion, so the object says nothing about the averages; renderers ask
+ * this, so a phases-only report paints no five zeroed bars and "0 ms" total.
  */
 export function hasPhaseAverages(source: TimingAverageSource | null | undefined): boolean {
 	return TIMING_PHASES.some((phase) => source?.[phase.averageKey] !== undefined);
@@ -201,12 +183,9 @@ export interface ResolvedPhasePercentiles extends TimingPhase {
 }
 
 /**
- * The phases a run reported percentiles for, in wire order.
- *
- * Filters like `phasesFromTrace` and unlike `phasesFromAverages`: this table is
- * only rendered at all when the section exists, and a phase the engine did not
- * write is one it did not measure. Returns an empty list for an absent section,
- * which is the caller's signal to render nothing rather than an empty table.
+ * The phases a run reported percentiles for, in wire order, filtering like `phasesFromTrace` and
+ * unlike `phasesFromAverages`: the table renders only when the section exists, and an unwritten
+ * phase is unmeasured. An empty list for an absent section, the caller's signal to render nothing.
  */
 export function phasesFromPercentiles(
 	source: TimingPercentileSource | null | undefined
@@ -218,16 +197,11 @@ export function phasesFromPercentiles(
 }
 
 /**
- * Ratio of a phase's p99 to its p50, or `null` when the tail cannot be read.
- *
- * A phase whose p99 towers over its p50 is the signal the percentile table
- * exists to surface - the classic case is TLS, where a p50 of 0 (connections
- * reused) beside a large p99 means the run was re-handshaking under load, which
- * an average over both flattens into a number that looks merely mediocre.
- *
- * `null` for a p50 of 0: the ratio is unbounded there, and "infinitely worse
- * than instant" is not a figure to print. Callers that care about that case
- * read `p99` directly - a zero p50 with a real p99 is itself the finding.
+ * A phase's p99 over its p50, or `null` when the tail cannot be read. A p99 towering over its p50
+ * is what the percentile table surfaces: classically TLS, where a p50 of 0 (reused connections)
+ * beside a large p99 means re-handshaking under load, which an average flattens to merely mediocre.
+ * `null` for a zero p50, where the ratio is unbounded; callers read `p99` directly, a zero p50 with
+ * a real p99 being itself the finding.
  */
 export function tailRatio(percentiles: TimingPhasePercentiles): number | null {
 	return percentiles.p50 > 0 ? percentiles.p99 / percentiles.p50 : null;
