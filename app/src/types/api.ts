@@ -1450,7 +1450,7 @@ export interface TrashEntry {
 	 * which the engine resolves, because the id would have to be looked up in a
 	 * live tree that need not hold a parent that is itself deleted. Add `parentId`
 	 * back with its reader, not before. The whole wire shape is in
-	 * `docs/engine/api-reference.md` under Trash.
+	 * `docs/engine/api-reference/trash.md`.
 	 */
 	/**
 	 * The live owner's name: the collection a request came from, the request an

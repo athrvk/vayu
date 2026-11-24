@@ -100,7 +100,35 @@ nav:
       - vs JMeter: compare/vayu-vs-jmeter.md
   - Engine:
       - Overview: engine/architecture.md
-      - HTTP API: engine/api-reference.md
+      - HTTP API:
+          - Overview: engine/api-reference/index.md
+          - Resource Writes: engine/api-reference/resource-writes.md
+          - Request Body: engine/api-reference/request-body.md
+          - Health, Config and Workspace: engine/api-reference/health-config.md
+          - Collections and Reorder: engine/api-reference/collections.md
+          - Requests and Elements: engine/api-reference/requests.md
+          - Trash: engine/api-reference/trash.md
+          - Request Examples: engine/api-reference/examples.md
+          - Specs: engine/api-reference/specs.md
+          - Import: engine/api-reference/import.md
+          - Export: engine/api-reference/export.md
+          - Environments and Globals: engine/api-reference/environments.md
+          - Change Feed: engine/api-reference/changes.md
+          - Cookies and Certificates: engine/api-reference/cookies-and-certificates.md
+          - File Access: engine/api-reference/file-access.md
+          - Webhook Inbox: engine/api-reference/inbox.md
+          - Mock Server: engine/api-reference/mock-server.md
+          - Authentication: engine/api-reference/authentication.md
+          - POST /compose: engine/api-reference/compose.md
+          - POST /execute: engine/api-reference/execute.md
+          - POST /runs: engine/api-reference/load-runs.md
+          - Scenario Runs: engine/api-reference/scenario-runs.md
+          - Scenario Load Runs: engine/api-reference/scenario-load.md
+          - Metrics and Statistics: engine/api-reference/metrics.md
+          - Live Metrics and Events: engine/api-reference/live-metrics.md
+          - Runs: engine/api-reference/runs.md
+          - Collection Run Verdicts: engine/api-reference/collection-runs.md
+          - Scripting Completions: engine/api-reference/scripting.md
       - Test Scripting: engine/scripting.md
       - Local Database: engine/db-schema.md
       - Elements: engine/elements.md

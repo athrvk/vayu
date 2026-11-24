@@ -15,7 +15,7 @@
  *
  * The metric name is typed, not picked from a list. The engine validates the
  * key's *shape* and not that the name is one this run records
- * (`docs/engine/api-reference.md`, the thresholds block), so a picker would
+ * (`docs/engine/api-reference/load-runs.md`, the thresholds block), so a picker would
  * have to resolve every `metric.record` element down the collection chain to
  * offer a choice the engine does not require - plumbing neither dialog has, for
  * no correctness gain. The stat is a closed set, so that half is a select.

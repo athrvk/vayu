@@ -53,7 +53,7 @@ description: >-
   The rows themselves are not capped further: at ~200 bytes of scalars each they are noise beside one body, and the run's shape is the answer even when the payloads cannot come along.
   Bounded sizes for the fixtures above: 33 K characters for the single 1 MB row, 76 K for 100 steps x 1 MB, 120 K for 200 rows with all three nodes populated (24.7 M unbounded).
 - **A trace can also carry `scripts.scriptRequests`** (issue #3633): one record per `pm.sendRequest` a design send's or a collection-run step's scripts made, each with its own `request` and `response` nodes.
-  The engine writes them masked (credential headers and URL credentials `<redacted>`, the challenge headers shown) and holds all of one trace's record bodies to one `maxTraceBodyBytes` together, so a row's records add at most what its own response may (see [`POST /execute`](../api-reference.md#post-execute)).
+  The engine writes them masked (credential headers and URL credentials `<redacted>`, the challenge headers shown) and holds all of one trace's record bodies to one `maxTraceBodyBytes` together, so a row's records add at most what its own response may (see [`POST /execute`](../api-reference/execute.md#post-execute)).
   That engine bound is 5 MiB, so `get_run_report` bounds the records as it bounds the main exchange: **each record's `request` and `response` body is cut to the same 32 KB**, with the same `bodyTruncated` / `bodyBytes` pair, and the records count toward the row's share of the 96 KB budget.
   **A trace over what is left of the budget gives up its records before anything of its own**, one step at a time, stopping at the first that fits.
   First the bodies: each one is stored `""` with `bodyTruncated: true` and its true `bodyBytes`, the engine's own spelling for a record body past its shared budget, and the `scripts` node gains `scriptRequestBodiesOmitted: true`.
@@ -211,7 +211,7 @@ A run comparison is the one multi-line reference, and the one with no quoted nam
 
 Every line below is the app's formatter (`app/src/lib/agent-reference.ts`) run over one fixture, the entities in `app/src/lib/agent-reference.docs.test.ts`, which fails when a line here stops matching its output.
 The run times are shown as `en-US` in UTC; the app prints the user's own locale and zone.
-A run exported as a file ([`POST /export/run-report`](../api-reference.md#post-exportrun-report)) carries its line as `run.reference` with the start in ISO-8601 UTC (`2026-10-05T08:10:00Z`), since a file is read away from any one locale.
+A run exported as a file ([`POST /export/run-report`](../api-reference/export.md#post-exportrun-report)) carries its line as `run.reference` with the start in ISO-8601 UTC (`2026-10-05T08:10:00Z`), since a file is read away from any one locale.
 
 ```
 Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders

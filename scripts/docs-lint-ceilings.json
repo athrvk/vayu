@@ -1,6 +1,6 @@
 {
   "reference_pages": [
-    "docs/engine/api-reference.md",
+    "docs/engine/api-reference/*.md",
     "docs/engine/db-schema.md"
   ],
   "pages": {
@@ -131,13 +131,13 @@
       "history": 1
     },
     "docs/app/import-collections/openapi-v3.md": {
-      "max_line": 1408,
+      "max_line": 1415,
       "long_lines": 40,
       "max_cell": 672,
       "history": 8
     },
     "docs/app/import-collections/postman-environment.md": {
-      "max_line": 828,
+      "max_line": 835,
       "long_lines": 5,
       "max_cell": 249
     },
@@ -185,12 +185,98 @@
       "max_cell": 1091,
       "history": 26
     },
-    "docs/engine/api-reference.md": {
-      "lines": 15738,
-      "max_line": 1075,
-      "long_lines": 45,
-      "max_cell": 1060,
-      "history": 31
+    "docs/engine/api-reference/authentication.md": {
+      "max_cell": 372
+    },
+    "docs/engine/api-reference/changes.md": {
+      "max_cell": 263
+    },
+    "docs/engine/api-reference/collection-runs.md": {
+      "max_cell": 262
+    },
+    "docs/engine/api-reference/collections.md": {
+      "max_cell": 325
+    },
+    "docs/engine/api-reference/cookies-and-certificates.md": {
+      "max_line": 698,
+      "long_lines": 2,
+      "max_cell": 680
+    },
+    "docs/engine/api-reference/environments.md": {
+      "history": 2
+    },
+    "docs/engine/api-reference/examples.md": {
+      "history": 1
+    },
+    "docs/engine/api-reference/execute.md": {
+      "max_cell": 294,
+      "history": 1
+    },
+    "docs/engine/api-reference/export.md": {
+      "max_line": 726,
+      "long_lines": 3,
+      "max_cell": 707
+    },
+    "docs/engine/api-reference/health-config.md": {
+      "max_line": 890,
+      "long_lines": 17,
+      "max_cell": 832,
+      "history": 9
+    },
+    "docs/engine/api-reference/import.md": {
+      "max_line": 504,
+      "long_lines": 1,
+      "max_cell": 464,
+      "history": 3
+    },
+    "docs/engine/api-reference/inbox.md": {
+      "max_line": 422,
+      "long_lines": 1,
+      "max_cell": 399,
+      "history": 1
+    },
+    "docs/engine/api-reference/index.md": {
+      "history": 1
+    },
+    "docs/engine/api-reference/live-metrics.md": {
+      "max_line": 1082,
+      "long_lines": 12,
+      "max_cell": 1067
+    },
+    "docs/engine/api-reference/load-runs.md": {
+      "max_line": 754,
+      "long_lines": 2,
+      "max_cell": 659,
+      "history": 2
+    },
+    "docs/engine/api-reference/metrics.md": {
+      "max_cell": 244
+    },
+    "docs/engine/api-reference/request-body.md": {
+      "history": 1
+    },
+    "docs/engine/api-reference/resource-writes.md": {
+      "history": 3
+    },
+    "docs/engine/api-reference/runs.md": {
+      "max_line": 416,
+      "long_lines": 1,
+      "max_cell": 358,
+      "history": 1
+    },
+    "docs/engine/api-reference/scenario-load.md": {
+      "max_line": 989,
+      "long_lines": 4,
+      "max_cell": 953,
+      "history": 5
+    },
+    "docs/engine/api-reference/scenario-runs.md": {
+      "max_line": 529,
+      "long_lines": 2,
+      "max_cell": 369
+    },
+    "docs/engine/api-reference/specs.md": {
+      "history": 3
     },
     "docs/engine/architecture.md": {
       "lines": 2269,
@@ -205,9 +291,9 @@
     },
     "docs/engine/building.md": {
       "lines": 1972,
-      "max_line": 1693,
+      "max_line": 1701,
       "long_lines": 8,
-      "max_cell": 1682,
+      "max_cell": 1690,
       "history": 11
     },
     "docs/engine/cli.md": {
@@ -216,9 +302,9 @@
     },
     "docs/engine/db-schema.md": {
       "lines": 3041,
-      "max_line": 2580,
+      "max_line": 2588,
       "long_lines": 12,
-      "max_cell": 2518,
+      "max_cell": 2526,
       "history": 17
     },
     "docs/engine/elements.md": {

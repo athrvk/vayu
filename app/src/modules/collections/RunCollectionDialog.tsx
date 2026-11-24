@@ -221,7 +221,7 @@ const SEQUENCE_PROFILE_COPY: ProfilePickerCopy = {
  * `scripts` stays load-only: the design send and the sequential run already
  * run every `script.*` element inline, so a choice between inline and
  * deferred has nothing to say until a run is on the event loop. Matches
- * `docs/engine/api-reference.md`'s "elements" block exactly.
+ * `docs/engine/api-reference/load-runs.md`'s "elements" block exactly.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";

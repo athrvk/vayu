@@ -30,8 +30,8 @@ The CLI automatically detects whether the JSON file contains a single request or
 
 A request body that names a file on disk (a `binary` body or a `form-data` file
 part) is sent only when the file lies under an
-[allowed folder](api-reference.md#allowed-folders-file-roots) or was picked in
-the app ([trust rule](api-reference.md#file-references-binary-bodies-and-file-parts)).
+[allowed folder](api-reference/file-access.md#allowed-folders-file-roots) or was picked in
+the app ([trust rule](api-reference/request-body.md#file-references-binary-bodies-and-file-parts)).
 An engine you start yourself has no grant secret, so neither the CLI nor any
 other caller can allow a folder or pick a file through it; allow the folder in
 the app's Settings once, and every engine on that workspace honours it.
@@ -242,7 +242,7 @@ on is refused on stderr with exit code **1** rather than dropped:
 
 `--mcp-port` names the port the app's MCP server listens on. The engine never
 sends a request to it on this machine, as it never sends one to its own port
-([Reserved local ports](api-reference.md#reserved-local-ports)): given the
+([Reserved local ports](api-reference/compose.md#reserved-local-ports)): given the
 flag, that port is the reserved one and 9877 is an ordinary port; without it,
 9877 is reserved. The app passes the flag to the engine it starts; a daemon
 you start yourself beside an app whose MCP port was changed in Settings needs

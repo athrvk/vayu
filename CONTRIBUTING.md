@@ -486,7 +486,9 @@ heading). A page that is over a budget today has a ceiling in
 and one whose page is now within budget fails as stale, so delete it. A page
 split into several is the one way a ceiling is added: the new pages may hold,
 between them, what the old page's entry held (counts summed, each maximum no
-higher). The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
+higher). A change that retires a page also re-aims links and rewraps text, so
+in that change a maximum may rise by 32 characters and the new pages' `history`
+may total a tenth more. The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
 the ceilings file the current tree needs, for lowering it after a cleanup.
 
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
