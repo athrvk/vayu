@@ -49,8 +49,7 @@ export function DrawerPanel({ title, actions, children, className }: DrawerPanel
 				{actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
 			</div>
 			{/* Flush: rows run edge to edge and bring their own padding. The panel
-			    owns scrolling so every view scrolls the same way - views used to
-			    differ, some wrapped by the Drawer and some managing their own. */}
+			    owns scrolling so every view scrolls the same way. */}
 			{/*
 			 * overflow-x-hidden is explicit: `overflow-y: auto` alone computes
 			 * overflow-x to `auto` as well, so a single over-wide row would add a

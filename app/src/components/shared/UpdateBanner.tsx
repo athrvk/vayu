@@ -110,11 +110,8 @@ function UpdateBanner() {
 	};
 
 	return (
-		// One line at every density (issue #1670): `h-banner` (issue #1679 -
-		// was `h-[var(--tabstrip-height)]`, the tab strip's own band and 4px
-		// short of a notification bar's floor) rather than stacking a second
-		// row for the download progress bar, which used to make this banner
-		// two lines tall while downloading. The bar still shows - as a thin
+		// One line at every density (issue #1670): `h-banner` (issue #1679) rather
+		// than stacking a second row for the download progress bar. The bar still shows - as a thin
 		// strip along the bottom edge, absolutely positioned so it adds no
 		// height of its own.
 		<div className="enter-fade relative flex h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 text-sm">
