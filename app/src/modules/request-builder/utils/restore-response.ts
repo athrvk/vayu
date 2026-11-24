@@ -305,8 +305,8 @@ export function responseFromRunResult(
 	};
 
 	/*
-	 * * A request that reached no server stores no `response` node, but `error_type` and *
-	 * `error_message` (`build_result_trace`). The status-0 shape a live failure has lets *
+	 * A request that reached no server stores no `response` node, but `error_type` and
+	 * `error_message` (`build_result_trace`). The status-0 shape a live failure has lets
 	 * `ClientErrorView` render it, icon, hint and code included.
 	 */
 	if (!trace.response) {
@@ -323,9 +323,9 @@ export function responseFromRunResult(
 	}
 
 	/*
-	 * * A failure after the header block stores the node *and* the error (#3423), as the live
-	 * answer * holds both: a failed exchange (status 0, so `ClientErrorView` renders) keeping the
-	 * server's * headers and body for the Headers tab and the notices.
+	 * A failure after the header block stores the node *and* the error (#3423), as the live answer
+	 * holds both: a failed exchange (status 0, so `ClientErrorView` renders) keeping the server's
+	 * headers and body for the Headers tab and the notices.
 	 */
 	return {
 		status: failure ? 0 : result.statusCode || 0,

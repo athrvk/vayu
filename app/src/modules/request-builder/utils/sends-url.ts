@@ -71,10 +71,10 @@ type Resolve = (input: string) => string;
 export interface SendsResolved {
 	url: string;
 	/**
-	 * * The API key's value as appended (resolved, trimmed), or the OAuth 2.0 token's stand-in, or
-	 * null * when nothing secret is on the line: no key, a blank value, or a `{{token}}` that
-	 * resolved to * itself (unset, or deferred by a script), which goes as written. A key is a
-	 * credential whatever its * variable's secret flag, so the caller always masks this. One auth
+	 * The API key's value as appended (resolved, trimmed), or the OAuth 2.0 token's stand-in, or
+	 * null when nothing secret is on the line: no key, a blank value, or a `{{token}}` that
+	 * resolved to itself (unset, or deferred by a script), which goes as written. A key is a
+	 * credential whatever its variable's secret flag, so the caller always masks this. One auth
 	 * applies, so at most one.
 	 */
 	secret: string | null;
