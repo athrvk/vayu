@@ -172,8 +172,7 @@
       "history": 13
     },
     "docs/architecture.md": {
-      "lines": 982,
-      "history": 3
+      "lines": 982
     },
     "docs/building.md": {
       "max_cell": 313
@@ -324,17 +323,10 @@
       "max_cell": 696,
       "history": 12
     },
-    "docs/lock-file-handling.md": {
-      "history": 2
-    },
-    "docs/request-storage-design.md": {
-      "history": 3
-    },
     "docs/ux-writing.md": {
       "max_line": 1352,
       "long_lines": 8,
-      "max_cell": 1129,
-      "history": 1
+      "max_cell": 1129
     }
   }
 }

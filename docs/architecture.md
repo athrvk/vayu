@@ -201,7 +201,7 @@ when it goes away or reloads, and the blocker stops with the last holder. A run
 that stops being watched without ending hands its lock back too: the two
 services share one SSE client, so starting a collection run takes the socket
 from a streaming load run, and the client tells the displaced service rather
-than closing on it in silence, which used to leave that key held for the rest of
+than closing on it in silence, which would leave that key held for the rest of
 the session (issue #1417). A run replaced by another of its own kind hands the
 key back on the same path: each service ends the run it is replacing before it
 registers the new one, so the key is released and taken again in that order,
@@ -680,13 +680,13 @@ which case the app picks a fallback (below).
   renderer's health poll adopts it the moment it answers. When the sidecar's own
   probe sees the answer first it moves to `ready` and the main process runs the
   file-grant sync the slow path skipped (not the log floor, which is applied
-  once per launch and already was, at `debug`). Quitting there used to end
+  once per launch and already was, at `debug`). Quitting there would end
   launches that were seconds from succeeding.
 - **The window is created alongside the engine, not after it.** First paint must
   not wait on a process whose own startup housekeeping is allowed to run for 45
   seconds - `db.init()` does orphan reconciliation, inbox cleanup and a
   page-reclaim rewrite before the engine listens at all, and that whole window
-  used to be blank screen. Nothing is lost by overlapping them: the renderer
+  would be blank screen. Nothing is lost by overlapping them: the renderer
   tolerates an absent engine by design, polling `/health` itself and rendering
   the starting state until one answers - in the Dock and in every query mounted
   at first paint, which retry a refused connection through the start window
