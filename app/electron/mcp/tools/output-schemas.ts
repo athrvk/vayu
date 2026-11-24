@@ -728,17 +728,10 @@ export const configUpdateSchema = z
  *
  * The engine says so in a typed `requiresRestart` field on each entry
  * (`engine/src/http/routes/config.cpp`), read here and in `SettingsMain.tsx`.
- * It replaced a "… (Requires Restart)" substring in the entry's `label` that
- * both consumers regex-matched out of the prose - so a label that fell out of
- * step with the mechanism (the `workers` case, #197) misinformed an agent and
- * the settings screen at once, and no rewording of the copy could be made
- * without minding this parser.
  *
  * Strictly `=== true`: this decides whether the tool result tells an agent its
  * change is live, and a payload that omits the field (an engine older than the
  * app it is paired with) has not said that it does not need one.
- *
- * `update_config`'s `restartRequired` result shape is unchanged.
  */
 export function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
 	const raw = Array.isArray(configResponse)
