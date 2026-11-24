@@ -141,7 +141,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `vayu::tests::remove_database_files`** (`tests/temp_database.hpp`): an opened
   database writes six files (#413), so never a hand-written suffix list.
 - **A startup repair pass is scoped, transactional, marked done and backed up
-  first** (#1487, [db-schema](../docs/engine/db-schema/startup-and-recovery.md#the-header-strip-pass-issues-1487-1491)):
+  first** (#1487, [db-schema](../docs/engine/db-schema/startup-and-recovery.md#the-header-strip-pass)):
   `/health` does not answer until `init ()` returns, so select candidates with a
   SQL predicate, rewrite inside one `transaction_guard`, record a done marker,
   and save a `backups/` snapshot first, skipping the pass when the copy cannot
@@ -151,7 +151,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   repair pass can read it. Read the data out in a `PRAGMA user_version`-gated
   step ahead of the probe (`migrate_before_sync`, the constructor's first,
   unguarded statement, which refuses a newer database rather than quarantine it)
-  or keep the column mapped ([migrations](../docs/engine/db-schema/startup-and-recovery.md#the-script-to-elements-migration-issue-1514)).
+  or keep the column mapped ([migrations](../docs/engine/db-schema/startup-and-recovery.md#the-script-to-elements-migration)).
 - **Only a corrupt database reaches recovery** (#2420): `classify_probe_failure`
   sorts `SQLITE_CORRUPT` and `SQLITE_NOTADB` as corrupt and anything else (a
   lock, a full disk, a failed migration step) as unavailable, which the

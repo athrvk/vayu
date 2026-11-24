@@ -115,8 +115,8 @@ Deleted with the run by the same cascade (`remove_run_cascade_locked`).
 
 **The EAV `metrics` table this replaced is gone.**
 It stored one row per (`run_id`, `name`, `timestamp`) sample, ~20 rows per second of a run, and was kept read-only after the switch so runs recorded by an older engine still rendered.
-Retention deletes those runs within `runRetentionDays`, so the read path outlived its data; it was removed in issue #177, along with the `MetricName` enum and `db::Metric`.
-`sync_schema()` only syncs the tables the storage still declares - it never drops one that was removed from it - so `Database::init()` issues an explicit `DROP TABLE IF EXISTS metrics`, and an upgraded database sheds the table and its rows on first start.
+Retention deletes those runs within `runRetentionDays`, so its read path outlived its data and is gone (#177), with the `MetricName` enum and `db::Metric`.
+`sync_schema()` only syncs the tables the storage still declares - it never drops one the storage stopped declaring - so `Database::init()` issues an explicit `DROP TABLE IF EXISTS metrics`, and an upgraded database sheds the table and its rows on first start.
 The freed pages return to SQLite's freelist for reuse; the file itself shrinks only when the guarded reclamation at the end of `Database::init()` decides they are worth a rewrite - see [Reclaiming freed pages](startup-and-recovery.md#reclaiming-freed-pages).
 
 ---

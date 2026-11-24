@@ -2026,7 +2026,7 @@ left alone. A second backup requested while one is running is refused with
 The engine writes into the same directory on its own, under the same count:
 `vayu-<stamp>-pre-v<N>.db` before an update migrates the workspace from schema
 version `N`, and `vayu-<stamp>-pre-repair.db` before a one-time repair pass
-rewrites stored rows ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-copy-before-a-migration-issue-2426)).
+rewrites stored rows ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-copy-before-a-migration)).
 A start that cannot write the first refuses to migrate rather than migrate
 without it.
 
@@ -2064,7 +2064,7 @@ snapshot with the steps above. Anything written since the update is not in it.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-quarantine-issue-984)). The `.bak` holds
+fresh ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-quarantine)). The `.bak` holds
 the last clean shutdown at best, and less after a session that ended in a crash
 or one whose final refresh ran out of time, so when the quarantined file was
 healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over

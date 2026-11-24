@@ -22,7 +22,7 @@ Stores named variable sets.
 
 **`is_active` marks the environment clients resolve against by default, and at most one row carries it.**
 The invariant is enforced in the DB layer, not the routes: every write path that can store an active environment calls `Database::deactivate_other_environments_locked` first, inside the same transaction, so activating one environment deactivates the previous one atomically - no reader can observe two actives, and none can observe an intermediate zero.
-Three paths reach this table (`POST /environments`, `PUT /environments/:id`, and `POST /import/apply`); putting the rule in the handlers would mean repeating it in each, which is how this column previously ended up honoured on create but not on update.
+Three paths reach this table (`POST /environments`, `PUT /environments/:id`, and `POST /import/apply`); putting the rule in the handlers would mean repeating it in each, and a rule repeated in each handler ends up honoured on create but not on update.
 
 **A trashed row is never active.**
 `DELETE /environments/:id` stamps `deleted_at` and clears `is_active` in one write, and a restore clears the stamp alone, so the row comes back inactive.

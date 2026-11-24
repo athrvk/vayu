@@ -184,7 +184,7 @@ It reads `engine-store.recovery`, which `queries/health.ts` writes from the
 optional `recovery` node on `GET /health`. Absent means a clean start, which is
 also what a genuine first run gives, so the banner renders nothing in the
 ordinary case; the engine never reports the node speculatively (see
-[db-schema/startup-and-recovery.md](../../engine/db-schema/startup-and-recovery.md#the-recovery-marker-issue-922)).
+[db-schema/startup-and-recovery.md](../../engine/db-schema/startup-and-recovery.md#the-recovery-marker)).
 
 A banner rather than a toast, beside `UpdateBanner` and above it: the fact is
 permanent, a user who misses it cannot get it back, and it names a path they may

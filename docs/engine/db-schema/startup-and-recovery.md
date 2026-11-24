@@ -5,7 +5,7 @@ description: >-
 
 # Startup validation, backup and recovery
 
-`Database::Database` (`engine/src/db/database.cpp`) reads `PRAGMA user_version` before anything else - a version newer than this engine's throws immediately and the constructor fails outright (see [the script-to-elements migration](#the-script-to-elements-migration-issue-1514)); that is not corruption, and none of the recovery below applies to it.
+`Database::Database` (`engine/src/db/database.cpp`) reads `PRAGMA user_version` before anything else - a version newer than this engine's throws immediately and the constructor fails outright (see [the script-to-elements migration](#the-script-to-elements-migration)); that is not corruption, and none of the recovery below applies to it.
 Past that gate it probes the file - opens it and runs `sync_schema()` before anything else uses the database - and sorts the answer three ways (issue #2420):
 
 - **Valid**: the probe finished.
@@ -20,7 +20,7 @@ What happens next:
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
-| An older `user_version` | Before anything raises the version, a copy is saved to `backups/vayu-<stamp>-pre-v<N>.db` ([the copy before a migration](#the-copy-before-a-migration-issue-2426)). If it cannot be written, nothing is touched and the daemon does not start | (the exception, naming the path and why the copy failed) |
+| An older `user_version` | Before anything raises the version, a copy is saved to `backups/vayu-<stamp>-pre-v<N>.db` ([the copy before a migration](#the-copy-before-a-migration)). If it cannot be written, nothing is touched and the daemon does not start | (the exception, naming the path and why the copy failed) |
 | Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
 | Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy. A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work | Nothing |
 | Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
@@ -52,11 +52,11 @@ Starting fresh is deliberate - the alternative is a daemon that fails to start o
 > **The copy taken before a rewrite is in `backups/`, not beside the
 > database.** `<db>.bak` is refreshed, once the engine listens, from a file the
 > migration or repair has already rewritten, so it cannot be the way back.
-> [The copy before a migration](#the-copy-before-a-migration-issue-2426) is.
+> [The copy before a migration](#the-copy-before-a-migration) is.
 
-## The copy before a migration (issue #2426)
+## The copy before a migration
 
-Before `migrate_before_sync` raises `user_version` - on the stamp-only path as well as before the transaction of a step that rewrites rows - the constructor's call writes a `VACUUM INTO` snapshot of the file to `backups/vayu-<stamp>-pre-v<N>.db` beside it, where `N` is the version the file had.
+Before `migrate_before_sync` raises `user_version` - on the stamp-only path as well as before the transaction of a step that rewrites rows - the constructor's call writes a `VACUUM INTO` snapshot of the file to `backups/vayu-<stamp>-pre-v<N>.db` beside it, where `N` is the version the file had (#2426).
 It is the copy an engine at version `N` opens, and the only one: the `<db>.bak` refresh that follows replaces the backup from the migrated file.
 
 - **No copy, no migration.**
@@ -68,15 +68,15 @@ It is the copy an engine at version `N` opens, and the only one: the `<db>.bak` 
   Exempting it from the count was weighed and declined: a full copy of every stored credential that nothing ever removes is what this replaced.
 - **Only the constructor's own call takes it.**
   `probe_database` runs the same migration on a candidate it is about to judge (a `.bak` recovery may restore, the refresh's own snapshot), which is not the workspace a person goes back to, and takes none.
-- **The header-strip pass takes one too**, labelled `pre-repair` ([below](#the-header-strip-pass-issues-1487-1491)).
+- **The header-strip pass takes one too**, labelled `pre-repair` ([below](#the-header-strip-pass)).
 
 Engines before this wrote `<db>.pre-migration.bak` and `<db>.pre-upgrade.bak` (with their `-wal` and `-shm`) beside the database and never removed them.
 They are removed on a later start than the one that migrated: one that validated, found the file already at `SCHEMA_VERSION` before writing anything, and has refreshed `<db>.bak`.
 A file modified since that start began is left alone.
 
-## The quarantine (issue #984)
+## The quarantine
 
-A database that is corrupt is **moved, not deleted**: `<db>` becomes `<db>.corrupt-<epoch-ms>` with its `-wal` and `-shm` sidecars renamed alongside.
+A database that is corrupt is **moved, not deleted**: `<db>` becomes `<db>.corrupt-<epoch-ms>` with its `-wal` and `-shm` sidecars renamed alongside (#984).
 SQLite's own tooling can usually pull most rows back out of a damaged file, and only while the file exists:
 
 ```
@@ -98,9 +98,9 @@ One implementation detail worth knowing before changing the order of that code: 
 SQLite **deletes the `-wal` and `-shm`** when it opens a file whose header is not a database's, and a `-wal` holds committed transactions the main file does not, so the sidecars would be gone before the quarantine could move them.
 The constructor reads the 16-byte SQLite header itself first and only opens a file that could plausibly be a database.
 
-## The recovery marker (issue #922)
+## The recovery marker
 
-The record of that cannot live in the database, because the database is the thing that just went away, so it is a small JSON file beside it, `<db>.recovery`, written by `engine/src/db/recovery.cpp`:
+The record of that cannot live in the database, because the database is the thing that just went away, so it is a small JSON file beside it, `<db>.recovery` (#922), written by `engine/src/db/recovery.cpp`:
 
 ```json
 {
@@ -111,7 +111,7 @@ The record of that cannot live in the database, because the database is the thin
 ```
 
 `at` is epoch milliseconds, as every other engine timestamp is.
-`quarantinedPath` is present only when a set was moved aside - absent for `deleted_corrupt` and for any marker written before #984 - so a reader tests for it rather than deriving it from `outcome`.
+`quarantinedPath` is present only when a set went to the quarantine - absent for `deleted_corrupt` and for a marker an engine without the quarantine wrote (#984) - so a reader tests for it rather than deriving it from `outcome`.
 Two rules the readers depend on:
 
 - **A clean start writes no marker.**
@@ -149,9 +149,9 @@ A rewrite slow enough to matter is one this line explains.
 Best-effort like the sweeps before it: a failure is a warning, never a daemon that will not start.
 `auto_vacuum` was rejected as the alternative - switching an existing database's mode requires a full `VACUUM` anyway, and it changes page bookkeeping for every write thereafter.
 
-## The header-strip pass (issues #1487, #1491)
+## The header-strip pass
 
-`Database::strip_stored_managed_headers()`, called from `init()`, disables the `X-Vayu-Version`, `X-Request-ID` and `User-Agent` rows a pre-#1229 renderer wrote into a saved request's `headers` column on the app's own behalf - default headers are applied per transfer now and never stored.
+`Database::strip_stored_managed_headers()` (#1487, #1491), called from `init()`, disables the `X-Vayu-Version`, `X-Request-ID` and `User-Agent` rows a pre-#1229 renderer wrote into a saved request's `headers` column on the app's own behalf - default headers are applied per transfer now and never stored.
 Like the passes above it runs before `/health` can answer, but it is scoped so a workspace with nothing left to touch pays close to nothing for it:
 
 - **A SQL `LIKE` over `headers` first, on undeleted rows only.**
@@ -165,19 +165,19 @@ Like the passes above it runs before `/health` can answer, but it is scoped so a
 - **One transaction for the rewrite**, not one implicit commit per candidate row - the same shape `seed_default_config` uses.
 - **A one-time marker.**
   Once a pass finds nothing left to change, it records a `managedHeadersStripped` config entry (`advanced`, no everyday user story) and every later start skips the scan outright rather than re-running it to confirm nothing changed. #1492 will give this kind of migration bookkeeping a proper home; until then a config entry is where this file's other internal-only flags already live.
-- **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first row this pass ever rewrites, under the same retention as [the copy before a migration](#the-copy-before-a-migration-issue-2426).
+- **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first row this pass ever rewrites, under the same retention as [the copy before a migration](#the-copy-before-a-migration).
   When it cannot be written the pass rewrites nothing and leaves its marker unset, so the next start tries again.
 - **Trash is caught up on restore, not on the startup scan.**
   A request already in the trash when this pass runs is skipped, so it stays byte-identical for as long as it sits there; restoring it (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on its way back, which is a no-op if the pass already handled it before the request was deleted.
 
-## The empty-parent pass (issue #3451)
+## The empty-parent pass
 
 `Database::clear_empty_parent_ids()`, called from `init()`, rewrites every collection stored with `parent_id = ''` to `NULL`, trashed rows included.
-Until #3451, `POST`/`PUT /collections` stored a `parentId: ""` as written: a second spelling of the tree root that the change feed and `get_requests_in_subtree` read as root while the append scan, the root `normalize` of `POST /reorder` and a restore did not, so such a row tied with the first root, and a delete and restore of it came back with `reparentedToRoot: true`, as if its parent were gone.
-The write paths now store `""` as `NULL` (`read_parent_id_field`, see [Accepted field shapes](../api-reference/resource-writes.md#accepted-field-shapes)); this pass is the rows written before.
+A `parentId: ""` kept as written is a second spelling of the tree root that the change feed and `get_requests_in_subtree` read as root while the append scan, the root `normalize` of `POST /reorder` and a restore did not, so such a row tied with the first root, and a delete and restore of it came back with `reparentedToRoot: true`, as if its parent were gone (#3451).
+The write paths store `""` as `NULL` (`read_parent_id_field`, see [Accepted field shapes](../api-reference/resource-writes.md#accepted-field-shapes)); this pass is for the rows written before that.
 
 - **No done marker and no schema bump.**
-  Both statements, the count and the `UPDATE`, are served by [`idx_collections_parent_id`](indexes.md#indexes), so a workspace with nothing to rewrite pays one index probe per start, not the scan the [header-strip pass](#the-header-strip-pass-issues-1487-1491) marks itself done to avoid.
+  Both statements, the count and the `UPDATE`, are served by [`idx_collections_parent_id`](indexes.md#indexes), so a workspace with nothing to rewrite pays one index probe per start, not the scan the [header-strip pass](#the-header-strip-pass) marks itself done to avoid.
   Running every start also catches a `''` an older engine writes after a downgrade.
   An older engine reads `NULL` as the root, as it always did, so the rewrite is nothing it must be stopped from reading past, which is what a bump is for ([Schema versions](schema-versions.md#schema-versions)).
 - **One statement**, so one commit.
@@ -185,7 +185,7 @@ The write paths now store `""` as `NULL` (`read_parent_id_field`, see [Accepted 
 - **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first rewrite, as the header-strip pass does.
   When it cannot be written the pass rewrites nothing, logs a warning, and the next start tries again.
 
-## The script-to-elements migration (issue #1514)
+## The script-to-elements migration
 
 Issue #1513 landed `elements` additively, beside the two script columns, with a startup repair pass (`fold_scripts_into_elements`) that gave a 0.26-shaped row an `elements` entry without touching `pre_request_script` / `post_request_script` - nothing ran an *element* yet, so the columns had to keep driving execution.
 Issue #1514 lands the pipeline that runs one, which is what makes the two columns dead data and the cut a real migration rather than another additive pass.
@@ -196,7 +196,7 @@ The repair pass, its `scriptsFoldedIntoElements` marker and its `.pre-elements-f
 1. **Read `PRAGMA user_version`.**
    Newer than this engine's `SCHEMA_VERSION` (currently `11`, see [Schema versions](schema-versions.md#schema-versions)) throws `std::runtime_error` naming both versions - not inside the constructor's probe/recovery try-catch, so the exception reaches the daemon's own startup failure path, naming both versions, rather than surfacing from the probe as a generic refusal to examine the file.
    Equal to `SCHEMA_VERSION` is a fast no-op.
-   Anything older is copied first ([the copy before a migration](#the-copy-before-a-migration-issue-2426)).
+   Anything older is copied first ([the copy before a migration](#the-copy-before-a-migration)).
    `0` (every database written before this issue, folded by #1513's pass or not) proceeds to fold.
    `1` and `2` have no script column left, so they skip the fold and are only stamped.
 2. **Fold, if either table still has a script column.**
@@ -243,7 +243,7 @@ Stored bodies still carry the old `unresolved` key, so the same `migrate_before_
 - **Removes the allowed folders the root rule refuses**, as version `4` did.
 
 `file_grants` is created by this step (`CREATE TABLE IF NOT EXISTS`, `FILE_GRANTS_DDL` in `db_maintenance.cpp`) because it runs before `sync_schema ()`; the statement is exactly what the mapping generates, or `sync_schema ()` would rebuild the table empty.
-All of it is planned before anything is written, so a database with nothing to change is only stamped; either way the [copy before a migration](#the-copy-before-a-migration-issue-2426) is written first.
+All of it is planned before anything is written, so a database with nothing to change is only stamped; either way the [copy before a migration](#the-copy-before-a-migration) is written first.
 A second run finds nothing to change and grants nothing twice.
 A database already at `6` does not run it on its way to a later version (`plan_file_trust_migration` plans nothing from `6` on), so a root rule that has since moved never removes a folder allowed under the rule it was written with.
 **The cost**: a body a non-editor caller managed to store as `unresolved: false` before the upgrade is granted once, like a pick.
@@ -261,6 +261,6 @@ So the same `migrate_before_sync` transaction, for any database below version `7
   Relative order within each kind is unchanged, so the merged comparator lists each parent exactly as the two blocks did.
   A collection with no sub-folder, trashed or live, is untouched.
 
-`plan_sibling_order_shift` (`db_maintenance.cpp`) reads one shift per collection before anything is written, so a database with no request beside a sub-folder is only stamped; either way the [copy before a migration](#the-copy-before-a-migration-issue-2426) is written first.
+`plan_sibling_order_shift` (`db_maintenance.cpp`) reads one shift per collection before anything is written, so a database with no request beside a sub-folder is only stamped; either way the [copy before a migration](#the-copy-before-a-migration) is written first.
 A plan read SQLite refuses throws rather than reading as "nothing to shift", and a refused shift rolls the whole transaction back with `user_version` unmoved.
 The step is not idempotent on its own - run twice, it would shift twice - so the version stamp, written in the same transaction, is its only done-marker.

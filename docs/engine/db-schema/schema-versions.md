@@ -10,7 +10,7 @@ It is bumped by the commit that changes `make_vayu_storage`'s mapping - an added
 It is also bumped by a migration step that must run exactly once and that an older engine must not read past (versions `4`, `6` and `7`); the version is that step's done-marker.
 **A bump is one-way.**
 Once a newer engine has opened a workspace, every engine that carries the version gate refuses it at startup (the refusal above), so the release that carries a bump says so in its notes.
-The way back is the [copy before a migration](startup-and-recovery.md#the-copy-before-a-migration-issue-2426): install the older release, then restore `backups/vayu-<stamp>-pre-v<N>.db` as [architecture.md](../architecture.md#restoring) describes; anything written since the update is not in it.
+The way back is the [copy before a migration](startup-and-recovery.md#the-copy-before-a-migration): install the older release, then restore `backups/vayu-<stamp>-pre-v<N>.db` as [architecture.md](../architecture.md#restoring) describes; anything written since the update is not in it.
 The gate first shipped in `0.27.0`: `0.26.0` and earlier have none, and opening a newer workspace with one rebuilds `requests` and `collections` empty (their `pre_request_script` / `post_request_script` columns are `NOT NULL` with no default, which sqlite_orm cannot add to an existing table) and then copies that emptied file over `<db>.bak`, with no error.
 A shipped binary cannot be changed, so nothing in the engine can stop that.
 `install.sh` refuses to install a version below `0.27.0` over an existing `db/vayu.db` unless given `--allow-data-loss`.

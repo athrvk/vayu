@@ -58,7 +58,7 @@ It is resolved once at startup and always present:
 | `quarantinedPath` | Where the engine moved the unopenable database, readable with `sqlite3 <path> .recover`. **Optional** - absent for `deleted_corrupt` and for markers written before #984, so test for it rather than deriving it from `outcome` |
 
 The node is read from a marker file beside the database and stands until a later recovery overwrites it, so a client that has already told the user about an event should key off `at` rather than expecting the node to disappear.
-See [db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-recovery-marker-issue-922).
+See [db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-recovery-marker).
 
 ### POST /shutdown
 
@@ -469,7 +469,7 @@ Copying `vayu.db` by hand is not: the `-wal` beside it holds committed transacti
 Two concurrent copies would each write a whole second database - unbounded disk for a button someone double-clicked - and the second would race the first's retention pass.
 Anything else that goes wrong is a `500` naming what SQLite or the filesystem refused; there is no success response with an empty path.
 
-**Retention only removes files Vayu wrote**: this endpoint's `vayu-<stamp>.db`, and the `vayu-<stamp>-pre-v<N>.db` an update saves before it migrates the workspace, which counts toward the same `maxBackupsRetained` ([db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-copy-before-a-migration-issue-2426)).
+**Retention only removes files Vayu wrote**: this endpoint's `vayu-<stamp>.db`, and the `vayu-<stamp>-pre-v<N>.db` an update saves before it migrates the workspace, which counts toward the same `maxBackupsRetained` ([db-schema/startup-and-recovery.md](../db-schema/startup-and-recovery.md#the-copy-before-a-migration)).
 A copy you put in that directory yourself is left where it is.
 `0` keeps every snapshot.
 

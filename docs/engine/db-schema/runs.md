@@ -85,7 +85,7 @@ A `failed` status is `failed` for every run type with no summary needed (#3643: 
 NULL is no verdict: a run in flight, a design run that did not fail, a clean collection run, a `completed` or `stopped` row with no summary that yields a `resultSummary`, and every row stored before the column, `failed` ones included.
 Nullable with no default because a default would claim a verdict nothing judged; `sync_schema` adds it and backfills nothing, and the migration only stamps.
 
-**`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every metric row of the run: totals, the cumulative latency percentiles, the status-code distribution, bytes, and the script-validation tallies.
+**`summary`** holds the aggregates `GET /runs/:runId/report` would otherwise rebuild by scanning every metric row of the run: totals, the cumulative latency percentiles, the status-code distribution, bytes, and the script-validation tallies.
 It is written once - by `run_manager.cpp` when the run reaches `completed`/`stopped`, and best-effort (`setup_overhead` and `cleanup_overhead` left at `0`, with a wall-clock `test_duration`) when it fails.
 `setup_overhead` is the seconds from the load run's worker taking the run up to load start, its `script.setup` pass included; `cleanup_overhead` is the seconds from the end of load to its background threads stopped (issue #2894).
 A summary with no `cleanup_overhead` was stored before that issue, and its `setup_overhead` holds the cleanup figure: the report reads it as `cleanupOverhead` and leaves `setupOverhead` out.
@@ -347,7 +347,7 @@ The writer is `vayu::core::build_scenario_manifest` (`core/scenario_plan.cpp`).
 Only the `scenario` block is replaced: the run's top-level options (`environmentId`, `failOnSchemaError`, `stopOnError`, `thresholds` and the rest) stay beside it as sent, which is what keeps two runs that differ only in one of them from reading as the same run.
 
 **`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection run's snapshot also carries the run's resolved default-header decision at start: `{"userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true, "expectContinue": false}` (`expectContinue`, #2516, is `DefaultHeaderPolicy::expect_continue`).
-This is a deliberate, narrow exception to [Default request headers](../api-reference/health-config.md#default-request-headers)'s "nothing here is stored" rule - that rule is about not writing an applied default back into a *saved request*, the way the renderer used to freeze `X-Request-ID` into one before issue #1229.
+This is a deliberate, narrow exception to [Default request headers](../api-reference/health-config.md#default-request-headers)'s "nothing here is stored" rule - that rule is about not writing an applied default back into a *saved request*, as freezing `X-Request-ID` into one would (#1229).
 Here nothing is applied to anything: the value is read back only to compare one run's report against another's, most often a pinned baseline against a newer run after `loadNegotiateCompression`'s default changed underneath both.
 Written once at `POST /runs` alongside the rest of the snapshot (`with_default_headers_snapshot`, `http/routes/execution.cpp`); absent on a design run and on any run recorded before this issue.
 

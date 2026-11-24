@@ -65,7 +65,7 @@ It holds what a user types that the entry's key, label and description never say
 
 **unit** is nullable, like `min_value` / `max_value`: an entry that measures nothing declares none, and NULL is that - a nullable column is ALTER-friendly without a `default_value`.
 It is what lets the app put the unit on the input where a unit belongs, and `"bytes"` additionally selects the human-readable size formatting.
-The app used to decide that last part from a hardcoded list of three keys, which is the "one branch defines, another re-derives" shape: an entry seeded here was invisible to it until someone edited a TypeScript array, and two of the three keys had already been retired out from under it.
+The app reads that last part from this column, not from a list of keys it keeps itself: such a list is the "one branch defines, another re-derives" shape, and an entry seeded here would stay invisible to it until someone edited a TypeScript array.
 `config_route_test.cpp` guards that every key ending `Ms` / `Bytes` / `Days` declares the matching unit, that no non-numeric entry declares one, and that no description restates a unit the input already carries.
 
 **options** is nullable and populated only for `type: "enum"` entries.

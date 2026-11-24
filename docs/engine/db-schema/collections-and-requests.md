@@ -12,7 +12,7 @@ Stores folder/group hierarchy for requests.
 | Column               | Type    | Notes                                        |
 |----------------------|---------|----------------------------------------------|
 | `id`                 | TEXT PK | `col_` + UUID                                |
-| `parent_id`          | TEXT    | NULL for root collections; never `''` ([the empty-parent pass](startup-and-recovery.md#the-empty-parent-pass-issue-3451)) |
+| `parent_id`          | TEXT    | NULL for root collections; never `''` ([the empty-parent pass](startup-and-recovery.md#the-empty-parent-pass)) |
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
 | `variables`          | TEXT    | JSON: `Record<string, VariableValue>`        |
@@ -29,7 +29,7 @@ Stores folder/group hierarchy for requests.
 
 **elements** - the ordered, typed behaviours attached to this collection (issue #1512): extractors, assertions, timers, controllers, scripts and metrics, each `{"id", "kind", "enabled", "name"?, "config"}` and validated against the registry `GET /elements/kinds` serves (`vayu::core::Registry::validate`, `engine/include/vayu/core/elements.hpp`).
 `[]` - the default, and what an explicit `null` on `PUT` resets to - means no elements.
-The only script source since issue #1514's cut-over: a pre-cutover collection's scripts are folded in here as `script.pre` / `script.post` entries by [`migrate_before_sync`](startup-and-recovery.md#the-script-to-elements-migration-issue-1514), and `preRequestScript` / `postRequestScript` are refused (`400`, naming `elements`) on every route that used to accept them.
+The only script source (#1514): a pre-cutover collection's scripts are folded in here as `script.pre` / `script.post` entries by [`migrate_before_sync`](startup-and-recovery.md#the-script-to-elements-migration), and `preRequestScript` / `postRequestScript` are refused (`400`, naming `elements`) on every route.
 `POST /compose` resolves a request's whole chain of these (its own collection's, root to leaf, then the request's) into one list, minus anything a `inherit.disable` entry names.
 
 **data_schema** - which columns this collection's data files are expected to carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run (issue #599):
@@ -61,7 +61,7 @@ Shape validation lives in `apply_collection_fields` so the write paths that acce
 **The version half is the engine's** (issue #709).
 A client sends the `specId`; whichever write path receives it fills in `specHash` from the document that id names and `syncedAt` from the moment of the write - the same division `spec_documents.hash` itself draws.
 A `specHash` or `syncedAt` a client sends on `POST /collections` or `POST /import/apply` is dropped first (issue #3348), so the pair always comes from the store; a stale one arises only when the document under a binding is replaced, and a run then reports `hash_mismatch`.
-This matters because both contract readers - coverage and response-schema validation - require the binding's hash to equal the stored document's before they engage: until #709 the import path stored `{specId}` alone, and every run of an imported collection therefore reported no contract at all.
+This matters because both contract readers - coverage and response-schema validation - require the binding's hash to equal the stored document's before they engage: a binding of `{specId}` alone (#709) leaves every run of the collection with no contract at all.
 `Database::stamp_hashless_spec_bindings()` repairs the rows written before that rule, on every startup, stamping the document's `fetched_at` (when the import that made the binding stored it, not the moment of the restart) and skipping any binding whose document is gone.
 
 The **edge** is stored here; the **document** is not.
@@ -152,7 +152,7 @@ Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-
 Duplicate keys are allowed.
 A query row may carry `"valueless": true` for a bare `key` with no `=` (issue #1772).
 The enabled query rows of `params` follow `url`: a write that states `url` and no `params` reconciles them with the URL's query, and rewrites the column only when that changes a row (issue #3551, see [`POST /requests`](../api-reference/requests.md#post-requests)); no startup pass touches rows stored before it.
-A pre-#1229 renderer also wrote its own `X-Vayu-Version`, `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](startup-and-recovery.md#the-header-strip-pass-issues-1487-1491) disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
+A pre-#1229 renderer also wrote its own `X-Vayu-Version`, `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](startup-and-recovery.md#the-header-strip-pass) disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
 An optional `source` key (`"body-mode"` | `"stream"` | `"legacy-default"`) marks a row an app setting or that repair pass wrote rather than the user - the auto `Content-Type` a body-mode change adds, the `Accept` the Event stream toggle adds, or a row the header-strip pass disabled - so it can tell its own row apart from a hand-typed one across a reload;
 retyping the row's key or value clears it (issues #1481, #1491).
 A Postman import also keeps two keys nothing sends, for the Postman export to write back: a header row's `type` other than `"text"` (`"default"`) and a query row's boolean `equals`.
