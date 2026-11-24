@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/changes.cpp
  * @brief `GET /changes` - the workspace change feed (issue #3420): one SSE
  *        event per committed write, so a client caching rows hears about a
  *        write any other client made - and `POST /changes/subscriptions`, the

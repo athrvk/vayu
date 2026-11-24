@@ -6,18 +6,9 @@
  */
 
 /**
- * The one-line explanation above a key/value table, shown only while it is
- * empty.
- *
- * Both Params and Headers opened with a permanent sentence - "Add headers to
- * include with your request. Use `{{variable}}` for dynamic values." - in a
- * dense developer tool, repeated on the sibling tab, saying what the field
- * placeholder and the coloured token already say once you have a row. It is
- * genuinely useful on an empty tab and furniture every time after, which is the
- * same shape as "Auto-saves when you click away" in the variable popover.
- *
- * A table is "empty" when it has nothing but the trailing blank row the editor
- * always keeps - so this counts rows with content rather than rows.
+ * The line above a key/value table, shown only while it is empty: useful on an empty tab, furniture
+ * after, like "Auto-saves when you click away" in the variable popover. "Empty" is nothing but the
+ * trailing blank row the editor keeps, so this counts rows with content.
  */
 
 import type { KeyValueItem } from "@/types";

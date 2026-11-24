@@ -6,7 +6,6 @@
  */
 
 /**
- * @file platform_unix.cpp
  * @brief Unix/macOS/Linux platform implementations
  */
 
@@ -163,7 +162,6 @@ bool write_pid_to_lock (LockHandle handle) {
         return false;
     }
 
-    // Write PID
     std::string pid = std::to_string (get_process_id ()) + "\n";
     ssize_t written = write (handle.file, pid.c_str (), pid.length ());
 

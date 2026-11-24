@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/events.cpp
  * @brief `GET /runs/:id/events` - the relay that hands a streaming run's events
  *        to a client (issue #573).
  *

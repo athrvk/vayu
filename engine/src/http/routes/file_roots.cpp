@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/file_roots.cpp
  * @brief The folders a request-body file may be read from without a person
  * choosing it in the editor (`file_roots`, `FileAccessPolicy`).
  *

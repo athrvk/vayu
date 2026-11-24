@@ -125,9 +125,7 @@ export function BudgetsSection({
 			))}
 
 			{/*
-			 * The custom rows sit below the fixed fields and above the flag, which is
-			 * the reading order of the section: the fixed ones a run can declare, then
-			 * the ones this plan records, then what a miss does.
+			 * Reading order: the fixed fields, then this plan's custom rows, then what a miss does.
 			 */}
 			<div className="space-y-1.5">
 				<span className="block text-xs font-medium leading-none">

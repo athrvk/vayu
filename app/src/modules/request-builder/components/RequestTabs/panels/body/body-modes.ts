@@ -6,22 +6,13 @@
  */
 
 /**
- * Every body a request can carry, in the order the picker offers them.
- *
- * `contentType` is what the panel *shows* beside the picker - what will go on
- * the wire for that mode, whether the panel writes the header or the engine
- * implies it. Which Content-Type a mode makes the panel actually write a header
- * row for is the separate, narrower rule in `content-type.ts`; the two answer
- * different questions and a mode can have one without the other (`text` shows
- * `text/plain` and writes nothing, because the engine derives it at send time).
- *
- * It sits in its own module rather than in `BodyPanel.tsx` because
- * `body-editor-completion.test.tsx` derives the modes it renders from this
- * table: a list of modes written out again in the test is the same silent drift
- * as the hand-written list of languages the guard exists to catch - `xml` was
- * absent from both for as long as the mode existed (#1214). A component file
- * cannot export it (react-refresh), and the table is data about bodies, not
- * about the panel that renders them.
+ * Every body a request can carry, in picker order. `contentType` is what the panel *shows* beside
+ * the picker, what goes on the wire whether the panel writes it or the engine implies it; which
+ * modes make the panel write a header row is `content-type.ts`'s narrower rule (`text` shows
+ * `text/plain` and writes nothing, since the engine derives it at send). Its own module because
+ * `body-editor-completion.test.tsx` derives the modes it renders from this table, so no second list
+ * can drift and leave a mode untested (#1214, `xml`); a component file cannot export it
+ * (react-refresh), and it is data about bodies, not the panel.
  */
 
 import type { BodyMode } from "../../../../types";
@@ -30,9 +21,9 @@ export interface BodyModeOption {
 	value: BodyMode;
 	label: string;
 	/**
-	 * What goes on the wire in this mode, or null when no one type can be
-	 * named: nothing is sent (`none`), or the type depends on the file
-	 * (`binary`, which `binary-content-type.ts` answers per request).
+	 * What goes on the wire in this mode, or null when no one type applies: nothing is sent
+	 * (`none`), or it depends on the file (`binary`, answered per request by
+	 * `binary-content-type.ts`).
 	 */
 	contentType: string | null;
 }

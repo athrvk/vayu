@@ -6,10 +6,8 @@
  */
 
 /**
- * UrlInput Component
- *
- * URL input field with variable support and query param syncing.
- * Pasting a curl/wget command auto-populates the whole request.
+ * The URL field, variable-aware and synced to the query params; a pasted curl/wget command fills
+ * the whole request.
  */
 
 import { useCallback, useEffect } from "react";
@@ -24,10 +22,9 @@ import { useVariableSupport } from "../../hooks/useVariableSupport";
 import { joinWrappedLines, mergeParamsFromUrl } from "../../utils/url";
 
 /**
- * Type `text` over the input's selection as a user would: the browser's own
- * `input` event, so the change reaches `onChange` and the caret lands after it
- * exactly as for a native paste. Setting `value` instead would move the caret
- * to the end.
+ * Types `text` over the selection as a user would, through the browser's `input` event, so it
+ * reaches `onChange` and the caret lands after it as for a native paste; setting `value` would move
+ * the caret to the end.
  */
 function insertAtSelection(input: HTMLInputElement, text: string): void {
 	const start = input.selectionStart ?? input.value.length;
@@ -45,26 +42,22 @@ export default function UrlInput({ className }: UrlInputProps) {
 	const variables = useVariableSupport();
 	const showToast = useToastStore((s) => s.showToast);
 
-	// Sync params from URL when URL changes directly
 	const handleUrlChange = useCallback(
 		(newUrl: string) => {
-			// Trim leading/trailing whitespace to prevent malformed URL errors
+			// Trimmed, so stray whitespace does not make a malformed URL.
 			const trimmedUrl = newUrl.trim();
 			updateField("url", trimmedUrl);
 
-			// Merge, never replace: a disabled row is invisible in the URL by
-			// design and must survive a URL edit, and clearing the query must
-			// clear the enabled rows it used to carry (issue #1482). The rows
+			// Merge, never replace: a disabled row is invisible in the URL and must survive an
+			// edit, and clearing the query must clear the enabled rows it carried (#1482). Rows
 			// keep the query as written (#1771).
 			updateField("params", mergeParamsFromUrl(request.params, trimmedUrl, request.url));
 		},
 		[request.params, request.url, updateField]
 	);
 
-	/*
-	 * The field mounts after the tab opens, so a blank new request's ask for the
-	 * caret travels as a nav intent, answered once it is mounted (#3400).
-	 */
+	// The field mounts after the tab opens, so a new blank request's ask for the caret is a nav
+	// intent, answered once mounted (#3400).
 	const focusRequested = useTabsStore(
 		(s) => s.navIntent?.kind === "focusUrl" && s.navIntent.target === request.id
 	);
@@ -75,9 +68,9 @@ export default function UrlInput({ className }: UrlInputProps) {
 	}, [focusRequested, request.id, takeNavIntent]);
 
 	/**
-	 * Replace the request with what a curl/wget command describes. A command that
-	 * cannot be read leaves the request as it was and says why (#3685): the
-	 * paste's default is already prevented, so silence is a vanished paste.
+	 * Replaces the request with what a curl/wget command describes. An unreadable command leaves
+	 * the request alone and says why (#3685): the paste's default is already prevented, so silence
+	 * would be a vanished paste.
 	 */
 	const importIntoRequest = useCallback(
 		(text: string) => {
@@ -87,20 +80,19 @@ export default function UrlInput({ className }: UrlInputProps) {
 				return;
 			}
 			const imported = reading.command;
-			// Request-shape replacement; identity & scripts are preserved.
+			// The request's shape is replaced; identity and scripts are kept.
 			setRequest(imported.request);
-			// And what it could not carry, said out loud rather than eaten
-			// (issue #708), with the shell variables it turned into `{{NAME}}`
-			// (#3777). After the import, never instead of it.
+			// What it could not carry, said rather than eaten (#708), with the shell variables it
+			// turned into `{{NAME}}` (#3777). After the import, never instead of it.
 			for (const notice of pasteNotices(imported)) showToast(notice);
 		},
 		[setRequest, showToast]
 	);
 
 	/*
-	 * A pasted curl/wget command replaces the whole request. Any other text with
-	 * a line break is a wrapped URL: Chromium would turn each break into a space
-	 * and send the wrong request, so it is joined instead (#3688).
+	 * A pasted curl/wget command replaces the request. Other text with a line break is a wrapped
+	 * URL: Chromium would turn each break into a space and send the wrong request, so it is joined
+	 * (#3688).
 	 */
 	const handlePaste = useCallback(
 		(e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -120,11 +112,9 @@ export default function UrlInput({ className }: UrlInputProps) {
 	);
 
 	/*
-	 * The same import, asked for by the right-click menu's "Paste as curl"
-	 * (#1359). The menu is composed in the main process, which reads the
-	 * clipboard and offers the item only for text this would accept, then hands
-	 * that text back here: the offer exists to make the paste behaviour above
-	 * discoverable, so it must be the same import and not a second one.
+	 * The same import from the right-click "Paste as curl" (#1359). Main composes the menu, reads
+	 * the clipboard, offers the item only for text this accepts and hands it back: the item exists
+	 * to make the paste behaviour discoverable, so it must be the same import, not a second.
 	 */
 	useEffect(() => {
 		return window.electronAPI?.onContextMenuCommand?.((command) => {
@@ -139,13 +129,13 @@ export default function UrlInput({ className }: UrlInputProps) {
 			onChange={handleUrlChange}
 			onPaste={handlePaste}
 			placeholder="Paste a URL or a cURL command"
-			// Explicit, because the placeholder is an instruction, not the field's
-			// name, and it is withheld entirely once the URL contains a variable.
+			// Explicit: the placeholder is an instruction, not the name, and is withheld once the
+			// URL has a variable.
 			aria-label="Request URL"
 			// So ⌘L can find it from the Shell, which is outside this subtree.
 			id={REQUEST_URL_INPUT_ID}
-			// The one field whose right-click menu offers to import a command from
-			// the clipboard, because it is the one that imports a pasted one.
+			// The one field whose right-click offers a clipboard command import, as it imports a
+			// pasted one.
 			contextKind="url-bar"
 			variables={variables}
 			className={className ?? "w-full"}

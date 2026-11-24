@@ -200,8 +200,7 @@ const ResultAnnotations& annotations) {
     // exemplar gets one, a plain 1-in-N sample does not - a thousand
     // identical 200s are not worth a thousand bodies. A completion that is
     // both sampled and an exemplar is stored in the sampled budget *and*
-    // keeps its body, which is the case the old precedence-based version
-    // could only express by moving the record.
+    // keeps its body.
     const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
     // The phase breakdown goes in whatever the retention gate above
     // decided: `trace_data` carries these same five numbers for the ~1% of
@@ -1140,8 +1139,8 @@ std::optional<vayu::http::Auth>& late_auth) {
  *
  * Every strategy submits through here rather than each writing its own
  * `submit_one`, so a run's rows reach whichever pacing mode the user picked
- * instead of the one whose lambda remembered them - and so does the
- * mid-run credential swap, which two of the four used to miss.
+ * instead of the one whose lambda remembered them - and so does the mid-run
+ * credential swap.
  *
  * **A run carrying none of them takes the path it always did**: one null test
  * and two `empty()` tests, then the same submit of the same shared request. No
@@ -1517,8 +1516,7 @@ class ConstantLoadStrategy : public LoadStrategy {
      * `sendRate` never showed what this function does; only a target
      * timestamping its arrivals does.
      *
-     * Not because of 15.6ms rounding, which is what this said until issue
-     * #1161 read the two mechanisms against each other: this run's event loop
+     * Not because of 15.6ms rounding (issue #1161): this run's event loop
      * holds `platform::HighResolutionTimerScope` for as long as it exists, so
      * in-process the resolution is already 1ms while a run is sending, on the
      * pacing thread as much as in the loop. The spin is for the residual -
@@ -1906,10 +1904,9 @@ class CapacityLoadStrategy : public LoadStrategy {
         " -> " + std::to_string (capacity_config.max_concurrency));
         vayu::utils::log_info ("run", "  Deadline: " + std::to_string (deadline_ms) + " ms");
 
-        // Through `SubmissionRequest` like every other mode since #993: a
-        // capacity search binds its data rows the same way, and picks up a
-        // credential the refresh watchdog renewed mid-search, which submitting
-        // the built request directly never did.
+        // Through `SubmissionRequest` like every other mode (#993): a capacity search
+        // binds its data rows the same way, and picks up a credential the refresh
+        // watchdog renewed mid-search, which submitting the built request directly would not.
         SubmissionRequest live (context, request);
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_collections.cpp
  * @brief Collections: the tree, the trash (issue #988) and batch reorder
  * (issue #365) (issue #1614).
  */

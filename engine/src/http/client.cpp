@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/client.cpp
  * @brief HTTP client implementation using libcurl
  */
 
@@ -561,8 +560,8 @@ std::string raw_request_from_wire (std::string header_frame, const std::string& 
  *
  * The fallback for a transfer that failed before libcurl sent anything - DNS
  * failure, connection refused, a timeout during connect. Synthesized from the
- * composed request, which is what this view was built from throughout before
- * #339, so an unreachable host still shows the request that was attempted.
+ * composed request (#339), so an unreachable host still shows the request that
+ * was attempted.
  */
 std::string synthesize_raw_request (const Request& request, const Response& response) {
     std::stringstream raw_req;
@@ -614,7 +613,6 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // Host header (required for HTTP/1.1)
     raw_req << "Host: " << host << "\r\n";
 
-    // Add all request headers
     for (const auto& [key, value] : response.request_headers) {
         // Skip if it's a Host header (we already added it)
         if (key == "Host" || key == "host")
@@ -640,7 +638,6 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // End of headers
     raw_req << "\r\n";
 
-    // Body
     if (!body.empty ()) {
         raw_req << body;
     }
@@ -988,7 +985,6 @@ Result<Response> Client::send (const Request& request) {
     // rawRequest is read off the wire, so it can only be built after the
     // transfer completes - see below, just before the error-path early return.
 
-    // Set callbacks
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &sink);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
@@ -1032,12 +1028,8 @@ Result<Response> Client::send (const Request& request) {
         frame.peer_check.local_peers = &*local_peer_rule;
     }
 
-    // Protocol selection. This path (POST /execute, "Send") previously set no
-    // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -
-    // the same NONE value Auto maps to, but not by anything that named the
-    // request's field, so a Send and a load test of the same request had no
-    // structural guarantee of agreeing. Both drivers now go through the one
-    // shared mapping.
+    // Protocol selection through the one mapping both drivers share, so a Send and a
+    // load test of the same request cannot disagree.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.http_version));
 
@@ -1083,9 +1075,8 @@ Result<Response> Client::send (const Request& request) {
         impl_->config.cookie_scope, frame.jar_seeded_from);
     }
 
-    // The event loop's semantics through the shared helper, which had drifted
-    // from this code once already (negative TLS ms on the load path). The
-    // phase timers are every hop's, summed.
+    // The event loop's semantics through the shared helper. The phase timers are
+    // every hop's, summed.
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
     detail::apply_transfer_timing (response.timing, chain.phases, perceived_ms);

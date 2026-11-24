@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/cookies.cpp
  * @brief See and clear the design-mode cookie jar (issue #301).
  *
  * A session the user cannot inspect or reset is a support problem: "why is

@@ -18,13 +18,12 @@ interface DisclosureCardProps {
 }
 
 /**
- * Header and contents are one card, not a bordered header with loose fields
- * under it: a disclosure whose contents sit on the dialog background reads as
- * loose fields rather than as the section that revealed them. The card is the
- * design system's `Card` (docs/design-system/component-patterns.md "Cards"), which the
- * `Collapsible` root renders as (`asChild`) so the open state still lands on the
- * card's own element. `panel-clip` is required by the `overflow-hidden` that keeps the trigger's hover fill inside the rounded
- * corners - it tucks focus rings inward so the clip cannot eat them.
+ * Header and contents are one card: contents on the dialog background would read as loose fields,
+ * not as the section that revealed them. It is the design system's `Card`
+ * (docs/design-system/component-patterns.md "Cards"), rendered by the `Collapsible` root
+ * (`asChild`) so the open state lands on the card's element. `overflow-hidden` keeps the trigger's
+ * hover fill inside the rounded corners, so `panel-clip` is required: it tucks focus rings inward
+ * where the clip cannot eat them.
  */
 export function DisclosureCard({
 	open,
@@ -50,14 +49,11 @@ export function DisclosureCard({
 					</span>
 				</CollapsibleTrigger>
 				{/*
-				 `border-rule`: a divider *inside* the card, so the surface decides
-				 its colour rather than this line doing so. `--border` is tuned for
-				 the canvas and is the same colour as `--card` in dark (1.003), which
-				 is why the divider was not there at all; the Card's `surface-card`
-				 resolves it to 1.278 dark / 1.304 light.
-
-				 The card's own outline stays `border-border` - that edge faces the
-				 dialog background, where the canvas token is correct.
+				 * `border-rule`: a divider *inside* the card, so the surface sets its colour.
+				 * `--border` is tuned for the canvas and equals `--card` in dark (1.003), so the
+				 * divider vanished; the Card's `surface-card` resolves it to 1.278 dark / 1.304
+				 * light. The card's outline stays `border-border`: that edge faces the dialog
+				 * background, where the canvas token is right.
 				 */}
 				<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
 					{children}

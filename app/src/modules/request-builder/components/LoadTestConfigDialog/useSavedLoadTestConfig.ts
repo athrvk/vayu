@@ -35,50 +35,38 @@ export interface SavedLoadTestConfig {
 	retryAfterBackoff: boolean;
 	retryAfterMaxMs: number;
 	/**
-	 * The stream caps (issue #576), memoed like every other field so a second
-	 * run of the same stream does not have to be re-bounded by hand. Stored
-	 * even for a non-streaming request: the memo is one object, and dropping
-	 * keys per request kind would make "what did I set last time" depend on
-	 * which request happened to run last.
+	 * The stream caps (#576), memoed like every field so a repeat run need not re-bound them.
+	 * Stored even for a non-streaming request: the memo is one object, and dropping keys per
+	 * request kind would make "what did I set last time" depend on which request ran last.
 	 */
 	streamDuration: number;
 	streamMaxEvents: number;
 	/**
-	 * Budgets are memoed as typed, blanks included, so a cleared field stays
-	 * cleared. A restored draft is also what tells the p99 prefill it has
-	 * already had its turn - without it, declining the SLO budget once would be
-	 * undone by the next dialog open. Partial because a Capacity run leaves the
-	 * Settings p99 seed out (`budgetsToRemember`, issues #2816, #3772): written, it
-	 * would restore as the user's own and the next capacity or stream run would
-	 * send it.
+	 * Memoed as typed, blanks included, so a cleared field stays cleared, and a restored draft
+	 * tells the p99 prefill it had its turn (else declining the SLO budget once is undone on the
+	 * next open). Partial because a Capacity or streaming run leaves the Settings p99 seed out
+	 * (`budgetsToRemember`, #2816, #3772): written, it would restore as the user's own and be sent.
 	 */
 	budgets: Partial<BudgetDraft>;
 	/**
-	 * The request whose Start last changed the budgets above, so the next dialog
-	 * can say where carried-over budgets came from (issue #2194). Provenance for
-	 * the one global memo, not per-request storage. Absent from a memo written
-	 * before this field existed, and when the budgets were written without a
-	 * saved request to name.
+	 * The request whose Start last changed the budgets, so the next dialog can name the source of
+	 * carried budgets (#2194): provenance for the one global memo, not per-request storage. Absent
+	 * in older memos and when no saved request could be named.
 	 */
 	budgetsFrom?: BudgetsOrigin;
 	/**
-	 * The `custom.<name>.<stat>` rows (issue #1579), memoed for the same reason
-	 * and in the same shape as the fixed budgets above: a metric name is a
-	 * property of the plan, not of one run, so retyping it per run is friction
-	 * the memo exists to remove. Absent from a memo written before this field
-	 * existed, which restores as no rows.
+	 * The `custom.<name>.<stat>` rows (#1579), memoed like the fixed budgets: a metric name belongs
+	 * to the plan, not one run, so retyping it per run is the friction the memo removes. An older
+	 * memo without it restores no rows.
 	 */
 	customBudgets: CustomBudgetDraft[];
 	/**
-	 * Whether a missed budget above should fail the run, not only report it -
-	 * memoed alongside `budgets` for the same reason.
+	 * Whether a missed budget fails the run rather than only reporting it; memoed with `budgets`.
 	 */
 	failRun: boolean;
 	/**
-	 * The monitoring endpoint, memoed for the same reason the budgets are: it is
-	 * a property of the *target* rather than of one run, so retyping a
-	 * `/metrics` URL and its metric names for every run is the same friction the
-	 * memo exists to remove.
+	 * The monitoring endpoint, memoed: it belongs to the *target*, not one run, so retyping a
+	 * `/metrics` URL and its names every run is the friction the memo removes.
 	 */
 	monitor: MonitorDraft;
 }
@@ -100,9 +88,8 @@ export type LoadTestProfile = Pick<
 >;
 
 /**
- * The memo as the dialog's fields start out: every range-bound number clamped
- * into the current limits, every absent field defaulted. `maxInFlight` is a
- * string because its field is optional and blank means "derive it".
+ * The memo as the fields start: range-bound numbers clamped into the current limits, absent fields
+ * defaulted. `maxInFlight` is a string: optional, and blank means "derive it".
  */
 export type RestoredLoadTestConfig = Omit<
 	SavedLoadTestConfig,
@@ -148,11 +135,9 @@ function saveConfig(config: SavedLoadTestConfig): void {
 }
 
 /**
- * The ceilings are a user setting (Settings -> Load testing), so every range
- * is resolved rather than read off the constant. Restored values are clamped
- * into it: the memo is written by a past run, and a ceiling lowered since then
- * would otherwise seed a field above its own `max` - which a number input
- * shows without complaint.
+ * The ceilings are a user setting (Settings -> Load testing), so every range is resolved, and
+ * restored values are clamped into it: a ceiling lowered since the memo was written would otherwise
+ * seed a field above its own `max`, which a number input shows without complaint.
  */
 function restoreConfig(
 	saved: Partial<SavedLoadTestConfig>,
@@ -193,10 +178,9 @@ function restoreConfig(
 			LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS,
 			"STREAM_MAX_EVENTS"
 		),
-		// Capacity Discovery searches for the edge of this budget. Seeded from the
-		// same `sloThresholdMs` setting the p99 budget is - the search and the
-		// chart annotation are two readings of one number, and giving the mode its
-		// own default would be a third notion of "too slow".
+		// Capacity Discovery searches for the edge of this budget, seeded from `sloThresholdMs`
+		// like the p99 budget: the search and the chart annotation read one number, and a mode
+		// default would be a third notion of "too slow".
 		sloMs: restore(saved.sloMs, seeds.sloThresholdMs, "SLO_MS"),
 	};
 
@@ -205,9 +189,8 @@ function restoreConfig(
 	return {
 		profile,
 		maxInFlight: saved.maxInFlight != null ? String(saved.maxInFlight) : "",
-		// Clamped like the rest, and load-bearing for a second reason: a config
-		// saved when the slider's floor was 0 restores that 0, because
-		// `saved.sampleRate ?? DEFAULT` keeps a present 0.
+		// Clamped like the rest, and load-bearing: a config saved when the slider's floor was 0
+		// restores that 0, since `saved.sampleRate ?? DEFAULT` keeps a present 0.
 		sampleRate: restore(
 			saved.sampleRate,
 			LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT,
@@ -215,21 +198,17 @@ function restoreConfig(
 		),
 		slowThreshold: saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS,
 		saveTimingBreakdown: saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN,
-		// A memo written before the option existed carries neither key.
+		// An older memo carries neither key.
 		retryAfterBackoff: saved.retryAfterBackoff ?? LOAD_TEST_DEFAULTS.RETRY_AFTER_BACKOFF,
 		retryAfterMaxMs: restore(
 			saved.retryAfterMaxMs,
 			LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
 			"RETRY_AFTER_MAX_MS"
 		),
-		// Budgets and monitor are merged onto an empty draft rather than swapped
-		// wholesale: a block saved by an older build predates whatever field this
-		// build added since, and `budgetError` / `monitorError` read every
-		// current key unconditionally - a stale object missing one crashed the
-		// dialog outright on `undefined.trim()`.
-		//
-		// The p99 budget is seeded from the capacity SLO only on a first run:
-		// once a draft has been memoed, a cleared p99 stays cleared.
+		// Budgets and monitor merge onto an empty draft, never swapped whole: an older build's
+		// block lacks fields added since, and `budgetError` / `monitorError` read every current
+		// key, so a stale object crashed the dialog on `undefined.trim()`. The p99 budget is seeded
+		// from the capacity SLO on a first run only: once memoed, a cleared p99 stays cleared.
 		budgets: {
 			...emptyBudgetDraft(),
 			[SLO_SEEDED_KEY]: String(seeds.sloThresholdMs),
@@ -239,15 +218,14 @@ function restoreConfig(
 		carried: findCarriedBudgets(saved.budgets, customBudgets),
 		customBudgets,
 		failRun: saved.failRun ?? false,
-		// The scrape cadence is likewise seeded only on a first run: once a draft
-		// has been memoed, the interval the user set stays set.
+		// The scrape cadence too is seeded on a first run only; once memoed, the user's interval
+		// stays.
 		monitor: { ...emptyMonitorDraft(seeds.monitorIntervalMs), ...saved.monitor },
 	};
 }
 
 /**
- * The last run's settings: read once when the dialog opens, clamped into
- * @p limits, and written back by `save` when a run starts.
+ * The last run's settings: read once on open, clamped into @p limits, written by `save` at Start.
  */
 export function useSavedLoadTestConfig(limits: LoadTestLimits, seeds: RestoreSeeds) {
 	const [initial] = useState(() => restoreConfig(loadSavedConfig(), limits, seeds));

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db/change_feed.cpp
  * @brief The change feed's ring and wire spellings (issue #3420).
  */
 

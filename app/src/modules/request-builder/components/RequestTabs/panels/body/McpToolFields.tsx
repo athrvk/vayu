@@ -6,29 +6,22 @@
  */
 
 /**
- * What an `mcp` body adds to the raw JSON pane (#3762): the tool a `tools/call`
- * names, and a note on the headers the engine writes.
+ * What an `mcp` body adds to the raw JSON pane (#3762): the tool a `tools/call` names, and a note
+ * on the headers the engine writes.
  *
- * **The headers are the engine's, and this panel displays none of its own
- * derivation.** `Accept`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` and
- * `Mcp-Param-*` are derived at send time from the bytes about to leave, in the
- * one builder every client shares, and reported on the response as the request
- * headers that were sent. A list computed here would be a second reader of the
- * body that drifts from it. The note says where to look instead.
+ * **The headers are the engine's; this panel derives none.** `Accept`, `MCP-Protocol-Version`,
+ * `Mcp-Method`, `Mcp-Name` and `Mcp-Param-*` are derived at send from the outgoing bytes, in the
+ * one builder every client shares, and reported on the response as sent headers. A list here would
+ * be a second reader that drifts, so the note says where to look.
  *
- * The tool exists for `Mcp-Param-*`: the engine mirrors each argument its
- * `inputSchema` marks `x-mcp-header`. Without a stored tool none is sent, which
- * the note says in that state because nothing else on screen would. The fields
- * are typed by hand; importing an MCP server is what will fill them (#3765).
- *
- * The output schema is the one input the engine never reads: the builder does,
- * to prefill an `assert.jsonschema` element for this tool's `structuredContent`
- * (#3806). It lives beside the input schema because both are what `tools/list`
- * states about the tool, and an edit of either must not drop the other.
- *
- * The schema editor is not a native control, so `LabelledField`'s
- * `<label for>` cannot name it; the label and the error reach it through a
- * named group instead, the shape `GenericElementForm`'s map field uses.
+ * The tool exists for `Mcp-Param-*`: the engine mirrors each argument its `inputSchema` marks
+ * `x-mcp-header`. Without a stored tool none is sent, which the note says then, as nothing else
+ * would. Fields are typed by hand; importing an MCP server will fill them (#3765). The output
+ * schema is the one input the engine never reads: the builder uses it to prefill an
+ * `assert.jsonschema` for `structuredContent` (#3806). It sits by the input schema because
+ * `tools/list` states both and an edit of either must keep the other. The schema editor is not a
+ * native control, so `LabelledField`'s `<label for>` cannot name it; label and error reach it
+ * through a named group, as in `GenericElementForm`'s map field.
  */
 
 import { useState } from "react";
@@ -57,9 +50,9 @@ export default function McpToolFields({ tool, onToolChange, requestId }: McpTool
 	const [fields, setFields] = useState<Fields>(() => fieldsOf(tool));
 
 	/*
-	 * A request switch or an external write moved the stored tool away from what
-	 * the fields commit: take it. Typing never trips this, and a field the engine
-	 * would refuse commits nothing, so it is held rather than overwritten.
+	 * A request switch or external write moved the stored tool from what the fields commit: take
+	 * it. Typing never trips this, and a field the engine would refuse commits nothing, so it is
+	 * held.
 	 */
 	if (!describes(fields, tool)) setFields(fieldsOf(tool));
 

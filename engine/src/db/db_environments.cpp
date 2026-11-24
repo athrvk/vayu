@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_environments.cpp
  * @brief Environments (including the single-active-environment invariant)
  * and the app-wide globals singleton (issue #1614).
  */

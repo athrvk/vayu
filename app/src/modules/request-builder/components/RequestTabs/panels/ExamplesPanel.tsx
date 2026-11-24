@@ -6,30 +6,19 @@
  */
 
 /**
- * ExamplesPanel - the request's saved example responses (issues #481, #588,
- * #722).
+ * The request's saved example responses (#481, #588, #722): what an importer found beside the
+ * request (Postman's saved responses, an OpenAPI operation's documented ones) and the responses a
+ * user kept from the response viewer. Also what a mock server answers with, the first row of a
+ * matched request being the one served, so the stored order is kept, never re-sorted here.
  *
- * These are what an importer found next to the request and, until the engine
- * had a table for them, threw away: Postman's saved responses, an OpenAPI
- * operation's documented ones - and the responses a user kept from
- * the response viewer. It is also the list of what a mock server for this
- * collection will answer with, the first row of a matched request being the one
- * it serves, which is why the stored order is preserved rather than re-sorted
- * here.
+ * Rows can be deleted, not edited: an example you can create and never remove is the #553 zombie
+ * shape, and an editor is a separate change, so this is a viewer until then.
  *
- * Rows can be removed but not edited. Delete landed with save-as-example
- * because an example you can create and never remove is the #553 zombie shape
- * at a smaller scale; an editor for a stored example is a separate change, and
- * this is still a viewer until it exists.
- *
- * **A row says where it came from, because the two kinds behave differently**
- * (#722). A spec sync rewrites a request's imported examples whenever it
- * applies any change to it and never touches a saved one, so which rows the
- * next sync owns is a fact about the list - and until the chip it was one the
- * list did not show. Deleting either kind is durable: the engine records a
- * deleted imported example as a tombstone, and moves a saved one to the Trash
- * (#2971), which is why only a saved delete raises the Undo toast and why the
- * dialog's wording of what could bring the row back differs.
+ * **A row says where it came from, because the kinds behave differently** (#722). A spec sync
+ * rewrites a request's imported examples whenever it changes the request, and never a saved one, so
+ * which rows the next sync owns is shown. Deleting either kind is durable: an imported one becomes
+ * an engine tombstone, a saved one goes to the Trash (#2971), which is why only a saved delete
+ * offers Undo and why the dialog words what can bring the row back differently.
  */
 
 import { useMemo, useState } from "react";
@@ -72,12 +61,9 @@ import type { MockResponseMode, Request, RequestExample } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
- * The header map `ResponseBody` reads, from the example's stored entries.
- *
- * Disabled rows are dropped and a repeated name keeps its last value: this map
- * exists only so the viewer can pick a renderer, and it is deliberately not the
- * copy shown to the user - `ExampleRow` lists the stored entries themselves, so
- * duplicates stay visible where they matter.
+ * The header map `ResponseBody` reads. Disabled rows are dropped and a repeated name keeps its last
+ * value: it only picks a renderer and is not what the user sees; `ExampleRow` lists the stored
+ * entries, duplicates visible.
  */
 function headerMap(example: RequestExample): Record<string, string> {
 	const out: Record<string, string> = {};
@@ -106,11 +92,10 @@ function ExampleRow({
 	return (
 		<div className="rounded-md border border-rule surface-card">
 			{/*
-			 * The expander and the delete cannot be one button, so the row is a
-			 * container that paints the hover and the expander stretches into it -
-			 * the drawer-row rule (`drawer-row-hit-area.test.tsx`). Without
-			 * `self-stretch` the expander is content-height and the padding above
-			 * and below it swallows clicks that look like they land on the row.
+			 * The expander and the delete cannot be one button, so the row is a container that
+			 * paints the hover and the expander stretches into it, the drawer-row rule
+			 * (`drawer-row-hit-area.test.tsx`): without `self-stretch` the padding above and below
+			 * swallows clicks that look like they land on the row.
 			 */}
 			<div className="flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent">
 				<button
@@ -123,15 +108,11 @@ function ExampleRow({
 					<StatusCodeBadge status={example.status} />
 					<span className="truncate font-medium">{example.name}</span>
 					{/*
-					 * A partial body, said on the row rather than in the name
-					 * (issue #659). The name is editable at save time, so it lost
-					 * the disclosure to any rename; the engine records
-					 * `bodyTruncated` and this reads it.
-					 *
-					 * Amber, not destructive: a truncated example is a usable
-					 * one - a mock will serve it and the response is real as far
-					 * as it goes - so the state is "know this", never "broken".
-					 * The same reading `DATA_TOKEN_TONE_CLASS` gives `warning`.
+					 * A partial body, said on the row, not in the name (#659): the name is editable
+					 * at save, so it lost the disclosure on any rename; the engine records
+					 * `bodyTruncated`. Amber, not destructive: a truncated example is usable (a
+					 * mock serves it, the response is real as far as it goes), so the state is
+					 * "know this", never "broken", as `DATA_TOKEN_TONE_CLASS` reads `warning`.
 					 */}
 					{example.bodyTruncated && (
 						<Badge
@@ -143,19 +124,12 @@ function ExampleRow({
 						</Badge>
 					)}
 					{/*
-					 * Where the row came from (issue #722). The engine has
-					 * recorded it and the two kinds behave
-					 * differently - a sync rewrites the imported rows of a
-					 * request it applies any change to, and never the saved
-					 * ones - so leaving the asymmetry invisible made the list
-					 * unpredictable: nothing on screen said which rows the next
-					 * sync would replace.
-					 *
-					 * Neutral, unlike the amber beside it: this is where a row
-					 * came from, not something to watch out for. The muted
-					 * text-only chip the settings cards use for the same kind
-					 * of fact ("Every port", "Passphrase set") - `chip` paints
-					 * no background, so the colour is the caller's to state.
+					 * Where the row came from (#722): a sync rewrites the imported rows of a
+					 * request it changes, never the saved ones, and without this nothing said which
+					 * rows the next sync replaces. Neutral, unlike the amber beside it: provenance,
+					 * not a warning. The muted text-only chip the settings cards use for such facts
+					 * ("Every port", "Passphrase set"); `chip` paints no background, so the colour
+					 * is the caller's to state.
 					 */}
 					{example.origin === "import" && (
 						<Badge
@@ -217,16 +191,11 @@ function ExampleRow({
 }
 
 /**
- * Which saved example a mock server answers with (issue #481 phase 3).
- *
- * A property of the request, not of any running mock - editing it here takes
- * effect the next time a mock for this collection starts, exactly like every
- * other change to a saved example does.
- *
- * `mockResponseMode`/`mockExampleId` live on the persisted `Request` and are
- * written immediately through `useUpdateRequestMutation`, not through the
- * builder's dirty/save flow - `RequestState` (the context's `request`) never
- * carries them, so the caller passes the query-backed row instead.
+ * Which saved example a mock server answers with (#481 phase 3). A property of the request, not of
+ * a running mock: an edit applies when a mock for this collection next starts, like any example
+ * change. `mockResponseMode`/`mockExampleId` are on the persisted `Request`, written at once via
+ * `useUpdateRequestMutation`, outside the dirty/save flow; `RequestState` never carries them, so
+ * the caller passes the query-backed row.
  */
 function MockResponseModeControl({
 	request,
@@ -237,10 +206,9 @@ function MockResponseModeControl({
 }) {
 	const updateRequest = useUpdateRequestMutation();
 	const mode = request.mockResponseMode;
-	// What the mock answers with, not what the row records: a pointer that is
-	// unset, or names an example that is gone (a spec sync can drop one without
-	// touching the request), falls back to the first example, so the selector
-	// shows that one instead of a blank trigger (#3422).
+	// What the mock answers with, not what the row records: an unset pointer, or one naming a gone
+	// example (a sync can drop one without touching the request), falls back to the first, so the
+	// selector shows it instead of a blank trigger (#3422).
 	const effectiveExampleId = examples.some((e) => e.id === request.mockExampleId)
 		? request.mockExampleId
 		: examples[0]?.id;
@@ -257,22 +225,17 @@ function MockResponseModeControl({
 	return (
 		<div className="flex flex-wrap items-center gap-2">
 			{/*
-			 * A `<span>`, not a `<Label>`: a segmented control is a group of
-			 * buttons with no single labelable control to point `htmlFor` at, so
-			 * the group carries its own `aria-label` instead (the shape
-			 * `ModeElementForm.tsx`'s `ModePicker` uses).
+			 * A `<span>`, not a `<Label>`: a segmented control has no single control for `htmlFor`,
+			 * so the group carries its `aria-label` (as `ModeElementForm.tsx`'s `ModePicker` does).
 			 */}
 			<span className="text-xs font-medium">Mock response</span>
 			<ToggleGroup
 				value={mode}
-				// Radix clears the value when the active segment is pressed again;
-				// this mode always has to be something, never "off".
+				// Radix clears the value when the active segment is pressed again; this mode is
+				// never "off".
 				onValueChange={(next) => next && setMode(next as MockResponseMode)}
-				// `sm` (28px), not the default `xs` (24px): matches the 28px compact
-				// `Select` this row shows in `fixed` mode, so switching into that
-				// mode never changes the row's height (it does when the two
-				// heights differ, because the row is `items-center` and grows to
-				// its tallest child).
+				// `sm` (28px), not the default `xs` (24px): it matches the 28px `Select` shown in
+				// `fixed` mode, so switching modes never changes the `items-center` row's height.
 				size="sm"
 				aria-label="Mock response"
 			>
@@ -282,9 +245,10 @@ function MockResponseModeControl({
 			</ToggleGroup>
 			{mode === "fixed" && (
 				<Select value={effectiveExampleId} onValueChange={(id) => setMode("fixed", id)}>
-					{/* Fixed rem, not `w-40`: the trigger holds an example's name, a
-					    text measure that should not narrow at the Default density the
-					    way `w-40`'s `--spacing` unit does. */}
+					{/*
+					 * Fixed rem, not `w-40`: an example name is a text measure, which should not
+					 * narrow at the Default density as `--spacing` does.
+					 */}
 					<SelectTrigger className="h-control-sm w-[10rem] text-xs" aria-label="Example">
 						<SelectValue />
 					</SelectTrigger>
@@ -316,8 +280,7 @@ export default function ExamplesPanel() {
 	const openImport = useImportModalStore((s) => s.open);
 	const offerUndo = useTrashUndo();
 
-	// The saved row, not the builder's draft: an unsaved rename would put a name
-	// in the line that the engine and the agent's tools do not know yet.
+	// The saved row, not the draft: the engine and the agent's tools do not know an unsaved rename.
 	const exampleLine = useMemo(() => {
 		if (!savedRequest) return null;
 		const path = collectionNamePath(savedRequest.collectionId, collections);
@@ -332,17 +295,16 @@ export default function ExamplesPanel() {
 			{
 				onSuccess: () => {
 					setPendingDelete(null);
-					// An imported example is a spec-sync tombstone, not a Trash
-					// entry: there is nothing to restore it from.
+					// An imported example becomes a spec-sync tombstone, not a Trash entry: nothing
+					// to restore.
 					if (origin !== "import") offerUndo(id, name, "example");
 				},
 			}
 		);
 	};
 
-	// An unsaved request has no id, so there is nothing stored to list - said
-	// plainly rather than shown as an empty list, which would read as "this
-	// request has no examples" for a request that cannot have any yet.
+	// An unsaved request has nothing stored to list; said plainly, since an empty list would read
+	// as "no examples" for a request that cannot have any yet.
 	if (!request.id) {
 		return (
 			<EmptyState
@@ -354,8 +316,8 @@ export default function ExamplesPanel() {
 	if (isLoading) {
 		return <DetailSkeleton label="Loading example responses" rows={3} className="p-0" />;
 	}
-	// Gated on no data: TanStack keeps the last list through a failed background
-	// refetch, and a full-pane error over rows that are still valid would hide them.
+	// Only with no data: TanStack keeps the last list through a failed refetch, and a full-pane
+	// error would hide valid rows.
 	if (loadError && !examples) {
 		return (
 			<ErrorState
@@ -395,8 +357,7 @@ export default function ExamplesPanel() {
 					example={example}
 					reference={exampleLine ? exampleLine(example) : null}
 					onDelete={() => {
-						// Clears the previous refusal, so reopening does not lead
-						// with the error from the attempt before it.
+						// Clears the last refusal, so reopening does not lead with an old error.
 						deleteExample.reset();
 						setPendingDelete(example);
 					}}
@@ -405,17 +366,11 @@ export default function ExamplesPanel() {
 			))}
 
 			{/*
-			 * Confirmed rather than immediate: a mock server answers with the first
-			 * example of a matched route, so removing one can change what the next
-			 * restart serves.
-			 *
-			 * The last sentence differs by origin because what happens next does
-			 * (issues #722, #2971). A saved example goes to the Trash and the
-			 * toast after the delete offers it straight back. An imported one is
-			 * not trashed - the engine keeps the delete as a tombstone, so no
-			 * later sync writes it back - but re-importing the document is a
-			 * fresh import and does bring it back, which is the one way it can
-			 * return and so the one thing worth saying here.
+			 * Confirmed, not immediate: a mock answers with a route's first example, so a delete
+			 * can change what the next restart serves. The last sentence differs by origin (#722,
+			 * #2971): a saved example goes to the Trash and the toast offers it back; an imported
+			 * one becomes an engine tombstone, so no later sync writes it back, but re-importing
+			 * the document does, the one way it returns and so the one thing worth saying.
 			 */}
 			<DeleteConfirmDialog
 				open={!!pendingDelete}
@@ -423,9 +378,8 @@ export default function ExamplesPanel() {
 				title={`Delete "${pendingDelete?.name ?? "example"}"?`}
 				confirmLabel="Delete example"
 				description={exampleDeleteDescription(pendingDelete?.origin ?? "user")}
-				// The engine's refusal, in the dialog that asked for the delete. Without
-				// it a failed delete looks like nothing happened: the row is still there
-				// and the dialog is still open.
+				// The engine's refusal, in the dialog that asked: without it a failed delete looks
+				// like nothing happened, row present and dialog open.
 				error={
 					deleteExample.error && (
 						<Callout severity="blocking">

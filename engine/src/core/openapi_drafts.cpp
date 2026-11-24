@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/openapi_drafts.cpp
  * @brief The requests an import of a document would build (issue #865).
  *        See the header for what a draft is and why it is not an identity.
  *
@@ -28,8 +27,7 @@
  *
  * The documented responses **are** ported (issue #854), although the diff does
  * not compare them: applying a change writes them, so a draft without them is
- * an answer no apply can be built from - which is what kept a second parse of
- * the same document in the renderer after the comparison had moved.
+ * an answer no apply can be built from.
  */
 
 #include "vayu/core/openapi_document.hpp"

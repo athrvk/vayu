@@ -6,18 +6,15 @@
  */
 
 /**
- * One live sentence describing the run being configured.
+ * One live sentence describing the run being configured. A summary earns its place twice:
  *
- * Replaces the "What will happen:" box, which restated the fields in prose and
- * sat five controls below them. Two things justify keeping a summary at all:
+ *   - **Ramp-Up's semantics are non-obvious.** The ramp runs *inside* the total, so a 30s ramp in a
+ *     60s run means 30s ramping and 30s at target.
+ *   - **It states the total request count**, which no single field shows.
  *
- *   - **Ramp-Up's semantics are genuinely non-obvious.** The ramp runs *inside*
- *     the total, so a 30s ramp in a 60s run means 30s ramping and 30s at target.
- *   - **It can state the total request count**, which no single field shows.
- *
- * The count is only stated where it is knowable. `constant_concurrency`,
- * `ramp_up` and `capacity` send as many requests as the target can answer,
- * which depends on latency - guessing there would be worse than saying nothing.
+ * The count is stated only where knowable: `constant_concurrency`, `ramp_up` and `capacity` send as
+ * many requests as the target answers, which depends on latency, and a guess would be worse than
+ * nothing.
  */
 
 import { CONCURRENCY_UNIT, CONCURRENCY_UNIT_SINGULAR } from "@/constants/load-test-modes";
@@ -57,10 +54,8 @@ export function requestsPhrase(n: number): string {
 }
 
 /**
- * How many requests the run sends, or null for a mode whose count is the
- * target's answer rather than a number on this form. The one place the
- * `iterations` and `constant_rps` arithmetic lives: the summary sentence and
- * the off-network advisory both read it.
+ * How many requests the run sends, or null where the count is the target's answer. The one home of
+ * the `iterations` and `constant_rps` arithmetic: the summary and the off-network advisory read it.
  */
 export function totalRequests({
 	mode,
@@ -74,19 +69,16 @@ export function totalRequests({
 }
 
 /**
- * What one unit of work is. A single-request run counts requests; a collection
- * run counts passes through the sequence, and calling a pass a request would
- * understate the load by the sequence's length.
+ * The unit of work: a single-request run counts requests, a collection run passes; calling a pass a
+ * request would understate the load by the sequence's length.
  */
 export type SummarySubject = "request" | "sequence";
 
 /**
- * @param blocked  When a validation error is live the numbers describe a run
- *                 that cannot start, so the estimate is withheld rather than
- *                 printed as a confident falsehood.
- * @param subject  `"sequence"` rewords the two modes that name a count of work
- *                 (Constant Virtual Users and Fixed request count); the ramp reads
- *                 the same either way.
+ * @param blocked  A live validation error means the numbers describe a run that cannot start, so
+ *        the estimate is withheld rather than printed as a confident falsehood.
+ * @param subject  `"sequence"` rewords the two modes naming a count of work (Constant Virtual Users
+ *        and Fixed request count); the ramp reads the same.
  */
 export function summarise(
 	input: SummaryInput,
@@ -106,9 +98,8 @@ export function summarise(
 	} = input;
 
 	if (mode === "capacity") {
-		// No count, for the same reason constant_concurrency has none - and one
-		// more: how many levels the search holds is decided by the target, not
-		// by anything on this form.
+		// No count, as for constant_concurrency, and the target decides how many levels the search
+		// holds.
 		return `Steps up from ${virtualUsers(startConcurrency)}, holding each level for ${count(
 			stepDuration
 		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${virtualUsers(concurrency)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
@@ -143,11 +134,11 @@ export function summarise(
 		)}s. Total requests depend on how fast the target responds.`;
 	}
 
-	// ramp_up - the one case where the old prose was earning its keep.
+	// ramp_up: the case the summary exists for.
 	const atTarget = duration - rampDuration;
 	const tail = atTarget > 0 ? ` then holds it for the remaining ${count(atTarget)}s` : "";
-	// Exactly zero, not "not above": a ramp longer than the run is a blocking
-	// error the form already names, and this sentence would misdescribe it.
+	// Exactly zero, not "not above": a ramp longer than the run is a blocking error the form names,
+	// and this sentence would misdescribe it.
 	const noHold = atTarget === 0 ? " No time is left at the target." : "";
 	return `Climbs from ${count(startConcurrency)} to ${virtualUsers(concurrency)} over ${count(rampDuration)}s${tail}, within a ${count(
 		duration
