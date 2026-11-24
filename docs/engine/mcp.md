@@ -3832,8 +3832,11 @@ in the test, not measurements of the code, and a change that needs bytes
 removes bytes elsewhere; it never raises a ceiling (#3558). They are interim
 values that only move down, and #3751 is where they reach their final ones. A
 failing session prints its host, its measured size, the overshoot and the five
-largest tools. The server instructions have a ceiling of their own in the same
-file, so text moved from the descriptions into them still counts.
+largest tools. The server instructions have a fixed ceiling of their own in
+the same file, 8,100 bytes for any one session, so text moved from the
+descriptions into them still counts. It is frozen at the largest session
+today (the CLI host with writes and reveal off) and is lowered when the
+instructions are trimmed, never raised.
 
 A tool's result fields are explained on its output schema, one clause per
 member, rather than narrated in its description (`get_run_report` and

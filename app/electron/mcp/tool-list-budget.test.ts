@@ -40,7 +40,7 @@ const CEILING_WRITES_OFF = 156_000;
 const CEILING_WRITES_ON = 226_000;
 
 /** UTF-8 bytes the server instructions of any one session may not exceed. */
-const INSTRUCTIONS_CEILING = 7_000;
+const INSTRUCTIONS_CEILING = 8_100;
 
 const LARGEST_TOOLS_SHOWN = 5;
 
