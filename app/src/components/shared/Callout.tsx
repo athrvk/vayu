@@ -6,20 +6,11 @@
  */
 
 /**
- * One notice treatment for the whole app.
- *
- * The load-test dialog alone had five, including two warning styles that did
- * not match each other (`border-warning/30 bg-warning/10` against
- * `border-warning/40 bg-warning/5`), and the MCP settings panel had the same
- * two variants again. They are all this shape: an icon, a line of text, and
- * sometimes an action.
- *
- * Up to four can be on screen at once where the conditions are independent -
- * in the load-test dialog a ramp error, a pre-request script and an OAuth
- * warning all stack.
- *
- * With that many, the only thing telling the user which notice is *stopping*
- * them is order and weight, so severity is a prop and the caller sorts on it.
+ * One notice treatment for the app: an icon, a line of text, sometimes an action (the load-test
+ * dialog alone had five, two mismatched warnings among them). Up to four stack where the conditions
+ * are independent (in the load-test dialog a ramp error, a pre-request script and an OAuth
+ * warning), so only order and weight say which one is *stopping* the user: severity is a prop and
+ * the caller sorts on it.
  */
 
 import type { ReactNode } from "react";
@@ -28,8 +19,8 @@ import { cn } from "@/lib/utils";
 import type { Severity } from "./callout-severity";
 
 const STYLES: Record<Severity, { box: string; icon: string; Icon: typeof AlertTriangle }> = {
-	// Destructive tokens, not warning ones: this is the tier that disables Start,
-	// and it has to outrank the advisory notice sitting next to it.
+	// Destructive tokens, not warning ones: this tier disables Start and must outrank the advisory
+	// beside it.
 	blocking: {
 		box: "border-destructive/40 bg-destructive/10",
 		icon: "text-destructive-text",

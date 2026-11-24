@@ -9,17 +9,10 @@ import { Button } from "@/components/ui";
 import { Callout } from "./Callout";
 
 /**
- * A background change that arrived while a draft was dirty - see
- * `useEntityDraft`'s `externalValue`, and the request builder's own per-field
- * merge (issue #1436). The surface never overwrites the in-progress edit;
- * this is what it shows instead, with a "Take theirs" action that adopts the
- * external value.
- *
- * Shared rather than collection-tab-local (it started in
- * `CollectionDetail/shared.tsx` for #1437): the request builder needs the
- * same notice for the same reason, and a second copy would be the "written
- * but never read" style drift CLAUDE.md warns about, just for a component
- * instead of a field.
+ * A background change that arrived while a draft was dirty (`useEntityDraft`'s `externalValue`, and
+ * the request builder's per-field merge, #1436). The surface never overwrites the edit; it shows
+ * this, with "Take theirs" adopting the external value. Shared (first written for the collection
+ * tabs, #1437), as the request builder needs the same notice and a second copy would drift.
  */
 export function ExternalChangeCallout({
 	what,

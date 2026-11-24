@@ -6,27 +6,16 @@
  */
 
 /**
- * What a capacity-discovery run found: the most virtual users the target held
- * inside its latency budget and error limit, the level it gave out at, and the
- * per-level trail the search left behind.
- *
- * The headline is a sentence rather than a stat grid because the mode exists to
- * answer one question in words - "what can my service take" - and four numbers
- * side by side make the reader assemble that answer themselves. The levels
- * table below it is the evidence, so a reader who distrusts the headline can
- * see the shape of the curve it came from.
- *
- * The sentence follows why the search stopped, because the same
- * `maxHealthy*` figures mean different things under each reason: a measured
- * capacity when the target gave out (latency or errors), a floor when the
- * search ran out of ceiling, time or patience, and an overshoot when throughput
- * plateaued (the last level tried, not where the curve flattened - the
- * `saturation*` figures name that one). Reading all of them as "Sustained N"
- * claims a limit the search never found.
- *
- * Silent for every other mode. A fixed-target run measured a point rather than
- * a curve, so an empty shell here would imply it looked for a limit and found
- * none.
+ * What a capacity-discovery run found: the most virtual users the target held inside its latency
+ * budget and error limit, the level it gave out at, and the per-level trail. The headline is a
+ * sentence, not a stat grid: the mode answers one question in words ("what can my service take"),
+ * and four numbers side by side leave the reader to assemble it; the levels table is the evidence
+ * behind it. The sentence follows why the search stopped, as the `maxHealthy*` figures mean
+ * different things per reason: a measured capacity when the target gave out (latency or errors), a
+ * floor when the search ran out of ceiling, time or patience, an overshoot when throughput
+ * plateaued (the last level tried; `saturation*` names where the curve flattened). "Sustained N"
+ * for all of them claims a limit never found. Silent for every other mode: a fixed-target run
+ * measured a point, and an empty shell would imply it looked for a limit and found none.
  */
 
 import type { ReactNode } from "react";
@@ -40,9 +29,8 @@ import { STOP_REASONS, stopDetail, type CapacityResult } from "./capacityStop";
 type Capacity = CapacityResult;
 
 /**
- * The reading at the knee: the error share when errors ended the search, the p99
- * otherwise. Each is printed only when the engine sent it, so an absent figure
- * never renders as "0ms" or "0.0%".
+ * The reading at the knee: the error share when errors ended the search, else the p99; each printed
+ * only when sent, so an absent figure never reads "0ms" or "0.0%".
  */
 function KneeEvidence({ capacity }: { capacity: Capacity }) {
 	if (capacity.stopReason === "errors_exceeded" && capacity.kneeErrorPct !== undefined) {
@@ -76,18 +64,15 @@ const INTERRUPTED_STOPS: ReadonlySet<string> = new Set(["deadline", "stopped"]);
 type HeadlineKind =
 	"judgedNothing" | "plateau" | "openEnded" | "sustained" | "noLevelOnErrors" | "noLevelOnBudget";
 
-// A search can end before its first level closed - `stepDuration` longer than
-// `duration`, or a run stopped seconds after it started - and the engine
-// reports the section anyway, because "judged nothing" is itself the finding
-// that says to lengthen the run or shorten the step. Absent levels and absent
-// `maxHealthy*` are therefore two different states, and only the empty-levels
-// check separates them: without it the "no level met the budget" sentence
-// claims a measurement at the lowest level that was never taken, directly
-// contradicting the "Ran out of time" badge beside it.
+// A search can end before its first level closed (`stepDuration` longer than `duration`, a run
+// stopped seconds in), and the engine still reports the section, as "judged nothing" is the finding
+// that says to lengthen the run or shorten the step. Absent levels and absent `maxHealthy*` are
+// different states only the empty-levels check separates: without it "no level met the budget"
+// claims a measurement never taken, beside a "Ran out of time" badge.
 function headlineKind(capacity: Capacity): HeadlineKind {
 	if (capacity.levels.length === 0) return "judgedNothing";
-	// Ahead of the held-level checks: a plateau's `maxHealthy*` is the last level
-	// tried, which is not what the headline may print.
+	// Before the held-level checks: a plateau's `maxHealthy*` is the last level tried, which the
+	// headline may not print.
 	if (capacity.stopReason === "plateau") return "plateau";
 	if (capacity.maxHealthyConcurrency === undefined) {
 		return capacity.stopReason === "errors_exceeded" ? "noLevelOnErrors" : "noLevelOnBudget";
@@ -179,10 +164,9 @@ function Headline({ capacity }: { capacity: Capacity }) {
 }
 
 /**
- * Where the limit sits. With a held level beside it the knee is half of a
- * bracket, not a point: the target held one level and gave out at the next, so
- * the limit lies between them. Without a held level the first one tried already
- * gave out, and the knee is all there is to say.
+ * Where the limit sits. With a held level the knee is half a bracket: the target held one level and
+ * gave out at the next, so the limit lies between. Without one, the first level tried gave out, and
+ * the knee is all there is.
  */
 function KneeSentence({ capacity, knee }: { capacity: Capacity; knee: number }) {
 	const held = capacity.maxHealthyConcurrency;
@@ -238,8 +222,8 @@ export function CapacitySummary({ capacity, stepDuration, className }: CapacityS
 
 	const stop = STOP_REASONS[capacity.stopReason];
 	const detail = stopDetail(capacity, stepDuration);
-	// A run stored before errors were judged has no `errorPct` on any level; its
-	// column would be empty cells, so the table keeps its three columns for it.
+	// A run stored before errors were judged has no `errorPct` on any level, and its error column
+	// would be empty cells, so the table keeps its three columns for it.
 	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
 	// Likewise `samples`, absent on a run stored before the engine reported it.
 	const showSamples = capacity.levels.some((level) => level.samples !== undefined);
@@ -252,16 +236,11 @@ export function CapacitySummary({ capacity, stepDuration, className }: CapacityS
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle>Capacity</CardTitle>
 				{/*
-				 * `Badge variant="chip"`, not a hand-rolled span. The variant is
-				 * the one that lets a caller own the colour without inheriting a
-				 * `hover:bg-*` it cannot override, and going through the
-				 * primitive is also what supplies the radius: a box with no
-				 * radius class at all is pinned square for a user who chose the
-				 * Rounded setting (app/CLAUDE.md, "No bare `rounded`").
-				 *
-				 * The colour is a tint plus a `-text` token, never the bare
-				 * `--status-*` fill as a foreground - the three-token rule
-				 * (docs/design-system/accent-and-status.md, "Status tokens").
+				 * `Badge variant="chip"`, not a hand-rolled span: the variant lets a caller own the
+				 * colour without a `hover:bg-*` it cannot override, and the primitive supplies the
+				 * radius (a box with none is square for a Rounded user; app/CLAUDE.md, "No bare
+				 * `rounded`"). A tint plus a `-text` token, never the bare `--status-*` fill as a
+				 * foreground (docs/design-system/accent-and-status.md, "Status tokens").
 				 */}
 				<Badge
 					variant="chip"
@@ -328,10 +307,9 @@ export function CapacitySummary({ capacity, stepDuration, className }: CapacityS
 										capacity.maxErrorPct !== undefined &&
 										level.errorPct > capacity.maxErrorPct;
 									return (
-										// Index, not concurrency: a level the search
-										// re-measured after one bad measurement appears
-										// twice, and that repeat is the audit trail
-										// doing its job rather than a duplicate key.
+										// Index, not concurrency: a level re-measured after one bad
+										// measurement appears twice, the audit trail at work, not a
+										// duplicate key.
 										<tr
 											key={`${level.concurrency}-${index}`}
 											className="border-b border-rule last:border-b-0"

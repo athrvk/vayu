@@ -6,18 +6,13 @@
  */
 
 /**
- * A scenario load run's assertions counted on every response (#2820): passed,
- * failed and the failure rate over both. The report's `scenario.assertions`, the
- * exact population - `assert.*` outcomes, required `extract.*` misses and inline
- * `pm.test` calls - where `TestValidationSummary` beside it reports the sampled
- * replay of the scripts that did not run inline.
- *
- * It is a different population from the HTTP figures above it, which is the
- * point of the block: a run whose every assertion failed against `200`s has a
- * 100.0% success rate and a 0.0% error rate, and this card is where the
- * failures show. **Silent when the run made no exact assertion** (`undefined`),
- * so a single-request run, a collection run and an older report render as they
- * did before.
+ * A scenario load run's assertions counted on every response (#2820): passed, failed, and the
+ * failure rate. The report's `scenario.assertions`, the exact population (`assert.*` outcomes,
+ * required `extract.*` misses, inline `pm.test` calls), where `TestValidationSummary` beside it
+ * reports the sampled replay of scripts that did not run inline. A different population from the
+ * HTTP figures above, which is the point: a run whose every assertion failed against `200`s has
+ * 100.0% success and 0.0% errors, and the failures show here. **Silent without an exact assertion**
+ * (`undefined`), so a single-request run, a collection run and an older report render unchanged.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

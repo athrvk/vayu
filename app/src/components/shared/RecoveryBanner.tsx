@@ -14,12 +14,9 @@ const LOSS =
 	"Collections, requests, environments, saved examples and run history from before are gone.";
 
 /**
- * The notice, per outcome.
- *
- * A `Record` over the union rather than a chain of comparisons: an outcome the
- * engine adds without copy for it is then a type error here, instead of falling
- * silently into whichever branch happens to be last - which is exactly how the
- * two outcomes #984 added would have been announced as deletions.
+ * The notice per outcome, a `Record` over the union rather than comparisons, so an outcome the
+ * engine adds without copy is a type error instead of falling into the last branch (as #984's two
+ * would have been announced as deletions).
  */
 const HEADLINE: Record<EngineRecovery["outcome"], string> = {
 	restored_from_backup: "Your Vayu data was restored from a backup",
@@ -37,29 +34,17 @@ const DETAIL: Record<EngineRecovery["outcome"], string> = {
 };
 
 /**
- * The one place the user is told the engine restored or deleted their database
- * (issue #922).
- *
- * A database that fails validation at startup and cannot be restored from its
- * `.bak` backup is replaced by an empty one, so the daemon starts instead of
- * crash-looping. That is the right call, and until this banner the whole record
- * of it was two lines in the engine log: every collection, request,
- * environment, example, spec and run was gone and the app came up looking like
- * a fresh install.
- *
- * A banner rather than a toast, and this banner rather than the connection
- * tooltip in the Dock: the fact is permanent, the user cannot act on it later
- * if they miss it, and it names a path they may want to copy. It sits beside
- * `UpdateBanner` and shares its shape for that reason.
- *
- * Since issue #984 the engine keeps the unreadable file rather than deleting
- * it, and this is the only place its path, the way to put it back (issue
- * #2420) and the `sqlite3 ... .recover` that reads it are shown - so the
- * salvage route exists exactly as far as this component renders it.
- *
- * Shown once *ever* per event, not once per session - `recovery-notice-store`
- * remembers the timestamp that was dismissed, because the engine keeps
- * reporting the record for as long as its marker file stands.
+ * The one place the user is told the engine restored or deleted their database (#922). A database
+ * failing startup validation that cannot be restored from its `.bak` is replaced by an empty one,
+ * so the daemon starts instead of crash-looping; without this banner the record was two log lines,
+ * every collection, request, environment, example, spec and run gone and the app looking freshly
+ * installed. A banner, not a toast or the Dock's connection tooltip: the fact is permanent, missing
+ * it cannot be undone, and it names a path worth copying; it shares `UpdateBanner`'s shape for
+ * that. The engine keeps the unreadable file (#984), and this is the only place its path, the way
+ * to put it back (#2420) and the `sqlite3 ... .recover` that reads it are shown: the salvage route
+ * exists as far as this renders it. Shown once *ever* per event, not per session:
+ * `recovery-notice-store` remembers the dismissed timestamp, as the engine reports the record while
+ * its marker file stands.
  */
 function RecoveryBanner() {
 	const recovery = useEngineStore((s) => s.recovery);
@@ -74,12 +59,9 @@ function RecoveryBanner() {
 	return (
 		<div
 			role="status"
-			// `min-h-banner` (issue #1679, 36px floor) - not the fixed `h-banner`
-			// `UpdateBanner` uses, because this banner's text genuinely wraps to
-			// two or more lines (the outcome detail plus a database path plus,
-			// sometimes, a recovery command), where `UpdateBanner` is
-			// deliberately kept to one. A fixed height would clip that content;
-			// a floor lets it grow past 36px while never sitting under it.
+			// `min-h-banner` (#1679, a 36px floor), not `UpdateBanner`'s fixed `h-banner`: this
+			// text wraps (the outcome, a path, sometimes a command), where `UpdateBanner` is one
+			// line; a floor lets it grow and never sit under 36px.
 			className="enter-fade flex min-h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm"
 		>
 			<AlertTriangle
@@ -93,22 +75,22 @@ function RecoveryBanner() {
 			<span className="flex-1 min-w-0 text-secondary-foreground">
 				<span className="font-semibold">{HEADLINE[recovery.outcome]}</span>{" "}
 				{DETAIL[recovery.outcome]}{" "}
-				{/* The path, not a prose description of it: it is what the user
-				    needs to look in, and it is the one part of this they can act
-				    on - by restoring their own copy of the file. */}
+				{/*
+				 * The path, not prose about it: it is where to look, and the part the user can act
+				 * on by restoring their own copy.
+				 */}
 				<span className="break-all font-mono text-xs text-muted-foreground">
 					{recovery.databasePath}
 				</span>
 				{recovery.quarantinedPath && (
-					/* The previous file is kept rather than deleted (issue #984),
-					   and this is the only place the user is told where and how
-					   to put it back (issue #2420): the engine judged it, and a
-					   judgement can be wrong. The sidecars travel with it - its
-					   -wal holds writes the main file had not taken yet, and a
-					   stale one left beside the copied file would be replayed
-					   onto it. The command is for a file that really is
-					   damaged, because a path alone does not tell someone that
-					   most of their rows are probably still in it. */
+					/*
+					 * The previous file is kept (#984), and this is the only place the user learns
+					 * where and how to restore it (#2420): the engine judged it, and judgements can
+					 * be wrong. The sidecars travel with it, as its -wal holds writes the main file
+					 * has not taken and a stale one beside the copy would be replayed onto it. The
+					 * command is for a truly damaged file, as a path alone does not say most rows
+					 * are probably still in it.
+					 */
 					<>
 						{" "}
 						The previous file was kept at{" "}
@@ -126,8 +108,7 @@ function RecoveryBanner() {
 					</>
 				)}
 			</span>
-			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
-			    no `size-7` override needed, the way one was before it existed. */}
+			{/* `size="icon"` gives the `target` floor (#1679), so no size override. */}
 			<TooltipIconButton
 				className="shrink-0"
 				onClick={() => acknowledge(recovery.at)}

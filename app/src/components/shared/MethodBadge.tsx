@@ -6,71 +6,50 @@
  */
 
 /**
- * MethodBadge
+ * The one way to show an HTTP method, so method colour, one of the app's strongest signals, means
+ * the same everywhere (seven renderings had drifted, one losing an unknown method's colour to a
+ * missing `getMethodColor` fallback).
  *
- * The single way to display an HTTP method. It previously rendered seven
- * different ways across the app - three sizes, two weights, some tinted, some
- * with no colour at all - and the history sidebar carried its own copy of the
- * colour logic that omitted `getMethodColor`'s fallback, so an unrecognised
- * method resolved to an undefined custom property and silently lost its colour.
+ * The `badge` variant is a fixed-width column, not a chip growing with its letters: rows put the
+ * badge first, so an intrinsic-width chip started names at a different x per method, a ragged edge
+ * down every list. Three decisions hold the column:
  *
- * Method colour is one of the app's strongest visual signals; it should mean the
- * same thing everywhere it appears.
+ * 1. **Width** is `BADGE_METHOD_CHARS` characters plus the chip's padding and border, in `ch` so it
+ *    tracks the mono font and one class covers both sizes. Five keeps `PATCH` whole; the three
+ *    longer standard methods are abbreviated `DEL`, `OPT`, `CONN` by `getMethodDisplayLabel`, the
+ *    forms Postman, Insomnia and Bruno use, so the sidebar gives the name about a third of the row
+ *    back rather than paying `7ch` on every row for two rare verbs.
+ * 2. **The label is centred**: short methods in a wide chip read better so, the shape every client
+ *    uses.
+ * 3. **Longer methods truncate** rather than widen the chip: `method` is unbounded at runtime (a
+ *    pasted `curl -X PROPPATCH` reaches it through the curl parser's type assertion, a stored run's
+ *    method is a `string`), so one exotic verb must not misalign every row. The full method is the
+ *    `title`, as for an abbreviation (`DEL` titled `DELETE`).
  *
- * The `badge` variant is a fixed-width column, not a chip that grows with its
- * letters. Sibling rows put the badge first and the name after it, so an
- * intrinsic-width chip started `GET` names at one x, `POST` names at another and
- * `DELETE`/`OPTIONS` further still - a ragged left edge down every list. Three
- * decisions hold that column together:
- *
- * 1. **Width** is `BADGE_METHOD_CHARS` characters plus the chip's own padding
- *    and border, expressed in `ch` so it tracks the mono font the chip already
- *    uses and one class covers both sizes. Five is the longest label that stays
- *    whole (`PATCH`), because the three standard methods longer than that are
- *    substituted for their conventional abbreviations - `DEL`, `OPT`, `CONN` -
- *    through `getMethodDisplayLabel`. The column paid `7ch` on every row for
- *    the two verbs almost nobody has in a tree; at `5ch` the sidebar gives the
- *    request name roughly a third of the row back, and the abbreviations are
- *    the ones Postman, Insomnia and Bruno all use.
- * 2. **The label is centred** inside the chip. Short methods in a wide chip read
- *    better centred than left-aligned against the border, and it is the shape
- *    every other client uses.
- * 3. **Longer methods truncate** rather than widening the chip. `method` is not
- *    bounded at runtime - a pasted `curl -X PROPPATCH` reaches this component
- *    through a type assertion in the curl parser, and a stored run's method is
- *    a plain `string` - so one exotic verb must not re-break the alignment of
- *    every row around it. The full method stays available as the `title`, and
- *    the same rule catches a substitution - the chip shows `DEL`, its title
- *    reads `DELETE`, so the meaning is one hover away.
- *
- * The width is not an opt-in prop: this component's own history (it "previously
- * rendered seven different ways") is the argument for the primitive enforcing
- * the rule. The `text` variant keeps its intrinsic width - it sits inline in
- * running text (tabs), where a fixed column would punch holes, and a caller
- * that wants a column there sets its own width. The collections tree row is
- * the second sanctioned caller-set column (after the import preview): a bordered
- * chip on every row was a second shape competing with the tree's own hover
- * fill and selection ring, so it uses `variant="text"` inside a `w-[5ch]`
- * container and lets colour alone carry the signal.
+ * The width is not an opt-in prop: the drift above is the argument for the primitive enforcing it.
+ * The `text` variant keeps intrinsic width, inline in running text (tabs), where a column would
+ * punch holes; a caller wanting one sets its own. The collections tree row is the second sanctioned
+ * caller-set column (after the import preview): a bordered chip per row competed with the tree's
+ * hover fill and selection ring, so it uses `variant="text"` in a `w-[5ch]` container, colour alone
+ * carrying the signal.
  */
 
 import { getMethodColor, getMethodDisplayLabel } from "@/lib/method-display";
 import { cn } from "@/lib/utils";
 
 /**
- * Longest standard HTTP method label that stays whole - `PATCH`. `DELETE`,
- * `OPTIONS` and `CONNECT` are shortened to `DEL`, `OPT` and `CONN` by
- * `getMethodDisplayLabel` before they reach the chip. Kept in step with the
- * `5ch` in the width class below, which Tailwind has to see as a literal.
+ * The longest standard method label kept whole, `PATCH` (`DELETE`, `OPTIONS`, `CONNECT` reach the
+ * chip as `DEL`, `OPT`, `CONN`). Keep in step with the `5ch` literal below, which Tailwind must
+ * see.
  */
 const BADGE_METHOD_CHARS = 5;
 
 interface MethodBadgeProps {
 	method: string;
 	/**
-	 * `badge` - tinted chip, for list rows and headers where it anchors a line.
-	 *   Fixed-width, so sibling labels align; see the note above.
-	 * `text` - colour only, for dense places (tabs) where chrome would crowd.
+	 * - `badge` - tinted chip for list rows and headers where it anchors a line; fixed-width, so
+	 *   sibling labels align (see the header).
+	 * - `text` - colour only, for dense places (tabs) where chrome would crowd.
 	 */
 	variant?: "badge" | "text";
 	/** 10px for dense rows, 11px where it sits beside body text. */
@@ -103,11 +82,9 @@ export function MethodBadge({
 				"font-mono font-semibold uppercase shrink-0 transition-opacity",
 				size === "sm" ? "text-micro" : "text-label",
 				isBadge &&
-					// `5ch` of content plus this chip's own `px-1.5` and 1px border, so
-					// the box is exactly wide enough for `PATCH` (the longest label
-					// that stays whole) at either size and the name after it starts at
-					// the same x for every method. `inline-flex` makes the width apply
-					// outside a flex row too, and centres the label on both axes.
+					// `5ch` of content plus `px-1.5` and the 1px border: exactly `PATCH` at either
+					// size, so every name starts at the same x. `inline-flex` applies the width
+					// outside a flex row too and centres the label on both axes.
 					"inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 w-[calc(5ch+0.75rem+2px)]",
 				muted && "opacity-60",
 				className
@@ -121,11 +98,9 @@ export function MethodBadge({
 						}
 					: { color: `hsl(${c})` }
 			}
-			// Only when the chip does not show the whole method: an abbreviated
-			// standard method (`DEL`, `OPT`, `CONN`) or a longer method truncated
-			// inside the badge column both need the full name one hover away. A
-			// native tooltip on every chip would fight the app's own tooltips on
-			// the same rows, so the absent case matters as much as the present one.
+			// Only when the chip does not show the whole method (an abbreviation, or a truncated
+			// long method). A native tooltip on every chip would fight the app's tooltips on the
+			// same rows, so its absence matters as much as its presence.
 			title={abbreviated || isTruncated ? upperMethod : undefined}
 		>
 			{isBadge ? <span className="min-w-0 truncate">{label}</span> : label}

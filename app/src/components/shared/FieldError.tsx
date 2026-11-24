@@ -6,34 +6,21 @@
  */
 
 /**
- * FieldError - the message under a control that will not take what you typed.
- *
- * Error text had three presentations and no rule saying which to reach for:
- * `Callout` in twenty files, a full-pane `ErrorState`, and hand-written
- * `text-destructive-text` paragraphs in between - at `text-sm`, `text-xs` and
- * `text-label`, some with a leading glyph and some without, some announced and
- * most not. The import dialog alone carried all three sizes.
- *
- * The rule, in one line each (`docs/design-system/component-patterns.md`, Component Patterns):
+ * The message under a control that will not take what you typed. Error text had three presentations
+ * and no rule (`Callout`, a full-pane `ErrorState`, and hand-written paragraphs at three sizes).
+ * The rule, one line each (`docs/design-system/component-patterns.md`, Component Patterns):
  *
  * - **field-level** - one control rejected one value: `FieldError`.
- * - **block-level** - a condition about the whole form or pane, which may stack
- *   with others: `Callout`.
- * - **pane-level** - the thing you came to look at could not be loaded:
- *   `ErrorState`.
+ * - **block-level** - a condition about the whole form or pane, which may stack with others:
+ *   `Callout`.
+ * - **pane-level** - the thing you came to look at could not be loaded: `ErrorState`.
  *
- * **One size, and it is `text-xs`.** The three sizes were not a hierarchy, they
- * were the order the code was written in; a 1px difference between two messages
- * on the same screen says nothing a reader can act on.
- *
- * **`role="alert"`.** A validation message that appears after a keystroke is a
- * change a screen-reader user is not looking at, so it has to announce itself.
- * Pass `id` and point the control's `aria-describedby` at it as well, which is
- * what names the message as belonging to that field rather than to the form.
- *
- * Renders nothing for no message, so a call site is `<FieldError>{error}</FieldError>`
- * rather than `{error && <FieldError>…</FieldError>}` - the same reason
- * `TabCount` swallows a zero.
+ * **One size, `text-xs`**: the sizes were no hierarchy, and a 1px difference between two messages
+ * says nothing actionable. **`role="alert"`**: a message appearing after a keystroke is a change a
+ * screen reader user is not looking at, so it announces itself; pass `id` and point the control's
+ * `aria-describedby` at it, which ties it to that field rather than the form. Renders nothing
+ * without a message, so a call site is `<FieldError>{error}</FieldError>`, as `TabCount` swallows a
+ * zero.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -44,16 +31,14 @@ interface FieldErrorProps {
 	/** The control's `aria-describedby` target. */
 	id?: string;
 	/**
-	 * A leading glyph, for a message that has to be found among other lines of
-	 * the same size - the import dialog's per-file rows. A field with one message
-	 * under it needs no icon to be located.
+	 * A leading glyph, for a message found among same-size lines (the import dialog's per-file
+	 * rows); a field with one message needs none.
 	 */
 	icon?: LucideIcon;
 	children?: ReactNode;
 	/**
-	 * `span`, for a parent whose content model is phrasing only - a `<label>`,
-	 * or another `<span>`. A `<p>` there is invalid markup that the browser
-	 * silently reparents, which moves the message out of the row it belongs to.
+	 * `span`, for a phrasing-only parent (a `<label>`, a `<span>`): a `<p>` there is invalid, and
+	 * the browser reparents it out of its row.
 	 */
 	as?: "p" | "span";
 	className?: string;
@@ -71,8 +56,7 @@ export function FieldError({ id, icon: Icon, children, as = "p", className }: Fi
 			role="alert"
 			className={cn(
 				"flex items-center gap-1.5 text-xs text-destructive-text",
-				// A `<span>` is inline by default, so the flex row above would not
-				// take a line of its own.
+				// A `<span>` is inline by default, so the flex row would not take its own line.
 				as === "span" && "flex",
 				className
 			)}

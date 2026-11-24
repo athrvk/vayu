@@ -6,23 +6,14 @@
  */
 
 /**
- * KeepAwakePrompt - the one ask, for the one run that needs it (issue #1357).
- *
- * The wake lock is off by default, because an app that quietly overrides the
- * machine's power settings has decided something that is not its to decide. But
- * the case the lock exists for - a long run the user starts and walks away from
- * - is also the case where nobody thinks to visit a settings screen first. So
- * the app asks when the situation arises, and only then: a run that declares
- * ten minutes or more, with the standing preference off.
- *
- * Mounted once, at the app root, rather than at any of the three places a load
- * run can start: the question is about the run that is live, and the
- * dashboard store is where that fact lives. One mount also means one dialog -
- * a prompt per start site could stack.
- *
- * A collection run is never asked about. It declares no duration, so nothing
- * here can tell a two-second sequence from a two-hour one, and a prompt on
- * every one of them would train the user to dismiss it.
+ * The one ask, for the one run needing it (#1357). The wake lock is off by default, as overriding
+ * the machine's power settings is not the app's decision; but a long run started and walked away
+ * from is also where nobody visits settings first. So the app asks then and only then: a run
+ * declaring ten minutes or more, with the standing preference off. Mounted once at the root, not at
+ * the three start sites: the question is about the live run, which the dashboard store knows, and
+ * one mount cannot stack dialogs. A collection run is never asked about: it declares no duration,
+ * so a two-second sequence looks like a two-hour one, and a prompt on every run would train the
+ * user to dismiss it.
  */
 
 import { useState } from "react";
@@ -38,15 +29,10 @@ export default function KeepAwakePrompt() {
 	const keepAwakeAlways = useClientSettingsStore((s) => s.keepAwakeDuringRuns);
 
 	/**
-	 * The run the user has already answered about - by either button, or by
-	 * dismissing. Held so a stream that stops and starts again under the same id
-	 * (a reconnect, or the dashboard re-attaching) does not re-open a question
-	 * that was answered.
-	 *
-	 * State rather than an effect: whether to ask is a function of what is
-	 * live and what the user has said, so it is derived during render. An
-	 * effect that opened the dialog would be a second copy of that answer, one
-	 * render behind.
+	 * The run already answered (either button, or dismissing), so a stream restarting under the
+	 * same id (a reconnect, the dashboard re-attaching) does not re-ask. State, not an effect:
+	 * whether to ask derives during render from what is live and what was said, and an effect
+	 * opening the dialog would be a second copy of that answer, a render behind.
 	 */
 	const [decided, setDecided] = useState<string | null>(null);
 
@@ -56,8 +42,8 @@ export default function KeepAwakePrompt() {
 	const length = runLengthSeconds(config);
 
 	const keepAwake = () => {
-		// Held under the same key the service releases on every terminal path, so
-		// this grant ends with the run rather than outliving it.
+		// Under the key the service releases on every terminal path, so the grant ends with the
+		// run.
 		wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "Load test run streaming (allowed for this run)");
 		setDecided(runId);
 	};
