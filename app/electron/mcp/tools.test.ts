@@ -15287,7 +15287,11 @@ describe("run status reads (#2436)", () => {
 				status: "completed",
 				endTime: 1_700_000,
 			},
-			summary: { totalRequests: 5, drainCut: { cancelled: 2 } },
+			summary: {
+				totalRequests: 5,
+				drainCut: { cancelled: 2 },
+				errorClasses: { protocol: 1, tool: 2, protocolCodes: { "-32602": 1 } },
+			},
 			warnings: [
 				{ code: "unresolved_tokens", message: "1 request sent {{token}}", count: 1 },
 			],

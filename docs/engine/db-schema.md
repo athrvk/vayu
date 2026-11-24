@@ -1762,7 +1762,7 @@ under this column's own keys, plus `"partial": true`:
 `rps` is `total_requests / test_duration`, not the tick's trailing `current_rps`. Nothing a tick
 holds for its last second only (`current_*`, `window_*`, the latency percentiles) is copied, and
 nothing it never measures (`latency`, `peak_concurrency`, `avg_in_flight`, `queue_wait_avg`,
-`error_types`, `sampling`, the sending window, `connection_replays`) is written, so the report
+`error_types`, `error_classes`, `sampling`, the sending window, `connection_replays`) is written, so the report
 reads each absent key as it reads an older engine's summary. The report flags the run with
 `summary.partial` and leaves its `latency` block out (#2938), derived on read: a run already
 reconciled by an earlier version reads without latency with nothing rewritten. A summary the run already stored is never replaced, a run that wrote no tick
@@ -1780,6 +1780,7 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
   "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "error_types": { "timeout": 2, "connection_failed": 1 },
+  "error_classes": {},
   "latency": { "count": 97, "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0,
                "p75": 15.0, "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
   "phases": {
@@ -1861,6 +1862,17 @@ stop at `maxStoredErrors`, and the report's `errors.types` reads it while `error
 counts the stored records. Written by the completed and the failed run alike, `{}` included. A
 summary stored before the issue has no key, and the report then counts the stored records by
 type as it always did. A design-mode collection run's summary does not write it.
+
+`error_classes` (issue #3828) is every failed `mcp` reply the run counted, by class, stored in
+the report's own shape (`McpErrorCounts::to_json`): `{ "transport"?, "protocol"?, "tool"?,
+"protocolCodes"? }`, a class only when counted and `protocolCodes` a `protocol` failure's JSON-RPC
+`error.code` (`"-32602"`, ..., and `"other"` for any code outside the reserved and server
+ranges). It counts every failed reply whatever its status, so it is a superset of `error_types`'
+`mcp_*` names, which count only a failure under a 2xx or 3xx. Written by the completed and the
+failed run alike, `{}` included, and by a collection run, whose `status_codes` bucket a failed
+reply under a 2xx or 3xx under `0` as the load path does. A summary stored before the issue has
+no key, and the report then leaves `summary.errorClasses` out. A reconciled crash summary
+(above) does not write it.
 
 `slow_requests` (issue #2399) is every successful completion at or past the run's
 `slow_threshold_ms`, counted by the collector as it happened, and the threshold it was counted
@@ -1987,7 +1999,7 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
 ```json
 {
   "total_requests": 5, "status_codes": { "0": 1, "200": 4 },
-  "http_version_downgraded": 0, "test_duration": 1.8, "rps": 2.8,
+  "http_version_downgraded": 0, "error_classes": {}, "test_duration": 1.8, "rps": 2.8,
   "latency": {
     "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
     "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
@@ -2004,7 +2016,9 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
 `total_requests` is the number of **requests sent** and `status_codes` their
 distribution, in the load summary's shape (issue #2822): a step the plan skipped
 is in `scenario.steps_executed` and in neither, while a request that got no
-response is in both, under `"0"`. Both are here precisely because the report
+response is in both, under `"0"`, as is a failed `mcp` reply under a 2xx or 3xx
+(issue #3828, counted by class in `error_classes`, the load summary's key and
+shape, always written). Both are here precisely because the report
 would otherwise read the rows that survived `maxScenarioStoredSteps`, call their
 count the run's size, and count a skipped step's status-`0` row as a failure.
 `status_codes` is written even when empty: `{}` is a run in which no step sent,

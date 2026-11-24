@@ -40,6 +40,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
@@ -590,6 +591,26 @@ class MetricsCollector {
      * share a name (`"unknown"`) are summed under it.
      */
     [[nodiscard]] std::map<std::string, size_t> error_type_counts () const;
+
+    /**
+     * @brief One failed `mcp` reply, by class and JSON-RPC code (#3828).
+     *
+     * Lock-free: two relaxed increments into fixed tables, never a string.
+     * Counted for every failed reply whatever its status, so this is a
+     * superset of `error_type_counts`'s three `mcp_*` types, which count
+     * only a failure under a 2xx or 3xx; a 4xx or 5xx failure is an error by
+     * its status and named only here. It records nothing else: the error
+     * itself is the caller's to record, once.
+     */
+    void record_mcp_failure (McpErrorClass error_class, std::optional<std::int64_t> code) {
+        error_class_counts_.at (static_cast<size_t> (error_class)).fetch_add (1, std::memory_order_relaxed);
+        if (error_class == McpErrorClass::Protocol && code) {
+            protocol_code_counts_.at (McpErrorCounts::code_slot (*code)).fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    /// Every record_mcp_failure so far, as the summary serialises it.
+    [[nodiscard]] McpErrorCounts error_class_counts () const;
 
     /**
      * @brief Sampled success records dropped or displaced by the reservoir.
@@ -1577,6 +1598,9 @@ class MetricsCollector {
     // Indexed by ErrorCode and bumped before the store's cap is checked, so
     // the per-type breakdown stays exact when errors_ is a prefix.
     std::array<std::atomic<size_t>, ERROR_CODE_COUNT> error_type_counts_{};
+    // record_mcp_failure's tables, in McpErrorCounts's slot layout.
+    std::array<std::atomic<size_t>, McpErrorCounts::CLASS_COUNT> error_class_counts_{};
+    std::array<std::atomic<size_t>, McpErrorCounts::CODE_SLOT_COUNT> protocol_code_counts_{};
 
     // Sampled successes and slow-request outliers. One mutex for both: each is
     // written at most once per retained record (the 1-in-N gate and the

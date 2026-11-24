@@ -36,6 +36,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
@@ -464,8 +465,13 @@ struct ScenarioSummaryInputs {
     /// stored `status_codes` the report reads (#2822). A step the plan
     /// skipped (a script's decision, or a row that would not bind) sent no
     /// request and is not in this map, on the same terms it is left out of
-    /// `coverage` above.
+    /// `coverage` above. A failed `mcp` reply under a 2xx or 3xx is counted
+    /// under `0`, the bucket the load path records it in (#3828), so it is an
+    /// error of the run here too.
     std::map<int, size_t> status_codes;
+    /// The sent steps' failed `mcp` replies by class (#3828), the load path's
+    /// `RunSummaryInputs::error_classes`.
+    McpErrorCounts error_classes;
     /// The sent steps whose response negotiated a lower protocol than the one
     /// requested (`Response::http_version_downgraded`, #3262): requests, as in
     /// the load path's `RunSummaryInputs::http_version_downgraded`, so the

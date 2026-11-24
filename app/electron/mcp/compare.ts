@@ -138,6 +138,13 @@ export interface RunComparison {
 	reliability: MetricDelta[];
 	statusCodes: Record<string, { base: number; target: number }>;
 	/**
+	 * The mcp failure classes (#3828) of two runs that both recorded them,
+	 * `{}` when either did not: a run stored before the engine counted them has
+	 * no figure, and reading it as 0 would show a regression that never
+	 * happened. `protocolCodes` is not compared.
+	 */
+	errorClasses: ErrorClassDeltas;
+	/**
 	 * Whether the two runs negotiated a compressed response differently
 	 * (issue #1488) - a run recorded before `loadNegotiateCompression`'s
 	 * default flipped in 0.26 reads as `false`, so an older baseline against
@@ -457,6 +464,53 @@ function recordedNum(report: Report, section: "latency" | "summary", key: string
 	return num(report, section, key);
 }
 
+/**
+ * The classes `summary.errorClasses` counts (#3828), in the order every reader
+ * shows them. `protocolCodes` is the engine's finer split of `protocol` and is
+ * not compared.
+ */
+export const ERROR_CLASS_KEYS = ["transport", "protocol", "tool"] as const;
+
+export type ErrorClassKey = (typeof ERROR_CLASS_KEYS)[number];
+
+/** Each class a run counted, `{ base, target }`; a class neither run counted is absent. */
+export type ErrorClassDeltas = Partial<Record<ErrorClassKey, { base: number; target: number }>>;
+
+/**
+ * `summary.errorClasses` as the report carries it, or `null` for a run that
+ * never recorded one (stored before #3828). `{}` is a recording: nothing
+ * failed. Told apart here because an unrecorded side read as 0 would fake a
+ * regression against it.
+ */
+function recordedErrorClasses(report: Report): Record<string, unknown> | null {
+	const summary = report.summary;
+	if (summary === null || typeof summary !== "object") return null;
+	const classes = (summary as Report).errorClasses;
+	if (classes === null || typeof classes !== "object" || Array.isArray(classes)) return null;
+	return classes as Record<string, unknown>;
+}
+
+/**
+ * Per-class counts of the two runs, only when both recorded them. A class
+ * either side counted as a finite number is listed, the other side's missing
+ * count being 0; any other value reads as not counted.
+ */
+function errorClassDeltas(base: Report, target: Report): ErrorClassDeltas {
+	const baseCounts = recordedErrorClasses(base);
+	const targetCounts = recordedErrorClasses(target);
+	const deltas: ErrorClassDeltas = {};
+	if (baseCounts === null || targetCounts === null) return deltas;
+	const counted = (value: unknown) =>
+		typeof value === "number" && Number.isFinite(value) ? value : null;
+	for (const key of ERROR_CLASS_KEYS) {
+		const from = counted(baseCounts[key]);
+		const to = counted(targetCounts[key]);
+		if (from === null && to === null) continue;
+		deltas[key] = { base: from ?? 0, target: to ?? 0 };
+	}
+	return deltas;
+}
+
 /** Compare two engine run reports and return a structured delta. */
 export function compareReports(
 	baseRunId: string,
@@ -521,6 +575,7 @@ export function compareReports(
 		throughput,
 		reliability,
 		statusCodes,
+		errorClasses: errorClassDeltas(base, target),
 		compressionNegotiationDiffers,
 		comparability,
 	};

@@ -998,6 +998,19 @@ std::map<std::string, size_t> MetricsCollector::error_type_counts () const {
     return counts;
 }
 
+McpErrorCounts MetricsCollector::error_class_counts () const {
+    McpErrorCounts counts;
+    for (size_t slot = 0; slot < McpErrorCounts::CLASS_COUNT; ++slot) {
+        counts.classes.at (slot) =
+        error_class_counts_.at (slot).load (std::memory_order_relaxed);
+    }
+    for (size_t slot = 0; slot < McpErrorCounts::CODE_SLOT_COUNT; ++slot) {
+        counts.protocol_codes.at (slot) =
+        protocol_code_counts_.at (slot).load (std::memory_order_relaxed);
+    }
+    return counts;
+}
+
 void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }

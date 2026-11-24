@@ -33,6 +33,7 @@
 #include "vayu/core/elements.hpp"
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/run_phase.hpp"
@@ -1685,6 +1686,10 @@ struct RunSummaryInputs {
     // Every error by type, under the summary's `error_types` key (#2400):
     // exact, where counting the stored error records stops at max_errors.
     std::map<std::string, size_t> error_types;
+    // Every failed `mcp` reply by class and JSON-RPC code, under the
+    // summary's `error_classes` key (#3828); see
+    // MetricsCollector::record_mcp_failure for how it relates to `error_types`.
+    McpErrorCounts error_classes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
     // Whole-run percentiles for each of the five network phases, indexed by

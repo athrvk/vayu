@@ -329,6 +329,8 @@ const TILE_READOUTS = [
 	// Three run-summary numbers that were 20px until #1409, in the same shape as
 	// the ones above: a bold number in a muted tile.
 	"modules/history/main/components/RunKeyMetrics.tsx",
+	// The Error classes card's count tiles (#3828), the same shape.
+	"modules/history/main/components/ErrorClassesCard.tsx",
 ] as const;
 
 /**

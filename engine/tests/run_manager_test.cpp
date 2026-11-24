@@ -2833,12 +2833,28 @@ TEST (FailedRunSummaryInputs, CarriesTheExactErrorTypesPastTheStoreCap) {
 }
 
 // A run that recorded no error still writes the key, so a reader can tell it
-// from a summary stored before the counts existed.
+// from a summary stored before the counts existed; `error_classes` (#3828)
+// follows the same rule.
 TEST (FailedRunSummaryInputs, ARunWithNoErrorWritesAnEmptyErrorTypesObject) {
     RunContext ctx ("run_failed_clean", nlohmann::json::object ());
     const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
     ASSERT_TRUE (summary.contains ("error_types")) << summary.dump ();
     EXPECT_EQ (summary["error_types"], nlohmann::json::object ());
+    ASSERT_TRUE (summary.contains ("error_classes")) << summary.dump ();
+    EXPECT_EQ (summary["error_classes"], nlohmann::json::object ());
+}
+
+// #3828: a failed run's summary carries the classes its collector counted.
+// Mutation check: drop the error_classes assignment in
+// failed_run_summary_inputs and this reds at an empty object.
+TEST (FailedRunSummaryInputs, CarriesTheFailedRepliesByClass) {
+    RunContext ctx ("run_failed_classes", nlohmann::json::object ());
+    ctx.metrics_collector->record_mcp_failure (vayu::McpErrorClass::Protocol, -32601);
+    ctx.metrics_collector->record_mcp_failure (vayu::McpErrorClass::Tool, std::nullopt);
+    const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
+    EXPECT_EQ (summary["error_classes"],
+    nlohmann::json::parse (R"({"protocol":1,"tool":1,"protocolCodes":{"-32601":1}})"))
+    << summary.dump ();
 }
 
 // A failed run timed no drain apart, so its window is the whole run and every
