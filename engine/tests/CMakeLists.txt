@@ -220,7 +220,10 @@ add_executable(vayu_tests
     inline_collection_scope_test.cpp
     target_policy_test.cpp
     scenario_data_test.cpp
+    scenario_load_breakdown_test.cpp
+    scenario_load_rows_test.cpp
     scenario_load_test.cpp
+    scenario_load_variables_test.cpp
     scenario_plan_test.cpp
     scenario_runner_test.cpp
     script_levels_test.cpp
