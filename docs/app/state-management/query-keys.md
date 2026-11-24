@@ -118,17 +118,17 @@ The main process now sends one event per data family a successful call touched; 
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all`, `trash.all`, `mockServer.list()`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request`, `environment` and `clientCertificate` too). A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `mockServer.list()` because the engine stops the mocks of a deleted collection and its descendants as part of the delete (#3449), so the Dock's and the Services drawer's running-mock list must refetch rather than show a mock that is gone; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
-| `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
-| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open, and it is also the prefix the request's examples list sits under, so `delete_request_example` reaches an open Examples panel through it. `trash.all` because `delete_request` and `delete_request_example` (a saved example goes to the Trash since #2971) declare this family alone and stamp a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
-| `environment` | `environments.all`, `globals.all`, `trash.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader. `trash.all` because `delete_environment` declares this family alone and, since #2970, stamps a row the drawer lists; `restore_trash_entry` and `purge_trash_entry` declare it beside `collection` and `request`, so a restored environment reappears in the Variables tree. An `update_environment` pays a refetch of the trash list while the drawer is open - the trade the `request` family takes |
-| `run` | `runs.lists()`, `runs.count()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `mockServer.list()`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests... [Details](#why-collection-invalidates-those-keys) |
+| `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it... [Details](#why-collectionrow-invalidates-those-keys) |
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection... [Details](#why-request-invalidates-those-keys) | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. [Details](#why-request-invalidates-those-keys) |
+| `environment` | `environments.all`, `globals.all`, `trash.all`, `compose.all` | Variables are read through the detail cache as well as the list... [Details](#why-environment-invalidates-those-keys) |
+| `run` | `runs.lists()`, `runs.count()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`... [Details](#why-run-invalidates-those-keys) | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. [Details](#why-run-invalidates-those-keys) |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
-| `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first: five of them (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys. At the root, because design and load are separate cache entries and one write can move both (#1438) |
-| `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |
-| `clientCertificate` | `clientCertificates.all` | The registry the Settings card lists, which reads live entries only. No MCP tool writes it - an entry is added and removed by the user - so the only declarers are `restore_trash_entry` and `purge_trash_entry`: a restored certificate must reappear in an open card. Its own family rather than a fold into `config` (whose invalidator also refetches every config and request-default read) or `environment`; `trash.all` is not repeated because `collection`, declared beside it, already takes it (#2973) |
-| `oauth` | `oauth.all` | The whole prefix, not the one key: `useOAuth2TokenStatusQuery` is keyed per cache key, and the key a `fetch_oauth2_token` writes under is derived engine-side and appears only in the answer, so the event carries no hint to narrow by. The query polls at 30s on its own, so this is immediacy - an agent that clears a token must not leave the row saying it is valid |
-| `variables` | `environments.all`, `globals.all`, `collections.all`, `compose.all` | The design-mode runners (`run_request`, `run_collection_smoke`, `run_collection`) persist variables a script or extractor set, and the event cannot say which of environment, globals or collection moved. The first three are the reads the renderer's own Send invalidates after the same write; `compose.all` for the reason `environment` gives. Not the coarse `collection` family: a variable write changes no request row and adds nothing to Trash, so `requests.all`, `trash.all` and `prefetch.allRequests()` would only cost a refetch per send in an agent's loop (#1916) |
+| `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first... [Details](#why-config-invalidates-those-keys) |
+| `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy... [Details](#why-service-invalidates-those-keys) |
+| `clientCertificate` | `clientCertificates.all` | The registry the Settings card lists, which reads live entries only. [Details](#why-clientcertificate-invalidates-those-keys) |
+| `oauth` | `oauth.all` | The whole prefix, not the one key... [Details](#why-oauth-invalidates-those-keys) |
+| `variables` | `environments.all`, `globals.all`, `collections.all`, `compose.all` | The design-mode runners (`run_request`, `run_collection_smoke`, `run_collection`) persist variables a script or extractor set... [Details](#why-variables-invalidates-those-keys) |
 
 The event carries no engine data, only which family went stale, so a row still reaches the UI by exactly one path: the query layer.
 Per-run reports and time series are still never invalidated *wholesale* - a new run cannot have changed an existing run's report, and those are the expensive fetches in the family.
@@ -167,10 +167,10 @@ the globals or a trash entry on `GET /changes` (see [the API reference](../../en
 | Kind | Families | Why |
 |------|----------|-----|
 | `collection` | `collectionRow` for a `create` or `update`; `collection` for every other op, one this build does not know included | A delete, restore or purge is one event on the root for the whole subtree, which is the cascade `collection` takes coarsely |
-| `request` | `request`, with the event's `collectionId` and the request's id, once more with the collection the cache still holds it in when that differs | A move's event names only the destination; the source is read from the request's detail entry, then the tree's lists, when the event arrives (`ownerOfRequest`). An owner the cache never saw is in no list on screen |
+| `request` | `request`, with the event's `collectionId` and the request's id, once more with the collection the cache still holds it in when that differs | A move's event names only the destination... [Details](#how-a-request-event-is-applied-in-full) |
 | `example` | `request` named by the example's `requestId`, narrowed the same way | What the MCP example tools declare: the Examples list sits under the request's detail key, and the family takes the Trash list |
 | `environment`, `globals` | `environment` | Globals ride on the environment family (#758) |
-| `clientCertificate` | `clientCertificate`, and `trash.all` | The feed carries only a certificate's delete, restore and purge, and no MCP tool declares this family alone, so its invalidator leaves the Trash list to `collection`; here nothing else would refetch it |
+| `clientCertificate` | `clientCertificate`, and `trash.all` | The feed carries only a certificate's delete, restore and purge... [Details](#how-a-clientcertificate-event-is-applied-in-full) |
 
 A kind this build does not know is passed over (its id still moves the resume point), and so is a frame that does not parse.
 A `reset` (a resume the engine's ring no longer covers, an id from an engine process that has since restarted, or a reader that fell a whole ring behind) invalidates `collection`, `environment` and `clientCertificate` together, which between them reach every read a single event can.
@@ -206,7 +206,7 @@ The current shape:
 |-------|--------|
 | Collections, requests lists, environments, globals, runs list | `DEFAULT_STALE_TIME_MS` (30s) via the shared client |
 | Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once; its own mutations and the change feed (a write by any other client) invalidate it |
-| Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934) |
+| Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. [Details](#run-detail-and-run-report-staleness-in-full) |
 | Run time series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Run monitor series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Engine config | `CONFIG_STALE_TIME_MS` (1m) |
@@ -214,3 +214,79 @@ The current shape:
 | Health | `staleTime: 0`, refetched every `TIMING.HEALTH_CHECK_INTERVAL_MS` (30s) |
 
 Polling intervals are separate from staleness: the runs list polls every 5s **only while unpaged** (`runsPollInterval`), health polls on `TIMING.HEALTH_CHECK_INTERVAL_MS`, and the shared client sets `refetchOnWindowFocus: false` - a desktop app that refetched everything on focus would fight the editor the user just came back to.
+
+## Why `collection` invalidates those keys
+
+...`delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request`, `environment` and `clientCertificate` too).
+A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely.
+The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone.
+`trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `mockServer.list()` because the engine stops the mocks of a deleted collection and its descendants as part of the delete (#3449), so the Dock's and the Services drawer's running-mock list must refetch rather than show a mock that is gone;
+`compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438)
+
+## Why `collectionRow` invalidates those keys
+
+...a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place.
+So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all.
+The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546)
+
+## Why `request` invalidates those keys
+
+**Invalidates:** ...`trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row
+
+**Why that key:** The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open, and it is also the prefix the request's examples list sits under, so `delete_request_example` reaches an open Examples panel through it.
+`trash.all` because `delete_request` and `delete_request_example` (a saved example goes to the Trash since #2971) declare this family alone and stamp a row the drawer lists.
+The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` -
+so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched.
+Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call.
+`prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438)
+
+## Why `environment` invalidates those keys
+
+...`POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877).
+`globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader.
+`trash.all` because `delete_environment` declares this family alone and, since #2970, stamps a row the drawer lists; `restore_trash_entry` and `purge_trash_entry` declare it beside `collection` and `request`, so a restored environment reappears in the Variables tree.
+An `update_environment` pays a refetch of the trash list while the drawer is open - the trade the `request` family takes
+
+## Why `run` invalidates those keys
+
+**Invalidates:** ...`runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId`
+
+**Why that key:** The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes
+
+## Why `config` invalidates those keys
+
+...five of them (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys.
+At the root, because design and load are separate cache entries and one write can move both (#1438)
+
+## Why `service` invalidates those keys
+
+...the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from
+
+## Why `clientCertificate` invalidates those keys
+
+No MCP tool writes it - an entry is added and removed by the user - so the only declarers are `restore_trash_entry` and `purge_trash_entry`: a restored certificate must reappear in an open card.
+Its own family rather than a fold into `config` (whose invalidator also refetches every config and request-default read) or `environment`; `trash.all` is not repeated because `collection`, declared beside it, already takes it (#2973)
+
+## Why `oauth` invalidates those keys
+
+...`useOAuth2TokenStatusQuery` is keyed per cache key, and the key a `fetch_oauth2_token` writes under is derived engine-side and appears only in the answer, so the event carries no hint to narrow by.
+The query polls at 30s on its own, so this is immediacy - an agent that clears a token must not leave the row saying it is valid
+
+## Why `variables` invalidates those keys
+
+...and the event cannot say which of environment, globals or collection moved.
+The first three are the reads the renderer's own Send invalidates after the same write; `compose.all` for the reason `environment` gives.
+Not the coarse `collection` family: a variable write changes no request row and adds nothing to Trash, so `requests.all`, `trash.all` and `prefetch.allRequests()` would only cost a refetch per send in an agent's loop (#1916)
+
+## How a `request` event is applied in full
+
+...the source is read from the request's detail entry, then the tree's lists, when the event arrives (`ownerOfRequest`).
+An owner the cache never saw is in no list on screen
+
+## How a `clientCertificate` event is applied in full
+
+...and no MCP tool declares this family alone, so its invalidator leaves the Trash list to `collection`; here nothing else would refetch it
+
+## Run detail and run report staleness in full
+
+While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934)

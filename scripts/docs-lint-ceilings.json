@@ -120,15 +120,6 @@
       "long_lines": 3,
       "max_cell": 814
     },
-    "docs/app/state-management/query-keys.md": {
-      "max_line": 1529,
-      "long_lines": 9,
-      "max_cell": 1327
-    },
-    "docs/app/state-management/run-live-state.md": {
-      "max_line": 490,
-      "long_lines": 1
-    },
     "docs/app/variable-resolution.md": {
       "lines": 1405
     },
