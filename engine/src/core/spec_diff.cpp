@@ -6,15 +6,14 @@
  */
 
 /**
- * @brief The sync comparison (issue #654, moved engine-side by #854). See the
- *        header for the four rules this must not lose.
+ * The sync comparison (#654, #854); the header gives the four rules this must
+ * not lose.
  *
- * A port of `app/src/services/openapi/spec-diff.ts`, kept to the same answers
- * rather than to the same code, for the reason `openapi_drafts.cpp` states about
- * the drafts it compares: the two halves have to agree about what a document
- * produces, or a field reads as changed on a document nobody edited. The
- * renderer's copy is deleted with this file's arrival, so there is one answer
- * again rather than two that agree today.
+ * A port of the renderer's `spec-diff.ts` held to the same answers, not the
+ * same code, for the reason `openapi_drafts.cpp` gives about the drafts it
+ * compares: both halves must agree on what a document produces, or a field
+ * reads as changed on a document nobody edited. The renderer's copy is gone, so
+ * this is the one answer.
  */
 
 #include "vayu/core/spec_diff.hpp"
@@ -51,18 +50,16 @@ struct FieldValue {
 };
 
 /**
- * `value.replace(/\s+/g, " ").trim()`, cut to `DISPLAY_MAX`.
+ * `value.replace(/\s+/g, " ").trim()`, cut to `DISPLAY_MAX`. Two deliberate
+ * departures from that JavaScript, reachable only by a displayed string (the
+ * compared value is never truncated):
  *
- * Two deliberate readings of the JavaScript this mirrors, both of which only a
- * *displayed* string can reach - the compared value is never truncated:
- *
- * - The collapsed set is ASCII whitespace, where JavaScript's `\s` also covers
- *   NBSP and the Unicode spaces. A document written with those keeps them in the
- *   row it is shown in, which is a cosmetic difference and not a comparison one.
+ * - Only ASCII whitespace collapses, where `\s` also covers NBSP and the
+ *   Unicode spaces: a cosmetic difference in the shown row, not a comparison
+ *   one.
  * - The cut counts UTF-16 code units, as `slice` does, but never lands inside a
- *   character: an astral character straddling the boundary is dropped whole
- *   rather than halved, because half of a surrogate pair is not text this can
- *   put in a JSON response.
+ *   character: an astral character straddling it is dropped whole, since half a
+ *   surrogate pair cannot go in a JSON response.
  */
 std::string truncate (const std::string& value) {
     std::string collapsed;
@@ -111,13 +108,11 @@ FieldValue text_value (const std::string& value) {
 }
 
 /**
- * Key/value rows, compared and shown as one line.
- *
- * The row count leads so that two lists of different lengths can never render to
- * the same string however their values are punctuated - a collision here would
- * be a change the comparison failed to see, which is the one failure this must
- * not have. `description` is part of it because a document that re-words what a
- * parameter means has changed the row Vayu shows.
+ * Key/value rows, compared and shown as one line. The row count leads, so lists
+ * of different lengths never render alike however their values are punctuated;
+ * a collision would be a change the comparison missed, the one failure this
+ * must not have. `description` is included: re-wording what a parameter means
+ * changes the row Vayu shows.
  */
 FieldValue rows_value (const std::vector<DraftField>& entries) {
     std::string joined;
@@ -130,9 +125,8 @@ FieldValue rows_value (const std::vector<DraftField>& entries) {
         if (!entry.description.empty ()) {
             row += " (" + entry.description + ")";
         }
-        // A multipart part the document declares as an upload is a different row
-        // from a text one even when both are empty, which is exactly the state an
-        // imported file part is in (issue #425).
+        // An upload part is a different row from a text part even when both are
+        // empty, exactly an imported file part's state (#425).
         if (entry.file) {
             row += " [file]";
         }
@@ -154,14 +148,14 @@ FieldValue body_value (const DraftBody& body) {
         return { body.mode + " " + fields.compare, body.mode + ": " + fields.display };
     }
     if (body.mode == "binary") {
-        // The mode alone, as a file part compares by its `[file]` flag alone: the
-        // document names no file, and a content type the user set or a file
-        // picked since import is the user's, which a sync must not undo.
+        // The mode alone, as a file part compares by its `[file]` flag: the
+        // document names no file, and a content type or file the user set since
+        // import is theirs, which a sync must not undo.
         return { "binary", "binary" };
     }
     return { body.mode + " " + body.content,
-        // The mode leads because a body's first 120 characters are frequently
-        // identical between two different stubs (`{`, two keys, a newline).
+        // The mode leads: two different stubs often share their first 120
+        // characters (`{`, two keys, a newline).
         body.mode + ": " + truncate (body.content) };
 }
 
@@ -176,10 +170,10 @@ const std::vector<DraftField>& params,
 const std::vector<DraftField>& headers,
 const DraftBody& body) {
     return { text_value (name), text_value (description),
-        // Compared as written, unlike `same_operation`'s uppercasing of the
-        // identity: both sides are a stored method, which the engine parses
+        // Compared as written, unlike `same_operation`'s uppercased identity:
+        // both sides are a stored method, which the engine parses
         // case-sensitively and serialises from an enum, so a lower-case verb is
-        // a state no write can reach and normalising for it would guard nothing.
+        // unreachable and normalising would guard nothing.
         text_value (method), text_value (url), rows_value (params),
         rows_value (headers), body_value (body) };
 }
@@ -200,13 +194,11 @@ std::string path_key (const DeclaredOperation& operation) {
 }
 
 /**
- * Whether the recorded identity is still exactly what the document declares.
- *
- * Compared as *written*, not as shaped: `{petId}` -> `{id}` is the same endpoint
- * to `lookup` - which is what keeps the request attached to its operation - but
- * it is a different `spec_operation` to store, and reporting the identity as
- * unchanged would leave the collection recording a path the document no longer
- * uses.
+ * Whether the recorded identity is exactly what the document declares, compared
+ * as written, not as shaped: `{petId}` -> `{id}` is one endpoint to `lookup`
+ * (which keeps the request attached), but a different `spec_operation` to
+ * store, and calling it unchanged would leave the collection recording a path
+ * the document no longer uses.
  */
 bool same_operation (const DeclaredOperation& a, const DeclaredOperation& b) {
     return a.operation_id == b.operation_id &&
@@ -215,14 +207,12 @@ bool same_operation (const DeclaredOperation& a, const DeclaredOperation& b) {
 }
 
 /**
- * Both keys for every operation, first declaration winning.
- *
- * First rather than last because a document that declares one `operationId`
- * twice is already invalid, and the duplicate then falls out as an `added`
- * operation - visible, rather than silently displacing the one a request is
- * bound to. The reader drops a repeated id from the *identity* rather than
- * stamping it twice (issue #715), so the second declaration arrives here with a
- * method-and-path identity and is indexed by path alone.
+ * Both keys for every operation, first declaration winning: a document
+ * declaring one `operationId` twice is already invalid, and the duplicate then
+ * shows as an `added` operation instead of silently displacing the one a
+ * request is bound to. The reader drops a repeated id from the identity rather
+ * than stamping it twice (#715), so the second declaration arrives with a
+ * method-and-path identity, indexed by path alone.
  */
 class DraftIndex {
     public:
@@ -239,18 +229,16 @@ class DraftIndex {
     /**
      * The document's entry for one recorded identity, and how it was found.
      *
-     * The `operationId` leads - that is what follows an operation whose path
-     * moved - with two limits, both of them cases where following it would pair
-     * a request with an operation that contradicts what the request says it is
-     * (issue #715):
+     * The `operationId` leads (it follows an operation whose path moved), with
+     * two limits, both where following it would pair a request with an
+     * operation contradicting it (#715):
      *
      * - an id **two requests claim** identifies neither, so it is skipped;
      * - an id whose entry has a different method + path shape loses to an
-     *   **exact match on the request's own** method + path, because a document
-     *   still declaring the endpoint the request records is a stronger statement
-     *   about which operation this is than an id pointing somewhere else. With
-     *   no exact match the id is still followed: that is the ordinary rename,
-     *   where the document moved the path and the id is all there is left.
+     *   **exact match on the request's own** method + path: a document still
+     *   declaring the recorded endpoint says more about which operation this is
+     *   than an id pointing elsewhere. With no exact match the id is still
+     *   followed: that is the ordinary rename.
      */
     [[nodiscard]] std::optional<std::pair<size_t, IdentityMatch>> lookup (
     const DeclaredOperation& operation,
@@ -279,13 +267,11 @@ class DraftIndex {
 };
 
 /**
- * Which of @p fetched one of @p identities names, by `DraftIndex::lookup`, as
- * a mark per draft.
- *
- * For identities that are not a live request's - a declined record, or a
- * request a sync is about to create (#3031) - so no request's repeated
- * `operationId` makes one of theirs ambiguous: the lookup is the one a request
- * with an id nobody else claims gets.
+ * Which of @p fetched one of @p identities names, by `DraftIndex::lookup`, as a
+ * mark per draft. For identities that are not a live request's (a declined
+ * record, or a request a sync is about to create, #3031), so no request's
+ * repeated `operationId` makes one ambiguous: each gets the lookup of an id
+ * nobody else claims.
  */
 std::vector<bool> drafts_named (const DraftIndex& index,
 const std::vector<DeclaredOperation>& identities,
@@ -300,13 +286,11 @@ const std::vector<SpecRequestDraft>& fetched) {
 }
 
 /**
- * The `operationId`s more than one request in this collection records - the
- * shape a document that declared one id twice left behind (issue #715).
- *
- * An import no longer stamps a repeated id at all, but a collection imported
- * before that fix still holds two requests claiming one id, and an id two
- * requests claim identifies neither of them. They are followed by path here,
- * which is the same refusal-to-guess the matcher binds by.
+ * The `operationId`s more than one request here records: what a document
+ * declaring one id twice left behind (#715). An import does not stamp a
+ * repeated id, but an older collection can still hold two requests claiming
+ * one, and such an id identifies neither; they are followed by path, the
+ * matcher's same refusal to guess.
  */
 std::unordered_set<std::string> ids_more_than_one_request_claims (
 const std::vector<ComparableRequest>& requests) {
@@ -325,13 +309,11 @@ const std::vector<ComparableRequest>& requests) {
 }
 
 /**
- * Everything the request holds that the document no longer produces.
- *
- * A field is reported when the request does not match the new document -
- * "differs from what a fresh import would produce" - and flagged when it does
- * not match the bound document either. Those two questions are separate on
- * purpose: the first is what a sync would change, the second is whether changing
- * it would destroy somebody's work.
+ * Everything the request holds that the document no longer produces. A field is
+ * reported when the request differs from the new document (what a fresh import
+ * would produce), and flagged when it differs from the bound one too: the first
+ * is what a sync would change, the second whether changing it destroys
+ * somebody's work.
  */
 std::vector<SpecFieldDiff> diff_fields (const ComparableRequest& request,
 const DraftRequest& next,
@@ -459,8 +441,8 @@ const std::vector<DeclaredOperation>& created) {
 
 SafeSpecApply safe_spec_apply (const SpecDiff& diff) {
     SafeSpecApply safe;
-    // Everything the document adds: an operation no request claims is one the
-    // contract gained, and creating it takes nothing away from anybody.
+    // An operation no request claims is one the contract gained; creating it
+    // takes nothing from anybody.
     safe.create.assign (diff.added.size (), true);
     safe.recreate.assign (diff.declined.size (), false);
     safe.remove.assign (diff.removed.size (), false);
@@ -474,8 +456,8 @@ SafeSpecApply safe_spec_apply (const SpecDiff& diff) {
                     entry.fields.push_back (field.field);
                 }
             }
-            // The identity is written whether or not a field was ticked - see
-            // the route that applies this - so a pure rename is still an apply.
+            // The identity is written whether or not a field was ticked (see
+            // the applying route), so a pure rename is still an apply.
             entry.apply = !entry.fields.empty () || item.renamed;
         }
         safe.update.push_back (std::move (entry));
