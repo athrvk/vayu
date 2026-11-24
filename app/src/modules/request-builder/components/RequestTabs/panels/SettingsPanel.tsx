@@ -441,8 +441,8 @@ export default function SettingsPanel() {
 			/>
 
 			{/*
-			 * Scripts run on a streaming send (#612), so what is worth saying here is
-			 * *when* they run (issue #620).
+			 * Kept, but no longer a refusal: #612 shipped scripts on a streaming
+			 * send, so what is worth saying here is *when* they run (issue #620).
 			 * Send answers as soon as the stream opens, so the Tests script - and
 			 * its results in the Tests and Console panes - arrive only once the
 			 * stream has terminated, over the buffered event list rather than per
