@@ -6,16 +6,11 @@
  */
 
 /**
- * LabelledField - a visible `<Label>` and the one control it names.
- *
- * A `<Label>` written beside its control as a sibling names nothing: a screen
- * reader announces the control by its placeholder, or as a bare "edit text" or
- * "combo box" (#3498). The control is rendered through a function so it can
- * take the `id` the label points at, minted here and unique per instance.
- *
- * `label` is also handed to the control: an input that carries its own
- * `aria-label` (`VariableInput` falls back to its placeholder) is named by that,
- * which outranks the `<label for>`, so it has to be given the label's text.
+ * A visible `<Label>` and the one control it names. A sibling `<Label>` names nothing: a screen
+ * reader announces the control by its placeholder, or as a bare "edit text" (#3498). The control
+ * renders through a function so it takes the `id` the label points at, minted per instance. `label`
+ * goes to the control too: an input with its own `aria-label` (`VariableInput` falls back to its
+ * placeholder) is named by that, which outranks `<label for>`.
  */
 
 import { useId, type ReactNode } from "react";

@@ -6,16 +6,10 @@
  */
 
 /**
- * The standing reminder that a local service is reachable beyond this machine.
- *
- * The engine already refused to bind wide without an explicit confirmation;
- * this is what says the confirmation was given, wherever the service is named.
- *
- * A component rather than the same four lines twice: the Services drawer and
- * the inbox tab both render it, and as two copies they had already drifted -
- * the drawer printed the bare bind address and the tab "Reachable on <bind>",
- * so the same fact read as two different things depending on which surface you
- * were looking at (issue #556).
+ * The standing reminder that a local service is reachable beyond this machine. The engine refuses
+ * to bind wide without explicit confirmation; this says it was given, wherever the service is
+ * named. A component, as the Services drawer and the inbox tab both render it, and two copies had
+ * drifted (the bare bind address against "Reachable on <bind>", #556).
  */
 
 import { Badge } from "@/components/ui";
@@ -27,9 +21,8 @@ export interface NonLoopbackBadgeProps {
 
 export function NonLoopbackBadge({ bind }: NonLoopbackBadgeProps) {
 	return (
-		// `variant="chip"`, per the Badge note: every other variant pairs its
-		// `bg-x` with a `hover:bg-x/80` that tailwind-merge does not replace, so
-		// the fill below would win at rest and the accent under the pointer.
+		// `variant="chip"`, per the Badge note: other variants pair `bg-x` with a `hover:bg-x/80`
+		// tailwind-merge keeps, so the fill would show at rest and the accent under the pointer.
 		<Badge variant="chip" className="bg-status-warning-fill text-primary-foreground">
 			Reachable on {bind}
 		</Badge>

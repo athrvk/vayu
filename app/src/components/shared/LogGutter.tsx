@@ -8,10 +8,9 @@
 import { cn } from "@/lib/utils";
 
 /**
- * The gutter beside a log line: a word naming the level (or the kind, for an
- * element's message), right-aligned in a column that is reserved even when the
- * word is blank so the text beside it stays aligned. A span, not an icon -
- * console output is unbounded and a per-row SVG is the dominant render cost.
+ * The gutter beside a log line: a word naming the level (or an element message's kind),
+ * right-aligned in a column reserved even when blank so the text stays aligned. A span, not an
+ * icon: console output is unbounded, and a per-row SVG is the dominant render cost.
  */
 export function LogGutter({ label, labelClassName }: { label: string; labelClassName: string }) {
 	return (
