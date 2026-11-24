@@ -24,6 +24,8 @@
  * response, or that stream cut before the response - and what it says: the
  * result, a tool error, a JSON-RPC error, a `-32022` version refusal, or the
  * plain `400` a legacy-era server answers a modern request with.
+ * `reply_in_turn` gives each call its own outcome from a list, for a run that
+ * has to mix them.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -40,6 +42,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "task_queue.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -79,16 +83,24 @@ class McpFixtureServer {
     public:
     McpFixtureServer () {
         svr_.new_task_queue = pooled_task_queue (2);
+        // One call per connection: a load run's event loop keeps a connection
+        // per worker (one per core), and an idle kept-alive one holds a pool
+        // thread until httplib's keep-alive timeout, which starves the next
+        // worker's call into its request timeout on a box with more cores
+        // than threads.
+        svr_.set_keep_alive_max_count (1);
         svr_.Post ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
             McpReplyShape shape     = McpReplyShape::Json;
             McpReplyOutcome outcome = McpReplyOutcome::Result;
+            const std::size_t call  = requests_++;
             {
                 std::lock_guard<std::mutex> lock (mutex_);
                 headers_ = req.headers;
                 shape    = shape_;
-                outcome  = outcome_;
+                outcome  = turns_.empty () ?
+                outcome_ :
+                turns_.at ((call - turns_from_) % turns_.size ());
             }
-            ++requests_;
             answer (req, res, shape, outcome);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -115,6 +127,16 @@ class McpFixtureServer {
         std::lock_guard<std::mutex> lock (mutex_);
         shape_   = shape;
         outcome_ = outcome;
+        turns_.clear ();
+    }
+
+    /// The n-th call from now on answered with @p turns `[n % size]`, so a
+    /// run's mix of outcomes is exact whatever order its calls arrive in.
+    void reply_in_turn (McpReplyShape shape, std::vector<McpReplyOutcome> turns) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        shape_      = shape;
+        turns_      = std::move (turns);
+        turns_from_ = requests_.load ();
     }
 
     /// Calls answered so far.
@@ -302,6 +324,8 @@ class McpFixtureServer {
     httplib::Headers headers_;
     McpReplyShape shape_     = McpReplyShape::Json;
     McpReplyOutcome outcome_ = McpReplyOutcome::Result;
+    std::vector<McpReplyOutcome> turns_;
+    std::size_t turns_from_ = 0; // the call turns_[0] answers
     std::atomic<std::size_t> requests_{ 0 };
 };
 
