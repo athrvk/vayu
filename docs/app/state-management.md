@@ -3271,7 +3271,7 @@ an engine that is still starting: while `engineStartWindow` is open, an
 `EngineUnreachableError` is retried without counting against the budget, every
 `ENGINE_START_RETRY_DELAY_MS` (`queryRetryDelay`), so a launch shows loading
 rather than error panes until the engine answers or the window expires
-(`docs/app/api-integration.md`, Health Checking).
+(`docs/app/api-integration/errors-and-connection.md`, Health Checking).
 
 **Cache policy lives in `config/cache.ts` (`QUERY_CACHE`), not in the call
 sites.** Name the constant when you need a duration; restating the number here
