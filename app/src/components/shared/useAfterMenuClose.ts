@@ -11,11 +11,12 @@ import type { RowAction } from "./row-actions";
 /**
  * Lets an action opening an `autoFocus` field wait for its menu to close (#3443). `onSelect` runs
  * while the menu's `FocusScope` traps focus, so a field it mounts is yanked back into the menu,
- * which then closes and hands focus to the row: typing drives the tree's typeahead, Backspace
- * trashes the row, and a rename's blur commits the name unchanged. `onCloseAutoFocus` is Radix's
- * cleanup-done signal, so an `opensField` action runs there and the hand-back to the row is
- * skipped. Shared by both menus (`RowActionsMenu`, `RowContextMenuContent`), different Radix
- * families with the same trap. One slot suffices: a modal menu selects one item per opening.
+ * which then closes and hands focus to the row, leaving the field unfocused: typing drives the
+ * tree's typeahead, Backspace trashes the row, and a rename's blur commits the name unchanged.
+ * `onCloseAutoFocus` is Radix's cleanup-done signal, so an `opensField` action runs there and the
+ * hand-back to the row is skipped. Shared by both menus (`RowActionsMenu`,
+ * `RowContextMenuContent`), different Radix families with the same trap. One slot suffices: a modal
+ * menu selects one item per opening.
  */
 export function useAfterMenuClose() {
 	const pending = useRef<(() => void) | null>(null);

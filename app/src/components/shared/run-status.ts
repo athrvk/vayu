@@ -22,10 +22,10 @@ import type { RunOutcome } from "./run-outcome";
  * How a run's status is drawn, once: the history row's glyph and the dashboard header's pill read
  * this map, so a status cannot be green in one and neutral in the other (#1932). One glyph per
  * status, shape first, colour second (#1691): a coloured dot made colour the whole message, which a
- * red/green confusion, a monochrome display or a greyscale screenshot flattens. `text` is the
- * `-text` token, as small glyphs and words fail AA on the bare token
- * (`status-color-tokens.test.ts`); `tint` is the pill's fill and edge, an area of colour, where the
- * bare token is right.
+ * red/green confusion, a monochrome display or a greyscale screenshot flattens five of them into
+ * one. The shape and the word carry the status; the colour agrees with them. `text` is the `-text`
+ * token, as small glyphs and words fail AA on the bare token (`status-color-tokens.test.ts`);
+ * `tint` is the pill's fill and edge, an area of colour, where the bare token is right.
  */
 export interface RunStatusDisplay {
 	label: string;

@@ -6,9 +6,9 @@
  */
 
 /**
- * A step's unresolved `{{variables}}` (#3269), beside its {@link ExtractorMisses}: a miss unsets a
- * variable, and this is the later step sending that name as text; the step can still pass. The
- * engine counts two things under one field, so the caller says which:
+ * A step's unresolved `{{variables}}` (#3269), beside its {@link ExtractorMisses}: an extractor
+ * miss unsets a variable, and this is the later step sending that name as literal text; the step
+ * can still pass. The engine counts two things under one field, so the caller says which:
  * - `"names"` - a sequential collection run's step: the distinct `{{names}}` it sent unresolved.
  *   Absent, never 0, when none.
  * - `"sends"` - a scenario load run's step: the executions that sent one. Always present, so 0 is a

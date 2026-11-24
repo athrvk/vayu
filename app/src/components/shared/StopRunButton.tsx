@@ -10,9 +10,9 @@
  * dashboard header, the collection-run tab). A primitive, not markup each view repeats: the
  * treatment is no `Button` variant (a destructive *outline* over `ghost`, plus the in-flight swap
  * to a spinner and "Stopping…"), and a hand-rolled copy would miss its fixes. `destructive-text`,
- * not `destructive`, for the label: the bare fill as a foreground is the repo's most frequent
+ * not `destructive`, for the label: the bare fill token as a foreground is the repo's most frequent
  * colour bug (`docs/design-system/chart-colors.md`). The caller owns the request and the failure
- * path; this says only what pending looks like.
+ * path; this says only what pending looks like, not what stopping means.
  */
 
 import { StopCircle, Loader2 } from "lucide-react";
@@ -51,8 +51,8 @@ export function StopRunButton({
 			)}
 		>
 			{/*
-			 * No `mr-*`: the `Button` base sets `gap-2`, and a margin on top would double the icon
-			 * gap.
+			 * No `mr-*`: the `Button` base sets `gap-2`, and a margin on top would double the
+			 * icon-to-label gap to 8px + 6px.
 			 */}
 			{isStopping ? (
 				<Loader2 className="size-icon-sm animate-spin" />

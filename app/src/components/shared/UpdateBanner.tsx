@@ -63,10 +63,10 @@ function bannerMessage(
 /**
  * Slim banner for a newer Vayu release:
  *
- *   - silent platforms (Windows, Linux AppImage): a progress bar while the update downloads,
- *     "Verifying" while the installer's build-provenance attestation is checked, then
+ *   - silent platforms (Windows, Linux AppImage): a progress bar while the update downloads in the
+ *     background, "Verifying" while the installer's build-provenance attestation is checked, then
  *     restart-to-install. When the attestation fails (#2372) it says why and offers the release
- *     page; nothing installs.
+ *     page; nothing installs and there is no restart button.
  *   - macOS (ad-hoc signed): copy the one-line installer command, and quit so it can replace the
  *     app.
  *   - other notify platforms (.deb): link to the release page.

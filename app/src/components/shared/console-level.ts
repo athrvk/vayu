@@ -18,9 +18,9 @@ export type ToneLevel = ConsoleLevel | "debug";
  * sample (#3127) and the Logs tab's records (#3635), so a `warn` is one colour everywhere. `log`
  * and `info` share the plain foreground, as Chrome does: a fourth saturated tone in a slab already
  * carrying a section colour would compete with it. The gutter label separates them, which also
- * keeps this from being colour-only (`warn` against `error` in a desaturated scheme being the
- * failure the tab indicator avoids). `log`'s gutter is blank: the word on every ordinary line would
- * be noise, and the reserved column keeps messages aligned.
+ * keeps this from being colour-only (`warn` against `error` in a desaturated accent scheme being
+ * the failure the tab indicator avoids). `log`'s gutter is blank: the word on every ordinary line
+ * would be noise, and the reserved column keeps messages aligned.
  */
 export const LEVEL_TONE: Record<ToneLevel, { gutter: string; text: string; label: string }> = {
 	// Muted text as well as label: debug is what a quiet reader scrolls past, and most records

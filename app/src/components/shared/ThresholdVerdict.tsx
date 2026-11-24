@@ -127,8 +127,8 @@ export function ThresholdVerdict({
 				 * radius: a box with none is square for a Rounded user, which no source scan flags
 				 * (app/CLAUDE.md, "No bare `rounded`"). Text on a tint, never the bare fill as
 				 * foreground: `--status-*` is an indicator token failing contrast as a label, so
-				 * the word takes `-text` (docs/design-system/accent-and-status.md, "Status
-				 * tokens").
+				 * the three-token rule sends the word to `-text`
+				 * (docs/design-system/accent-and-status.md, "Status tokens").
 				 */}
 				<Badge
 					variant="chip"

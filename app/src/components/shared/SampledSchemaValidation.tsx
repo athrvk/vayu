@@ -17,7 +17,8 @@
  * separates them and the block's sentence follows it, the distinction `docs/app/openapi.md`'s
  * exact-vs-sampled table draws. Absent means sampled, as a report older than the field was, and
  * claiming exactness wrongly is the worse error. Reasons come from `uncheckedReasonText`, the
- * response viewer's wording for one response, so the two cannot drift.
+ * response viewer's wording for one response, so the two cannot drift. The name is from the
+ * load-mode block it was written for; it serves both run modes.
  */
 
 import { AlertTriangle } from "lucide-react";
@@ -135,8 +136,8 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				)}
 
 				{/*
-				 * Said aloud: a list shorter than its count reads as the whole set unless it says
-				 * so.
+				 * Said aloud: a list shorter than its count reads as the whole set of problems
+				 * unless it says so.
 				 */}
 				{validation.failuresTotal > failures.length && (
 					<p className="mt-2 text-xs text-muted-foreground tabular-nums">

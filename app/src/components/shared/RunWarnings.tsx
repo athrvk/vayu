@@ -7,11 +7,11 @@
 
 /**
  * "This run is not what it looks like": what a load run did not do, above the totals it would hide
- * behind (#1503). A `{{token}}` composition never resolved, a pre-request script load mode never
- * runs, a per-host connection limit raised, requests libcurl re-sent on a new connection,
- * `Set-Cookie` headers its cookie engine discarded: all let the run finish and count as sent, so a
- * reader checking only the error rate sees a green run. Silent when the report has no `warnings`
- * (older runs, and runs with nothing to report).
+ * behind (#1503). A `{{token}}` composition never resolved, a step whose pre-request script load
+ * mode never runs, a per-host connection limit the run had to raise, requests libcurl re-sent on a
+ * new connection, `Set-Cookie` headers its cookie engine discarded: all let the run finish and
+ * count as sent, so a reader checking only the error rate sees a green run. Silent when the report
+ * has no `warnings` (runs older than the field, and runs with nothing to report).
  */
 
 import { Callout } from "./Callout";

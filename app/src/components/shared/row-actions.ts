@@ -46,8 +46,9 @@ export interface RowAction {
 	disabledReason?: string;
 	/**
 	 * A value the item carries beside its label (the URL a Copy would put on the clipboard), in
-	 * `disabledReason`'s trailing column. On the row, not in a tooltip on an icon button, which
-	 * reads only on hover, only with a pointer; here a screen reader reaches it in the item's name.
+	 * `disabledReason`'s trailing column. On the row, not in a tooltip on an always-visible icon
+	 * button, which reads only on hover, only with a pointer and only while it stays; here a screen
+	 * reader reaches it in the item's name.
 	 */
 	hint?: string;
 }

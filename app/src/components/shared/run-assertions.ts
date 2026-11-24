@@ -206,7 +206,7 @@ export interface ReplayScope {
 /**
  * What the sampled replay sampled, or `undefined` outside a scenario load run or when no step
  * deferred a script (#2824): the request total is the wrong denominator there, as most of a
- * sequence's requests carry no test script.
+ * sequence's requests carry no test script, so they are not "not kept".
  */
 export function replayScopeOf(
 	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined

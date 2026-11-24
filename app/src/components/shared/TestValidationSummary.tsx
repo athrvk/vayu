@@ -10,15 +10,16 @@
  * and how many assertions passed (#726). Two units share the card, and the labels name them:
  * responses tested counts responses, passed and failed count assertions (#2144). The engine writes
  * `testValidation` (`run_manager.cpp` -> `runs.cpp`) into every load-run report whose plan carried
- * a post-request script, and stores the named failures on a synthetic result row. The History
- * Overview renders this, which the dashboard shows for a finished run (#2220), so a reopened run
- * says whether its assertions ran.
+ * a post-request script, and stores the named per-test failures on a synthetic result row. The
+ * History Overview renders this, which the dashboard shows for a finished run (#2220), so a
+ * reopened run says whether its assertions ran.
  *
  * **`failures` lists the named failures**: the synthetic row is filtered out of the Samples tab
  * (`test-validation.ts`), so this is the one place they reach the screen. Each distinct message is
- * listed once with its count (#3127): a script failing alike on every sample is one line, `x1,000`.
- * **The replay's console lines close the card** (#3127), under a heading naming the replay and its
- * sample size; they ride inside `testValidation`, so an older engine's report has none.
+ * listed once with its count (#3127): a script failing alike on every sampled response is one line,
+ * `x1,000`. **The replay's console lines close the card** (#3127), under a heading naming the
+ * replay and its sample size; they ride inside `testValidation`, so an older engine's report has
+ * none.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -217,9 +218,10 @@ export function TestValidationSummary({
 				)}
 
 				{/*
-				 * The named failures, so 13 of 100 failed is not indistinguishable from nothing
-				 * asserted; shaped like the request-builder Tests tab and a sample row's failure
-				 * list, so a failure reads the same everywhere.
+				 * The named failures, so a run failing 13 of 100 assertions is not
+				 * indistinguishable from one asserting nothing; shaped like the request-builder
+				 * Tests tab and a sample row's failure list, so a failure reads the same
+				 * everywhere.
 				 */}
 				{hasFailures && (
 					<div className={cn("space-y-1", testValidation && "mt-4")}>
@@ -238,8 +240,8 @@ export function TestValidationSummary({
 						</div>
 						{/*
 						 * Said aloud when the stored list is shorter than its count: ten under
-						 * forty reads as the whole set otherwise (as `SampledSchemaValidation`
-						 * does).
+						 * forty reads as the whole set of problems otherwise (as
+						 * `SampledSchemaValidation` does).
 						 */}
 						{shownCue && (
 							<p className="mt-2 text-xs text-muted-foreground tabular-nums">

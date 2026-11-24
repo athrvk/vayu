@@ -17,14 +17,14 @@
  * - **not-judged** - nothing declared a pass/fail line, or the run's errors undercut the budgets
  *   that passed (a latency ceiling met by all-instant 500s). Never green: no failure is not a pass.
  *
- * A failed check is evidence like an error: a scenario run whose every `assert.*` failed against
- * `200`s has 0% errors and met its latency budget (#2820). It is **not-judged**, as **failed** is
- * reserved for a declared line missed (a broken `maxAssertionFailureRatePct` is already `failed`
- * through the budgets). The failed checks are the run's assertion block (#3537), alike for every
- * load run kind: a failed assertion of either population, exact or replayed (#3458), an errored
- * element execution, a failed teardown script. The reason names each, on the met-budgets and
- * no-budgets line alike, in the run-report export's words and order
- * (`engine/tests/fixtures/run-verdict-conformance.json`).
+ * A failed check is evidence like an error: a scenario load run whose every `assert.*` failed
+ * against `200`s has 0% errors and met its latency budget, and drawing it green says the checks
+ * held (#2820). It is **not-judged**, as **failed** is reserved for a declared line missed (a
+ * broken `maxAssertionFailureRatePct` is already `failed` through the budgets). The failed checks
+ * are the run's assertion block (#3537), alike for every load run kind: a failed assertion of
+ * either population, exact or the sampled replay's (#3458), an errored element execution, a failed
+ * teardown script. The reason names each, on the met-budgets and no-budgets line alike, in the
+ * run-report export's words and order (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
  * A collection run is judged by `judgeCollection`, from its row (`rowOutcome`) or opened report
  * (`collectionReportOutcome`, #3543), the same either way: **failed** when a step failed or errored
@@ -32,11 +32,12 @@
  *
  * A Stop cutting the end-of-run drain with requests outstanding leaves the run `completed` with the
  * budgets its answered requests met, but those are not the run: a cancelled request is in no total,
- * rate or latency, and the ones the drain awaited are its slowest and hung ones (#3538). Such a run
- * (`summary.drainCut`, absent unless a Stop cut something) is **not-judged**, naming how many went
- * unanswered and nothing else. It ranks below **failed** (a missed budget is already known) and
- * above every met-budget and no-budget reason, failed checks and errors included; a Stop before the
- * drain is **stopped**. The export's `drain_stopped` code is the same verdict.
+ * rate or latency, and the ones the drain awaited are by construction its slowest and hung ones
+ * (#3538). Such a run (`summary.drainCut`, absent unless a Stop cut something) is **not-judged**,
+ * naming how many went unanswered and nothing else. It ranks below **failed** (a missed budget is
+ * already known) and above every met-budget and no-budget reason, failed checks and errors
+ * included; a Stop before the drain is **stopped**. The export's `drain_stopped` code is the same
+ * verdict (`run-verdict-conformance.json`).
  *
  * A budget the run could not measure (`evaluated: false`, #1484) is counted failed by the engine
  * (`passed: false`, in `failed`), so it lands in **failed** and is named like any missed budget.
@@ -345,8 +346,8 @@ function derivedRowOutcome(run: Run): RunJudgement | null {
  * as `GET /runs?outcome=` filters on it, so a row is never listed under a verdict it does not wear;
  * the reason is the row's own derivation (`derivedRowOutcome`) when that reaches the same category
  * (every row where engine and renderer agree), else a generic line. A row with no stored outcome
- * (stored before the column, or judged nothing) is derived from `status` and `resultSummary`, the
- * rule the engine's `judge_run_row` is held to by
+ * (stored before the column, or the engine judged nothing) is derived from `status` and
+ * `resultSummary`, the rule the engine's `judge_run_row` is held to by
  * `engine/tests/fixtures/run-row-outcome-conformance.json`. So a failed row stored before the
  * column wears `failed` here while its column stays NULL, and the History outcome filter, fetching
  * through `GET /runs?outcome=failed`, misses it (#3643).

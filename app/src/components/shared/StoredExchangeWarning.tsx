@@ -8,15 +8,15 @@
 /**
  * "The steps below were stored verbatim", the design-mode counterpart of `CapturedDataWarning`
  * (#731). A collection run writes one `results` row per step execution with the whole exchange (the
- * composed request, the headers as sent, libcurl's raw request line, both bodies), capped only by
- * `maxTraceBodyBytes` and kept until pruning: the same deliberately unredacted material the
- * load-mode capture notice covers, so the two are a pair: change one, read the other. The
- * `dataBound` half matters most: the Data tab and `docs/app/data-driven-runs.md` promise the engine
- * never reads the *file* and the *contract* stores no cells, which a reader took as "no cell of my
- * credentials CSV is written down", false for every cell reaching a request, as bind-before-auth
- * (#591) builds `Authorization` from the row. Where rows were bound, the notice says so. Silent
- * with no steps listed, the absent-vs-zero rule `SampleRetentionNote` and `CapturedDataWarning`
- * follow.
+ * composed request, the headers as sent (`sentHeaders`), libcurl's raw request line, both bodies),
+ * capped only by `maxTraceBodyBytes` and kept until run pruning: the same deliberately unredacted
+ * material the load-mode capture notice covers, so the two are a pair: change one, read the other.
+ * The `dataBound` half matters most: the Data tab and `docs/app/data-driven-runs.md` promise the
+ * engine never reads the *file* and the *contract* stores no cells, which a reader took as "no cell
+ * of my credentials CSV is written down", false for every cell reaching a request, as
+ * bind-before-auth (#591) builds `Authorization` from the row before it is encoded. Where rows were
+ * bound, the notice says so. Silent with no steps listed, the absent-vs-zero rule
+ * `SampleRetentionNote` and `CapturedDataWarning` follow.
  */
 
 import { Callout } from "./Callout";
@@ -31,7 +31,7 @@ export interface StoredExchangeWarningProps {
 	dataBound: boolean;
 	/**
 	 * The bound file's display name (#2051), named in the sentence when the snapshot recorded one;
-	 * absent for older runs, which keep the unnamed sentence.
+	 * absent for runs older than the field, which keep the unnamed sentence.
 	 */
 	dataFileName?: string;
 	className?: string;
