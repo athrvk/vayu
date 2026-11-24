@@ -61,7 +61,7 @@ an engine that stopped with nothing starting costs collections, runs and config 
 A launch does not spend those retries.
 While the start window below is open, the shared retry policy (`shouldRetryQuery` and `queryRetryDelay` in `lib/query-client.ts`, via `isEngineStartFailure`) keeps retrying a refused connection every `QUERY_CACHE.ENGINE_START_RETRY_DELAY_MS` (250ms) without counting it, so every query mounted at first paint -
 the collection tree, the Launcher, a restored tab's request or run - stays loading beside the Dock's "Starting…" and loads within that delay of the engine listening.
-It used to settle into "Couldn't reach Vayu's engine" panes a few hundred milliseconds to three seconds into an ordinary launch, and flash them until the reconnect refetch above replaced them.
+Without that, they would settle into "Couldn't reach Vayu's engine" panes a few hundred milliseconds to three seconds into an ordinary launch, and flash them until the reconnect refetch above replaced them.
 The failure still surfaces, on the same clock as the Dock: the first refused attempt after the window expires is not retried.
 `requestDetailOptions` and `runDetailOptions` bring their own `retry`, so they compose `isEngineStartFailure` in themselves.
 

@@ -23,7 +23,7 @@ Each page holds one part of the integration.
 | [SSE Client (`services/sse-client.ts`)](sse-client.md) | `services/sse-client.ts` |
 | [API Endpoints (`config/api-endpoints.ts`)](endpoints.md) | `config/api-endpoints.ts` |
 | [Request Execution Flow](execution-flow.md) | Single request execution, load test execution |
-| [Streaming Request Execution (issue #574)](streaming.md) | Streaming request execution |
+| [Streaming Request Execution](streaming.md) | Streaming request execution |
 | [Errors and connection management](errors-and-connection.md) | Error handling, health checking, engine startup |
 | [Best practices, testing and troubleshooting](testing-and-troubleshooting.md) | Best practices, mocking, troubleshooting |
 

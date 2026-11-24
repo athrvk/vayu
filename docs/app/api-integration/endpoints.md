@@ -103,5 +103,5 @@ export const API_ENDPOINTS = {
 };
 ```
 
-> Note: the old `STATS_STREAM` SSE constant was removed - live metrics go through
-> `METRICS_LIVE` only; `/stats` is now used solely for paginated historical reads.
+> Note: there is no `STATS_STREAM` SSE constant - live metrics go through
+> `METRICS_LIVE` only; `/stats` is used solely for paginated historical reads.

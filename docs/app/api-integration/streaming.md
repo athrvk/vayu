@@ -3,9 +3,9 @@ description: >-
   How a request with the Event stream setting travels: the shared composition, the 202 answer, the live events and how a stopped or failed stream ends.
 ---
 
-# Streaming Request Execution (issue #574)
+# Streaming Request Execution
 
-A request whose **Event stream** setting is on takes the same composition and a different answer.
+A request whose **Event stream** setting is on takes the same composition and a different answer (#574).
 `buildSendBody` is shared with the buffered path - the two must put the identical request on the wire, or a stream would measure something Send does not - and only the last two steps differ:
 
 4. **API Call**: `apiService.executeStreamRequest()` → `POST /execute` with `stream: true`, answered `202 {runId, eventsUrl, status}` at once.

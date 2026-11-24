@@ -45,7 +45,7 @@ They are not interchangeable, so `apiService` keeps one method per verb:
 - `createX(data)` posts the object to the collection path **with `id` stripped** (`withoutId` in `api.ts`).
   The engine assigns every id and answers a create carrying one with a `400`, and the `Create*Request` types declare `id?: never` - but TypeScript only excess-property-checks object literals, so a call site that spreads a whole record (a duplicate flow, a restored tab) would slip one through.
   The strip is what actually holds.
-  (Import used to be the exception, pre-assigning ids to wire `parentId` / `collectionId` across a tree before anything was persisted; it sends one `applyImport` call now, see below.)
+  (Import is no exception: it sends one `applyImport` call and assigns no ids of its own to wire a tree together, see below.)
 - `updateX(data)` takes `data.id`, puts it in the **path**, and sends the rest of the object as a merge-patch body - an omitted field keeps its stored value, an explicit `null` resets it to the default.
   The `id` is not repeated in the body; a body `id` disagreeing with the path is a `400`.
 

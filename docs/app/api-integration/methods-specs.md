@@ -62,7 +62,7 @@ The renderer decides *what* to send (`services/openapi/spec-apply.ts`) and never
 `diffSpec` is the read that the Sync section's **Check** is (issue #854).
 It sends the collection and the re-fetched bytes and nothing else: the engine walks the collection's subtree itself and reads the bound document from the binding, because the three-way `userTouched` flag - the request holds neither the new document's value nor the bound one's - is worth nothing if a caller can supply the previous side.
 It writes nothing, and the answer carries, per entry, the draft an apply would write, so `spec-apply.ts` builds a `POST /specs/sync` payload out of it without reading a document at all.
-The comparison used to be `services/openapi/spec-diff.ts`, which is gone.
+The comparison is the engine's; the app has no `services/openapi/spec-diff.ts`.
 
 Each entry also carries **what a sync with no ticks would do to it** - `safe`, and `safeFields` on a changed request (issue #871).
 `defaultSelection` reads those rather than deriving them from `userTouched`, because the rules behind them are the ones whose silent failure destroys a person's work and they now have one author: `core::safe_spec_apply`, which `POST /specs/sync`'s `policy: "safe"` applies for a caller that states no rows at all.
@@ -79,7 +79,7 @@ A created request states none at all, for the same reason.
 Echoing the rows back was a round trip through the client of an answer the engine had already given, and it let a payload state an example for a response no document describes.
 
 `bindSpec` is the other (issue #862), and it decides even less: the payload is a collection and a document, with **no pairing in it**.
-Binding used to be three calls made in order from `useBindSpecMutation` - store the document, move the binding, then stamp the matched requests and clear the stale ones - and both halves of that were defects waiting to happen: three writes are three places to stop, and the clearing half is a list a caller can forget, which is exactly what issue #718 was.
+Three calls made in order from `useBindSpecMutation` - store the document, move the binding, then stamp the matched requests and clear the stale ones - would make both halves defects waiting to happen: three writes are three places to stop, and the clearing half is a list a caller can forget (issue #718).
 `POST /specs/bind` commits all of it or none of it and works the pairing out from the bytes it stores.
 `matchSpecOperations` above is still what the Spec tab previews with; it is not a payload for this call, and the bind matches again over the same rule.
 
