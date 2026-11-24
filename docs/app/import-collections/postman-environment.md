@@ -151,7 +151,8 @@ What Postman has no place for is reported in `notes.notCarried`, not dropped sil
 
 ## Tests
 
-- `engine/tests/import_parse_test.cpp` - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced, less the clock's `createdAt`), the file-order `createdAt` stamps (`StampsEachVariableRowInFileOrder`), a re-imported global keeping its stamp, the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
+- `engine/tests/import_parse_test.cpp` (and `import_parse_postman_body_test.cpp` for
+  `StampsEachVariableRowInFileOrder`) - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced, less the clock's `createdAt`), the file-order `createdAt` stamps, a re-imported global keeping its stamp, the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
 - `engine/tests/postman_export_route_test.cpp` (`PostmanEnvironmentExportTest`) - the export: secrets blanked by default, the document shape and key order, the round trip back through `parse_import`, the `variable_types` note (a typed secret included), and the refusals.
 - `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, that a failed apply never reaches the globals write, that a failed globals write surfaces with the tree already committed, and the globals-last ordering.
 - `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation, the globals cache invalidation and `environmentIds` on the mutation's result.
