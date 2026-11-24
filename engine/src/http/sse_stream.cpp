@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The streaming execution core (issue #573).
- */
+/** The streaming execution core (issue #573). */
 
 #include "vayu/http/sse_stream.hpp"
 
@@ -799,8 +797,8 @@ struct StreamChainOutcome {
 };
 
 /**
- * @brief Runs the stream as one transfer per hop, following redirects itself
- *        rather than through `CURLOPT_FOLLOWLOCATION` (#3301).
+ * Runs the stream as one transfer per hop, following redirects itself rather
+ * than through `CURLOPT_FOLLOWLOCATION` (#3301).
  *
  * `Client::send`'s `run_chain` shape on the same `RedirectChain`: the handle is
  * never reset in between, so its cookie engine and connections serve the whole
@@ -858,8 +856,8 @@ run_stream_chain (CURL* curl, TransferState& state, RedirectChain& chain, CurlEr
 }
 
 /**
- * @brief The rule the stream ended by, with the failure recorded on
- *        @p response when it is an error.
+ * The rule the stream ended by, with the failure recorded on @p response when
+ * it is an error.
  *
  * An `abort_reason` is "we ended it" in any of its three spellings: the
  * progress callback's abort, the write callback's short return, or the chain
@@ -1086,7 +1084,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 namespace {
 
 /**
- * @brief Report a failure from a frame that must not let one escape.
+ * Report a failure from a frame that must not let one escape.
  *
  * The `noexcept` is the point, not decoration. Both callers are frames where an
  * escaping exception ends the process rather than being handled - a destructor,
