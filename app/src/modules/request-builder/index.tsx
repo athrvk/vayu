@@ -335,9 +335,9 @@ export default function RequestBuilder() {
 		[pendingLoadTestParts]
 	);
 
-	// The pending request's OAuth 2.0 config as written, if its auth resolves to oauth2. The shared
-	// walk lets an ancestor set to No Auth stop the search, or the guard would fetch a token never
-	// sent.
+	// The pending load-test request's OAuth 2.0 config as written, if its auth resolves to oauth2.
+	// The shared walk lets an ancestor set to No Auth stop the search, or the guard would fetch a
+	// token never sent.
 	const pendingOAuth2Raw = useMemo(
 		() =>
 			pendingLoadTestRequest
@@ -346,7 +346,8 @@ export default function RequestBuilder() {
 		[pendingLoadTestRequest, collectionAncestors]
 	);
 
-	// The variable-resolved OAuth 2.0 config, for the token-expiry guard.
+	// The pending load-test request's variable-resolved OAuth 2.0 config, for the token-expiry
+	// guard.
 	const pendingOAuth2Config = useMemo(
 		() =>
 			pendingOAuth2Raw
@@ -374,8 +375,8 @@ export default function RequestBuilder() {
 		[pendingLoadTestRequest, resolveString]
 	);
 
-	// The pending request in stored-row shapes, for the dialog's data-column audit (#2050); the
-	// draft, as that is what the run sends.
+	// The pending load-test request in stored-row shapes, for the load dialog's data-column audit
+	// (#2050); the draft, as that is what the run sends.
 	const pendingLoadTestAuditRequest = useMemo<ColumnAuditRequest | undefined>(
 		() =>
 			pendingLoadTestRequest
