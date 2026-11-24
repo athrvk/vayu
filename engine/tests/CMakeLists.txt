@@ -81,6 +81,9 @@ add_executable(vayu_tests
     sse_frame_counter_test.cpp
     sse_load_stream_test.cpp
     load_stream_events_test.cpp
+    sse_stream_execute_body_test.cpp
+    sse_stream_execute_test.cpp
+    sse_stream_relay_test.cpp
     sse_stream_test.cpp
     change_feed_test.cpp
     server_bind_test.cpp
