@@ -32,75 +32,25 @@ namespace vayu::db {
 
 /**
  * The schema version this engine understands, stamped into `PRAGMA
- * user_version` by `migrate_before_sync` (issues #1492, #1514).
- *
- * Bumped by the commit that changes `make_vayu_storage`'s mapping:
- * `sync_schema ()` runs without `preserve`, so an older engine opening a
- * database with a column it does not map would rebuild the table without it.
- * Also bumped by a migration step that must run once and that an older engine
- * must not read past (4, 6, 7). A database stamped newer than this is refused at startup. The
- * history is in `docs/engine/db-schema.md` (Schema versions):
- * 1 - scripts folded into `elements` (#1514);
- * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
- *     `disabled_system_headers`, `disable_url_encoding` and
- *     `postman_protocol_behavior` (#1765, folded into the same unreleased
- *     version);
- * 3 - `file_roots`, the folders request-body files may be read from without
- *     being chosen in the editor. Also the fence that keeps an older engine,
- *     which would send a `binary` body bodiless, off a workspace holding one;
- * 4 - no mapping change: every stored body's file references state
- *     `unresolved`, and the allowed folders the root rule refuses are gone.
- *     Bumped because the version is the migration's done-marker, and so an
- *     engine that reads an absent key as chosen never opens the workspace;
- * 5 - `oauth_tokens.raw_response` dropped (#1781): it held the provider's
- *     response, refresh and id tokens included, and nothing read it;
- *     `runs.origin` and `runs.origin_client` (#1817, folded into the same
- *     unreleased version);
- * 6 - `file_grants`, the files a person picked (#2356). The migration grants
- *     every existing regular file a stored body marked `unresolved: false`,
- *     then removes the key from every stored body: trust is the engine's to
- *     derive from roots and grants, and an older engine would read the
- *     missing key as untrusted and refuse every picked file;
- * 7 - no mapping change: a collection's sub-folders and requests share one
- *     `order` space (#2535). The migration moves each collection's requests
- *     past its highest sub-folder `order`, trashed folders included, so the
- *     folders-first display survives. An older engine numbers the two kinds
- *     apart again on its next create or reorder, and nothing would move them
- *     back;
- * 8 - `collections.spec_file` and `collections.data_file`, the files a
- *     collection's Spec and Data tabs are bound to (#2765);
- * 9 - `requests.timeout_ms`, a request's own timeout (#2937);
- *     `environments.deleted_at`, the environment trash (#2970),
- *     `request_examples.deleted_at`, the example trash (#2971), and
- *     `client_certificates.deleted_at`, the certificate trash (#2973), all
- *     folded into the same unreleased version; the partial index
- *     `idx_requests_deleted_at` (#3006) joins it too;
- * 10 - `spec_declined_operations`, the operations a person declined by
- *     deleting their request (#3031);
- * 11 - `runs.outcome` (#3547); `requests.stream_text_path` and
- *     `result_bodies.stream_text_path` (#3773), and
- *     `requests.stream_first_content_marker` (#3774), folded into the same
- *     unreleased version.
+ * user_version` by `migrate_before_sync` (#1492, #1514). Bumped by the commit
+ * that changes `make_vayu_storage`'s mapping: `sync_schema ()` runs without
+ * `preserve`, so an older engine opening a database with a column it does not
+ * map would rebuild the table without it. Also bumped by a migration step that
+ * must run once and that an older engine must not read past (4, 6, 7): the
+ * version is its done-marker. A database stamped newer is refused at startup.
+ * Every version's change is in `docs/engine/db-schema.md`, "Schema versions".
  */
 inline constexpr int SCHEMA_VERSION = 11;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
  *
- * `sqlite3_column_text` answers with `const unsigned char*` and nothing in this
- * engine consumes one: the value goes straight into a `std::string`, a
- * `std::string_view` or a parser that reads characters. Eight call sites - the
- * enum adapters in `database.cpp` and the schema assertions in `db_test.cpp` -
- * each spelled that conversion themselves, three of them as a C-style cast, and
- * a copy of a primitive does not receive the primitive's fixes.
- *
- * Reading bytes through a character type is what [basic.lval] permits outright,
- * which is why the cast is a NOLINT rather than a defect - written once here so
- * nothing has to argue it again.
- *
- * A SQL NULL comes back as `nullptr`, exactly as the C API reports it: the
- * distinction between an absent value and an empty string belongs to the
- * caller, and defaulting it here would erase it silently.
+ * `sqlite3_column_text` answers `const unsigned char*`, and every consumer
+ * reads characters, so the conversion lives once, here: a copy of a primitive
+ * does not receive its fixes. [basic.lval] permits reading bytes through a
+ * character type, which is why the cast is a NOLINT and not a defect. A SQL
+ * NULL comes back as `nullptr`, as the C API reports it: absent versus empty
+ * is the caller's distinction, and defaulting it here would erase it.
  */
 inline const char* column_text (sqlite3_stmt* stmt, int column_index) {
     // [basic.lval] permits reading any object through a character type; see
@@ -139,17 +89,14 @@ struct StorageError {
 std::optional<StorageError> classify_storage_error (const std::exception& error);
 
 /**
- * Optional filters for the paginated GET /runs list. An unset field is a
- * wildcard - it does not constrain the query. `q` is a case-insensitive
- * substring matched against the stored `config_snapshot` text (via SQL LIKE);
- * it may over-match JSON keys/structure, which is acceptable for a search box.
- *
- * `collection_id` is the exact opposite of `q` and deliberately so: it reads
- * `scenario.collectionId` out of the snapshot as JSON, so it matches the field
- * and never the text around it. Only a snapshot with a `scenario` manifest
- * carries that path: a collection run's, and a load run driven over a
- * collection (#3544). That is what makes a single-request design or load run
- * unmatchable rather than merely unlikely to match.
+ * Optional filters for the paginated GET /runs list; an unset field does not
+ * constrain the query. `q` is a case-insensitive substring of the stored
+ * `config_snapshot` text (SQL LIKE), which may over-match JSON keys and
+ * structure, acceptable for a search box. `collection_id` is the opposite, on
+ * purpose: it reads `scenario.collectionId` out of the snapshot as JSON, so it
+ * matches the field, never the text around it. Only a snapshot with a
+ * `scenario` manifest has that path (a collection run, and a load run over a
+ * collection, #3544), so a single-request design or load run cannot match.
  */
 struct RunFilter {
     std::optional<RunType> type;
@@ -293,11 +240,10 @@ struct RestoreFailure {
  * Thrown by `apply_reorder` when a row it was told to write is not stored at
  * commit time. The batch is rolled back whole, and the row stays deleted.
  *
- * A reorder only ever repositions rows that already exist, so a missing one is
- * never something to create: the previous `replace` would have resurrected a
- * row a concurrent cascade had just deleted, silently, inside an endpoint whose
- * contract is "all or nothing". The message names the row so the 409 the
- * `/reorder` route turns this into is actionable.
+ * A reorder only repositions rows that exist, so a missing one is never to be
+ * created: an upsert would silently resurrect a row a concurrent cascade just
+ * deleted, inside an endpoint whose contract is "all or nothing". The message
+ * names the row so the 409 the `/reorder` route turns this into is actionable.
  */
 class MissingRowError : public std::runtime_error {
     public:
@@ -309,23 +255,15 @@ class MissingRowError : public std::runtime_error {
 /**
  * @brief One OpenAPI sync, as the rows it writes (issue #655).
  *
- * A sync is the one write in Vayu that creates, updates *and* deletes at once,
- * and it must be all-or-nothing for a reason the other batch writers do not
- * share: half of it leaves a collection bound to a document its requests do not
- * reflect, which is precisely the state binding exists to make impossible. So
- * the whole of it - the new document, the moved binding, the rows - is one
- * transaction rather than a sequence the client stitches together.
- *
- * Ids are assigned by the caller, like `import_apply`: nothing here can look up
- * a row the same transaction has not committed yet.
- *
- * **`POST /specs/bind` writes through this too** (issue #862), filling only
- * @ref spec, @ref binding and @ref updated: a bind stores a document, moves the
- * binding and rewrites the identity column of the requests beneath it, which is
- * this batch with its create and delete halves empty. It shares the transaction
- * rather than owning a second one because the state a half-applied bind leaves
- * is the same state described above, and one transaction cannot come to
- * disagree with another about what "all of it" means.
+ * The one write that creates, updates *and* deletes, and it must be
+ * all-or-nothing: half of it leaves a collection bound to a document its
+ * requests do not reflect, the state binding exists to prevent. So the new
+ * document, the moved binding and the rows are one transaction. Ids are
+ * assigned by the caller, as for `import_apply`: nothing here can look up a
+ * row this transaction has not committed. `POST /specs/bind` writes through
+ * this too (#862), filling only @ref spec, @ref binding and @ref updated: a
+ * half-applied bind leaves the same state, so it shares this transaction
+ * rather than a second that could disagree about what "all of it" means.
  */
 struct SpecSyncBatch {
     /// The re-fetched document. A new row, never a rewrite - see `SpecDocument`.
@@ -430,14 +368,11 @@ class Database {
      * @brief What this startup did about a database it could not open, if it
      *        had to do anything (issue #922).
      *
-     * `nullopt` is a clean start - the ordinary case, and the one a genuine
-     * first run gives. A value means the user's data was restored from a backup
-     * or deleted outright, and it is what `GET /health` reports so the app can
-     * say so; see `db/recovery.hpp` for why the fact is on disk and why it is
-     * never cleared here.
-     *
-     * Read once at construction, so the polled health endpoint costs no file
-     * access.
+     * `nullopt` is a clean start, the ordinary case and what a genuine first run
+     * gives. A value means the user's data was restored from a backup or deleted,
+     * and `GET /health` reports it so the app can say so; `db/recovery.hpp` says
+     * why the fact is on disk and never cleared here. Read once at construction,
+     * so the polled health endpoint costs no file access.
      */
     [[nodiscard]] const std::optional<RecoveryRecord>& recovery () const; // db_maintenance.cpp
 
@@ -466,17 +401,15 @@ class Database {
     ///        bound tree is not a decision about any one operation.
     void delete_collection (const std::string& id,
     const std::optional<std::string>& declined_under = std::nullopt);
-    /// Writes @p collection as `create_collection` does and, in the same transaction,
-    /// forgets every operation declined under it (#3031): what a write that
-    /// moves its binding off the document those deletes were decided against
-    /// runs.
+    /// Writes @p collection as `create_collection` does and, in one transaction,
+    /// forgets every operation declined under it (#3031): a binding moved off
+    /// the document those deletes were decided against.
     ///
-    /// @param departed the requests the same write takes out of a spec
-    ///        contract, stamps already cleared, with @p declined_under naming
-    ///        where each is declined: `apply_reorder`'s two parameters, for a
-    ///        `PUT /collections/:id` that unbinds and reparents at once
-    ///        (#3470). The forget runs after them, so a decline recorded under
-    ///        @p collection itself goes with the rest.
+    /// @param departed the requests the same write takes out of a spec contract,
+    ///        stamps cleared, @p declined_under naming where each is declined
+    ///        (`apply_reorder`'s two parameters): a `PUT /collections/:id` that
+    ///        unbinds and reparents at once (#3470). The forget runs after them,
+    ///        so a decline recorded under @p collection itself goes too.
     // db_collections.cpp
     void rebind_collection (const Collection& collection,
     const std::vector<Request>& departed                               = {},
@@ -515,15 +448,14 @@ class Database {
      */
     std::vector<Request> get_requests_in_subtree (const std::string& root_id);
     /**
-     * The `order` a row appended under @p parent_id takes: one past the
-     * highest held by a live sibling of either kind, the sub-folders whose
-     * `parent_id` it is and the requests whose `collection_id` it is
-     * (`sibling_order.hpp`, #2535). `std::nullopt` is the roots, which hold
-     * collections only. @p excluded_id is left out of the scan, so a row
-     * asked to reset its own position lands after its *other* siblings
-     * rather than one past itself. `0` for a parent with no live child, and
-     * nothing when a sibling already holds `MAX_SIBLING_ORDER` (#3451): there
-     * is no slot after it, and the caller refuses the append.
+     * The `order` a row appended under @p parent_id takes: one past the highest
+     * held by a live sibling of either kind, sub-folders by `parent_id` and
+     * requests by `collection_id` (`sibling_order.hpp`, #2535). `std::nullopt` is
+     * the roots, which hold collections only. @p excluded_id is left out of the
+     * scan, so a row resetting its own position lands after its *other* siblings.
+     * `0` for a parent with no live child; nothing when a sibling already holds
+     * `MAX_SIBLING_ORDER` (#3451): there is no slot after it, and the caller
+     * refuses the append.
      */
     [[nodiscard]] std::optional<int> next_sibling_order (
     const std::optional<std::string>& parent_id,
@@ -559,26 +491,16 @@ class Database {
      * @brief Put a deleted row, and everything its delete took with it, back.
      *
      * Restores the *cohort*: the stamped subtree rows carrying this row's own
-     * `deleted_at`. A row deleted separately and earlier keeps its stamp, so
-     * restoring a collection cannot resurrect a request the user deleted before
-     * it - it becomes a trash root of its own again instead.
-     *
-     * A collection whose parent is gone or itself deleted comes back at the tree
-     * root (`parent_id` cleared) - the rule the issue names, and the only place
-     * a restore rewrites anything but the stamp.
-     *
-     * An environment comes back unconditionally and inactive (#2970): it has
-     * no owner to check, and its delete cleared `is_active`, which a restore
-     * does not set again - activating it is the client's choice to make.
-     *
-     * An example comes back only under a live request and only while that
-     * request has room under `MAX_PER_REQUEST` (#2971); either refusal is a
-     * 409 and leaves the row in the trash.
-     *
-     * A client certificate comes back only while no live entry claims its
-     * host and port (#2973): two rows for one target would leave the
-     * certificate presented to row order. The refusal is a 409 naming the
-     * live entry, decided under the same lock as the write.
+     * `deleted_at`; a row deleted separately and earlier keeps its stamp and
+     * becomes a trash root of its own. A collection whose parent is gone or
+     * deleted comes back at the tree root (`parent_id` cleared), the only rewrite
+     * beyond the stamp. An environment comes back unconditionally and inactive
+     * (#2970): activating it is the client's choice. An example comes back only
+     * under a live request with room under `MAX_PER_REQUEST` (#2971). A client
+     * certificate comes back only while no live entry claims its host and port
+     * (#2973), or the certificate presented would fall to row order; that refusal
+     * names the live entry and is decided under the write's lock. The example and
+     * certificate refusals are 409s and leave the row in the trash.
      */
     std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
 
@@ -648,14 +570,12 @@ class Database {
     /**
      * @brief The collections whose `openapi` binding names @p spec_id.
      *
-     * A scan rather than an index: the binding lives inside a JSON blob, so
-     * there is no column to index, and the collections table is the small,
-     * sidebar-sized one. Its callers are the delete refusal and nothing on a
-     * request's hot path.
-     *
-     * Collections in the Trash are included, `deleted_at` set (#3446): a
-     * restore brings their binding back. Empty means the spec is bound by
-     * nobody, which is the only state `delete_spec_document` may be called in.
+     * A scan, not an index: the binding lives inside a JSON blob, the collections
+     * table is the small, sidebar-sized one, and the callers are the delete
+     * refusal and nothing on a request's hot path. Collections in the Trash are
+     * included, `deleted_at` set (#3446), since a restore brings their binding
+     * back. Empty means nobody binds the spec, the only state
+     * `delete_spec_document` may be called in.
      */
     std::vector<Collection> get_collections_bound_to_spec (const std::string& spec_id);
     void delete_spec_document (const std::string& id);
@@ -664,40 +584,30 @@ class Database {
      * @brief Reclaim documents nothing can reach any more, returning how many
      *        went (issue #718).
      *
-     * Nothing owns a `spec_documents` row, which is what leaves it with no
-     * cascade to die by: every sync mints a new document and moves the binding
-     * off the old one, unbinding leaves it, re-binding mints another, and
-     * deleting the bound collection takes its requests and not the document. A
-     * year of weekly syncs of a 12 MB document therefore strands ~600 MB of
-     * rows no route can even enumerate, since `DELETE /specs/:id` needs an id
-     * and there is no list route to get one from.
+     * Nothing owns a `spec_documents` row, so no cascade removes it: every sync
+     * mints a new document and moves the binding off the old one, and unbinding,
+     * re-binding or deleting the bound collection leaves documents behind. A year
+     * of weekly syncs of a 12 MB document strands ~600 MB that no route can even
+     * list (`DELETE /specs/:id` needs an id, and there is no list route).
      *
-     * **The lifetime rule this implements**, and the only one: a document lives
-     * while a collection binds it, or while a *retained run* names it in
-     * `runs.config_snapshot`. The second half is what makes the sweep safe to
-     * run beside retention rather than instead of it - a scenario run stamps
-     * the `specId` it planned against, and its report's coverage describes a
-     * contract the reader may still want to see the source of. So a document
-     * outlives the binding that made it by exactly as long as the runs that
-     * used it, and goes with the last of them. That is also why the first of
-     * the three callers is `prune_runs_configured`: the pass that *releases*
-     * run references is the one that should look for what they were holding,
-     * and hanging the sweep there puts it on a startup and on the end of every
-     * run without a schedule of its own. The other two are `spec_sync_apply`
-     * (the accretion source) and `delete_collection` (a binder going away).
+     * **The lifetime rule**, and the only one: a document lives while a collection
+     * binds it or a *retained run* names it in `runs.config_snapshot`. The run half
+     * is what lets the sweep run beside retention rather than instead of it: a
+     * scenario run stamps the `specId` it planned against, and its coverage may
+     * still send a reader to the source, so a document outlives its binding
+     * exactly as long as the runs that used it. Hence the first caller,
+     * `prune_runs_configured`, the pass that releases run references (on startup
+     * and after every run, with no schedule of its own); the others are
+     * `spec_sync_apply` (the accretion source) and `delete_collection` (a binder
+     * going away). A document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` is
+     * spared regardless (that constant documents the bind-in-flight window).
      *
-     * A document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` is spared
-     * whatever else it looks like - see that constant for the bind-in-flight
-     * window it exists for.
-     *
-     * **Never throws.** All three callers reach it as the tail of an operation
-     * whose success does not depend on it (a startup, a sync, a collection
-     * delete), so a failure here is logged and swallowed rather than turned
-     * into a failed sync. Cheap when there is nothing to do, which is what
-     * riding on every run completion requires: it asks the three questions
-     * cheapest-first and stops at the first that leaves nothing at stake, so
-     * the ordinary case never reads the runs table - and no path reads
-     * `content`.
+     * **Never throws**: each caller reaches it as the tail of an operation whose
+     * success does not depend on it, so a failure is logged and swallowed. Cheap
+     * when there is nothing to do, as riding every run completion requires: it
+     * asks its three questions cheapest-first and stops at the first that leaves
+     * nothing at stake, so the ordinary case never reads the runs table, and no
+     * path reads `content`.
      */
     size_t sweep_orphaned_spec_documents ();
 
@@ -705,20 +615,14 @@ class Database {
      * @brief Repair bindings stored without the document version they name
      *        (issue #709), returning how many were stamped.
      *
-     * Until #709 the import path - which produces nearly every binding - wrote
-     * `{specId}` alone, and contract coverage and response-schema validation
-     * both require the binding's `specHash` to agree with the stored document,
-     * so every run of an imported collection reported no contract at all. The
-     * write paths stamp now; these are the rows written before they did.
-     *
-     * Safe by construction: a hashless binding can only have come from an
-     * import, and that import stored exactly the document the binding names, so
-     * the document's current hash *is* the version it was bound to. A binding
-     * naming a document this database no longer holds is left untouched - there
-     * is nothing to stamp it from, and a run says so already.
-     *
-     * Idempotent, and run at startup beside the other repair passes rather than
-     * behind a one-shot migration flag: a stamped binding is skipped on the
+     * Contract coverage and response-schema validation need the binding's
+     * `specHash` to agree with the stored document, and a binding the import path
+     * wrote before #709 has `{specId}` alone, so every run of it reports no
+     * contract. Safe by construction: a hashless binding came from an import that
+     * stored exactly the document it names, so that document's current hash *is*
+     * the bound version. A binding naming a document no longer held is left as
+     * is; a run already says so. Idempotent and run at startup with the other
+     * repair passes, not behind a one-shot flag: a stamped binding is skipped
      * next start, so the pass costs one scan of the sidebar-sized table.
      */
     int64_t stamp_hashless_spec_bindings ();
@@ -727,27 +631,18 @@ class Database {
      * @brief Disable the header rows a pre-#1229 client saved into stored
      *        requests, and answer how many requests were rewritten.
      *
-     * The renderer used to write `X-Vayu-Version` and a fresh `X-Request-ID`
-     * into the request document at save time, so every consumer of a stored
-     * request - a load run, a collection run, an MCP send, an export, a
-     * generated snippet - reproduced one saved day's version string and
-     * replayed one frozen correlation id. The engine owns those headers now
-     * and adds them at send time, which fixes what is sent from here on and
-     * nothing that was already written down; this pass is the "already
-     * written down" half.
-     *
-     * Which rows match and why each rule is narrow enough to disable rather
-     * than delete: `http/default_headers.hpp`'s `strip_legacy_managed_headers`,
-     * which is the decision, so it can be read - and tested - without a
-     * database.
-     *
-     * Idempotent, and run at startup beside the other repair passes for the
-     * reason `stamp_hashless_spec_bindings` is: a rewritten request is skipped
-     * on the next start, so the pass costs one scan of a sidebar-sized table.
-     * Trashed rows are left alone here (issue #1491) - `restore_request_locked`
-     * / `restore_collection_locked` run the same disable on a row on its way
-     * out of the trash, so a request sitting there stays byte-identical until
-     * someone actually brings it back.
+     * Such a client wrote `X-Vayu-Version` and a fresh `X-Request-ID` into the
+     * request at save time, so every consumer of the stored request (a load run,
+     * a collection run, an MCP send, an export, a snippet) replays one day's
+     * version and one frozen correlation id. The engine adds both at send time,
+     * which fixes only what is sent; this pass fixes what was already written.
+     * Which rows match, and why each rule is narrow enough to disable rather than
+     * delete, is `strip_legacy_managed_headers` (`http/default_headers.hpp`),
+     * testable without a database. Idempotent, at startup, for the reason
+     * `stamp_hashless_spec_bindings` is. Trashed rows are left alone (#1491):
+     * `restore_request_locked` / `restore_collection_locked` run the same disable
+     * on a row leaving the trash, so a trashed request stays byte-identical until
+     * restored.
      */
     int64_t strip_stored_managed_headers (); // db_maintenance.cpp
 
@@ -755,28 +650,24 @@ class Database {
      * @brief Rewrite every collection stored with `parent_id = ''` to NULL,
      *        trashed rows included, and answer how many were rewritten.
      *
-     * `""` was a second spelling of the tree root until #3451; the write
-     * paths store NULL now (`read_parent_id_field`).
-     *
-     * Idempotent and unmarked, unlike `strip_stored_managed_headers`: both
-     * statements are served by `idx_collections_parent_id`, so a clean
-     * workspace pays one index probe per start.
-     * Saves a `pre-repair` snapshot before the first rewrite and throws,
-     * rewriting nothing, when it cannot.
+     * `""` was a second spelling of the tree root before #3451; writes store NULL
+     * (`read_parent_id_field`). Idempotent and unmarked, unlike
+     * `strip_stored_managed_headers`: `idx_collections_parent_id` serves both
+     * statements, so a clean workspace pays one index probe per start. Saves a
+     * `pre-repair` snapshot before the first rewrite, and throws, rewriting
+     * nothing, when it cannot.
      */
     int64_t clear_empty_parent_ids (); // db_maintenance.cpp
 
     /**
      * @brief Persist a whole import in one transaction (issue #96).
      *
-     * Either every row lands or none does: a bulk import that failed halfway
-     * used to leave the tree half-created and depend on a best-effort
-     * client-side rollback to undo it. Rows are written collections -> requests
-     * -> examples -> environments so a parent exists before the rows that
-     * reference it.
-     * Ids must already be assigned by the caller (`POST /import/apply` resolves
-     * its temp ids first), because nothing here can look up a row that the same
-     * transaction has not committed yet.
+     * Every row lands or none does, so a failed import leaves no half-created tree
+     * for a client to roll back. Rows are written collections -> requests ->
+     * examples -> environments, so a parent exists before the rows that reference
+     * it. Ids are assigned by the caller (`POST /import/apply` resolves its temp
+     * ids first): nothing here can look up a row this transaction has not
+     * committed.
      */
     // db_requests.cpp
     void import_apply (const std::vector<Collection>& collections,
@@ -788,21 +679,15 @@ class Database {
     /**
      * @brief Persist a whole batch reorder in one transaction (issue #365).
      *
-     * The rows carry positions (and, for a move, owners) that the caller has
-     * already validated against each other; either every one lands or none
-     * does. A reorder expressed as N sibling `PUT`s could be interrupted
-     * halfway, leaving a parent with two rows at the same `order` and a gap
-     * where the moved one used to be - a shape no read repairs, because the tie
-     * rule then decides the display order.
-     *
-     * Every row is **updated, never inserted**: one that is not stored at
-     * commit time throws `MissingRowError` and rolls the batch back (issue
-     * #386). Repositioning is by definition an operation on existing rows, so
-     * an insert here could only ever be a resurrection.
-     *
-     * Separate from `import_apply` despite the shared shape: this writes rows
-     * that already exist and must not touch environments, and the two callers
-     * validate entirely different things beforehand.
+     * The rows carry positions (and, for a move, owners) the caller has already
+     * validated against each other; every one lands or none does. N sibling `PUT`s
+     * could stop halfway and leave two rows at one `order` and a gap, a shape no
+     * read repairs because the tie rule then decides the display order. Every row
+     * is **updated, never inserted**: one not stored at commit time throws
+     * `MissingRowError` and rolls the batch back (#386), since an insert here
+     * could only be a resurrection. Separate from `import_apply` despite the shape:
+     * this writes existing rows, must not touch environments, and its caller
+     * validates different things.
      *
      * @param declined_under request id to the bound collection the batch moves
      *        that request out of (#3446), each resolved by the route: the
@@ -818,36 +703,27 @@ class Database {
     /**
      * @brief Persist a whole OpenAPI sync in one transaction (issue #655).
      *
-     * Separate from `import_apply` for the reason `apply_reorder` is: this one
-     * writes rows that already exist and deletes rows the caller named, and an
-     * upsert on either would be a resurrection of something a concurrent delete
-     * removed. `SpecSyncBatch::binding` and every row in `updated` must be
-     * stored at commit time, or the batch throws `MissingRowError` and rolls
-     * back whole - the route turns that into a 409, because the ground the diff
-     * was computed against has moved.
-     *
-     * A named `deleted` request that is already gone is *not* an error: the
-     * sync asked for it to not be there, and it is not. Its examples are
-     * removed with it either way, the same cascade `delete_request` performs.
+     * Separate from `import_apply` for `apply_reorder`'s reason: it writes rows
+     * that exist and deletes rows the caller named, and an upsert on either would
+     * resurrect what a concurrent delete removed. `SpecSyncBatch::binding` and
+     * every `updated` row must be stored at commit time, or it throws
+     * `MissingRowError` and rolls back whole; the route answers 409, the diff's
+     * ground having moved. A `deleted` request already gone is *not* an error (the
+     * sync wanted it gone); its examples go either way, as `delete_request` does.
      */
     void spec_sync_apply (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).
      *
-     * Every other method here takes the lock per call, which is enough while a
-     * write depends only on its own arguments. It is not enough for a composite
-     * that *reads, decides, then writes*: `POST /reorder` validates a batch
-     * against the stored graph and only then commits it, and between those two
-     * steps another client's write can move the ground - two reparents that are
-     * each legal alone both commit and leave a cycle, or a create computes
-     * `max_order + 1` inside the range the batch is renumbering. Wrapping the
-     * whole composite makes the validation the write is based on still true
-     * when the write lands.
-     *
-     * The mutex is recursive, so @p fn may call any method on this Database.
-     * Hold it only for a bounded composite: everything else serializing on this
-     * lock - `/health`, the runs poll, SSE - waits for the whole of @p fn.
+     * Every other method locks per call, enough for a write that depends only on
+     * its arguments but not for a composite that reads, decides, then writes:
+     * `POST /reorder` validates a batch against the stored graph before committing
+     * it, and between the two another write can move the ground (two reparents,
+     * each legal alone, commit a cycle; a create computes `max_order + 1` inside
+     * the range being renumbered). The mutex is recursive, so @p fn may call any
+     * method here. Hold it only for a bounded composite: `/health`, the runs poll
+     * and SSE all wait for the whole of @p fn.
      */
     void with_lock (const std::function<void ()>& fn); // database.cpp
 
@@ -877,14 +753,12 @@ class Database {
 
     /**
      * Client-certificate registry (issue #707). Plain CRUD: the routes own
-     * validation and the answer to a uniqueness clash, because both belong to
-     * the one place that can answer with a status code.
-     *
-     * `get_client_certificates` is read once per resolved transport policy -
-     * per design send, and *once per run* on the load and collection paths -
-     * never per transfer; see `vayu::http::resolve_transport_policy`. Both
-     * reads see live rows only (#2973), so a trashed entry is presented to no
-     * host and a PUT or second DELETE of one is a 404.
+     * validation and the uniqueness answer, both decisions that need a status
+     * code. `get_client_certificates` is read once per resolved transport policy
+     * (per design send, *once per run* on the load and collection paths), never
+     * per transfer (`vayu::http::resolve_transport_policy`). Both reads see live
+     * rows only (#2973): a trashed entry is presented to no host, and a PUT or
+     * second DELETE of one is a 404.
      */
     // db_credentials.cpp
     void save_client_certificate (const ClientCertificate& c);
@@ -966,23 +840,18 @@ class Database {
      * @brief Move run @p id to @p to if its status is one of @p allowed_from
      * (#3340). The only run status write after the insert.
      *
-     * The read, the decision and the write share one DB mutex acquisition, so
-     * a competing writer cannot land between them. Membership is the whole
-     * rule: there is no wildcard and an empty @p allowed_from refuses every
-     * row, so a terminal status is left only by an edge the caller names.
-     *
-     * `end_time` moves with the edge. A terminal @p to keeps a stored value
-     * later than `start_time` (one `update_run_end_time` wrote) and stamps now
-     * over anything else, the `seed_run_times` seed included. @p to Running
-     * clears it to 0, so a live report measures up to now. Any other edge
-     * leaves it alone.
-     *
-     * A busy database is retried. A terminal write is retried until it lands:
-     * a run whose final status is lost stays `running`, which retention never
-     * prunes, until the next start reconciles it. A graceful shutdown waits
-     * for the worker doing that, and a killed daemon leaves the row to
-     * `reconcile_orphaned_runs`. Any other error throws. A refusal is logged
-     * and answered, never thrown.
+     * The read, the decision and the write share one DB mutex acquisition. No
+     * wildcard: an empty @p allowed_from refuses every row, so a terminal status
+     * is left only by an edge the caller names. `end_time` moves with the edge: a
+     * terminal @p to keeps a stored value later than `start_time` (from
+     * `update_run_end_time`) and stamps now over anything else, the
+     * `seed_run_times` seed included; @p to Running clears it to 0 so a live
+     * report measures to now; other edges leave it. A busy database is retried, a
+     * terminal write until it lands: a lost final status leaves the run `running`,
+     * which retention never prunes, until the next start reconciles it (a graceful
+     * shutdown waits for that worker; a killed daemon leaves it to
+     * `reconcile_orphaned_runs`). Any other error throws; a refusal is logged and
+     * answered, never thrown.
      */
     RunStatusTransition transition_run_status (const std::string& id,
     std::initializer_list<RunStatus> allowed_from,
@@ -1029,21 +898,16 @@ class Database {
     /**
      * @brief Prune old runs (and their cascaded metrics/results) by three limits.
      *
-     * The count caps are per kind (#2429): @p max_runs counts load and
-     * scenario runs, @p max_design_runs counts design Sends, and neither kind
-     * evicts the other. A run is a victim when it falls beyond its kind's
-     * most-recent N (ordered by start_time) OR its start_time is older than
-     * @p max_age_days, which applies to every kind. Each limit is disabled by
-     * passing 0. Runs still `running`/`pending` are never pruned and never
-     * count toward either cap, and neither is a run pinned as a baseline
-     * (`Run::baseline`). Deletion goes through the run cascade in
-     * batched transactions, releasing the DB mutex between batches so a large
-     * backlog cannot stall other endpoints.
-     *
-     * Selection and deletion are separate acquisitions, so each victim is
-     * re-read inside its batch's lock and spared when it has since been pinned,
-     * gone back in flight, or been deleted (#1906). `delete_run` is the
-     * explicit verb and deletes whatever it names.
+     * The count caps are per kind (#2429): @p max_runs counts load and scenario
+     * runs, @p max_design_runs design Sends, and neither evicts the other. A run
+     * is a victim beyond its kind's most recent N (by start_time) OR when older
+     * than @p max_age_days, which applies to every kind; 0 disables a limit. A
+     * run still `running`/`pending` or pinned as a baseline (`Run::baseline`) is
+     * never pruned and counts toward no cap. Deletion is batched, releasing the
+     * DB mutex between batches so a large backlog cannot stall other endpoints;
+     * each victim is re-read in its batch's lock and spared if since pinned, back
+     * in flight or deleted (#1906). `delete_run` is the explicit verb and deletes
+     * whatever it names.
      *
      * @param after_selection Test seam, invoked once victims are chosen, with
      *        the mutex released and before the first batch - the window a
@@ -1077,24 +941,19 @@ class Database {
     /**
      * @brief Mark runs left `running`/`pending` by a previous process as failed.
      *
-     * A crash or a kill abandons in-flight runs with no terminal status write,
-     * so `GET /runs` keeps reporting them as running forever. A graceful
-     * shutdown is not one of those paths - `RunManager::shutdown` stops and
-     * joins every worker, which writes the terminal status. Called from
-     * `init()` - before the sweeper and the HTTP server start - so no live run
-     * of this process can be caught by it, and `daemon.cpp` holds the
-     * instance lock before the database opens, so no other engine has a live
-     * run here either. That lock is the whole
-     * ownership check; rows carry no owner (issue #2422).
-     *
-     * A load run with no stored summary and at least one metric tick is given
-     * one built from its last tick, marked `"partial": true` (#2895): only the
-     * tick's cumulative figures, never its one-second windows. A run that
-     * already has a summary keeps it; any other run is given none.
-     *
-     * `end_time` keeps what the run recorded, since the moment the process
-     * died is unknowable and the restart time would span the downtime. A row
-     * with none (0, which a move to Running leaves) is given its `start_time`.
+     * A crash or kill leaves in-flight runs with no terminal status, so `GET /runs`
+     * would report them running forever; a graceful shutdown is not one of those
+     * (`RunManager::shutdown` joins every worker, which writes it). Called from
+     * `init()`, before the sweeper and the HTTP server start, so no run of this
+     * process can be caught; `daemon.cpp` holds the instance lock before the
+     * database opens, so no other engine has a live run here. That lock is the
+     * whole ownership check; rows carry no owner (#2422). A load run with no
+     * stored summary and at least one metric tick gets one from its last tick,
+     * marked `"partial": true` (#2895): only the tick's cumulative figures, never
+     * its one-second windows; a run with a summary keeps it, any other gets none.
+     * `end_time` keeps what the run recorded (the moment of death is unknowable,
+     * and the restart time would span the downtime); a row with none (0, as a
+     * move to Running leaves) gets its `start_time`.
      *
      * @return Number of rows reconciled.
      */
@@ -1134,19 +993,14 @@ class Database {
      *        response bodies captured alongside them.
      *
      * `bodies` refer to results by index (`PendingResultBody::result_index`),
-     * because the row ids only exist once the insert has run.
-     *
-     * Written in chunks of `RESULTS_WRITE_CHUNK_ROWS` results, one transaction
-     * and one DB mutex acquisition each, with a pause off the mutex between
-     * them, so another caller waits on one chunk rather than the whole flush
-     * (#2548). A chunk's results, their body rows and the blobs they introduce
-     * commit together, so a crash cannot leave a body row pointing at a result
-     * that was rolled back. The call as a whole is not atomic: a failure
-     * part-way keeps the chunks already committed.
-     *
-     * Bodies are deduplicated by `body_hash` within this call, across chunks:
-     * identical responses - the norm for a load test - share one `body_blobs`
-     * row.
+     * since row ids exist only after the insert. Written in chunks of
+     * `RESULTS_WRITE_CHUNK_ROWS`, one transaction and one DB mutex acquisition
+     * each with a pause off the mutex between, so another caller waits one chunk,
+     * not the flush (#2548). A chunk's results, body rows and new blobs commit
+     * together, so no body row points at a rolled-back result; the call as a
+     * whole is not atomic (a failure keeps committed chunks). Bodies dedupe by
+     * `body_hash` across the whole call: identical responses, the load-test norm,
+     * share one `body_blobs` row.
      */
     void add_results_batch (const std::vector<Result>& results,
     const std::vector<PendingResultBody>& bodies = {});
@@ -1156,30 +1010,23 @@ class Database {
      *
      * For a reader that needs each row's status, latency and error and not
      * the stored trace (#2548); the report of a load run that is not terminal
-     * reads no row at all since #2659. Each row's `trace_data` comes back empty,
+     * reads no row at all (#2659). Each row's `trace_data` comes back empty,
      * which every reader of a `Result` already takes to mean "no trace".
      */
     std::vector<Result> get_results_without_traces (const std::string& run_id);
     /**
      * @brief Status code and latency for a page of **design** runs, in one query.
      *
-     * The paginated GET /runs list attaches each design run's outcome to its
-     * row (`resultSummary`), the way GET /runs/:id attaches the whole exchange;
-     * a load or collection row's `resultSummary` comes from the run's stored
-     * `summary` instead, never from its results (#2130, #2954). Three
-     * properties make the design read affordable, and all three are why this
-     * is not `get_results` in a loop:
-     *
-     * - Two columns, so `trace_data` is never read.
-     * - One statement for the whole page, so a page of 50 is one query.
-     * - The statement itself only ever matches results whose run is a design
-     *   run, so a load run's unbounded error rows cannot be pulled - by the
-     *   query, not by the caller remembering to filter (the guard at
-     *   GET /runs/:id is a caller-side one, and it has to be).
-     *
-     * A run with no result row yet (still running, or one whose write failed)
-     * is absent from the map rather than present with zeroes - "no outcome
-     * recorded" and "HTTP 0 in 0ms" are different answers.
+     * The paginated GET /runs list attaches each design run's outcome to its row
+     * (`resultSummary`), as GET /runs/:id attaches the whole exchange; a load or
+     * collection row's comes from the stored `summary`, never its results (#2130,
+     * #2954). Not `get_results` in a loop, for three reasons: two columns, so
+     * `trace_data` is never read; one statement for a page of 50; and the
+     * statement matches only design-run results, so a load run's unbounded error
+     * rows cannot be pulled, by the query rather than by caller discipline
+     * (GET /runs/:id's guard is a caller-side one, and has to be). A run with no
+     * result row yet is absent from the map, not zeroed: "no outcome recorded" and
+     * "HTTP 0 in 0ms" differ.
      */
     std::unordered_map<std::string, DesignResultOutcome>
     get_design_result_outcomes (const std::vector<std::string>& run_ids);
@@ -1201,12 +1048,10 @@ class Database {
     /**
      * @brief Append one capture and trim the inbox back to @p max_captures.
      *
-     * Insert and trim are one transaction: a capture list that briefly held
-     * 501 rows would be harmless, but a trim that ran without its insert (or
-     * the reverse) would drop a capture the caller was told had landed. The
-     * oldest rows go first, by `id` - the insertion order, which for an
-     * append-only table is also the arrival order, and unlike `received_at`
-     * cannot tie.
+     * Insert and trim are one transaction: a list briefly holding 501 rows would
+     * be harmless, but a trim without its insert (or the reverse) would drop a
+     * capture the caller was told had landed. The oldest go first by `id`, the
+     * insertion and so arrival order, which unlike `received_at` cannot tie.
      *
      * @return the id assigned to the stored capture.
      */
@@ -1251,12 +1096,11 @@ class Database {
      * @brief Write one consistent, compacted snapshot of this workspace and
      *        prune older ones to `maxBackupsRetained`.
      *
-     * SQLite's `VACUUM INTO` rather than a file copy: copying the database file
-     * out from under a running engine is not safe under WAL - the `-wal` holds
-     * committed transactions the main file does not - while `VACUUM INTO` reads
-     * one snapshot and writes a defragmented database that is complete on its
-     * own. It is read-only with respect to the workspace, so nothing here can
-     * cost the user the data it is copying.
+     * `VACUUM INTO`, not a file copy: under WAL the `-wal` holds committed
+     * transactions the main file lacks, so copying the file under a running
+     * engine is unsafe, while `VACUUM INTO` reads one snapshot and writes a
+     * complete, defragmented database. It is read-only towards the workspace, so
+     * it cannot cost the user the data it copies.
      *
      * @param now The caller's clock, in Unix ms. It names the file, so a test
      *        can state which snapshot it is asking for; a stamp already taken
@@ -1269,20 +1113,15 @@ class Database {
     std::expected<BackupRecord, BackupFailure> backup_workspace (int64_t now);
 
     /**
-     * @brief The single-backup slot, held for as long as one snapshot is being
-     *        written (issue #987).
+     * @brief The single-backup slot, held while one snapshot is written
+     *        (issue #987).
      *
-     * Two concurrent `VACUUM INTO`s would each write a whole second copy of the
-     * database - unbounded disk for a button someone double-clicked - and the
-     * later one would race the retention pass of the earlier for the files it
-     * is pruning. So a second caller is refused rather than queued: a backup is
-     * a thing the user asked for *now*, and "one is already running" is a
-     * better answer than a copy they did not ask for arriving later.
-     *
-     * `backup_workspace` takes the slot for its own duration. The type is
-     * public because "a backup is already running" is a state a caller can be
-     * in deliberately, and a test that cannot enter it can only assert the
-     * refusal by racing.
+     * Two concurrent `VACUUM INTO`s would each write a whole copy (unbounded disk
+     * for a double-click), and the later would race the earlier's retention pass
+     * for the files it prunes. So a second caller is refused, not queued: a backup
+     * is asked for *now*, and "one is already running" beats an unasked-for copy
+     * later. `backup_workspace` takes the slot for its own duration; the type is
+     * public so a test can hold it and assert the refusal without racing.
      */
     class BackupSlot {
         public:
@@ -1313,18 +1152,14 @@ class Database {
      * @brief Replace `<db>.bak` with a snapshot of this database, if this start
      *        validated it.
      *
-     * The constructor used to take that copy itself, as a file copy, before the
-     * engine listened - O(database size) on every clean start. This is the
-     * same backup taken afterwards: `VACUUM INTO` a `.bak.tmp` on a connection
-     * of its own (a consistent snapshot under WAL, which a file copy of a live
-     * database is not), validated by the constructor's own probe, then renamed
-     * over the backup. A snapshot that fails at any step is removed and the
-     * previous backup is left exactly as it was, so the one copy recovery would
-     * reach for is never a partial one - which the in-place copy it replaces
-     * could leave behind if the process died mid-write.
-     *
-     * A no-op on a start that took the recovery branch: the backup that branch
-     * judged, restored or kept as evidence is not this call's to overwrite.
+     * Taken after the engine listens, not before (a copy there costs O(database
+     * size) on every clean start): `VACUUM INTO` a `.bak.tmp` on a connection of
+     * its own (consistent under WAL, unlike a file copy of a live database),
+     * validated by the constructor's own probe, then renamed over the backup. A
+     * snapshot failing any step is removed and the previous backup left as it
+     * was, so the copy recovery reaches for is never partial. A no-op on a start
+     * that took the recovery branch: the backup that branch judged, restored or
+     * kept as evidence is not this call's to overwrite.
      *
      * @return why nothing was written, or nothing. Never throws.
      */
@@ -1354,18 +1189,15 @@ class Database {
      *        session's work rather than only what the session started from.
      *
      * Called after every writer has stopped and @ref finish_recovery_backup_refresh
-     * has returned, and before the `Database` closes, so the engine's lock is
-     * still held. Skipped when the session wrote nothing after `init`, counted
-     * by `sqlite3_total_changes64` on the shared connection: a write through
-     * any other connection is not seen. Otherwise the WAL is checkpointed and
-     * the backup is replaced the way @ref refresh_recovery_backup replaces it.
-     *
-     * Bounded by the smaller of @p budget and
-     * `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is interrupted at the
-     * deadline, and a copy that finishes past it is discarded unvalidated.
-     * Validation, the flush and the rename that follow a copy in time are not
-     * interruptible and run to completion. Every failure leaves the previous
-     * backup standing; the caller logs the reason.
+     * has returned, before the `Database` closes, so the engine's lock is still
+     * held. Skipped when the session wrote nothing after `init`, counted by
+     * `sqlite3_total_changes64` on the shared connection (a write through another
+     * connection is not seen); otherwise the WAL is checkpointed and the backup
+     * replaced as @ref refresh_recovery_backup replaces it. Bounded by the smaller
+     * of @p budget and `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is
+     * interrupted at the deadline and one finishing past it is discarded
+     * unvalidated; the validation, flush and rename after a copy run to
+     * completion. Every failure leaves the previous backup; the caller logs why.
      *
      * @param budget what is left of the window the caller has for its
      *        shutdown; zero or less refreshes nothing.
@@ -1380,11 +1212,9 @@ class Database {
     /**
      * @brief Write a batch of config entries in one sqlite transaction (#1453).
      *
-     * `POST /config`'s own comment claims the batch is all-or-nothing; a loop
-     * of `save_config_entry` calls only made that true for validation, not for
-     * the write, since each call was its own transaction. This is the write
-     * half: every row lands or none does, the same shape `apply_reorder` and
-     * `spec_sync_apply` use for their own batches.
+     * The write half of `POST /config`'s all-or-nothing batch (validation is the
+     * other): every row lands or none does, the shape `apply_reorder` and
+     * `spec_sync_apply` use. A loop of `save_config_entry` commits row by row.
      */
     void save_config_entries (const std::vector<ConfigEntry>& entries);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);
@@ -1392,20 +1222,17 @@ class Database {
     void seed_default_config (); // Initialize default config values if empty
 
     /**
-     * @brief Whether @p key is one this running engine's build declares -
-     *        i.e. one `seed_default_config` upserts, not merely one with a row
-     *        in the table (issue #1492).
+     * @brief Whether @p key is one this build declares, i.e. one
+     *        `seed_default_config` upserts, not merely one with a row (#1492).
      *
-     * A row can outlive the catalogue that wrote it: a workspace opened by a
-     * newer engine, then reopened by this one, still carries that newer
-     * engine's config rows (`seed_default_config` only deletes its own fixed
-     * retired-key list, never a key it does not recognise at all - deleting an
-     * unrecognised row would be this build guessing that a row it cannot
-     * explain is safe to destroy). Without this check `GET /config` would list
-     * a setting this build cannot describe or validate, and `POST /config`
-     * would accept a write to it merely because the row already existed.
-     * Populated once, by `seed_default_config`, from the exact set of keys it
-     * upserts - never the retired list, and never read before the first seed.
+     * A row can outlive the catalogue that wrote it: a workspace a newer engine
+     * opened keeps that engine's config rows, and `seed_default_config` deletes
+     * only its own fixed retired-key list, never a key it does not recognise
+     * (deleting would guess that an unexplained row is safe to destroy). Without
+     * this check `GET /config` would list a setting this build cannot describe or
+     * validate, and `POST /config` would accept a write to it because the row
+     * exists. Populated once by `seed_default_config` from exactly the keys it
+     * upserts (never the retired list) and never read before the first seed.
      */
     bool is_known_config_key (const std::string& key) const;
 
@@ -1425,13 +1252,11 @@ class Database {
      * @brief SQLite's `synchronous` level on this database's connection, read
      * back from SQLite rather than echoed (0 = OFF, 1 = NORMAL, 2 = FULL).
      *
-     * The sibling of `applied_cache_size_bytes` above, and for the same reason:
-     * the level is applied twice over the life of a `Database` - the engine's
-     * compile-time default before the constructor's schema sync, then whatever
-     * `dbSynchronous` holds once `init` can read it - and asking SQLite is the
-     * only way to say which one is in force. Issue #838, where the startup log
-     * line reported the level the engine had *asked* for while the schema sync
-     * and the config seed had already run at SQLite's own default.
+     * Like `applied_cache_size_bytes`: the level is applied twice in a
+     * `Database`'s life (the compile-time default before the constructor's schema
+     * sync, then `dbSynchronous` once `init` can read it), so only SQLite can say
+     * which is in force (#838: the startup line reported the requested level
+     * while the schema sync and config seed had run at SQLite's default).
      */
     int applied_synchronous () const; // db_maintenance.cpp
 
@@ -1456,7 +1281,7 @@ class Database {
      */
     int applied_busy_timeout_ms () const; // db_maintenance.cpp
 
-    // Type-safe config getters (replaces ConfigManager)
+    // Type-safe config getters
     int get_config_int (const std::string& key, int default_value = 0);
     std::string get_config_string (const std::string& key,
     const std::string& default_value = "");
@@ -1525,17 +1350,14 @@ class Database {
     /**
      * @brief Every collection id in @p root_id's subtree, @p root_id first.
      *
-     * The single definition of "the subtree", shared by the delete cascade, the
-     * restore and the purge; the trash's counts run the same walk
-     * (`walk_subtree` in db_collections.cpp) over the collection rows the
-     * listing has already read (#2972), so all four agree about what one
-     * collection owns. `All` walks stamped and live rows alike: a walk that
-     * skipped deleted rows could not find what a restore has to put back.
-     * `StampedOnly` stops at a live row, which is what a purge destroys (#1883).
-     *
-     * The visited set is load-bearing rather than defensive - a cycle in
-     * `parent_id` written before write-time validation existed would otherwise
-     * loop forever while the global DB mutex is held (issue #79). The caller
+     * The one definition of "the subtree", shared by the delete cascade, the
+     * restore and the purge; the trash's counts run the same walk (`walk_subtree`
+     * in db_collections.cpp) over rows the listing already read (#2972), so all
+     * four agree on what a collection owns. `All` walks stamped and live rows
+     * alike (a restore must find what to put back); `StampedOnly` stops at a live
+     * row, which is what a purge destroys (#1883). The visited set is
+     * load-bearing: a `parent_id` cycle written before write-time validation
+     * would otherwise loop forever under the global DB mutex (#79). The caller
      * must already hold that mutex.
      */
     enum class SubtreeRows : std::uint8_t { All, StampedOnly };
@@ -1547,12 +1369,11 @@ class Database {
      *        environment, a single example or a single client certificate
      *        outright - examples, requests, then collections, deepest first.
      *
-     * The hard cascade soft delete replaced (issue #988), kept as the one
-     * definition purge and retention both reach for. A collection purge takes
-     * stamped collections only (#1883): a live one under the purged subtree
-     * is re-parented to the tree root rather than destroyed, the rule a
-     * restore applies to a collection whose parent is gone. The caller must
-     * already hold the DB mutex.
+     * The hard cascade soft delete replaced (#988), the one definition purge and
+     * retention reach for. A collection purge takes stamped collections only
+     * (#1883): a live one under the purged subtree is re-parented to the tree
+     * root, as a restore treats a collection whose parent is gone. The caller
+     * must already hold the DB mutex.
      */
     void purge_collection_locked (const std::string& id);  // db_collections.cpp
     void purge_request_locked (const std::string& id);     // db_requests.cpp
@@ -1573,13 +1394,12 @@ class Database {
      * @brief The trash entry for one deleted row, or nothing when @p id names
      *        no *deleted* row.
      *
-     * By id rather than by root, because restore and purge both take an id and
-     * a row a cascade took is not a root - so answering only about roots would
-     * make the re-parent rule unreachable and "restore this one request" a 404.
-     * The listing filters roots out of *its* answer and builds its entries
-     * from the same helpers (db_collections.cpp), counting a collection's
-     * cohort from rows it has already read (#2972); both agree about what an
-     * entry says. The caller must already hold the DB mutex.
+     * By id, not by root: restore and purge take an id, and a row a cascade took
+     * is not a root, so a roots-only answer would make the re-parent rule
+     * unreachable and "restore this one request" a 404. The listing filters roots
+     * from *its* answer and builds entries from the same helpers
+     * (db_collections.cpp), counting a cohort from rows already read (#2972), so
+     * both agree on what an entry says. The caller must hold the DB mutex.
      */
     std::optional<TrashEntry> trash_entry_locked (const std::string& id); // db_collections.cpp
 
@@ -1744,13 +1564,12 @@ class Database {
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
      *
-     * On a busy error the mutex is released *before* sleeping (exponential
-     * backoff, @p base * (attempt+1)), then the call is retried - so a retry
-     * never stalls other endpoints that need the same mutex. Non-busy
-     * exceptions rethrow immediately; busy exhaustion after @p attempts logs
-     * and rethrows. @p attempts of @ref RETRY_UNTIL_LANDED never exhausts: the
-     * backoff stops growing at ten steps and each retry past that is a
-     * warning. @p what names the operation for log messages.
+     * On a busy error the mutex is released *before* the backoff sleep (@p base
+     * times the attempt number), so a retry never stalls other endpoints that need
+     * it. Non-busy exceptions rethrow immediately; busy exhaustion after
+     * @p attempts logs and rethrows. @p attempts of @ref RETRY_UNTIL_LANDED never
+     * exhausts: the backoff stops growing at ten steps and each retry past that is
+     * a warning. @p what names the operation for log messages.
      */
     static constexpr int RETRY_UNTIL_LANDED = 0;
     void retry_on_busy (const char* what, // database.cpp
