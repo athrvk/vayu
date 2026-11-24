@@ -6,8 +6,6 @@
  */
 
 /**
- * useVariableResolver Hook
- *
  * Provides functions to resolve {{variables}} in strings using the current
  * variable context (globals, collection chain, active environment).
  *
@@ -47,8 +45,7 @@ import type {
 	VariableScope,
 } from "@/types";
 import { castByType } from "@/lib/variable-cast";
-// The chain this hook used to build itself, guard and all - see tree-utils for
-// why every `parentId` walk in the renderer now comes from one place.
+// See tree-utils for why every `parentId` walk in the renderer comes from one place.
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,

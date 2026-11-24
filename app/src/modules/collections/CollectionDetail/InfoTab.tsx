@@ -8,12 +8,10 @@
 /**
  * The collection's own Info tab.
  *
- * **It used to demand an explicit Save.** Name and description sat behind
- * "Save Changes" / "Cancel" while the request builder - the surface you spend
- * the day in - persisted on blur. Two Info tabs with opposite save models is a
- * coherence bug: the same act on the same kind of field either sticks or does
- * not depending on which pane you are in. They are one model now, and it is the
- * builder's, because that is the one the app is mostly made of.
+ * **Name and description persist on blur, the request builder's model.** Two
+ * Info tabs with opposite save models is a coherence bug: the same act on the
+ * same kind of field either sticks or does not depending on which pane you are
+ * in. The builder's is the model the app is mostly made of.
  *
  * Losing the buttons costs the blank-name guard its disabled state, so the
  * refusal is spoken instead - see `reportBlankNameRefused`. `SaveFailed` still
@@ -75,9 +73,7 @@ function mergeField<K extends keyof InfoDraft>(
 export default function InfoTab({ collection, requestCount, active = false }: InfoTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
-	// three collection tabs used to hand-roll it one each, and this was the one
-	// that forgot to clear the mutation on a collection switch. See
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook. See
 	// useEntityDraft.
 	//
 	// The resync also re-runs after a save (the props come back changed), which

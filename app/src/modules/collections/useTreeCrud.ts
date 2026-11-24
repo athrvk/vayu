@@ -792,11 +792,8 @@ export function useTreeCrud({
 				onSelect: () => handleCollectionDeleteClick(collection.id, collection.name),
 			},
 		],
-		// Honest deps, which is only possible now that both handlers are memoised
-		// and the expand goes through `expandCollection` rather than reading the
-		// expanded set. The suppression that used to sit here hid two callbacks
-		// captured from whichever render last rebuilt this - benign only by
-		// accident, and this is the seam the drag-and-drop work extends.
+		// Honest deps: both handlers are memoised and the expand goes through
+		// `expandCollection` rather than reading the expanded set.
 		[
 			expandCollection,
 			getCopyForAgentAction,

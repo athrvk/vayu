@@ -40,12 +40,10 @@
  * sends a document and a collection, and nothing it decided. The match query
  * below is the *preview* - it writes nothing, and is what the counts above the
  * Bind button are painted from.
- * **Nor does this tab read the document any more** (#869, `POST
+ * **Nor does this tab read the document** (#869, `POST
  * /specs/describe`): the format, the title and the operations the card shows
  * before a bind come from the reader the bind itself uses, so the identities
- * previewed here are the identities that will be stamped. It parsed the picked
- * file until then, which made the preview and the write two opinions about one
- * document.
+ * previewed here are the identities that will be stamped.
  * **What is bound is the bundled document** (#3032): a pick runs through the
  * same `$ref` bundler import and Sync use before it is described, so a spec
  * split across files is stored whole, and the next Sync compares like with like.
@@ -214,12 +212,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	/*
-	 * What the picked document *is* is the engine's answer now (issue #869).
-	 * This tab used to run the import parsers over the picked bytes to paint the
-	 * three things below - the format, the title and the operations - while the
-	 * bind derived the same identities from the same bytes engine-side. Two
-	 * readers of one document is the thing #853 set out to end, and here it could
-	 * preview a pairing the bind would not commit.
+	 * What the picked document *is* is the engine's answer (issue #869): two readers
+	 * of one document is the thing #853 set out to end, and here it could preview a
+	 * pairing the bind would not commit.
 	 */
 	const describeQuery = useSpecDescribeQuery(picked?.token ?? null, picked?.content ?? "");
 	const described = describeQuery.data ?? null;

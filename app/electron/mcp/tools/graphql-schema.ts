@@ -6,7 +6,6 @@
  */
 
 /**
- * @file graphql-schema.ts
  * @brief `get_graphql_schema`'s pure parts: the introspection payload, the
  *        reading of the endpoint's answer, and the SDL printer (#2097).
  *

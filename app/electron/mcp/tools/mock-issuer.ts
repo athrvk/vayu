@@ -6,7 +6,6 @@
  */
 
 /**
- * @file mock-issuer.ts
  * @brief The payloads the mock OAuth issuer tools send.
  */
 

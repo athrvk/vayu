@@ -15,11 +15,8 @@ import type { CollectionDraft, ImportResult } from "./types";
  * `collectionTempId`) inside a payload whose real ids do not exist yet, and the
  * engine returns the temp-id -> real-id map it generated. They are never stored.
  *
- * This used to mint real `col_`/`req_`/`env_` UUIDs, because the orchestrator
- * created items one POST at a time and had to wire the tree together itself -
- * which is the only reason `POST /<resource>` ever accepted a client-supplied id
- * (issues #96, #97). Counters are enough now that the ids are per-call and
- * opaque, and they make a failing import name a readable item (`c3`, `r17`).
+ * Counters are enough, because the ids are per-call and opaque, and they make a
+ * failing import name a readable item (`c3`, `r17`; issues #96, #97).
  *
  * Mutates the result in place (and returns it).
  */

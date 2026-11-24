@@ -6,7 +6,6 @@
  */
 
 /**
- * @file cli.ts
  * @brief Standalone stdio MCP server. Reuses the exact same tool registry and
  *        server factory as the Electron-hosted Streamable HTTP server, but over
  *        stdio - the transport stdio-only clients (Zed) and headless/CI setups

@@ -108,9 +108,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// ~60px each); or it is a dense config that is two independent
 					// groups, which is `max-w-xl lg:max-w-4xl` (896px from the `lg`
 					// breakpoint, one column below it) and lays them in two panes
-					// (issue #2231). They had been five values including two
-					// one-off pixel widths, so the same kind of dialog came out a
-					// different size depending on who wrote it.
+					// (issue #2231).
 					//
 					// A dialog is a focus device before it is a container: widen the
 					// scale only for content that earns it, in

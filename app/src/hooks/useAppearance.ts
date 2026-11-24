@@ -6,8 +6,6 @@
  */
 
 /**
- * useAppearance Hook
- *
  * React face of {@link useAppearanceStore} - the renderer-only interface
  * preferences (UI font, interface scale, corner roundedness, interface
  * density). The store owns

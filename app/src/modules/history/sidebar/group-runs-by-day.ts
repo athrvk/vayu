@@ -15,9 +15,8 @@ export interface RunDayGroup {
 
 /**
  * A calendar-day label for `ms` relative to `now` - "Today", "Yesterday", or
- * a date. This replaced the per-row relative timestamp ("8h ago" repeated
- * down a page of same-day runs said nothing after the first row); it says
- * once, above the day's rows, what every row used to say on its own.
+ * a date. It says once, above the day's rows, what a per-row timestamp ("8h
+ * ago") would repeat on every row of the same day.
  *
  * A calendar date rather than "N days ago" for anything older: the latter
  * decays on every render (today's "6 days ago" is tomorrow's "7 days ago"),

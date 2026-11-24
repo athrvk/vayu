@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_request_url.cpp
  * @brief `pm.request`, its `Url` object, `pm.info` and the pre-request write-back.
  */
 
@@ -42,9 +41,8 @@ namespace vayu::runtime::pm_detail {
 /**
  * @brief What `pm.request.url` is, behind the members a script reads.
  *
- * `pm.request.url` was a string primitive; issue #991 records the owner
- * decision that Postman compatibility wins over keeping that shape, so it is
- * now the `Url` object a lifted Postman script expects - `url.query.get(...)`,
+ * `pm.request.url` is the `Url` object a lifted Postman script expects (#991) -
+ * `url.query.get(...)`,
  * `url.getPath()`, `url.host` and the rest. The members are built in
  * `build_request_url_members` further down; what lives up here is the
  * *identity*, which three surfaces read without them: the `pm.request`
@@ -261,8 +259,8 @@ std::optional<std::string> expect_string_like (JSContext* ctx, JSValueConst valu
 }
 
 /**
- * @brief The URL a value carries, for the surfaces that used to require a
- *        string and are documented as taking `pm.request.url`.
+ * @brief The URL a value carries, for the surfaces documented as taking
+ *        `pm.request.url`.
  *
  * A JS string is itself; a Url object is the string it was built from. Anything
  * else is `nullopt` - the caller says so in its own words, because
@@ -2649,10 +2647,9 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
     JSValue request = JS_NewObject (ctx);
 
     if (data && data->request) {
-        // pm.request.url - Postman's Url object, not the string it used to be.
+        // pm.request.url - Postman's Url object.
         install_request_url (ctx, request, data->request->url);
 
-        // pm.request.method
         JS_SetPropertyStr (ctx, request, "method",
         JS_NewString (ctx, to_string (data->request->method)));
 

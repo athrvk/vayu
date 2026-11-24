@@ -6,8 +6,6 @@
  */
 
 /**
- * SettingControls
- *
  * Small shared primitives for the settings panels so the many pick-one / toggle
  * / numeric rows don't each re-implement the same markup. All use the
  * centralized `--primary` accent for the selected/on state.

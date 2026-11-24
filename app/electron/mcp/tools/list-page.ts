@@ -6,7 +6,6 @@
  */
 
 /**
- * @file list-page.ts
  * @brief The arguments and row shaping the paged whole-list reads share:
  *        `list_collections`, `list_requests`, `get_cookies` and `list_trash`
  *        (#2443).

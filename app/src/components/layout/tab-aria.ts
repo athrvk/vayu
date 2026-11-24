@@ -13,8 +13,7 @@
  * ends are rendered by different components - `TabStrip` draws the tabs, `Shell`
  * owns the content region - so the ids are derived from the tab id here rather
  * than spelled out in both places, where they would drift the first time either
- * side was renamed. The strip used to declare `role="tablist"` and stop, which
- * announces "tab 2 of 3" over content that claims no owner.
+ * side was renamed.
  *
  * A sibling module rather than an export from `TabStrip.tsx` for the same reason
  * `tab-descriptors.ts` is one: that file exports components, and a function

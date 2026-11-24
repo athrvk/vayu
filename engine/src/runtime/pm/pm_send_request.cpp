@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_send_request.cpp
  * @brief `pm.sendRequest`, and the auth block reader it shares with
  *        `pm.request.auth` (`pm_auth.hpp`).
  */
@@ -643,15 +642,13 @@ resolve_send_request_fields (JSContext* ctx, std::vector<FormField>& fields) {
 // Every string pm.sendRequest was handed, resolved once against the scopes the
 // script can see: the URL, each header name and value, a raw body, a form
 // body's field names and values, and each credential of an auth block. Postman
-// resolves these, and until #1001 Vayu
-// sent them as written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a
-// wrong request sent silently rather than a refusal. Resolving here rather than
+// resolves these (#1001), so `pm.sendRequest("{{baseUrl}}/token", cb)` is not a wrong
+// request sent silently. Resolving here rather than
 // at parse time is what gives it Postman's mid-script visibility: a value the
 // same script set two lines earlier is in the scopes this reads.
 //
-// Header names were the half #1001 left written as they stood, because the
-// collision two resolved names can make was undecided; #1051 decided it, so
-// #1067 resolves them under that rule - see `resolve_send_request_headers`.
+// Header names resolve under the collision rule of `http/header_names.hpp` (#1051,
+// #1067) - see `resolve_send_request_headers`.
 std::optional<std::string>
 interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& auth) {
     if (auto reason = resolve_send_request_text (ctx, request.url, "options.url")) {

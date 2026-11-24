@@ -6,7 +6,6 @@
  */
 
 /**
- * @file remedy.ts
  * @brief What a refusal tells the user to do about it, per host. The Electron
  *        app has Settings screens and a window; the stdio CLI has neither, only
  *        the `VAYU_MCP_*` variables and a `vayu-engine` process. A sentence that

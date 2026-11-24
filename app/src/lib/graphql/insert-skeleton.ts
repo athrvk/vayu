@@ -898,7 +898,7 @@ function appendOperation(
  * **Depth decides, not the kind of match.** The innermost set that can hold the
  * spread wins, whether its type is the fragment's exactly or merely overlaps it.
  * Preferring an exact match instead was the same rule while the two candidates
- * could not both be on the chain; since #1346 the chain descends through inline
+ * could not both be on the chain; the chain descends (#1346) through inline
  * fragments, so a cursor inside `... on Post` sits in an overlapping set with the
  * exactly-matching `Node` set outside it, and exactness would have written the
  * spread a set out from where the user is looking (#1350). Where both point the

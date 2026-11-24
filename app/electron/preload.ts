@@ -467,8 +467,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// validates the scheme and refuses everything else, so this does not hand the
 	// web layer a general "launch any protocol handler" capability.
 	//
-	// Used by the OAuth authorize flow and by links inside rendered markdown -
-	// the latter being why it is no longer named after OAuth.
+	// Used by the OAuth authorize flow and by links inside rendered markdown.
 	openExternalUrl: (url: string): Promise<void> =>
 		ipcRenderer.invoke("shell:openExternalUrl", url),
 

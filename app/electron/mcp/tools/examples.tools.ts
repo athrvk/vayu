@@ -6,7 +6,6 @@
  */
 
 /**
- * @file examples.tools.ts
  * @brief A saved request's examples: list, create, update and delete.
  */
 

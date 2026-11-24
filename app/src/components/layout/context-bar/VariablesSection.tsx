@@ -8,13 +8,8 @@
 /**
  * The variables the open request uses, and the quick editor over them.
  *
- * The list used to be the whole resolver - every global, environment and
- * collection definition in the workspace - so on a busy workspace it was a scroll
- * of names the request never mentions, and the one question a user has while
- * editing a request ("does `{{shop_domain}}` resolve, is `{{vault_path}}` defined
- * at all") was buried or, for an undefined reference, absent (#1308). It now leads
- * with what *this request references*, resolved or not, and keeps the full list a
- * disclosure away so the quick-edit-anything path is not lost.
+ * It leads with what *this request references*, resolved or not, and keeps the full list a
+ * disclosure away so the quick-edit-anything path is not lost (#1308).
  *
  * The bar sits outside `RequestBuilderProvider` and reads the stored request via
  * `useRequestQuery`, so the reference set lags the live editor buffer by the

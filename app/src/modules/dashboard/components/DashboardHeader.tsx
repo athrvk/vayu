@@ -6,8 +6,6 @@
  */
 
 /**
- * DashboardHeader Component
- *
  * Compact 52px single-row header with status, method, URL, config info, and stop button.
  * A collection load run has no URL, so the collection and its step count take that
  * place (#2270); the run's comment, when it has one, sits under it. A finished
@@ -96,8 +94,8 @@ function DashboardHeader({
 		configParts.push(
 			loadTestModeLabel(configuration.mode, collectionName ? "collection" : undefined)
 		);
-	// The rows are never stored, so the count (and, since #2051, the file's
-	// name) is the only trace on the dashboard that a file drove the run
+	// The rows are never stored, so the count (and the file's
+	// name, #2051) is the only trace on the dashboard that a file drove the run
 	// (#1940). Nothing for a run without one.
 	const rowCount = configuration?.dataRowCount;
 	if (rowCount != null && rowCount > 0) {

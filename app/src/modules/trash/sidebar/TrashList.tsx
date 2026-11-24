@@ -122,8 +122,8 @@ export default function TrashList() {
 	/**
 	 * Empty trash (issue #1689): the panel-header counterpart to per-row purge.
 	 *
-	 * No bulk-purge engine route exists (checked against `engine/CLAUDE.md`'s
-	 * HTTP API contract), and the owner's #1683 decision rules out adding one for
+	 * No bulk-purge engine route exists (see `docs/engine/api-reference/index.md#pages`),
+	 * and the owner's #1683 decision rules out adding one for
 	 * a client-only convenience - so this loops the same per-row mutation the
 	 * rows already use, one at a time rather than in parallel: the trash and the
 	 * engine's file moves behind it are not built for concurrent purges of the

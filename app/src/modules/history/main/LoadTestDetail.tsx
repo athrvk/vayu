@@ -6,8 +6,6 @@
  */
 
 /**
- * LoadTestDetail Component
- *
  * Displays details for a load test run with tabs for overview, performance, and samples.
  */
 

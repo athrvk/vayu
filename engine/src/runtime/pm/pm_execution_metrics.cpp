@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_execution_metrics.cpp
  * @brief `pm.execution` (flow control) and `pm.metrics` (custom metrics).
  */
 

@@ -208,7 +208,7 @@ app.commandLine.appendSwitch("use-mock-keychain");
 app.setAppUserModelId(APP_USER_MODEL_ID);
 
 // Named explicitly, never left to Electron: it derives `userData` from
-// `app.name` on the first read, so the directory used to depend on whether
+// `app.name` on the first read, so the directory depends on whether
 // anything happened to read it before the rename below. Set before anything
 // opens a file there - Chromium's profile, the single-instance lock further
 // down, the settings stores, the engine.
@@ -1853,8 +1853,7 @@ app.whenReady().then(async () => {
 		// The panel's fields are platform-scoped, and the two halves cover
 		// different platforms: `website` and `authors` are Linux-only, `credits`
 		// is macOS and Windows. Both are set so the panel names where to go on
-		// every platform - it was version and copyright alone on the two that
-		// could not open it at all until #1361.
+		// every platform (#1361).
 		authors: ["Atharva Kusumbia"],
 		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu\n\nLicence notices for the software Vayu includes: Help › Third-party notices.`,
 	});

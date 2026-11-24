@@ -77,8 +77,7 @@ export function Launcher({
 					<ActionTile icon={Braces} label="Variables" onClick={onVariables} />
 					{/* The local services - the webhook inbox, the OAuth mock
 					    issuer. Like History, this tile activates a drawer view
-					    rather than opening a tab: the inbox used to be reachable
-					    from here and nowhere else, and a tile that teaches where
+					    rather than opening a tab: a tile that teaches where
 					    a whole family of features lives outlives one that opens
 					    a single tab (issue #502). */}
 					<ActionTile icon={Radio} label="Services" onClick={onServices} />

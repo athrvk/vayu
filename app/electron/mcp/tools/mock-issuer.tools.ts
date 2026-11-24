@@ -6,7 +6,6 @@
  */
 
 /**
- * @file mock-issuer.tools.ts
  * @brief The local mock OAuth 2.0 issuer: start, list, stop and update.
  */
 

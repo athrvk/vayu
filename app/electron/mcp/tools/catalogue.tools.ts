@@ -6,7 +6,6 @@
  */
 
 /**
- * @file catalogue.tools.ts
  * @brief `list_element_kinds` and `get_script_api`: the element registry and
  *        the script sandbox's API by tool, for a client that cannot read the
  *        `vayu://elements/kinds` and `vayu://scripting/completions` resources

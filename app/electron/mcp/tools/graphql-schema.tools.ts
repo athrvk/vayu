@@ -6,7 +6,6 @@
  */
 
 /**
- * @file graphql-schema.tools.ts
  * @brief `get_graphql_schema`: a GraphQL request's schema, introspected through
  *        the engine with the request's own auth and answered as SDL (#2097).
  */

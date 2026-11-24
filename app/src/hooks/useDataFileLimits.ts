@@ -6,8 +6,6 @@
  */
 
 /**
- * useDataFileLimits
- *
  * The two engine caps a collection run's data set has to fit inside:
  * `maxScenarioDataRows` and `maxScenarioDataBytes`.
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_cookies.cpp
  * @brief `pm.cookies` (the jar) and `pm.response.cookies`.
  */
 
@@ -525,10 +524,9 @@ ContextData* jar_write_context (JSContext* ctx, const char* member) {
 // URL-scoped, which is the whole reason Postman's write half hangs off `jar()`
 // rather than off `pm.cookies` - so the URL is never optional.
 //
-// @p url_arg marks the positions that take a URL, which since #991 also accept
-// the Url object `pm.request.url` holds - `jar().set(pm.request.url, ...)` is
-// the documented example in both script docs and was a string argument until
-// that object replaced the string. A cookie *name* stays string-only: nothing
+// @p url_arg marks the positions that take a URL, which also accept the Url
+// object `pm.request.url` holds (#991) - `jar().set(pm.request.url, ...)` is the
+// documented example in both script docs. A cookie *name* stays string-only: nothing
 // makes a URL a plausible name, so accepting one there would only let a
 // misplaced argument through.
 std::optional<std::string> read_jar_string_arg (JSContext* ctx,
@@ -746,10 +744,8 @@ enum class JarCallbackArg : std::uint8_t {
 
 // Split out of finish_jar_call so that a method which *stages* a write can
 // check the callback slot before staging. **Every jar method validates all of
-// its arguments before it stages anything** - jar().clear used to push a
-// whole-jar wipe and only then discover the URL sitting where it expected a
-// callback, so the script got a TypeError pointing away from a wipe that
-// stayed staged and rode the next transfer regardless (issue #997).
+// its arguments before it stages anything** - otherwise a call refused for a
+// bad argument leaves a staged whole-jar wipe that rides the next transfer (issue #997).
 JarCallbackArg classify_jar_callback (JSContext* ctx, int argc, JSValueConst* argv, int index) {
     if (index >= argc || JS_IsUndefined (argv[index]) || JS_IsNull (argv[index])) {
         return JarCallbackArg::Absent;

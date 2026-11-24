@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/inbox.cpp
  * @brief The webhook inbox: an engine-hosted listener that records the requests
  *        sent to it (issue #480), plus the routes that drive it. Lives with the
  *        routes for the same reason oauth_authorize.cpp does - the listener

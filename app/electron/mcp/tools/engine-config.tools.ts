@@ -6,7 +6,6 @@
  */
 
 /**
- * @file engine-config.tools.ts
  * @brief `update_engine_config`, the write half of the engine config; the read,
  *        `get_engine_config`, sits with the other reads in `reads.tools.ts`.
  */

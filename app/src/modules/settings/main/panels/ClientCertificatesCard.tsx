@@ -6,8 +6,6 @@
  */
 
 /**
- * ClientCertificatesCard
- *
  * The registry that maps a host to the client certificate Vayu presents to it
  * (issue #707). An mTLS API is uncallable without one, and the certificate is a
  * property of *where you are calling* rather than of one request - so this is a
@@ -37,8 +35,7 @@
  *
  * **The format is a field, not a guess** (issue #833). A PEM certificate keeps
  * its key in a second file; a PKCS#12 bundle carries both. The engine has to be
- * told which, or libcurl hands a bundle to its PEM parser - and until #851 the
- * bundle was the only shape a Windows build could present at all. So the form
+ * told which, or libcurl hands a bundle to its PEM parser (#851). So the form
  * asks which one, drops the key picker for a bundle - a card that kept
  * demanding a key file the format does not have is a dead end no engine change
  * fixes - and every row prints what it will present, because the engine may
@@ -337,7 +334,7 @@ export function ClientCertificatesCard() {
 							// Flat hairline row, not a boxed card per entry - the
 							// list convention every other repeated-item list in the
 							// app uses (`RunItem`, `SampleRequestCard`), not the
-							// one-off "boxes within a box" look this used to have.
+							// one-off "boxes within a box" look.
 							<div
 								key={certificate.id}
 								className="border-b border-rule py-3 last:border-b-0 flex items-start justify-between gap-4"

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file failure.ts
  * @brief The one failure-mapping layer (#2776): what kind of failure an error
  *        result is, and what it says about it.
  *
