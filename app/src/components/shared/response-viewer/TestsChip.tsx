@@ -6,18 +6,12 @@
  */
 
 /**
- * What one step's assertions came to, in a line (issue #724).
- *
- * Two states, and the absent third is the point: a step whose script asserted
- * nothing renders no chip at all, because the component is not given a tally.
- * A `0 passed` would read as a result where the truth is that nothing was
- * claimed - the same absent-is-not-zero rule the schema verdict beside it
- * follows.
- *
- * The chip is a summary and never the evidence: the per-assertion list lives in
- * the expansion, from the stored trace. That split is what lets a live step say
- * something honest before its stored row exists - the engine's `step` frame
- * carries these two numbers and not the unbounded list.
+ * What one step's assertions came to, in a line (#724). Two states, and the absent third is the
+ * point: a step asserting nothing gets no tally and renders no chip, as `0 passed` would claim a
+ * result where nothing was claimed (the schema verdict's absent-is-not-zero rule). A summary, never
+ * the evidence: the per-assertion list lives in the expansion, from the stored trace, which lets a
+ * live step say something honest before its row exists, as the engine's `step` frame carries the
+ * two numbers, not the unbounded list.
  */
 
 import { CheckCircle2, XCircle } from "lucide-react";
