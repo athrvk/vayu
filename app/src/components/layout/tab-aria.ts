@@ -6,18 +6,12 @@
  */
 
 /**
- * The tab -> panel relationship, as ids both ends agree on.
- *
- * The WAI-ARIA tabs pattern is two links, not one: the tab points at the panel
- * with `aria-controls`, the panel names its tab with `aria-labelledby`. The two
- * ends are rendered by different components - `TabStrip` draws the tabs, `Shell`
- * owns the content region - so the ids are derived from the tab id here rather
- * than spelled out in both places, where they would drift the first time either
- * side was renamed.
- *
- * A sibling module rather than an export from `TabStrip.tsx` for the same reason
- * `tab-descriptors.ts` is one: that file exports components, and a function
- * beside them costs it fast refresh.
+ * The tab -> panel relationship, as ids both ends agree on. The WAI-ARIA tabs pattern is two links:
+ * the tab points at the panel with `aria-controls`, the panel names its tab with `aria-labelledby`.
+ * `TabStrip` draws the tabs and `Shell` owns the content region, so the ids derive from the tab id
+ * here rather than being spelled in both places, where they would drift at the first rename. A
+ * sibling module, not an export from `TabStrip.tsx`, as `tab-descriptors.ts` is: a function beside
+ * that file's components costs it fast refresh.
  */
 
 /** The id of a tab element in the strip. */
