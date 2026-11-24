@@ -602,6 +602,9 @@ A media type matches exactly first, then a declared `*/*` or `application/*`, am
 The validator reads draft-07; OpenAPI 3.1 schemas are JSON Schema 2020-12, whose `unevaluatedProperties`, `prefixItems` and `dependentSchemas` a draft-07 reader silently ignores - so a schema that meant to forbid something would permit it.
 Every such keyword is named and counted, which makes a `valid: true` beside one narrower than it looks rather than wrong.
 
+`format` is asserted for `date`, `time`, `date-time` and `ipv4` (the validator's own) and for `email`, `uri`, `uuid`, `hostname` and `ipv6` (the engine's `schema_format.hpp` table, #2581); any other name stays an annotation and fails no body.
+A name added to that table must not be one the validator already checks, or each failure is counted twice.
+
 `propertyNames` is the one draft-07 keyword on that list, and only when it is nested (#2729): valijson builds a `propertyNames` subschema from its parent's node path, so it validates the schema's root keyword but passes every body for one inside `properties`, `patternProperties`, `additionalProperties`, a `dependencies` schema, an `allOf`/`anyOf`/`oneOf`/`not` member, `items` or a `$ref` target.
 Each nested occurrence is counted once, a `$ref` target reached twice included; the root keyword is validated and counted only when a `$ref` back to `#` reaches it from below.
 In a script, `pm.response.to.have.jsonSchema` fails in both polarities on such a schema, as it does for any unevaluated keyword.
