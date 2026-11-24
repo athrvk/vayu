@@ -49,10 +49,8 @@ export interface RailButtonProps {
 /**
  * The icon-only button shared by `ActivityRail` and `ContextRail`.
  *
- * Extracted from what was `Dock`'s own `DockButton`: both rails need the same
- * accessible-name-from-`label`, shortcut-out-of-the-name shape, and the Dock
- * itself no longer has a button of this kind once its two switchers move out
- * (issue #1615).
+ * Both rails need the same accessible-name-from-`label`, shortcut-out-of-the-name
+ * shape (issue #1615).
  */
 export function RailButton({
 	active,

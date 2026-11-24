@@ -19,7 +19,7 @@ export const buttonVariants = cva(
 	// cascade and replace that whole list.
 	//
 	// `[&_svg:not([class*='size-'])]:size-icon`, not the bare `[&_svg]:size-icon`
-	// it used to be (issue #1679): a descendant rule scoped to a class plus a
+	// (issue #1679): a descendant rule scoped to a class plus a
 	// type selector is `(0,1,1)`, which outranks a plain `size-icon-sm` on the
 	// icon itself (`(0,1,0)`) - every caller that wanted the smaller glyph
 	// (the update/recovery banner closes, `RunItem`'s row actions) silently

@@ -8,10 +8,7 @@
 /**
  * What each request-tab section has to say about the request in front of it.
  *
- * The bar used to decide what to draw from the tab alone, so a plain REST
- * request opened seven sections of which three existed only to say they did not
- * apply ("This request does not send a GraphQL body", "No cookies held for this
- * host", "This request has not been sent yet"). `useRelevance` is the answer to
+ * `useRelevance` is the answer to
  * the data-level question `appliesTo` structurally cannot ask - see `types.ts`
  * for the contract and `registry.ts` for why it is a second function rather than
  * a wider `appliesTo`.
@@ -173,9 +170,8 @@ export function useCookiesRelevance(tab: Tab): SectionRelevance {
  *
  * The flicker that rule prevents would cost a 320KB chunk download here, and a
  * section that appears once the request lands reads better than one that appears
- * and then leaves. The section is `lazy` for the same reason, and the two now
- * agree: a REST tab never requests the chunk at all, where it used to arrive the
- * moment the expanded section mounted to say the request was not GraphQL.
+ * and then leaves. The section is `lazy` for the same reason: a REST tab never
+ * requests the chunk at all.
  */
 export function useGraphQLRelevance(tab: Tab): SectionRelevance {
 	const { data: request } = useRequestQuery(tab.entityId);

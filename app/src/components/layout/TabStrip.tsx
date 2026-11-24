@@ -6,8 +6,6 @@
  */
 
 /**
- * TabStrip Component
- *
  * The horizontal row of open tabs, rendered over the content area - main plus
  * the context bar - with the drawer to its left. It sits there rather than
  * across the window because that is the region tabs actually switch: the drawer
@@ -218,15 +216,12 @@ export function TabStrip() {
 			 * reads too - the two are one band across the window, and a step in it
 			 * is what a second literal would produce.
 			 *
-			 * No `app-region` anywhere in this file any more. It used to live in the
-			 * title bar, where the row was a drag region and every interactive child
-			 * had to opt out; down here nothing drags the window, so the opt-outs
-			 * were guarding against a rule that no longer applies to this subtree.
+			 * No `app-region` anywhere in this file: nothing drags the window down here.
 			 */
 			// `text-sm` is the tab label's own size, declared here because this is
 			// the element the width measurement reads its font from. Inheriting it
 			// from `body` measured whatever the document default happened to be -
-			// 16px until #1202 - so every tab came out ~23% wider than its name.
+			// 16px (#1202) - so every tab came out ~23% wider than its name.
 			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel text-sm"
 		>
 			{/*
@@ -275,9 +270,7 @@ export function TabStrip() {
 			</div>
 
 			{/*
-			 * The tabs that did not fit, reachable rather than scrolled out of
-			 * sight. The strip used to be `overflow-x-auto`, which hid them behind a
-			 * scroll with nothing to say they existed.
+			 * The tabs that did not fit, reachable rather than scrolled out of sight.
 			 */}
 			{overflowed.length > 0 && (
 				<DropdownMenu>

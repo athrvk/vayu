@@ -12,8 +12,7 @@
  * everything there is to say about the *latest* one - `ResponseStatusBar`
  * paints the same status chip, the same duration and the same age, from the
  * same stored run - so a section restating it would be a poorer copy a few
- * hundred pixels to its left, which is why the "last result" section specced in
- * #344 was built and then removed. What the pane structurally cannot show is a
+ * hundred pixels to its left (#344). What the pane structurally cannot show is a
  * sequence: whether that 500 is the first one, whether latency has been
  * drifting, when this last worked. That costs a trip to the History drawer and
  * a tab switch away from the request being debugged, and this is that trip.

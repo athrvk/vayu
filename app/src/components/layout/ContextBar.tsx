@@ -8,11 +8,9 @@
 /**
  * The context bar: a frame, and a list of sections for the active tab.
  *
- * It used to be one section - a variables quick-editor - hardcoded into this
- * file and rendered for request tabs only. The sections now come from a
- * registry (`context-bar/registry.ts`); this file owns the landmark, the resize
- * handle, the header, the scroll container and the per-section collapse state,
- * and nothing about what any section shows.
+ * The sections come from a registry (`context-bar/registry.ts`); this file owns
+ * the landmark, the resize handle, the header, the scroll container and the
+ * per-section collapse state, and nothing about what any section shows.
  *
  * A section's component is mounted only while its section is expanded, so a
  * collapsed section runs no queries - see `Section.tsx`. Collapse state is
