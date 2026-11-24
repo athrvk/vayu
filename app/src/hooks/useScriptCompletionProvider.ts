@@ -6,8 +6,6 @@
  */
 
 /**
- * useScriptCompletionProvider Hook
- *
  * Registers the engine-provided `pm.*` completions with Monaco's JavaScript
  * language so the script editors get `pm.` autocomplete. The completion set is
  * fetched and cached by useScriptCompletionsQuery; this hook is the consumer

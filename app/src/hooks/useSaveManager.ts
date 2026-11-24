@@ -6,8 +6,6 @@
  */
 
 /**
- * useSaveManager Hook
- *
  * Centralized auto-save manager that:
  * - Handles debounced auto-save for any saveable entity
  * - Registers with centralized save store for app-wide Ctrl/Cmd+S

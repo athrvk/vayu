@@ -6,8 +6,6 @@
  */
 
 /**
- * useSpecDocumentLimit
- *
  * The engine cap an imported OpenAPI document - and everything bundled into it
  * (issue #649) - has to fit inside: `maxSpecDocumentBytes`.
  *
