@@ -25,21 +25,17 @@ export interface RailButtonProps {
 	hint?: string;
 	children: React.ReactNode;
 	/**
-	 * Which window edge this button's rail sits on - which side the active
-	 * indicator (for the `"indicator"` variant) paints on, and which side the
-	 * tooltip opens on. The tooltip always opens away from the window edge:
-	 * a rail on the right edge whose tooltip opened further right would run
-	 * off-screen.
+	 * Which window edge the rail sits on: where the `"indicator"` bar paints, and where the tooltip
+	 * opens, always away from the edge (a right-rail tooltip opening further right would run
+	 * off-screen).
 	 */
 	side: "left" | "right";
 	/**
-	 * `"indicator"` paints a 2px accent bar on `side` when active and nothing
-	 * else - the IntelliJ/VS Code convention for a rail's current item - so
-	 * the rail never reads as a row of filled tiles. `ActivityRail` uses this:
-	 * one mutually-exclusive choice of what the Drawer shows.
-	 * `"tile"` is the app's ordinary icon-toggle look (`bg-accent`), for a
-	 * multi-select set of buttons rather than one current item -
-	 * `ContextRail`'s sections, any of which can be expanded at once.
+	 * `"indicator"` paints a 2px accent bar on `side` when active and nothing else, the IntelliJ/VS
+	 * Code convention for a rail's current item, so the rail never reads as filled tiles:
+	 * `ActivityRail`'s one mutually-exclusive choice of what the Drawer shows. `"tile"` is the
+	 * ordinary icon-toggle look (`bg-accent`) for a multi-select set: `ContextRail`'s sections, any
+	 * of which can be expanded.
 	 */
 	variant: "indicator" | "tile";
 	/** Roving tabindex: -1 for every button but the one arrow keys would land on. */
@@ -47,10 +43,8 @@ export interface RailButtonProps {
 }
 
 /**
- * The icon-only button shared by `ActivityRail` and `ContextRail`.
- *
- * Both rails need the same accessible-name-from-`label`, shortcut-out-of-the-name
- * shape (issue #1615).
+ * The icon-only button of `ActivityRail` and `ContextRail`: the name from `label`, the shortcut
+ * kept out of it (#1615).
  */
 export function RailButton({
 	active,
@@ -85,26 +79,23 @@ export function RailButton({
 					onClick={onClick}
 					aria-label={label}
 					aria-pressed={active}
-					// Lets the overlay panel hand focus back here and ignore the press
-					// that is about to toggle it - see `useOverlayPanel`.
+					// Lets the overlay panel hand focus back here and ignore the press about to
+					// toggle it (`useOverlayPanel`).
 					data-rail-side={side}
 					tabIndex={tabIndex}
 					className={cn(
-						// Explicit property list, not `transition-colors`: this is a
-						// hand-rolled button with no `[data-slot="button"]`, so it misses
-						// the baseline's `scale` press-feedback transition (`index.css`) -
-						// added here instead, same duration as the colour properties.
+						// Explicit property list, not `transition-colors`: a hand-rolled button has
+						// no `[data-slot="button"]`, so it misses the baseline's `scale` press
+						// transition (`index.css`), added here at the colours' duration.
 						//
-						// `h-band` (issue #1679), not `h-9`: this button fills the rail's
-						// own width top to bottom, and the rail is chrome, not a list -
-						// its buttons take the same floor the tab strip and drawer
-						// header do rather than riding the spacing rhythm.
-						// `group`: this is a hand-rolled button with no
-						// `[data-slot="button"]`, and the `Icon motion` block in
-						// `index.css` gates every `data-icon-motion` rule on the
-						// `:hover` / `:focus-visible` of a Button or a `group`
-						// ancestor. Without it the rail's glyphs carry the attribute
-						// and never move - dead CSS that looks wired up.
+						// `h-band` (#1679), not `h-9`: the button fills the rail's width top to
+						// bottom, and the rail is chrome, not a list, so it takes the tab strip's
+						// and drawer header's floor, not the spacing rhythm.
+						//
+						// `group`: the `Icon motion` block in `index.css` gates every
+						// `data-icon-motion` rule on the `:hover` / `:focus-visible` of a Button or
+						// a `group` ancestor; without it the glyphs carry the attribute and never
+						// move, dead CSS that looks wired up.
 						"group relative flex items-center justify-center w-full h-band text-xs",
 						"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 						variant === "tile" && "rounded-md",

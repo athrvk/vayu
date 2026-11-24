@@ -8,17 +8,14 @@
 /**
  * The context bar: a frame, and a list of sections for the active tab.
  *
- * The sections come from a registry (`context-bar/registry.ts`); this file owns
- * the landmark, the resize handle, the header, the scroll container and the
- * per-section collapse state, and nothing about what any section shows.
+ * The sections come from a registry (`context-bar/registry.ts`); this file owns the landmark, the
+ * resize handle, the header, the scroll container and the per-section collapse state, and nothing
+ * about what any section shows.
  *
- * A section's component is mounted only while its section is expanded, so a
- * collapsed section runs no queries - see `Section.tsx`. Collapse state is
- * persisted per section id in `layout-store`, beside `contextBarWidth`.
- *
- * What each section says it has to say - `useRelevance` - is read here too, in
- * `ContextBarSectionSlot` below, which is the only part of the bar that knows a
- * section can be quiet or absent.
+ * A section's component is mounted only while it is expanded, so a collapsed section runs no
+ * queries (`Section.tsx`). Collapse state is persisted per section id in `layout-store`, beside
+ * `contextBarWidth`. Each section's `useRelevance` is read in `ContextBarSectionSlot`, the only
+ * part of the bar that knows a section can be quiet or absent.
  */
 
 import { Suspense } from "react";
@@ -48,9 +45,7 @@ interface ContextBarProps {
 }
 
 /**
- * The relevance of a section that declares none: it always has content.
- *
- * A hook rather than a constant so that the one call site below stays
+ * The relevance of a section that declares none. A hook, not a constant, so the call stays
  * unconditional.
  */
 function useAlwaysContent(): SectionRelevance {
@@ -65,22 +60,15 @@ interface ContextBarSectionSlotProps {
 }
 
 /**
- * One section's slot: what it has to say, and the frame that goes with the
- * answer.
+ * One section's slot: what it has to say, and the frame for that answer.
  *
- * The `useRelevance` call lives in a component of its own rather than in the
- * loop that renders it, because the applicable section list changes with the
- * tab, and a hook called once per member of a list whose length changes is the
- * rules of hooks broken. A component per section, keyed by the section id -
- * unique, and pinned so by `registry.test.tsx` - gives every hook a mount of its
- * own: React unmounts the slot when its id leaves the list, so no instance ever
- * ends up calling a different section's hook in the same position.
+ * `useRelevance` is called in a component of its own, not in the loop, because the applicable list
+ * changes with the tab and a hook called once per member of a changing list breaks the rules of
+ * hooks. Keyed by section id (unique, pinned by `registry.test.tsx`), each slot unmounts when its
+ * id leaves the list, so no instance ever calls another section's hook in the same position.
  */
 function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarSectionSlotProps) {
-	// A section that declares no relevance has content by definition. The
-	// fallback is itself a hook so that this call is unconditional; which hook it
-	// is cannot change for the life of the slot, because the id it is keyed by
-	// cannot.
+	// Which hook this is cannot change for the slot's life, because the id it is keyed by cannot.
 	const useRelevance = section.useRelevance ?? useAlwaysContent;
 	const relevance = useRelevance(tab);
 
@@ -92,11 +80,11 @@ function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarS
 	const { Component } = section;
 	return (
 		<ContextBarSectionFrame title={section.title} expanded={expanded} onToggle={onToggle}>
-			{/* Per section, not around the list: a section whose code is still
-			    arriving must not blank the ones already on screen. `SectionLoading`
-			    is what a section shows while its own query is in flight, so a
-			    loading chunk reads the same as loading data - which, to the reader,
-			    it is. */}
+			{/*
+			 * Per section, not around the list: a section whose code is still arriving must not
+			 * blank the ones on screen. `SectionLoading` is what a section shows while its query is
+			 * in flight, so a loading chunk reads as loading data, which to the reader it is.
+			 */}
 			<Suspense fallback={<SectionLoading />}>
 				<Component tab={tab} />
 			</Suspense>
@@ -116,9 +104,8 @@ export function ContextBar({ mode = "push", siblingMode = "push" }: ContextBarPr
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const panelRef = useOverlayPanel({ panel: "context", mode, siblingMode });
 
-	// Nothing to show is a different case from closed (below): it never
-	// animates, because there is nothing behind it to reveal - a tab with no
-	// applicable section is not "collapsed", it just has no bar.
+	// A tab with no applicable section has no bar, unlike closed (below): it never animates, as
+	// there is nothing to reveal.
 	if (!contextBarHasContent(activeTab)) return null;
 
 	// `activeTab` is non-null here: `contextBarHasContent` is false without one.
@@ -126,23 +113,18 @@ export function ContextBar({ mode = "push", siblingMode = "push" }: ContextBarPr
 	const tab = activeTab!;
 
 	return (
-		// `Collapsible` only wires `contextBarOpen` to Radix's open/closed
-		// machinery - `asChild` on both it and `CollapsibleContent` (used
-		// directly, not the vertical-only wrapper in `collapsible.tsx`) means
-		// neither renders a DOM node of its own, so the `<aside>` below *is*
-		// the animated element rather than sitting inside two wrapper divs -
-		// closed-and-settled is still nothing in the tree, exactly as the
-		// plain `return null` it replaces was.
+		// `asChild` on both `Collapsible` and `CollapsibleContent` (used directly, not
+		// `collapsible.tsx`'s vertical-only wrapper) means neither renders a node, so the `<aside>`
+		// itself is the animated element; closed-and-settled is still nothing in the tree.
 		<Collapsible asChild open={contextBarOpen} onOpenChange={setContextBarOpen}>
 			<CollapsiblePrimitive.CollapsibleContent asChild className="rail-collapse">
-				{/* <aside>, so the bar is a landmark a screen reader can jump to, the
-				   same way the Drawer facing it across the window already is. It was
-				   an anonymous <div>, so the left panel could be reached by landmark
-				   navigation and the right one could not.
-
-				   No `border-l` here: the resize handle paints its own 1px hairline,
-				   and the two together drew a doubled 2px edge - the Drawer's
-				   identical handle is what the single line should look like. */}
+				{/*
+				 * <aside>, so the bar is a landmark a screen reader can jump to, like the Drawer
+				 * facing it.
+				 *
+				 * No `border-l`: the resize handle paints its own 1px hairline, and a border beside
+				 * it doubles the edge to 2px.
+				 */}
 				<aside
 					ref={panelRef}
 					className={cn(
@@ -175,27 +157,23 @@ export function ContextBar({ mode = "push", siblingMode = "push" }: ContextBarPr
 						/>
 					</div>
 
-					{/* The sections.
-
-					    The scroll lives here rather than on the root. With it on the
-					    root, the root was both the scroll container and the handle's
-					    positioning context, so scrolling the list carried the drag
-					    strip, the header and the close button out of view and left the
-					    lower edge un-draggable - `Drawer.tsx` puts the overflow on an
-					    inner wrapper for exactly this reason. `min-h-0` because a flex
-					    child's default `min-height: auto` refuses to shrink below its
-					    content, which would push the overflow back up to the root. */}
+					{/*
+					 * The sections. The scroll lives here, not on the root: the root is the
+					 * handle's positioning context, so scrolling it would carry the drag strip, the
+					 * header and the close button out of view and leave the lower edge undraggable
+					 * (`Drawer.tsx` does the same). `min-h-0` because a flex child's default
+					 * `min-height: auto` will not shrink below its content, which would push the
+					 * overflow back to the root.
+					 */}
 					<div
 						className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border"
-						// Where the Context Rail's `scrollWithin` call scrolls, and
-						// nothing above it - see `app/CLAUDE.md`'s "Reveal inside the
-						// scroller you mean" rule (#1612).
+						// Where the Context Rail's `scrollWithin` scrolls, and nothing above it
+						// (app/CLAUDE.md, "Reveal inside the scroller you mean", #1612).
 						data-context-bar-scroller
 					>
 						{sections.map((section) => (
-							// The wrapper, not `ContextBarSectionSlot` itself, carries the
-							// anchor: a "hidden" relevance verdict renders nothing at all,
-							// and an id on an element that may not exist is not a scroll
+							// The wrapper carries the anchor, not the slot: a "hidden" verdict
+							// renders nothing, and an element that may not exist is no scroll
 							// target.
 							<div key={section.id} data-context-bar-section={section.id}>
 								<ContextBarSectionSlot

@@ -6,25 +6,21 @@
  */
 
 /**
- * What a side panel does while it floats over the content instead of pushing
- * it (#3507), shared by `Drawer` and `ContextBar` so the two cannot drift.
+ * What a side panel does while it floats over the content instead of pushing it (#3507), shared by
+ * `Drawer` and `ContextBar` so the two cannot drift.
  *
- * - One overlay at a time. A panel that starts showing as an overlay - opened,
- *   or brought on screen by a tab switch - closes the other if that one is
- *   overlaying too, so the most recent wins. This watches the stores rather than
- *   the actions that cause the change, so the rail button, the chords, the
- *   palette and `revealDrawerView` are all covered without each knowing the
- *   rule. It is a store subscription and not a render effect because a reveal
- *   can reopen the loser in the very flush that closed it, a round trip a
- *   render never sees. Where nothing opened (the first render, or a resize that
- *   turned both into overlays) the drawer stays. A panel that pushes is never
- *   closed here: it takes layout space of its own, and a panel that only
- *   overlays has its persisted open flag written false when it loses.
- * - Escape closes it when focus is inside and nothing of its own is open above
- *   it, and focus goes back to the rail button that toggles it.
- * - A pointer press outside closes it. Heard in the capture phase and never
- *   cancelled, so the click that dismissed it still lands on what it was aimed
- *   at.
+ * - One overlay at a time. A panel that starts showing as an overlay (opened, or brought on screen
+ *   by a tab switch) closes the other if that one overlays too, so the most recent wins. This
+ *   watches the stores, not the actions, so the rail button, the chords, the palette and
+ *   `revealDrawerView` are covered without knowing the rule; a store subscription, not a render
+ *   effect, because a reveal can reopen the loser in the very flush that closed it, a round trip a
+ *   render never sees. Where nothing opened (the first render, or a resize that made both overlays)
+ *   the drawer stays. A pushing panel is never closed here: it takes layout space of its own, and
+ *   only an overlaying panel has its persisted open flag written false when it loses.
+ * - Escape closes it when focus is inside and nothing of its own is open above it, and focus goes
+ *   back to the rail button that toggles it.
+ * - A pointer press outside closes it, heard in the capture phase and never cancelled, so the
+ *   dismissing click still lands on what it was aimed at.
  */
 
 import { useEffect, useRef } from "react";
@@ -42,9 +38,8 @@ const RAIL_SIDE: Record<OverlayPanelId, "left" | "right"> = { drawer: "left", co
 const SIBLING: Record<OverlayPanelId, OverlayPanelId> = { drawer: "context", context: "drawer" };
 
 /**
- * A menu, popover, select or dialog. Radix gives each of them one of these
- * roles on its content, which is portalled out of the panel - so a press on a
- * menu item is outside the panel's DOM and still belongs to it.
+ * A menu, popover, select or dialog: Radix gives each content one of these roles, and portals it
+ * out of the panel, so a press on a menu item is outside the panel's DOM and still belongs to it.
  */
 const FLOATING_LAYER = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]';
 
@@ -67,8 +62,8 @@ function closePanel(panel: OverlayPanelId): void {
 }
 
 /**
- * The rail button that toggles `panel`: the lit one, else the rail's roving
- * stop. The context rail has one button per section and none is "the" opener.
+ * The rail button that toggles `panel`: the lit one, else the rail's roving stop, since the context
+ * rail has a button per section and none is "the" opener.
  */
 function railButtonFor(panel: OverlayPanelId): HTMLElement | null {
 	const buttons = Array.from(
@@ -94,13 +89,13 @@ function hasOpenFloatingLayer(): boolean {
 }
 
 function shouldEscapeDismiss(e: KeyboardEvent, panelEl: HTMLElement | null): boolean {
-	// Radix cancels the Escape it acts on, so a menu or popover that just closed
-	// itself has already answered this one.
+	// Radix cancels the Escape it acts on, so a menu or popover that just closed has answered this
+	// one.
 	if (e.key !== "Escape" || e.defaultPrevented || !panelEl) return false;
 	const active = document.activeElement;
 	if (!(active instanceof HTMLElement) || !panelEl.contains(active)) return false;
-	// A field owns its Escape (cancel a rename, abandon a new name); the same
-	// press must not also take the panel away.
+	// A field owns its Escape (cancel a rename, abandon a new name); the press must not also close
+	// the panel.
 	if (isTextEntryTarget(active)) return false;
 	return !isModalOpen() && !hasOpenFloatingLayer();
 }
@@ -111,12 +106,11 @@ function shouldPointerDismiss(
 	panelEl: HTMLElement | null
 ): boolean {
 	if (!(target instanceof Element) || !panelEl || panelEl.contains(target)) return false;
-	// The rail's own button toggles the panel on click; closing it on the press
-	// as well would have the click open it again.
+	// The rail's own button toggles the panel on click; closing on the press too would reopen it.
 	if (target.closest(`[data-rail-side="${RAIL_SIDE[panel]}"]`)) return false;
 	if (isModalOpen() || target.closest(FLOATING_LAYER)) return false;
-	// A press that dismisses a menu is the menu's. A modal Radix menu leaves the
-	// body unclickable, so its target can be `<html>`, outside every layer.
+	// A press that dismisses a menu is the menu's. A modal Radix menu leaves the body unclickable,
+	// so the target can be `<html>`, outside every layer.
 	return !hasOpenFloatingLayer();
 }
 
@@ -153,9 +147,8 @@ export function useOverlayPanel(options: OverlayPanelOptions) {
 	const panelRef = useRef<HTMLElement>(null);
 	useOneOverlayAtATime(options);
 
-	// Subscribed, so the listeners below attach on the transition. A context bar
-	// with nothing to show has no element (`panelRef` is null), so its listeners
-	// are inert without asking.
+	// Subscribed, so the listeners below attach on the transition. A context bar with nothing to
+	// show has no element (`panelRef` is null), so its listeners are inert without asking.
 	const open = useLayoutStore((s) => (panel === "drawer" ? s.drawerOpen : s.contextBarOpen));
 	const overlaying = mode === "overlay" && open;
 

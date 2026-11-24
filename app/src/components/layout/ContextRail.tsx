@@ -6,36 +6,24 @@
  */
 
 /**
- * The right-edge counterpart to `ActivityRail` (#1615): one icon per section
- * the context bar has for the active tab, so reaching a given section is one
- * click instead of toggle-then-scroll-then-expand.
+ * The right-edge counterpart to `ActivityRail` (#1615): one icon per section the context bar has
+ * for the active tab, so reaching a section is one click instead of toggle, scroll, expand.
  *
- * Icons come straight from `CONTEXT_BAR_SECTIONS` (`context-bar/registry.ts`),
- * the same list the bar itself draws from - one registry, so the rail and the
- * bar cannot drift the way two hand-kept lists would.
+ * Icons come from `CONTEXT_BAR_SECTIONS` (`context-bar/registry.ts`), the list the bar draws from,
+ * so the rail and the bar cannot drift.
  *
- * Clicking a section's icon opens the bar if it is closed, expands that
- * section if it is collapsed, and scrolls it into view inside the bar's own
- * scroller with `scrollWithin` (`@/lib/scroll-within`, #1612) - never
- * `Element.scrollIntoView`, which would walk the shell's `overflow: hidden`
- * ancestors the way the settings pane's reveal bug did. Clicking the icon of
- * the section that is the only one expanded collapses the whole bar, which is
- * this rail's answer to a dedicated close button - ⌘I still toggles the bar
- * outright.
+ * A click opens the bar if closed, expands the section if collapsed, and scrolls it into view
+ * inside the bar's scroller with `scrollWithin` (`@/lib/scroll-within`, #1612), never
+ * `Element.scrollIntoView`, which would walk the shell's `overflow: hidden` ancestors. Clicking the
+ * only expanded section's icon closes the whole bar, this rail's close button; ⌘I still toggles the
+ * bar outright.
  *
- * One Tab stop for the whole rail, Up/Down between the section buttons - the
- * roving model `ActivityRail` uses (`useRovingStop`), so a page with several
- * sections is not several Tab presses to get past.
+ * One Tab stop for the rail, Up/Down between sections, `ActivityRail`'s roving model
+ * (`useRovingStop`), so several sections are not several Tab presses to get past.
  *
- * Present in both `ContextBar` layout modes: below `CONTEXT_BAR_PUSH_MIN_WIDTH` the bar overlays
- * `main` rather than pushing it, but the rail is a normal flex child beside
- * that overlay (`Shell.tsx`), never inside the positioned box the bar
- * overlays from - so it stays reachable exactly where it always is.
- *
- * No AppRegion of its own, unlike `ActivityRail`: the issue that added this
- * rail names the left one as the F6 cycle's fifth stop and says nothing about
- * this one, and the bar it fronts is already a stop (`region-focus.ts`'s
- * `"context"`).
+ * Present in both `ContextBar` modes: below `CONTEXT_BAR_PUSH_MIN_WIDTH` the bar overlays `main`,
+ * but the rail is a flex child beside that overlay (`Shell.tsx`), never inside its positioned box,
+ * so it stays where it always is.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -48,31 +36,25 @@ import { RailButton } from "./RailButton";
 import { regionProps } from "./region-focus";
 import { useRovingStop } from "./useRovingStop";
 
-/** A section that declares no relevance hook has content by definition - the
- *  same fallback `ContextBarSectionSlot` (`ContextBar.tsx`) uses, duplicated
- *  rather than imported: it is a one-line stand-in, and importing a component
- *  file's internal here for it would be the bigger coupling. */
+/**
+ * No relevance hook means content, as in `ContextBarSectionSlot` (`ContextBar.tsx`); duplicated, as
+ * importing a component file's internal for one line is the bigger coupling.
+ */
 function useAlwaysContent(): SectionRelevance {
 	return "content";
 }
 
 /**
- * Calls one section's relevance hook and reports the verdict up, without
- * rendering anything of its own.
+ * Calls one section's relevance hook and reports the verdict up, rendering nothing.
  *
- * A component of its own, not a loop over `sections` in `ContextRail` itself,
- * for the same rules-of-hooks reason `ContextBarSectionSlot` is: the
- * applicable section list changes with the tab, so a hook called at list
- * position N in one render and position N in a differently-shaped list next
- * render is not the same hook call. Keyed by `section.id` (stable, unique -
- * `registry.test.tsx` pins it), every instance keeps its own hook identity
- * across a section list that grows, shrinks or reorders.
+ * A component per section, not a loop in `ContextRail`, for `ContextBarSectionSlot`'s
+ * rules-of-hooks reason: the section list changes with the tab. Keyed by `section.id` (stable,
+ * unique, pinned by `registry.test.tsx`), each instance keeps its hook identity as the list grows,
+ * shrinks or reorders.
  *
- * Calling the same relevance hook a second time (once here, once in
- * `ContextBarSectionSlot`) is not a second query: `SectionRelevanceHook`'s own
- * contract (`types.ts`) is to read the same cache entry the section component
- * reads, which is the whole point of it being a hook rather than a plain
- * function.
+ * Calling the relevance hook here and in `ContextBarSectionSlot` is not a second query: the
+ * `SectionRelevanceHook` contract (`types.ts`) is to read the section component's cache entry,
+ * which is why it is a hook and not a function.
  */
 function RelevanceReporter({
 	section,
@@ -102,8 +84,8 @@ export function ContextRail() {
 	const sections = sectionsForTab(activeTab);
 	const navRef = useRef<HTMLElement>(null);
 
-	// The stop follows the first expanded section, or the first section when the
-	// user has collapsed them all - the rail must never be left with no stop.
+	// The stop follows the first expanded section, or the first section when all are collapsed: the
+	// rail must never have no stop.
 	const sectionIds = sections.map((s) => s.id);
 	const firstExpanded = sectionIds.find((id) => !contextBarCollapsedSections.includes(id));
 	const [rovingSection, setRovingSection] = useRovingStop(
@@ -111,8 +93,10 @@ export function ContextRail() {
 		sectionIds
 	);
 
-	/** Up/Down move focus along the rail without activating, as `ActivityRail`'s
-	 *  handler does: arrowing past a section must not toggle it. */
+	/**
+	 * Up/Down move focus without activating, as in `ActivityRail`: arrowing past a section must not
+	 * toggle it.
+	 */
 	const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
 		if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
 
@@ -130,25 +114,19 @@ export function ContextRail() {
 		buttons[next].focus();
 	};
 
-	// Read by `onSectionClick` only, never for rendering - a ref rather than
-	// state, so a relevance answer settling does not itself cost a render.
+	// Read only by `onSectionClick`, never to render: a ref, so a settling relevance costs no
+	// render.
 	const relevanceRef = useRef<Map<string, SectionRelevance>>(new Map());
 	const onRelevance = useCallback((id: string, relevance: SectionRelevance) => {
 		relevanceRef.current.set(id, relevance);
 	}, []);
 
 	/**
-	 * Scroll to `sectionId` once the DOM has actually caught up.
-	 *
-	 * The click handler that calls this has just told two zustand stores to
-	 * open the bar and expand the section - state updates React has not
-	 * committed to the DOM yet at that point in the handler, so a target
-	 * queried synchronously would still be missing or collapsed. A
-	 * `requestAnimationFrame` runs after the browser's next paint, which is
-	 * after React has committed the re-render those `set` calls triggered;
-	 * this is deliberately not a `useEffect` keyed on the store state, which
-	 * would call `setState` from inside an effect body and cascade another
-	 * render for no reason - nothing here is React state to begin with.
+	 * Scroll to `sectionId` once the DOM has caught up. The click handler has just told two stores
+	 * to open the bar and expand the section, which React has not committed yet, so a synchronous
+	 * query would find it missing or collapsed; a `requestAnimationFrame` runs after that commit.
+	 * Not a `useEffect` on the store state: that would `setState` inside an effect and cascade a
+	 * render, and nothing here is React state.
 	 */
 	const scrollToSection = useCallback((sectionId: string) => {
 		requestAnimationFrame(() => {
@@ -161,22 +139,15 @@ export function ContextRail() {
 	const onSectionClick = useCallback(
 		(section: ContextBarSection, sections: readonly ContextBarSection[]) => {
 			const wasCollapsed = contextBarCollapsedSections.includes(section.id);
-			// A section whose relevance is `"hidden"` or `{ empty }` renders
-			// `ContextBarSectionEmptyHeader` (`Section.tsx`) - a plain header with
-			// no trigger - rather than `ContextBarSectionFrame`'s real collapse
-			// chrome. It never enters `contextBarCollapsedSections`, because there
-			// is no toggle to add it with, so counting every section id not in
-			// that list (the old check) treated it as permanently "expanded": on a
-			// tab where any section has nothing to say, `expandedIds.length` could
-			// never fall back to 1, and a rail click could open sections but never
-			// close the bar. `relevanceRef` (`RelevanceReporter` above) is the real
-			// signal; a section this rail has not heard from yet (relevance still
-			// unsettled, or the map genuinely has nothing for it) defaults to
-			// `"content"` rather than being excluded - the same reason
-			// `SectionRelevanceHook`'s own contract picks `"content"` for "not
-			// known yet" (`types.ts`): treating an unsettled section as expanded
-			// is the safer failure (a click that scrolls to it instead of closing
-			// the bar), not the other way around.
+			// Only a section drawing `ContextBarSectionFrame`'s collapse chrome can count as
+			// expanded. A `{ empty }` verdict draws `ContextBarSectionEmptyHeader` (`Section.tsx`)
+			// and a `"hidden"` one nothing; neither has a toggle, so neither ever enters
+			// `contextBarCollapsedSections`, and counting every id not in it would leave
+			// `expandedIds.length` unable to reach 1 and a click unable to close the bar.
+			// `relevanceRef` is the signal. A section not heard from yet defaults to `"content"`,
+			// as the `SectionRelevanceHook` contract does for "not known yet" (`types.ts`): an
+			// unsettled section taken as expanded fails safe, a click that scrolls to it instead of
+			// closing the bar.
 			const expandedIds = sections
 				.filter((s) => {
 					if (contextBarCollapsedSections.includes(s.id)) return false;
@@ -205,8 +176,7 @@ export function ContextRail() {
 
 	if (!contextBarHasContent(activeTab)) return null;
 
-	// Non-null past the guard above: `contextBarHasContent` is false without
-	// one, the same reasoning `ContextBar.tsx`'s identical guard uses.
+	// Non-null past the guard: `contextBarHasContent` is false without one, as in `ContextBar.tsx`.
 	const tab = activeTab!;
 
 	return (
@@ -216,13 +186,15 @@ export function ContextRail() {
 			onKeyDown={onKeyDown}
 			className="flex flex-col items-center gap-1 w-[var(--rail-width)] shrink-0 pt-2 border-l border-border bg-panel"
 			aria-label="Context sections"
-			// A stop in the F6 cycle (`region-focus.ts`), as the activity rail is
-			// on the other edge: it is on screen while the bar it opens is closed.
+			// An F6 stop (`region-focus.ts`) like the activity rail: on screen while the bar it
+			// opens is closed.
 			{...regionProps("context-rail")}
 		>
-			{/* Relevance probes, not rendered chrome - `onSectionClick` is the only
-			    reader, and it needs nothing while the bar is closed (opening it
-			    never depends on which sections currently have content). */}
+			{/*
+			 * Relevance probes, not chrome, mounted only while the bar is open: `onSectionClick` is
+			 * their only reader, and opening a closed bar never depends on which sections have
+			 * content.
+			 */}
 			{contextBarOpen &&
 				sections.map((section) => (
 					<RelevanceReporter
