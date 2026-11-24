@@ -113,6 +113,7 @@ add_executable(vayu_tests
     jsonrpc_body_test.cpp
     mcp_body_test.cpp
     mcp_reply_test.cpp
+    mcp_fixture_server_test.cpp
     url_parts_test.cpp
     script_request_url_test.cpp
     script_request_auth_test.cpp

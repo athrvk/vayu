@@ -28,11 +28,19 @@
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
+ *
+ * The discovery and list methods an import reads (#3838) are answered from
+ * what the test configures: `server/discover` (`discover_as`), `tools/list`
+ * in pages (`set_tools`), `resources/list`, `resources/templates/list` and
+ * `prompts/list`. Any other method keeps the `tools/call`-shaped answer above.
+ * Every request is recorded (`calls`), so a test asserts the order of methods
+ * and the cursors a client sent back.
  */
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -41,9 +49,12 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "task_queue.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::tests {
 
@@ -81,21 +92,39 @@ enum class McpReplyOutcome : std::uint8_t {
 /// The scopes the fixture's `403 insufficient_scope` challenge names.
 inline constexpr std::string_view INSUFFICIENT_SCOPES = "db:read db:write";
 
+/// How the fixture answers `server/discover`.
+enum class McpDiscovery : std::uint8_t {
+    /// A result carrying `supportedVersions`, `capabilities` and `serverInfo`.
+    Modern,
+    /// JSON-RPC `-32601` in a `200`, as a legacy server that knows no such method.
+    MethodNotFound,
+    /// The plain-text `400` a legacy-era server answers a modern request with.
+    LegacyBadRequest,
+};
+
+/// One request the fixture received, in arrival order.
+struct McpRecordedCall {
+    /// The body's `method`, empty when the body was not a JSON-RPC object.
+    std::string method;
+    /// The body's `params.cursor`, absent when none was sent.
+    std::optional<std::string> cursor;
+    /// The `Authorization` header as sent, absent when none was.
+    std::optional<std::string> authorization;
+    /// The body as sent.
+    std::string body;
+};
+
+/// The version the fixture's `server/discover` result names.
+inline constexpr std::string_view MCP_DISCOVER_VERSION = "2026-07-28";
+
 class McpFixtureServer {
     public:
     McpFixtureServer () {
         svr_.new_task_queue = pooled_task_queue (2);
         svr_.Post ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
-            McpReplyShape shape     = McpReplyShape::Json;
-            McpReplyOutcome outcome = McpReplyOutcome::Result;
-            {
-                std::lock_guard<std::mutex> lock (mutex_);
-                headers_ = req.headers;
-                shape    = shape_;
-                outcome  = outcome_;
-            }
+            const Settings settings = record (req);
             ++requests_;
-            answer (req, res, shape, outcome);
+            answer (req, res, settings);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -113,14 +142,58 @@ class McpFixtureServer {
     McpFixtureServer (McpFixtureServer&&)                 = delete;
     McpFixtureServer& operator= (McpFixtureServer&&)      = delete;
 
+    int port () const {
+        return port_;
+    }
+
     std::string url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/mcp";
     }
 
     void reply_with (McpReplyShape shape, McpReplyOutcome outcome = McpReplyOutcome::Result) {
         std::lock_guard<std::mutex> lock (mutex_);
-        shape_   = shape;
-        outcome_ = outcome;
+        settings_.shape   = shape;
+        settings_.outcome = outcome;
+    }
+
+    /// How `server/discover` is answered; a modern result by default.
+    void discover_as (McpDiscovery discovery) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.discovery = discovery;
+    }
+
+    /// The tools `tools/list` answers, @p page_size to a page. A page that
+    /// leaves tools behind carries `nextCursor`; 0 answers every tool in one
+    /// page with none. A cursor the fixture did not issue is a `-32602`.
+    void set_tools (nlohmann::json tools, std::size_t page_size = 0) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.tools           = std::move (tools);
+        settings_.tools_page_size = page_size;
+    }
+
+    /// Answers the `tools/list` that sends no cursor as an event stream whose
+    /// last frame carries the result; later pages stay one JSON object.
+    void first_tools_page_as_event_stream (bool on = true) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.first_tools_page_stream = on;
+    }
+
+    /// What `resources/list` answers; one page, no cursor.
+    void set_resources (nlohmann::json resources) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.resources = std::move (resources);
+    }
+
+    /// What `resources/templates/list` answers; one page, no cursor.
+    void set_resource_templates (nlohmann::json templates) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.resource_templates = std::move (templates);
+    }
+
+    /// What `prompts/list` answers; one page, no cursor.
+    void set_prompts (nlohmann::json prompts) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.prompts = std::move (prompts);
     }
 
     /// Calls answered so far.
@@ -138,7 +211,49 @@ class McpFixtureServer {
         return found->second;
     }
 
+    /// Every request received, in arrival order.
+    std::vector<McpRecordedCall> calls () const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return calls_;
+    }
+
+    /// The `method` of every request received, in arrival order.
+    std::vector<std::string> methods () const {
+        std::vector<std::string> methods;
+        for (const auto& call : calls ()) {
+            methods.push_back (call.method);
+        }
+        return methods;
+    }
+
+    /// The `params.cursor` of every `tools/list` received, in arrival order;
+    /// nothing for a request that sent none.
+    std::vector<std::optional<std::string>> tools_list_cursors () const {
+        std::vector<std::optional<std::string>> cursors;
+        for (const auto& call : calls ()) {
+            if (call.method == "tools/list") {
+                cursors.push_back (call.cursor);
+            }
+        }
+        return cursors;
+    }
+
     private:
+    /// What a test configured, copied out per request so an answer reads one
+    /// consistent set while the test may reconfigure.
+    struct Settings {
+        McpReplyShape shape               = McpReplyShape::Json;
+        McpReplyOutcome outcome           = McpReplyOutcome::Result;
+        McpDiscovery discovery            = McpDiscovery::Modern;
+        nlohmann::json tools              = nlohmann::json::array ();
+        std::size_t tools_page_size       = 0;
+        bool first_tools_page_stream      = false;
+        nlohmann::json resources          = nlohmann::json::array ();
+        nlohmann::json resource_templates = nlohmann::json::array ();
+        nlohmann::json prompts            = nlohmann::json::array ();
+    };
+
+    static constexpr std::string_view CURSOR_PREFIX   = "cursor-";
     static constexpr std::string_view SENTINEL_PREFIX = "=?base64?";
     static constexpr std::string_view SENTINEL_SUFFIX = "?=";
 
@@ -266,14 +381,123 @@ class McpFixtureServer {
         res.set_content (stream, "text/event-stream");
     }
 
-    static void answer (const httplib::Request& req,
-    httplib::Response& res,
-    McpReplyShape shape,
-    McpReplyOutcome outcome) {
+    static nlohmann::json result_frame (const nlohmann::json& id, nlohmann::json result) {
+        return { { "jsonrpc", "2.0" }, { "id", id }, { "result", std::move (result) } };
+    }
+
+    static nlohmann::json
+    error_frame (const nlohmann::json& id, int code, const std::string& message) {
+        return { { "jsonrpc", "2.0" }, { "id", id },
+            { "error", { { "code", code }, { "message", message } } } };
+    }
+
+    static void send_error (httplib::Response& res,
+    const nlohmann::json& id,
+    int status,
+    int code,
+    const std::string& message) {
+        res.status = status;
+        res.set_content (error_frame (id, code, message).dump (), "application/json");
+    }
+
+    static nlohmann::json discover_result () {
+        return { { "supportedVersions", nlohmann::json::array ({ MCP_DISCOVER_VERSION }) },
+            { "capabilities",
+            { { "tools", nlohmann::json::object () }, { "resources", nlohmann::json::object () },
+            { "prompts", nlohmann::json::object () } } },
+            { "serverInfo", { { "name", "vayu-fixture" }, { "version", "1.0.0" } } } };
+    }
+
+    static std::string cursor_at (std::size_t offset) {
+        return std::string (CURSOR_PREFIX) + std::to_string (offset);
+    }
+
+    /// Where the page a @p cursor names starts, or nothing when the fixture
+    /// never issued it.
+    static std::optional<std::size_t>
+    cursor_offset (const std::string& cursor, std::size_t total, std::size_t page_size) {
+        if (page_size == 0 || !cursor.starts_with (CURSOR_PREFIX)) {
+            return std::nullopt;
+        }
+        const auto offset = vayu::utils::parse_number<std::size_t> (
+        std::string_view (cursor).substr (CURSOR_PREFIX.size ()));
+        if (!offset || *offset == 0 || *offset >= total || *offset % page_size != 0) {
+            return std::nullopt;
+        }
+        return offset;
+    }
+
+    static nlohmann::json tools_page_frame (const nlohmann::json& call,
+    const nlohmann::json& id,
+    const Settings& settings) {
+        const std::size_t total = settings.tools.size ();
+        std::size_t offset      = 0;
+        if (const auto cursor =
+            string_at (call, nlohmann::json::json_pointer ("/params/cursor"))) {
+            const auto start = cursor_offset (*cursor, total, settings.tools_page_size);
+            if (!start) {
+                return error_frame (id, -32602, "Invalid cursor: " + *cursor);
+            }
+            offset = *start;
+        }
+        const std::size_t end = settings.tools_page_size == 0 ?
+        total :
+        std::min (total, offset + settings.tools_page_size);
+        nlohmann::json page   = nlohmann::json::array ();
+        for (std::size_t at = offset; at < end; ++at) {
+            page.push_back (settings.tools.at (at));
+        }
+        nlohmann::json result{ { "tools", std::move (page) } };
+        if (end < total) {
+            result["nextCursor"] = cursor_at (end);
+        }
+        return result_frame (id, std::move (result));
+    }
+
+    /// The answer to a discovery or list method the fixture knows, or nothing
+    /// for any other method.
+    static std::optional<nlohmann::json> known_method_frame (
+    const std::optional<std::string>& method,
+    const nlohmann::json& call,
+    const nlohmann::json& id,
+    const Settings& settings) {
+        if (method == "server/discover") {
+            return std::make_optional (result_frame (id, discover_result ()));
+        }
+        if (method == "tools/list") {
+            return std::make_optional (tools_page_frame (call, id, settings));
+        }
+        if (method == "resources/list") {
+            return std::make_optional (
+            result_frame (id, { { "resources", settings.resources } }));
+        }
+        if (method == "resources/templates/list") {
+            return std::make_optional (result_frame (
+            id, { { "resourceTemplates", settings.resource_templates } }));
+        }
+        if (method == "prompts/list") {
+            return std::make_optional (
+            result_frame (id, { { "prompts", settings.prompts } }));
+        }
+        return std::nullopt;
+    }
+
+    static McpReplyShape known_method_shape (const std::optional<std::string>& method,
+    const nlohmann::json& call,
+    const Settings& settings) {
+        const bool first_tools_page = method == "tools/list" &&
+        !string_at (call, nlohmann::json::json_pointer ("/params/cursor"));
+        return first_tools_page && settings.first_tools_page_stream ?
+        McpReplyShape::EventStream :
+        McpReplyShape::Json;
+    }
+
+    /// Answers a legacy-era refusal that needs no look at the body; true when it did.
+    static bool refuse_before_parsing (httplib::Response& res, McpReplyOutcome outcome) {
         if (outcome == McpReplyOutcome::LegacyBadRequest) {
             res.status = 400;
             res.set_content ("Bad Request: No valid session ID provided", "text/plain");
-            return;
+            return true;
         }
         if (outcome == McpReplyOutcome::InsufficientScope) {
             res.status = 403;
@@ -281,33 +505,86 @@ class McpFixtureServer {
             "Bearer error=\"insufficient_scope\", scope=\"" +
             std::string (INSUFFICIENT_SCOPES) + "\"");
             res.set_content ("Forbidden", "text/plain");
+            return true;
+        }
+        return false;
+    }
+
+    /// Answers `server/discover` as a legacy server would; false when the
+    /// fixture is to answer it as a modern one.
+    static bool refuse_discovery (httplib::Response& res,
+    const nlohmann::json& id,
+    McpDiscovery discovery) {
+        if (discovery == McpDiscovery::MethodNotFound) {
+            res.set_content (error_frame (id, -32601, "Method not found").dump (),
+            "application/json");
+            return true;
+        }
+        if (discovery == McpDiscovery::LegacyBadRequest) {
+            res.status = 400;
+            res.set_content ("Bad Request: No valid session ID provided", "text/plain");
+            return true;
+        }
+        return false;
+    }
+
+    static std::optional<std::string>
+    body_string (const nlohmann::json& body, const char* at) {
+        return body.is_object () ?
+        string_at (body, nlohmann::json::json_pointer (at)) :
+        std::nullopt;
+    }
+
+    static McpRecordedCall recorded_call (const httplib::Request& req) {
+        const auto body = nlohmann::json::parse (req.body, nullptr, false);
+        McpRecordedCall call;
+        call.method = body_string (body, "/method").value_or ("");
+        call.cursor = body_string (body, "/params/cursor");
+        call.body   = req.body;
+        if (req.has_header ("Authorization")) {
+            call.authorization = req.get_header_value ("Authorization");
+        }
+        return call;
+    }
+
+    /// Notes the request and answers the settings it is to be answered by.
+    Settings record (const httplib::Request& req) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        headers_ = req.headers;
+        calls_.push_back (recorded_call (req));
+        return settings_;
+    }
+
+    static void
+    answer (const httplib::Request& req, httplib::Response& res, const Settings& settings) {
+        if (refuse_before_parsing (res, settings.outcome)) {
             return;
         }
         const auto call = nlohmann::json::parse (req.body, nullptr, false);
         const nlohmann::json id =
         call.is_object () ? call.value ("id", nlohmann::json ()) : nlohmann::json ();
         if (!call.is_object ()) {
-            res.status = 400;
-            res.set_content (
-            nlohmann::json{ { "jsonrpc", "2.0" }, { "id", id },
-            { "error", { { "code", -32700 }, { "message", "Parse error" } } } }
-            .dump (),
-            "application/json");
+            send_error (res, id, 400, -32700, "Parse error");
+            return;
+        }
+        const auto method = string_at (call, nlohmann::json::json_pointer ("/method"));
+        if (method == "server/discover" && refuse_discovery (res, id, settings.discovery)) {
             return;
         }
         if (const auto reason = header_mismatch (req, call)) {
-            res.status = 400;
-            res.set_content (
-            nlohmann::json{ { "jsonrpc", "2.0" }, { "id", id },
-            { "error", { { "code", -32020 }, { "message", "Header mismatch: " + *reason } } } }
-            .dump (),
-            "application/json");
+            send_error (res, id, 400, -32020, "Header mismatch: " + *reason);
             return;
         }
-        if (outcome == McpReplyOutcome::UnsupportedVersion) {
+        if (settings.outcome == McpReplyOutcome::Result) {
+            if (const auto known = known_method_frame (method, call, id, settings)) {
+                send_frame (res, *known, known_method_shape (method, call, settings));
+                return;
+            }
+        }
+        if (settings.outcome == McpReplyOutcome::UnsupportedVersion) {
             res.status = 400;
         }
-        send_frame (res, response_frame (id, outcome), shape);
+        send_frame (res, response_frame (id, settings.outcome), settings.shape);
     }
 
     httplib::Server svr_;
@@ -315,8 +592,8 @@ class McpFixtureServer {
     std::thread thread_;
     mutable std::mutex mutex_;
     httplib::Headers headers_;
-    McpReplyShape shape_     = McpReplyShape::Json;
-    McpReplyOutcome outcome_ = McpReplyOutcome::Result;
+    Settings settings_;
+    std::vector<McpRecordedCall> calls_;
     std::atomic<std::size_t> requests_{ 0 };
 };
 
