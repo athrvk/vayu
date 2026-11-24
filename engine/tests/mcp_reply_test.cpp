@@ -922,10 +922,10 @@ class McpReplyRunTest : public ::testing::Test {
 /// one a legacy-era `400` (a transport failure under a 4xx), the rest succeed.
 std::vector<McpReplyOutcome> mixed_turns () {
     std::vector<McpReplyOutcome> turns (40, McpReplyOutcome::Result);
-    for (const size_t call : { 3, 13, 23, 33 }) {
+    for (const size_t call : { 3U, 13U, 23U, 33U }) {
         turns.at (call) = McpReplyOutcome::ToolError;
     }
-    for (const size_t call : { 7, 27 }) {
+    for (const size_t call : { 7U, 27U }) {
         turns.at (call) = McpReplyOutcome::RpcError;
     }
     turns.at (19) = McpReplyOutcome::LegacyBadRequest;
