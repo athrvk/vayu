@@ -50,6 +50,16 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   fails on a `json::parse (req.body)` (or `request_body`, `body`) anywhere
   under `src/http/routes`, so a new handler cannot skip the helper. It has no
   exemption list because no route needs one; `routes.hpp` holds the one parse.
+- **A public header never calls `min` or `max` unparenthesized.** `NOMINMAX` is
+  PRIVATE to `vayu_core`, so a test that includes `<curl/curl.h>` or
+  `<httplib.h>` first gets `windows.h`'s `min`/`max` macros on MSVC, and
+  `std::min (a, b)` or `numeric_limits<T>::max ()` in an engine header fails
+  there with C2589 while every Linux and macOS build stays green. Write
+  `(std::min) (a, b)`, `(std::max) (a, b)` and `(std::numeric_limits<T>::max) ()`;
+  for a bare constant use `SIZE_MAX` or `INT64_MAX`, since clang-tidy refuses
+  redundant parentheses around a whole initializer.
+  `tests/header_min_max_scan_test.cpp` scans `include/` for a name followed by
+  `(`, so the next one fails on every OS. It has no exemption list.
 - **An optional a guard has already proved is read through one binding**, not
   re-derived: `const auto& shape = shapes[i]; if (!shape) { continue; }
   use (*shape);`. `shapes[i]` written twice is two expressions, so
