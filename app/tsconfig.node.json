@@ -55,6 +55,8 @@
 	 * Tests are not part of the main process - emitting them shipped vitest
 	 * imports into `dist-electron`, and `resolve.test.ts` reaches across to
 	 * `app/src/` (see tsconfig.electron-test.json, which checks them instead).
+	 * A testkit is test code for the same reason: `mcp/tool-list.testkit.ts`
+	 * imports vitest and the MCP client, both devDependencies.
 	 */
-	"exclude": ["electron/**/*.test.ts"]
+	"exclude": ["electron/**/*.test.ts", "electron/**/*.testkit.ts"]
 }

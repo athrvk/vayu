@@ -54,7 +54,7 @@ namespace vayu::core {
 /// absent from every percentile and from max; clamped, it lands in the top
 /// bucket and total_count stays the number of completions (#2790).
 [[nodiscard]] inline int64_t clamp_to_histogram_ceiling (int64_t latency_us) {
-    return std::min (latency_us, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US);
+    return (std::min)(latency_us, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US);
 }
 
 /// @p latency_ms as the histogram's microseconds: at least @p floor_us (a
@@ -62,8 +62,8 @@ namespace vayu::core {
 /// at most the ceiling. Clamped in double before the cast, so a duration past
 /// int64 range is not undefined behaviour, and a NaN takes the floor.
 [[nodiscard]] inline int64_t histogram_latency_us (double latency_ms, int64_t floor_us) {
-    const double us = std::max (static_cast<double> (floor_us), latency_ms * 1000.0);
-    return static_cast<int64_t> (std::min (us,
+    const double us = (std::max)(static_cast<double> (floor_us), latency_ms * 1000.0);
+    return static_cast<int64_t> ((std::min)(us,
     static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
 }
 
