@@ -18,7 +18,6 @@
     "app/electron/startup-probe.ts": 1,
     "app/electron/updater.ts": 1,
     "app/src/App.tsx": 1,
-    "app/src/components/layout/Dock.tsx": 3,
     "app/src/components/layout/TabStrip.tsx": 1,
     "app/src/components/layout/context-bar/AuthContextSection.tsx": 1,
     "app/src/components/layout/context-bar/registry.ts": 1,
