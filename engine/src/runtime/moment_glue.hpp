@@ -8,7 +8,6 @@
  */
 
 /**
- * @file moment_glue.hpp
  * @brief The factory around the vendored `moment` (engine/vendor/moment, #2652).
  *
  * `MOMENT_GLUE_OPEN + MOMENT_JS + MOMENT_GLUE_CLOSE` is the source the shelf

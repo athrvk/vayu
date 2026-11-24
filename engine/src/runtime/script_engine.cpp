@@ -6,7 +6,6 @@
  */
 
 /**
- * @file script_engine.cpp
  * @brief QuickJS-based JavaScript scripting engine implementation
  *
  * This file interfaces with QuickJS C library and uses different coding conventions.
@@ -650,7 +649,7 @@ void setup_pm_object (JSContext* ctx) {
 
     // `pm.request.url` inherits from **String.prototype**, which is the whole
     // of how `url.startsWith(...)`, `.includes(...)`, `.slice(...)` and the
-    // rest keep working on what used to be a string: every one of them coerces
+    // rest keep working as they did on a string: every one of them coerces
     // through `ToString(this)`, which the object's own `@@toPrimitive` answers
     // with the URL. What it does not restore is `.length` - an own property of
     // a real string, and one of the three breaks #991 documents.
@@ -663,7 +662,6 @@ void setup_pm_object (JSContext* ctx) {
     JS_SetClassProto (ctx, request_body_class_id, JS_DupValue (ctx, string_proto));
     JS_SetClassProto (ctx, request_url_class_id, string_proto);
 
-    // pm.test()
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
 
     // pm.expect(), with chai's `expect.fail` on the function object itself.
@@ -675,13 +673,10 @@ void setup_pm_object (JSContext* ctx) {
     ctx, expect_fn, "fail", JS_NewCFunction (ctx, js_pm_expect_fail, "fail", 1));
     JS_SetPropertyStr (ctx, pm, "expect", expect_fn);
 
-    // pm.response
     setup_pm_response (ctx, pm);
 
-    // pm.request
     setup_pm_request (ctx, pm);
 
-    // pm.info
     setup_pm_info (ctx, pm);
 
     // pm.iterationData - present only for a data-driven collection run's steps
@@ -691,10 +686,8 @@ void setup_pm_object (JSContext* ctx) {
     // pm.environment, pm.globals, pm.collectionVariables
     setup_pm_variable_scopes (ctx, pm);
 
-    // pm.variables
     setup_pm_variables (ctx, pm);
 
-    // pm.crypto
     setup_pm_crypto (ctx, pm);
 
     // pm.cookies - the jar's flat read half (issue #301) and, through
@@ -1572,7 +1565,6 @@ class ScriptEngine::Impl {
     ScriptResult execute (const std::string& script, const ScriptContext& ctx) {
         ScriptResult result;
 
-        // Acquire runtime/context pair
         ContextPair pair  = acquire_context ();
         JSRuntime* rt     = pair.first;
         JSContext* js_ctx = pair.second;
@@ -1598,7 +1590,6 @@ class ScriptEngine::Impl {
             std::chrono::milliseconds (config.timeout_ms);
         }
 
-        // Set up context data
         ContextData ctx_data;
         ctx_data.request             = ctx.request;
         ctx_data.response            = ctx.response;

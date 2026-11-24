@@ -6,14 +6,12 @@
  */
 
 /**
- * @file http/routes/spec_match.cpp
  * @brief `POST /specs/match` - which request of a collection is which operation
  *        of a document (issue #638's matcher, moved engine-side by #761).
  *
  * Binding a collection that already exists has to work out which of its
- * requests is which of the document's operations, and until #761 that lived in
- * the renderer - which put it out of reach of everything that is not the Spec
- * tab, MCP first among them. The rule itself is `core/operation_match.hpp`;
+ * requests is which of the document's operations (#761). The rule itself is
+ * `core/operation_match.hpp`;
  * this is the one way to ask it, and it owns the two things a caller must not
  * be trusted with:
  *

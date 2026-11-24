@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_expect.cpp
  * @brief `pm.test` and the `pm.expect` chainable assertions.
  */
 
@@ -176,7 +175,7 @@ void expect_gc_mark (JSRuntime* rt, JSValueConst val, JS_MarkFunc* mark_func) {
  * implements evaluates to `undefined` and asserts nothing - the test reports
  * PASS whatever the value is, which for a matcher that was *meant* to check
  * something is the worst answer an assertion library can give. `pm.response.to`
- * has thrown by name since #487; this is the same rule for the other chain, and
+ * throws by name (#487); this is the same rule for the other chain, and
  * it covers every matcher chai has and Vayu does not, present and future, plus
  * every typo.
  *
@@ -384,12 +383,11 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
  * @brief Throw a failed assertion the way chai does - as an `AssertionError`.
  *
  * `pm.expect` is chai, and chai reports a broken assertion as an
- * `AssertionError`. Vayu threw a `TypeError` instead, which is wrong in two
- * ways a user can see (issue #487): the report and the console prefix every
- * failure with `TypeError:`, which reads as an engine fault rather than the
- * assertion doing its job, and a script that inspects what it caught -
- * `catch (e) { if (e.name === "AssertionError") ... }` - takes the other branch
- * than it does in Postman.
+ * `AssertionError` (issue #487): a `TypeError` would make the report and the
+ * console prefix every failure with `TypeError:`, which reads as an engine fault
+ * rather than the assertion doing its job, and a script that inspects what it
+ * caught - `catch (e) { if (e.name === "AssertionError") ... }` - would take the
+ * other branch than it does in Postman.
  *
  * QuickJS has no `AssertionError` class, so the error is a plain `Error` with
  * the name replaced: `instanceof Error` still holds, `JS_NewError` gives it the
@@ -575,8 +573,8 @@ namespace {
 // enormous rather than cyclic. Nothing a script asserts on legitimately nests
 // this far.
 //
-// The cap alone used to be the whole mechanism, and #959 is why it is not any
-// more: it only bounds the C recursion *after* the fact, and 64 frames of this
+// The cap alone is not enough (#959): it only bounds the C recursion *after* the
+// fact, and 64 frames of this
 // function is a different amount of stack on every toolchain. On MSVC at /Od
 // with AddressSanitizer's redzones the frames are fat enough that QuickJS's
 // own 256 KB stack guard tripped first, inside the JS_Call in js_class_tag -
@@ -690,8 +688,8 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     // Both branches below render each side through script the test author may
     // have written - an own `toJSON`, an overridden `toString` - and both
     // renderers answer "" when that throws, leaving the exception pending. Two
-    // empty renderings compare *equal*, so a pair of throwing Dates used to
-    // report a pass. Neither renderer reports failure, so the context is asked
+    // empty renderings compare *equal*, so a pair of throwing Dates would report a
+    // pass. Neither renderer reports failure, so the context is asked
     // instead - and asked after each side, because `JS_Throw` replaces the
     // pending exception, so rendering the second side over a first that threw
     // would report b's error for a's read.
@@ -2060,7 +2058,7 @@ int magic) {
     ctx, this_val, *state, JS_ToBool (ctx, answer.get ()) == 1, matcher.name);
 }
 
-// Callable matchers documented in pm-api-compatibility.md but previously absent.
+// Callable matchers documented in pm-api-compatibility.md.
 // `least` and `most` are the other two arms of `expect_ordering` above.
 
 JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -2243,7 +2241,7 @@ JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return expect_chained (ctx, this_val);
 }
 
-// Matchers a Postman suite reaches for that used to throw "not a function".
+// Matchers a Postman suite reaches for.
 // Each one fails loudly on an argument it cannot use, because a matcher that
 // quietly accepts anything is the false-pass this series exists to remove.
 
@@ -2651,10 +2649,9 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
 // What chai matches a string or a regular expression against: an `Error`'s
 // `message`, and the thrown value itself for a script that threw something that
-// is not one. `String(err)` - what this used to compare - is "TypeError: bad
-// input", name included, so `.to.throw("Error")` passed for every Error thrown
-// whatever it said, and `.to.throw("TypeError")` passed on a message that
-// merely mentioned the word.
+// is not one. `String(err)` is "TypeError: bad input", name included, so
+// comparing it would pass `.to.throw("Error")` for every Error thrown whatever
+// it said, and `.to.throw("TypeError")` on a message that merely mentioned the word.
 std::string thrown_message (JSContext* ctx, JSValueConst error) {
     if (JS_IsObject (error)) {
         ScopedValue message (ctx, JS_GetPropertyStr (ctx, error, "message"));
@@ -2730,10 +2727,8 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     bool matches      = threw;
     int matcher_index = 0;
     // chai reads a function argument as the error constructor the throw must be
-    // an instance of, and takes an optional message matcher after it. Vayu
-    // refused a constructor outright ("accepts a message substring or a regular
-    // expression"), so `expect(fn).to.throw(TypeError)` - ordinary chai, and
-    // what imported scripts carry - was an error rather than an assertion.
+    // an instance of, and takes an optional message matcher after it:
+    // `expect(fn).to.throw(TypeError)` is ordinary chai, and what imported scripts carry.
     if (threw && argc >= 1 && JS_IsFunction (ctx, argv[0])) {
         const int is_instance = JS_IsInstanceOf (ctx, thrown.get (), argv[0]);
         if (is_instance < 0) {
@@ -3381,8 +3376,8 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     // all and exist so a chain reads as English - `expect(rows).to.be.an
     // ('array').that.is.not.empty`. Without them an imported collection written
     // in the fluent style fails on the *language* rather than on the API under
-    // test, since #999 armed the unknown-member hook and every one of these
-    // words now throws by name. Each hands the same expectation back, so the
+    // test, because the unknown-member hook (#999) throws by name on every one of these
+    // words. Each hands the same expectation back, so the
     // flags a chain has set - `not` included - carry across exactly as they do
     // for `and`.
     //
@@ -3557,8 +3552,7 @@ void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result)
         // Postman genuinely waits here; this sandbox does not. The verdict is
         // taken when the callback returns, and a `done()` left for later - in
         // a `.then`, after an `await` - only runs once the job queue drains,
-        // after the row was written. Saying so is the honest outcome, where
-        // the same script used to fail with "undefined is not a function".
+        // after the row was written. Saying so is the honest outcome.
         result.passed = false;
         result.error_message =
         "done() was never called before the callback returned. A done-style "
