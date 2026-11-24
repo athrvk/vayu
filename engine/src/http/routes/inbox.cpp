@@ -53,10 +53,9 @@ bool is_valid_port (int port) {
 }
 
 /**
- * Collapse httplib's header multimap into a JSON object, joining a repeated
- * name with ", " as RFC 9110 §5.3 permits. Repeated headers are recorded rather
- * than the last one winning: `Set-Cookie` and `Forwarded` legitimately repeat,
- * and a capture that showed one of two is a capture that lies.
+ * httplib's header multimap as a JSON object, a repeated name joined with ", "
+ * (RFC 9110 §5.3): `Set-Cookie` and `Forwarded` legitimately repeat, and a
+ * capture showing one of two lies.
  */
 // nlohmann's internal `swap` inlined into the object build: GCC cannot see that
 // a `basic_json` it just constructed holds a value, and reports the move as a
@@ -104,62 +103,47 @@ std::string query_of (const std::string& target) {
 }
 
 /**
- * The raw path of a request target, without the query string.
- *
- * Kept as the sender spelled it, percent-escapes included, like the query:
- * decoding turns `%2F` into a path separator and `%20` into a space, so a
- * signature over the path or a copied capture URL would no longer match what
- * was sent (issue #3113). A capture derives the path here rather than reading
- * `req.path`, because the inbox listener routes every request as one literal
- * path; see `AnyPathServer`.
+ * The raw path of a request target, without the query, as the sender spelled
+ * it: decoding turns `%2F` into a separator and `%20` into a space, so a
+ * signature over the path or a copied capture URL would no longer match
+ * (#3113). Derived here, not read from `req.path`, because the listener routes
+ * every request as one literal path (`AnyPathServer`).
  */
 std::string path_of (const std::string& target) {
     return target.substr (0, target.find ('?'));
 }
 
 /**
- * The inbox's listener: one handler, reached by every request whatever its path.
+ * The inbox's listener: one handler, reached by every request whatever its
+ * path. cpp-httplib picks a handler by matching `Request::path`, and its only
+ * matcher spanning segments is the regex one, which since 0.53.1 refuses a path
+ * over `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (256) before
+ * `std::regex_match`. Behind a `.*` route a webhook to a longer path drew
+ * httplib's 404 and was never recorded (#1140), and long paths are ordinary
+ * here: signed callback URLs, per-delivery tokens, nested tenant routes.
  *
- * cpp-httplib chooses a handler by matching `Request::path`, and the only
- * matcher of its two that can span path segments is the regex one - which,
- * since 0.53.1, refuses any path longer than
- * `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (256) before it reaches
- * `std::regex_match`. The `.*` route per method this replaces was subject to
- * that, so a webhook delivered to a longer path drew httplib's own 404 and was
- * never recorded - no row, nothing in the list, no sign anything arrived
- * (issue #1140). Long paths are ordinary in the traffic an inbox exists to
- * receive: signed callback URLs, per-delivery tokens in the path, deeply
- * nested tenant routes.
+ * An inbox routes nothing, so every request is routed **as** `ROUTE` and the
+ * handlers register on that literal, which `make_matcher` answers with a
+ * string-comparing `PathParamsMatcher`. No regex runs on inbox traffic; only
+ * httplib's 8192-byte request-target cap bounds the path.
  *
- * An inbox has nothing to route - one handler answers every method and path -
- * so rather than ask the matcher a question whose answer is always yes, every
- * request is routed **as** `ROUTE` and the handlers register on that literal,
- * which `make_matcher` answers with a `PathParamsMatcher` that compares it as a
- * string. No regex runs against an inbox's traffic at all, so nothing bounds
- * the path it accepts but httplib's own 8192-byte request-target cap.
+ * Raising the limit is wrong twice: it is a macro read by an `inline` function,
+ * so a value for this translation unit is an ODR violation, and globally it
+ * hands `std::regex_match` an 8192-byte target, the recursion the limit bounds,
+ * on the one listener that may bind past loopback.
  *
- * Raising the limit instead would be the wrong lever twice over: it is a
- * compile-time macro read by an `inline` function, so a value for this
- * translation unit alone is an ODR violation, and raising it globally hands
- * `std::regex_match` up to that 8192-byte target - the per-character recursion
- * the limit exists to bound - on the one listener that may bind past loopback.
+ * The mock server's fix (#1139) does not port: `set_pre_routing_handler` runs
+ * before the body is read, which a capture needs, and takes a const `Request&`.
+ * `process_request`'s `setup_request` callback is the one hook with a mutable
+ * `Request` ahead of routing, reached by overriding the private
+ * `process_and_close_socket`: access control limits calling a virtual, not
+ * overriding it, and cpp-httplib's own `SSLServer` does the same.
+ * `process_request` and the members the override reads are protected.
  *
- * The mock server's fix for the same defect (#1139) does not port here.
- * `set_pre_routing_handler` runs before cpp-httplib reads the body, and
- * recording the body is what a capture is for; it also takes a `const
- * Request&`, so it cannot rewrite the path either. `process_request`'s
- * `setup_request` callback is the one hook that sees a mutable `Request` ahead
- * of routing, and overriding `process_and_close_socket` reaches it. That one is
- * *private* in `httplib::Server`, which is no obstacle: access control governs
- * who may call a virtual, not who may override it, and it is how cpp-httplib's
- * own `SSLServer` extends the same function. `process_request` and the members
- * the override reads are protected.
- *
- * The mirror below is a copy of library code, and it has an exit on record
- * rather than by default: #1283 tracks upstreaming a public request-setup hook
- * (or a matcher-free default handler) to cpp-httplib, after which this class
- * and its version assert go and the two inbox tests that pin this behaviour
- * stay as they are.
+ * The mirror is copied library code with an exit on record: #1283 tracks
+ * upstreaming a public request-setup hook (or a matcher-free default handler),
+ * after which this class and its version assert go and the two inbox tests
+ * pinning the behaviour stay.
  */
 class AnyPathServer final : public httplib::Server {
     public:
@@ -174,16 +158,15 @@ class AnyPathServer final : public httplib::Server {
     static constexpr std::string_view MASK = "x-vayu-raw+";
 
     /**
-     * Keep a form body whole (#3110, #3111). cpp-httplib parses a request whose
-     * Content-Type is multipart/form-data into `Request::form` and leaves
-     * `body` empty, so a capture would record the headers and no bytes; for
-     * application/x-www-form-urlencoded it keeps the body but refuses one over
-     * `CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH` (8192) with a bare 413,
-     * which `set_payload_max_length` does not lift. Both are chosen from the
-     * Content-Type as `setup_request` leaves it, so the media type is masked
-     * here and `sender_headers` strips the mask again for the capture. (A
-     * sender that itself opens its Content-Type with the mask sees it removed
-     * from the stored header; nothing else reads it.)
+     * Keeps a form body whole (#3110, #3111). cpp-httplib parses a
+     * multipart/form-data request into `Request::form`, leaving `body` empty (a
+     * capture with no bytes), and refuses an x-www-form-urlencoded one over
+     * `CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH` (8192) with a bare 413
+     * `set_payload_max_length` does not lift. Both key off the Content-Type as
+     * `setup_request` leaves it, so the media type is masked here and
+     * `sender_headers` strips the mask for the capture. (A sender whose own
+     * Content-Type opens with the mask sees it removed from the stored header;
+     * nothing else reads it.)
      */
     static void mask_form_body (httplib::Request& req) {
         const auto it = req.headers.find ("Content-Type");
@@ -199,14 +182,13 @@ class AnyPathServer final : public httplib::Server {
     }
 
     /**
-     * Keep a compressed body as the sender wrote it. cpp-httplib answers
-     * a bare 415 to a Content-Encoding it knows (gzip, deflate, br, zstd) but
-     * was not built to decompress, and engine/vcpkg.json builds it without any
-     * of them, so a compressing sender - an OpenTelemetry exporter, a Sentry
-     * SDK, a log shipper - would get a refusal and leave no capture. A masked
-     * coding is an unrecognised one, which the library passes through as bytes;
-     * `sender_headers` strips the mask for the capture. Every Content-Encoding
-     * line is masked, since the library reads them joined.
+     * Keeps a compressed body as sent. cpp-httplib answers a bare 415 to a
+     * Content-Encoding it knows (gzip, deflate, br, zstd) but was not built to
+     * decompress, and engine/vcpkg.json builds it with none, so a compressing
+     * sender (an OpenTelemetry exporter, a Sentry SDK, a log shipper) would be
+     * refused with no capture. A masked coding is unrecognised and passes as
+     * bytes; `sender_headers` strips the mask. Every Content-Encoding line is
+     * masked, as the library reads them joined.
      */
     static void mask_content_encoding (httplib::Request& req) {
         const auto [first, last] = req.headers.equal_range ("Content-Encoding");
@@ -231,18 +213,15 @@ class AnyPathServer final : public httplib::Server {
 
     private:
     bool process_and_close_socket (::socket_t sock) override {
-        // Mirrors httplib::Server::process_and_close_socket. The one difference
-        // is the `setup_request` callback below, which that one passes as null -
-        // and `process_request` is its only caller, so there is no narrower
-        // override that reaches the callback.
-        //
-        // `serve_guarded` is 0.54.0's addition and is copied rather than
-        // dropped: `process_request` wraps only `routing()` and the hooks ahead
-        // of a WebSocket upgrade in a try/catch, so an exception from a content
-        // provider, a post-routing, error, logging or expect-100 handler runs
-        // outside it, and the task queue calls the job with no catch of its
-        // own. Omitting the guard here would terminate the process on a throw
-        // from any of those - on the one listener that may bind past loopback.
+        // Mirrors httplib::Server::process_and_close_socket except for the
+        // `setup_request` callback below, which that passes as null;
+        // `process_request` is its only caller, so no narrower override reaches
+        // it. `serve_guarded` (0.54.0) is copied, not dropped:
+        // `process_request` guards only `routing()` and the pre-upgrade hooks,
+        // so a throw from a content provider, a post-routing, error, logging or
+        // expect-100 handler runs outside it, and the task queue calls the job
+        // with no catch: the process would terminate, on the one listener that
+        // may bind past loopback.
         static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.65.0",
         "cpp-httplib moved: re-read Server::process_and_close_socket, "
         "confirm this override still mirrors it, then update this assert - "
@@ -296,10 +275,9 @@ std::string content_type_of (const std::map<std::string, std::string>& headers) 
 
 InboxLimits read_inbox_limits (vayu::db::Database& db) {
     const InboxLimits defaults;
-    // A value outside the seeded range can only reach here from a hand-edited
-    // row - POST /config rejects one against each key's min/max - and a body cap
-    // of 0 or a retention of 0 would quietly turn every capture into an empty
-    // row. Fall back rather than trust it, as read_auth_refresh_tuning does.
+    // Out-of-range values come only from a hand-edited row (POST /config checks
+    // each key's min/max), and a body cap or retention of 0 would make every
+    // capture an empty row, so fall back, as `read_auth_refresh_tuning` does.
     auto read = [&db] (const char* key, int64_t fallback, int64_t low, int64_t high) {
         const auto value =
         static_cast<int64_t> (db.get_config_int (key, static_cast<int> (fallback)));
@@ -322,15 +300,12 @@ InboxLimits read_inbox_limits (vayu::db::Database& db) {
 namespace {
 
 /**
- * The first octet of @p bind when it is a dotted-quad IPv4 literal, otherwise
- * `std::nullopt`.
- *
- * A parse rather than a prefix match: a *hostname* like `127.example.com` also
- * starts with `127.` but resolves wherever DNS says, so treating it as loopback
- * would bind wide while reporting `loopback: true` and skipping the
- * confirmation gate. Shorthand forms (`127.1`) are not addresses here either -
- * they only cost their user an explicit `confirmNonLoopback`, which is the safe
- * direction to be wrong in.
+ * The first octet of @p bind when it is a dotted-quad IPv4 literal, else
+ * `std::nullopt`. A parse, not a prefix match: a hostname like
+ * `127.example.com` resolves wherever DNS says, so calling it loopback would
+ * bind wide while reporting `loopback: true` and skipping the confirmation
+ * gate. Shorthand (`127.1`) is not an address here either; it only costs an
+ * explicit `confirmNonLoopback`, the safe direction to be wrong in.
  */
 std::optional<unsigned> ipv4_first_octet (std::string_view bind) {
     unsigned first    = 0;
@@ -594,10 +569,10 @@ nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {
         out["headers"] = nlohmann::json::object ();
     }
     // A JSON string holds only UTF-8 and a capture is whatever a sender wrote
-    // (#3109), so a body that is not text travels as its base64, as a response
-    // body does (`bodyEncoding`, `request_exchange.cpp`). Decided here, at the
-    // read, so a row stored before the field needs no migration. `bodyBytes` is
-    // the size as received either way, never the encoded length.
+    // (#3109), so a non-text body travels as base64, as a response body does
+    // (`bodyEncoding`, `request_exchange.cpp`). Decided at the read, so older
+    // rows need no migration; `bodyBytes` is the size as received, never the
+    // encoded length.
     if (vayu::utils::is_valid_utf8_text (capture.body)) {
         out["body"]         = capture.body;
         out["bodyEncoding"] = vayu::json::BODY_ENCODING_UTF8;
@@ -737,12 +712,10 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
                                        httplib::Response& res) {
         routes::apply_cors_headers (req, res, raw->cors);
 
-        // A real preflight must get a 2xx or the browser aborts before the
-        // actual request ever arrives - so it answers 204 here and returns
-        // before the capture, the canned delay and the canned status, the
-        // same way the mock server does. A canned status configured to
-        // exercise a sender's retry path (500, 429, a redirect) would
-        // otherwise be handed to the preflight itself and break every
+        // A preflight must get a 2xx or the browser aborts before the real
+        // request, so it answers 204 before the capture and the canned delay
+        // and status, as the mock server does: a canned 500, 429 or redirect
+        // meant for a sender's retry path would otherwise break every
         // browser-hosted sender silently.
         if (req.has_header ("Access-Control-Request-Method")) {
             res.status = 204;
@@ -812,11 +785,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         routes::finalize_cors_expose_headers (res);
     };
 
-    // Every method cpp-httplib will route, on the one literal path the listener
-    // routes every request as - which is how a path of any length reaches the
-    // capture rather than being refused by a regex route (AnyPathServer, issue
-    // #1140). CONNECT, TRACE and PRI are the remainder and are not routable - a
-    // webhook is never one.
+    // Every method cpp-httplib routes, on the one literal path, so a path of
+    // any length reaches the capture (`AnyPathServer`, #1140). CONNECT, TRACE
+    // and PRI are not routable, and a webhook is never one.
     httplib::Server& svr = inbox->listener.server ();
     // The other server in the process (issue #1510): one request line per
     // capture, same hook as the management API's.
@@ -889,10 +860,9 @@ InboxManager::remove (vayu::db::Database& db, const std::string& inbox_id) {
         if (it == entries.end ()) {
             return std::nullopt;
         }
-        // Stop first: the join inside it is what makes "no capture can still
-        // be landing" true, so the clear below cannot race a webhook into rows
-        // that outlive the record. See the header for why the order is
-        // load-bearing.
+        // Stop first: its join makes "no capture can still be landing" true, so
+        // the clear cannot race a webhook into rows outliving the record (the
+        // header says why the order is load-bearing).
         retire_listener (*it->second);
         const int64_t deleted = db.clear_inbox_requests (inbox_id);
         entries.erase (it);
@@ -1024,14 +994,10 @@ void send_parse_error (httplib::Response& res, const InboxParseError& error) {
 } // namespace
 
 /**
- * The wire shape of an inbox with its capture count filled in.
- *
- * `captureCount` is the one field the manager cannot answer - captures are
- * database rows - so every route that hands an inbox back fills it through
- * here. One place rather than four, because the failure mode of the fourth
- * copy is not a compile error: it is a `0` that reads as "nothing to lose"
- * beside a delete confirmation. Extracted (like `inbox_captures_response`) so
- * that wiring is covered without an in-process HTTP server.
+ * An inbox's wire shape with `captureCount`, the one field the manager cannot
+ * answer (captures are rows), filled here for every route handing one back: a
+ * forgotten copy would not fail to compile, it would show `0`, "nothing to
+ * lose", beside a delete confirmation.
  */
 nlohmann::json inbox_json (vayu::db::Database& db, InboxInfo info) {
     info.capture_count = db.count_inbox_requests (info.inbox_id);
@@ -1040,9 +1006,8 @@ nlohmann::json inbox_json (vayu::db::Database& db, InboxInfo info) {
 
 /**
  * Testable core of `GET /inbox/:id/requests`: the capture page in the
- * `{data, pagination}` envelope every list endpoint returns, or a 404 for an
- * inbox the manager does not know. Extracted so the wiring is covered without
- * an in-process HTTP server (inbox_test.cpp).
+ * `{data, pagination}` envelope, or a 404 for an inbox the manager does not
+ * know (inbox_test.cpp).
  */
 std::pair<int, nlohmann::json> inbox_captures_response (vayu::db::Database& db,
 InboxManager& manager,
@@ -1094,17 +1059,15 @@ std::string_view capture_id) {
 }
 
 /**
- * Testable core of `PUT /inbox/:id`: the read, the merge and the write are one
- * lock scope inside `InboxManager::update_response`, the same window issue
- * #1440 closed for the database-backed resources - closed here in the manager
- * rather than through `Database::with_lock`, because a canned response lives
- * in memory, not a row (issue #1454). Extracted so the wiring is covered
- * without an in-process HTTP server (inbox_test.cpp).
+ * Testable core of `PUT /inbox/:id`: read, merge and write are one lock scope
+ * inside `InboxManager::update_response`, the window #1440 closed for the
+ * database-backed resources, closed in the manager rather than through
+ * `Database::with_lock` because a canned response lives in memory, not a row
+ * (#1454).
  *
  * @param before_write Test seam, invoked with the merged response staged and
- *        immediately before it is written, still inside the manager's lock;
- *        see `update_collection_response` in collections.cpp for why it
- *        exists.
+ *        immediately before it is written, still inside the manager's lock; see
+ *        `update_collection_response` in collections.cpp for why it exists.
  */
 std::pair<int, nlohmann::json> update_inbox_response (vayu::db::Database& db,
 InboxManager& manager,
@@ -1259,9 +1222,8 @@ void handle_list_inbox_requests (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
     const std::string inbox_id = req.matches[1];
-    // The cap follows the inbox's own retention rather than the constant:
-    // with `inboxMaxCaptures` raised, a page of 50 would otherwise be the
-    // most the engine would ever hand back.
+    // Capped at the inbox's own retention, not the constant: with
+    // `inboxMaxCaptures` raised, 50 would be the most ever handed back.
     const auto limits    = ctx.inbox_manager.limits (inbox_id);
     auto [limit, offset] = parse_capture_pagination (
     req, limits ? limits->max_captures : constants::inbox::MAX_CAPTURES);
@@ -1346,12 +1308,10 @@ std::optional<std::string> live_capture_frame (const vayu::db::InboxRequest& cap
 }
 
 /**
- * One poll: every capture since @p last_id, and - when there are none - a
- * keep-alive on a still-running inbox.
- *
- * A write that lands is the only evidence this socket is alive, and therefore
- * what holds the claim. Losing it means a reconnect already took the slot over,
- * so the stream ends without releasing what is no longer its own.
+ * One poll: every capture since @p last_id or, with none, a keep-alive on a
+ * running inbox. A write that lands is the only evidence the socket lives, and
+ * so what holds the claim; losing it means a reconnect took the slot, so the
+ * stream ends without releasing what is no longer its own.
  */
 InboxStep stream_inbox_step (RouteContext& ctx,
 const std::string& inbox_id,
@@ -1460,9 +1420,10 @@ void register_inbox_routes (RouteContext& ctx) {
     /**
      * POST /inbox/start
      * Body (every field optional): {port, bind, confirmNonLoopback,
-     * response: {status, body, headers, delayMs}}.
+     * allowedOrigins, response: {status, body, headers, delayMs}}.
      * Returns the started inbox: {inboxId, url, bind, port, running, loopback,
-     * response}.
+     * captureCount, allowedOrigins, response, and reachableAt for a wildcard
+     * bind}.
      */
     ctx.server.Post ("/inbox/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -1481,14 +1442,11 @@ void register_inbox_routes (RouteContext& ctx) {
 
     /**
      * DELETE /inbox/:id
-     * Stop the listener, drop the record, and delete its captures with it -
-     * the only way a stopped inbox leaves the list before the process does.
-     * A running inbox is stopped rather than refused: the caller asked for it
-     * to be gone, and the teardown joins before the captures are cleared.
-     *
-     * `[^/]+` cannot span a `/`, so this pattern never swallows
-     * `/inbox/:id/requests` - the two DELETE routes are disjoint whatever
-     * order they are registered in.
+     * Stops the listener, drops the record and deletes its captures, the
+     * only way a stopped inbox leaves the list before the process does. A
+     * running inbox is stopped, not refused: the teardown joins before the
+     * captures are cleared. `[^/]+` cannot span a `/`, so this never
+     * swallows `/inbox/:id/requests`, whatever the registration order.
      */
     ctx.server.Delete (R"(/inbox/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
