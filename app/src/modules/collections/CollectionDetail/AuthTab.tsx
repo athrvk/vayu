@@ -121,8 +121,8 @@ interface AuthTabProps {
 export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
-	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook. See
+	// useEntityDraft.
 	// The key is also what the context bar's `CollectionAuthSection` reads the
 	// draft by (`useCollectionAuthDraft`), so it shows the picked-but-unsaved
 	// mode instead of the stored one (#1483).

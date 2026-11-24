@@ -6,8 +6,6 @@
  */
 
 /**
- * BaselineComparison Component
- *
  * "Is this run slower than the one I pinned?" - the deltas between the open
  * load run and the baseline pinned for the same request, in the load report's
  * body, above the tabs.

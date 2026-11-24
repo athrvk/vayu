@@ -692,8 +692,7 @@ export function ImportModal() {
 		// Across the whole batch: "exactly one environment" is a property of the import,
 		// not of a file, so two files carrying one each is two.
 		const createdEnvironmentIds: string[] = [];
-		// The apply is one transaction per file and always was; the only sign of it
-		// used to be a button reading "Importing…" for all of them.
+		// The apply is one transaction per file.
 		patchTab(t, at, { progress: { stage: "applying", done: 0, total: applicable.length } });
 		for (const entry of applicable) {
 			const result = entry.result as ImportResult;
@@ -722,7 +721,7 @@ export function ImportModal() {
 				createdEnvironmentIds.push(...Object.values(applied?.environmentIds ?? {}));
 				outcomes.set(entry.id, { ok: true, message: "Imported" });
 			} catch (e) {
-				// There is no rollback since #145: the engine write is atomic, so a validation
+				// There is no rollback (#145): the engine write is atomic, so a validation
 				// failure persisted nothing - but a failure *after* it (the id-map check, the
 				// globals write) leaves the tree committed. Surface the error and leave the
 				// modal open; the mutation invalidates on every outcome, so whatever did land
@@ -1042,13 +1041,6 @@ export function ImportModal() {
 
 	return (
 		/*
-		 * This used to hand-roll its own modal: a fixed backdrop, a bare
-		 * role="dialog", a window keydown listener for Escape and its own close
-		 * button. That meant no focus trap, no focus restore on close, no portal
-		 * (so it rendered inside the tree that opened it), no scroll lock and no
-		 * inerting of the background - all of which Radix gives for free, and
-		 * none of which the app's other dialogs were missing.
-		 *
 		 * Radix now owns the shell: Escape, the overlay click, focus and the
 		 * shared presentation animation. Only the body below is ImportModal's.
 		 */
@@ -1107,9 +1099,8 @@ export function ImportModal() {
 				<Tabs
 					value={tab}
 					// Switching tab shows the other tab, and that is all it does
-					// (issue #893). It used to `reset()` the one shared state, which
-					// cleared the display of work that went right on running - and
-					// then landed under whichever tab was showing when it finished.
+					// (issue #893): a reset would clear the display of work that goes right
+					// on running.
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>

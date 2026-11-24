@@ -6,8 +6,6 @@
  */
 
 /**
- * HistoryDetail Component
- *
  * The run tab. Routes to `DesignRunView` (an editable copy of the request that
  * was sent) or `LoadTestDetail` (the load-test report) by run type.
  *
@@ -167,10 +165,8 @@ export default function HistoryDetail() {
 		return <DetailSkeleton label="Loading run report" rows={5} />;
 	}
 
-	// Error state. Previously a hand-rolled pane whose only action was "Back to
-	// History" - it walked the user away from the run instead of offering the
-	// one thing that might work, a retry. A transient engine hiccup left no way
-	// back in short of re-selecting the run.
+	// Error state: a retry, the one thing that might work, rather than a walk away
+	// from the run - a transient engine hiccup would otherwise need a re-select.
 	//
 	// A deleted run is the other case entirely, and the tab strip is where it
 	// arrives from: tabs persist, so a run deleted in another window (or before
@@ -224,9 +220,7 @@ export default function HistoryDetail() {
 		<div className="flex flex-col h-full bg-background">
 			{/*
 			 * Run identity header. No back button: this is a tab, closed from the
-			 * tab strip, and History lives in the left nav. The old "Back to
-			 * history" only called activateDrawerView("history"), which toggled the
-			 * drawer open/closed rather than navigating anywhere.
+			 * tab strip, and History lives in the left nav.
 			 */}
 			<div className="border-b border-border bg-card px-6 py-3 shrink-0">
 				{/*

@@ -71,16 +71,6 @@ export function useRevealActiveSelection(
 	 * Reveal whatever the active tab points at: expand its ancestor folders so
 	 * the row is rendered, then (in the effect below) scroll it into view.
 	 *
-	 * This used to handle requests only, which is why switching to a *collection*
-	 * tab looked like the sidebar ignored it - a collection nested inside a
-	 * collapsed parent has no row in the tree at all, so there was nothing to
-	 * highlight and nothing to scroll to. `selectedCollectionId` was computed and
-	 * then only used for a label and a highlight, so nothing revealed it.
-	 *
-	 * Settings and Variables never had the problem because they own a whole
-	 * drawer view; a request did not because of this effect. A collection fell
-	 * between the two.
-	 *
 	 * Guarded by a ref so it fires once per selection - the same discipline the
 	 * scroll effect below has always had. Unguarded, it re-ran after *every*
 	 * render of the tree (it lists `requestsByCollection` and `collections`, and
