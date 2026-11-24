@@ -277,8 +277,8 @@ narration (`used to`, `until #N`, `since #N landed`, an issue number in a
 heading; rationale is allowed). `scripts/docs-lint.py` holds this in the
 `Docs site` workflow. A page already over a budget has a ceiling in
 `scripts/docs-lint-ceilings.json` that may only be lowered, and a stale one
-fails; split or trim the page instead of raising a ceiling. A page split out
-of one that is gone may carry that page's ceilings and no higher.
+fails; split or trim the page instead of raising a ceiling. Pages split out
+of one that is gone may together hold its ceilings and no more.
 `CONTRIBUTING.md` has the local command.
 
 **A table or count derived from a registry is generated, never kept by hand.**

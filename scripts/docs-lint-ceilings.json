@@ -4,12 +4,82 @@
     "docs/engine/db-schema.md"
   ],
   "pages": {
-    "docs/app/COMPONENTS.md": {
-      "lines": 4134,
-      "max_line": 17143,
-      "long_lines": 278,
-      "max_cell": 17111,
-      "history": 54
+    "docs/app/COMPONENTS/app-shell.md": {
+      "max_line": 7483,
+      "long_lines": 65,
+      "history": 9
+    },
+    "docs/app/COMPONENTS/collections.md": {
+      "max_line": 1031,
+      "long_lines": 12
+    },
+    "docs/app/COMPONENTS/dashboard.md": {
+      "max_line": 12166,
+      "long_lines": 9
+    },
+    "docs/app/COMPONENTS/graphql-library.md": {
+      "max_line": 1180,
+      "long_lines": 8,
+      "history": 4
+    },
+    "docs/app/COMPONENTS/history.md": {
+      "max_line": 5745,
+      "long_lines": 56,
+      "history": 6
+    },
+    "docs/app/COMPONENTS/inbox.md": {
+      "history": 5
+    },
+    "docs/app/COMPONENTS/logs-and-console.md": {
+      "max_line": 3378,
+      "long_lines": 15
+    },
+    "docs/app/COMPONENTS/mock-server.md": {
+      "history": 2
+    },
+    "docs/app/COMPONENTS/palette.md": {
+      "history": 1
+    },
+    "docs/app/COMPONENTS/request-builder.md": {
+      "max_line": 9113,
+      "long_lines": 48,
+      "history": 10
+    },
+    "docs/app/COMPONENTS/shared-element-list.md": {
+      "history": 4
+    },
+    "docs/app/COMPONENTS/shared-key-value-editor.md": {
+      "max_line": 1474,
+      "long_lines": 2
+    },
+    "docs/app/COMPONENTS/shared-response-viewer.md": {
+      "max_line": 3503,
+      "long_lines": 18,
+      "history": 2
+    },
+    "docs/app/COMPONENTS/shared-run-results.md": {
+      "history": 1
+    },
+    "docs/app/COMPONENTS/shared-run-status.md": {
+      "max_line": 504,
+      "long_lines": 1
+    },
+    "docs/app/COMPONENTS/shared-variable-input.md": {
+      "history": 4
+    },
+    "docs/app/COMPONENTS/ui-primitives.md": {
+      "max_line": 878,
+      "long_lines": 2,
+      "history": 3
+    },
+    "docs/app/COMPONENTS/variables-and-settings.md": {
+      "max_line": 6509,
+      "long_lines": 29,
+      "history": 3
+    },
+    "docs/app/COMPONENTS/welcome.md": {
+      "max_line": 631,
+      "long_lines": 2
     },
     "docs/app/api-integration.md": {
       "lines": 3095,

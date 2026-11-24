@@ -6,7 +6,7 @@
  * `url.query` and their getters, asserted here rather than through a JS context
  * so a wrong split is located in the parser instead of in a script that read
  * it. The script-level contract - that a lifted Postman script sees these under
- * Postman's names - is `script_engine_test.cpp`'s.
+ * Postman's names - is `script_engine_request_test.cpp`'s.
  *
  * Two rules carry most of the weight and each has a test that fails if it is
  * reversed: a path segment is decoded **on its own**, so an encoded separator

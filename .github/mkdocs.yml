@@ -123,7 +123,6 @@ nav:
       - Benchmarks: engine/benchmarks.md
   - Desktop App:
       - Overview: app/architecture.md
-      - UI Components: app/COMPONENTS.md
       - Design System: design-system.md
       - UX Writing: ux-writing.md
       - State Management: app/state-management.md
@@ -151,7 +150,36 @@ nav:
   - Design Notes:
       - Request Storage: request-storage-design.md
       - Lock Files: lock-file-handling.md
+  # Internals for someone changing the app, not for someone using it. The
+  # section index (navigation.indexes) keeps the page at /app/COMPONENTS/.
   - Contributing:
+      - UI Components:
+          - app/COMPONENTS/index.md
+          - App Shell: app/COMPONENTS/app-shell.md
+          - Request Builder: app/COMPONENTS/request-builder.md
+          - GraphQL Library: app/COMPONENTS/graphql-library.md
+          - Drag Primitives and Agent References: app/COMPONENTS/drag-and-agent-references.md
+          - Collections: app/COMPONENTS/collections.md
+          - Load Test Dashboard: app/COMPONENTS/dashboard.md
+          - History: app/COMPONENTS/history.md
+          - Variables and Settings: app/COMPONENTS/variables-and-settings.md
+          - Webhook Inbox: app/COMPONENTS/inbox.md
+          - Services: app/COMPONENTS/services.md
+          - Mock Server: app/COMPONENTS/mock-server.md
+          - Logs and Console: app/COMPONENTS/logs-and-console.md
+          - Welcome: app/COMPONENTS/welcome.md
+          - Command Palette: app/COMPONENTS/palette.md
+          - Command Registry: app/COMPONENTS/command-registry.md
+          - "Shared: Breadcrumb, Toasts and Run Status": app/COMPONENTS/shared-run-status.md
+          - "Shared: Run Results": app/COMPONENTS/shared-run-results.md
+          - "Shared: Warnings and Banners": app/COMPONENTS/shared-warnings-and-banners.md
+          - "Shared: Fields and Snippets": app/COMPONENTS/shared-fields.md
+          - "Shared: ElementList": app/COMPONENTS/shared-element-list.md
+          - "Shared: Response Viewer and Auth": app/COMPONENTS/shared-response-viewer.md
+          - "Shared: Key/Value Editor": app/COMPONENTS/shared-key-value-editor.md
+          - "Shared: Variable Input": app/COMPONENTS/shared-variable-input.md
+          - UI Primitives: app/COMPONENTS/ui-primitives.md
+          - Patterns and State: app/COMPONENTS/patterns.md
       - MCP Internals: engine/mcp/internals.md
 
 markdown_extensions:

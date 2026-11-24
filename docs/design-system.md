@@ -4127,7 +4127,7 @@ Wherever Vayu shows a time, the user's own zone, UTC and how long ago are one ho
 - **A surface with no visible time** puts the card on a trigger of its own with `TimeTooltip`: a history row hangs it off the row's stretched activator, with the status and the run's comment as extra rows, in place of the native `title` that used to say the same in one unnamed zone.
 - **No setting.** The OS locale and zone decide, as they always did.
 - **A test that renders a time needs a `TooltipProvider`** above it: `@/test/render-with-tooltips` is Testing Library's `render` inside one.
-- Monaco editors underline a time by the same parser and draw the same rows, the Raw tab's `http` language included; see `docs/app/COMPONENTS.md`.
+- Monaco editors underline a time by the same parser and draw the same rows, the Raw tab's `http` language included; see `docs/app/COMPONENTS/shared-variable-input.md`.
 
 → `time-surfaces.test.ts` reads every source file under `app/src` and fails on `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` on a Date, `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` outside `lib/time-value.ts` and `components/shared/TimeValue/`, and on any `CodeEditor` that opts out of the time matcher. `Number#toLocaleString` for counts is untouched. It also pins `ResponseCookies.tsx` to `HeaderValue` or `TimeValue`, because a time shown unformatted is invisible to the scan.
 

@@ -264,7 +264,7 @@ jobs:
             # is red too.
             #
             # A page split into a directory is one registry entry ending in `/`
-            # and one line here ending in `/**` (`docs/app/components/**`); the
+            # and one line here ending in `/**` (`docs/app/COMPONENTS/**`); the
             # comparison expands the first to the second and refuses an entry
             # whose directory holds no Markdown.
             app_doc_fixtures:
@@ -275,7 +275,7 @@ jobs:
               - 'docs/app/architecture.md'
               - 'docs/app/api-integration.md'
               - 'docs/app/data-driven-runs.md'
-              - 'docs/app/COMPONENTS.md'
+              - 'docs/app/COMPONENTS/**'
               - 'docs/index.md'
               - 'docs/engine/mcp/**'
               - 'docs/compare/vayu-vs-bruno.md'
