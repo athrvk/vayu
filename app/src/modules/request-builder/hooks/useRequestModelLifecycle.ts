@@ -12,19 +12,13 @@ import { UNSAVED_AUTO_KEY } from "../context/auto-record-slot";
 import { disposeRequestModels } from "../utils/editor-models";
 
 /**
- * Bound the request editors' models (`utils/editor-models.ts`, #3136) to the
- * open tabs.
- *
- * A model outlives the request switch on purpose, which is what keeps its undo
- * stack, so a tab closing ends it, and so does the builder going away:
- * `@monaco-editor/react` disposes only the model its editor holds at unmount.
- *
- * Subscribed to rather than selected, like the provider's other tab sweep, so
- * a tab focus does not re-render the provider. The id-less key stays because it
- * names no tab. A History run copy has no request id either, so its models
- * file under that key and `HistoryDetail`'s `key={selectedRunId}` remount is
- * what ends them between runs; the `run` ids kept here are a guard for a copy
- * that ever files under its run id.
+ * Bounds the request editors' models (`utils/editor-models.ts`, #3136) to the open tabs. A model
+ * outlives a request switch on purpose (it keeps the undo stack), so a closing tab ends it, as does
+ * the builder going away: `@monaco-editor/react` disposes only the model its editor holds at
+ * unmount. Subscribed, not selected, like the provider's tab sweep, so a tab focus does not
+ * re-render it. The id-less key stays (it names no tab). A History run copy has no request id, so
+ * its models use that key and `HistoryDetail`'s `key={selectedRunId}` remount ends them; the `run`
+ * ids kept here guard a copy that ever files under its run id.
  */
 export function useRequestModelLifecycle(): void {
 	const monaco = useLoadedMonaco();

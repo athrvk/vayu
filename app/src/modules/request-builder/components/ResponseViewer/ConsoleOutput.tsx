@@ -6,36 +6,20 @@
  */
 
 /**
- * The console output of a request's two scripts.
+ * The console output of a request's two scripts: one `ScriptError` and one `ScriptLogs`, each
+ * rendered twice, the differences in a table. Every box has a radius class, so it follows the
+ * Roundedness setting.
  *
- * This was 212 lines, roughly 120 of which were two pairs of near-identical
- * blocks - the pre/post error cards and the pre/test log sections - each pair
- * differing in a status token and a heading. They are one `ScriptError` and one
- * `ScriptLogs` now, rendered twice, with the differences in a table.
+ * The log slabs are `surface-sunken`, not a border token: measured in the running app, no token
+ * outlines a `bg-muted` box in both themes:
  *
- * The four boxes here were also the module's square-corner cluster: no radius
- * class at all, so they stayed sharp at every Roundedness setting while their
- * neighbours followed it.
+ * light    dark --border       on --muted    1.105    1.157 --border-strong on --muted   1.317
+ * 1.108
  *
- * The log slabs additionally dropped `border border-border`. Measured in the
- * running app, no border token outlines a `bg-muted` box in both themes:
- *
- *                                  light    dark
- *     --border       on --muted    1.105    1.157
- *     --border-strong on --muted   1.317    1.108
- *
- * `--border-strong` is the usual escape hatch on `--card` - it is what fixed the
- * URL bar and the history rows - and here it is the *worse* of the two in dark,
- * because `--muted` (L 16%) sits between `--border` (L 10%) and
- * `--border-strong` (L 18%). Strengthening the border makes it fainter.
- * Whichever token is picked, one theme gets no edge at all.
- *
- * So there was no border *token* to pick, and the slabs went without one. That
- * is no longer the best available answer: `surface-sunken` is not a token but an
- * alpha of `--foreground`, which flips with the theme and lands on 1.356 light /
- * 1.343 dark - parity a single token cannot give. The reasoning above is kept
- * because it is still why every token was rejected; what changed is that the
- * surface contract arrived after it was written.
+ * `--border-strong`, the usual escape hatch on `--card`, is the worse in dark, since `--muted` (L
+ * 16%) sits between `--border` (L 10%) and `--border-strong` (L 18%): strengthening the border
+ * fades it. `surface-sunken` is an alpha of `--foreground`, flipping with the theme, at 1.356 light
+ * / 1.343 dark, a parity no single token gives.
  */
 
 import { useMemo, useState } from "react";
@@ -48,7 +32,7 @@ import { parseConsoleLogs, splitBySource } from "./console/parse-logs";
 import { ScriptError, ScriptLogs } from "./console/ScriptSection";
 
 export interface ConsoleOutputProps {
-	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
+	/** A `string` is the engine's pre-structured shape; see `parse-logs.ts`. */
 	logs: Array<ConsoleLogEntry | string>;
 	/** The scripts' `pm.sendRequest` records (#3633), drawn among the lines. */
 	scriptRequests?: ScriptRequestRecord[];
@@ -62,14 +46,10 @@ export default function ConsoleOutput({ logs, scriptRequests, errors }: ConsoleO
 	const [filter, setFilter] = useState("");
 
 	/*
-	 * The filter runs over *every* log, not over what is currently rendered.
-	 *
-	 * That distinction is the whole point: the list renders progressively, so a
-	 * filter applied to the rendered slice would search only the part you had
-	 * already scrolled past - which is the same trap as searching a virtualised
-	 * list's DOM. Matching happens on the parsed lines, before the window is
-	 * taken, so a match ten thousand lines down is found without being visited.
-	 * A script request is a row like a line, so the same holds for it.
+	 * The filter runs over *every* log, not what is rendered: the list renders progressively, so
+	 * filtering the rendered slice would search only what was scrolled past (the virtualised-DOM
+	 * trap). Matching runs on the parsed lines before the window is taken, so a match ten thousand
+	 * lines down is found unvisited; a script request is a row like a line.
 	 */
 	const rows = useMemo(
 		() => consoleRows(parseConsoleLogs(logs), scriptRequests),
@@ -104,11 +84,9 @@ export default function ConsoleOutput({ logs, scriptRequests, errors }: ConsoleO
 							onChange={(e) => setFilter(e.target.value)}
 							placeholder="Filter logs"
 							aria-label="Filter console output"
-							// `md:text-xs` as well as `text-xs`: the Input primitive's base
-							// classes carry `md:text-sm`, and tailwind-merge keeps a
-							// responsive variant in its own group - so an unqualified
-							// `text-xs` loses to it above 768px and the field renders a
-							// step larger than everything around it.
+							// `md:text-xs` as well: the Input primitive carries `md:text-sm`, and
+							// tailwind-merge keeps a responsive variant in its own group, so a bare
+							// `text-xs` loses above 768px.
 							className="pl-7 text-xs md:text-xs"
 						/>
 					</div>

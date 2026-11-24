@@ -6,24 +6,12 @@
  */
 
 /**
- * ResponseAnnouncer
- *
- * Sending a request is the primary action in the app, and until now its result
- * was conveyed only visually: the status badge, time and size appear in a pane
- * that never receives focus, so a screen reader user pressed Send (or
- * Ctrl/Cmd+Enter, which moves focus nowhere at all) and heard nothing back.
- * There was no live region anywhere in the request builder or response viewer.
- *
- * This is the same fix as the Toaster, and it carries the same constraint: a
- * live region has to already be in the DOM for a change to it to be observed.
- * So this component is rendered unconditionally by RequestBuilderLayout and is
- * empty until there is something to say - never mounted alongside its own
- * message.
- *
- * Polite, including for failures. A response is the end of an action the user
- * just took, so there is nothing to interrupt; `assertive` would cut off
- * whatever they were reading to tell them about something they asked for. Same
- * call as the toasts.
+ * Speaks a send's result: the status badge, time and size appear in a pane that never takes focus,
+ * so a screen reader user pressing Send (or Ctrl/Cmd+Enter, which moves focus nowhere) heard
+ * nothing. The Toaster's fix and constraint: a live region must already be in the DOM for a change
+ * to be observed, so RequestBuilderLayout renders this unconditionally, empty until there is
+ * something to say, never mounted with its message. Polite even for failures, as the toasts are: a
+ * response ends an action the user just took, and `assertive` would cut off what they were reading.
  */
 
 import { useState } from "react";
@@ -35,8 +23,8 @@ import { useRequestBuilderContext } from "../context";
 const SPOKEN_UNIT = { ms: "millisecond", s: "second" } as const;
 
 /**
- * The header's number, spoken: the digits are the shared ones so the announcer
- * never disagrees with the pane, and the unit is a word.
+ * The header's number, spoken: the shared digits, so the announcer never disagrees with the pane,
+ * and a unit word.
  */
 function spokenDuration(ms: number): string {
 	const { value, unit } = formatLatencyParts(ms);
@@ -47,17 +35,11 @@ function spokenDuration(ms: number): string {
 export default function ResponseAnnouncer() {
 	const { response, isExecuting } = useRequestBuilderContext();
 
-	// A live region is announced when its content changes in the DOM. If two
-	// responses produce byte-identical text React never touches the node, and
-	// the second one is silent - resending the same request and hearing nothing
-	// reads as the app having failed to send. Bumping a key on each new response
-	// object replaces the text node, so the announcement fires either way.
-	//
-	// React's adjust-state-during-render pattern, not a ref and not an effect.
-	// Refs are lint-banned here (and rightly: this value is rendered, so it is
-	// not ref material), and an effect would announce a paint late. React
-	// re-runs this component immediately with the new state, before touching the
-	// DOM, so the extra pass is not visible.
+	// A live region speaks when its DOM content changes; two byte-identical responses leave the
+	// node untouched and the second is silent, which reads as a failed send. A key bumped per
+	// response object replaces the text node, so it always fires. Adjust-state-during-render, not a
+	// ref (this value is rendered; refs are lint-banned here) and not an effect (a paint late);
+	// React re-runs the component before touching the DOM, so the extra pass is invisible.
 	const [lastResponse, setLastResponse] = useState(response);
 	const [seq, setSeq] = useState(0);
 	if (lastResponse !== response) {
@@ -67,14 +49,13 @@ export default function ResponseAnnouncer() {
 
 	let message = "";
 	if (isExecuting) {
-		// Ctrl/Cmd+Enter gives no other feedback: focus does not move and the
-		// Send button's label change is not announced unless it happens to be
-		// the focused element.
+		// Ctrl/Cmd+Enter gives no other feedback: focus stays, and Send's label change is announced
+		// only if it is focused.
 		message = "Sending request…";
 	} else if (response) {
 		if (response.status === 0) {
-			// No server response - status 0 is the client-side failure sentinel,
-			// and "0" is not a status code worth speaking.
+			// No server response: status 0 is the client-side failure sentinel, not a code worth
+			// speaking.
 			message = `Couldn't get a response. ${response.errorMessage || response.errorCode || "The server didn't respond."}`;
 		} else {
 			const parts = [
@@ -97,11 +78,9 @@ export default function ResponseAnnouncer() {
 	return (
 		<div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
 			{/*
-			 * aria-atomic is set rather than left to the default. `role="status"`
-			 * carries an implicit aria-atomic="true", and here that implicit value
-			 * is the one we want - but the Toaster shipped assuming the default was
-			 * false and was wrong, so it is written down at both call sites now.
-			 * One utterance, whole message, is correct for a single-line region.
+			 * aria-atomic is written out: `role="status"` implies "true", the value wanted, but the
+			 * Toaster assumed false and was wrong, so both call sites state it. One utterance,
+			 * whole message, suits a single-line region.
 			 */}
 			<span key={seq}>{message}</span>
 		</div>

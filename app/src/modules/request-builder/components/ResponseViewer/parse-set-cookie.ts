@@ -6,23 +6,15 @@
  */
 
 /**
- * Set-Cookie parsing for the response Cookies tab.
+ * Set-Cookie parsing for the Cookies tab, in its own module: a component file exporting a function
+ * breaks fast refresh (`react-refresh/only-export-components`), and the parser is worth testing
+ * without rendering. Three silent corruptions it avoids:
  *
- * Its own module rather than an export from `ResponseCookies.tsx`: a component
- * file that also exports a function breaks Vite's fast refresh for that file
- * (`react-refresh/only-export-components`), and the parser is worth testing
- * without rendering anything.
- *
- * What this replaces was labelled "simplified" and corrupted three things
- * silently - it displayed wrong data, not merely less data:
- *
- *   - `split(",")` cut `Expires=Wed, 21 Oct 2015 07:28:00 GMT` in half, so a
- *     cookie with an expiry produced a phantom row named
- *     "21 Oct 2015 07:28:00 GMT" and lost the real one's attributes.
- *   - `const [name, value] = pair.split("=")` drops everything past the second
- *     `=`. Session cookies are routinely base64, which ends in `=` padding, so
- *     the value on screen was not the value the server set.
- *   - `attrs` was parsed on every row and rendered nowhere.
+ *   - splitting on `,` cuts `Expires=Wed, 21 Oct 2015 07:28:00 GMT` in half, producing a phantom
+ *     cookie named "21 Oct 2015 07:28:00 GMT" and losing the real one's attributes;
+ *   - `pair.split("=")` drops everything past the second `=`, and session cookies are routinely
+ *     base64 with `=` padding, so the shown value differs from the server's;
+ *   - `attrs` must be rendered, not only parsed.
  */
 
 export interface ParsedCookie {
@@ -32,11 +24,9 @@ export interface ParsedCookie {
 }
 
 /**
- * One received `Set-Cookie` line: a single cookie, its attributes after the
- * first `;`. Does not split on a comma - a line is one cookie by construction,
- * so a comma in the value or in `Expires=` belongs to it
- * (`prefs=a=1, theme=dark` is one cookie whose value holds a comma). Null for a
- * line with no displayable name.
+ * One received `Set-Cookie` line: one cookie, attributes after the first `;`. No comma split: a
+ * line is one cookie, so a comma in the value or `Expires=` belongs to it (`prefs=a=1, theme=dark`
+ * is one cookie). Null for a line with no displayable name.
  */
 export function parseSetCookieLine(line: string): ParsedCookie | null {
 	const [pair, ...rest] = line.split(";");
@@ -45,29 +35,24 @@ export function parseSetCookieLine(line: string): ParsedCookie | null {
 	if (at <= 0) return null;
 	return {
 		name: pair.slice(0, at).trim(),
-		// slice, not split - the value may legally contain "=".
+		// slice, not split: the value may legally contain "=".
 		value: pair.slice(at + 1).trim(),
 		attrs: rest.map((a) => a.trim()).filter(Boolean),
 	};
 }
 
 /**
- * Where one cookie ends and the next begins, in a folded header.
- *
- * Multiple Set-Cookie headers arrive joined by ", ". A new cookie only starts
- * where a comma is followed by `name=`; the remainder of a date
- * ("21 Oct 2015 07:28:00 GMT") never matches that, so expiry commas survive.
+ * Where one cookie ends in a folded header: Set-Cookie headers arrive joined by ", ", and a new
+ * cookie starts only where a comma precedes `name=`, which a date's remainder never matches, so
+ * expiry commas survive.
  */
 const COOKIE_BOUNDARY = /,\s*(?=[^;,\s=]+=)/;
 
 /**
- * Cookies out of the engine's folded `set-cookie` map entry.
- *
- * **Legacy only (issue #2460).** The Cookies tab reads the received lines and
- * calls `parseSetCookieLine` per line; this guesses where one cookie ends from
- * the joined text, and is wrong for a value like `prefs=a=1, theme=dark`. It
- * stays for what has no lines: a response stored before the engine kept them,
- * a stream's `open` frame, and an engine that predates the key.
+ * Cookies out of the engine's folded `set-cookie` entry. **Legacy only (#2460)**: the Cookies tab
+ * parses received lines with `parseSetCookieLine`; this guesses boundaries from joined text and is
+ * wrong for `prefs=a=1, theme=dark`. It serves what has no lines: a response stored before the
+ * engine kept them, a stream's `open` frame, an engine predating the key.
  */
 export function parseSetCookie(header: string): ParsedCookie[] {
 	return header

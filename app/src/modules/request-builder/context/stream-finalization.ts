@@ -6,27 +6,17 @@
  */
 
 /**
- * When a streamed run finishes, replace its live rows with what the run stored.
- *
- * The two-sources-one-list handoff `ScenarioRunView` makes, at the moment the
- * source changes: while the stream is open the Events tab reads
- * `execution-events-store`, and the completed run's trace is the record -
- * bounded by `sseMaxStoredEvents` and carrying the truthful `totalEvents` /
- * `eventsTruncated` markers, which the live list has no way to know. Without
- * this the tab would keep showing whatever happened to arrive on the socket,
- * and a switch to another request and back would show nothing at all, since
- * the durable copy of a response is the response store.
- *
- * Addressed to the request that streamed, not the one on screen (#3382), and
- * for two kinds of run: the stream the store holds, once its `complete` frame
- * has ended it, and every feed another request's stream took over, which
- * nothing relays any more and so is watched by polling the run until the
- * engine reports a terminal status.
- *
- * The report is fetched directly rather than through the last-design-run query
- * the cold-start restore uses: that query is keyed by request and its restore
- * is gated on having answered once, so waiting for it to refetch would race the
- * cache. Here the run id is already known.
+ * When a streamed run finishes, replace its live rows with what the run stored: the
+ * two-sources-one-list handoff `ScenarioRunView` makes, at the moment the source changes. Open, the
+ * Events tab reads `execution-events-store`; the finished trace is the record, bounded by
+ * `sseMaxStoredEvents` with the truthful `totalEvents` / `eventsTruncated` the live list cannot
+ * know. Without this the tab keeps whatever arrived on the socket, and switching away and back
+ * shows nothing, as the response store is the durable copy. Addressed to the request that streamed,
+ * not the one on screen (#3382), for the stream the store holds once its `complete` frame ends it,
+ * and for every feed another request's stream took over, which nothing relays, so the run is polled
+ * until terminal. The report is fetched directly, not through the last-design-run query: that query
+ * is request-keyed with a restore gated on one answer, so waiting for its refetch would race the
+ * cache, and the run id is known.
  */
 
 import { useEffect, useMemo } from "react";
@@ -56,13 +46,10 @@ function withSendSnapshot(stored: ResponseState, claim: FinalizationClaim): Resp
 }
 
 /**
- * Fetch `runId`'s stored report and land it under the request that streamed.
- *
- * At most one finalisation per run, whoever asks: the claim lives in the store,
- * so a re-render, a StrictMode double effect or a builder remounted after the
- * user left for a settings tab all find it taken. Not cancelled by anything:
- * another request's Send can empty the store mid-fetch, and the run has
- * finished regardless.
+ * Fetch `runId`'s stored report and land it under the request that streamed. At most once per run:
+ * the claim is in the store, so a re-render, a StrictMode double effect or a remount after a
+ * settings tab all find it taken. Never cancelled: another Send can empty the store mid-fetch, and
+ * the run is finished regardless.
  */
 export async function finalizeStreamRun(runId: string, land: LandStreamResponse): Promise<void> {
 	const claim = useExecutionEventsStore.getState().claimFinalization(runId);
@@ -71,8 +58,8 @@ export async function finalizeStreamRun(runId: string, land: LandStreamResponse)
 		const report = await apiService.getRunReport(runId);
 		const result = report?.results?.[0];
 		const stored = responseFromRunResult(result, runId);
-		// Before the overtaken skip: a newer Send owns the pane, but this one was
-		// still sent, and the claim above keeps it to one append per run.
+		// Before the overtaken skip: a newer Send owns the pane, but this one was sent, and the
+		// claim keeps it to one append per run.
 		if (stored) {
 			appendSendToConsole({
 				method: result?.trace?.request?.method ?? "",
@@ -87,15 +74,13 @@ export async function finalizeStreamRun(runId: string, land: LandStreamResponse)
 		const overtaken = (sendCounts[claim.requestId] ?? 0) !== claim.sends;
 		if (stored && !overtaken) land(claim.requestId, withSendSnapshot(stored, claim));
 	} catch {
-		// The rows already on screen came from the stream itself and are still
-		// true, so nothing is torn down. The claim is given back, so the next
-		// mount of the builder fetches again; not retried in place, because an
-		// engine that refused the report once would be asked in a loop.
+		// The rows on screen came from the stream and are still true, so nothing is torn down. The
+		// claim is returned so the next mount fetches again; no retry in place, which would loop on
+		// a refusing engine.
 		useExecutionEventsStore.getState().releaseFinalization(runId);
 	}
-	// A finished stream is a finished design run: History, the context bar's
-	// Recent sends and the cold-start restore all read it, and nothing else
-	// tells them.
+	// A finished stream is a finished design run: History, Recent sends and the cold-start restore
+	// read it, and nothing else tells them.
 	void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 	void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesign(claim.requestId) });
 	void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesign(claim.requestId) });
@@ -107,12 +92,9 @@ function settledRunIds(results: QueryObserverResult<Run>[]): string[] {
 }
 
 /**
- * Finalize every streamed run this builder is owed, while `enabled`.
- *
- * Only the request builder's provider enables it: the History run view mounts
- * another `RequestBuilderProvider`, and two finalizers would race for the same
- * global store. A run that finishes while no builder is mounted (the user is on
- * a settings or run tab) is finalized when one mounts again.
+ * Finalize every streamed run this builder is owed, while `enabled`. Only the request builder's
+ * provider enables it: History's run view mounts another provider, and two finalizers would race
+ * for one global store. A run finishing with no builder mounted is finalized when one mounts.
  */
 export function useStreamFinalization(enabled: boolean, land: LandStreamResponse): void {
 	const endedRunId = useExecutionEventsStore((s) =>
@@ -122,9 +104,8 @@ export function useStreamFinalization(enabled: boolean, land: LandStreamResponse
 		if (enabled && endedRunId) void finalizeStreamRun(endedRunId, land);
 	}, [enabled, endedRunId, land]);
 
-	// `runDetailOptions` polls a run only while it is in progress, which is
-	// exactly the watch a replaced feed needs. A request's own re-send drops its
-	// entry (`beginSend`), and with it the watch.
+	// `runDetailOptions` polls a run only while in progress, the watch a replaced feed needs; a
+	// re-send drops its entry (`beginSend`), and the watch with it.
 	const replacedFeeds = useExecutionEventsStore((s) => s.replacedFeeds);
 	const watched = useMemo(
 		() => (enabled ? Object.values(replacedFeeds).map((feed) => feed.runId) : []),

@@ -6,40 +6,23 @@
  */
 
 /**
- * The three reversible-side-effect settings this module used to hold a
- * provider-keyed record for - the body mode's `Content-Type`, the Event
- * stream toggle's `Accept`, the GraphQL mode's `POST` - all now mark
- * ownership on the request's own state instead: the two header rows carry it
- * on the row itself (`KeyValueEntry.source`, `utils/auto-header.ts`, issue
- * #1481), and the method carries it on `RequestState.methodSource`
- * (`panels/body/graphql-method.ts`, issue #1505). A ref-based record could not
- * survive a reload, so a stale auto-written value was then indistinguishable
- * from one the user chose; a value on the request itself is exactly as
- * durable as the rest of the request.
- *
- * {@link UNSAVED_AUTO_KEY} outlives that slot: the Send-with-row picker's row
- * memory (issue #1271) still is a provider-held per-request map, and needs
- * the same fallback key for a builder that declares no identity of its own.
+ * The fallback memory key. The settings that write a reversible side effect (the body mode's
+ * `Content-Type`, the Event stream toggle's `Accept`, the GraphQL mode's `POST`) mark ownership on
+ * the request itself: header rows on `KeyValueEntry.source` (`utils/auto-header.ts`, #1481), the
+ * method on `RequestState.methodSource` (`panels/body/graphql-method.ts`, #1505), as durable as the
+ * request, where a ref-held record lost ownership on reload. {@link UNSAVED_AUTO_KEY} remains for
+ * the Send-with-row picker's provider-held per-request row memory (#1271).
  */
 
 /**
- * The key a record is filed under while the builder names no identity at all -
- * the provider's one fallback, read by the Send-with-row picker's memory as
- * well as by the slots here (issue #1271). One convention spelled twice is how
- * two spellings of it drift apart.
- *
- * A builder says which identity it files under with the provider's `memoryKey`
- * prop, defaulting to `request.id`. A request tab is always opened against a
- * request the backend has already created (`useNewRequest`), and the editable
- * copy History renders for a stored run - the one builder with no request id -
- * passes its run id (issue #1272), so nothing reaches this key in the app
- * today. It stays as the answer for a builder that has neither, because the
- * alternative is every such builder sharing whichever key was written last:
- * the rules read a `requestId` of `null` against another `null` as a match, so
- * a shared bucket is handed out as owned rather than refused.
- *
- * It is the one key the open-tab sweep never drops. That is what it costs: a
- * key naming no tab cannot be bounded by the tabs, which is the second reason
- * to declare an identity that does.
+ * The key a record is filed under while the builder names no identity, the provider's one fallback
+ * (#1271), read by the Send-with-row memory, the editor models and the model lifecycle; one
+ * convention spelled twice drifts. A builder names its identity with the provider's `memoryKey`,
+ * default `request.id`. A request tab always opens on a request the backend created
+ * (`useNewRequest`), and History's editable copy of a stored run passes its run id (#1272), so no
+ * app builder reaches this key; it stays because otherwise such builders would share the
+ * last-written key, and the rules read `null` against `null` as a match, handing a shared bucket
+ * out as owned. The open-tab sweep never drops it, since a key naming no tab is unbounded by tabs:
+ * a second reason to declare an identity.
  */
 export const UNSAVED_AUTO_KEY = "__unsaved__";

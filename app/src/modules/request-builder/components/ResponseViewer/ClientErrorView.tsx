@@ -6,10 +6,8 @@
  */
 
 /**
- * ClientErrorView Component
- *
- * Displayed when a request fails before reaching the server (status === 0).
- * Shows appropriate icon, error message, and helpful hints based on error type.
+ * Shown when a request fails before reaching the server (status 0): icon, message and a hint by
+ * error type.
  */
 
 import {
@@ -43,34 +41,27 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
 }
 
 /**
- * The engine answered the send with an HTTP error of its own, rather than
- * reporting the target's failure as `status: 0` (issue #2458). Two spellings
- * reach here: `UNKNOWN_ERROR` is `readApiError`'s word for a body that was not
- * the engine's JSON error (its message carries the status line), and
- * `internal_error` is the engine's own code for a 5xx it explained.
+ * The engine answered the send with an HTTP error of its own, not the target's failure as
+ * `status: 0` (#2458). Two spellings arrive: `UNKNOWN_ERROR` is `readApiError`'s word for a
+ * non-JSON error body (its message carries the status line), `internal_error` the engine's code for
+ * a 5xx it explained.
  */
 const ENGINE_ANSWERED_ERROR = "Vayu's engine answered with an error";
 const ENGINE_ANSWERED_HINT =
 	"This is Vayu's failure, not the server's. Send again; if it repeats, Vayu's engine log in Settings › General › Logs has the reason.";
 
 /**
- * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
- * Without one (the engine is not known to have left, so the Dock offers
- * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
- * The button's label is not named: it reads Retry after a start failure and a
- * disabled Restarting… while a restart runs.
+ * `ENGINE_ERROR`'s tip while the Dock shows its Restart or Retry button; otherwise (the engine is
+ * not known to have left) the tip is the shared `ENGINE_NO_ANSWER`. The label is not named: it is
+ * Retry after a start failure and a disabled Restarting… during a restart.
  */
 const ENGINE_RESTART_IN_DOCK_HINT =
 	"Vayu's engine isn't running or didn't answer. Start it again with the button in the status bar at the bottom of the window.";
 
 /**
- * Error hints for common error codes
- *
- * The proxy and TLS hints name the *setting* to go to, not just the condition
- * (issue #708). Every one of these failures is reported against the endpoint by
- * libcurl, so a hint that only restates the message sends the reader to debug a
- * server that was never reached - which is the misdiagnosis the whole
- * behind-real-networks epic exists to end.
+ * Hints per error code. The proxy and TLS hints name the *setting* to go to, not just the condition
+ * (#708): libcurl reports every one against the endpoint, so restating the message sends the reader
+ * to debug a server never reached.
  */
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
@@ -105,26 +96,18 @@ const ErrorHints: Record<string, string> = {
 };
 
 /**
- * The headline, when the generic one would misdescribe the failure.
+ * The headline, where the generic one misdescribes the failure: "Couldn't get a response" is true
+ * of a proxy refusal but unhelpful, since the next move depends on *which hop* said no, and the
+ * heading is the one line surely read.
  *
- * "Couldn't get a response" is true of a proxy refusal and unhelpful about it:
- * the reader's next move depends entirely on *which hop* said no, and the
- * heading is the one line they are guaranteed to read.
- *
- * `ENGINE_ERROR` is Vayu's own failure, not the network's, so it names the
- * engine rather than borrowing the network template (docs/ux-writing.md,
- * "Errors have three sources").
- *
- * `UNSENDABLE_FILE` is the request's own file (none chosen, an unresolved
- * variable in its path, unreadable, outside the allowed folders): the engine
- * refused it before sending, so it names neither the network nor Vayu. A trace
- * stored before the code existed reads `INTERNAL_ERROR` and keeps that title.
- *
- * `INVALID_URL` covers a URL that does not parse, one that parses but names a
- * scheme other than http or https, and one the engine will not send to (its
- * own port, a host with no ASCII name, a redirect to another scheme), so its
- * heading and its tip claim no one cause; the engine's message under it says
- * which.
+ * - `ENGINE_ERROR` is Vayu's failure, not the network's, so it names the engine
+ *   (docs/ux-writing.md, "Errors have three sources").
+ * - `UNSENDABLE_FILE` is the request's own file (none chosen, an unresolved variable in its path,
+ *   unreadable, outside the allowed folders), refused before sending, so it names neither. An older
+ *   trace reads `INTERNAL_ERROR` and keeps that title.
+ * - `INVALID_URL` covers an unparseable URL, a non-http(s) scheme, and one the engine will not send
+ *   to (its own port, a host with no ASCII name, a redirect to another scheme), so heading and tip
+ *   claim no single cause; the engine's message says which.
  */
 const ErrorTitles: Record<string, string> = {
 	TIMEOUT: "No response before the timeout",
@@ -147,9 +130,6 @@ const ErrorTitles: Record<string, string> = {
 	internal_error: ENGINE_ANSWERED_ERROR,
 };
 
-/**
- * Get appropriate icon for error type
- */
 function getErrorIcon(errorCode?: string) {
 	switch (errorCode) {
 		case "TIMEOUT":
@@ -173,8 +153,8 @@ function getErrorIcon(errorCode?: string) {
 		// A file the request names, not a hop or Vayu: nothing was sent.
 		case "UNSENDABLE_FILE":
 			return FileX;
-		// Vayu's own failures get a glyph a target's failure never uses
-		// (docs/ux-writing.md, "Errors have three sources").
+		// Vayu's own failures get a glyph a target's never uses (docs/ux-writing.md, "Errors have
+		// three sources").
 		case "ENGINE_ERROR":
 		case "INTERNAL_ERROR":
 		case "UNKNOWN_ERROR":
@@ -230,10 +210,9 @@ export default function ClientErrorView({
 				</div>
 
 				{/*
-				 * A lucide glyph, not an emoji: an emoji renders in the OS emoji font,
-				 * full colour beside 12px muted text, at whatever size and baseline
-				 * that font chooses, on a row where every other icon in the app is a
-				 * stroked lucide mark in a token colour.
+				 * A lucide glyph, not an emoji: an emoji renders in the OS emoji font, full colour
+				 * beside 12px muted text at its own size and baseline, on a row where every other
+				 * icon is a stroked lucide mark.
 				 */}
 				{hint && (
 					<div className="surface-sunken rounded-md border border-rule p-3 text-left flex items-start gap-2">

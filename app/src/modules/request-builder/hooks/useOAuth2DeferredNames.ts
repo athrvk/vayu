@@ -11,15 +11,11 @@ import type { OAuth2Config } from "@/types";
 import { oauth2DeferredNames, oauth2HasTokens } from "../utils/auth-resolution";
 
 /**
- * The names in @p rawConfig, the OAuth 2.0 config *as written*, that a
- * pre-request script may change before @p requestId's Send (#2742). Empty
- * until the engine's composition lands, for a config with no `{{token}}`, and
- * while @p enabled is false.
- *
- * The raw config is read, never the resolved one: a name that also has a stored
- * value is swapped for it there, and the token is gone from the text. /compose
- * is asked only while the config holds a `{{token}}`, so a literal one costs no
- * compose. The result is memoised: a host passes it down as a prop.
+ * Names in @p rawConfig (the OAuth 2.0 config *as written*) a pre-request script may change before
+ * @p requestId's Send (#2742). Empty until the engine's composition lands, for a config with no
+ * `{{token}}`, and while @p enabled is false. The raw config, never the resolved one: a name with a
+ * stored value is swapped there, and the token gone. /compose is asked only while the config holds
+ * a `{{token}}`. Memoised: a host passes it down as a prop.
  */
 export function useOAuth2DeferredNames(
 	requestId: string,
