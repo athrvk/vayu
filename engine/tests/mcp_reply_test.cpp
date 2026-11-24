@@ -120,6 +120,61 @@ json mcp_payload (const McpFixtureServer& server) {
         { "mcpTool", vayu::tests::execute_sql_tool_json () } } } };
 }
 
+/// The same call as a plain `json` request: the bytes and headers the `mcp`
+/// body sends, so the fixture answers it alike and only the mode differs.
+json plain_payload (const McpFixtureServer& server) {
+    const std::string wire = mcp_wire_body (kToolsCall);
+    const auto tool = read_mcp_tool (vayu::tests::execute_sql_tool_json ());
+    if (!tool) {
+        ADD_FAILURE () << tool.error ();
+        return json::object ();
+    }
+    json headers = json::array ();
+    for (const auto& [name, value] : mcp_derived_headers (wire, *tool)) {
+        headers.push_back ({ { "name", name }, { "value", value } });
+    }
+    return json{ { "method", "POST" }, { "url", server.url () },
+        { "timeout", 5000 }, { "headers", headers },
+        { "body", { { "mode", "json" }, { "content", wire } } } };
+}
+
+/// One way a reply stream ends before its response (#3831): a cap the payload
+/// names, or the server closing it.
+struct StreamEnding {
+    /// The design stream's stored `endReason`.
+    const char* end_reason;
+    McpReplyShape shape;
+    /// The caps beside `stream: true`; none for the server's close.
+    json caps;
+    bool capped;
+};
+
+const auto& stream_endings () {
+    static const std::vector<StreamEnding> endings{
+        { "maxStreamEvents", McpReplyShape::EventStreamEndless,
+        { { "maxStreamEvents", 3 } }, true },
+        { "maxStreamDurationMs", McpReplyShape::EventStreamEndless,
+        { { "maxStreamDurationMs", core::constants::sse::MIN_STREAM_DURATION_MS } }, true },
+        { "completed", McpReplyShape::EventStreamCut, json::object (), false },
+    };
+    return endings;
+}
+
+/// @p payload streaming, bounded by @p ending's caps.
+json streaming (json payload, const StreamEnding& ending) {
+    payload["stream"] = true;
+    payload.update (ending.caps);
+    return payload;
+}
+
+/// @p ending's caps as a load step carries them: both always in force, the
+/// one it does not name at its default.
+vayu::StreamBounds bounds_of (const StreamEnding& ending) {
+    namespace sse = core::constants::sse;
+    return vayu::StreamBounds{ ending.caps.value ("maxStreamDurationMs", sse::MAX_STREAM_DURATION_MS),
+        ending.caps.value ("maxStreamEvents", sse::MAX_STREAM_EVENTS) };
+}
+
 // ---------------------------------------------------------------------------
 // The reader, on responses built by hand.
 // ---------------------------------------------------------------------------
@@ -617,6 +672,11 @@ class McpReplyStreamTest : public ::testing::Test {
         json payload        = mcp_payload (*server_);
         payload["stream"]   = true;
         payload["elements"] = elements;
+        return stream_trace (payload);
+    }
+
+    /// The stored trace of sending @p payload to `POST /execute`.
+    json stream_trace (const json& payload) {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
         const auto answer = client.Post ("/execute", payload.dump (), "application/json");
@@ -655,6 +715,12 @@ class McpReplyStreamTest : public ::testing::Test {
 /// a `const` subscript's assertion.
 json mcp_node_of (const json& trace) {
     return trace.value ("response", json::object ()).value ("mcp", json ());
+}
+
+/// A stored trace's `response.mcp.errorClass`, or empty when it has none.
+std::string error_class_of (const json& trace) {
+    const auto node = mcp_node_of (trace);
+    return node.is_object () ? node.value ("errorClass", "") : "";
 }
 
 json test_results_of (const json& trace) {
@@ -714,6 +780,38 @@ TEST_F (McpReplyStreamTest, EachFailureClassFailsAStreamWithNoElement) {
     }
 }
 
+/// A stored trace's `events.endReason`.
+std::string end_reason_of (const json& trace) {
+    return trace.value ("events", json::object ()).value ("endReason", "");
+}
+
+// A tool call's reply ends with its response, so a stream that a cap or the
+// server ends first leaves the call unfinished: `transport` on an `mcp`
+// request, while the same bytes sent as a plain request end there as a
+// success (#3831). Mutation check: answer `reply` for a streamed reply in
+// `judge_missing_response` and every `mcp` ending reddens.
+TEST_F (McpReplyStreamTest, AStreamEndedBeforeTheResponseIsTransportAndAPlainStreamsSuccess) {
+    for (const auto& ending : stream_endings ()) {
+        server_->reply_with (ending.shape);
+        const auto mcp = stream_trace (streaming (mcp_payload (*server_), ending));
+        EXPECT_EQ (end_reason_of (mcp), ending.end_reason) << mcp.dump (2);
+        const auto node = mcp_node_of (mcp);
+        ASSERT_TRUE (node.is_object ()) << ending.end_reason << ": " << mcp.dump (2);
+        EXPECT_EQ (node.value ("errorClass", ""), "transport") << mcp.dump (2);
+        EXPECT_NE (node.value ("message", "").find ("ended before the final response"),
+        std::string::npos)
+        << node.dump ();
+        const auto test = test_named (mcp, "MCP reply");
+        ASSERT_FALSE (test.is_null ()) << ending.end_reason << ": " << mcp.dump (2);
+        EXPECT_FALSE (test["passed"].get<bool> ());
+
+        const auto plain = stream_trace (streaming (plain_payload (*server_), ending));
+        EXPECT_EQ (end_reason_of (plain), ending.end_reason) << plain.dump (2);
+        EXPECT_TRUE (mcp_node_of (plain).is_null ()) << plain.dump (2);
+        EXPECT_TRUE (test_named (plain, "MCP reply").is_null ()) << plain.dump (2);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Runs: a collection run's sequential steps, a scenario load run and a
 // single-request load run.
@@ -740,20 +838,33 @@ class McpReplyRunTest : public ::testing::Test {
         global_cleanup ();
     }
 
-    /// A one-step plan sending the fixture's `tools/call`, carrying @p elements.
-    core::ScenarioExecution plan (const std::vector<json>& elements) const {
+    /// How a run's one step sends: its payload, streamed within its bounds when
+    /// they are set, as a plan sets them from a stored request's `stream`.
+    struct StepSend {
+        json payload;
+        std::optional<vayu::StreamBounds> bounds;
+    };
+
+    StepSend mcp_step () const {
+        return StepSend{ mcp_payload (*server_), std::nullopt };
+    }
+
+    /// A one-step plan sending @p send, carrying @p elements.
+    core::ScenarioExecution
+    plan (const std::vector<json>& elements, const StepSend& send) const {
         core::ScenarioExecution execution;
         execution.request.source        = "collection";
         execution.request.collection_id = "col_mcp";
         core::ScenarioStep step;
         step.request_id = "req_mcp";
         step.name       = "tools/call";
-        auto request = vayu::json::deserialize_request (mcp_payload (*server_));
+        auto request    = vayu::json::deserialize_request (send.payload);
         EXPECT_TRUE (request.is_ok ());
         if (request.is_ok ()) {
             step.request = std::move (request).value ();
         }
-        step.stored_url = step.request.url;
+        step.request.stream_bounds = send.bounds;
+        step.stored_url            = step.request.url;
         if (!elements.empty ()) {
             step.elements = vayu::tests::compiled_elements (elements);
         }
@@ -776,8 +887,9 @@ class McpReplyRunTest : public ::testing::Test {
     }
 
     /// The collection run's stored step rows.
-    std::vector<db::Result> run_sequentially (const std::vector<json>& elements) {
-        auto execution               = plan (elements);
+    std::vector<db::Result> run_sequentially (const std::vector<json>& elements,
+    const std::optional<StepSend>& send = std::nullopt) {
+        auto execution = plan (elements, send.value_or (mcp_step ()));
         execution.request.iterations = ITERATIONS;
         const json config            = { { "scenario",
         { { "source", "collection" }, { "collectionId", "col_mcp" },
@@ -801,9 +913,10 @@ class McpReplyRunTest : public ::testing::Test {
     };
 
     /// A scenario load run of the plan, as `scenario_load_test.cpp` drives one.
-    LoadOutcome run_scenario_load (const std::vector<json>& elements) {
-        const auto execution =
-        std::make_shared<const core::ScenarioExecution> (plan (elements));
+    LoadOutcome run_scenario_load (const std::vector<json>& elements,
+    const std::optional<StepSend>& send = std::nullopt) {
+        const auto execution = std::make_shared<const core::ScenarioExecution> (
+        plan (elements, send.value_or (mcp_step ())));
         auto context =
         std::make_shared<core::RunContext> ("test-mcp-scenario-load",
         json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } });
@@ -819,9 +932,11 @@ class McpReplyRunTest : public ::testing::Test {
     }
 
     /// A single-request load run of the fixture's call with @p elements as its
-    /// `requestElements`, through `RunManager`; its stored summary.
-    json run_single_request_load (const std::vector<json>& elements) {
-        json config = mcp_payload (*server_);
+    /// `requestElements`, through `RunManager`; its stored summary. @p payload
+    /// replaces the call, when set.
+    json run_single_request_load (const std::vector<json>& elements,
+    const std::optional<json>& payload = std::nullopt) {
+        json config = payload.value_or (mcp_payload (*server_));
         config.update (json{ { "mode", "iterations" },
         { "iterations", ITERATIONS }, { "concurrency", 1 } });
         if (!elements.empty ()) {
@@ -943,6 +1058,83 @@ TEST_F (McpReplyRunTest, EachFailureClassIsASingleRequestLoadRunsError) {
         auto summary = run_single_request_load ({});
         EXPECT_EQ (summary["error_types"][failure.load_error_type], ITERATIONS)
         << summary.dump ();
+    }
+}
+
+// The run paths' half of #3831. Each transfer driver ends a capped or closed
+// stream as a success (`curl_utils.cpp` under load, `client.cpp` for a
+// sequential step); the reply judged after it makes an `mcp` one a
+// `transport` failure, and a plain one stays a success. Mutation check:
+// answer `reply` for a streamed reply in `judge_missing_response` and every
+// `mcp` ending on all three paths reddens.
+TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseFailsACollectionRunsStep) {
+    for (const auto& ending : stream_endings ()) {
+        server_->reply_with (ending.shape);
+        for (const bool as_mcp : { true, false }) {
+            const auto rows = run_sequentially ({},
+            StepSend{ as_mcp ? mcp_payload (*server_) : plain_payload (*server_),
+            bounds_of (ending) });
+            ASSERT_EQ (rows.size (), ITERATIONS) << ending.end_reason;
+            for (const auto& row : rows) {
+                const auto trace = json::parse (row.trace_data);
+                if (as_mcp) {
+                    EXPECT_NE (row.error.find ("MCP reply"), std::string::npos)
+                    << ending.end_reason << ": " << row.error;
+                    EXPECT_EQ (error_class_of (trace), "transport")
+                    << ending.end_reason << ": " << trace.dump (2);
+                } else {
+                    EXPECT_TRUE (row.error.empty ())
+                    << ending.end_reason << ": " << row.error;
+                    EXPECT_TRUE (mcp_node_of (trace).is_null ()) << trace.dump (2);
+                }
+            }
+        }
+    }
+}
+
+TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsAScenarioLoadStepsError) {
+    for (const auto& ending : stream_endings ()) {
+        server_->reply_with (ending.shape);
+        for (const bool as_mcp : { true, false }) {
+            auto load = run_scenario_load ({},
+            StepSend{ as_mcp ? mcp_payload (*server_) : plain_payload (*server_),
+            bounds_of (ending) });
+            if (as_mcp) {
+                EXPECT_EQ (load.summary["failed"], ITERATIONS)
+                << ending.end_reason << ": " << load.summary.dump ();
+                const auto counted = load.error_types.find ("mcp_transport");
+                ASSERT_NE (counted, load.error_types.end ()) << ending.end_reason;
+                EXPECT_EQ (counted->second, ITERATIONS);
+            } else {
+                EXPECT_EQ (load.summary["failed"], 0)
+                << ending.end_reason << ": " << load.summary.dump ();
+                EXPECT_TRUE (load.error_types.empty ()) << ending.end_reason;
+            }
+        }
+    }
+}
+
+// A capped `mcp` stream is still a capped stream: the report's `stream`
+// section counts it beside the error.
+TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsASingleRequestLoadRunsTransportError) {
+    for (const auto& ending : stream_endings ()) {
+        server_->reply_with (ending.shape);
+        for (const bool as_mcp : { true, false }) {
+            auto summary = run_single_request_load ({},
+            streaming (as_mcp ? mcp_payload (*server_) : plain_payload (*server_), ending));
+            EXPECT_EQ (summary["stream"]["completions"], ITERATIONS)
+            << ending.end_reason << ": " << summary.dump ();
+            EXPECT_EQ (summary["stream"]["capped"], ending.capped ? ITERATIONS : 0)
+            << ending.end_reason << ": " << summary.dump ();
+            const auto errors = summary.value ("error_types", json::object ());
+            if (as_mcp) {
+                EXPECT_EQ (errors.value ("mcp_transport", size_t{ 0 }), ITERATIONS)
+                << ending.end_reason << ": " << summary.dump ();
+            } else {
+                EXPECT_TRUE (errors.empty ())
+                << ending.end_reason << ": " << summary.dump ();
+            }
+        }
     }
 }
 
