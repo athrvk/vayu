@@ -6,22 +6,17 @@
  */
 
 /**
- * How this collection's last run went, and when.
+ * How this collection's last run went, and when (specced in #377; #394 and #400 deferred it while a
+ * collection's runs were not addressable). A collection run links no request, so `GET /runs` by
+ * `requestId` cannot find it, and a substring search of every stored snapshot would be a scan per
+ * open bar; `GET /runs?collectionId=&limit=1` (#422) is that lookup as one indexed-ish server query
+ * returning exactly the row shown.
  *
- * The section #377 specced and PR #394 and PR #400 each deferred, for a reason
- * that was true both times and is not any more: a collection's runs were not
- * addressable. `GET /runs` filtered by `requestId`, and a collection run links
- * no request, so the only way to the row was a substring search of every stored
- * snapshot - a scan per open bar. `GET /runs?collectionId=&limit=1` (#422) is
- * that lookup as one indexed-ish server query returning exactly the row shown.
- *
- * **A run outcome, not a run report.** What the row carries is the outcome
- * (status, refined by the step counts a collection run's list row carries,
- * #3496), the size (steps, and passes when there was more than one) and the
- * age - all of it already on the list row, so there is no `GET /runs/:id/report`
- * behind this. Opening the run is what the row is for: the step-by-step result
- * lives in `ScenarioRunView`, and this is the way back to it from the collection
- * you are editing.
+ * **A run outcome, not a run report.** The row carries the outcome (status, refined by the step
+ * counts a collection run's list row carries, #3496), the size (steps, and passes when more than
+ * one) and the age, all already on the list row, so there is no `GET /runs/:id/report` behind it.
+ * Opening the run is what the row is for: the step-by-step result lives in `ScenarioRunView`, and
+ * this is the way back to it from the collection you are editing.
  */
 
 import { Button } from "@/components/ui";

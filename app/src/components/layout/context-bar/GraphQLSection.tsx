@@ -6,35 +6,27 @@
  */
 
 /**
- * The glanceable half of GraphQL: is there a schema, how old is it, and what
- * does this document actually define.
+ * The glanceable half of GraphQL: is there a schema, how old is it, and what does this document
+ * define.
  *
- * **Status here, browsing in the editor.** The bar clamps to 220-480px
- * (`layout-store`), which is enough for a freshness line and a short outline
- * and is not enough for a schema tree with docs - that is why the explorer
- * (#387 phase 1) docks beside the query editor instead. The split is the whole
- * design decision: at-a-glance state belongs in the bar, and browsing belongs
+ * **Status here, browsing in the editor.** The bar clamps to 220-480px (`layout-store`): room for a
+ * freshness line and a short outline, not a schema tree with docs, which is why the explorer (#387
+ * phase 1) docks beside the query editor. At-a-glance state belongs in the bar; browsing belongs
  * next to the cursor it inserts at.
  *
- * **The outline reads the stored request, not the editor's live buffer.** The
- * bar sits outside `RequestBuilderProvider`; what it shows is the last saved
- * document, which autosave keeps a second or two behind the editor. The Code
- * section reads the draft through the `editorDraft` slot (#2638), but it
- * composes a payload someone copies; this outline answers "what is in this
- * request", which does not change per keystroke, so it is not worth a read of
- * the live buffer.
+ * **The outline reads the stored request, not the editor's live buffer.** The bar sits outside
+ * `RequestBuilderProvider`, so it shows the last saved document, which autosave keeps a second or
+ * two behind the editor. The Code section reads the draft (the `editorDraft` slot, #2638) because
+ * it composes a payload someone copies; "what is in this request" does not change per keystroke, so
+ * it is not worth a read of the live buffer.
  *
  * **A row scrolls the editor to its operation** by writing a command to
- * `lib/graphql/reveal-store.ts`, which `GraphQLBody` consumes and clears. The
- * row sends the operation's *name* rather than the line it drew, because the
- * two copies of the document differ by whatever has not autosaved yet - see
- * `findOperationLine`.
+ * `lib/graphql/reveal-store.ts`, which `GraphQLBody` consumes and clears. It sends the operation's
+ * *name*, not the line it drew, as the two copies of the document differ by whatever has not
+ * autosaved yet (see `findOperationLine`).
  *
- * Like every section, this introspects nothing of its own: it renders whatever
- * the schema cache holds.
- *
- * **It carries no Refresh.** Refresh lives in the Query header's own control,
- * once (#455, #1224).
+ * Like every section, it introspects nothing of its own: it renders what the schema cache holds.
+ * **It carries no Refresh**: that is the Query header's own control, once (#455, #1224).
  */
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
@@ -127,10 +119,8 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 					{operations.map((operation, index) => (
 						<li key={`${operation.kind}:${operation.name ?? ""}:${index}`}>
 							{/*
-							 * A real button, so Enter and Space come with it: the rows
-							 * were plain text carrying no affordance at all, and a
-							 * div with an onClick would have been the keyboard-only
-							 * user losing the feature instead.
+							 * A real button, so Enter and Space come with it: a div with an onClick
+							 * would leave a keyboard-only user without the feature.
 							 */}
 							<Button
 								type="button"

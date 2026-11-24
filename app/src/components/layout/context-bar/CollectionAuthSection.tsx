@@ -6,17 +6,14 @@
  */
 
 /**
- * What this collection hands down to the requests under it.
+ * What this collection hands down to the requests under it. The request tab's twin answers "what am
+ * I sending"; a collection is always a source, never an inheritor (`Collection.auth` excludes
+ * `inherit`), so what matters is what a descendant set to Inherit would pick up.
  *
- * The request tab's twin of this section answers "what am I sending"; here the
- * subject is the other end of the same walk - a collection is always a source,
- * never an inheritor (`Collection.auth` excludes `inherit`), so what matters is
- * what a descendant set to Inherit would pick up.
- *
- * A collection that configures nothing is not the end of the answer: the walk
- * carries on to *its* ancestors, and one of them set to No Auth stops it. That
- * is `resolveAuthSource` - the same function the Auth tab's inheritance chain
- * and both send paths use, so this cannot claim a source execution would not.
+ * A collection that configures nothing is not the end of the answer: the walk carries on to *its*
+ * ancestors, and one set to No Auth stops it. That is `resolveAuthSource`, the function the Auth
+ * tab's inheritance chain and both send paths use, so this cannot claim a source execution would
+ * not.
  */
 
 import { useCollectionsQuery, useCollectionAncestors } from "@/queries";

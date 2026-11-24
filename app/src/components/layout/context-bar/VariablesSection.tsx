@@ -6,16 +6,14 @@
  */
 
 /**
- * The variables the open request uses, and the quick editor over them.
+ * The variables the open request uses, and the quick editor over them. It leads with what *this
+ * request references*, resolved or not, and keeps the full list a disclosure away so the
+ * quick-edit-anything path is not lost (#1308).
  *
- * It leads with what *this request references*, resolved or not, and keeps the full list a
- * disclosure away so the quick-edit-anything path is not lost (#1308).
- *
- * The bar sits outside `RequestBuilderProvider` and reads the stored request via
- * `useRequestQuery`, so the reference set lags the live editor buffer by the
- * autosave interval - the same lag the GraphQL section's outline documents. That
- * is deliberate: a reference list does not need the live buffer the way a copied
- * snippet does (see the Code section's `editorDraft` read, #2638).
+ * The bar sits outside `RequestBuilderProvider` and reads the stored request (`useRequestQuery`),
+ * so the reference set lags the editor by the autosave interval, the lag the GraphQL section's
+ * outline has too. Deliberate: a reference list does not need the live buffer the way a copied
+ * snippet does (the Code section's `editorDraft` read, #2638).
  */
 
 import { useState } from "react";
@@ -42,12 +40,10 @@ export function VariablesSection({ tab }: ContextBarSectionProps) {
 
 	const { references, resolvedRefs, undefinedRefs, rest } = derived;
 
-	// Nothing referenced *and* nothing in scope: there is genuinely nothing to
-	// say, distinct from "this request uses none but others are in scope" below.
-	// The bar reduces this section to a dimmed header before it gets here
-	// (`useVariablesRelevance`), so this is the honest answer for a caller that
-	// mounts the section directly, and the answer during the render in which the
-	// last definition in scope goes away.
+	// Nothing referenced *and* nothing in scope: nothing to say, unlike "this request uses none but
+	// others are in scope" below. The bar reduces this section to a dimmed header before it gets
+	// here (`useVariablesRelevance`), so this is the answer for a caller that mounts it directly,
+	// and in the render where the last definition in scope goes away.
 	if (references.length === 0 && rest.length === 0) {
 		return <SectionEmpty>No variables in scope</SectionEmpty>;
 	}

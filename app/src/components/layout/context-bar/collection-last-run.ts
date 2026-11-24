@@ -6,10 +6,9 @@
  */
 
 /**
- * What the Last run section says about a collection run, as plain functions
- * over the list row - so "which parts are actually present" is answerable in a
- * unit test rather than by opening the bar. The same split `run-scenario.ts`
- * makes for the run tab's sections.
+ * What the Last run section says about a collection run, as plain functions over the list row, so
+ * "which parts are present" is answerable in a unit test rather than by opening the bar: the split
+ * `run-scenario.ts` makes for the run tab's sections.
  */
 
 import { rowOutcome, verdictBesideStatus } from "@/components/shared/run-outcome";
@@ -51,12 +50,9 @@ export function runStatusTone(run: Run): RunStatusTone {
 }
 
 /**
- * "3 steps", and "× 2" only when more than one pass ran - one pass is the
- * default, and printing it on every row is noise rather than information.
- *
- * Null for a run stored before the engine sent the descriptor: the plan's
- * length was not recorded, which is not the same as a run of nothing, and
- * "0 steps" would be a claim about the plan.
+ * "3 steps", plus "× 2" only when more than one pass ran: one pass is the default, and printing it
+ * on every row is noise. Null for a run stored before the engine sent the descriptor: the plan's
+ * length was not recorded, which is not a run of nothing, and "0 steps" would be a claim about it.
  */
 export function scenarioSizeLabel(run: Run): string | null {
 	const scenario = run.summary?.scenario;

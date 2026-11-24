@@ -6,22 +6,16 @@
  */
 
 /**
- * Where this run came from: the request that was sent, and the environment it
- * was sent with.
+ * Where this run came from: the request that was sent, and the environment it was sent with. The
+ * environment is the first question asked of a result that surprises you: `Run.environmentId` is
+ * written by every send, and without it shown a run measured against Staging looks exactly like one
+ * measured against Production.
  *
- * Both are stored on the run and neither had a reader anywhere in the app -
- * `Run.environmentId` in particular was written by every send and displayed by
- * nothing, so a run measured against Staging looked exactly like one measured
- * against Production. It is the first question asked of a result that surprises
- * you, and the run tab could not answer it.
+ * The request link opens the tab rather than navigating in place: a run is often opened to compare
+ * against the request as it is now, and closing the run to look would lose the comparison.
  *
- * The request link opens the tab rather than navigating in place: a run is
- * often opened to compare against the request as it is now, and closing the run
- * to look would lose the comparison.
- *
- * A **collection run** has no `requestId` at all - its source is the folder -
- * so the request row read "Not saved" for it, which is true of the field and
- * wrong about the run. It gets the collection instead, linked the same way and
+ * A **collection run** has no `requestId` (its source is the folder), where "Not saved" would be
+ * true of the field and wrong about the run, so it gets the collection instead, linked the same way
  * for the same reason.
  */
 

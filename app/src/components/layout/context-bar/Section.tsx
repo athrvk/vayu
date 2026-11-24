@@ -8,18 +8,15 @@
 /**
  * The collapsible frame every context-bar section is drawn in.
  *
- * "A collapsed section costs nothing" rests on `CollapsibleContent` unmounting
- * closed children (Radix's `CollapsibleContentImpl` renders `isOpen && children`),
- * not on a guard here - a manual `{expanded && children}` would unmount
- * immediately and skip the ~200ms close animation. The one consequence: a
- * collapsed section's body stays mounted, hooks and all, for that animation's
- * duration before Radix drops it.
+ * "A collapsed section costs nothing" rests on `CollapsibleContent` unmounting closed children
+ * (Radix's `CollapsibleContentImpl` renders `isOpen && children`), not on a guard here: a manual
+ * `{expanded && children}` would unmount at once and skip the ~200ms close animation. So a
+ * collapsed section's body stays mounted, hooks and all, for that animation before Radix drops it.
  *
- * A section's `useRelevance` hook (see `types.ts`) is the one thing that does
- * run while it is collapsed, so the guarantee is now precisely "no *section*
- * mounts, and no query beyond the one its relevance already needs". Code, the
- * one section whose query is a server round trip nobody asked for, declares no
- * relevance hook at all and so still costs exactly nothing while collapsed.
+ * A section's `useRelevance` hook (see `types.ts`) is the one thing that runs while it is
+ * collapsed, so the guarantee is "no *section* mounts, and no query beyond the one its relevance
+ * already needs". Code, the one section whose query is a server round trip nobody asked for,
+ * declares no relevance hook and so costs nothing while collapsed.
  */
 
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -37,10 +34,9 @@ interface ContextBarSectionFrameProps {
 }
 
 /**
- * The width of the chevron's column, shared with the empty header's blank stand-in
- * for it below - the one thing that keeps every section title on the same left
- * edge whether or not its section can be opened. Two separately typed widths would line
- * up until one of them changed.
+ * The chevron column's width, shared with the empty header's blank stand-in for it below, which
+ * keeps every section title on one left edge whether or not its section can open. Two separately
+ * typed widths would line up until one of them changed.
  */
 const CHEVRON_COLUMN = "w-icon-sm";
 
@@ -79,20 +75,15 @@ export function ContextBarSectionFrame({
 }
 
 /**
- * What a section with nothing to say is reduced to: its title, a word for why,
- * and no way in.
- *
- * There is no chevron because there is nothing to expand, and no button because
- * there is nothing to press - a trigger that toggles an empty body is a control
- * that lies about having something behind it. "Quiet" here is the loss of the
- * chevron, the hover-to-foreground affordance and the body, not a fainter
- * colour: `EYEBROW_CLASS` is already `--muted-foreground`, and stacking an
- * opacity on it would take the title under the contrast floor
+ * What a section with nothing to say is reduced to: its title, a word for why, and no way in. No
+ * chevron, as there is nothing to expand, and no button, as there is nothing to press: a trigger
+ * toggling an empty body lies about having something behind it. "Quiet" is the loss of the chevron,
+ * the hover-to-foreground affordance and the body, not a fainter colour: `EYEBROW_CLASS` is already
+ * `--muted-foreground`, and an opacity on it would take the title under the contrast floor
  * `docs/design-system/surfaces.md` holds for small text.
  *
- * The empty box where the chevron would be keeps these titles on the same left
- * edge as the sections above and below them; without it a quiet section reads
- * as an outdented heading over its neighbour.
+ * The empty box where the chevron would be keeps these titles on the left edge of the sections
+ * around them; without it a quiet section reads as an outdented heading over its neighbour.
  */
 export function ContextBarSectionEmptyHeader({ title, note }: { title: string; note: string }) {
 	return (
