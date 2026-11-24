@@ -6,9 +6,8 @@
  */
 
 /**
- * Where a load run is aimed, read off the request's variable-resolved URL
- * (#2117). One classification feeds both the dialog's target line and the
- * advisory notice, so the two cannot disagree about which host they mean.
+ * Where a load run is aimed, read off the variable-resolved URL (#2117). One classification feeds
+ * the target line and the advisory, so they cannot disagree on the host.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -22,9 +21,8 @@ export type Target =
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /**
- * The part of `url` between the scheme and the first `/`, `?` or `#`, without
- * any `user:pass@`. Cut textually because a `{{token}}` in it makes `new URL`
- * throw, and the token is the thing worth naming.
+ * `url` between the scheme and the first `/`, `?` or `#`, without `user:pass@`. Cut textually: a
+ * `{{token}}` there makes `new URL` throw, and the token is what is worth naming.
  */
 function authorityOf(url: string): string {
 	const rest = url.replace(SCHEME, "");
@@ -33,8 +31,8 @@ function authorityOf(url: string): string {
 }
 
 /**
- * A URL typed without a scheme is sent as http, so it is read as http here
- * rather than as the `localhost:` "scheme" `new URL("localhost:3000/x")` finds.
+ * A scheme-less URL is sent as http, so it is read as http, not as `new URL`'s `localhost:`
+ * "scheme".
  */
 function hostnameOf(url: string): string | null {
 	try {
@@ -46,8 +44,8 @@ function hostnameOf(url: string): string | null {
 }
 
 /**
- * A token in the path or query leaves the host readable, so only the authority
- * is searched: `https://api.example.com/users/{{id}}` is still a known host.
+ * Only the authority is searched: a token in path or query (`https://api.example.com/users/{{id}}`)
+ * leaves the host known.
  */
 export function classifyTarget(resolvedUrl: string): Target {
 	const url = resolvedUrl.trim();

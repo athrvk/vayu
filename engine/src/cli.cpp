@@ -6,7 +6,6 @@
  */
 
 /**
- * @file main.cpp
  * @brief Vayu CLI entry point
  *
  * Usage:
@@ -388,12 +387,7 @@ int run_cli (std::span<char* const> args) {
         return 1;
     }
 
-    // Initialize curl (still needed for httplib?)
-    // httplib uses its own socket implementation, but vayu::http::global_init
-    // might be needed if we use other vayu components. However, we are not
-    // using vayu::http::Client anymore. vayu::http::global_init();
 
-    // Set logger verbosity
     vayu::utils::Logger::instance ().set_verbosity (options.verbosity);
 
     int result = 0;

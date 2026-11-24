@@ -12,23 +12,18 @@ import { rangeError } from "../../utils/loadTestValidation";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
- * Duration is meaningless in `iterations`: the engine stops on
- * `requests_sent < iterations` and its branch in `load_strategy.cpp` never
- * reads duration - `docs/engine/api-reference/load-runs.md` documents the field as
- * "constant_rps / constant_concurrency / ramp_up". The old dialog showed it
- * anyway, second on screen, and persisted whatever you typed. It already
- * half-knew: the OAuth guard is handed `null` in this mode precisely because
- * a duration-based warning would be nonsense.
+ * Duration is meaningless in `iterations`: the engine stops on `requests_sent < iterations` and
+ * that branch of `load_strategy.cpp` never reads duration (`docs/engine/api-reference/load-runs.md`
+ * lists the field for constant_rps / constant_concurrency / ramp_up only). The OAuth guard is
+ * handed `null` in this mode for the same reason.
  */
 export function usesDuration(mode: LoadTestConfig["mode"]): boolean {
 	return mode !== "iterations";
 }
 
 /**
- * Whether a virtual user has a "next request" to hold back. `constant_rps`
- * sends on a schedule, so the engine skips Retry-After back-off there with a
- * warning (#3782); the dialog hides the control instead of offering one that
- * does nothing.
+ * Whether a virtual user has a "next request" to hold. `constant_rps` sends on a schedule, so the
+ * engine skips Retry-After back-off there with a warning (#3782); the dialog hides the control.
  */
 export function appliesRetryAfter(mode: LoadTestConfig["mode"]): boolean {
 	return mode !== "constant_rps";
@@ -49,8 +44,8 @@ export function retryAfterCapError(
 }
 
 /**
- * What the dialog calls the virtual-user count in each mode. Shared with the
- * range message, so the field a refusal names is the one on screen.
+ * The dialog's name for the virtual-user count per mode, shared with the range message it must
+ * match.
  */
 export function concurrencyLabel(mode: LoadTestConfig["mode"]): string {
 	if (mode === "ramp_up") return `Target ${CONCURRENCY_UNIT}`;
@@ -66,14 +61,11 @@ export function durationLabel(mode: LoadTestConfig["mode"]): string {
 }
 
 /**
- * The parameters a mode actually sends, in the dialog's own units and names and
- * with nothing else: an unused one is absent, never `undefined`, so a payload
- * built from it cannot claim a field the engine discards.
- *
- * Neutral on purpose. The single-request payload spells these snake_case
- * (`LoadTestConfig`) and the scenario payload camelCase with `"Ns"` strings
- * (`StartScenarioRunRequest`); both map from here, so which fields a mode owns
- * is decided in one place.
+ * The parameters a mode sends, in the dialog's units and names, and nothing else: an unused one is
+ * absent, never `undefined`, so a payload cannot claim a field the engine discards. Neutral on
+ * purpose: the single-request payload spells these snake_case (`LoadTestConfig`), the scenario one
+ * camelCase with `"Ns"` strings (`StartScenarioRunRequest`), and both map from here, so which
+ * fields a mode owns is decided once.
  */
 export interface ProfileParams {
 	mode: LoadTestConfig["mode"];
@@ -89,8 +81,8 @@ export interface ProfileParams {
 }
 
 /**
- * @param maxInFlight  Constant RPS only: a positive cap on requests in flight.
- *                     Null or non-positive leaves the engine to derive it.
+ * @param maxInFlight  Constant RPS only: a positive in-flight cap. Null or non-positive lets the
+ *        engine derive it.
  */
 export function profileParams(
 	profile: LoadTestProfile,
@@ -118,10 +110,8 @@ export function profileParams(
 			params.startConcurrency = profile.startConcurrency;
 			break;
 		case "capacity":
-			// `concurrency` is the ceiling the search will not climb past and
-			// `startConcurrency` is where it begins - the same two fields the
-			// ramp owns, reused rather than respelled, so one cap in Settings
-			// bounds both modes.
+			// `concurrency` is the ceiling the search never passes and `startConcurrency` where it
+			// begins: the ramp's fields reused, so one Settings cap bounds both modes.
 			params.concurrency = profile.concurrency;
 			params.startConcurrency = profile.startConcurrency;
 			params.sloMs = profile.sloMs;

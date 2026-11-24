@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_specs.cpp
  * @brief OpenAPI documents (issue #637): storage, the orphan sweep (issue
  * #718), and the OpenAPI-sync transaction (issue #655) (issue #1614).
  */

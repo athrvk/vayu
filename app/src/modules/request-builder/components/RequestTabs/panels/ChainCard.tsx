@@ -6,24 +6,17 @@
  */
 
 /**
- * "Something up the collection chain applies to this request, and here is the
- * chain." Two panels say that, about two different things.
+ * "Something up the collection chain applies to this request, and here is the chain": the shared
+ * chrome of `AuthInheritBanner` and `InheritedElementsNotice` (the tinted box, the summary row with
+ * its `Info` icon and bottom rule, the captioned body, hairline-separated rows with the last bare).
  *
- * `AuthInheritBanner` and `InheritedScriptsNotice` had the chrome written out
- * twice, identically: the tinted box, the summary row with its `Info` icon and
- * bottom rule, the captioned body, and rows separated by a hairline with the
- * last one bare. Nine class strings each, matching character for character.
+ * Not a `Callout`: that primitive is one row (icon, text, optional action) with no body slot, and
+ * its `info` severity is a neutral `border-border bg-panel`, not this accent tint. A captioned list
+ * is a different shape, so it gets a component, not a `Callout` severity only one shape could use.
  *
- * Not a `Callout`. That primitive is one row - icon, text, optional action -
- * and deliberately so; it has no body slot, and its `info` severity is a
- * neutral `border-border bg-panel` rather than this accent tint. A card with a
- * captioned list underneath is a different thing, so it gets its own component
- * rather than a fourth `Callout` severity that only one shape can use.
- *
- * The tints stay `--primary`-derived. That is the accent the user chose, and
- * these cards are the app pointing at something it resolved on their behalf -
- * the same register as the resolved-variable highlight. `--primary` is correct
- * as a tint and a text colour here; `--primary-fill` is for solid buttons.
+ * The tints are `--primary`-derived: the user's accent, for the app pointing at something it
+ * resolved for them, the register of the resolved-variable highlight. `--primary` is right as a
+ * tint and text colour; `--primary-fill` is for solid buttons.
  */
 
 import type { ReactNode } from "react";
@@ -45,10 +38,9 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 		<div className="enter-fade rounded-md border border-primary/30 bg-primary-tint">
 			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
 				{/*
-				 * `size-icon` (16px), not `size-icon-sm`: matches `Callout.tsx`'s own
-				 * leading-icon size, which is what actually centers on a `text-xs
-				 * leading-relaxed` line at `mt-px` - a 12px icon at the same offset
-				 * sits visibly above the text's vertical center instead of beside it.
+				 * `size-icon` (16px), not `size-icon-sm`: `Callout.tsx`'s leading-icon size, which
+				 * centers on a `text-xs leading-relaxed` line at `mt-px`; a 12px icon there sits
+				 * visibly above center.
 				 */}
 				<Info className="size-icon text-primary shrink-0 mt-px" aria-hidden="true" />
 				<div className="flex-1 min-w-0">{summary}</div>
@@ -69,12 +61,9 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 }
 
 /**
- * One link. Separated from the next by a hairline; the last one bare, so the
- * list does not appear to continue past its end.
- *
- * `border-primary/10` rather than `border-rule`: the rule contract covers the
- * neutral surfaces, and this row sits on an accent tint where a neutral rule
- * would read as a different material. Tint on tint is the deliberate choice.
+ * One link, separated from the next by a hairline; the last is bare, so the list does not seem to
+ * continue. `border-primary/10`, not `border-rule`: the rule contract covers neutral surfaces, and
+ * on an accent tint a neutral rule reads as another material. Tint on tint is deliberate.
  */
 function ChainRow({ children, last }: { children: ReactNode; last: boolean }) {
 	return (

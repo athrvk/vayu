@@ -16,16 +16,12 @@ interface StreamCapFieldsProps {
 }
 
 /**
- * The two stream caps, as grid items of a two-column field grid. Shared by
- * `ProfileFields` (a load run) and `RunCollectionDialog`, which shows them for
- * a design run too: a collection's streaming steps are bounded by the same two
- * numbers whichever executor runs them (#3235).
- *
- * They sit with the other run parameters, not under Advanced: for a streaming
- * request they are what decides when each transfer ends, which is the same
- * kind of decision Duration makes for the run. Reaching either is a
- * *completed* stream, so the hints say so - a user who read them as timeouts
- * would read the run's 0% error rate as luck.
+ * The two stream caps, as items of a two-column grid. Shared by `ProfileFields` (a load run) and
+ * `RunCollectionDialog`, which shows them for a design run too: a collection's streaming steps have
+ * the same two bounds whichever executor runs them (#3235). With the run parameters, not under
+ * Advanced: for a streaming request they decide when each transfer ends, as Duration does for the
+ * run. Reaching either is a *completed* stream, and the hints say so; read as timeouts, a 0% error
+ * rate would look like luck.
  */
 export function StreamCapFields({ profile, onChange, limits }: StreamCapFieldsProps) {
 	return (

@@ -112,9 +112,8 @@ function profileFieldError(
 }
 
 /**
- * The first field outside its range, among the ones this draft would send. A
- * field the mode does not send is hidden, so a stale value in it is nobody's
- * mistake (the stream caps only when the request streams).
+ * The first field outside its range among those the draft sends. A field the mode does not send is
+ * hidden, so a stale value there is nobody's mistake (the stream caps only when it streams).
  */
 function rangeErrorOf(
 	{
@@ -157,9 +156,8 @@ export function validateLoadTestDraft(draft: DraftToValidate): DraftErrors {
 		isStreamingRequest,
 	} = draft;
 	const { mode, duration, concurrency, rampDuration, startConcurrency } = profile;
-	// Checked before the two range rules, which both compare the start against
-	// the target: a start below the floor is wrong on its own terms, and saying
-	// so is more useful than "this would ramp down".
+	// Before the two range rules, which compare start to target: a start below the floor is wrong
+	// on its own, and saying so beats "this would ramp down".
 	const startFloorError = validateStartConcurrencyFloor(mode, startConcurrency);
 	return {
 		rampDurationError: validateRampDuration(mode, duration, rampDuration),
@@ -167,8 +165,8 @@ export function validateLoadTestDraft(draft: DraftToValidate): DraftErrors {
 		startConcurrencyError: validateStartConcurrency(mode, startConcurrency, concurrency),
 		capacityRangeError: validateCapacityRange(mode, startConcurrency, concurrency),
 		profileRangeError: rangeErrorOf(draft, startFloorError),
-		// One message slot for both budget families: a custom row is refused on the
-		// same terms a fixed field is, so the notice reads the same either way.
+		// One slot for both budget families: a custom row is refused on a fixed field's terms, so
+		// the notice reads the same.
 		budgetsError: budgetError(budgets, isStreamingRequest) ?? customBudgetsError(customBudgets),
 		monitoringError: monitorError(monitor, maxSeries),
 		scenarioOnlyError: scenarioOnlyError(scenarioOnly),

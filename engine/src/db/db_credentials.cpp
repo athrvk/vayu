@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_credentials.cpp
  * @brief Client-certificate registry (issue #707) and its trash (#2973), the
  * allowed folders and picked files for request bodies (`file_roots`,
  * `file_grants`) and the OAuth token cache (issue #1614).

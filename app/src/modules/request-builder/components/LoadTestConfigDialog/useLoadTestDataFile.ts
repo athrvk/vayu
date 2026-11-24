@@ -15,39 +15,27 @@ import { useColumnAudit, type ColumnAuditRequest } from "@/hooks/useColumnAudit"
 const NO_COLUMNS: string[] = [];
 
 /**
- * The data set a load run binds (issue #993), against the contract in scope
- * for the request's collection.
- *
- * Per-run and deliberately not memoed like the profile's numbers: rows are user
- * data of unknown sensitivity, and neither side stores the set - the same rule
- * the collection run dialog keeps. Picking a file again is the whole cost of
- * that - which is what the declared-file pre-fill spares the user, without the
- * rows ever being what is remembered.
+ * The data set a load run binds (#993), against the contract in scope for the request's collection.
+ * Per run, deliberately not memoed like the profile: rows are user data of unknown sensitivity, and
+ * neither side stores the set (the collection run dialog's rule). Picking the file again is the
+ * cost, which the declared-file pre-fill spares without ever remembering the rows.
  */
 export function useLoadTestDataFile(collectionId?: string, request?: ColumnAuditRequest) {
 	/**
-	 * The parse failure that blocks starting: a file the parser refused leaves
-	 * no rows behind, so starting the run would send the request with its
-	 * `{{data.*}}` tokens written as they stand - the failure the whole
-	 * namespace exists to prevent.
+	 * The parse failure that blocks Start: a refused file leaves no rows, so the run would send its
+	 * `{{data.*}}` tokens as written, the failure the namespace exists to prevent.
 	 */
 	const [error, setError] = useState<string | null>(null);
 
 	/*
-	 * The chosen file against the contract in scope for this request's
-	 * collection - the nearest declaring ancestor, as everywhere else in the
-	 * feature (issue #729). A mismatch is a warning and never blocks: a missing
-	 * column fails loudly engine-side at bind time, and a file carrying extra
-	 * columns is simply a file with extra columns. What it buys is hearing about
-	 * it here rather than at the first submission.
-	 *
-	 * ...and the file that contract was last run with, pre-filled (issue #1039).
-	 * The same hook the Run collection dialog reads, so the two cannot drift on
-	 * which ancestor is consulted or on what a moved file says. What does *not*
-	 * come across with it is that dialog's iterations coupling: a load run's
-	 * length is its profile's, so nothing about a data file may touch the
-	 * profile's fields. `contract` comes back from the same call because the
-	 * audit and the pre-fill are answers about the same declaration.
+	 * The file against the contract in scope (the nearest declaring ancestor, as everywhere, #729).
+	 * A mismatch warns, never blocks: a missing column fails loudly engine-side at bind, and extra
+	 * columns are harmless; the gain is hearing it here, not at the first submission. Also the file
+	 * the contract last ran with, pre-filled (#1039), from the hook the Run collection dialog
+	 * reads, so the two cannot drift on the ancestor or on what a moved file says. Not carried
+	 * over: that dialog's iterations coupling, since a load run's length is its profile's.
+	 * `contract` comes from the same call because the audit and the pre-fill answer about one
+	 * declaration.
 	 */
 	const {
 		file,
@@ -60,17 +48,12 @@ export function useLoadTestDataFile(collectionId?: string, request?: ColumnAudit
 	const writer = useDataContractWriter(declaringCollectionId);
 
 	/*
-	 * A pick declares the contract from the picked file (issue #2050), the same
-	 * rule as the Run collection dialog and the Data tab: for the collection whose
-	 * contract this request binds against, and for nothing when the request is in
-	 * no collection. Remove clears it through the picker's `onRemove`, never
-	 * here, because a file the picker refuses also arrives as `null`. A declare
-	 * that fails leaves the selection alone, so Start still sends the rows.
-	 *
-	 * Picking by hand also replaces whatever was pre-filled, so the note about a
-	 * file that could not be re-read has nothing left to say. And no
-	 * `onPrefill`: a load run's length is its profile's, so a file arriving
-	 * changes no field of it.
+	 * A pick declares the contract from the file (#2050), as the Run collection dialog and Data tab
+	 * do: for the collection whose contract the request binds against, none outside a collection.
+	 * Remove clears it through the picker's `onRemove`, not here, since a refused file also arrives
+	 * as `null`. A failed declare leaves the selection, so Start still sends the rows. A hand pick
+	 * replaces the pre-fill, so the re-read note has nothing left to say. No `onPrefill`: the run's
+	 * length is its profile's, so an arriving file changes none of it.
 	 */
 	const select = (next: SelectedDataFile | null) => {
 		setFile(next);
@@ -81,9 +64,8 @@ export function useLoadTestDataFile(collectionId?: string, request?: ColumnAudit
 	};
 
 	/*
-	 * "Read numbers as numbers" re-parsed the same file. Remembered on the
-	 * binding when the request's collection has one; for a request in no
-	 * collection the setting lives in the selection alone, for this run.
+	 * "Read numbers as numbers" re-parsed the file. Remembered on the binding when the collection
+	 * has one; outside a collection it lives in the selection, for this run.
 	 */
 	const changeReading = (next: SelectedDataFile) => {
 		setFile(next);
@@ -91,11 +73,10 @@ export function useLoadTestDataFile(collectionId?: string, request?: ColumnAudit
 	};
 
 	/*
-	 * The one request this run sends, audited under its collection's chain (its
-	 * `inherit` auth and the chain's scripts are part of what it sends) against
-	 * the picked file's columns. The contract diff beside it is for a pre-filled
-	 * file that drifted on disk; once a pick's declare lands it is empty by
-	 * construction, and the request is what is left to compare against.
+	 * The one request this run sends, audited under its collection's chain (its `inherit` auth and
+	 * chain scripts are part of what it sends) against the file's columns. The contract diff is for
+	 * a pre-filled file that drifted on disk; after a pick's declare it is empty, so the request is
+	 * what is left to compare.
 	 */
 	const auditSubject = useMemo(
 		() => ({ collectionId: collectionId ?? null, requests: request ? [request] : [] }),

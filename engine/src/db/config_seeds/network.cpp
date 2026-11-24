@@ -49,9 +49,8 @@ std::string proxy_mode_options_json () {
 // NETWORK & CONNECTIVITY (network_performance)
 // The wire itself: what a new request starts with, how many transfers a
 // worker keeps open, and how long a name resolution is reused. The OAuth
-// renewal knobs that used to sit here were five of its eight entries and
-// moved to Services (#703) - a user tuning token renewal does not arrive at
-// "network tuning".
+// renewal knobs are in Services (#703): a user tuning token renewal does not
+// arrive at "network tuning".
 // =============================================================================
 void seed_network (ConfigSeeder& seed, int64_t now) {
     seed (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (ConfigEntry{ "defaultTimeout",

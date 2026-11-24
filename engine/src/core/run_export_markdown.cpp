@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/run_export_markdown.cpp
  * @brief The run-report document as Markdown (#2131): a verdict, the run, the
  *        headline numbers, latency against budgets, a streaming run's events
  *        (#3240), a capacity search's result, the contract's coverage and schema

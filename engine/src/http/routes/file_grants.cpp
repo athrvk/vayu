@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/file_grants.cpp
  * @brief The files a person picked, which a request body may send from
  * wherever they lie (`file_grants`, `FileAccessPolicy`, #2356).
  *

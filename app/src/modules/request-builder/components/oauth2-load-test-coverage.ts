@@ -6,9 +6,8 @@
  */
 
 /**
- * Pure coverage decision for OAuth2LoadTestGuard, split out so the state machine
- * can be unit-tested without React and so the component file only exports a
- * component (keeps React Fast Refresh happy).
+ * OAuth2LoadTestGuard's pure coverage decision, split out to unit-test without React and so the
+ * component file exports only a component (React Fast Refresh).
  */
 
 export function fmtDuration(ms: number): string {
@@ -40,37 +39,33 @@ export type CoverageState =
 			kind: "covered";
 			nonExpiring: boolean;
 			remainingMs?: number;
-			/** Covered because the engine renews the token mid-run, not because
-			 *  the cached one outlives the test. */
+			/**
+			 * Covered because the engine renews the token mid-run, not because the cached one
+			 * outlives the test.
+			 */
 			viaRefresh?: boolean;
 	  }
 	| { kind: "refresh"; remainingMs: number; lifetimeMs: number; durationMs: number }
 	| { kind: "too-long"; lifetimeMs: number; durationMs: number };
 
 /**
- * Whether the engine will keep this credential current for the whole run.
+ * Whether the engine keeps this credential current for the whole run. Mirrors `plan_oauth2_refresh`
+ * (engine/src/http/auth_resolver.cpp), the config and token cases a single-request run and a
+ * collection run's steps share: never promise a refresh the engine will not do, never block a run
+ * it can carry. Change one, change both.
  *
- * Mirrors `plan_oauth2_refresh` (engine/src/http/auth_resolver.cpp), the config
- * and token cases a single-request run and a collection run's steps both go
- * through - the guard must not promise a refresh the engine will not perform,
- * and must not block a run the engine can carry. Change one, change both.
+ * It cannot mirror what the engine decides from the composed request, which is not an input here:
  *
- * It cannot mirror what the engine decides from the request it composed, which
- * is not an input here (a config and a token are all this is handed):
+ *   - an `Authorization` header that is not the token's value (a user-supplied header won, so a
+ *     token swap changes nothing on the wire: `plan_auth_refresh`, and a collection step's
+ *     `auth_header`);
+ *   - a collection step whose auth waited on its scripts, or that writes the token under a
+ *     different `headerPrefix` than the first step sharing its cache key
+ *     (`plan_scenario_auth_refresh`).
  *
- *   - a run whose `Authorization` header is not the token's own value - a
- *     user-supplied header beat the token to it, so swapping the token under it
- *     would change nothing on the wire (`plan_auth_refresh`, and for a
- *     collection run the step's `auth_header`);
- *   - a collection step whose auth waited on its scripts, and one that writes
- *     the token under a different `headerPrefix` than the first step sharing
- *     its cache key (`plan_scenario_auth_refresh`).
- *
- * The gap leans the safe way for the first: a user-supplied `Authorization`
- * authenticates the request in place of this token, which makes the coverage
- * question moot. The other two are collection-run only, and there the verdict
- * can read "the engine renews it" for a step the engine leaves on its first
- * token. Covering any of them would be a signature change.
+ * The first gap leans safe: a user-supplied `Authorization` replaces this token, so coverage is
+ * moot. The other two are collection-run only, where the verdict can read "the engine renews it"
+ * for a step the engine leaves on its first token. Covering them would change the signature.
  */
 export function isMidRunRefreshable(
 	config: Pick<OAuth2Config, "grantType" | "tokenPlacement" | "autoRefreshToken">,

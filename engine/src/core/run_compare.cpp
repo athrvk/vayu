@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/run_compare.cpp
  * @brief `compareReports` (`app/src/lib/run-compare.ts`) in C++, for the
  *        run-report export's comparison block (#2127).
  *

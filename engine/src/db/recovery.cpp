@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db/recovery.cpp
  * @brief Reading and writing the startup recovery marker (issue #922), the
  *        quarantined file sets it points at (issue #984), and the sorting of a
  *        SQLite failure into what a caller can do about it (#2420, #2423).

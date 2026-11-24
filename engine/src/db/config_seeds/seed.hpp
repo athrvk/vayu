@@ -8,11 +8,10 @@
 #pragma once
 
 /**
- * @file seed.hpp
  * @brief What every category file under `config_seeds/` shares (issue #1611).
  *
- * `Database::seed_default_config` used to be one 990-line function; this
- * header carries what it factored out so a category file needs nothing but
+ * This header carries what `Database::seed_default_config` factored out so a
+ * category file needs nothing but
  * this include and `vayu/types.hpp`'s `ConfigEntry`. See `ConfigSeeder` below
  * for how it reaches back into `Database`'s private storage without exposing
  * `Database::Impl` (that split is #1614's, over the table-family members).
@@ -88,15 +87,14 @@ struct AdoptNewDefault {};
 inline constexpr AdoptNewDefault adopt_new_default{};
 
 /**
- * @brief Everything `Database::seed_default_config` used to do before it
- * became the seven per-category calls: delete the retired-key rows, index
+ * @brief What `Database::seed_default_config` does around the seven per-category
+ * calls: delete the retired-key rows, index
  * the rows a reseed must preserve, and - through `operator()` - upsert one
  * entry, preserving a user's existing value, while refusing a key seeded
  * twice across the seven category files.
  *
- * The single function this replaces made that duplication impossible by
- * inspection - one function, read top to bottom. Split across seven files it
- * is not, so the check that used to be free is now explicit: `operator()`
+ * One function read top to bottom made a duplicate key impossible by inspection;
+ * split across seven files it is not, so the check is explicit: `operator()`
  * throws `std::runtime_error` naming the key the moment a second category
  * tries to seed it, which fails engine startup loudly rather than letting
  * the second write silently win. `known_keys` is cleared on construction, so

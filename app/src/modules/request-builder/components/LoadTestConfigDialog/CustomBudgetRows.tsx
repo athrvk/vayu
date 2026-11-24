@@ -6,19 +6,12 @@
  */
 
 /**
- * The `custom.<name>.<stat>` budget rows (issue #1579).
- *
- * One component, mounted by both dialogs that declare budgets, for the reason
- * `budgets.ts` and `NumberField` are shared rather than copied: a second copy
- * of a repeatable-row list stops receiving this one's fixes, and the two
- * dialogs would drift on what a half-filled row means.
- *
- * The metric name is typed, not picked from a list. The engine validates the
- * key's *shape* and not that the name is one this run records
- * (`docs/engine/api-reference/load-runs.md`, the thresholds block), so a picker would
- * have to resolve every `metric.record` element down the collection chain to
- * offer a choice the engine does not require - plumbing neither dialog has, for
- * no correctness gain. The stat is a closed set, so that half is a select.
+ * The `custom.<name>.<stat>` budget rows (#1579), one component for both budget dialogs, as
+ * `budgets.ts` and `NumberField` are: a copy would miss this one's fixes and drift on what a
+ * half-filled row means. The name is typed, not picked: the engine checks the key's shape, not that
+ * the run records the name (`docs/engine/api-reference/load-runs.md`, the thresholds block), so a
+ * picker would need every `metric.record` down the chain, for no correctness gain. The stat is a
+ * closed set, so a select.
  */
 
 import { Plus, X } from "lucide-react";
@@ -46,15 +39,13 @@ export interface CustomBudgetRowsProps {
 	rows: CustomBudgetDraft[];
 	onChange: (rows: CustomBudgetDraft[]) => void;
 	/**
-	 * Namespaces every DOM id this renders. Both dialogs pass their own, the
-	 * rule `NumberField`'s callers already keep, so the two cannot collide if
-	 * they are ever mounted together.
+	 * Namespaces every DOM id, as `NumberField`'s callers do, so both dialogs could mount at once.
 	 */
 	idPrefix: string;
 	disabled?: boolean;
 	/**
-	 * The saved request these budgets belong to; each named row's "Copy for
-	 * agent" is absent without it, as in the collection runner, which has none.
+	 * The saved request these budgets belong to; without it (the collection runner) rows have no
+	 * "Copy for agent".
 	 */
 	referenceOwner?: ThresholdOwner;
 }
@@ -73,11 +64,9 @@ export function CustomBudgetRows({
 		<div className="space-y-2">
 			{rows.length > 0 && (
 				/*
-				 * Column captions rather than a label per control: a label on
-				 * every row would print "Metric name" once per budget. The
-				 * captions are `aria-hidden` and each control carries its own
-				 * `aria-label` naming the row, so what a screen reader hears is
-				 * unambiguous where sighted reading is by column.
+				 * Column captions, not a label per row (which would print "Metric name" per
+				 * budget). They are `aria-hidden`; each control's own `aria-label` names its row
+				 * for a screen reader.
 				 */
 				<div
 					className="flex items-center gap-2 text-label text-muted-foreground"
@@ -169,8 +158,7 @@ export function CustomBudgetRows({
 }
 
 /**
- * A row names a budget once it has a metric name; before that the slot stays
- * empty at the button's width so the columns do not shift as the name is typed.
+ * Only a named row has the button; before that the slot keeps its width so columns do not shift.
  */
 function CustomBudgetCopyButton({
 	row,

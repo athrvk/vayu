@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/openapi_document.cpp
  * @brief The engine's one reader of a stored OpenAPI document (issue #853).
  *        See the header for what it promises and why it lives here.
  *

@@ -6,28 +6,15 @@
  */
 
 /**
- * InheritedElementsNotice (issue #1512)
- *
- * Generalizes `InheritedScriptsNotice` from scripts alone to every element
- * kind. Walks the ancestor chain of the request's collection (root first, via
- * `useCollectionAncestors` - the same hook `AuthInheritBanner` uses for auth)
- * and lists every enabled element a collection in the chain carries that
- * will run before the request's own. A collection's `script.setup` /
- * `script.teardown` are not among them (#3457): they run once at the run's
- * boundary, never before a request, so listing them under "Runs before your
- * own" would claim a run that never happens. A blank `script.pre`/
- * `script.post` (empty or whitespace-only text) is excluded: it is inert
- * everywhere else (#1609), so counting it here would claim a run that never
- * happens. A disable toggle writes an `inherit.disable` entry into the
- * request's own list rather than editing the ancestor, which the request
- * cannot do.
- *
- * Renders nothing when no collection in the chain carries an element. That is
- * most requests, so it must not leave an empty box behind.
- *
- * `entries` lets a caller supply the resolved list directly instead of
- * reading the live chain - the History run view shows what a stored run
- * recorded, not the live collection chain, which may have changed since.
+ * Every enabled element a collection in the chain carries that runs before the request's own
+ * (#1512), walking the chain root first via `useCollectionAncestors` (as `AuthInheritBanner` does).
+ * Left out, since listing them would claim a run that never happens: a collection's `script.setup`
+ * / `script.teardown` (#3457), which run once at the run's boundary, and a blank `script.pre` /
+ * `script.post` (empty or whitespace), inert everywhere (#1609). A disable toggle writes an
+ * `inherit.disable` entry into the request's own list, since the request cannot edit an ancestor.
+ * Renders nothing when no collection carries an element: most requests, so no empty box. `entries`
+ * supplies the list directly: the History run view shows what a stored run recorded, not the live
+ * chain, which may have changed.
  */
 
 import { Folder } from "lucide-react";
@@ -74,9 +61,7 @@ export default function InheritedElementsNotice({
 	onChangeOwnElements,
 	kinds,
 }: InheritedElementsNoticeProps) {
-	// Only resolve the live chain when nothing was supplied - passing `null`
-	// when `entries` is present skips the lookup rather than resolving a chain
-	// nobody will render.
+	// Resolve the live chain only without `entries`: `null` skips the lookup nobody would render.
 	const ancestors = useCollectionAncestors(entries ? null : collectionId);
 	const source = (entries ?? entriesFromChain(ancestors)).filter(
 		(e) =>
