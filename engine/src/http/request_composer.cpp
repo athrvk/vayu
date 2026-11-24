@@ -676,12 +676,12 @@ DynamicResolution dynamic) {
         return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
     }
     // An unknown ordinary name keeps its braces too (#1009), on the rule the
-    // line above holds (#186): a token that resolved to "" left the
-    // request *different* and said nothing - `https://{{host}}/x` went out as
-    // `https:///x`, a URL nobody wrote, where the literal reaches DNS or the
-    // server and comes back as an error naming the host that was never set.
-    // It is also what makes a token survive composition for something later to
-    // resolve, which is the half #1008's residual pass is built on.
+    // line above holds (#186): resolving it to "" would leave the request
+    // *different* and say nothing (`https://{{host}}/x` sent as `https:///x`, a
+    // URL nobody wrote), where the literal reaches DNS or the server and comes
+    // back as an error naming the host that was never set. It is also what lets
+    // a token survive composition for something later to resolve, which #1008's
+    // residual pass is built on.
     return std::nullopt;
 }
 
@@ -1079,10 +1079,10 @@ const nlohmann::json& origin) {
 /**
  * The resolved element list for a saved request (issue #1513): the collection
  * chain's elements root->leaf, then the request's own, minus disabled and
- * `inherit.disable` targets from *either* level - each stamped with where it
- * came from. The only script source since issue #1514's cut-over: scripts
- * fold into this list as `script.pre` / `script.post` entries, and the
- * pipeline (`core/elements/pipeline.cpp`) is what runs them.
+ * `inherit.disable` targets from *either* level, each stamped with where it
+ * came from. The only script source (issue #1514): scripts fold into this list
+ * as `script.pre` / `script.post` entries, and the pipeline
+ * (`core/elements/pipeline.cpp`) is what runs them.
  */
 nlohmann::json compose_elements (const std::vector<vayu::db::Collection>& chain,
 const vayu::db::Request& request) {
@@ -1253,8 +1253,7 @@ const std::vector<vayu::db::Collection>& chain) {
     nlohmann::json auth = parse_auth_blob (request.auth);
     payload["auth"] = auth.is_object () ? auth : nlohmann::json{ { "mode", "inherit" } };
 
-    // The only script source (issue #1514's cut-over) - `preRequestScripts` /
-    // `postRequestScripts` retired with `compose_script_parts`.
+    // The only script source (issue #1514).
     nlohmann::json elements = compose_elements (chain, request);
     if (!elements.empty ()) {
         payload["elements"] = elements;
@@ -1322,23 +1321,19 @@ const std::vector<vayu::db::Collection>& chain) {
 namespace {
 
 /**
- * The variables this composition resolves through, and the collection chain they
- * come from.
+ * The variables this composition resolves through, and the collection chain
+ * they come from.
  *
  * Scope: the saved request's own collection wins; an explicit `collectionId` is
  * the inline path's scope (and a fallback for a stored request without one).
- * Unknown ids degrade to an empty scope, the same tolerance the clients had -
- * composition must still work with no collection at all.
+ * Unknown ids degrade to an empty scope: composition must still work with no
+ * collection at all.
  */
 VariableValues resolve_compose_variables (vayu::db::Database& db,
 const nlohmann::json& body,
 const std::optional<vayu::db::Request>& stored,
 std::vector<vayu::db::Collection>& chain,
 std::string& environment_id) {
-    // Scope: the saved request's own collection wins; an explicit collectionId
-    // is the inline path's scope (and a fallback for a stored request without
-    // one). Unknown ids degrade to an empty scope, the same tolerance the
-    // clients had - composition must still work with no collection at all.
     std::string scope_collection_id;
     if (stored && !stored->collection_id.empty ()) {
         scope_collection_id = stored->collection_id;
@@ -1394,8 +1389,8 @@ struct ComposeLookup {
     const VariableValues& vars;
     const BoundColumnNames& bound_columns;
     DynamicResolution dynamic = DynamicResolution::Generate;
-    /// Null when no pre-request script runs before the send: composition as
-    /// it always was.
+    /// Null when no pre-request script runs before the send: nothing is
+    /// deferred.
     std::set<std::string>* deferred = nullptr;
 
     std::optional<std::string> operator() (const std::string& name) const {
@@ -1891,10 +1886,10 @@ nlohmann::json& payload) {
  * The `dataColumns` field: the bare names this composition must leave to a
  * per-row bind (issue #1007).
  *
- * Names only, never values - composition happens once and a row is bound per
+ * Names only, never values: composition happens once and a row is bound per
  * iteration, so a value here would be one row's value written into every one of
- * them. A caller that omits the field composes exactly as it always did, which
- * is what makes this additive for every client that has no dataset.
+ * them. Omitting the field binds no column, so a client with no dataset needs
+ * nothing new.
  *
  * @return the refusal, or nothing (with @p out filled).
  */
@@ -1925,11 +1920,11 @@ read_bound_columns (const nlohmann::json& body, BoundColumnNames& out) {
  * a run will repeat (issue #995).
  *
  * A boolean rather than a run kind, because that is the whole of what
- * composition needs to know - "somebody else sends this many times, so a value
+ * composition needs to know: "somebody else sends this many times, so a value
  * generated here would be that many identical values", and an OAuth 2.0 token
  * acquired once for all of them (`OAuth2Resolution::AtComposition`). The run
- * paths set it; a Send, a preview and every client that omits it compose as
- * they always did.
+ * paths set it; a Send, a preview and every client that omits it generate at
+ * composition.
  *
  * @return the refusal, or nothing (with @p out filled).
  */
@@ -2059,16 +2054,16 @@ VariableDeferral deferral) {
     }
     resolve_compose_body (lookup, payload);
     // The request half only: a credential is *encoded* when the request is
-    // built - `apply_auth` collapses basic auth into one base64 value - so a
+    // built (`apply_auth` collapses basic auth into one base64 value), so a
     // token left for the bind would go out as base64 of its own text. Deferring
     // the build is what a `{{data.*}}` credential needs (issue #591) and what
-    // the identity is waiting on (issue #1055), and a name no scope answers yet,
-    // or one the pre-request script may change (#2521), keeps its braces for
-    // the auth applied after that script (issue #2473). Until that is decided
-    // by what the credentials carry rather than by whether the run has rows, a
-    // generator in a credential is generated here, once, exactly as it was.
-    // A run composition's OAuth 2.0 config resolves here: no HTTP client
-    // composes for a sequential collection run, so a run here is a load run.
+    // the identity is waiting on (issue #1055), and a name no scope answers
+    // yet, or one the pre-request script may change (#2521), keeps its braces
+    // for the auth applied after that script (issue #2473). Whether the build
+    // defers follows whether the run has rows, not what the credentials carry,
+    // so a generator in a credential is generated here, once. A run
+    // composition's OAuth 2.0 config resolves here: no HTTP client composes for
+    // a sequential collection run, so a run here is a load run.
     const OAuth2Resolution oauth2_resolution = oauth2_resolution_of (oauth2, dynamic);
     if (auto refusal = resolve_compose_auth (chain,
         ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into },
