@@ -133,8 +133,7 @@
       "lines": 1405
     },
     "docs/architecture.md": {
-      "lines": 982,
-      "history": 3
+      "lines": 982
     },
     "docs/building.md": {
       "max_cell": 313
@@ -215,26 +214,22 @@
       "max_cell": 369
     },
     "docs/engine/architecture.md": {
-      "lines": 2269,
-      "history": 3
+      "lines": 2268
     },
     "docs/engine/benchmarks.md": {
-      "lines": 1244,
+      "lines": 1242,
       "max_line": 401,
       "long_lines": 1,
-      "max_cell": 366,
-      "history": 6
+      "max_cell": 366
     },
     "docs/engine/building.md": {
-      "lines": 1972,
-      "max_line": 1701,
+      "lines": 1937,
+      "max_line": 1688,
       "long_lines": 8,
-      "max_cell": 1690,
-      "history": 11
+      "max_cell": 1677
     },
     "docs/engine/cli.md": {
-      "max_cell": 316,
-      "history": 3
+      "max_cell": 284
     },
     "docs/engine/db-schema.md": {
       "lines": 3041,
@@ -244,8 +239,7 @@
       "history": 17
     },
     "docs/engine/elements.md": {
-      "lines": 894,
-      "history": 1
+      "lines": 894
     },
     "docs/engine/logging.md": {
       "max_cell": 277
@@ -255,17 +249,10 @@
       "long_lines": 3,
       "max_cell": 520
     },
-    "docs/engine/mcp/index.md": {
-      "history": 1
-    },
     "docs/engine/mcp/internals.md": {
       "max_line": 867,
       "long_lines": 7,
-      "max_cell": 842,
-      "history": 1
-    },
-    "docs/engine/mcp/load-and-specs.md": {
-      "history": 1
+      "max_cell": 842
     },
     "docs/engine/mcp/request-composition.md": {
       "max_line": 450,
@@ -283,8 +270,7 @@
     },
     "docs/engine/mcp/saved-data.md": {
       "max_line": 461,
-      "long_lines": 1,
-      "history": 1
+      "long_lines": 1
     },
     "docs/engine/mcp/secrets.md": {
       "max_line": 1973,
@@ -298,17 +284,10 @@
       "max_cell": 696,
       "history": 12
     },
-    "docs/lock-file-handling.md": {
-      "history": 2
-    },
-    "docs/request-storage-design.md": {
-      "history": 3
-    },
     "docs/ux-writing.md": {
       "max_line": 1352,
       "long_lines": 8,
-      "max_cell": 1129,
-      "history": 1
+      "max_cell": 1129
     }
   }
 }
