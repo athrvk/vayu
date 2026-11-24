@@ -335,9 +335,7 @@ export function ResponseStatusBar({
 			 * a different question, and the one a duration cannot answer - whether
 			 * what you are looking at is the response to the request beside it *as
 			 * it is now*, or to a version of it from twenty minutes and several
-			 * edits ago. A restored response used to be the only case that got an
-			 * answer, which left the more common one - a response you sent, then
-			 * kept editing around - reading as if it were current forever.
+			 * edits ago.
 			 *
 			 * The two are labelled apart: "from run" carries the run's identity
 			 * and its id in the tooltip; a live one is just its age.

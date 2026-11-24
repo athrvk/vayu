@@ -11,11 +11,7 @@
  * `HeadersViewer` is the collapsible table, used for request and response
  * headers alike. `CompactHeadersViewer` is the same content on a sunken slab,
  * for panes with no room for a table. `ResponseHeadersPanel` is the Headers
- * *tab* - request collapsed above response open - and lived in its own file
- * until #76 folded it in here, which is where the other two already were.
- *
- * Displays HTTP headers in a collapsible table format.
- * Used for both request and response headers.
+ * *tab* - request collapsed above response open.
  *
  * The rules are `border-rule`, so their colour comes from whichever surface
  * encloses this table rather than from a token picked here. Rendered in the
