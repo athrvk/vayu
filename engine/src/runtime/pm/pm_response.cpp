@@ -1071,7 +1071,6 @@ void define_magic_getter (JSContext* ctx, JSValue obj, const char* name, JSCFunc
     JS_FreeAtom (ctx, atom);
 }
 
-// Create the pm.response.to.have chain object
 JSValue create_response_have_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue have = create_response_chain_object (ctx);
     if (JS_IsException (have)) {
@@ -1091,7 +1090,6 @@ JSValue create_response_have_object (JSContext* ctx, const ResponseChainLinks& l
     return have;
 }
 
-// Create the pm.response.to.be chain object
 JSValue create_response_be_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue be = create_response_chain_object (ctx);
     if (JS_IsException (be)) {
@@ -1320,9 +1318,8 @@ JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 }
 
 // Postman's header object is a PropertyList, and the six reads below are the
-// half of it that only looks. `each` in particular is an everyday idiom - it
-// threw here, which is how an imported script died on a line that reads nothing
-// - so all six install on the response and sendRequest objects too, ahead of
+// half of it that only looks. `each` in particular is an everyday idiom, so all
+// six install on the response and sendRequest objects too, ahead of
 // the `mutators` gate.
 //
 // What they cannot report is what this object no longer holds: `Headers` is a
@@ -1923,11 +1920,9 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         // pm.response.json() and pm.response.text()
         install_response_body_readers (ctx, response, data->response->body);
 
-        // pm.response.reason()
         JS_SetPropertyStr (ctx, response, "reason",
         JS_NewCFunction (ctx, js_response_reason, "reason", 0));
 
-        // pm.response.size()
         JS_SetPropertyStr (ctx, response, "size",
         JS_NewCFunction (ctx, js_response_size, "size", 0));
 

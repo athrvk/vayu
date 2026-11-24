@@ -247,11 +247,6 @@
     "engine/src/http/sse_stream.cpp": 1,
     "engine/src/http/transport_policy.cpp": 2,
     "engine/src/platform/platform_windows.cpp": 1,
-    "engine/src/runtime/pm/pm_cookies.cpp": 2,
-    "engine/src/runtime/pm/pm_expect.cpp": 8,
-    "engine/src/runtime/pm/pm_request_url.cpp": 2,
-    "engine/src/runtime/pm/pm_scopes.cpp": 1,
-    "engine/src/runtime/pm/pm_send_request.cpp": 1,
-    "engine/src/runtime/script_engine.cpp": 2
+    "engine/src/runtime/script_engine.cpp": 1
   }
 }
