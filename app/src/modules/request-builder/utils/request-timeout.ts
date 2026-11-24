@@ -18,10 +18,9 @@ import type { ConfigEntry } from "@/types";
 const DEFAULT_TIMEOUT_KEY = "defaultTimeout";
 
 /**
- * The typed text as a stored timeout, clamped into the range the engine
- * accepts (it refuses anything outside with a 400, so an unclamped value would
- * fail every save). `null` for text that is not a number: the caller decides
- * whether that is "keep what was there" or "clear".
+ * Typed text as a stored timeout, clamped into the engine's range (it 400s anything outside, so an
+ * unclamped value fails every save). `null` for non-numeric text; the caller decides between "keep"
+ * and "clear".
  */
 export function parseTimeout(raw: string): number | null {
 	const parsed = Number.parseInt(raw, 10);
@@ -30,10 +29,9 @@ export function parseTimeout(raw: string): number | null {
 }
 
 /**
- * The `defaultTimeout` setting in milliseconds, or `null` while the config has
- * not arrived or the entry cannot be read. Null rather than the engine's
- * seeded 30 s: the field's empty state names the number a send will use, and
- * guessing it would state one the engine is not applying.
+ * The `defaultTimeout` setting in ms, or `null` while config has not arrived or the entry is
+ * unreadable. Not the engine's 30 s seed: the empty field names the number a send will use, and a
+ * guess could name one the engine is not applying.
  */
 export function defaultTimeoutFrom(entries: ConfigEntry[] | undefined): number | null {
 	const entry = entries?.find((e) => e.key === DEFAULT_TIMEOUT_KEY);

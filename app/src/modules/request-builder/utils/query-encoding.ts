@@ -6,21 +6,15 @@
  */
 
 /**
- * Postman's query encoding (issue #1771): how one key or value of a query row
- * is written into the URL, the engine's `encode_query_component`
- * (`engine/src/core/query_encoding.cpp`), pinned to it by
- * `engine/tests/fixtures/query-encoding-conformance.json`.
- *
- * Postman's `toNodeUrl` joins the rows with `QueryParam.unparse` and encodes
- * the result with `postman-url-encoder`'s `QUERY_ENCODE_SET`: the C0 controls,
- * DEL, every byte above `~` (per UTF-8 byte), and space `"` `#` `'` `<` `>`.
- * `unparseSingle` has already encoded `&` (and `#`) in both parts and `=` in a
- * key only, so `=` in a value goes out raw. `%` is never encoded: a `%XX`
- * passes through, and so does a lone `%`. A whole `{{...}}` token is kept.
- *
- * The same file holds the rest of the line Vayu sends (issue #2465):
- * `encodeUrlAsPostman` is the engine's `core::encode_url_as_postman`
- * (`engine/src/core/url_encoding.cpp`) and `resolveUrlTemplate` its
+ * Postman's query encoding (#1771): how a query row's key or value is written into the URL, the
+ * engine's `encode_query_component` (`engine/src/core/query_encoding.cpp`), pinned by
+ * `engine/tests/fixtures/query-encoding-conformance.json`. Postman's `toNodeUrl` joins rows with
+ * `QueryParam.unparse` and encodes with `postman-url-encoder`'s `QUERY_ENCODE_SET`: the C0
+ * controls, DEL, every byte above `~` (per UTF-8 byte), and space `"` `#` `'` `<` `>`.
+ * `unparseSingle` already encoded `&` (and `#`) in both parts and `=` in a key only, so a value's
+ * `=` goes raw. `%` is never encoded (a `%XX` or a lone `%` passes); a whole `{{...}}` token is
+ * kept. Also here, the rest of the line Vayu sends (#2465): `encodeUrlAsPostman` is the engine's
+ * `core::encode_url_as_postman` (`engine/src/core/url_encoding.cpp`) and `resolveUrlTemplate` its
  * `substitute_url_tokens`, both pinned by the same fixture.
  */
 
@@ -88,10 +82,9 @@ export function encodeQueryComponent(text: string, part: QueryPart): string {
 }
 
 /**
- * @p url cut at its fragment, the first `#` outside a `{{...}}` token, so
- * `{{a#b}}` is not one. `fragment` runs from the `#` on, or is "" when there is
- * none. The one rule the query split (`url.ts`), the "Sends" line and the
- * snippet's appended query parameter share; libcurl never sends a fragment.
+ * @p url cut at its fragment, the first `#` outside a `{{...}}` token (so `{{a#b}}` is not one);
+ * `fragment` runs from the `#`, or is "". The one rule the query split (`url.ts`), the "Sends" line
+ * and the snippet's appended query parameter share; libcurl never sends a fragment.
  */
 export function splitFragment(url: string): { base: string; fragment: string } {
 	const hash = maskTokens(url).indexOf("#");
@@ -100,22 +93,19 @@ export function splitFragment(url: string): { base: string; fragment: string } {
 }
 
 /**
- * @p text without the spaces and tabs a paste leaves around a credential, only
- * the ends: the engine's `trimmed_credential` (`auth_resolver.cpp`), which is
- * `trim_optional_whitespace`, not `String.prototype.trim`.
+ * @p text without the surrounding spaces and tabs a paste leaves on a credential: the engine's
+ * `trimmed_credential` (`trim_optional_whitespace`), not `String.prototype.trim`.
  */
 export function trimCredential(text: string): string {
 	return text.replace(/^[ \t]+|[ \t]+$/g, "");
 }
 
 /**
- * @p url with `key=value` appended to its query, before any fragment: the
- * engine's `append_query_param` (`auth_resolver.cpp`), which writes an API
- * key's query placement. The trim of both halves and the empty-key rule are
- * `apply_api_key`'s, the engine function that calls it, and are done here so
- * the Sends line and the snippet share them: a key left empty writes nothing,
- * an empty value writes `key=`. Both go through Postman's query rule, or as
- * typed when @p encode is false (`disableUrlEncoding`).
+ * @p url with `key=value` added to its query, before any fragment: the engine's
+ * `append_query_param` (`auth_resolver.cpp`), writing an API key's query placement. The trim and
+ * the empty-key rule are its caller `apply_api_key`'s, done here so the Sends line and the snippet
+ * share them: an empty key writes nothing, an empty value `key=`. Both go through Postman's query
+ * rule, or as typed when @p encode is false (`disableUrlEncoding`).
  */
 export function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
 	const name = trimCredential(key);
@@ -124,9 +114,8 @@ export function appendQueryParam(url: string, key: string, value: string, encode
 }
 
 /**
- * @p url with `key=value` appended as written, no trim and no empty-key rule:
- * `append_query_param` itself, for a caller whose engine function does not trim
- * (an OAuth 2.0 token's `queryParamName`, which the engine writes as it is).
+ * @p url with `key=value` appended as written (no trim, no empty-key rule): `append_query_param`
+ * itself, for an untrimming caller (an OAuth 2.0 token's `queryParamName`).
  */
 export function appendQueryPair(url: string, key: string, value: string, encode: boolean): string {
 	const pair = encode
@@ -138,11 +127,10 @@ export function appendQueryPair(url: string, key: string, value: string, encode:
 }
 
 /**
- * Which part of a URL a point in its text sits in (issues #1773, #2465), the
- * engine's `core::UrlComponent`. `head` is the scheme and the authority;
- * `headSeparator` is the head just after a `:` or `/`, where a `/` continues a
- * `://` rather than opening the path. A query key and value are one
- * component: substituted text encodes both alike.
+ * The URL part a point in its text sits in (#1773, #2465), the engine's `core::UrlComponent`.
+ * `head` is scheme and authority; `headSeparator` the head just after a `:` or `/`, where a `/`
+ * continues `://` rather than opening the path. Query key and value are one component: substituted
+ * text encodes both alike.
  */
 export type UrlComponent = "head" | "headSeparator" | "path" | "query" | "fragment";
 
@@ -160,8 +148,8 @@ function afterUrlChar(char: string, where: UrlComponent): UrlComponent {
 }
 
 /**
- * A kept `{{...}}` token reads as head text, a scheme or a host: a `/` after
- * `http://{{host}}` opens the path.
+ * A kept `{{...}}` token reads as head text (a scheme or host), so a `/` after `http://{{host}}`
+ * opens the path.
  */
 function afterUrlToken(where: UrlComponent): UrlComponent {
 	return where === "headSeparator" ? "head" : where;
@@ -197,17 +185,13 @@ function inSubstitutedSet(byte: number, where: UrlComponent): boolean {
 }
 
 /**
- * `value` written into a URL at `from`, and the component it leaves the URL
- * in: the engine's `encode_at_url_component`. Postman substitutes into the URL
- * string and parses it again, so a value is URL text: its `/` makes path
- * segments, its `?` opens the query, its `#` the fragment, its `&` and `=`
- * split pairs. Each component is encoded by its Postman set - the path by
- * `PATH_ENCODE_SET`, the query by `QUERY_ENCODE_SET`, the fragment by
- * `FRAGMENT_ENCODE_SET` - and the head as it stands, which
- * `encodeUrlAsPostman` then lowercases and punycodes. `%` passes, so nothing
- * is encoded twice. The component moves *before* a byte is judged, so a `?`
- * or `#` is always structure, never encoded, and every whole `{{...}}` token
- * is kept verbatim.
+ * `value` written into a URL at `from`, and the component it leaves the URL in: the engine's
+ * `encode_at_url_component`. Postman substitutes into the string and reparses, so a value is URL
+ * text: `/` makes segments, `?` opens the query, `#` the fragment, `&` and `=` split pairs. Each
+ * component is encoded by its Postman set (path `PATH_ENCODE_SET`, query `QUERY_ENCODE_SET`,
+ * fragment `FRAGMENT_ENCODE_SET`), the head as it stands (`encodeUrlAsPostman` then lowercases and
+ * punycodes). `%` passes, so nothing is encoded twice. The component moves *before* a byte is
+ * judged, so `?` or `#` is always structure, and whole `{{...}}` tokens are kept.
  */
 export function encodeAtUrlComponent(
 	value: string,
@@ -223,13 +207,13 @@ export function encodeAtUrlComponent(
 			at = end;
 			continue;
 		}
-		// A whole code point, so a character outside the BMP encodes as its
-		// UTF-8 bytes rather than as two lone surrogates.
+		// A whole code point, so a character outside the BMP encodes as its UTF-8 bytes, not two
+		// lone surrogates.
 		const char = String.fromCodePoint(value.codePointAt(at) ?? 0);
 		at += char.length;
 		where = afterUrlChar(char, where);
-		// Every byte of a multi-byte character is above `~`, so a set takes all
-		// of them or none, and a kept character is written whole.
+		// Every byte of a multi-byte character is above `~`, so a set takes all or none, and a kept
+		// character is written whole.
 		const bytes = encoder.encode(char);
 		out += bytes.some((byte) => inSubstitutedSet(byte, where))
 			? percentEncode(char, () => true)
@@ -243,9 +227,9 @@ const lowerAscii = (text: string) => text.replace(/[A-Z]/g, (letter) => letter.t
 const isAscii = (text: string) => ![...text].some((char) => char.charCodeAt(0) >= 0x80);
 
 /**
- * `url.domainToASCII`, which `toNodeUrl` calls on the host: `host` parsed as a
- * special scheme's domain (IDNA), or `null` where that has no answer and the
- * host stays as typed. A host with no non-ASCII byte is its own answer.
+ * `url.domainToASCII`, which `toNodeUrl` calls on the host: `host` parsed as a special scheme's
+ * domain (IDNA), or `null` where that has no answer and the host stays as typed; an ASCII host is
+ * its own.
  */
 function asciiHost(host: string): string | null {
 	if (isAscii(host)) return host;
@@ -274,9 +258,8 @@ function encodeUserInfo(userInfo: string): string {
 }
 
 /**
- * Where the authority starts in `head`: after the first `://` and any further
- * slashes (the parser drops those, keeping one for `file`), or at the start
- * when there is no `://`.
+ * Where `head`'s authority starts: after the first `://` and further slashes (dropped by the
+ * parser, one kept for `file`), else at the start.
  */
 function authorityStart(head: string, view: string): number {
 	for (let colon = view.indexOf(":"); colon !== -1; colon = view.indexOf(":", colon + 1)) {
@@ -290,16 +273,14 @@ function authorityStart(head: string, view: string): number {
 }
 
 /**
- * `url` without the user info of its `scheme://` authority, and that user info
- * as written (no `@`); null when there is no such authority or it holds no `@`.
- * The authority ends at the first `/`, `?` or `#` and the user info at its last
- * `@`, which is how libcurl reads it and the engine's `rfind ('@')`. A
- * `{{...}}` token is opaque, so an `@`, `:` or `/` inside one is not structure.
+ * `url` without its `scheme://` authority's user info, and that user info as written (no `@`); null
+ * without such an authority or `@`. The authority ends at the first `/`, `?` or `#`, the user info
+ * at its last `@`, as libcurl reads it and the engine's `rfind ('@')`. A `{{...}}` token is opaque.
  */
 export function splitUrlUserInfo(url: string): { userInfo: string; url: string } | null {
 	const view = maskTokens(url);
-	// The scheme comes before any `/`, `?` or `#`: a `://` later in a scheme-less
-	// URL (a redirect target in a query value) is not an authority.
+	// The scheme precedes any `/`, `?` or `#`: a later `://` in a scheme-less URL (a redirect
+	// target in a query value) is no authority.
 	if (!/^[^/?#]*:\/\//.test(view)) return null;
 	const start = authorityStart(url, view);
 	if (start === 0) return null;
@@ -351,12 +332,11 @@ function encodeQuery(query: string): string {
 }
 
 /**
- * `url` as `postman-url-encoder` 3.0.8's `toNodeUrl (url, false)` writes it,
- * and so as Send puts it on the wire (issue #2465): leading whitespace dropped,
- * a backslash before the query a `/`, user info by `USERINFO_ENCODE_SET`, the
- * host lowercased and punycoded, the path, each query key and value and the
- * fragment by their sets. `%` is in no set, so an escape already in the text
- * passes and the result is idempotent; a whole `{{...}}` token is kept.
+ * `url` as `postman-url-encoder` 3.0.8's `toNodeUrl (url, false)` writes it, so as Send sends it
+ * (#2465): leading whitespace dropped, a backslash before the query a `/`, user info by
+ * `USERINFO_ENCODE_SET`, the host lowercased and punycoded, the path, each query key and value and
+ * the fragment by their sets. `%` is in no set, so escapes pass and the result is idempotent; whole
+ * `{{...}}` tokens are kept.
  */
 export function encodeUrlAsPostman(url: string): string {
 	const text = url.replace(/^[ \t\n\v\f\r]+/, "");
@@ -377,12 +357,11 @@ export function encodeUrlAsPostman(url: string): string {
 }
 
 /**
- * `url` with each `{{...}}` token resolved through `resolve` and written as
- * URL text at the component the text before it has reached, and then the whole
- * URL written as Send puts it on the wire (`encodeUrlAsPostman`): the engine's
- * `substitute_url_tokens`. `resolve` gets the token alone, so a layered value
- * is resolved whole and encoded once. `encode: false` is `disableUrlEncoding`:
- * nothing is encoded, the host included.
+ * `url` with each `{{...}}` token resolved through `resolve` and written as URL text at the
+ * component reached so far, then the whole URL as Send sends it (`encodeUrlAsPostman`): the
+ * engine's `substitute_url_tokens`. `resolve` gets the token alone, so a layered value resolves
+ * whole and is encoded once. `encode: false` is `disableUrlEncoding`: nothing is encoded, the host
+ * included.
  */
 export function resolveUrlTemplate(
 	url: string,
