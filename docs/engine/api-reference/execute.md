@@ -277,7 +277,7 @@ It is the caller's session rule, changing per request, and rides on the payload 
 It is the single-send half of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names and values, the body and both halves of every form field is substituted against it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0` and `pm.info.iterationCount` `1` - the send *is* row 0 of 1.
 Without the field nothing changes: `{{data.*}}` goes out written as it stands and `pm.iterationData` is `undefined`.
 
-**The row's own keys are also its bound bare names** (issue #1007): the send derives its `dataColumns` set from `data`'s keys itself, so a bare `{{username}}` binds from the row exactly as `{{data.username}}` does, at the same precedence [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) gives it.
+**The row's own keys are also its bound bare names** (issue #1007): the send derives its `dataColumns` set from `data`'s keys itself, so a bare `{{username}}` binds from the row exactly as `{{data.username}}` does, at the same precedence [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment) gives it.
 A bare name the row does not carry is not deferred in the first place - it is an ordinary `{{name}}`, resolved from the scopes at compose time or, if nothing there answers either, by the residual pass after the pre-request script (issue #1008).
 
 An **object** of name/value pairs, never the array a run sends - one row.

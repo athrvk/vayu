@@ -435,7 +435,7 @@ to see, and one third-party race documented rather than ignored.
 ### Cycle detection, not a depth cap
 
 Worth stating separately, because the shape of the bug generalises.
-`js_deep_equal` used to bound cyclic input with a depth cap alone. A cap bounds
+Bounding `js_deep_equal`'s cyclic input with a depth cap alone does not work. A cap bounds
 the C recursion only *after* the fact, and N frames is a different amount of
 stack on every toolchain - so which guard fires first (ours, or the
 interpreter's own stack check) is decided by frame size, and frame size varies
@@ -479,9 +479,9 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 
 | Library | Purpose |
 |---------|---------|
-| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858). libcurl links every protocol the port builds by default (`file`, `ftp(s)`, `gopher(s)`, `dict`, `imap(s)`, `pop3(s)`, `smtp(s)`, `telnet`, `tftp`, `rtsp`, `mqtt(s)`): curl 8.23 removed the `HTTP_ONLY` build that the port's `non-http` feature used to select, so the build no longer backs the engine's http/https scheme rule ([#2321](https://github.com/athrvk/vayu/issues/2321)). The rule is enforced per handle - `apply_transport_policy` sets `CURLOPT_PROTOCOLS_STR` to `http,https` on every transfer handle (a redirect's `Location` is refused by the engine's own redirect chain, not by libcurl) - and by the URL check before a send ([URL schemes](api-reference/compose.md#url-schemes)). `UrlSchemeHandle.TheApplierAloneRefusesEveryOtherProtocolLibcurlSpeaks`, `UrlSchemeRedirect.TheTransportApplierAloneRefusesAFileUrl` and `UrlSchemeRedirect.ARedirectToFtpIsRefusedOnBothDrivers` pin the handle option, and `UrlSchemeGuard.EveryFileThatCreatesAHandleAppliesTheTransportPolicy` fails when a source file creates a handle without calling the applier. WebSocket support would be the port's `websockets` feature |
+| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858). libcurl links every protocol the port builds by default (`file`, `ftp(s)`, `gopher(s)`, `dict`, `imap(s)`, `pop3(s)`, `smtp(s)`, `telnet`, `tftp`, `rtsp`, `mqtt(s)`): curl 8.23 has no `HTTP_ONLY` build for the port's `non-http` feature to select, so the build does not back the engine's http/https scheme rule ([#2321](https://github.com/athrvk/vayu/issues/2321)). The rule is enforced per handle - `apply_transport_policy` sets `CURLOPT_PROTOCOLS_STR` to `http,https` on every transfer handle (a redirect's `Location` is refused by the engine's own redirect chain, not by libcurl) - and by the URL check before a send ([URL schemes](api-reference/compose.md#url-schemes)). `UrlSchemeHandle.TheApplierAloneRefusesEveryOtherProtocolLibcurlSpeaks`, `UrlSchemeRedirect.TheTransportApplierAloneRefusesAFileUrl` and `UrlSchemeRedirect.ARedirectToFtpIsRefusedOnBothDrivers` pin the handle option, and `UrlSchemeGuard.EveryFileThatCreatesAHandleAppliesTheTransportPolicy` fails when a source file creates a handle without calling the applier. WebSocket support would be the port's `websockets` feature |
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`), and the CSPRNG behind the script sandbox's `require('uuid')` (`randombytes_buf`, [#2650](https://github.com/athrvk/vayu/issues/2650)) |
-| OpenSSL (libcrypto) | MD5, SHA-1 and the SHA-2 digests and HMACs behind the script sandbox's `crypto-js` shim (`utils/digest.hpp`, [#2578](https://github.com/athrvk/vayu/issues/2578)), and the RS256 and ES256 signatures of the `jwt_bearer` OAuth 2.0 grant's assertion (`utils/jwt.cpp`, [#3632](https://github.com/athrvk/vayu/issues/3632)). Not a new dependency: it is libcurl's TLS backend, and `vayu_core` now links `OpenSSL::Crypto` directly |
+| OpenSSL (libcrypto) | MD5, SHA-1 and the SHA-2 digests and HMACs behind the script sandbox's `crypto-js` shim (`utils/digest.hpp`, [#2578](https://github.com/athrvk/vayu/issues/2578)), and the RS256 and ES256 signatures of the `jwt_bearer` OAuth 2.0 grant's assertion (`utils/jwt.cpp`, [#3632](https://github.com/athrvk/vayu/issues/3632)). Not a new dependency: it is libcurl's TLS backend, and `vayu_core` links `OpenSSL::Crypto` directly |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
 | ada-url | WHATWG URL host processing (UTS #46 IDNA and punycode), the library Node's `url.domainToASCII` is built on: a non-ASCII host is sent by the punycode name Postman sends it by ([Non-ASCII hosts](api-reference/compose.md#non-ascii-hosts)). libcurl is built without its `idn` feature on purpose: its libidn2 reads the host in the locale's codeset, so it would need a process-wide UTF-8 `LC_CTYPE` (which changes what `std::isspace` and kin answer for user text on macOS), and it refuses hosts Node converts (`bücher-.example`). MIT or Apache-2.0. Only `engine/src/http/url_parts.cpp` includes it |
@@ -945,16 +945,16 @@ MSVC runtime. `vayu-engine.exe` therefore ships as a single self-contained
 binary with **no DLLs beside it** - nothing is copied into
 `app/build/resources/bin` except the executable itself.
 
-This is not a size optimisation, it is a correctness requirement. The engine
-used to link dynamically, so the shipped binary imported `MSVCP140.dll` and
+This is not a size optimisation, it is a correctness requirement. A
+dynamically linked engine would import `MSVCP140.dll` and
 `VCRUNTIME140.dll` from the Visual C++ redistributable. That redistributable is
-**not** part of a clean Windows install, and it was never bundled. On any
+**not** part of a clean Windows install, and it is not bundled. On any
 machine without it - a fresh VM, a user who has never installed a C++ app -
-Windows refused to load the binary, the sidecar died the moment Electron
-spawned it, and the app showed only "Disconnected". v0.10.0 and v0.11.0 both
-shipped this way. Every developer machine has the redistributable (Visual
+Windows refuses to load the binary, the sidecar dies the moment Electron
+spawns it, and the app shows only "Disconnected" (v0.10.0 and v0.11.0 shipped
+this way). Every developer machine has the redistributable (Visual
 Studio installs it), and so does every CI runner, which is why building and
-testing the engine never caught it.
+testing the engine never catches it.
 
 Two consequences worth knowing before you change the build:
 
@@ -1144,24 +1144,23 @@ took ~37 min against a ~6 min serial run - the same `-j4` that cut ubuntu from
 why: a fast band of pure-logic suites, and a slow band that is exactly the
 fixtures which open a scratch `Database`, where concurrent SQLite commits cost
 more than the concurrency returns (the 25-250ms retry sleeps `os_win.c` answers
-a sharing violation with, and - until #838 - a genuine `synchronous=FULL` flush
-barrier, though not where this paragraph used to put it; see below). Moving the
+a sharing violation with, and a genuine `synchronous=FULL` flush
+barrier paid when a `Database` opens rather than per commit; see below). Moving the
 scratch directories between volumes was tried and made no difference, and
 Windows Defender is not a factor - GitHub's hosted Windows images ship with
 real-time monitoring disabled - so do not re-litigate either without new
 measurements.
 
-**Where the flush barrier actually was (#838).** This section used to name
-"the flush barrier `synchronous=FULL` issues per commit" as the cost, and that
-was wrong about the steady state: in WAL a committed result does not carry an
+**Where the flush barrier is (#838).** It is not "the flush barrier
+`synchronous=FULL` issues per commit": in WAL a committed result does not carry an
 fsync at `dbSynchronous` Normal, the default (`constants::database::SYNCHRONOUS`
-is `1`; it was Off until #2419, which moved it because Off can corrupt the file
-on power loss). What did carry one was everything a `Database` does *before*
+is `1`; Off can corrupt the file on power loss, #2419). What does carry one is
+everything a `Database` does *before*
 `init` applies that setting - two `sync_schema` passes from the constructor and
 a config seed that wrote its sixty-odd rows as sixty-odd separate transactions -
 all of it on SQLite's own defaults, a rollback journal at `synchronous=FULL`.
-Per process, once; and the suite is one process per test. So the barrier was
-real, and it was paid at open rather than per commit. #838 applies the
+Per process, once; and the suite is one process per test. So the barrier is
+real, and it is paid at open rather than per commit. #838 applies the
 engine's journal mode and `synchronous` to the first connection the constructor
 opens, and makes the seed one transaction.
 
@@ -1187,52 +1186,18 @@ Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
 figures, which is what makes this box a usable proxy for the *shape* of the
 suite) are only the visible tip of that group.
 
-**What #838 took off that group**, measured on the same class of box (Debug,
-`ctest -j1` over the locked filter only, all green):
-
-| build | locked-group serial wall |
-|---|---:|
-| before | 281.5s (820 tests) |
-| config seed in one transaction | 170.8s (822 tests) |
-| plus the pragmas on the first connection | **146.0s** (823 tests) |
-
-So the group's serial time - the floor the whole hybrid model sits on - is a
-little under half what it was, and the seed is the larger of the two halves.
-
-**What that turned into on CI**, first run after the change (32275928094), all
-three legs green:
-
-| leg | ctest step | before |
-|---|---:|---:|
-| ubuntu | 30s | ~1m15s |
-| macOS | 53s | ~1m06s |
-| **windows** | **2m32s** (2105 tests, 10 skipped, 0 failed) | 5m27s / 4m50s |
-
-The Windows leg is the one this was aimed at, and it lands at roughly half of
-the 4m40s-6m38s band its *serial* runs spanned - so the hybrid model is finally
-faster than the serial one it replaced, rather than merely no slower.
+With #838's changes the locked group is cheap enough that the hybrid model beats a serial run on
+Windows.
 
 Note what this does *not* change: the group is still locked on Windows. The
-lock's justification is the `-j4` blow-up, and the number above says the group
-got cheaper, not that it now survives overlapping - that is its own experiment.
+lock's justification is the `-j4` blow-up, and a cheaper group is not one that
+survives overlapping - that is its own experiment.
 Do not shrink `vayu_scratch_database_suites` without one.
 
-**What CI measured on the hybrid model: 5m27s and 4m50s** on two runs of the
-same tree (32249239500 and 32252015024), 2071 tests, 0 failures, 9 skipped. Both
-sit inside the 4m40s-6m38s band the serial legs spanned, so **this is not a
-speedup** - and with a baseline that noisy, two samples could not show one either
-way. What they do establish is that the mechanism works: the same `-j4` that took
-~37 min without the lock now finishes in the time serial used to take, which is
-what the 81% number predicts and the reason to hold the expectation there rather
-than at the ~2.5 min this was first scoped for. Getting a real speedup meant
-making the database tests cheaper, which is issue #838 and the table above -
-and which took the Windows leg to 2m32s, close to the ~2.5 min this whole line
-of work was first scoped for.
-
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
-safe wherever it happens; the Windows presets used to set
-`VAYU_TEST_NO_SCRATCH_ISOLATION` (which skips the scratch directory entirely)
-because a serial run has nothing to isolate from, and no preset sets it today.
+safe wherever it happens. No preset sets
+`VAYU_TEST_NO_SCRATCH_ISOLATION`, which skips the scratch directory entirely and
+is safe only for a serial run, which has nothing to isolate from.
 
 **Do not "improve" the job count to `"jobs": 0`.** Only CMake 3.29+ reads 0 as
 "one job per processor"; this project's floor is 3.25, where `ctest -j 0`
@@ -1298,13 +1263,13 @@ the next build picks it up, nothing to opt into:
 includes nothing, and defined in `src/core/user_agent.cpp`, the one translation
 unit that sees `VAYU_VERSION_STRING` for it.
 
-That is a build-cache rule, not a style one (issue #659). It used to be a
-`constexpr` in `core/constants.hpp` spelled `"Vayu/" VAYU_VERSION_STRING`, which
-forced that header to include `vayu/version.hpp` - and `constants.hpp` is
+That is a build-cache rule, not a style one (issue #659). A
+`constexpr` in `core/constants.hpp` spelled `"Vayu/" VAYU_VERSION_STRING` would
+force that header to include `vayu/version.hpp` - and `constants.hpp` is
 reached transitively by essentially every TU, through `types.hpp`,
 `utils/logger.hpp`, `utils/json.hpp` and `http/client.hpp`. So bumping `VERSION`
-changed a header in every compile command's input and invalidated the whole
-sccache, meaning **every release rebuilt the engine from scratch on all three
+would change a header in every compile command's input and invalidate the whole
+sccache, meaning **every release would rebuild the engine from scratch on all three
 platforms**. With the declaration in front of it, a bump recompiles
 `user_agent.cpp` plus the handful of files that include `vayu/version.hpp`
 directly (`daemon.cpp`, `cli.cpp`, `http/client.cpp`, `http/server.cpp`,
@@ -1580,8 +1545,8 @@ scanned with - and #946's own pull request proved that a zero does not
 transfer between legs: the first whole-file lint ever run on Windows reported
 ~85 findings in the touched files alone, none on a line the diff wrote.
 Promoting a leg ahead of its measured zero is the original failure back again,
-so the Windows leg kept changed-lines scope until #1023 measured what only it
-could see, paid it down, and collapsed the branch. What that leg was carrying,
+so a leg stays on changed-lines scope until its own whole-file count is measured
+and paid down - as #1023 did for Windows - and the branch collapses. What that leg was carrying,
 and what each class cost:
 
 | Class | What it was | What #1023 did |

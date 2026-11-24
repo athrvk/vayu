@@ -144,7 +144,7 @@ A content-based body (`json`, `text`, `graphql`, `jsonrpc`, `mcp`, `xml`) is sto
 see [api-reference/request-body.md](engine/api-reference/request-body.md#the-mcp-body)), and an empty `content` is still a
 body of that mode - clearing the editor to retype it is not the same action as
 picking **None**. The save path tests `bodyMode` alone rather than falling back
-to `mode: "none"` when the content is an empty (falsy) string, which used to
+to `mode: "none"` when the content is an empty (falsy) string, which would
 collapse a cleared JSON/text/XML/GraphQL/JSON-RPC body to `none` on save (issue
 #1490) while the mode selector kept showing the old mode until the next reload.
 
@@ -216,8 +216,8 @@ Separate from execution history, and deliberately so: a `results` row records a
 response that *happened* and is pruned with its run, while an example is a
 response the request *documents* and lives as long as the request does. Examples
 are what an importer found next to a request - Postman's saved responses, an
-OpenAPI operation's documented ones - which every parser used to drop, because
-there was nowhere to keep them (issue #481).
+OpenAPI operation's documented ones - which a parser without a place to keep them
+would drop (issue #481).
 
 ```json
 {
@@ -246,9 +246,9 @@ in the sense the next section describes: they stay on the row while the request
 is in the trash, unreachable because every read of them checks the owner first,
 and a purge removes them in the same transaction as the request.
 
-### 5. The deletion lifecycle (issue #988)
+### 5. The deletion lifecycle
 
-**Deleting a collection or a request does not remove it.** `DELETE
+**Deleting a collection or a request does not remove it** (issue #988). `DELETE
 /collections/:id` and `DELETE /requests/:id` stamp `deleted_at` on the row - and,
 for a collection, on its whole subtree in one transaction - and every read
 surface filters stamped rows out. To the sidebar, an export, an MCP tool or a

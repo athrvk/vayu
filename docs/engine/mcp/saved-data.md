@@ -106,7 +106,7 @@ description: >-
   `secret` masks the value in the app and withholds it from every MCP read, write answer and run output unless the user enables reveal (see [Secret values](secrets.md#secret-values)).
   Clearing it with `secret: false` is refused while reveal is off, since the next read would return the value; `secret: true` is always accepted.
 - **Activation is one write, and `"none"` is the other direction.**
-  `activate_environment` sends `isActive: true` and nothing else: the DB layer clears the previously active row in the same transaction (`deactivate_other_environments_locked`), so a companion deactivate would be a second definition of the same rule.
+  `activate_environment` sends `isActive: true` and nothing else: the DB layer clears the flag on the currently active row in the same transaction (`deactivate_other_environments_locked`), so a companion deactivate would be a second definition of the same rule.
   There is no "no environment" row to write `true` to, so `"none"` reads the list to find the row holding the flag and writes `isActive: false` to it - and when nothing is active it writes nothing, says so, and emits no data-changed event.
   The app follows either direction: `useActiveEnvironmentRestore` adopts whatever the engine reports, including a clear it has seen the engine hold a selection before.
 - **`update_globals` has to read first.**

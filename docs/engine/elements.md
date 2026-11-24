@@ -586,8 +586,8 @@ transaction's span. The report gains
 for a transaction the run never closed.
 
 **`control.switch` and `control.loop` under a scenario load run (issue #1569).** A scenario load run's
-virtual users used to advance through the plan strictly forward (`VirtualUser::step`), with no jump the
-way a repeat or a dispatch needs. They now do: `ScenarioLoadState::step_index` (the load path's own
+virtual users advance through the plan (`VirtualUser::step`) with the jump a repeat or a dispatch
+needs: `ScenarioLoadState::step_index` (the load path's own
 `ScenarioStepIndex`, built once per run) resolves a `control.switch` target or a `control.loop`'s
 folder-start name through the same `resolve_next_step` the sequential run's `setNextRequest` uses, and
 `finish_step` applies the result to the VU's own `step`, guarded against a cycle that never closes by

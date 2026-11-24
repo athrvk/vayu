@@ -183,13 +183,13 @@ matcher inside it (issue #1786): the variable matcher only with a provider
 above an editable editor, the time matcher wherever the language has one.
 There is no model left to mark and no per-language provider left to answer
 for one anyway. That is simpler than the
-two mechanisms this used to take: a Monaco hover provider is registered per
+two mechanisms marking models would take: a Monaco hover provider is registered per
 *language*, not per editor, so the `json` provider answering for a request
-body was the same
-object Monaco asked about a response body, and an editor that painted tokens
-had to mark its model (`lib/variable-token-models.ts`, since deleted) for the
-hover to tell them apart. `readOnly` could not decide it either way - that is
-an editor option, and the provider was handed a model.
+body is the same
+object Monaco asks about a response body, and an editor that paints tokens
+would have to mark its model for the
+hover to tell them apart. `readOnly` cannot decide it either way - that is
+an editor option, and the provider is handed a model.
 
 **A `data.*` token has three states of its own** (issue #600), decided by
 `describeDataToken` against `VariableSupport.dataColumns` - the contract the
@@ -207,10 +207,10 @@ column still binds if the run's file carries it, so this is "check this", not
 The `{{` autocomplete offers declared columns as a **Data columns** group beside
 Variables and Dynamic.
 
-**This chip row lives beside a `script.pre` / `script.post` element's editor
-now** (issue #1553), as `ScriptReferencesRow` (`components/shared/`) - split
-out rather than restored, because the row now has two hosts and used to have
-two copies. Through issue #1075, both the request builder's script panel and
+**This chip row lives beside a `script.pre` / `script.post` element's editor**
+(issue #1553), as `ScriptReferencesRow` (`components/shared/`) - split
+out rather than inlined, because the row has two hosts and a copy per host
+would drift. Through issue #1075, both the request builder's script panel and
 the collection's Script tab painted a **"Names mentioned:"** row above their
 Monaco editor - `referencedVariables` (`lib/referenced-variables.ts`) split
 `pm` reads from `{{template}}` mentions (issue #659, decision D16: the engine
@@ -231,8 +231,8 @@ context's answers through `ElementList`'s `renderAboveForm`, a plain
 per-element render callback that keeps `ElementList` itself as
 context-free as before. One deliberate behaviour change from the two retired
 panels: an ordinary `pm.*.get()` read now paints the resolved/unresolved
-(`secondary`/`destructive`) pair on both hosts, where the collection's
-`ScriptTab` previously painted every such read with a flat accent regardless
+(`secondary`/`destructive`) pair on both hosts, not the flat accent the collection's
+retired `ScriptTab` painted on every such read regardless
 of whether anything defined it - the two panels had quietly drifted apart on
 this one state, and a single shared implementation cannot paint it two ways.
 
@@ -301,12 +301,11 @@ inside: `{{data.email}}` is one atom to everything that reads it, and a caret
 between its braces is how a keystroke corrupts the name.
 
 **The keyboard splits the overlay the same way the pointer does, and along the
-same line** (issue #1215). The layer used to be `aria-hidden="true"` as a whole,
-which is right for what it mostly is - a repaint of text the `<input>` beneath
+same line** (issue #1215). The layer is not `aria-hidden="true"` as a whole.
+That is right for what it mostly is - a repaint of text the `<input>` beneath
 already carries - and wrong for the one thing it also holds: an editable token is
 a `role="button"` that opens the variable editor, and a focusable control inside
-an `aria-hidden` subtree is the `aria-hidden-focus` violation. Two commits that
-never met, each correct alone. So the duplication now carries the attribute where
+an `aria-hidden` subtree is the `aria-hidden-focus` violation. So the duplication carries the attribute where
 it actually is - the literal text either side of a token, which the input does
 carry - and the tokens stay in the accessibility tree.
 
