@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/oauth.cpp
  * @brief OAuth 2.0 token endpoints - acquisition, cache status, cache clear.
  *
  * POST   /oauth2/token          {config, force?, interactive?, environmentId?,

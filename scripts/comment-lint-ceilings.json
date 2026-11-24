@@ -179,13 +179,7 @@
     "engine/src/db/db_config.cpp": 1,
     "engine/src/db/db_maintenance.cpp": 2,
     "engine/src/db/db_requests.cpp": 1,
-    "engine/src/http/client.cpp": 1,
-    "engine/src/http/event_loop/curl_utils.cpp": 2,
-    "engine/src/http/request_composer.cpp": 3,
-    "engine/src/http/request_exchange.cpp": 1,
     "engine/src/http/routes/script_types.cpp": 1,
-    "engine/src/http/sse_stream.cpp": 1,
-    "engine/src/http/transport_policy.cpp": 2,
     "engine/src/platform/platform_windows.cpp": 1,
     "engine/src/runtime/script_engine.cpp": 1
   }

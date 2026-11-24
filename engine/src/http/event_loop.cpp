@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/event_loop.cpp
  * @brief Async HTTP event loop implementation using curl_multi
  */
 
