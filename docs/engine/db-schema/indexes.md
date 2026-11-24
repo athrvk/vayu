@@ -20,16 +20,26 @@ Declared alongside the tables in `make_vayu_storage()` (`engine/src/db/database_
 | `idx_body_blobs_run_id`      | `body_blobs.run_id`     | The `remove_all` in the run cascade                                                                                                               |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
-| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`, and `get_runs_before`, which seeks it to a `before` cursor (#2978). The `id` tiebreak needs no second column: the plan sorts only the rows sharing one `start_time`, which the `LIMIT` bounds |
+| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`... [Details](#idx_runs_start_time-in-full) |
 | `idx_inbox_requests_inbox_id`| `inbox_requests.inbox_id`| Every inbox read - the capture page, the live poll, the per-insert retention trim and `DELETE /inbox/:id/requests`                |
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 | `idx_request_examples_request_id` | `request_examples.request_id` | Every example read - `GET /requests/:id/examples`, the create path's append scan, and the `remove_all` in both the request and collection cascades |
-| `idx_requests_deleted_at`    | `requests.deleted_at`   | `Database::get_trash`'s request listing (`GET /trash`), which otherwise scans every request row and walks the overflow pages of a large body to reach the stamp (#3006). **Partial:** `WHERE deleted_at IS NOT NULL`, so it holds only the trashed rows and a live write never touches it; a query reaches it only by filtering `deleted_at IS NOT NULL`, which is what the listing does |
+| `idx_requests_deleted_at`    | `requests.deleted_at`   | `Database::get_trash`'s request listing (`GET /trash`)... [Details](#idx_requests_deleted_at-in-full) |
 
 `metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per second (the retired EAV `metrics` table cost roughly 20 rows for the same second) - so without `run_id` indexes a lookup slows down with every run ever recorded, not just the current one.
 `collections.parent_id` is a nullable column; `sqlite_orm` indexes it without special handling.
 
 Guarded by `DatabaseTest.CreatesIndexesOnFreshDatabase` and `DatabaseTest.RecreatesIndexesOnExistingDatabase` in `engine/tests/db_test.cpp`, which read `sqlite_master` directly rather than trusting what `sqlite_orm` reports about itself.
+
+### `idx_runs_start_time` in full
+
+...and `get_runs_before`, which seeks it to a `before` cursor (#2978).
+The `id` tiebreak needs no second column: the plan sorts only the rows sharing one `start_time`, which the `LIMIT` bounds
+
+### `idx_requests_deleted_at` in full
+
+...which otherwise scans every request row and walks the overflow pages of a large body to reach the stamp (#3006).
+**Partial:** `WHERE deleted_at IS NOT NULL`, so it holds only the trashed rows and a live write never touches it; a query reaches it only by filtering `deleted_at IS NOT NULL`, which is what the listing does
 
 ---
 

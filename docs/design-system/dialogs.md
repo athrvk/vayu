@@ -12,7 +12,7 @@ description: >-
 | Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
 | Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
 | Browser | `sm:max-w-2xl` (672px) | A dialog whose job is *reading* that shape and picking out of it, not confirming something about it. One call site: the data-row picker beside Send. |
-| Two-pane | `max-w-xl lg:max-w-4xl` (576px, 896px from the `lg` breakpoint) | A dense config that is two independent groups, which a single column makes scroll past one to reach the other. One call site: the load-test dialog, with the run's shape on the left and what it records and checks on the right. Below `lg` it is the Wide column. |
+| Two-pane | `max-w-xl lg:max-w-4xl` (576px, 896px from the `lg` breakpoint) | A dense config that is two independent groups, which a single column makes scroll past one to reach the other. [Details](#the-two-pane-dialog-in-full) |
 
 These had drifted to five values across eleven call sites, including two one-off pixel widths, so the same kind of dialog came out a different size depending on who wrote it.
 `dialog-width-scale.test.tsx` holds the set closed; a dialog that genuinely needs another size widens the scale here and in `dialog.tsx`, with the reason, rather than opening a one-off.
@@ -27,6 +27,11 @@ A two-pane dialog pins anything that explains a disabled Start (its notices) bet
 Prefer a **cap** (`max-w-*`) over a fixed `w-[…]`: a fixed width is one the panel keeps on a viewport narrower than it, where `w-full` under a cap gives the same stable band and still fits.
 And widening is never the fix for content escaping the panel - a wider panel with an `auto` track spills exactly the same way, just further along.
 Clamp the track; widen only for the reading.
+
+### The two-pane dialog in full
+
+One call site: the load-test dialog, with the run's shape on the left and what it records and checks on the right.
+Below `lg` it is the Wide column.
 
 ## Dialog height: one cap, and the band that scrolls
 

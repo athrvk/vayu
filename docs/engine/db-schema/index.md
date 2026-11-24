@@ -57,11 +57,23 @@ The `config_entries` rows named below are re-applied by `init` once they can be 
 | `busy_timeout` | `dbBusyTimeout`, default 10 s | How long a statement waits on another connection's lock |
 | `cache_size` | `dbCacheSize`, default 64 MB | |
 | `temp_store` | `2` (memory) | |
-| `mmap_size` | `0` (off) | An I/O error inside a mapped region is a signal (SIGBUS on POSIX), not `SQLITE_IOERR`, so a failing disk or a truncated file would kill the engine with no log line. Mapping 256 MB cut SQLite's read time by 5-55%, which is 1-6 ms per 1,000 result rows (about 50 ms at the default 10,000 stored errors), and Windows cannot truncate a mapped file, so the engine stays unmapped (#2433). Measured on Windows with a release SQLite and a warm OS cache, over a file of 2 KB result rows and 8 KB bodies, cache 64 MB, medians of 7 interleaved runs, mapped against unmapped, first pass then second pass in one connection. 185 MB file (fits the map): scan of 15,000 `results` rows 118 against 202 ms, then 67 against 146 ms; 7,500 random body reads 273 against 339 ms, then 252 against 341 ms. 560 MB file (the map covers part): scan of 50,000 rows 485 against 532 ms, then 336 against 544 ms; 7,500 body reads 326 against 344 ms, then 335 against 375 ms. Only Windows was measured |
+| `mmap_size` | `0` (off) | An I/O error inside a mapped region is a signal (SIGBUS on POSIX), not `SQLITE_IOERR`, so a failing disk or a truncated file would kill the engine with no log line. [Details](#mmap_size-in-full) |
 | `wal_autocheckpoint` | `1000` pages | Passive: it copies frames back but never shrinks the `-wal` file |
-| `journal_size_limit` | `64 MiB` | Once a checkpoint has emptied the log and the next write restarts it, the `-wal` file is cut back to this size. Without it one large transaction (a run prune, a big import) leaves a `-wal` of its own size beside the database for the rest of the session; only a clean shutdown (which checkpoints and deletes the `-wal`) or the startup `VACUUM` gives it back (#2433) |
+| `journal_size_limit` | `64 MiB` | Once a checkpoint has emptied the log and the next write restarts it, the `-wal` file is cut back to this size. [Details](#journal_size_limit-in-full) |
 
 The run-row reader (see [`runs`](runs.md#runs)) opens `query_only` with `mmap_size = 0` and sets none of the write-side settings.
+
+### `mmap_size` in full
+
+Mapping 256 MB cut SQLite's read time by 5-55%, which is 1-6 ms per 1,000 result rows (about 50 ms at the default 10,000 stored errors), and Windows cannot truncate a mapped file, so the engine stays unmapped (#2433).
+Measured on Windows with a release SQLite and a warm OS cache, over a file of 2 KB result rows and 8 KB bodies, cache 64 MB, medians of 7 interleaved runs, mapped against unmapped, first pass then second pass in one connection.
+185 MB file (fits the map): scan of 15,000 `results` rows 118 against 202 ms, then 67 against 146 ms; 7,500 random body reads 273 against 339 ms, then 252 against 341 ms.
+560 MB file (the map covers part): scan of 50,000 rows 485 against 532 ms, then 336 against 544 ms; 7,500 body reads 326 against 344 ms, then 335 against 375 ms.
+Only Windows was measured
+
+### `journal_size_limit` in full
+
+Without it one large transaction (a run prune, a big import) leaves a `-wal` of its own size beside the database for the rest of the session; only a clean shutdown (which checkpoints and deletes the `-wal`) or the startup `VACUUM` gives it back (#2433)
 
 ---
 

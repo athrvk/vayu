@@ -32,7 +32,7 @@ Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`, `Numbe
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](require-shelf.md#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')`, `require('xml2js')`, `require('chai')`, `require('ajv')` and `require('tv4')` answer the library, any other name throws |
+| `require(name)` | The [shelf](require-shelf.md#the-require-shelf)... [Details](#requirename-in-full) |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
 | `xml2Json(xml)` | Postman's synchronous XML parse over the shelf's `xml2js`, loaded on first read - see [`xml2js`](require-shelf.md#xml2js) |
@@ -52,6 +52,10 @@ There is no `fetch`, but there **is** [`pm.sendRequest`](send-request.md#sending
 Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`, `csv-parse/lib/sync`, `xml2js` with its `xml2Json` global, `chai`, `ajv` and `tv4` run (`uuid`, `moment`, `csv-parse/lib/sync`, `chai` and `ajv` have no global, they are `require` only, as in Postman; `tv4` is a global and a module, one object).
 The others (`cheerio`, `Backbone`) are absent.
 The editor declares each as unusable, so a use is underlined and the hover names the replacement; [the compatibility page](../../app/pm-api-compatibility.md#not-yet-supported) lists them.
+
+### `require(name)` in full
+
+...`require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')`, `require('xml2js')`, `require('chai')`, `require('ajv')` and `require('tv4')` answer the library, any other name throws
 
 ## Timers (`setTimeout` and `setInterval`)
 

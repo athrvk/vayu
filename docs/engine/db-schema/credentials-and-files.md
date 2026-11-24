@@ -91,7 +91,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f grantType \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](../api-reference/authentication.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource). A row keyed before `grantType` joined the key (#3689) is orphaned, never reused and never pruned |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f grantType \x1f username?`... [Details](#cache_key-in-full) |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |
@@ -112,3 +112,8 @@ See `plan_oauth2_refresh` and `plan_auth_refresh` (`engine/src/http/auth_resolve
 
 Tokens are plaintext at rest (v1 posture), in a database file only its owner can read (`0600` in a `0700` directory on POSIX); the row is cleared via `DELETE /oauth2/token`.
 The provider's raw response (refresh and id tokens included) is not stored: the column was dropped at schema version `5`.
+
+### `cache_key` in full
+
+...then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](../api-reference/authentication.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource).
+A row keyed before `grantType` joined the key (#3689) is orphaned, never reused and never pruned

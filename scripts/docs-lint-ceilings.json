@@ -56,11 +56,6 @@
       "max_line": 631,
       "long_lines": 2
     },
-    "docs/app/api-integration/methods-local.md": {
-      "max_line": 425,
-      "long_lines": 1,
-      "max_cell": 379
-    },
     "docs/app/architecture.md": {
       "max_line": 2047,
       "long_lines": 25
@@ -120,15 +115,6 @@
       "long_lines": 3,
       "max_cell": 814
     },
-    "docs/app/state-management/query-keys.md": {
-      "max_line": 1529,
-      "long_lines": 9,
-      "max_cell": 1327
-    },
-    "docs/app/state-management/run-live-state.md": {
-      "max_line": 490,
-      "long_lines": 1
-    },
     "docs/app/variable-resolution.md": {
       "lines": 1405
     },
@@ -137,19 +123,6 @@
     },
     "docs/building.md": {
       "max_cell": 313
-    },
-    "docs/design-system/accessibility.md": {
-      "max_line": 527,
-      "long_lines": 1,
-      "max_cell": 451
-    },
-    "docs/design-system/component-patterns.md": {
-      "max_line": 1129,
-      "long_lines": 1,
-      "max_cell": 1091
-    },
-    "docs/design-system/dialogs.md": {
-      "max_cell": 259
     },
     "docs/engine/api-reference/authentication.md": {
       "max_cell": 372
@@ -237,39 +210,6 @@
     "docs/engine/cli.md": {
       "max_cell": 284
     },
-    "docs/engine/db-schema/collections-and-requests.md": {
-      "max_cell": 219
-    },
-    "docs/engine/db-schema/credentials-and-files.md": {
-      "max_line": 505,
-      "long_lines": 1,
-      "max_cell": 473
-    },
-    "docs/engine/db-schema/index.md": {
-      "max_line": 999,
-      "long_lines": 2,
-      "max_cell": 969
-    },
-    "docs/engine/db-schema/indexes.md": {
-      "max_line": 437,
-      "long_lines": 1,
-      "max_cell": 376
-    },
-    "docs/engine/db-schema/run-artifacts.md": {
-      "max_line": 2591,
-      "long_lines": 5,
-      "max_cell": 2529
-    },
-    "docs/engine/db-schema/schema-versions.md": {
-      "max_line": 692,
-      "long_lines": 2,
-      "max_cell": 582
-    },
-    "docs/engine/db-schema/startup-and-recovery.md": {
-      "max_line": 413,
-      "long_lines": 1,
-      "max_cell": 383
-    },
     "docs/engine/elements.md": {
       "lines": 894
     },
@@ -308,27 +248,6 @@
       "max_line": 1973,
       "long_lines": 11,
       "max_cell": 1307
-    },
-    "docs/engine/scripting/limitations.md": {
-      "max_cell": 291
-    },
-    "docs/engine/scripting/response.md": {
-      "max_line": 524,
-      "long_lines": 1,
-      "max_cell": 512
-    },
-    "docs/engine/scripting/sandbox.md": {
-      "max_cell": 286
-    },
-    "docs/engine/scripting/send-request.md": {
-      "max_line": 712,
-      "long_lines": 2,
-      "max_cell": 696
-    },
-    "docs/engine/scripting/variables.md": {
-      "max_line": 511,
-      "long_lines": 1,
-      "max_cell": 462
     },
     "docs/ux-writing.md": {
       "max_line": 1352,
