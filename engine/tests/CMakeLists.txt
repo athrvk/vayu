@@ -144,6 +144,9 @@ add_executable(vayu_tests
     live_metrics_route_test.cpp
     execution_timeout_test.cpp
     execution_http_version_test.cpp
+    load_strategy_capacity_test.cpp
+    load_strategy_elements_test.cpp
+    load_strategy_pacing_test.cpp
     load_strategy_test.cpp
     load_data_test.cpp
     load_identity_test.cpp
