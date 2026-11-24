@@ -147,10 +147,8 @@ const std::string& kind_name) {
 
 /**
  * One `elements[index]` entry's whole validation, extracted out of
- * `Registry::validate`'s own loop (#1499's placement check pushed that
- * function's cognitive complexity over the linter's threshold - the fix is
- * un-nesting these checks into their own top-level function, not paring any
- * of them back).
+ * `Registry::validate`'s own loop, to keep that function's cognitive complexity
+ * under the linter's threshold (#1499).
  *
  * @param kind_name_out,config_out Filled on success, for the caller's own
  *        cross-entry metric-name bookkeeping (issue #1500) - split out so

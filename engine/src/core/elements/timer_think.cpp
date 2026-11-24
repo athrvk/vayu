@@ -108,8 +108,8 @@ class TimerThinkElement final : public Element {
     }
 
     /// Unseeded, thread-local fallback for a caller with no run to be
-    /// reproducible against (a design send) - the behaviour every draw here
-    /// had before #1498 added `ElementContext::rng`.
+    /// reproducible against (a design send) - the behaviour of every draw without
+    /// `ElementContext::rng` (#1498).
     static std::mt19937& fallback_rng () {
         static thread_local std::mt19937 rng{ std::random_device{}() };
         return rng;
