@@ -7,7 +7,8 @@ rule that quietly stopped firing would let the pages regrow.
 Mutation checks: change `>` to `>=` in `page_findings` and the "exactly at the
 budget" cases fail; drop the `fence is not None` skip in `measure_page` and the
 fenced-code cases fail; delete the `raised_entries` call in `lint` and the
-baseline cases fail.
+baseline cases fail; change `>` to `>=` in `new_entries` and the exact-allowance
+split case fails.
 
 Run: python3 scripts/test/docs_lint_test.py
 """
@@ -184,6 +185,31 @@ report = fails(two_pages, added, *args)
 check("a new entry fails: a new page meets the budget", report is not None and "docs/b.md" in report and "new ceiling" in report, str(report))
 dropped_page = {"a.md": FRONT}
 check("dropping an entry passes", passes(dropped_page, cfg(), *args))
+
+print("a split may carry its page's ceilings")
+big = cfg({"docs/big.md": {"max_line": 900, "long_lines": 3, "history": 2}})
+big_file = Path(tempfile.mkdtemp(prefix="docs-lint-base-")) / "big.json"
+big_file.write_text(json.dumps(big), encoding="utf-8")
+split_args = ("--baseline", str(big_file))
+halves = {"a.md": FRONT + "x" * 900 + "\nIt used to be x.\n", "b.md": FRONT + ("y" * 700 + "\n") * 2}
+carried = cfg({"docs/a.md": {"max_line": 900, "long_lines": 1, "history": 1},
+               "docs/b.md": {"max_line": 700, "long_lines": 2}})
+check("pages that split an entry's page may hold its counts between them", passes(halves, carried, *split_args))
+heavier = cfg({"docs/a.md": {"max_line": 900, "long_lines": 2, "history": 1},
+               "docs/b.md": {"max_line": 700, "long_lines": 2}})
+heavier_pages = {"a.md": FRONT + ("x" * 900 + "\n") * 2 + "It used to be x.\n", "b.md": halves["b.md"]}
+report = fails(heavier_pages, heavier, *split_args)
+check("a count summed over the new pages may not exceed the retired page's",
+      report is not None and "long_lines ceilings of new pages total more than the 3" in report, str(report))
+wider = cfg({"docs/a.md": {"max_line": 901, "long_lines": 1, "history": 1},
+             "docs/b.md": {"max_line": 700, "long_lines": 2}})
+wider_pages = {"a.md": FRONT + "x" * 901 + "\nIt used to be x.\n", "b.md": halves["b.md"]}
+report = fails(wider_pages, wider, *split_args)
+check("a longest line may not exceed the retired page's",
+      report is not None and "max_line ceiling 901 is above the 900" in report, str(report))
+report = fails({"a.md": page_of_lines(700)}, cfg({"docs/a.md": {"lines": 700}}), *split_args)
+check("a metric the retired page had no ceiling for may not appear on a new page",
+      report is not None and "lines ceilings of new pages total more than the 0" in report, str(report))
 
 print("malformed input")
 for label, ceilings_text in (
