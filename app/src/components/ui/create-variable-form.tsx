@@ -6,13 +6,9 @@
  */
 
 /**
- * The undefined branch of `VariablePopover`: a value, whether it is a secret, a
- * scope to create it in, and Create.
- *
- * The value, the secret flag and the picked scope are held by the popover, not
- * here: its content unmounts on close, the value is the same buffer the close
- * path reads, and a flag or scope picked once survives a re-open of the same
- * token.
+ * `VariablePopover`'s undefined branch: a value, whether it is a secret, a scope, and Create. The
+ * value, secret flag and scope are held by the popover: its content unmounts on close, the value is
+ * the buffer the close path reads, and a flag or scope picked once survives re-opening the token.
  */
 
 import { useEffect, useId, useRef } from "react";
@@ -43,8 +39,8 @@ export interface CreateVariableFormProps {
 	/** Called only with a non-empty value. */
 	onCreate: (scope: VariableScope) => void;
 	/**
-	 * A real DOM attribute, so it fires on mount whatever Radix's own
-	 * `onOpenAutoFocus` decided: an inert (hover) open must pass false.
+	 * A real DOM attribute, so it fires on mount whatever Radix's `onOpenAutoFocus` decided; an
+	 * inert (hover) open passes false.
 	 */
 	autoFocus: boolean;
 	/** The bound row's answer for this name, when one is picked (issue #1064). */
@@ -67,20 +63,17 @@ export function CreateVariableForm({
 	boundRowOrigin,
 	switchedOffCount,
 }: CreateVariableFormProps) {
-	// Falls back rather than storing a default, so a scope that stops being
-	// writable (the environment was deselected) cannot leave a stale selection
-	// pointing at a no-op.
+	// A fallback, not a stored default, so a scope that stops being writable (its environment
+	// deselected) leaves no stale selection pointing at a no-op.
 	const activeScope = selectedScope && scopes.includes(selectedScope) ? selectedScope : scopes[0];
 	const valueRef = useRef<HTMLInputElement>(null);
 	const scopeLabelId = useId();
 	const refocusValue = useRef(false);
 
-	// The toggle swaps `Input` for `SecretInput`, so the field remounts and the
-	// button that was clicked keeps focus, whether or not the open set `autoFocus`.
-	// Runs after the commit so the ref holds the new input, and only for a toggle
-	// from here: a first mount, or a StrictMode re-run of the effect, must not
-	// take focus the open declined. `SecretInput` has no `autoFocus` of its own:
-	// a keyboard open lets Radix focus the first tabbable, which is its field.
+	// The toggle swaps `Input` for `SecretInput`, remounting the field while the clicked button
+	// keeps focus. After commit, so the ref holds the new input, and only for a toggle from here: a
+	// first mount or a StrictMode re-run must not take focus the open declined. `SecretInput` has
+	// no `autoFocus`: a keyboard open lets Radix focus the first tabbable, its field.
 	useEffect(() => {
 		if (!refocusValue.current) return;
 		refocusValue.current = false;
@@ -88,13 +81,9 @@ export function CreateVariableForm({
 	}, [secret]);
 
 	/**
-	 * An empty field is not a variable worth writing (issue #1380).
-	 *
-	 * `mergeVariable` stores what it is handed, so an empty value defines the name
-	 * as `""` - a definition that resolves, so the token stops reading as
-	 * undefined and answers with nothing. Refused rather than trimmed: a value of
-	 * spaces is a value the user typed, and this form is not the place to have an
-	 * opinion about it.
+	 * An empty field is no variable worth writing (#1380): `mergeVariable` stores what it gets, so
+	 * `""` defines the name and the token stops reading undefined while answering nothing. Refused,
+	 * not trimmed: spaces are a value the user typed.
 	 */
 	const canSubmit = value.length > 0;
 
@@ -110,9 +99,8 @@ export function CreateVariableForm({
 		placeholder: "value…",
 		"aria-label": `Value for new variable ${name}`,
 		onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
-			// `isCommitEnter`, not a bare Enter (#939): an IME
-			// commits its composition with the same keydown, and
-			// the app's Send chord is Ctrl/Cmd+Enter.
+			// `isCommitEnter`, not a bare Enter (#939): an IME commits with the same keydown, and
+			// Send is Ctrl/Cmd+Enter.
 			if (isCommitEnter(e)) {
 				e.preventDefault();
 				create();
@@ -121,15 +109,10 @@ export function CreateVariableForm({
 	} as const;
 
 	/**
-	 * Picking a scope is a modifier on the value, not a destination (issue #1380).
-	 *
-	 * A segment is a `<button>`, so clicking one takes focus the way any button
-	 * does, and the field's `autoFocus` only ever ran at mount - so the click
-	 * hands focus back to the value it qualifies.
-	 *
-	 * Radix clears the value when the active segment is pressed again; a scope has
-	 * no "off", so the empty string means "keep what is chosen" and only the
-	 * refocus is left to do.
+	 * Picking a scope qualifies the value, not a destination (#1380): a segment is a `<button>` and
+	 * takes focus on click, and the field's `autoFocus` ran only at mount, so the click hands focus
+	 * back to the value. Radix clears the value when the active segment is pressed again; a scope
+	 * has no "off", so `""` means "keep it" and only the refocus remains.
 	 */
 	const selectScope = (next: string) => {
 		const scope = scopes.find((s) => s === next);
@@ -147,9 +130,9 @@ export function CreateVariableForm({
 			<div className="flex items-center gap-1">
 				<div className="min-w-0 flex-1">
 					{/*
-					 * `SecretInput` while the entry is a secret, the same primitive the
-					 * Variables editor masks its secret rows with: the value is typed
-					 * here, so it is masked but editable, with the eye beside it.
+					 * `SecretInput` while the entry is a secret, the primitive the Variables editor
+					 * masks secret rows with: typed here, so masked but editable, with the eye
+					 * beside it.
 					 */}
 					{secret ? (
 						<SecretInput {...valueField} onChange={onValueChange} />
@@ -163,9 +146,9 @@ export function CreateVariableForm({
 					)}
 				</div>
 				{/*
-				 * The Variables editor's own control and labels, so one mark has one
-				 * name. Off by default: a variable is plain unless it is chosen
-				 * otherwise, and the stored entry is unchanged until then.
+				 * The Variables editor's control and labels, so one mark has one name. Off by
+				 * default: a variable is plain unless chosen otherwise, and the entry is unchanged
+				 * until then.
 				 */}
 				<TooltipIconButton
 					label={secret ? "Unmark as secret" : "Mark as secret (masks value in UI)"}
@@ -180,31 +163,26 @@ export function CreateVariableForm({
 				/>
 			</div>
 			{/*
-			 * The label sits above the control, not beside it, which is how
-			 * `LoadTestConfigDialog` labels its own segmented control: beside it,
-			 * a narrow popover (a small window's `max-w` clamp) leaves
-			 * "Environment Collection Global" nowhere to shrink to.
+			 * The label sits above the control, as `LoadTestConfigDialog` labels its segmented
+			 * control: beside it, a narrow popover (a small window's `max-w` clamp) leaves
+			 * "Environment Collection Global" nowhere to shrink.
 			 */}
 			<div className="space-y-1.5">
 				<span id={scopeLabelId} className="block text-micro text-muted-foreground">
 					Create in
 				</span>
 				{/*
-				 * The app's segmented control (issue #1391): Radix supplies the
-				 * `radiogroup`/`radio` roles, the roving tab stop and the arrow keys.
-				 *
-				 * The Enter handler sits on the group rather than on each segment:
-				 * the keydown bubbles either way, and the group is a component
-				 * here, not the bare unfocusable div that `jsx-a11y` would ask to
-				 * be silenced about at the line.
+				 * The app's segmented control (#1391): Radix supplies the `radiogroup`/`radio`
+				 * roles, the roving tab stop and the arrows. The Enter handler sits on the group:
+				 * the keydown bubbles either way, and the group is a component, not a bare
+				 * unfocusable div `jsx-a11y` would need silencing for.
 				 */}
 				<ToggleGroup
 					value={activeScope ?? ""}
 					aria-labelledby={scopeLabelId}
 					onValueChange={selectScope}
 					onKeyDown={(e) => {
-						// A segment that has focus and a value already
-						// typed leaves Enter nothing else to mean.
+						// A focused segment with a value typed leaves Enter nothing else to mean.
 						if (isCommitEnter(e)) {
 							e.preventDefault();
 							create();
@@ -216,12 +194,10 @@ export function CreateVariableForm({
 							key={scope}
 							value={scope}
 							/*
-							 * Selection follows focus, which is the radio group's own
-							 * pattern: Radix moves the roving tab stop and leaves
-							 * selection to a press, so an arrow would otherwise light
-							 * one segment while Enter created in another. Focus stays
-							 * on the segments rather than returning to the field, or
-							 * the second arrow press would have nothing to move from.
+							 * Selection follows focus, the radio group pattern: Radix moves the
+							 * roving stop and leaves selection to a press, so an arrow would light
+							 * one segment while Enter created in another. Focus stays on the
+							 * segments, or a second arrow would have nothing to move from.
 							 */
 							onFocus={() => onSelectedScopeChange(scope)}
 						>
@@ -231,9 +207,8 @@ export function CreateVariableForm({
 				</ToggleGroup>
 			</div>
 			{/*
-			 * The primary action sits where the resolved branch puts Cancel and
-			 * Save, so the two branches read as one component - and so the button
-			 * is not the thing that pushes a row past the card's edge.
+			 * The primary action sits where the resolved branch puts Cancel and Save, so both
+			 * branches read as one component and the button pushes no row past the card's edge.
 			 */}
 			<div className="flex justify-end gap-2">
 				<Button size="sm" disabled={!canSubmit} onClick={create}>
@@ -241,11 +216,9 @@ export function CreateVariableForm({
 				</Button>
 			</div>
 			{/*
-			 * A create offer must not imply the token is unanswered. The row
-			 * carries a column the declared contract does not, so the painter never
-			 * diverted this token and the send resolves it anyway - creating a
-			 * variable here is still worth doing, but for the sends that carry no
-			 * row, not for this one.
+			 * A create offer must not imply the token is unanswered: the row carries a column the
+			 * contract does not, so the painter did not divert this token and the send resolves it
+			 * anyway. Creating is still worth it, for sends that carry no row.
 			 */}
 			{boundRowOrigin && (
 				<p className="text-micro text-muted-foreground">
@@ -255,11 +228,9 @@ export function CreateVariableForm({
 				</p>
 			)}
 			{/*
-			 * The offer says what it is doing (issue #1083). A switch would be the
-			 * closer answer, and this popover cannot give it: it writes values
-			 * through `onValueChange`, which carries no enabled flag, so the toggle
-			 * lives in the variables editor. Offering to create in silence is the
-			 * part that misleads.
+			 * The offer says what it is doing (#1083). A switch would answer better, but this
+			 * popover writes values through `onValueChange`, which carries no enabled flag, so the
+			 * toggle lives in the variables editor; offering to create in silence is what misleads.
 			 */}
 			{switchedOffCount > 0 && (
 				<p className="text-micro text-muted-foreground">

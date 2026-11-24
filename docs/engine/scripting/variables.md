@@ -95,12 +95,12 @@ The variables editor and an MCP agent's withholding read the stored flag too.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused)) |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text)... [Details](#setname-value-options-in-full) |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
 | `toObject()` | plain object | every enabled variable, each value as `get()` answers it; a snapshot, not a live view |
-| `replaceIn(template)` | string | resolves `{{name}}` against **this scope's** enabled values alone, so a name only another scope defines stays `{{name}}`; `{{$guid}}` and the other generators, `{{$vu}}` / `{{$iteration}}` and a bound row's columns answer as they do on `pm.variables.replaceIn` ([below](#the-local-scope-pmvariablesset)); a non-string is a `TypeError` naming the call |
+| `replaceIn(template)` | string | resolves `{{name}}` against **this scope's** enabled values alone, so a name only another scope defines stays `{{name}}`... [Details](#replaceintemplate-in-full) |
 
 ```javascript
 if (pm.environment.has('auth_token')) {
@@ -109,6 +109,14 @@ if (pm.environment.has('auth_token')) {
 
 console.log(pm.environment.toObject());
 ```
+
+#### `set(name, value, options?)` in full
+
+...keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused))
+
+#### `replaceIn(template)` in full
+
+...`{{$guid}}` and the other generators, `{{$vu}}` / `{{$iteration}}` and a bound row's columns answer as they do on `pm.variables.replaceIn` ([below](#the-local-scope-pmvariablesset)); a non-string is a `TypeError` naming the call
 
 #### A name a token cannot read back is refused
 
@@ -210,7 +218,7 @@ How long it lives is the run that owns it:
 |---|---|
 | A single Send or `POST /execute` (buffered or streaming) | that send: the pre-request script, the send and the test script |
 | A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
-| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary; the user's environment, collection and globals writes are not local and carry on (#3044) |
+| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary... [Details](#a-scenario-load-run-in-full) |
 | A single-request load run with `requestElements` | one submission, starting empty |
 | A load run's deferred `tests` replay | the replay pass: one scope, empty at the start and shared by every replayed sample of every step, as the replay's other writes are; never stored |
 
@@ -249,3 +257,7 @@ A token in a template answers what it resolves to *here*, and here it resolves t
 **Dynamic variables are otherwise not readable from a script.**
 `{{$guid}}`, `{{$timestamp}}` and the rest of the set in [variable resolution](../../app/variable-resolution.md#dynamic-variables) are generated while the payload is composed; by the time a script runs, that payload holds the generated *value* and no scope has ever heard of the name.
 `pm.variables.get("$guid")` reads as any other undefined name does - reach the generators through `replaceIn`.
+
+#### A scenario load run in full
+
+...the user's environment, collection and globals writes are not local and carry on (#3044)

@@ -21,16 +21,16 @@ On Windows the only protection is not installing an older version over a newer w
 |---------|--------|----------------|
 | `0` | Every database before #1514 (never stamped) | - |
 | `1` | Scripts folded into `elements`; `pre_request_script` / `post_request_script` dropped (#1514) | the fold above |
-| `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from); `requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
-| `3` | [`file_roots`](credentials-and-files.md#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
-| `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](startup-and-recovery.md#the-file-trust-restatement-schema-version-4) |
+| `2` | `request_examples.postman_response` added (the Postman saved response an example was imported from)... [Details](#version-2-in-full) | none: `sync_schema ()` adds the nullable and defaulted columns, the migration only stamps |
+| `3` | [`file_roots`](credentials-and-files.md#file_roots) added - the folders request-body files may be read from. [Details](#version-3-in-full) | none: `sync_schema ()` creates the table, the migration only stamps |
+| `4` | No mapping change. Every stored body's file references state `unresolved`... [Details](#version-4-in-full) | [the file-trust restatement](startup-and-recovery.md#the-file-trust-restatement-schema-version-4) |
 | `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read; [`runs.origin` and `runs.origin_client`](runs.md#runs) added (#1817) | none: `sync_schema ()` drops the one column at the constructor's probe and adds the defaulted and nullable two, the migration only stamps |
-| `6` | [`file_grants`](credentials-and-files.md#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](startup-and-recovery.md#the-file-grants-migration-schema-version-6) |
-| `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](startup-and-recovery.md#the-sibling-order-migration-schema-version-7) |
+| `6` | [`file_grants`](credentials-and-files.md#file_grants) added - the files a person picked (#2356). [Details](#version-6-in-full) | [the file-grants migration](startup-and-recovery.md#the-file-grants-migration-schema-version-6) |
+| `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535)... [Details](#version-7-in-full) | [the sibling-order migration](startup-and-recovery.md#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](collections-and-requests.md#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
-| `9` | [`requests.timeout_ms`](collections-and-requests.md#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](environments-and-globals.md#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](collections-and-requests.md#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](credentials-and-files.md#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](indexes.md#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
-| `10` | [`spec_declined_operations`](specs.md#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them, so a sync does not re-create them. An engine at `9` does not know the table, so it would re-create every declined operation on its next sync | none: `sync_schema ()` creates the table, the migration only stamps |
-| `11` | [`runs.outcome`](runs.md#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. An engine at `10` would rebuild `runs` without the column. [`requests.stream_text_path`](collections-and-requests.md#requests) and [`result_bodies.stream_text_path`](run-artifacts.md#result_bodies) added (#3773): a stream's declared text path, on the request and on each captured sample. [`requests.stream_first_content_marker`](collections-and-requests.md#requests) added (#3774): the literal a run times its stream to | none: `sync_schema ()` adds the nullable columns, the migration only stamps; rows stored before them stay NULL |
+| `9` | [`requests.timeout_ms`](collections-and-requests.md#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting... [Details](#version-9-in-full) | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
+| `10` | [`spec_declined_operations`](specs.md#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them... [Details](#version-10-in-full) | none: `sync_schema ()` creates the table, the migration only stamps |
+| `11` | [`runs.outcome`](runs.md#runs) added (#3547): the verdict a run's list row draws, so `GET /runs` can filter on it. [Details](#version-11-in-full) | none: `sync_schema ()` adds the nullable columns, the migration only stamps; rows stored before them stay NULL |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no released build has ever stamped `2`: the version shipped only on the unreleased branch that carried both changes.
 `sync_schema ()` runs on every start whatever the stamp, so a development database an earlier build of that branch already stamped `2` still gets the four columns.
@@ -83,3 +83,42 @@ The release that carries `11` says so under Changed, naming #3547.
 The two #3773 `stream_text_path` columns and the #3774 `requests.stream_first_content_marker` column joined version `11` the way the #1817 columns joined `5`: `0.51.1`, the last release, stamps `10`, so no released build has stamped `11`, and `sync_schema ()` adds the nullable columns on every start whatever the stamp, so a database an earlier build of `11` stamped still gets them.
 **Merge gate:** the `git grep` against the last tag must still show `10`; if a release shipped `11` without these columns, they need their own bump to `12` and a row of their own here.
 The release that carries `11` names #3773 and #3774 beside #3547 under Changed.
+
+## Version `2` in full
+
+...`requests.disable_cookies`, `disabled_system_headers`, `disable_url_encoding` and `postman_protocol_behavior` added (#1765)
+
+## Version `3` in full
+
+Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless
+
+## Version `4` in full
+
+...and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed.
+An engine at `3` read an absent key as chosen
+
+## Version `6` in full
+
+Every stored file reference loses `unresolved`; the ones stored as chosen become grants.
+An engine at `5` would read the missing key as untrusted and refuse every picked file
+
+## Version `7` in full
+
+...every request moves past its collection's sub-folders so the display is unchanged.
+An engine at `6` would number the two kinds apart again on its next create or reorder
+
+## Version `9` in full
+
+...[`environments.deleted_at`](environments-and-globals.md#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](collections-and-requests.md#request_examples) added (#2971): the example trash;
+[`client_certificates.deleted_at`](credentials-and-files.md#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](indexes.md#indexes) added (#3006): a partial index on the stamped requests
+
+## Version `10` in full
+
+...so a sync does not re-create them.
+An engine at `9` does not know the table, so it would re-create every declined operation on its next sync
+
+## Version `11` in full
+
+An engine at `10` would rebuild `runs` without the column.
+[`requests.stream_text_path`](collections-and-requests.md#requests) and [`result_bodies.stream_text_path`](run-artifacts.md#result_bodies) added (#3773): a stream's declared text path, on the request and on each captured sample.
+[`requests.stream_first_content_marker`](collections-and-requests.md#requests) added (#3774): the literal a run times its stream to

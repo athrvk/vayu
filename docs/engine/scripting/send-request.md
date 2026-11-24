@@ -34,9 +34,9 @@ The first argument is a URL string or an options object; the second, when given,
 | `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
-| `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`), `urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`). Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`. A `type: 'file'` row and the `file` and `graphql` modes throw. A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary |
+| `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`)... [Details](#the-body-option-in-full) |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
-| `timeout` | milliseconds. Absent, the call takes the resolved timeout of the send or run the script belongs to - the request's or run's `timeout`, else the `defaultTimeout` setting; a sequential collection run's step scripts take their step's, which is the stored request's own `timeout` when it states one (#2937), and every other script of a run the run's - in every script that may send: a Send's scripts (buffered or streamed), a collection run's step, `script.setup` and `script.teardown` scripts, and every script of a load run, its inline step scripts, `script.setup` / `script.teardown` and the deferred `tests` script (issues #2833, #2841). Either is clamped to the script's remaining budget (below) |
+| `timeout` | milliseconds. Absent, the call takes the resolved timeout of the send or run the script belongs to - the request's or run's `timeout`... [Details](#the-timeout-option-in-full) |
 
 **Synchronous, in both forms.**
 The send blocks and the callback runs inline, before `pm.sendRequest` returns.
@@ -184,3 +184,16 @@ A token or key naming a variable that resolves empty is not refused: it writes n
 The refusal names the parameter and lists those, so `basic: { user, pass }` fails saying so rather than composing `Basic Og==`.
 What Postman's export writes beside the credential still reads: an entry's own `type` member, and the basic helper's `showPassword`, which sends nothing.
 Dropping the option would send an unauthenticated request that looks like the script's own mistake, which is the reason the body modes it cannot send whole (`file`, `graphql`, a file part) are refused too.
+
+## The `body` option in full
+
+...`urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`).
+Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`.
+A `type: 'file'` row and the `file` and `graphql` modes throw.
+A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary
+
+## The `timeout` option in full
+
+...else the `defaultTimeout` setting; a sequential collection run's step scripts take their step's, which is the stored request's own `timeout` when it states one (#2937), and every other script of a run the run's - in every script that may send:
+a Send's scripts (buffered or streamed), a collection run's step, `script.setup` and `script.teardown` scripts, and every script of a load run, its inline step scripts, `script.setup` / `script.teardown` and the deferred `tests` script (issues #2833, #2841).
+Either is clamped to the script's remaining budget (above)

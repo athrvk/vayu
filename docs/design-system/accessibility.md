@@ -21,7 +21,7 @@ Which tool holds a rule decides what breaking it looks like: a lint error on the
 | A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window but the tab strip (the main pane's own header, by design) is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
-| A tab's main pane has one `h1`, and no heading under it skips a level | `heading-outline.testkit.tsx`'s `expectOneTopHeading`, one case per tab root (`WelcomeScreen.test.tsx`, `RequestBuilderLayout.headings.test.tsx`, `CollectionDetail.breadcrumb.test.tsx`, `dashboard.breadcrumb.test.tsx`, `HistoryDetail.states.test.tsx`, `VariableTableEditor.banner.test.tsx`, `SettingsMain.category-card.test.tsx`, `SettingsMain.panel-heading.test.tsx`, `InboxView.test.tsx`, `MockServerView.test.tsx`); `Shell.heading-outline.test.tsx` |
+| A tab's main pane has one `h1`, and no heading under it skips a level | `heading-outline.testkit.tsx`'s `expectOneTopHeading`, one case per tab root... [Details](#one-top-heading-per-tab-in-full) |
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
@@ -144,3 +144,7 @@ Paths are relative to `app/src`, and the count in brackets is directive lines, n
 
 Test files are outside the count.
 Four directives live in two of them, each a fixture modelling one of the patterns above rather than a component the app ships.
+
+## One top heading per tab in full
+
+...(`WelcomeScreen.test.tsx`, `RequestBuilderLayout.headings.test.tsx`, `CollectionDetail.breadcrumb.test.tsx`, `dashboard.breadcrumb.test.tsx`, `HistoryDetail.states.test.tsx`, `VariableTableEditor.banner.test.tsx`, `SettingsMain.category-card.test.tsx`, `SettingsMain.panel-heading.test.tsx`, `InboxView.test.tsx`, `MockServerView.test.tsx`); `Shell.heading-outline.test.tsx`

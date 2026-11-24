@@ -37,8 +37,6 @@
     "app/src/components/shared/response-viewer/ResponseBody.tsx": 1,
     "app/src/components/shared/response-viewer/ResponseEvents.tsx": 1,
     "app/src/components/shared/response-viewer/index.ts": 1,
-    "app/src/components/ui/command.tsx": 1,
-    "app/src/components/ui/delete-confirm-dialog.tsx": 1,
     "app/src/constants/appearance.ts": 1,
     "app/src/constants/auth-modes.ts": 1,
     "app/src/constants/layout.ts": 1,

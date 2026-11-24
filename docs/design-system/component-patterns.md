@@ -12,7 +12,7 @@ Three shared primitives in `components/shared/` now cover it.
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320). `compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself. The context bar's `SectionEmpty` is this component (inline, compact), so every section's empty body is one. `empty-state-lines.test.ts` fails on a `<p>` that begins "No " or "Nothing matches" in `modules/` or `components/`, and on a `SectionEmpty` that stops rendering one, #3501 |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. [Details](#emptystate-in-full) |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
@@ -38,6 +38,16 @@ The `inline` variant takes an action for this reason - the drawer's group notes 
 When adding an error pane, gate it on `length === 0`: TanStack keeps last-good data through a failed background refetch, and covering still-valid content with a full-pane error is its own regression.
 
 Sentence case for titles, everywhere.
+
+### `EmptyState` in full
+
+Both variants take an `action`.
+Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it).
+A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps.
+Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320).
+`compact` (inline only) is `p-3 text-xs` for a dense surface - a drawer tree, a dialog's list box, a card - in place of the default `p-8 text-sm`; a call site does not override the padding itself.
+The context bar's `SectionEmpty` is this component (inline, compact), so every section's empty body is one.
+`empty-state-lines.test.ts` fails on a `<p>` that begins "No " or "Nothing matches" in `modules/` or `components/`, and on a `SectionEmpty` that stops rendering one, #3501
 
 ## Error text has three levels, and one component each
 

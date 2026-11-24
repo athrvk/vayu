@@ -133,7 +133,7 @@ Struct is `db::Result`.
 | `timestamp`   | INTEGER    | Unix ms                                                      |
 | `status_code` | INTEGER    | HTTP status, or **0 for transport errors** (so totals reconcile) |
 | `status_text` | TEXT       | Wire reason phrase or canonical IANA text                    |
-| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time. On a load run's error row, the time until the transfer gave up (#2412); `0` for a request with no duration, which a real `0` reading cannot be told apart from (see [Latency population](../api-reference/metrics.md#latency-population)) |
+| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time. [Details](#latency_ms-in-full) |
 | `error`       | TEXT       | Error message for failures; empty on success                 |
 | `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
@@ -160,12 +160,12 @@ Only the design writer and the scenario step writer store `scriptMs`, and only t
 
 | Writer | What lands in `trace_data` |
 |--------|----------------------------|
-| Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys. Written for a completion the 1-in-`success_sample_rate` sampler selects (only while `save_timing_breakdown` is on), **or** one that crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`, and is stored whether or not the breakdown toggle is on). The two have separate retention budgets - `max_success_results` and `max_slow_results` - and an outlier never consumes a sampling slot. A **scenario** load run started with `scenario.data` adds **`dataRowIndex`**, the row that iteration bound - the only per-result record of it, since a scenario load run stores no per-step rows. |
-| Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`, plus **`dataRowIndex`** for a scenario load run given `scenario.data`. A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing. |
-| Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** and **`scriptMs`** for a buffered send, the one value each the live `timing.engineMs` / `timing.scriptMs` returned; both absent for a streaming send, an auth-failure row and any row stored before #2132 (`scriptMs`: before #3676). Written on **every** single request, alongside a nested `request` object plus `error_type` / `error_message` when the exchange failed and `response` when it did not. The two can coexist (#3423): every driver reports a failure at status 0 (`mark_failed`, the stream's `settle_end_reason`), and one that came after a header block arrived (an undecodable body, a timeout mid-body, a redirect limit, a proxy's refusal) keeps its whole `response` node beside the error, as the live answer shows it, so `response` is not a success flag. A failure that received no header block (a refused connection, an unresolved host, a failed handshake) has no `response` node; a proxy's answer counts as one, so headers a proxy sent on its tunnel are kept too. The `response` node carries `headers` (the folded, lower-cased map), `headerLines` (#2460: the lossless `{name, value}` list in wire order with `Set-Cookie` per line, written only when non-empty - absent on a load sample and on any row stored before the field, so a reader falls back to `headers`), `redirects` (#2461: the followed 3xx hops as `{status, statusText, headerLines, url, schemeDowngrade}` - `url` the request that hop answered with its credential query values written as `<redacted>`, `schemeDowngrade` true when it went over `https` and the next hop over `http` (#2949) - written only when non-empty - absent when nothing was followed and on any row stored before the field; a hop stored before #2949 lacks `url` and `schemeDowngrade`), `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](../api-reference/execute.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
-| Load run, script validation (`store_validation_failures` in `run_manager.cpp`) | not a captured request: the one synthetic row the post-run replay of the un-inlined `script.post` elements leaves when an assertion failed (`status_code` 0, `error` `Script validation failures`; none is written for a run that failed nothing). `trace_data` is `{failures, failureCounts, failuresDistinct, totalFailed, totalPassed}`. `failures` holds each **distinct** failure message once, in first-seen order, at most 10 (`MAX_FAILURE_MESSAGES`); a scenario step's name prefixes it (`step name: assertion: message`) and is part of its identity. `failureCounts` is parallel to `failures`: how many times each failed across the sampled responses. `failuresDistinct` is every distinct message the replay saw, kept or not, so `failuresDistinct - len(failures)` were turned away. `totalFailed` / `totalPassed` count assertions, each occurrence once, so the counts sum to `totalFailed` unless messages were turned away. `failureCounts` and `failuresDistinct` are absent on a row stored before #3127, which also repeated a message once per sample; a reader falls back to a count of 1 each. The number of responses replayed is the report's `testValidation.samplesTested`, not stored here. `trace.failures` is the only field that tells the row from a captured sample. |
+| Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys. Written for a completion the 1-in-`success_sample_rate` sampler selects (only while `save_timing_breakdown` is on)... [Details](#load-run-success-sample-in-full) |
+| Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`... [Details](#load-run-error-in-full) |
+| Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries... [Details](#design-mode-trace-in-full) |
+| Load run, script validation (`store_validation_failures` in `run_manager.cpp`) | not a captured request: the one synthetic row the post-run replay of the un-inlined `script.post` elements leaves when an assertion failed... [Details](#load-run-script-validation-in-full) |
 
-| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored` / `stopped`, the last a step a Stop or shutdown cut short, #3397), a flat **`scriptMs`** (#3676: the step's pre-request and test script time, `pm.sendRequest` included, `0` for a step with no script, absent for a row that could not bind and on a row stored before the key), and **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that failed, errored or was skipped is kept and successes, with `stopped` steps, fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
+| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step... [Details](#scenario-run-one-row-per-step-execution-in-full) |
 
 A **streaming** design run (`POST /execute` with `"stream": true`, issue #573) stores the stream's bytes once, as `response.body` (issue #3770, up to `maxDesignResponseBodyBytes` and then `maxTraceBodyBytes`, with `bodyCapped` / `bodyTruncated` saying which cut a prefix), and adds one node the others never carry:
 **`events`**, a sidecar holding only what the bytes cannot say - `totalEvents` (every event received, whatever was kept), `endReason`, `maxEventBytes` (the per-event cap the live parser ran under) and `receivedAt`, an array of one arrival time (epoch milliseconds) per event, for the first `sseMaxStoredEvents` events, plus **`startedAt`** (#3805):
@@ -237,6 +237,54 @@ That design-mode subset is what rebuilds the request builder's response pane (Ti
 A design run has exactly one `results` row.
 `GET /runs/:runId` serves it (as `result`) alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the same row, read by two routes for two different callers.
 
+### `latency_ms` in full
+
+On a load run's error row, the time until the transfer gave up (#2412); `0` for a request with no duration, which a real `0` reading cannot be told apart from (see [Latency population](../api-reference/metrics.md#latency-population))
+
+### Load run, success sample in full
+
+...**or** one that crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`, and is stored whether or not the breakdown toggle is on).
+The two have separate retention budgets - `max_success_results` and `max_slow_results` - and an outlier never consumes a sampling slot.
+A **scenario** load run started with `scenario.data` adds **`dataRowIndex`**, the row that iteration bound - the only per-result record of it, since a scenario load run stores no per-step rows.
+
+### Load run, error in full
+
+...plus **`dataRowIndex`** for a scenario load run given `scenario.data`.
+A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing.
+
+### Design mode trace in full
+
+...so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** and **`scriptMs`** for a buffered send, the one value each the live `timing.engineMs` / `timing.scriptMs` returned; both absent for a streaming send, an auth-failure row and any row stored before #2132 (`scriptMs`: before #3676).
+Written on **every** single request, alongside a nested `request` object plus `error_type` / `error_message` when the exchange failed and `response` when it did not.
+The two can coexist (#3423): every driver reports a failure at status 0 (`mark_failed`, the stream's `settle_end_reason`), and one that came after a header block arrived (an undecodable body, a timeout mid-body, a redirect limit, a proxy's refusal) keeps its whole `response` node beside the error, as the live answer shows it, so `response` is not a success flag.
+A failure that received no header block (a refused connection, an unresolved host, a failed handshake) has no `response` node; a proxy's answer counts as one, so headers a proxy sent on its tunnel are kept too.
+The `response` node carries `headers` (the folded, lower-cased map), `headerLines` (#2460: the lossless `{name, value}` list in wire order with `Set-Cookie` per line, written only when non-empty - absent on a load sample and on any row stored before the field, so a reader falls back to `headers`),
+`redirects` (#2461: the followed 3xx hops as `{status, statusText, headerLines, url, schemeDowngrade}` - `url` the request that hop answered with its credential query values written as `<redacted>`, `schemeDowngrade` true when it went over `https` and the next hop over `http` (#2949) -
+written only when non-empty - absent when nothing was followed and on any row stored before the field; a hop stored before #2949 lacks `url` and `schemeDowngrade`), `body`, `httpVersion` -
+the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](../api-reference/execute.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both.
+Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column).
+
+### Load run, script validation in full
+
+...(`status_code` 0, `error` `Script validation failures`; none is written for a run that failed nothing).
+`trace_data` is `{failures, failureCounts, failuresDistinct, totalFailed, totalPassed}`.
+`failures` holds each **distinct** failure message once, in first-seen order, at most 10 (`MAX_FAILURE_MESSAGES`); a scenario step's name prefixes it (`step name: assertion: message`) and is part of its identity.
+`failureCounts` is parallel to `failures`: how many times each failed across the sampled responses.
+`failuresDistinct` is every distinct message the replay saw, kept or not, so `failuresDistinct - len(failures)` were turned away.
+`totalFailed` / `totalPassed` count assertions, each occurrence once, so the counts sum to `totalFailed` unless messages were turned away.
+`failureCounts` and `failuresDistinct` are absent on a row stored before #3127, which also repeated a message once per sample; a reader falls back to a count of 1 each.
+The number of responses replayed is the report's `testValidation.samplesTested`, not stored here.
+`trace.failures` is the only field that tells the row from a captured sample.
+
+### Scenario run, one row per step execution in full
+
+...`iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored` / `stopped`, the last a step a Stop or shutdown cut short, #3397),
+a flat **`scriptMs`** (#3676: the step's pre-request and test script time, `pm.sendRequest` included, `0` for a step with no script, absent for a row that could not bind and on a row stored before the key), and **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used.
+The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows.
+A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response.
+Bodies are capped the same way.
+The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that failed, errored or was skipped is kept and successes, with `stopped` steps, fill the remainder - what was thinned is reported in `runs.summary`, never silently.
+
 ---
 
 ## `result_bodies`
@@ -256,7 +304,7 @@ Read only by [`GET /runs/:runId/samples`](../api-reference/runs.md#get-runsrunid
 | `binary`       | INTEGER    | 1 when the body was stored as a descriptor rather than as text     |
 | `content_type` | TEXT       | The response's `Content-Type`, `""` when it sent none              |
 | `stream_events` | INTEGER   | Events the transfer delivered when it was a **stream** (its reply announced `text/event-stream`, #3771); NULL otherwise, and NULL on every row written before 0.17.2 |
-| `stream_text_path` | TEXT   | The `streamTextPath` the streamed sample's request declared, so the served list derives each event's `text` and the joined `streamText` from the stored bytes; NULL for none, and on every row written before schema version 11 (issue #3773). Per row because a collection run's steps each declare their own and a sample names no step |
+| `stream_text_path` | TEXT   | The `streamTextPath` the streamed sample's request declared... [Details](#stream_text_path-in-full) |
 
 **Which completions get a row.**
 Not a uniform sample - a uniform slice of a 30M-request run is a thousand identical 200s.
@@ -297,6 +345,11 @@ The mitigation is the run's own marker - `sampling.response_bodies_captured` in 
 
 **Per-run request.**
 There is deliberately no per-sample request copy: a load run's request is constant across iterations and already lives in `runs.config_snapshot`, and the event-loop path never populates `Response::request_headers` at all (only the synchronous `client.cpp` does).
+
+### `stream_text_path` in full
+
+...so the served list derives each event's `text` and the joined `streamText` from the stored bytes; NULL for none, and on every row written before schema version 11 (issue #3773).
+Per row because a collection run's steps each declare their own and a sample names no step
 
 ---
 
