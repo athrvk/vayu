@@ -294,17 +294,10 @@
       "long_lines": 3,
       "max_cell": 520
     },
-    "docs/engine/mcp/index.md": {
-      "history": 1
-    },
     "docs/engine/mcp/internals.md": {
       "max_line": 867,
       "long_lines": 7,
-      "max_cell": 842,
-      "history": 1
-    },
-    "docs/engine/mcp/load-and-specs.md": {
-      "history": 1
+      "max_cell": 842
     },
     "docs/engine/mcp/request-composition.md": {
       "max_line": 450,
@@ -322,8 +315,7 @@
     },
     "docs/engine/mcp/saved-data.md": {
       "max_line": 461,
-      "long_lines": 1,
-      "history": 1
+      "long_lines": 1
     },
     "docs/engine/mcp/secrets.md": {
       "max_line": 1973,

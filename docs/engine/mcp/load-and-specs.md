@@ -61,8 +61,8 @@ description: >-
   It sends `policy: "safe"` and nothing else: the engine works out the rows from `core::safe_spec_apply`, the same function whose answer `diff_spec` reports per entry as `safe` / `safeFields`.
   That is the whole design.
   Which of a drift is safe to write - **every operation the document adds (never one whose request the user deleted, issue #3031), every field it moved that nobody had edited by hand, no deletions, and a request whose bound document could not be read left alone whole** -
-  used to live in the renderer alone (`spec-apply.ts`, `defaultSelection`), which is why applying a drift was app-only through phase 1:
-  `electron/` may not import `src/`, so any tool would have needed a copy, and a copy of *that* rule is a second opinion about which of a user's fields a sync may overwrite.
-  The rule moved engine-side instead, and `defaultSelection` now reads the marks rather than deriving them, so the Spec tab's pre-ticked boxes and an agent's sync are one answer.
+  is decided engine-side, not in the renderer's `spec-apply.ts` (`defaultSelection`), because
+  `electron/` may not import `src/`, so any tool would need a copy there, and a copy of *that* rule is a second opinion about which of a user's fields a sync may overwrite.
+  `defaultSelection` reads the marks rather than deriving them, so the Spec tab's pre-ticked boxes and an agent's sync are one answer.
   A person who changes a tick still sends explicit rows - a choice a person made is not a policy.
   The tool result's `skipped` (requests untouched, fields not written, deletions not made, declined operations not re-created) is named in the caveat sentence for `diff_spec`'s reason: a caller that stated no ticks cannot see what it did not tick, and "5 updated" alone reads as "applied the drift".
