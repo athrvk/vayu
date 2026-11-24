@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/redirect_policy.cpp
  * @brief What the engine's own redirect loop decides between two hops.
  */
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/cookie_jar.cpp
  * @brief The cookie jar's storage and its two read views. See cookie_jar.hpp
  *        for the scope / lifetime / persistence / threading decisions.
  */

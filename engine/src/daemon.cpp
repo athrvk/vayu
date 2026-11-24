@@ -7,7 +7,6 @@
 
 
 /**
- * @file daemon.cpp
  * @brief Vayu Engine daemon entry point
  *
  * This is the background process that handles high-concurrency requests.
@@ -171,7 +170,6 @@ int run_daemon (std::span<char* const> args) {
     const std::string log_dir = vayu::platform::path_join (data_dir, "logs");
     const std::string db_dir  = vayu::platform::path_join (data_dir, "db");
 
-    // Initialize logger
     vayu::utils::Logger::instance ().init (log_dir, "engine");
 
     // Taken while this is the only thread, because it writes the environment,
@@ -196,7 +194,6 @@ int run_daemon (std::span<char* const> args) {
 
     vayu::utils::Logger::instance ().set_verbosity (verbosity);
 
-    // Setup signal handlers using platform abstraction
     vayu::platform::setup_signal_handlers (
     vayu::platform::make_shutdown_handler (g_signal, [] () {
         // `_Exit` and not `exit` (#945): this runs inside the signal
@@ -276,8 +273,8 @@ int run_daemon (std::span<char* const> args) {
 
     // A listener that never came up and one that was asked to stop both leave
     // the wait loop below with `is_running()` false, and telling them apart is
-    // the whole of #983: a taken port used to print the listening banner, fall
-    // into the graceful path and exit 0, so the app saw an engine that had
+    // the whole of #983: a taken port would print the listening banner, fall into
+    // the graceful path and exit 0, so the app would see an engine that had
     // simply died. The teardown is shared - the lock file and curl's global
     // state must be released either way - and only the exit code differs.
     int exit_code = 0;
@@ -289,9 +286,9 @@ int run_daemon (std::span<char* const> args) {
         std::cerr.flush ();
         exit_code = 1;
     } else {
-        // After the listener, never before it: the refresh is O(database size)
-        // and used to be taken in the `Database` constructor, ahead of the
-        // first `/health`. It reads through a connection of its own, so the
+        // After the listener, never before it: the refresh is O(database size), so it
+        // is not taken in the `Database` constructor ahead of the first `/health`. It
+        // reads through a connection of its own, so the
         // app's first requests are served alongside it. It holds what the
         // session started from; the refresh at shutdown below adds what the
         // session wrote (#2421).
