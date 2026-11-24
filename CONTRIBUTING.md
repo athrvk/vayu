@@ -449,8 +449,9 @@ history narration (`used to`, `until #N`, `since #N landed`, `formerly`,
 `previously`, `was renamed|moved|removed|replaced`, an issue number in a
 heading). A page that is over a budget today has a ceiling in
 `scripts/docs-lint-ceilings.json`; a ceiling can be lowered and never raised,
-and one whose page is now within budget fails as stale, so delete it. The lint
-prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
+and one whose page is now within budget fails as stale, so delete it. A page
+split out of one that is gone may carry that page's ceilings, no higher. The
+lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
 the ceilings file the current tree needs, for lowering it after a cleanup.
 
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be

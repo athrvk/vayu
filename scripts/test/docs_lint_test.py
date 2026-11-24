@@ -185,6 +185,25 @@ check("a new entry fails: a new page meets the budget", report is not None and "
 dropped_page = {"a.md": FRONT}
 check("dropping an entry passes", passes(dropped_page, cfg(), *args))
 
+print("a split page may carry the ceilings of the page it came from")
+old_page = cfg({"docs/old.md": {"max_line": 900, "long_lines": 5, "history": 2}})
+old_file = Path(tempfile.mkdtemp(prefix="docs-lint-base-")) / "old.json"
+old_file.write_text(json.dumps(old_page), encoding="utf-8")
+split_args = ("--baseline", str(old_file))
+halves = {"a.md": FRONT + "x" * 800 + "\n", "b.md": FRONT + "y" * 450 + "\nIt used to be x.\n"}
+within = cfg({"docs/a.md": {"max_line": 800, "long_lines": 1}, "docs/b.md": {"max_line": 450, "long_lines": 1, "history": 1}})
+check("split pages within the removed page's ceilings pass", passes(halves, within, *split_args))
+above = cfg({"docs/a.md": {"max_line": 901, "long_lines": 1}, "docs/b.md": {"max_line": 450, "long_lines": 1, "history": 1}})
+report = fails({"a.md": FRONT + "x" * 901 + "\n", "b.md": halves["b.md"]}, above, *split_args)
+check("a split page above the removed page's ceiling fails", report is not None and "docs/a.md" in report and "new ceiling" in report, str(report))
+unmeasured = cfg({"docs/a.md": {"max_cell": 250}})
+report = fails({"a.md": FRONT + "| " + "x" * 250 + " |\n"}, unmeasured, *split_args)
+check("a metric the removed page had no ceiling for fails", report is not None and "new ceiling" in report, str(report))
+kept = cfg({"docs/old.md": {"max_line": 900, "long_lines": 5, "history": 2}, "docs/a.md": {"max_line": 800, "long_lines": 1}})
+kept_pages = {"old.md": FRONT + "x" * 900 + "\n" + "\n".join(["x" * 401] * 4) + "\nIt used to be x. It used to be y.\n", "a.md": halves["a.md"]}
+report = fails(kept_pages, kept, *split_args)
+check("a page that still exists is no source for another", report is not None and "docs/a.md" in report and "new ceiling" in report, str(report))
+
 print("malformed input")
 for label, ceilings_text in (
     ("not JSON", "{"),

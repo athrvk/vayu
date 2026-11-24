@@ -16,7 +16,9 @@ A page over a budget has an entry in scripts/docs-lint-ceilings.json holding the
 value it had when the entry was written, and is held to that instead. The file
 may only shrink: an entry whose page is now within budget (or gone) fails as
 stale, and with --baseline an entry that is new or higher than the baseline's
-fails. A page without an entry meets the budget. A missing description is never
+fails. The one new entry allowed is a page split out of one that is gone: it may
+carry ceilings no higher than that removed page's, metric by metric. A page
+without an entry meets the budget. A missing description is never
 grandfathered.
 
 A reference page is one matching a glob in the file's `reference_pages`.
@@ -221,10 +223,23 @@ def stale_entries(pages: dict, ceilings: dict) -> list[tuple[str, str]]:
     ]
 
 
-def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
+def inherited(entry: dict, sources: list[dict]) -> bool:
+    """Whether one removed page's ceilings cover every metric of a split page's entry."""
+    return any(
+        all(metric in source and value <= source[metric] for metric, value in entry.items())
+        for source in sources
+    )
+
+
+def raised_entries(ceilings: dict, baseline: dict, pages: dict) -> list[tuple[str, str]]:
+    # A page split into several leaves its ceilings behind: the baseline's
+    # entries for pages that no longer exist are what a new page may carry.
+    sources = [entry for page, entry in baseline["pages"].items() if page not in pages]
     found = []
     for page, entry in ceilings["pages"].items():
         base = baseline["pages"].get(page)
+        if base is None and inherited(entry, sources):
+            continue
         if base is None:
             found.append((page, "is a new ceiling; a page not in the baseline meets the budget"))
             continue
@@ -276,7 +291,7 @@ def lint(root: Path, baseline: dict | None) -> tuple[list[str], dict]:
             problems.append((page, finding))
     problems += stale_entries(pages, ceilings)
     if baseline is not None:
-        problems += raised_entries(ceilings, baseline)
+        problems += raised_entries(ceilings, baseline, pages)
 
     report = [f"{page}: {finding}" for page, finding in problems]
     for page in dict.fromkeys(page for page, _ in problems):
