@@ -8,8 +8,8 @@
  */
 
 /**
- * @brief The factory around the vendored `csv-parse/lib/sync`
- *        (engine/vendor/csv-parse, #2653).
+ * The factory around the vendored `csv-parse/lib/sync`
+ * (engine/vendor/csv-parse, #2653).
  *
  * `CSV_PARSE_GLUE_OPEN + CSV_PARSE_SYNC_JS + CSV_PARSE_GLUE_CLOSE` is the
  * source the shelf evaluates. The library is csv-parse 1.2.4's `lib/sync.js`
