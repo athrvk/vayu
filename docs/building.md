@@ -411,9 +411,9 @@ The project uses GitHub Actions for automated builds:
     tracked `.py`, both file lists taken from `git ls-files` so a script added
     later cannot escape them
   - The frontend suite runs as vitest shards on separate runners: two on
-    ubuntu and macOS, three on Windows, the slowest leg. The `CI gate` job
-    proves each platform's shards covered every test file between them, none
-    twice
+    ubuntu, three on macOS and Windows. The `CI gate`
+    job proves each platform's shards covered every test file between them,
+    none twice
   - A later push to a pull request skips the app or engine matrix when an
     earlier run of the same pull request already passed it on identical
     inputs. `scripts/suite-fingerprint.py` hashes every file the suite's

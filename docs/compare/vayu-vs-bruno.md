@@ -37,9 +37,9 @@ rather than per URL; a headless engine with nothing resolved falls back to
 environment-variable pickup rather than to no proxy. Client certificates carry
 no qualification any more - they are proven on a wire on all three platforms,
 in both PEM-pair and PKCS#12 form. Detail:
-[proxy settings](../engine/api-reference.md#proxy-settings),
-[TLS trust](../engine/api-reference.md#tls-trust-settings) and
-[client certificates](../engine/api-reference.md#client-certificates).
+[proxy settings](../engine/api-reference/health-config.md#proxy-settings),
+[TLS trust](../engine/api-reference/health-config.md#tls-trust-settings) and
+[client certificates](../engine/api-reference/cookies-and-certificates.md#client-certificates).
 
 ## The native load engine is the difference
 

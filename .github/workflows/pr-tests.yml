@@ -118,6 +118,7 @@ jobs:
       build_script: ${{ steps.area.outputs.build_script }}
       scripts: ${{ steps.area.outputs.scripts }}
       repo_js: ${{ steps.area.outputs.repo_js }}
+      comment_lint: ${{ steps.area.outputs.comment_lint }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -439,6 +440,10 @@ jobs:
               - 'scripts/test/suite_fingerprint_test.py'
               - 'scripts/docs-lint.py'
               - 'scripts/test/docs_lint_test.py'
+              - 'scripts/comment-lint.py'
+              - 'scripts/comment-diff-check.py'
+              - 'scripts/test/comment_lint_test.py'
+              - 'scripts/test/comment_diff_check_test.py'
               - 'scripts/test/vcpkg_baseline_test.py'
               # The benchmark script's mode names are read out of types.hpp.
               - 'scripts/test/bench-compare.sh'
@@ -518,6 +523,20 @@ jobs:
               - '.github/workflows/pr-tests.yml'
               - '!app/**'
               - '!engine/vendor/**'
+            # The source comments `scripts/comment-lint.py` reads (#3868): any
+            # file under `app/` or `engine/`, since a ceiling is per file and a
+            # new source file starts at zero. Tests and `engine/vendor` are
+            # inside these globs and the lint skips them; routing them costs a
+            # seconds-long job, and a list of the lint's own scope here would be
+            # a second copy of it. The ceilings file is an input of the job.
+            comment_lint:
+              - 'app/**'
+              - 'engine/**'
+              - 'scripts/comment-lint.py'
+              - 'scripts/comment-lint-ceilings.json'
+              - '.github/workflows/pr-tests.yml'
+              - '!*.md'
+              - '!**/*.md'
 
       # A suite that already passed on identical inputs in an earlier run of
       # this pull request is not run again: an engine-only push does not re-run
@@ -733,17 +752,24 @@ jobs:
         # (`pool: threads`, no worker cap) - the second runner buys what more
         # threads on one runner cannot.
         #
-        # Windows runs three. Its two shards took 11 minutes each (vitest
-        # 9.8m median, 2026-10-21..23) against 7 on macOS and 6.5 on ubuntu,
-        # and were the wall of most app-only pull requests.
+        # Windows and macOS run three, ubuntu two. The vitest step of a
+        # two-way macOS shard took 7-12.5 minutes (426-754 s, with one
+        # docs-only run cut off at the step's 15-minute ceiling at 913 s while
+        # still progressing); the ceiling is a hang detector, so a healthy leg
+        # has to sit well under it. Windows' two shards took 11 minutes each
+        # (vitest 9.8m median) before it went to three, and ubuntu's two are
+        # the fastest leg.
         #
         # `shard` is the literal vitest argument, so the index and the count
         # cannot drift apart. Changing a platform's shard count means changing
         # its entries here *and* the count `ci-gate` expects for it - the
         # coverage check fails loudly if that is done by halves.
-        os: [ubuntu-26.04, macos-latest]
-        shard: [1/2, 2/2]
         include:
+          - { os: ubuntu-26.04, shard: 1/2 }
+          - { os: ubuntu-26.04, shard: 2/2 }
+          - { os: macos-latest, shard: 1/3 }
+          - { os: macos-latest, shard: 2/3 }
+          - { os: macos-latest, shard: 3/3 }
           - { os: windows-latest, shard: 1/3 }
           - { os: windows-latest, shard: 2/3 }
           - { os: windows-latest, shard: 3/3 }
@@ -1553,6 +1579,49 @@ jobs:
       - name: Test the docs lint
         run: python3 scripts/test/docs_lint_test.py
 
+      # The comment gate (#3868): the lint runs in `Source comment lint`, and
+      # this is what proves each pattern still fires. The checker has no CI run
+      # of its own; a comment-only pull request runs it and pastes the output.
+      - name: Test the comment lint
+        run: python3 scripts/test/comment_lint_test.py
+
+      - name: Test the comment-only token-diff checker
+        run: python3 scripts/test/comment_diff_check_test.py
+
+  # History phrasing in source comments (#3868), against per-file ceilings that
+  # only go down. Python and git only, so it needs neither toolchain.
+  #
+  # A pull request is compared with the base branch's copy of the ceilings, so
+  # it cannot raise one to make room. A base without the file (the pull request
+  # that introduced it) has nothing to hold the ceilings to, and runs without a
+  # baseline.
+  comment-lint:
+    name: Source comment lint
+    runs-on: ubuntu-26.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.comment_lint == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Lint history phrasing in source comments
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          args=()
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          if git cat-file -e FETCH_HEAD:scripts/comment-lint-ceilings.json 2>/dev/null; then
+            git show FETCH_HEAD:scripts/comment-lint-ceilings.json > "$RUNNER_TEMP/base-ceilings.json"
+            args+=(--baseline "$RUNNER_TEMP/base-ceilings.json")
+          fi
+          python3 scripts/comment-lint.py "${args[@]}"
+
   # Shell and Python (#887) - the two languages nothing else in this workflow
   # reads. Both checks are seconds of work on a runner that needs neither a C++
   # toolchain nor Node, so they share one Linux job rather than riding a matrix
@@ -1736,7 +1805,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, engine-format, installer, build-script, scripts]
+    needs: [changes, quality, app, engine, engine-format, installer, build-script, comment-lint, scripts]
     # The gate grades a pull request. A push to master runs only the engine
     # build (see `on.push`), and the gate's first check - change detection
     # succeeded - would fail on the skipped `changes`.
@@ -1770,7 +1839,7 @@ jobs:
           # The app matrix's platforms and each one's shard count. A matrix
           # that gains or loses either without this following it fails below,
           # rather than leaving part of the suite run nowhere.
-          declare -A shard_count=([ubuntu-26.04]=2 [macos-latest]=2 [windows-latest]=3)
+          declare -A shard_count=([ubuntu-26.04]=2 [macos-latest]=3 [windows-latest]=3)
           status=0
 
           for os in ubuntu-26.04 macos-latest windows-latest; do
@@ -1894,6 +1963,7 @@ jobs:
           check engine-format "${{ needs['engine-format'].result }}"
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
+          check comment-lint "${{ needs['comment-lint'].result }}"
           check scripts   "${{ needs.scripts.result }}"
 
           if [[ $status -ne 0 ]]; then

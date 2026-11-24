@@ -708,7 +708,7 @@ string_field_type_error (const char* key, const nlohmann::json& value) {
  * stored the literal four-character string `null` because that handler had no
  * guard at all. The rule below replaces all of that, is identical across
  * collections, requests and environments, and is stated once in
- * `docs/engine/api-reference.md`:
+ * `docs/engine/api-reference/resource-writes.md`:
  *
  *   - On create (POST): absent and `null` both mean "use the default".
  *   - On update (PUT): absent means "keep the current value"; `null` means

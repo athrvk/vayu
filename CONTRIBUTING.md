@@ -313,6 +313,40 @@ a Ctrl-C during one of `build.py`'s slow toolchain probes is eaten instead of
 aborting the build. Catch what the call can actually raise - for a subprocess
 probe that is `(OSError, subprocess.SubprocessError)`.
 
+### Source comments
+
+Comments state the constraint in the present tense (`CLAUDE.md`, "Comments").
+Two Python scripts hold that line, and neither needs an install:
+
+```bash
+python3 scripts/comment-lint.py                     # history phrasing in comments
+python3 scripts/comment-lint.py --measure           # the ceilings file this tree needs
+python3 scripts/comment-diff-check.py --base <sha>  # proves a change touched comments only
+```
+
+`comment-lint.py` counts `used to`, `until #N`, `since #N`, `#N added|changed|...`,
+`formerly` and `previously` in the comment lines of non-test source under
+`engine/include`, `engine/src`, `app/src` and `app/electron`. A file that has
+some holds a ceiling in `scripts/comment-lint-ceilings.json`, and the file may
+only shrink: CI compares it with the base branch's copy, a ceiling whose file
+has no phrase left fails as stale (delete it), and a split or rename may hand a
+retired entry's count to the new files, between them and no more. Lowering one
+after a cleanup is `--measure`. There is no inline marker to silence a line; a
+file with a legitimate use takes a ceiling. It runs on a pull request as
+`Source comment lint`, and prints nothing when it passes. A trailing comment
+(code, then `// ...`) is not scanned.
+
+`comment-diff-check.py` is for a pull request that claims to change comments
+only. It strips the comments from every touched source file at the merge-base
+and at `HEAD` (`--head` names another end), requires the two token streams to be
+identical and the counts of `NOLINT`, `eslint-disable`, `@ts-expect-error`,
+`@deliberate`, `clang-format off|on` and the other directives to be equal, and
+exits non-zero naming the file and the first differing token. Strings, template
+literals, regex literals and C++ raw strings are read as such, so a `//` inside
+one is not taken for a comment. Paste its output into the pull request
+description. It is not a CI step; commit the change first, since it compares
+commits.
+
 ## Testing
 
 ### Engine (C++)
@@ -452,7 +486,9 @@ heading). A page that is over a budget today has a ceiling in
 and one whose page is now within budget fails as stale, so delete it. A page
 split into several is the one way a ceiling is added: the new pages may hold,
 between them, what the old page's entry held (counts summed, each maximum no
-higher). The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
+higher). A change that retires a page also re-aims links and rewraps text, so
+in that change a maximum may rise by 32 characters and the new pages' `history`
+may total a tenth more. The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
 the ceilings file the current tree needs, for lowering it after a cleanup.
 
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be

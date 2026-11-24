@@ -104,7 +104,7 @@ See [Data files](saved-data.md#data-files).
 
 ### How History names the client
 
-Every run an MCP tool starts is sent with `origin: {"kind": "mcp", "client": "<name>"}` (#1817; the field is described under [`POST /execute`](../api-reference.md#post-execute)): `run_request`, streaming or not, every request `run_collection_smoke` sends, `run_collection`, and both shapes of `start_load_run`.
+Every run an MCP tool starts is sent with `origin: {"kind": "mcp", "client": "<name>"}` (#1817; the field is described under [`POST /execute`](../api-reference/execute.md#post-execute)): `run_request`, streaming or not, every request `run_collection_smoke` sends, `run_collection`, and both shapes of `start_load_run`.
 The name is the `clientInfo.name` the client gave - in its `initialize` handshake, or for a 2026-07-28 client on each request - forwarded as given: the engine trims it and caps it at 128 characters, and the renderer turns a known identifier into a product name through `app/src/lib/mcp-client-names.ts`.
 When no name is known the run carries `{"kind": "mcp"}` alone, and History shows it as an unnamed MCP client.
 The origin is set after every argument has been folded into the payload, so no tool argument can claim another one.

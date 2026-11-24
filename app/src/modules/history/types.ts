@@ -100,7 +100,7 @@ export interface TimeSeriesResponse {
 	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
 	 * consecutive ticks: latency percentiles, concurrency and backpressure are the
 	 * bucket's max, `current_rps` its mean, everything else its last tick's
-	 * (`docs/engine/api-reference.md`, "Downsampling with `maxPoints`").
+	 * (`docs/engine/api-reference/metrics.md`, "Downsampling with `maxPoints`").
 	 */
 	bucketed?: boolean;
 	/** Ticks folded into each entry; `1` when the series already fit. */
@@ -125,7 +125,7 @@ export interface MonitorSeriesResponse {
 	 * Present only on a `maxPoints` request (#2611). `true` when the stored samples
 	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
 	 * consecutive scrapes: each series is the bucket's max, the timestamp its last
-	 * scrape's (`docs/engine/api-reference.md`, "Downsampling the monitor series").
+	 * scrape's (`docs/engine/api-reference/metrics.md`, "Downsampling the monitor series").
 	 */
 	bucketed?: boolean;
 	/** Scrapes folded into each entry; `1` when the series already fit. */

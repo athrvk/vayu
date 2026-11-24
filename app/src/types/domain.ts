@@ -839,7 +839,7 @@ export interface ElementOrigin {
  * that ran, beside the existing script test results.
  *
  * `origin` is absent for an inline send with no `requestId` to resolve a
- * chain from (`docs/engine/api-reference.md`'s Elements section).
+ * chain from (`docs/engine/api-reference/execute.md`, the `elements` entries).
  */
 export interface ElementOutcome {
 	id: string;
@@ -1398,7 +1398,7 @@ export type StreamEndReason = (typeof STREAM_END_REASONS)[number];
  *
  * `sourceId` is the **origin's** own `id:` field, not the relay frame id the
  * `lastEventId` resume takes - conflating the two would make one of the two
- * resumes silently wrong (see `docs/engine/api-reference.md`). An event larger
+ * resumes silently wrong (see `docs/engine/api-reference/live-metrics.md`). An event larger
  * than `sseMaxEventBytes` arrives as a prefix with `dataTruncated` set and
  * `dataBytes` holding the size as sent, never silently cut.
  */
@@ -1608,8 +1608,9 @@ export interface RunResultTrace {
 		 * response's `rawRequest` (#348), so a restored raw view shows the `Cookie`
 		 * line the jar attached. Absent on older rows and on a step that sent nothing,
 		 * so `restore-response.ts`'s `sentSide` falls back to `buildRawRequest`. Values
-		 * are **not redacted**, as on the live field (`docs/engine/api-reference.md`).
-		 * The body half is capped at `maxTraceBodyBytes`; the header block never is.
+		 * are **not redacted**, as on the live field
+		 * (`docs/engine/api-reference/execute.md`). The body half is capped at
+		 * `maxTraceBodyBytes`; the header block never is.
 		 */
 		rawRequest?: string;
 		/**
@@ -2251,7 +2252,7 @@ export interface RunThresholds extends RunThresholdBudgets {
 	 * not `[key: string]`, so the fixed fields keep their types, `failRun` keeps
 	 * `boolean` (it does not match the pattern), and a mistyped fixed key is still
 	 * a type error. Like the engine, this checks the key's shape, not that `<name>`
-	 * is recorded (`docs/engine/api-reference.md`, the thresholds block).
+	 * is recorded (`docs/engine/api-reference/load-runs.md`, the thresholds block).
 	 */
 	[key: `custom.${string}`]: number | undefined;
 }

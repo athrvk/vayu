@@ -8,7 +8,9 @@ Mutation checks: change `>` to `>=` in `page_findings` and the "exactly at the
 budget" cases fail; drop the `fence is not None` skip in `measure_page` and the
 fenced-code cases fail; delete the `raised_entries` call in `lint` and the
 baseline cases fail; change `>` to `>=` in `new_entries` and the exact-allowance
-split case fails.
+split case fails; drop the `+ MOVE_LINK_SLACK` in `new_entries`, apply the slack
+without `moved(...)`, or apply it to a count in `raised_entries` and the move cases
+fail.
 
 Run: python3 scripts/test/docs_lint_test.py
 """
@@ -201,15 +203,57 @@ heavier_pages = {"a.md": FRONT + ("x" * 900 + "\n") * 2 + "It used to be x.\n", 
 report = fails(heavier_pages, heavier, *split_args)
 check("a count summed over the new pages may not exceed the retired page's",
       report is not None and "long_lines ceilings of new pages total more than the 3" in report, str(report))
-wider = cfg({"docs/a.md": {"max_line": 901, "long_lines": 1, "history": 1},
+slack = dl.MOVE_LINK_SLACK
+at_slack = cfg({"docs/a.md": {"max_line": 900 + slack, "long_lines": 1, "history": 1},
+                "docs/b.md": {"max_line": 700, "long_lines": 2}})
+at_slack_pages = {"a.md": FRONT + "x" * (900 + slack) + "\nIt used to be x.\n", "b.md": halves["b.md"]}
+check("a split's longest line may exceed the retired page's by the link slack",
+      passes(at_slack_pages, at_slack, *split_args))
+wider = cfg({"docs/a.md": {"max_line": 901 + slack, "long_lines": 1, "history": 1},
              "docs/b.md": {"max_line": 700, "long_lines": 2}})
-wider_pages = {"a.md": FRONT + "x" * 901 + "\nIt used to be x.\n", "b.md": halves["b.md"]}
+wider_pages = {"a.md": FRONT + "x" * (901 + slack) + "\nIt used to be x.\n", "b.md": halves["b.md"]}
 report = fails(wider_pages, wider, *split_args)
-check("a longest line may not exceed the retired page's",
-      report is not None and "max_line ceiling 901 is above the 900" in report, str(report))
+check("a longest line may not exceed the retired page's by more than the slack",
+      report is not None and f"max_line ceiling {901 + slack} is above the {900 + slack}" in report, str(report))
+rewrapped = cfg({"docs/a.md": {"max_line": 900, "long_lines": 1, "history": 2},
+                 "docs/b.md": {"max_line": 700, "long_lines": 2, "history": 1}})
+rewrapped_pages = {"a.md": FRONT + "x" * 900 + "\nIt used to be x.\nIt used to be y.\n",
+                   "b.md": FRONT + ("y" * 700 + "\n") * 2 + "It used to be z.\n"}
+check("a split's history may total a tenth more than the retired page's",
+      passes(rewrapped_pages, rewrapped, *split_args))
+twice = cfg({"docs/a.md": {"max_line": 900, "long_lines": 1, "history": 2},
+             "docs/b.md": {"max_line": 700, "long_lines": 2, "history": 2}})
+twice_pages = {"a.md": rewrapped_pages["a.md"], "b.md": FRONT + ("y" * 700 + "\n") * 2 + "It used to be z.\nIt used to be w.\n"}
+report = fails(twice_pages, twice, *split_args)
+check("a split's history may not total more than that allowance",
+      report is not None and "history ceilings of new pages total more than the 3" in report, str(report))
+
+print("a move re-aims links in other pages")
+linker = cfg({"docs/linker.md": {"max_line": 500, "long_lines": 1}, "docs/old.md": {"max_line": 900, "long_lines": 1}})
+linker_file = Path(tempfile.mkdtemp(prefix="docs-lint-base-")) / "linker.json"
+linker_file.write_text(json.dumps(linker), encoding="utf-8")
+linker_args = ("--baseline", str(linker_file))
+grown = {"linker.md": FRONT + "x" * (500 + slack) + "\n", "new.md": FRONT + "short\n"}
+grown_cfg = cfg({"docs/linker.md": {"max_line": 500 + slack, "long_lines": 1}})
+check("a page that links to a retired page may grow its longest line by the slack",
+      passes(grown, grown_cfg, *linker_args))
+too_grown = {"linker.md": FRONT + "x" * (501 + slack) + "\n", "new.md": FRONT + "short\n"}
+too_grown_cfg = cfg({"docs/linker.md": {"max_line": 501 + slack, "long_lines": 1}})
+report = fails(too_grown, too_grown_cfg, *linker_args)
+check("it may not grow by more than the slack",
+      report is not None and "max_line ceiling raised from 500" in report, str(report))
+kept = cfg({"docs/linker.md": {"max_line": 500 + slack, "long_lines": 1}, "docs/old.md": {"max_line": 900, "long_lines": 1}})
+report = fails({"linker.md": grown["linker.md"], "old.md": FRONT + "x" * 900 + "\n"}, kept, *linker_args)
+check("without a retired page the same growth is a raised ceiling",
+      report is not None and "max_line ceiling raised from 500" in report, str(report))
 report = fails({"a.md": page_of_lines(700)}, cfg({"docs/a.md": {"lines": 700}}), *split_args)
 check("a metric the retired page had no ceiling for may not appear on a new page",
       report is not None and "lines ceilings of new pages total more than the 0" in report, str(report))
+
+more_long = cfg({"docs/linker.md": {"max_line": 500, "long_lines": 2}})
+report = fails({"linker.md": FRONT + ("x" * 500 + "\n") * 2, "new.md": FRONT + "short\n"}, more_long, *linker_args)
+check("a moved page's count of long lines may not rise",
+      report is not None and "long_lines ceiling raised from 1 to 2" in report, str(report))
 
 print("malformed input")
 for label, ceilings_text in (
