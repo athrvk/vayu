@@ -70,7 +70,7 @@ On `PUT`, the path is the identity.
 A body `id` matching it is accepted and ignored; one that disagrees - including `null` - is a `400` (message `Body 'id' must match the id in the path ('col_1') or be omitted`), because the payload otherwise names two different records and guessing between them is how a `PUT` to one id rewrites another.
 This is checked before the record is looked up, so a malformed body answers `400` whether or not the target exists.
 
-Since no create can select an id, the pre-existing "id already exists" `409` - whose body names the update path, e.g. message `Collection 'col_1' already exists; use PUT /collections/:id to update` - is now reachable only on a `generate_id` collision, which 122 bits of entropy put out of reach.
+Since no create can select an id, the "id already exists" `409` - whose body names the update path, e.g. message `Collection 'col_1' already exists; use PUT /collections/:id to update` - is reachable only on a `generate_id` collision, which 122 bits of entropy put out of reach.
 It stays as a guard: on that draw the alternative is overwriting a live record.
 
 ## The null-vs-absent rule
@@ -117,7 +117,7 @@ naming the field, its size and the cap, and leaving the stored row untouched.
 
 A row written before this cap existed can still be oversized.
 `GET /<resource>/:id` always answers with the field whole, however large it is - this did not change.
-Only a **request's** list route, `GET /requests?collectionId=`, behaves differently: it has always substituted the field's documented default for a column too large to serve efficiently across a whole page, and now names which fields it substituted for that row in a `truncatedFields` array (e.g. `["body"]`), omitted when nothing was.
+Only a **request's** list route, `GET /requests?collectionId=`, behaves differently: it substitutes the field's documented default for a column too large to serve efficiently across a whole page, and names which fields it substituted for that row in a `truncatedFields` array (e.g. `["body"]`), omitted when nothing was.
 Neither `GET /collections` nor `GET /environments` substitutes or carries this field - see [GET /requests](requests.md#get-requests).
 
 ## Ordering
@@ -215,7 +215,7 @@ Anything else is a `400` naming the field, e.g. message `Invalid 'auth': must be
 | every other plain string field (`name`, `description`, `url`, `bodyType`, an example's `body` and `contentType`, a certificate's `host` and `passphrase`, ...) | string; the `400` is `Invalid '<field>': must be a string (got <type>)` |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades quietly when it is not an object - `variables` reads back empty, a request `body` is dropped, and `auth` resolves to none, so a request the caller believes carries credentials goes out bare.
-The write is therefore rejected rather than stored: `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously stored value is left untouched.
+The write is therefore rejected rather than stored: `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the stored value is left untouched.
 
 **`parentId: ""` is the root, the same as `null`** (#3451).
 It is stored as `null` on `POST`/`PUT /collections` (a folder `POST /specs/sync` creates with `""` or `null` lands under the synced collection), and [`POST /reorder`](collections.md#post-reorder) reads it as `null` in a move and in a `normalize` scope, so the tree has one spelling of the root: a collection created with `""` is appended among the roots and lists with them.
@@ -267,17 +267,16 @@ Absent, `null` and `""` pass (a key file in `privateKeyFile`, or no key yet).
 `POST /compose` leaves the reference written in every mode, so no composed payload carries the key;
 it is resolved only where a token is acquired: after the pre-request script on a Send and a sequential collection run, once at the start of a load run from the run's own scopes (a reference none answers is the run's `400`, `invalid_run_config` or `invalid_scenario`, naming it), and by [`POST /oauth2/token`](authentication.md#post-oauth2token) from the scopes it names.
 
-## Behavior change (pre-1.0)
+## Creates never update
 
-**A create carrying an `id` is now a `400`** on all three resources.
+**A create carrying an `id` is a `400`** on all three resources.
 External scripts that minted their own ids must drop the field and read the engine's id out of the response, or use [`POST /import/apply`](import.md#post-importapply) for a whole tree.
-A `PUT` whose body `id` disagrees with the path id is a `400` for the same reason (it used to be silently ignored, so the write landed on the path id).
+A `PUT` whose body `id` disagrees with the path id is a `400` for the same reason (ignoring it would land the write on the path id).
 
-`POST /<resource>` used to be a silent upsert on all three resources, so a client could send an update as a POST.
-That no longer works; external scripts that relied on POST-as-update must switch to `PUT /<resource>/:id`.
-Two bugs went with the old behavior and are fixed here:
+`POST /<resource>` is not an upsert on any of the three resources: a client sends an update as `PUT /<resource>/:id`.
+The split closes three failure modes:
 
-- A stale or typo'd `id` silently **created** a second record instead of failing, and an `id` collision silently **merged** two records into one.
-- `POST /environments` had no null guard, so `{"variables": null}` stored the literal four-character text `null` - JSON that parses but is not an object, so every reader saw an environment with no variables and no error.
-  It now resets to `{}` like every other resource.
-- `environments.isActive` was honored only on create; it now follows the rule on both verbs.
+- A stale or typo'd `id` would silently **create** a second record instead of failing, and an `id` collision would silently **merge** two records into one.
+- `{"variables": null}` on `POST /environments` would store the literal four-character text `null` - JSON that parses but is not an object, so every reader would see an environment with no variables and no error.
+  It resets to `{}` like every other resource.
+- `environments.isActive` follows the rule on both verbs.

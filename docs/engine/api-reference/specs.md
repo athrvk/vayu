@@ -149,7 +149,7 @@ A reader that needs any of them reads the full route.
 
 `contentBytes` is the document's size as the engine counts it - the same measure `maxSpecDocumentBytes` refuses a write by, so a size reported here and the limit it was stored under are in one unit.
 
-This route exists because binding metadata lives on the *document*: the app's Spec tab paints a source and a fetch date, and getting them used to cost a transfer of the whole spec on every first open of the tab.
+This route exists because binding metadata lives on the *document*: the app's Spec tab paints a source and a fetch date, and reading them from `GET /specs/:id` would cost a transfer of the whole spec on every first open of the tab.
 
 ## DELETE /specs/:id
 
@@ -456,7 +456,7 @@ A pairing worked out by the caller would be a second opinion about what the docu
 `unmatchedRequests` and `unmatchedOperations` carry the same shapes `POST /specs/match` answers with, so a caller reads one shape for the preview and the commit.
 
 **Stamping goes both ways** (issue #718).
-After a bind, a request's `spec_operation` is the operation it matched in the bound document, or nothing: `cleared` counts the requests whose identity was removed because this document does not account for it.
+After a bind, a request's `spec_operation` is the operation it matched in the bound document, or nothing: `cleared` counts the requests whose identity is removed because this document does not account for it.
 That half is not a list the caller states - it is the other side of the same walk - because a bind that wrote only the matches left every non-matcher carrying identity from the previous document, and coverage resolves a stamp by `operationId` first, so such a stamp claims whichever operation of the new document shares the id rather than going unread.
 
 **Nothing outside the subtree is touched**, the rule `POST /specs/sync` follows: a request under another collection keeps its own stamp even when it would have matched.
@@ -690,7 +690,7 @@ A sync updates and deletes rows that already exist.
 `"safe"` - the only one - is `core::safe_spec_apply`,
 the same answer [`POST /specs/diff`](#post-specsdiff) reports per entry as `safe` / `safeFields`: **every operation the document adds, every field it moved that nobody here had edited, no deletions, none of the operations a person declined by deleting their request (issue #3031), and a request whose bound document could not be read left alone whole.**
 The engine works out the rows, mints the tag folders an added operation needs (matching an existing direct child by name, creating one at most once per call), and writes them through everything below - the same validation, the same id minting, the same transaction.
-It exists because those rules used to live in the renderer alone, which put applying a drift out of reach of every caller that is not the Spec tab: `electron/` may not import `src/`, so an MCP `sync_spec` would have needed a *copy* of the one judgement whose silent failure destroys a person's work.
+It exists because those rules would otherwise live in the renderer alone, which puts applying a drift out of reach of every caller that is not the Spec tab: `electron/` may not import `src/`, so an MCP `sync_spec` would need a *copy* of the one judgement whose silent failure destroys a person's work.
 
 Sending `policy` together with `collections`, `create`, `update` or `delete` is a `400`: there is no reading of "the safe ticks, plus these" that is not a guess.
 A caller that wants anything the policy declines - a deletion, a field somebody edited - states the rows itself, which is what the app does the moment a user changes a tick.

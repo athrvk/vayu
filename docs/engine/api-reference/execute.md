@@ -365,7 +365,7 @@ A redirect that changes any of the three therefore starts without the hop's cook
 A same-origin hop is unchanged, and a hop back to the origin that set the cookie carries it again.
 Later requests use the jar as normal.
 This is Vayu's own rule, held by the engine's redirect loop, and it is not configurable.
-The reason is the one behind **curl 8.21.0**'s hardening (`http: don't pass on set cookies to new origins`, which the engine picked up with the vcpkg baseline bump of #679): what one origin handed the client is not the next origin's to read. libcurl's cookie engine matches by host and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride a redirect to `127.0.0.1:9090`.
+The reason is the one behind curl's hardening in 8.21.0 (`http: don't pass on set cookies to new origins`, #679): what one origin handed the client is not the next origin's to read. libcurl's cookie engine matches by host and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride a redirect to `127.0.0.1:9090`.
 A flow that depended on a cookie surviving a cross-origin hop (a login that bounces through an identity provider is the usual shape) sends the follow-up request without it.
 A hop's `Set-Cookie` is reported in `redirects` whether or not a later hop carried it, so the member says what the server sent, not what went on to the next origin.
 

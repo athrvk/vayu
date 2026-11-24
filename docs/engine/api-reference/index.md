@@ -36,8 +36,8 @@ Any per-error detail sits **inside** the same object, so a client reads one plac
 }
 ```
 
-Most routes used to emit a flat `{"error": "message"}` instead, which the app's http-client could not read - every validation message surfaced as a bare `HTTP 400` (issue #173).
-The client still accepts the flat shape so a newer app can read an older engine, but the engine no longer produces it.
+No route emits a flat `{"error": "message"}`, which the app's http-client cannot read - every validation message would surface as a bare `HTTP 400` (issue #173).
+The client still accepts the flat shape so a newer app can read an older engine.
 
 ## Pages
 

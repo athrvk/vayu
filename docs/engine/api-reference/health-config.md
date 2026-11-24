@@ -52,10 +52,10 @@ It is resolved once at startup and always present:
 
 | Field | Meaning |
 |-------|---------|
-| `outcome` | `restored_from_backup` - `<db>.bak` passed the same validation and was restored over the corrupt database. `started_fresh_quarantined` - no backup restored it, so it was moved aside and a fresh one created. `backup_also_corrupt` - a backup existed, failed the same validation, and was left untouched rather than restored. `deleted_corrupt` - it was **deleted**, which an engine older than issue #984 always did and this one does only when the quarantine rename fails |
+| `outcome` | `restored_from_backup` - `<db>.bak` passed the same validation and was restored over the corrupt database. `started_fresh_quarantined` - no backup restored it, so the engine moved it aside and created a fresh one. `backup_also_corrupt` - a backup existed, failed the same validation, and was left untouched rather than restored. `deleted_corrupt` - it was **deleted**, which happens only when the quarantine rename fails (issue #984) |
 | `at` | When that happened, epoch milliseconds |
 | `databasePath` | The database file it happened to |
-| `quarantinedPath` | Where the unopenable database was moved to, readable with `sqlite3 <path> .recover`. **Optional** - absent for `deleted_corrupt` and for markers written before #984, so test for it rather than deriving it from `outcome` |
+| `quarantinedPath` | Where the engine moved the unopenable database, readable with `sqlite3 <path> .recover`. **Optional** - absent for `deleted_corrupt` and for markers written before #984, so test for it rather than deriving it from `outcome` |
 
 The node is read from a marker file beside the database and stands until a later recovery overwrites it, so a client that has already told the user about an event should key off `at` rather than expecting the node to disappear.
 See [db-schema.md](../db-schema.md#the-recovery-marker-issue-922).
@@ -175,7 +175,7 @@ Non-numeric entries never declare one.
 
 The app renders it as the suffix inside the input, which is where a unit is stated **once** - so a seeded description never spells the same unit out as an "in milliseconds" clause, and a label never carries a `(ms)` suffix; a test over the catalogue enforces both.
 Labels are sentence case ("Default request timeout", "Correlation ID"), enforced by a second catalogue test.
-`bytes` additionally selects human-readable formatting for the value, the range hint and the default line (`104857600` reads as `100.0 MB`), which the app used to select from a hardcoded list of three keys - so a byte-valued entry added engine-side was formatted as a raw number until someone edited a TypeScript array.
+`bytes` additionally selects human-readable formatting for the value, the range hint and the default line (`104857600` reads as `100.0 MB`), which the app reads from the entry rather than from a hardcoded key list, so a byte-valued entry added engine-side is formatted without a TypeScript change.
 A client that meets a unit it does not know should show it verbatim rather than drop it.
 
 Three entries are seeded as `enum` today.
@@ -243,12 +243,12 @@ A malformed URL is rejected under any mode; a *valid* URL stored while the mode 
 
 A failure of the proxy hop is reported as its own error code, `PROXY_ERROR`, rather than as the target's:
 
-- an unresolvable proxy hostname (previously `CONNECTION_FAILED`, which sent people debugging an endpoint that was never reached);
+- an unresolvable proxy hostname (not `CONNECTION_FAILED`, which would send people debugging an endpoint that was never reached);
 - a proxy that is down, so connecting to *it* is refused (#3257).
   The refused socket is the proxy's whatever the target is, and the target was never dialled.
   This holds in every mode, `environment` included, because the decision reads libcurl's own record that a proxy was in the path (`CURLINFO_USED_PROXY`) and not the configured URL; the same refusal with no proxy in the path stays the target's `CONNECTION_FAILED`;
 - a SOCKS handshake failure;
-- a `4xx` answered to a `CONNECT`, which an `https://` target makes the proxy see - including the `407` a proxy demanding authentication returns, which curl reports as a generic receive error and which previously surfaced as `INTERNAL_ERROR`;
+- a `4xx` answered to a `CONNECT`, which an `https://` target makes the proxy see - including the `407` a proxy demanding authentication returns, which curl reports as a generic receive error that would otherwise surface as `INTERNAL_ERROR`;
 - a forwarding proxy's `407` on a plain `http://` request (#3257), which needs no `CONNECT` and so comes back as an ordinary response that read as the server's own answer.
   `POST /execute` (and the other single-request sends: the connection test, `pm.sendRequest`, the OAuth token fetch, the import fetch) reports it as `PROXY_ERROR` with status `0` and the message "The proxy answered 407 Proxy Authentication Required: check the proxy's credentials".
   A `407` is the proxy's only when a proxy carried the transfer and no tunnel stands between the engine and the server: a `407` a server sends directly, or through an established `CONNECT` tunnel, stays a response with its status.
@@ -259,20 +259,20 @@ A proxy that is down is `PROXY_ERROR` there too, since that mapping reads the fa
 The code is **appended** to the error enumeration, so the numeric values stored in existing traces are unchanged.
 
 Two more failures of the *target's answer* have their own codes (issue #2462): `TOO_MANY_REDIRECTS`, when the server redirected past the request's `maxRedirects` (usually a loop), and `BAD_CONTENT_ENCODING`, when the response declares a `Content-Encoding` that its bytes are not in or that this libcurl has no decoder for.
-Both previously came back as `CONNECTION_FAILED`, which sent people looking for a network fault when every hop had been answered.
+Neither is `CONNECTION_FAILED`, which would send people looking for a network fault when every hop had been answered.
 `errorMessage` opens with a plain statement - `Too many redirects: the server redirected more than N times (see Maximum redirects). Maximum (N) redirects followed`, which is the engine's own text and ends there (the engine follows redirects itself), or `The response could not be decoded: the server sent Content-Encoding X.`, which is followed by libcurl's own text.
 The codes are **appended** to the enumeration like `PROXY_ERROR`, so stored numeric values are unchanged, but a script that tested `err.code === 'CONNECTION_FAILED'` (`pm.sendRequest`) or `pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees the new spelling.
 A load run records them under the error types `too_many_redirects` and `bad_content_encoding`.
 
 A target that answers in something other than HTTP/1.x is `PROTOCOL_MISMATCH` (issue #3306), error type `protocol_mismatch`.
 The usual case is an `h2c` server (HTTP/2 over cleartext) sent a request over `http://`: Vayu speaks HTTP/1.1 there whatever `httpVersion` says (the Protocol paragraph under [POST /execute](execute.md#post-execute)), and the server answers with its binary HTTP/2 preface, which libcurl reports as `Received HTTP/0.9 when not allowed`.
-That failure used to come back as `INVALID_URL`, which sent people to a URL that was fine.
+It is not `INVALID_URL`, which would send people to a URL that was fine.
 `errorMessage` opens with `The server answered in a protocol other than HTTP/1.x:` followed by libcurl's text, and when the request asked for `http2` and the hop that failed was `http://` (after any redirect) it adds `HTTP/2 is only negotiated over https://; this server may speak h2c, which Vayu does not send`.
 A scheme the transfer refuses, a redirect onto `ftp://` included, is still `INVALID_URL`.
 The code is appended like the others, and a script sees it as `err.code` (`pm.sendRequest`) or `pm.response.errorCode`.
 
 A file the request names that cannot be sent is `UNSENDABLE_FILE` (issue #3693), error type `unsendable_file`: every refusal of the file rule listed under [File references](request-body.md#file-references-binary-bodies-and-file-parts) (no file chosen, an unresolved `{{variable}}` in the path, an unreadable file, one outside the allowed folders).
-The request is at fault and nothing was sent, so it is not `INTERNAL_ERROR`, which those refusals used to carry; the streaming and `POST /runs` answers keep their `unsendable_file` rule code.
+The request is at fault and nothing was sent, so it is not `INTERNAL_ERROR`; the streaming and `POST /runs` answers keep their `unsendable_file` rule code.
 The code is appended like the others, so stored numeric values are unchanged and a trace written before it still reads `INTERNAL_ERROR`.
 
 A send still in flight when the engine shuts down is cancelled rather than waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is making: the send answers, and its trace records, `CANCELLED` with `errorMessage` `Request cancelled`, about a second after the shutdown began.
@@ -361,14 +361,14 @@ OpenSSL reads it through the Windows crypto API rather than being the OS verifie
 - **No on-demand root fetch.**
   Windows can download a missing trusted root when Schannel asks for one; nothing here asks, so only roots already in the store count.
 - **No revocation through the store.**
-  Schannel passed `CERT_CHAIN_REVOCATION_CHECK_CHAIN`; OpenSSL does not revocation-check the chain unless told to, and the engine does not tell it to on any platform - so Windows now behaves like Linux and macOS here rather than being the strict one.
+  Schannel passed `CERT_CHAIN_REVOCATION_CHECK_CHAIN`; OpenSSL does not revocation-check the chain unless told to, and the engine does not tell it to on any platform - so Windows behaves like Linux and macOS here rather than being the strict one.
 
 A certificate that still fails to verify fails at handshake time with libcurl's own `SSL_ERROR` - the validation on the way in is about the *shape* of the paste, deliberately, so a chain curl would accept is never refused by a parser of ours.
 
 **A TLS connection that never answers is an `SSL_ERROR` too**, whatever code libcurl put on it.
 The mapping needs that rule because the interesting refusals do not arrive as TLS errors: under TLS 1.3 the server's verdict about the *client* - a certificate it will not accept, or one it demanded and did not get - reaches us after our own handshake has finished, so libcurl reports the generic receive error of a connection that went away, carrying the alert in its message.
 A key the stored passphrase does not open arrives as a generic argument error in the same way.
-All three used to surface as `INTERNAL_ERROR`, which says the failure was ours.
+All three are `SSL_ERROR` rather than `INTERNAL_ERROR`, which would say the failure was ours.
 The rule applies only where the mapping has no answer of its own, and only to an `https` transfer that produced no response line at all - so a `4xx`, a timeout, a refused connection and a proxy failure all keep the code they had (issue #802).
 
 Per-request, `verifySSL: false` turns verification off for one endpoint entirely (see [POST /execute](execute.md#post-execute)); trusting the authority here is the answer that keeps verification on everywhere else.

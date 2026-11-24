@@ -202,12 +202,6 @@
       "long_lines": 2,
       "max_cell": 680
     },
-    "docs/engine/api-reference/environments.md": {
-      "history": 2
-    },
-    "docs/engine/api-reference/examples.md": {
-      "history": 1
-    },
     "docs/engine/api-reference/execute.md": {
       "max_cell": 294
     },
@@ -219,23 +213,17 @@
     "docs/engine/api-reference/health-config.md": {
       "max_line": 890,
       "long_lines": 17,
-      "max_cell": 832,
-      "history": 9
+      "max_cell": 832
     },
     "docs/engine/api-reference/import.md": {
       "max_line": 504,
       "long_lines": 1,
-      "max_cell": 464,
-      "history": 3
+      "max_cell": 464
     },
     "docs/engine/api-reference/inbox.md": {
       "max_line": 422,
       "long_lines": 1,
-      "max_cell": 399,
-      "history": 1
-    },
-    "docs/engine/api-reference/index.md": {
-      "history": 1
+      "max_cell": 399
     },
     "docs/engine/api-reference/live-metrics.md": {
       "max_line": 1082,
@@ -249,9 +237,6 @@
     },
     "docs/engine/api-reference/metrics.md": {
       "max_cell": 244
-    },
-    "docs/engine/api-reference/resource-writes.md": {
-      "history": 3
     },
     "docs/engine/api-reference/runs.md": {
       "max_line": 416,
@@ -267,9 +252,6 @@
       "max_line": 529,
       "long_lines": 2,
       "max_cell": 369
-    },
-    "docs/engine/api-reference/specs.md": {
-      "history": 3
     },
     "docs/engine/architecture.md": {
       "lines": 2269,

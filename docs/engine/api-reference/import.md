@@ -28,9 +28,9 @@ Bounding it by `maxSpecDocumentBytes` would refuse a collection that imports tod
   A declared length is what the refusal names as the size.
 
 **A fetch is bounded by a stall, not by a total** (issue [#882](https://github.com/athrvk/vayu/issues/882)).
-This route used to inherit the 30-second `timeout_ms` every request carries, which bounds a download's *size* rather than its health: 10 MB needed better than 340 KB/s merely to arrive, and the failure read `Operation timed out after 30001 milliseconds with 4177920 out of 6296254 bytes received` for a transfer that had never once stopped.
-It is now abandoned only after `constants::import_fetch::STALL_TIMEOUT_MS` below `STALL_FLOOR_BYTES_PER_SEC` - so a slow link finishes, slowly, and a dead one still ends.
-What bounds a transfer that never ends at all is `maxBytes` above, which is the bound that was always meant.
+The 30-second `timeout_ms` every request carries would bound a download's *size* rather than its health: 10 MB needs better than 340 KB/s merely to arrive, and a transfer that had never once stopped would fail with `Operation timed out ... bytes received`.
+So this route is abandoned only after `constants::import_fetch::STALL_TIMEOUT_MS` below `STALL_FLOOR_BYTES_PER_SEC` - so a slow link finishes, slowly, and a dead one still ends.
+What bounds a transfer that never ends at all is `maxBytes` above.
 Connecting is bounded apart from the stall, at the stall window capped at 30 seconds (issue #2835): the stall window only runs once a connection is made, so a host that never completes the handshake would otherwise hold the fetch for libcurl's 300-second default.
 Both forms of the route get this: a document must not arrive on one and time out on the other.
 
@@ -113,7 +113,7 @@ Three events, and the last one is always terminal:
 Parse a raw import document into the tree [`POST /import/apply`](#post-importapply) persists (issue [#877](https://github.com/athrvk/vayu/issues/877)).
 Reads only - nothing is stored, so a preview costs no write.
 
-**Every format Vayu accepts, detected by content**, in the order the app's dispatcher used to run its parsers in - so a document carrying two formats' keys is claimed by the same one it always was:
+**Every format Vayu accepts, detected by content**, in a fixed order, so a document carrying two formats' keys is always claimed by the same one:
 
 | Claimed by | `meta.format` |
 |------------|---------------|
@@ -167,7 +167,7 @@ A stored variables object keeps its keys in name order, and the app lists a scop
 | `importEnvironments` | bool, default `true` | Off, the environments and global variables a document carries are not built and the counts report `0` - gated at parse time, so a preview shows what will actually be created. |
 | `importScripts` | bool, default `true` | Off, every script imports empty. |
 | `fileName` | string | Display only; echoed on `meta.fileName`. Never stored. |
-| `sourceUrl` | string | Recorded on a stored OpenAPI document (so a later sync knows what to re-fetch) and used to resolve a relative `servers[0].url`. |
+| `sourceUrl` | string | Recorded on a stored OpenAPI document (so a later sync knows what to re-fetch) and is used to resolve a relative `servers[0].url`. |
 | `unresolvedRefs` | int ≥ 0 | External `$ref`s a bundling pass could not reach, counted into `meta.skipped` as `external_ref`. Nothing here follows a ref. |
 
 **Response:** `200` - the whole import tree.
@@ -352,7 +352,7 @@ Persist an entire parsed import - collections, their requests, environments, and
 Items reference each other by opaque **temp ids** the client invents; the engine generates every real id via `generate_id` and returns the translation in `idMap`.
 A fifth section, **`clientCertificates`** (issue #1656), is not part of that atomic tree or its temp-id namespace - see its own bullet below.
 
-This is what replaced ~500 sequential `POST /collections` + `POST /requests` calls for a 500-request import, and with it the only reason those endpoints ever accepted a client-supplied `id` - which they no longer do (see [The engine owns every id](resource-writes.md#the-engine-owns-every-id)).
+This takes the place of ~500 sequential `POST /collections` + `POST /requests` calls for a 500-request import, and with it the only reason those endpoints would accept a client-supplied `id` - which they do not (see [The engine owns every id](resource-writes.md#the-engine-owns-every-id)).
 
 **Request:**
 ```json

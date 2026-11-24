@@ -254,6 +254,6 @@ A value that is not a non-negative capture id is refused with `400` and code `in
 A second concurrent watcher is refused with `409` and code `inbox_live_in_use`: each SSE handler occupies a cpp-httplib pool thread for its whole life, so N watchers on one inbox is N parked threads.
 
 **A claim whose holder stopped writing is taken over, not refused.**
-A stream learns its socket died only when its next write fails, up to one `inboxLivePollIntervalMs` later, so a client reconnecting inside that window used to meet a `409` it could not recover from.
+A stream learns its socket died only when its next write fails, up to one `inboxLivePollIntervalMs` later, and a client reconnecting inside that window would otherwise meet a `409` it could not recover from.
 A holder that has not written successfully for two poll intervals (at least 100ms) is not writing, and its slot goes to the newcomer; the evicted stream ends on its next write.
 Every live stream writes at least a keep-alive each interval, so a genuinely live watcher is never evicted and a second concurrent one is still refused.
