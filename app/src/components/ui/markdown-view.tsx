@@ -6,16 +6,11 @@
  */
 
 /**
- * Rendered markdown, for description fields.
- *
- * The prose styling lives here; the pipeline that turns markdown into elements -
- * react-markdown, remark-gfm, rehype-raw, rehype-sanitize, and the four
- * load-bearing security decisions behind them - lives in `markdown-renderer.tsx`
- * and is loaded on first render rather than at startup (#1146). This component
- * is the only importer of that module, and the boundary is the whole reason it
- * is a separate file: `MarkdownView` reaches the entry chunk through the `ui`
- * barrel, so an eager parser chain here is a parser chain in every cold start,
- * for a description panel most sessions never open.
+ * Rendered markdown for description fields. The prose styling lives here; the pipeline
+ * (react-markdown, remark-gfm, rehype-raw, rehype-sanitize and the four security decisions) is
+ * `markdown-renderer.tsx`, loaded on first render, not at startup (#1146). This is its only
+ * importer and the reason for the split: `MarkdownView` reaches the entry chunk through the `ui`
+ * barrel, so an eager parser chain here would load on every cold start.
  */
 
 import { lazy, Suspense } from "react";
@@ -38,18 +33,15 @@ export function MarkdownView({ children, className }: MarkdownViewProps) {
 				"[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5",
 				"[&_blockquote]:border-l-2 [&_blockquote]:border-primary/45 [&_blockquote]:pl-2.5 [&_blockquote]:text-muted-foreground",
 				"[&_hr]:my-3 [&_hr]:border-rule",
-				// Code inside a `pre` is a block, and the `pre` already paints the box
-				// - so the pill the `code` renderer applies is flattened here rather
-				// than decided from a class the sanitiser strips.
+				// Code in a `pre` is a block the `pre` already boxes, so the `code` renderer's pill
+				// is flattened here, not decided from a class the sanitiser strips.
 				"[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0",
 				className
 			)}
 		>
 			{/*
-			 * No skeleton: the chunk is on disk beside the app, so the wait is a
-			 * frame or two, and a description is a paragraph inside a panel that
-			 * has already drawn. A placeholder appearing and vanishing that fast is
-			 * a flash, which is what the empty box avoids - the surrounding layout
+			 * No skeleton: the chunk is on disk, so the wait is a frame or two, inside a panel
+			 * already drawn; a placeholder appearing and vanishing that fast is a flash. The layout
 			 * does not move either way.
 			 */}
 			<Suspense fallback={null}>
