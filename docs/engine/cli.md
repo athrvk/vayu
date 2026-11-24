@@ -227,7 +227,7 @@ one, and `--daemon` to point the CLI at it. It also exits **1** when its
 database cannot be opened safely - one written by a newer Vayu, or one it cannot
 examine because another program holds it or the disk is full or read-only -
 naming the database on stderr and changing nothing
-([db-schema.md](db-schema.md#startup-validation-backup-and-recovery)). An
+([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)). An
 ordinary shutdown exits **0**.
 
 Its arguments are checked before anything starts, and one that cannot be acted

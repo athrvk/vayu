@@ -3614,7 +3614,7 @@ add) could tell the difference (issue #1481). Ownership now lives on the row
 itself - `KeyValueEntry.source?: HeaderRowSource`, whose `"body-mode" | "stream"`
 half (`AutoHeaderSource`) is what an app setting writes; the third value,
 `"legacy-default"`, is the engine's own header-strip repair pass marking a row
-it disabled rather than deleted (issue #1491, `docs/engine/db-schema.md`'s
+it disabled rather than deleted (issue #1491, `docs/engine/db-schema/startup-and-recovery.md`'s
 "header-strip pass" section) and is never written from this side. There is no
 context accessor for either app setting any more; `switchAutoHeader` in
 `modules/request-builder/utils/auto-header.ts` reads and writes the marker

@@ -33,7 +33,7 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    check whether this release's changes touched the schema before tagging - not
    every version bump carries one. When one did
    (`git diff <last tag> -- engine/include/vayu/db/database.hpp` shows the
-   constant moving; the history is `docs/engine/db-schema.md#schema-versions`),
+   constant moving; the history is `docs/engine/db-schema/schema-versions.md`),
    the release notes say so under **Changed**: once this version opens a
    workspace, earlier versions refuse it, so downgrading means restoring a
    backup.

@@ -603,7 +603,7 @@ inline auto make_vayu_storage (const std::string& path) {
     //
     // `cert_path` / `key_path` are paths: the private key never enters this
     // file. `passphrase` does, in plaintext, which is the repo's existing
-    // credential precedent and is disclosed in docs/engine/db-schema.md rather
+    // credential precedent and is disclosed in docs/engine/db-schema/credentials-and-files.md rather
     // than left for a reader of the schema to discover.
     make_table ("client_certificates",
     make_column ("id", &ClientCertificate::id, primary_key ()),

@@ -178,7 +178,7 @@ poll should wait (a results chunk whose commit runs the automatic WAL
 checkpoint); this read waits for none of it. What it gives up is composing
 with anything: it sees only what was committed before it, never a write in
 flight, and no lock scope can include it. A read that decides a write is
-`get_run` under the DB mutex. [`runs`](db-schema.md#runs) has the connection's
+`get_run` under the DB mutex. [`runs`](db-schema/runs.md#runs) has the connection's
 settings.
 
 ### Listeners
@@ -647,7 +647,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   run row, through `get_run_snapshot`, which takes no DB mutex (#2679, [One read that takes no
   lock](#one-read-that-takes-no-lock)). A result and its captured body share a chunk; a
   failure part-way keeps the chunks before it
-  ([`results`](db-schema.md#results))
+  ([`results`](db-schema/run-artifacts.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
@@ -862,7 +862,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `privateKey` that is one `{{variable}}` reference or a `privateKeyFile` read
   through file trust, #3632; the reference is resolved only into the config the
   token is acquired with and never stored, composed, logged or exported), the
-  [`oauth_tokens`](db-schema.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
+  [`oauth_tokens`](db-schema/credentials-and-files.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
   in flight per cache key and a compare-before-delete on a refused refresh,
   #3344; only an `invalid_grant` or `invalid_client` refusal clears the row,
   and an unavailable endpoint on a refresh is an `oauth2_network_error`,
@@ -1093,7 +1093,7 @@ Persistent storage using sqlite_orm:
 - `oauth_tokens`: Cached OAuth 2.0 access/refresh tokens (keyed by config identity)
 - `config_entries`: Engine configuration registry (read/written via `/config`)
 
-See [Database Schema](db-schema.md) for the full column list.
+See [Database Schema](db-schema/index.md) for the full column list.
 
 **Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
 
@@ -1107,7 +1107,7 @@ See [Database Schema](db-schema.md) for the full column list.
    restart and the restart time would span the downtime. A load run that stored no summary but wrote metric
    ticks is given one from its last tick in the same transaction, flagged
    `partial` (#2895), so its report shows the totals it reached rather than
-   zeros (see [Database Schema](db-schema.md#runs)).
+   zeros (see [Database Schema](db-schema/runs.md#runs)).
 2. **Pruning**: run history is trimmed per kind - load and collection runs to
    `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
    kind to `runRetentionDays`.
@@ -2026,7 +2026,7 @@ left alone. A second backup requested while one is running is refused with
 The engine writes into the same directory on its own, under the same count:
 `vayu-<stamp>-pre-v<N>.db` before an update migrates the workspace from schema
 version `N`, and `vayu-<stamp>-pre-repair.db` before a one-time repair pass
-rewrites stored rows ([db-schema.md](db-schema.md#the-copy-before-a-migration-issue-2426)).
+rewrites stored rows ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-copy-before-a-migration-issue-2426)).
 A start that cannot write the first refuses to migrate rather than migrate
 without it.
 
@@ -2064,7 +2064,7 @@ snapshot with the steps above. Anything written since the update is not in it.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` holds
+fresh ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-quarantine-issue-984)). The `.bak` holds
 the last clean shutdown at best, and less after a session that ended in a crash
 or one whose final refresh ran out of time, so when the quarantined file was
 healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over

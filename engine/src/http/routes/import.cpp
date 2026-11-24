@@ -1477,7 +1477,7 @@ namespace {
 /**
  * @p imported as it replaces @p stored, a global of the same name: the
  * import stamped a fresh `createdAt`, and an existing variable is never
- * restamped (`docs/engine/db-schema.md`, VariableValue shape), so the stored
+ * restamped (`docs/engine/db-schema/indexes.md`, VariableValue shape), so the stored
  * row's stamp is kept - or its absence, for a row that never had one.
  */
 nlohmann::json keep_stored_created_at (const nlohmann::json& stored, nlohmann::json imported) {

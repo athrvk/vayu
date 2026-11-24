@@ -130,7 +130,6 @@ nav:
           - Collection Run Verdicts: engine/api-reference/collection-runs.md
           - Scripting Completions: engine/api-reference/scripting.md
       - Test Scripting: engine/scripting.md
-      - Local Database: engine/db-schema.md
       - Elements: engine/elements.md
       - Command Line: engine/cli.md
       - MCP Server:
@@ -178,7 +177,7 @@ nav:
   - Design Notes:
       - Request Storage: request-storage-design.md
       - Lock Files: lock-file-handling.md
-  # Internals for someone changing the app, not for someone using it. The
+  # Internals for someone changing the app or the engine, not for someone using it. The
   # section index (navigation.indexes) keeps the page at /app/COMPONENTS/.
   - Contributing:
       - UI Components:
@@ -209,6 +208,18 @@ nav:
           - UI Primitives: app/COMPONENTS/ui-primitives.md
           - Patterns and State: app/COMPONENTS/patterns.md
       - MCP Internals: engine/mcp/internals.md
+      - Local Database:
+          - Overview: engine/db-schema/index.md
+          - Startup and Recovery: engine/db-schema/startup-and-recovery.md
+          - Schema Versions: engine/db-schema/schema-versions.md
+          - Collections and Requests: engine/db-schema/collections-and-requests.md
+          - Spec Documents: engine/db-schema/specs.md
+          - Environments and Globals: engine/db-schema/environments-and-globals.md
+          - Certificates, Files and OAuth Tokens: engine/db-schema/credentials-and-files.md
+          - Runs: engine/db-schema/runs.md
+          - Run Samples, Results and Inbox: engine/db-schema/run-artifacts.md
+          - Config Entries: engine/db-schema/config.md
+          - Indexes and VariableValue: engine/db-schema/indexes.md
 
 markdown_extensions:
   - admonition

@@ -126,7 +126,7 @@ Host comparison is case-insensitive (rows are stored lower-cased), and an IPv6 h
 
 **Paths, not contents.**
 The row holds the *paths* of the certificate and key files and the engine opens them at send time, so the private key never enters the database.
-The passphrase is the one exception - it is stored, in plaintext, the same as every other saved credential (see [db-schema.md](../db-schema.md#client_certificates)) - and it is **never sent back**: reads carry `hasPassphrase` instead.
+The passphrase is the one exception - it is stored, in plaintext, the same as every other saved credential (see [db-schema/credentials-and-files.md](../db-schema/credentials-and-files.md#client_certificates)) - and it is **never sent back**: reads carry `hasPassphrase` instead.
 
 Both file paths are checked when the entry is written, and an unreadable one is a `400` naming the file.
 That is deliberate: a path that is not there otherwise fails at handshake time as an SSL error against the endpoint, which reads as "the API is broken" rather than "this setting is wrong".
