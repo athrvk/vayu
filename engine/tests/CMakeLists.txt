@@ -53,6 +53,11 @@ add_executable(vayu_tests
     script_completions_test.cpp
     script_types_test.cpp
     event_loop_test.cpp
+    db_migration_repair_test.cpp
+    db_migration_test.cpp
+    db_migration_versions_test.cpp
+    db_run_retention_test.cpp
+    db_run_summary_test.cpp
     db_test.cpp
     db_layout_test.cpp
     config_seed_test.cpp
