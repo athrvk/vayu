@@ -164,6 +164,9 @@ add_executable(vayu_tests
     threshold_eval_test.cpp
     capacity_controller_test.cpp
     monitor_test.cpp
+    run_manager_live_frames_test.cpp
+    run_manager_load_clock_test.cpp
+    run_manager_summary_test.cpp
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
@@ -517,6 +520,11 @@ set(vayu_scratch_database_suites
     LoadScriptScopesTest
     LoadTemplateScopesRunTest
     LoadFailureDedupTest
+    LoadClock
+    LoadDrain
+    LoadRunTimeoutTest
+    LoadRunToTerminalTest
+    LoadStream
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest
