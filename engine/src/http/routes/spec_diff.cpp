@@ -6,35 +6,28 @@
  */
 
 /**
- * @brief `POST /specs/diff` - what a re-fetched document would change about the
- *        collection bound to it (issue #654's comparison, moved engine-side by
- *        #854).
+ * `POST /specs/diff`: what a re-fetched document would change about the
+ * collection bound to it (#654's comparison, engine-side per #854), the read
+ * half of the sync. The rule is `core/spec_diff.hpp`; this route owns the three
+ * things a caller must not be trusted with:
  *
- * The read half of the sync. The rule
- * itself is `core/spec_diff.hpp`; this is the one way to ask it, and it owns the
- * three things a caller must not be trusted with:
- *
- * - **Which requests are compared.** The whole subtree of the bound collection,
- *   through the same `collection_subtree_requests` walk `POST /specs/sync`
- *   bounds its writes by - an OpenAPI import files its requests under one
- *   sub-collection per tag, so a caller passing "the collection's requests"
- *   would compare against a set that excludes almost all of them and report a
- *   collection as untouched by a document that rewrote it.
+ * - **Which requests are compared.** The bound collection's whole subtree,
+ *   through the `collection_subtree_requests` walk `POST /specs/sync` bounds
+ *   its writes by: an import files requests under one sub-collection per tag,
+ *   so "the collection's requests" would exclude almost all of them and report
+ *   a rewritten collection as untouched.
  * - **What the collection is bound to.** The bound document is read from the
- *   store by the binding, never sent: the three-way user-touched rule rests on
- *   the *bound* values being the ones actually stored, and a caller that could
- *   supply them could - by accident, with a stale copy - turn every one of its
- *   own edits into "the document did this".
- * - **Whether anything changed at all.** `identical` is decided on the stored
- *   bytes, the same bytes `spec_documents.hash` is over, rather than on a hash
- *   the caller computed.
+ *   store, never sent: the three-way user-touched rule rests on the bound
+ *   values being the stored ones, and a caller's stale copy would turn its own
+ *   edits into "the document did this".
+ * - **Whether anything changed.** `identical` is decided on the stored bytes
+ *   (those `spec_documents.hash` covers), not a caller's hash.
  *
- * It writes nothing: no document is stored, no binding moved, no stamp written,
- * so a caller may ask about a document it has not decided to apply - and the
- * apply is `POST /specs/sync`, which re-reads everything rather than being
- * handed this answer, exactly as `POST /specs/bind` re-matches rather than
- * trusting `POST /specs/match`. What the two share is the rule, not a result
- * carried between them.
+ * It writes nothing (no document, binding or stamp), so a caller may ask about
+ * a document it has not decided to apply. The apply, `POST /specs/sync`,
+ * re-reads everything rather than taking this answer, as `POST /specs/bind`
+ * re-matches rather than trusting `POST /specs/match`: the two share the rule,
+ * not a result.
  */
 
 #include "vayu/core/spec_diff.hpp"
@@ -63,9 +56,8 @@ std::pair<int, nlohmann::json> body_error (const std::string& message) {
     return { 400, error_body (400, message) };
 }
 
-/// JavaScript truthiness, which is what the renderer's comparison read a row's
-/// `enabled` with - an absent or `false` flag is off, and every other stored
-/// value is on.
+/// JavaScript truthiness, as the renderer's comparison read a row's `enabled`:
+/// an absent or `false` flag is off, every other stored value on.
 bool truthy (const nlohmann::json* node) {
     if (node == nullptr || node->is_null ()) {
         return false;
@@ -126,10 +118,9 @@ vayu::core::DraftBody read_body (const std::string& blob) {
     if (body.mode.empty ()) {
         body.mode = "none";
     }
-    // A row whose mode names a payload but carries no `content` compares as
-    // empty. JavaScript's template literal wrote the word "undefined" there;
-    // that is a state no write can produce, and reproducing it would put a
-    // sentinel in a user-visible diff.
+    // A payload mode with no `content` compares as empty. JavaScript's template
+    // literal wrote the word "undefined" there; no write can produce that
+    // state, and reproducing it would put a sentinel in a user-visible diff.
     body.content = text_of (parsed, "content");
     if (const nlohmann::json* fields = prop (parsed, "fields");
     fields != nullptr && fields->is_array ()) {
@@ -157,10 +148,10 @@ nlohmann::json row_json (const vayu::core::DraftField& row) {
         out["description"] = row.description;
     }
     if (row.file) {
-        // A document names the upload, never the file: the part is written with
-        // no path attached and the user picks one. `src` is present and empty
-        // because that is the row an import writes, and a sync must not produce
-        // a different one for the same operation.
+        // A document names the upload, never the file: the part has no path and
+        // the user picks one. `src` is present and empty because an import
+        // writes that row, and a sync must not produce a different one for the
+        // same operation.
         out["type"] = "file";
         out["src"]  = "";
     }
@@ -177,14 +168,11 @@ nlohmann::json rows_json (const std::vector<vayu::core::DraftField>& rows) {
 
 /**
  * The draft as this route reports it: the fields an apply writes, plus the
- * example rows it would refresh.
- *
- * `examples` is the one field here that is *not* sent back on an apply: since
- * issue #869 a sync derives the rows from the document it stores and the caller
- * states only whether to refresh them. It is still reported, because what an
- * apply would write to a request is exactly the kind of thing a preview exists
- * to show - and it is built by the one function that knows that shape, so what
- * is shown here and what is stored there cannot drift apart.
+ * example rows it would refresh. `examples` is the one field not sent back on
+ * an apply (a sync derives the rows from the document it stores, #869, and the
+ * caller only says whether to refresh), but a preview exists to show what an
+ * apply would write, and the one builder of that shape keeps the shown and the
+ * stored from drifting.
  */
 nlohmann::json draft_json (const vayu::core::DraftRequest& draft) {
     nlohmann::json out = draft_request_fields_json (draft);
@@ -270,11 +258,11 @@ SpecComparison& out) {
     out.fetched       = vayu::core::spec_request_drafts_of (fetched_document);
 
     /*
-     * A stored document that cannot be read is not a reason to refuse to say
-     * what the *new* one declares. Every write path derives its indexes from the
-     * document (issue #853), so this is only reachable for a row written before
-     * that rule - and the honest answer there is the two-way comparison, with
-     * `previousUnknown` on every changed request saying so per request.
+     * A stored document that cannot be read is no reason to refuse to say what
+     * the new one declares. Every write path derives its indexes from the
+     * document (#853), so only a row older than that rule reaches here, and the
+     * honest answer is the two-way comparison, `previousUnknown` on every
+     * changed request saying so.
      */
     const vayu::core::DocumentRead bound_read =
     vayu::core::read_document (stored->content);
@@ -306,14 +294,11 @@ SpecComparison& out) {
 }
 
 /**
- * Testable core of POST /specs/diff - the comparison, computed and returned,
- * nothing written.
- *
- * The three failures a caller can act on are told apart rather than folded into
- * one: a collection that does not exist is a 404, a collection that binds no
- * document is a 400 (there is nothing to compare against, and binding is a
- * different call), and a binding naming a document the store no longer holds is
- * a 409 - a broken binding rather than a bad request.
+ * Testable core of POST /specs/diff: the comparison, computed and returned,
+ * nothing written. The three failures a caller can act on stay apart: an
+ * unknown collection is a 404, one binding no document a 400 (nothing to
+ * compare, and binding is another call), and a binding to a document the store
+ * no longer holds a 409, a broken binding rather than a bad request.
  */
 std::pair<int, nlohmann::json>
 diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
@@ -354,9 +339,8 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         collection_id + "' is not bound to a spec; bind it before asking what a document would change");
     }
 
-    // The same cap a store of these bytes would apply, read the same way: a
-    // document too large to keep is not one to compare against, and answering
-    // about it would offer an apply that is then refused.
+    // A store's cap, read the same way: a document too large to keep is none to
+    // compare against, and answering would offer an apply then refused.
     const size_t cap = spec_size_cap (db);
     if (content.size () > cap) {
         return body_error ("Spec document is " + std::to_string (content.size ()) +
@@ -372,9 +356,9 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     const auto collections = db.get_collections ();
     const auto subtree = spec_contract_subtree_ids (collections, collection_id);
 
-    // The comparison itself, shared with a `"safe"` sync (issue #871): the route
-    // that says what would change and the route that changes it read one answer,
-    // so an apply cannot write rows its preview never showed.
+    // Shared with a `"safe"` sync (#871): the route saying what would change
+    // and the one changing it read one answer, so an apply cannot write rows
+    // its preview never showed.
     SpecComparison comparison;
     if (auto outcome = compare_bound_spec (db, collections, subtree,
         collection_id, spec_id, fetched_read.root, comparison);
@@ -385,18 +369,17 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     const auto& requests             = comparison.requests;
     const vayu::core::SpecDiff& diff = comparison.diff;
 
-    // What an apply with no ticks would write, per entry (issue #871). Reported
-    // rather than left to the caller: the rules behind it - never write a field
-    // somebody edited, never delete, leave a request nothing can be told apart
-    // about alone - are the ones whose silent failure costs a person their work,
-    // and a second author for them is exactly what moving them here removes. The
-    // Spec tab's pre-ticked boxes are this answer read back, and
-    // `POST /specs/sync`'s `"policy": "safe"` applies the same one.
+    // What an apply with no ticks would write, per entry (#871), reported
+    // rather than left to the caller: its rules (never write a field somebody
+    // edited, never delete, leave an indistinguishable request alone) are the
+    // ones whose silent failure costs a person their work, and here they have
+    // one author. The Spec tab's pre-ticked boxes read this answer back, and
+    // `POST /specs/sync`'s `"policy": "safe"` applies it.
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
-    // A declined operation (#3031) is reported in the shape of an added one,
-    // because ticking it is the same create; only the bucket, and its `safe`,
-    // say that somebody deleted the request for it.
+    // A declined operation (#3031) is reported in an added one's shape, since
+    // ticking it is the same create; only the bucket and its `safe` say
+    // somebody deleted the request for it.
     const auto creatable = [&fetched] (const std::vector<size_t>& indices,
                            const std::vector<bool>& marks) {
         nlohmann::json entries = nlohmann::json::array ();
