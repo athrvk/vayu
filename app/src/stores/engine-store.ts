@@ -19,8 +19,8 @@ import type { EngineRecovery } from "@/types/domain";
 /**
  * Where the engine is, as the renderer's own health poll sees it.
  *
- * Three values rather than a boolean because since #1144 the window paints
- * alongside the engine instead of after it, so "not answering" is an ordinary
+ * Three values rather than a boolean because the window paints alongside the
+ * engine instead of after it (#1144), so "not answering" is an ordinary
  * launch condition as well as a crash. One flag made both wear the crash's
  * wording and its error affordance, from first paint, on every launch.
  *

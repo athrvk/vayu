@@ -116,9 +116,8 @@ export function useSpecContentReader(): (specId: string) => Promise<SpecDocument
  * `useSpecContentReader` is one: the caller is an event handler. The Sync
  * section needs `sourceUrl` - where to re-fetch from - at the moment Check is
  * pressed, and since the comparison moved engine-side (issue #854) that is the
- * *only* thing it needs from the stored document. It used to read the bytes
- * here to compare them; the engine reads its own now, so a check of a 12 MB
- * document transfers nothing.
+ * *only* thing it needs from the stored document. The engine reads its own bytes
+ * to compare them, so a check of a 12 MB document transfers nothing.
  *
  * Shared cache with the tab's card, which describes the same document, so the
  * click normally costs no request at all.

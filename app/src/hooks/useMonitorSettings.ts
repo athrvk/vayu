@@ -6,8 +6,6 @@
  */
 
 /**
- * useMonitorSettings
- *
  * The two server-monitoring limits a user can move: the default scrape cadence
  * and how many metrics one run may chart.
  *
