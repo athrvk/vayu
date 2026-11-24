@@ -13,12 +13,10 @@ const LINE_CLASSES = {
 } as const;
 
 /**
- * The 2px `--primary` line a drag draws at the edge it would drop on: across a
- * row in a vertical list, down the side of an item in a horizontal one.
- *
- * Absolutely positioned inside the target, so the host must be `relative`. A
- * horizontal line is inset from the right and starts at `indentPx` from the
- * left; a vertical one spans the host's full height and takes no indent.
+ * The 2px `--primary` line a drag draws at the edge it would drop on: across a row in a vertical
+ * list, down an item's side in a horizontal one. Absolutely positioned, so the host must be
+ * `relative`. A horizontal line is inset from the right and starts `indentPx` from the left; a
+ * vertical one spans the host's height with no indent.
  */
 export function DropIndicator({
 	edge,

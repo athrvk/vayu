@@ -6,28 +6,15 @@
  */
 
 /**
- * ErrorState - the load failed, which is not the same as there being nothing.
- *
- * The third answer a data view can give, after `DetailSkeleton` (not yet) and
- * `EmptyState` (nothing to show). Every query in the app is destructured as
- * `{ data = [] }` and nothing sets `throwOnError`, so a query that settles as
- * an error resolves to `[]` and falls straight through to the empty state.
- * The collections tree then said "No collections yet" and offered "Add your
- * first collection" to a user whose collections exist and simply could not be
- * fetched - an invitation to create a duplicate.
- *
- * Deliberately not a variant of `EmptyState`. Folding them together would blur
- * exactly the distinction this exists to draw.
- *
- * The icon is not a prop. An empty state is about a particular kind of thing,
- * so it picks an icon to match; a failure is a failure, and giving every site
- * its own symbol for it would only make the same event look like different
- * events.
- *
- * **`onRetry` is close to required.** An error state with no way out leaves
- * the user with a dead pane and no idea whether waiting helps. Pass a query's
- * `refetch`. It is optional only for the few places that have nothing to
- * retry.
+ * The load failed, which is not there being nothing: the third answer a data view gives, after
+ * `DetailSkeleton` (not yet) and `EmptyState` (nothing). Every query is destructured
+ * `{ data = [] }` without `throwOnError`, so an error settles as `[]` and falls through to the
+ * empty state: the collections tree said "No collections yet" and offered "Add your first
+ * collection" to a user whose collections exist, inviting a duplicate. Not a variant of
+ * `EmptyState`, which would blur that distinction. The icon is not a prop: a failure is a failure,
+ * and a symbol per site would make one event look like several. **`onRetry` is close to required**:
+ * an error with no way out is a dead pane. Pass a query's `refetch`; optional only where there is
+ * nothing to retry.
  */
 
 import type { ReactNode } from "react";
@@ -37,23 +24,20 @@ import { cn } from "@/lib/utils";
 
 interface ErrorStateProps {
 	/**
-	 * What failed, in sentence case with no trailing period - "Couldn't load
-	 * collections". Name the thing; "Something went wrong" tells nobody
-	 * anything.
+	 * What failed, sentence case, no trailing period ("Couldn't load collections"): name the thing,
+	 * as "Something went wrong" tells nobody anything.
 	 */
 	title: string;
 	/**
-	 * The reason, when there is one worth showing. Vayu is a developer tool and
-	 * "Failed to fetch" versus a 500 genuinely changes what the user does next,
-	 * so the raw message earns its place here.
+	 * The reason, when worth showing: in a developer tool "Failed to fetch" versus a 500 changes
+	 * what the user does next, so the raw message earns its place.
 	 */
 	detail?: string;
 	/** A query's `refetch`. Renders the "Try again" button. */
 	onRetry?: () => void;
 	/**
-	 * A second way out, rendered beside "Try again" - "Close tab" for a pane
-	 * whose entity is gone. Retrying is pointless when the thing was deleted,
-	 * and an error state offering only a doomed retry is a dead end.
+	 * A second way out beside "Try again" ("Close tab" for a pane whose entity is gone): retrying a
+	 * deleted thing is pointless, and a doomed retry alone is a dead end.
 	 */
 	action?: ReactNode;
 	variant?: "pane" | "inline";
@@ -96,8 +80,10 @@ export function ErrorState({
 		>
 			<AlertCircle className="h-12 w-12 text-destructive-text/60" aria-hidden="true" />
 			<div className="max-w-sm">
-				{/* A heading in the main pane's outline, as `EmptyState`'s is (#3498);
-				    the inline line above is a status, not a title. */}
+				{/*
+				 * A heading in the main pane's outline, as `EmptyState`'s (#3498); the inline line
+				 * is a status, not a title.
+				 */}
 				<Heading outside="p" className="text-md font-semibold text-foreground">
 					{title}
 				</Heading>

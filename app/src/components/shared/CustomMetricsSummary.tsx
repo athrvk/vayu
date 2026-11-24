@@ -6,17 +6,11 @@
  */
 
 /**
- * A run's custom trends, counters and rates - the numbers a `metric.record`
- * element or `pm.metrics.trend` / `.counter` / `.rate` call chose to track,
- * under the name the script gave them (issue #1500).
- *
- * Unlike {@link ThresholdVerdict} these are not judged against anything here:
- * there is no pass/fail, just what the run measured. Silent when the run
- * recorded none - an absent card, not an empty one, for every run that never
- * called `pm.metrics` and every report from an engine that predates it.
- *
- * The history detail's Overview shows it, which is also the dashboard's view of
- * a finished run (#2220).
+ * A run's custom trends, counters and rates: what a `metric.record` element or `pm.metrics.trend` /
+ * `.counter` / `.rate` call tracked, under the script's name (#1500). Unlike
+ * {@link ThresholdVerdict} nothing is judged: just what the run measured. Silent without any (an
+ * absent card, not an empty one, for runs that never called `pm.metrics` and engines predating it).
+ * Shown by the history Overview, which is also the dashboard's view of a finished run (#2220).
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

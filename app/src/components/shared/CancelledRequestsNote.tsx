@@ -6,16 +6,11 @@
  */
 
 /**
- * How many requests a Stop cancelled before they were answered (issue #2136).
- *
- * Those requests are in no other number on the page: not the total, not the
- * status-code distribution, not the error rate. Without a line of their own a
- * stopped run's request count silently falls short of what it sent. The line is
- * muted and never destructive, because a cancellation the user asked for is not
- * an error. Drawn by the history Overview, beside the error card.
- *
- * Silent for zero and for `undefined`, which is a report from an engine older
- * than the count: absent means none.
+ * How many requests a Stop cancelled before they were answered (#2136). They are in no other number
+ * on the page (the total, the status distribution, the error rate), so without this line a stopped
+ * run's count falls silently short of what it sent. Muted, never destructive: a cancellation the
+ * user asked for is not an error. Drawn by the history Overview beside the error card. Silent for
+ * zero and `undefined` (an engine older than the count): absent means none.
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";
