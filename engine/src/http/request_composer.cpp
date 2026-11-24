@@ -127,7 +127,7 @@ constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
 static_assert (HEX_DIGITS.substr (0, DIGITS.size ()) == DIGITS,
 "the hex alphabet opens with the decimal digits");
 
-// The corpora behind the generators #1010 added. Curated lists, not a faker
+// The corpora behind the generators (#1010). Curated lists, not a faker
 // port: what the two sides have to agree on is the *shape* of a value - which
 // is what the tests pin on each - and never the words behind it.
 constexpr auto CITIES = std::to_array<const char*> (

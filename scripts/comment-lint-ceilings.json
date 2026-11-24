@@ -243,7 +243,6 @@
     "engine/src/db/db_config.cpp": 1,
     "engine/src/db/db_maintenance.cpp": 2,
     "engine/src/db/db_requests.cpp": 1,
-    "engine/src/http/request_composer.cpp": 1,
     "engine/src/http/routes/collections.cpp": 4,
     "engine/src/http/routes/config.cpp": 1,
     "engine/src/http/routes/environments.cpp": 1,
