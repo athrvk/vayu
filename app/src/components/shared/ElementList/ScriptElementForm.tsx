@@ -64,8 +64,8 @@
  * **Each row's Snippets disclosure is its own `useState`**, seeded once from
  * the store's persisted default and written back to it on toggle. A request
  * or collection can show a `script.pre` and a `script.post` row on the same
- * screen; `ScriptSnippets` used to read the store's boolean directly, so
- * opening one opened both.
+ * screen, so a row must not read the store's boolean directly: opening one
+ * would open both.
  *
  * **The intro sentence is the kind's own `description`** (issue #1608), not
  * a hard-coded pair of strings here - `script.pre` and `script.post`'s
@@ -234,7 +234,7 @@ export function ScriptElementForm({
 			<div className="flex flex-col">
 				<div
 					ref={boxRef}
-					// `min-h-0`: the GraphQL body's own trap (`GraphQLBody.tsx:812-817`) -
+					// `min-h-0`: the GraphQL body's own trap (`GraphQLBody.tsx`) -
 					// a flex item will not shrink below its content, so a card that ever
 					// gains a flex ancestor above this one must not let the editor keep
 					// its old height and grow a second scrollbar beside Monaco's own.

@@ -9,12 +9,8 @@
  * "What does this `{{name}}` resolve to?" in an editor, answered by the same
  * card that answers it in a field (issue #1320).
  *
- * The editors used to answer through Monaco's own hover widget, fed markdown:
- * the token as a code chip, the value as a second one, the source in italics.
- * Monaco renders that in VS Code's palette, so one token had two designs - the
- * app's `TooltipValue` over a URL bar, a grey-chipped `vs-dark` card three
- * lines below it in the body. This is the app's tooltip, over the rectangle the
- * editor measured, which is exactly how `VariablePopover` already reaches a
+ * It is the app's tooltip, not Monaco's hover widget (which renders in VS Code's
+ * palette), over the rectangle the editor measured, which is exactly how `VariablePopover` already reaches a
  * token that has no DOM node of its own.
  *
  * **What it says is the field tooltip's answer** (`EditableVariable`): what the
@@ -93,9 +89,8 @@ export function TokenHoverCard({
 				{/*
 				 * What a click does, for the one class of token that has anything
 				 * behind it to open. A field's token is a real element and looks
-				 * pressable; this one is painted text on a canvas, and the
-				 * affordance used to be spelled out by the Monaco hover ("⌘-click
-				 * or ⇧⌘D to edit") this card replaced. A generator has no stored
+				 * pressable; this one is painted text on a canvas, so the
+				 * card says it. A generator has no stored
 				 * variable behind it, so it says nothing; a token whose scope is
 				 * not currently writable still opens the popover, for the origins
 				 * list, but never promises a save it cannot do.
