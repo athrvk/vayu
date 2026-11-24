@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Request management routes
- */
+/** Request management routes. */
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
@@ -42,21 +40,14 @@
 namespace vayu::http::routes {
 
 /**
- * Testable core of GET /requests/:id, returning {http_status, json_body}.
- *
- * A missing request is a *definitive* 404, never a transport failure. That
- * distinction is the whole point of the endpoint: the app reads a single
- * request by id, so a real 404 means "deleted" and a 5xx means "engine
- * unreachable". Present -> 200 with the same serialized shape a list entry carries
- * (`serialize(const db::Request&)`), so the client transforms it identically -
- * with one deliberate exception (issue #1485): this route never substitutes a
- * default for a column over the field cap, so it carries no `truncatedFields`
- * and answers whatever is stored, whole, even for a row written before the
- * cap existed. Only `serialize_to_stream` (the list) can produce that key.
- *
- * Extracted so the wiring (404 vs 200 + body) is covered without an in-process
- * HTTP server - see requests_route_test.cpp. The error body is built by
- * `error_body`, like every other error the engine emits.
+ * Testable core of GET /requests/:id, {http_status, json_body}. A missing
+ * request is a definitive 404, never a transport failure: the app reads one
+ * request by id, so 404 means "deleted" and a 5xx "engine unreachable". A hit
+ * is 200 in a list entry's shape (`serialize(const db::Request&)`), with one
+ * exception (#1485): it never substitutes a default for a column over the field
+ * cap, so it carries no `truncatedFields` and answers what is stored, whole;
+ * only `serialize_to_stream` (the list) produces that key. The error body is
+ * `error_body`'s; `requests_route_test.cpp` covers the wiring.
  */
 std::pair<int, nlohmann::json>
 get_request_response (vayu::db::Database& db, const std::string& id) {
@@ -69,19 +60,13 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
 }
 
 /**
- * GET /requests answers one DB fetch as one serialized JSON array.
- *
- * The rows arrive already ordered by `order`, then `created_at`, then `id`
- * (the `get_request*_in_*` reads have the ORDER BY), matching the ordering contract
- * collections have had all along - see the ordering section of
- * `docs/engine/api-reference/resource-writes.md` for why the tiebreak is part of the contract
- * rather than a detail.
- *
- * Each row is serialized into its own buffer inside the try, so a row
- * that fails to serialize is skipped whole - it cannot leave a half-written
- * item behind and corrupt the array, and one bad row does not fail the whole
- * response. Extracted for requests_route_test.cpp, same as
- * get_request_response above.
+ * GET /requests answers one DB fetch as one serialized JSON array, rows already
+ * ordered by `order`, `created_at`, `id` (the `get_request*_in_*` reads' ORDER
+ * BY), the collections' ordering contract
+ * (`docs/engine/api-reference/resource-writes.md` says why the tiebreak is
+ * contract). Each row serializes into its own buffer inside the try, so a row
+ * that fails is skipped whole: no half-written item corrupts the array, and one
+ * bad row does not fail the response.
  */
 namespace {
 /// Hands @p on_item the text of every row of @p rows that serialized, in order.
@@ -177,8 +162,7 @@ const std::optional<std::string>& collection_id) {
 /// The row shapes `GET /requests?fields=` can ask for (#2546).
 enum class RequestListFields : std::uint8_t { Full, Summary };
 
-/// Absent or empty is the full row, which is what the route answered before
-/// it took the parameter; anything unknown is refused rather than served as
+/// Absent or empty is the full row; anything unknown is refused, not served as
 /// the full list, so a typo cannot quietly cost the 10 MB the summary saves.
 std::expected<RequestListFields, RouteError> parse_request_list_fields (
 std::string_view fields) {
@@ -217,12 +201,11 @@ const ListPage& page) {
 } // namespace
 
 /**
- * Testable core of the whole GET /requests route, returning
- * {http_status, body_text}: one collection's requests when @p collection_id
- * is set, every live collection's otherwise, in the row shape @p fields
- * names. With any of `q` / `limit` / `offset` in @p page_query, one page of
- * the rows whose `name` matches, in the `{data, pagination}` envelope (#2443);
- * with none, the bare array the route has always answered.
+ * Testable core of the whole GET /requests route, {http_status, body_text}: one
+ * collection's requests when @p collection_id is set, every live collection's
+ * otherwise, in the row shape @p fields names. With any of `q` / `limit` /
+ * `offset` in @p page_query, one page of the rows whose `name` matches, in the
+ * `{data, pagination}` envelope (#2443); with none, a bare array.
  */
 std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
 const std::optional<std::string>& collection_id,
@@ -246,16 +229,13 @@ const ListPageQuery& page_query) {
 }
 
 /**
- * The value new/reset requests' httpVersion is seeded with: the live
- * "defaultHttpVersion" config entry, read fresh on every write (not cached,
- * not vayu::DEFAULT_HTTP_VERSION) so a user-changed global takes effect
- * immediately for the next create or explicit reset. Falls back to
- * vayu::DEFAULT_HTTP_VERSION only if the config entry is missing or somehow
- * holds a value outside all_http_versions().
- *
- * The validity check goes through the domain's own parser: a tampered config
- * row must not be able to plant an invalid value via the seed path, and the
- * rule for what counts as valid lives in exactly one place.
+ * What a new or reset request's httpVersion is seeded with: the live
+ * "defaultHttpVersion" config entry, read on every write (never cached, never
+ * `vayu::DEFAULT_HTTP_VERSION`) so a changed global applies to the next create
+ * or reset, falling back to `vayu::DEFAULT_HTTP_VERSION` only when the entry is
+ * missing or outside `all_http_versions ()`. Validity goes through the domain's
+ * parser: a tampered config row must not plant an invalid value, and what
+ * counts as valid lives in one place.
  */
 static std::string http_version_seed (vayu::db::Database& db) {
     std::string configured = db.get_config_string (
@@ -267,21 +247,17 @@ static std::string http_version_seed (vayu::db::Database& db) {
 }
 
 /**
- * Applies `specOperation` - which operation of the bound spec this request is
- * (issue #637) - under the same null-vs-absent rule as every other field, with
- * `null`/absent-on-create meaning "declares no operation" (a NULL column).
+ * Applies `specOperation`, which operation of the bound spec this request is
+ * (#637), under the null-vs-absent rule, with `null` or absent-on-create
+ * meaning "declares no operation" (a NULL column). Not `apply_json_field`,
+ * which resets to a text default: `"{}"` would be a second spelling of "no
+ * operation" every reader (the serializers, #627's diff, #629's coverage) would
+ * have to learn.
  *
- * Its own helper rather than `apply_json_field`, because the column is nullable:
- * `apply_json_field` resets to a *text* default, and `"{}"` there would be a
- * second spelling of "no operation" that every reader - the serializers, the
- * diff in #627, the coverage count in #629 - would have to learn.
- *
- * Contents are validated, not merely shaped. `method` and `path` are what make
- * the identity an identity: an operation with neither is not one, and a
- * `spec_operation` holding half of one would fail much later, as a request that
- * silently matches nothing in the spec it is supposedly bound to. `path` is the
- * templated path, so it is required to start with `/` - a concrete URL stored
- * here would never match the document it came from.
+ * Contents are validated, not just shaped: `method` and `path` make the
+ * identity, and half of one would fail much later as a request silently
+ * matching nothing in its spec. `path` is the templated path, so it must start
+ * with `/`: a concrete URL here would never match its document.
  */
 static RouteResult apply_spec_operation_field (const nlohmann::json& json,
 std::optional<std::string>& out,
@@ -323,15 +299,12 @@ bool is_create) {
 }
 
 /**
- * Applies `methodSource` - which app setting last wrote `method`, still
- * unclaimed by the user (issue #1505) - under the same null-vs-absent rule as
- * `specOperation` above: absent-on-create and `null` both mean no marker.
- *
- * The only value a client writes today is `"graphql"` (the GraphQL body mode's
- * auto-`POST`), and it is validated rather than accepted as an opaque string -
- * an unrecognized marker would silently outlive the setting that is supposed
- * to own it, reverting a method the user picked because some other client
- * wrote a source string this app does not recognize as its own.
+ * Applies `methodSource`, which app setting last wrote `method` while the user
+ * has not claimed it (#1505), under `specOperation`'s rule: absent-on-create
+ * and `null` mean no marker. The only value a client writes is `"graphql"` (the
+ * GraphQL body mode's auto-`POST`), validated rather than opaque: an
+ * unrecognised marker would outlive the setting meant to own it and revert a
+ * method the user picked.
  */
 static RouteResult apply_method_source_field (const nlohmann::json& json,
 std::optional<std::string>& out,
@@ -409,18 +382,13 @@ apply_stream_fields (const nlohmann::json& json, vayu::db::Request& r, bool is_c
 }
 
 /**
- * Applies `mockResponseMode` / `mockExampleId` (issue #481 phase 3) - which
- * saved example a mock server answers with. Same null-vs-absent rule as
- * `methodSource`: `mockResponseMode` absent-on-create defaults to "first"
- * (through the shared string applier below, since it is a plain enum-shaped
- * string like `httpVersion`, not a nullable marker); `mockExampleId` absent
- * keeps, `null` clears, exactly like `specOperation`.
- *
- * `mockExampleId` is not checked against `request_examples` here: the target
- * can be created after this write (a caller free to reorder create-example
- * and set-mode), and a target later deleted must not retroactively make this
- * row invalid - `pick_example` (mock_server.cpp) falls back to "first" for
- * either case rather than this applier refusing one up front.
+ * Applies `mockResponseMode` / `mockExampleId` (#481 phase 3), which saved
+ * example a mock server answers with. `mockResponseMode` absent-on-create
+ * defaults to "first" (the shared string applier, like `httpVersion`);
+ * `mockExampleId` absent keeps and `null` clears, like `specOperation`. The id
+ * is not checked against `request_examples`: the target may be created after
+ * this write, and its later delete must not make this row invalid;
+ * `pick_example` (mock_server.cpp) falls back to "first" in either case.
  */
 static RouteResult apply_mock_response_mode_field (const nlohmann::json& json,
 std::string& mode,
@@ -541,17 +509,14 @@ bool is_create) {
 }
 
 /**
- * Applies `postmanProtocolBehavior` (issue #1765): the imported Postman
- * item's `protocolProfileBehavior`, kept for `POST /export/postman` and sent
- * by nothing. Absent-on-create and `null` both mean none.
- *
- * Two spellings of the one value: an object, or a string holding a JSON
- * object. The string is the one the importer writes, on the
- * `request_examples.postman_response` precedent, because an object crossing
- * this engine's JSON reader loses its member order and the export writes the
- * members back in the order the source had them. The text is stored as
- * parsed from an order-preserving reader, so a string that is not an object
- * is refused the same as a non-object value.
+ * Applies `postmanProtocolBehavior` (#1765): the imported Postman item's
+ * `protocolProfileBehavior`, kept for `POST /export/postman` and sent by
+ * nothing; absent-on-create and `null` mean none. An object, or a string
+ * holding a JSON object: the importer writes the string (the
+ * `request_examples.postman_response` precedent) because an object crossing
+ * this engine's JSON reader loses member order, which the export restores. The
+ * text is stored as parsed by an order-preserving reader, so a string that is
+ * not an object is refused like a non-object value.
  */
 static RouteResult apply_postman_protocol_behavior_field (const nlohmann::json& json,
 std::optional<std::string>& out,
@@ -699,19 +664,14 @@ static RouteResult store_request_body (const nlohmann::json& json, vayu::db::Req
 }
 
 /**
- * Applies the request body onto `r` under the one null-vs-absent rule (see the
- * helpers in routes.hpp). Shared by the create and update cores so the two
- * verbs cannot drift apart on what a field means.
- *
- * `collectionId`, `name`, `method` and `url` have no default, so each is
- * required on create and rejects an explicit null on either verb.
- *
- * `params` is the one field another field writes: a body that states `url`
- * and no `params` reconciles the query rows with it
- * (`reconcile_params_with_url`).
- *
- * Declared in routes.hpp because `POST /import/apply` applies the same fields to
- * every request in a bulk payload (issue #96).
+ * Applies the request body onto `r` under the one null-vs-absent rule (the
+ * helpers in routes.hpp), shared by the create and update cores so the verbs
+ * agree on what a field means. `collectionId`, `name`, `method` and `url` have
+ * no default: required on create, an explicit null refused on either verb.
+ * `params` is the one field another field writes: a body stating `url` and no
+ * `params` reconciles the query rows (`reconcile_params_with_url`). Declared in
+ * routes.hpp because `POST /import/apply` runs it over every request in a bulk
+ * payload (#96), which is how every field below reaches an imported row.
  */
 RouteResult apply_request_fields (vayu::db::Database& db,
 vayu::db::Request& r,
@@ -737,9 +697,7 @@ bool is_create) {
     }
     r.method = *method;
 
-    // The method-source marker (issue #1505). Same file, same applier list as
-    // `method` itself, so `POST /import/apply` (which runs this shared
-    // applier over a bulk payload) carries it too.
+    // The method-source marker (#1505).
     if (auto outcome = apply_method_source_field (json, r.method_source, is_create); !outcome) {
         return outcome;
     }
@@ -781,9 +739,9 @@ bool is_create) {
     // An imported `postman` source that no longer describes the auth holds
     // the credential this write replaced; it goes with it.
     r.auth = vayu::core::without_stale_postman_source (std::move (r.auth));
-    // Scripts are elements now (issue #1514's clean cut - no transitional
-    // alias, per the owner's decision on #1512): `preRequestScript` /
-    // `postRequestScript` refuse rather than write.
+    // Scripts are elements (#1514, no alias, per the owner's decision on
+    // #1512): `preRequestScript` / `postRequestScript` refuse rather than
+    // write.
     if (auto refusal = refuse_legacy_script_fields (json)) {
         return route_error (400, *refusal);
     }
@@ -796,15 +754,13 @@ bool is_create) {
     }
     apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
 
-    // TLS verification (issue #706). Through the shared applier like every
-    // other stored field, so `POST /requests`, `PUT /requests/:id` and
-    // `POST /import/apply` all carry it without three copies of the rule.
+    // TLS verification (#706).
     apply_bool_field (json, "verifySSL", r.verify_ssl, true, is_create);
 
     apply_int_field (json, "maxRedirects", r.max_redirects, 10, is_create);
-    // Clamp to the range the UI offers; the redirect chain reads a negative
-    // limit as "unlimited" (`redirect_limit_reached`), which is not a policy we
-    // want a stray value to select.
+    // Clamped to the UI's range: the redirect chain reads a negative limit as
+    // unlimited (`redirect_limit_reached`), which a stray value must not
+    // select.
     r.max_redirects = std::clamp (r.max_redirects, 0, 100);
 
     // The request's own timeout (issue #2937), refused rather than clamped
@@ -815,26 +771,21 @@ bool is_create) {
         return outcome;
     }
 
-    // Unlike the fields above, an unrecognized httpVersion is rejected rather
-    // than coerced - see apply_http_version_field in routes.hpp. The seed is
-    // read fresh here (not hoisted above the field applications) so it always
-    // reflects the config entry as of this write.
+    // An unrecognised httpVersion is refused, not coerced
+    // (`apply_http_version_field`, routes.hpp). The seed is read here, not
+    // hoisted, so it reflects the config as of this write.
     if (auto outcome = apply_http_version_field (
         json, "httpVersion", r.http_version, http_version_seed (db), is_create);
     !outcome) {
         return outcome;
     }
 
-    // Consume the response as an event stream (issue #574). Through the shared
-    // applier rather than the by-id route alone, so `POST /import/apply` -
-    // which runs this same function over a bulk payload - carries it too.
+    // Consume the response as an event stream (#574).
     if (auto outcome = apply_stream_fields (json, r, is_create); !outcome) {
         return outcome;
     }
 
-    // Postman's per-request protocol settings (issue #1765). Here for the
-    // same reason `stream` is: `POST /import/apply` runs this same applier,
-    // which is how an imported item's settings reach the row.
+    // Postman's per-request protocol settings (#1765).
     if (auto outcome =
         apply_strict_bool_field (json, "disableCookies", r.disable_cookies, is_create);
     !outcome) {
@@ -856,18 +807,14 @@ bool is_create) {
         return outcome;
     }
 
-    // Operation identity (issue #637). Here rather than in the by-id route, for
-    // the same reason `stream` is: `POST /import/apply` runs this same applier,
-    // and an importer that recovered the operation a request came from must be
-    // able to store it in the one call that writes the tree.
+    // Operation identity (#637), here so an importer that recovered a request's
+    // operation stores it in the call that writes the tree.
     if (auto outcome = apply_spec_operation_field (json, r.spec_operation, is_create);
     !outcome) {
         return outcome;
     }
 
-    // Which saved example a mock server answers with (issue #481 phase 3).
-    // Through the shared applier like every other field here, so
-    // `POST /import/apply` (which runs this same applier) carries it too.
+    // Which saved example a mock server answers with (#481 phase 3).
     if (auto outcome = apply_mock_response_mode_field (
         json, r.mock_response_mode, r.mock_example_id, is_create);
     !outcome) {
@@ -878,15 +825,12 @@ bool is_create) {
 }
 
 /**
- * Rejects a write that would park a request under a collection that does not
- * exist. Without it a stale or mistyped `collectionId` succeeded and stranded
- * the row invisibly: no per-collection GET lists it, and the cascade delete of
- * any real collection never reaps it. This is the endpoint a cross-collection
- * move uses, so the check guards the move as much as the create.
- *
- * Lives in the route cores rather than in `apply_request_fields`, because
- * `POST /import/apply` runs the shared applier against collection rows it has
- * not written yet - every id would look missing there.
+ * Refuses a write parking a request under a collection that does not exist: the
+ * row would be stranded invisibly, listed by no per-collection GET and reaped
+ * by no cascade delete. A cross-collection move uses this endpoint, so the
+ * check guards moves as well as creates. In the route cores, not
+ * `apply_request_fields`, because `POST /import/apply` runs the applier against
+ * collection rows it has not written yet.
  */
 static RouteResult reject_missing_collection (vayu::db::Database& db,
 const std::string& collection_id) {
@@ -897,16 +841,12 @@ const std::string& collection_id) {
 }
 
 /**
- * The `order` a request takes when the caller states none: one past the
- * highest held by any sibling, sub-folders included (#2535), so a created or
- * duplicated request lands at the *end* of its collection.
- *
- * A default of 0 (`apply_int_field`) would tie every UI-created request with
- * every other, and the first drag would jump every new request to the top.
- *
- * Applied here rather than in `apply_request_fields` for the reason
- * `reject_missing_collection` is: bulk import cannot scan rows it has yet to
- * write, and hands out its own slots.
+ * The `order` a request takes when the caller states none: one past the highest
+ * of any sibling, sub-folders included (#2535), so it lands at the end of its
+ * collection. A default of 0 would tie every UI-created request, and the first
+ * drag would jump every new one to the top. Here, not in
+ * `apply_request_fields`, for `reject_missing_collection`'s reason: bulk import
+ * cannot scan unwritten rows and hands out its own slots.
  */
 static RouteResult append_order (vayu::db::Database& db, vayu::db::Request& r) {
     return append_sibling_order (db, r.collection_id, r.order, r.id);
@@ -994,20 +934,17 @@ const std::function<void ()>& before_write) {
     if (auto outcome = apply_request_fields (db, r, json, /*is_create=*/false); !outcome) {
         return as_response (outcome.error ());
     }
-    // Only when the write states a collection: an already-stranded row (written
-    // before this check existed) must stay repairable by a PUT that moves it
-    // somewhere real, rather than becoming unwritable.
+    // Only when the write states a collection: a row stranded before this check
+    // existed stays repairable by a PUT moving it somewhere real.
     if (json.contains ("collectionId")) {
         if (auto outcome = reject_missing_collection (db, r.collection_id); !outcome) {
             return as_response (outcome.error ());
         }
     }
-    // A move that states no `order` appends in the destination. Carrying the
-    // source position across would drop the request into an arbitrary slot among
-    // its new siblings - the same defect a collection reparent had. An explicit
-    // null is "reset to the default", which is the same append, the rule
-    // `apply_collection_fields` applies to a collection. Ordering *within* a
-    // collection is still the caller's to state.
+    // A move stating no `order` appends in the destination: the source position
+    // would drop it into an arbitrary slot among new siblings. An explicit null
+    // resets to the default, the same append, as `apply_collection_fields` does
+    // for a collection. Ordering within a collection is the caller's to state.
     const bool moved = r.collection_id != existing->collection_id;
     if (order_is_defaulted (json) && (moved || json.contains ("order"))) {
         if (auto outcome = append_order (db, r); !outcome) {
@@ -1037,31 +974,27 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * Testable core of PUT /requests/:id - **update only**, returning
- * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- * Merge-patch semantics, same as collections - including the 400 on a body `id`
- * that disagrees with the path (#97).
+ * Testable core of PUT /requests/:id, **update only**, {http_status,
+ * json_body}: a missing id is a 404, never a create. Merge-patch as for
+ * collections, including the 400 on a body `id` disagreeing with the path
+ * (#97).
  *
- * **The read, the merge and the write are one lock scope** (#1440, the rule
- * `POST /reorder` states at length under #386). Merge-patch means the write
- * carries every field the body did not name, read a moment earlier - so two
- * PUTs to one row interleaved as read, read, write, write leave the second
- * writer's stale copy of the fields it never mentioned on top of the first
- * writer's changes, and the first client's edit is gone with no error on either
- * side. cpp-httplib serves on a thread pool and the renderer's autosave and an
- * MCP agent are genuinely concurrent clients, so the interleaving is reachable
- * today. Holding the lock across the composite makes the row the merge was
- * computed from still the stored row when the merge lands; the merge itself is
- * microseconds, which is the whole cost to everything else serializing here.
+ * **The read, the merge and the write are one lock scope** (#1440; the rule
+ * `POST /reorder` states under #386). A merge-patch write carries every field
+ * the body did not name, read a moment earlier, so two PUTs interleaved read,
+ * read, write, write lay the second writer's stale copy over the first's edit,
+ * with no error on either side. cpp-httplib serves on a thread pool, and the
+ * renderer's autosave and an MCP agent are concurrent clients, so this is
+ * reachable. The merge is microseconds, the whole cost of serializing it.
  *
  * @param before_write Test seam, invoked inside the lock scope with the merged
- *        row staged and immediately before it is written - the only way to
- *        drive a competing writer into the window this closes. It is a separate
- *        overload rather than the defaulted parameter `reorder_response` uses
- *        because ten test files already declare the three-argument form, and a
- *        defaulted parameter would move the symbol they link against.
- * @param if_match The request's `If-Match`, judged inside the same scope; a
- *        row it no longer names is a 412 (#2433).
+ *        row staged and immediately before it is written, the only way to drive
+ *        a competing writer into the window. A separate overload, not
+ *        `reorder_response`'s defaulted parameter, because ten test files
+ *        declare the three-argument form and a default would move the symbol
+ *        they link against.
+ * @param if_match The request's `If-Match`, judged inside the same scope; a row
+ *        it no longer names is a 412 (#2433).
  */
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
@@ -1219,11 +1152,10 @@ void register_request_routes (RouteContext& ctx) {
 
     /**
      * GET /requests/:id
-     * Retrieves a single request by id in one lookup, so a restored tab or a
-     * design-run copy does not have to fetch every collection's list and scan
-     * them. Returns 200 with the request and its ETag (#2433), or 404 if it
-     * genuinely does not exist (as opposed to a transport failure, which the
-     * app must treat differently). Path params: id - The request ID to fetch.
+     * One request by id in one lookup, so a restored tab or a design-run copy
+     * need not fetch and scan every list. Returns 200 with the request and its
+     * ETag (#2433), or a definitive 404 the app tells from a transport failure.
+     * Path params: id - The request ID to fetch.
      */
     ctx.server.Get (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -1251,12 +1183,15 @@ void register_request_routes (RouteContext& ctx) {
      * the id; a body carrying one is a 400 (issue #97).
      * Body params: collectionId, name, method, url (all required), description,
      * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
-     * elements, order, followRedirects,
-     * maxRedirects, timeout (ms, 1..86400000, null for the defaultTimeout
-     * setting), stream, specOperation ({operationId?, method, path} naming
-     * the operation of the collection's bound spec this request is, or null for
-     * none), httpVersion (absent/null seeds from the "defaultHttpVersion"
-     * config entry; an unrecognized value is a 400, never silently coerced).
+     * elements, order, followRedirects, maxRedirects, verifySSL, timeout (ms,
+     * 1..86400000, null for the defaultTimeout setting), stream,
+     * streamTextPath, streamFirstContentMarker, disableCookies,
+     * disableUrlEncoding, disabledSystemHeaders, postmanProtocolBehavior,
+     * methodSource, mockResponseMode, mockExampleId, specOperation
+     * ({operationId?, method, path} naming the operation of the collection's
+     * bound spec this request is, or null for none), httpVersion (absent/null
+     * seeds from the "defaultHttpVersion" config entry; an unrecognized value
+     * is a 400, never silently coerced).
      * Returns: The created request object, or 400 (body `id`, missing required
      * field, bad field shape).
      */
