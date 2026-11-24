@@ -1081,7 +1081,7 @@ engine's parsed copy of a JSON body is a second tree that the daemon builds,
 serializes and holds on its heap and the renderer then parses and never reads;
 declining it answers `body: null`. The MCP server does not send it - its
 `run_request` result exposes the parsed `body` to the agent, so it keeps the
-engine's default (`electron/mcp/tools.test.ts` asserts the payload). The
+engine's default (`electron/mcp/tools/run-request.tools.test.ts` asserts the payload). The
 streaming send answers `202` with no body, so the flag is not part of it.
 
 **`executeRequest` budgets its abort timer as a worst case for the payload**
