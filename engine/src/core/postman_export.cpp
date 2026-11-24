@@ -6,13 +6,13 @@
  */
 
 /**
- * @brief The Postman v2.1.0 exporter. See the header for the contract.
+ * The Postman v2.1.0 exporter; the header holds the contract.
  *
  * Shapes follow what current Postman (v11) writes, read off its own exports:
- * key order per object, `"type": "text"` on every request-side row,
- * `disabled` only when true, `response: []` on every request, an event
- * script's `packages` / `requests` placeholders (and their key order, which
- * differs between a request's script and a folder's or the collection's), and
+ * key order per object, `"type": "text"` on every request-side row, `disabled`
+ * only when true, `response: []` on every request, an event script's `packages`
+ * / `requests` placeholders (whose key order differs between a request's script
+ * and a folder's or the collection's), and
  * `JSON.stringify(document, null, "\t")` with no trailing newline.
  */
 
@@ -93,8 +93,8 @@ struct LossText {
     std::string_view message;
 };
 
-/// A message is a short standalone phrase: the export dialog shows it as
-/// "message (count)", keyed on the code.
+/// Short standalone phrases: the export dialog shows "message (count)", keyed
+/// on the code.
 constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "vayu_elements", "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" },
 { "script_settings", "Script names and the run-inline setting have no Postman equivalent" },
@@ -129,12 +129,12 @@ struct Walk {
     int folders          = 0;
     int secrets_omitted  = 0;
     std::array<int, static_cast<std::size_t> (Loss::Count_)> losses{};
-    /// When the export runs: a cookie regenerated from edited rows has no
-    /// other time to count its `Max-Age` from.
+    /// When the export runs: the only time a cookie regenerated from edited
+    /// rows can count its `Max-Age` from.
     std::time_t now = 0;
-    /// The header and query-parameter names the API-key auth in force for the
-    /// request being written claims (`vayu_ext::apikey_*_names`): a header or a
-    /// parameter the user typed under that name is the credential too.
+    /// The header and query names the API-key auth in force for the request
+    /// being written claims (`vayu_ext::apikey_*_names`): a row typed under one
+    /// is the credential too.
     std::vector<std::string> apikey_headers;
     std::vector<std::string> apikey_params;
 
@@ -184,9 +184,8 @@ enum class RowShape : std::uint8_t {
     Plain,
 };
 
-/// Whether @p row names nothing. A named row is written; an unnamed one is
-/// dropped, and counted when it carried a value (an editor's trailing blank
-/// row carries none).
+/// Whether @p row names nothing. An unnamed row is dropped, and counted when it
+/// carried a value (an editor's trailing blank row carries none).
 bool skip_unnamed (const json& row, Walk& walk) {
     if (!text_of (row, "key").empty ()) {
         return false;
@@ -203,7 +202,7 @@ json postman_row (const json& row, RowShape shape) {
     out["value"] = text_of (row, "value");
     if (shape == RowShape::Plain && flag_of (row, "valueless", false) &&
     text_of (row, "value").empty ()) {
-        // A query row with no value at all, which Postman writes as a bare key.
+        // No value at all: Postman writes a bare key.
         out["value"] = nullptr;
     }
     if (const auto equals = row.find ("equals");
@@ -243,10 +242,10 @@ json postman_rows (const json& rows, RowShape shape, Walk& walk) {
 // ---------------------------------------------------------------------------
 // Credentials outside an auth block (#1804)
 //
-// Every site below writes a value the user typed, or a server sent, into the
-// document, and a name says whether it is a credential: `Authorization`, an
-// `api_key` parameter, `Set-Cookie`. Each is a no-op when secrets are asked
-// for, so that export stays byte for byte what was stored.
+// Every site below writes a value the user typed or a server sent, and a name
+// says whether it is a credential: `Authorization`, an `api_key` parameter,
+// `Set-Cookie`. Each is a no-op when secrets are asked for, so that export
+// stays byte for byte what was stored.
 // ---------------------------------------------------------------------------
 
 /// A request header table with the credentials' values blanked, counted.
@@ -266,9 +265,9 @@ json blank_response_headers (json headers, Walk& walk) {
     return headers;
 }
 
-/// A saved response's `cookie[]` with every cookie's value blanked, counted.
-/// A cookie holds a session or a token as often as not, and its name does not
-/// say which; the names, flags and expiry stay.
+/// A saved response's `cookie[]` with every value blanked, counted: a cookie
+/// holds a session or token as often as not and its name does not say which.
+/// Names, flags and expiry stay.
 void blank_response_cookies (json& cookies, Walk& walk) {
     if (!walk.include_secrets) {
         vayu_ext::blank_cookie_values (cookies, walk.secrets_omitted);
@@ -294,9 +293,9 @@ std::string blank_url_credentials (const std::string& raw, json& query_rows, Wal
 // URL
 // ---------------------------------------------------------------------------
 
-/// The characters that split a URL into parts, a query into pairs (`&`) and a
-/// pair into key and value (`=`). A `{{variable}}` holding one of them is kept
-/// whole, as Postman's parser keeps it.
+/// What splits a URL into parts, a query into pairs (`&`) and a pair into key
+/// and value (`=`). A `{{variable}}` holding one is kept whole, as Postman's
+/// parser keeps it.
 constexpr std::string_view URL_SEPARATORS = ".:/?#@&=]";
 
 /// A byte no URL separator is, standing in for a protected variable.
@@ -390,8 +389,8 @@ json postman_url_parts (const std::string& raw) {
     }
     std::replace (rest.begin (), rest.end (), '\\', '/');
 
-    // Placeholders are restored in document order, so each part is restored
-    // in the order it appears in @p raw: protocol, host, port, path.
+    // Placeholders are restored in document order, so parts are restored in
+    // their order in @p raw: protocol, host, port, path.
     std::size_t next = 0;
     if (const std::size_t cut = rest.find ("://"); cut != std::string::npos) {
         url["protocol"] = restore (rest.substr (0, cut), held, next);
@@ -405,8 +404,8 @@ json postman_url_parts (const std::string& raw) {
         rest     = rest.substr (0, cut);
     }
     if (const std::size_t cut = rest.rfind ('@'); cut != std::string::npos) {
-        // Credentials in the authority are not a member of the v2.1 url
-        // object; `raw` keeps them.
+        // Authority credentials are no member of the v2.1 url object; `raw`
+        // keeps them.
         for (const char ch : rest.substr (0, cut)) {
             next += ch == PLACEHOLDER ? 1 : 0;
         }
@@ -428,8 +427,7 @@ json postman_url_parts (const std::string& raw) {
         url["path"] = restore_all (split_on (path, '/'), held, next);
     }
     if (has_hash) {
-        // Everything between the path and the hash (the query) held its own
-        // placeholders; the hash's are the last ones.
+        // The query held its own placeholders; the hash's are the last ones.
         std::size_t tail = held.size ();
         for (const char ch : hash) {
             tail -= ch == PLACEHOLDER ? 1 : 0;
@@ -441,11 +439,9 @@ json postman_url_parts (const std::string& raw) {
 
 namespace {
 
-/**
- * One path row as a `url.variable[]` entry (issue #1764), in the member order
- * Postman's own export writes: `key`, `value`, then a `type` an import kept,
- * `description`, and `disabled` for a row turned off.
- */
+/// One path row as a `url.variable[]` entry (#1764), in Postman's member order:
+/// `key`, `value`, then a kept `type`, `description`, and `disabled` for a row
+/// turned off.
 json postman_path_variable (const json& row) {
     json out;
     out["key"]   = text_of (row, "key");
@@ -475,11 +471,10 @@ std::pair<json, json> split_params (const json& params) {
     return { std::move (query), std::move (path) };
 }
 
-/// Whether @p row, joined into a URL, writes @p pair. The join depends on where
-/// the request came from (`QueryEncoding`: Postman's rule, `encodeURIComponent`
-/// for an OpenAPI, Insomnia or JMeter import, as typed under
-/// `disableUrlEncoding`) and a row does not record which, so any of the three
-/// counts.
+/// Whether @p row, joined into a URL, writes @p pair. The join depends on the
+/// request's origin (`QueryEncoding`: Postman's rule, `encodeURIComponent` for
+/// an OpenAPI, Insomnia or JMeter import, as typed under `disableUrlEncoding`),
+/// which a row does not record, so any of the three counts.
 bool row_writes_pair (const json& row, const QueryPair& pair) {
     const std::string key   = text_of (row, "key");
     const std::string value = text_of (row, "value");
@@ -491,9 +486,9 @@ bool row_writes_pair (const json& row, const QueryPair& pair) {
     });
 }
 
-/// The pairs of the URL's query that no enabled, named row of @p rows states,
-/// in URL order. A row accounts for one pair, whichever comes first, because
-/// a key may repeat (`tag=a&tag=b`).
+/// The URL query's pairs no enabled, named row of @p rows states, in URL order.
+/// A row accounts for one pair, the first, since a key may repeat
+/// (`tag=a&tag=b`).
 std::vector<QueryPair> url_only_pairs (const json& rows, const std::string& raw) {
     std::vector<const json*> unclaimed;
     for (const json& row : rows) {
@@ -524,22 +519,22 @@ json postman_url_only_row (const QueryPair& pair) {
     return postman_row (row, RowShape::Plain);
 }
 
-/// The url object with its query, and the path rows as `url.variable[]` -
-/// after everything else, where Postman writes it.
+/// The url object with its query, and the path rows as `url.variable[]` last,
+/// where Postman writes it.
 ///
 /// `url` is what the engine sends and Params rows mirror it (a URL-only write
-/// derives them, and they also hold the turned-off rows), and Postman reads
-/// `query[]` over `raw` when both exist. So `query[]` is every stored row in stored order, then the
-/// pairs of `raw`'s query that no enabled row states, in URL order: a request
-/// whose rows do not state its URL (stored before a URL-only write derived
-/// them, issue #3551, or written with `params: []`) keeps its query, and one
-/// whose rows already state every pair gains nothing.
+/// derives them; they also hold turned-off rows), and Postman reads `query[]`
+/// over `raw` when both exist. So `query[]` is every stored row in order, then
+/// `raw`'s pairs no enabled row states, in URL order: a request whose rows do
+/// not state its URL (stored before a URL-only write derived them, #3551, or
+/// written with `params: []`) keeps its query, and one whose rows state every
+/// pair gains nothing.
 json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
     auto [query_rows, path_rows] = split_params (params);
     const std::string raw = blank_url_credentials (raw_url, query_rows, walk);
     if (!walk.include_secrets) {
         // A path row's value never appears in `raw` (it is `:name` there), so
-        // it is a credential of its own to count.
+        // it is its own credential to count.
         vayu_ext::blank_credential_param_rows (
         path_rows, walk.apikey_params, walk.secrets_omitted);
     }
@@ -581,7 +576,7 @@ json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
 // Auth
 // ---------------------------------------------------------------------------
 
-/// Where an auth sits, which decides what "nothing" is written as.
+/// Where an auth sits, which decides how "nothing" is written.
 enum class AuthLevel : std::uint8_t { Request, Collection };
 
 /// Attributes Postman's auth helpers declare boolean, which an import stores
@@ -619,10 +614,10 @@ json typed_auth (const std::string& type, json attributes) {
 
 /**
  * The Postman `grant_type` for a stored config, or empty for a grant Postman
- * has no name for (`jwt_bearer`, #3632): writing the Vayu name would make
- * Postman read an unknown grant, so the attribute is left out and the block is
- * a loss (`oauth2_loses_settings`). Its own members (`subject`, the claims, the
- * key reference) have no attribute either.
+ * cannot name (`jwt_bearer`, #3632): the Vayu name would read as an unknown
+ * grant, so the attribute is left out and the block is a loss
+ * (`oauth2_loses_settings`). Its own members (`subject`, the claims, the key
+ * reference) have no attribute either.
  */
 std::string grant_type_of (const json& config) {
     const std::string grant = text_of (config, "grantType");
@@ -657,9 +652,9 @@ bool oauth2_loses_settings (const json& config, const std::string& postman_grant
     (!query_name.empty () && query_name != "access_token") || empty_prefix;
 }
 
-/// The `credentialsId` an import derives for a block naming no `tokenName`
-/// (`promoted_cache_separator` in `import_document.cpp`): written back as a
-/// `tokenName`, it would be read as one the user chose.
+/// The `credentialsId` an import derives for a block with no `tokenName`
+/// (`promoted_cache_separator`, `import_document.cpp`): written back as a
+/// `tokenName`, it would read as one the user chose.
 std::string import_derived_credentials_id (const json& config) {
     const std::string audience = text_of (config, "audience");
     return audience.empty () ? text_of (config, "resource") : audience;
@@ -702,9 +697,9 @@ oauth2_derived (std::string_view key, const json& config, const std::string& gra
     json (text_of (config, "credentialsPlacement") == "body" ? "body" : "header"));
 }
 
-/// The Postman `send_as` of a stored parameter row of @p list, or nothing for
-/// a `sendAs` Postman has no name for. An authorization request's rows ride
-/// the authorize URL, so they are all `request_url`.
+/// The Postman `send_as` of a stored row of @p list, or nothing for a `sendAs`
+/// Postman cannot name. An authorization request's rows ride the authorize URL,
+/// so all are `request_url`.
 std::optional<std::string_view>
 postman_send_as (const json& row, const postman::OAuth2ParamList& list) {
     if (!list.targeted) {
@@ -734,9 +729,9 @@ json postman_param_row (const std::string& key, const json& value, bool enabled,
 
 /**
  * @p list's rows of @p config as Postman's `{key, value, enabled, send_as}`,
- * a row with no string key or an unknown `sendAs` left out. The token
- * request's list opens with the config's `audience` and `resource`, the rows
- * an import promotes them from (issue #2536).
+ * leaving out a row with no string key or an unknown `sendAs`. The token
+ * request's list opens with the config's `audience` and `resource`, the rows an
+ * import promotes them from (#2536).
  */
 json postman_param_rows (const json& config, const postman::OAuth2ParamList& list) {
     json rows = json::array ();
@@ -764,9 +759,9 @@ json postman_param_rows (const json& config, const postman::OAuth2ParamList& lis
 }
 
 /**
- * An `oauth2` attribute list. Postman lists attributes in the order a user
- * last edited them, so no one order is canonical; this is the one its most
- * complete recent exports show, the extra request parameter lists last.
+ * An `oauth2` attribute list. Postman lists attributes in the order a user last
+ * edited them, so none is canonical; this is the order its most complete recent
+ * exports show, extra request parameter lists last.
  */
 json oauth2_attributes (const json& config, const json& original, Walk& walk) {
     const std::string grant = grant_type_of (config);
@@ -797,11 +792,9 @@ json oauth2_attributes (const json& config, const json& original, Walk& walk) {
     return out;
 }
 
-/**
- * The attribute order Postman's exports show for each `{mode, config}` type.
- * An import keeps the attributes in a sorted map, so the order is restored
- * here; a key not listed follows in stored order.
- */
+/// Postman's exported attribute order per `{mode, config}` type, restored
+/// because an import keeps attributes in a sorted map; an unlisted key follows
+/// in stored order.
 std::vector<std::string_view> config_attribute_order (std::string_view type) {
     if (type == "awsv4") {
         return { "service", "sessionToken", "region", "secretKey", "accessKey",
@@ -874,8 +867,8 @@ std::optional<json> credential_auth (const json& auth, const json& original, Wal
     return config_auth (mode, config);
 }
 
-/// @p node with `key` and `value` first, then the rest in stored order, at
-/// every depth: how Postman orders an attribute and a request parameter.
+/// @p node with `key` and `value` first, the rest in stored order, at every
+/// depth: how Postman orders an attribute and a request parameter.
 json key_value_first (const json& node) {
     if (node.is_array ()) {
         json out = json::array ();
@@ -901,9 +894,8 @@ json key_value_first (const json& node) {
     return out;
 }
 
-/// A kept auth block in Postman's key order: `type`, then its attributes.
-/// The stored column went through a sorted-key writer, so the order is
-/// restored rather than read.
+/// A kept auth block in Postman's order: `type`, then its attributes. Restored,
+/// not read: the stored column went through a sorted-key writer.
 json postman_ordered (const json& source) {
     const std::string type = text_of (source, "type");
     json out;
@@ -917,11 +909,10 @@ json postman_ordered (const json& source) {
 }
 
 /**
- * The Postman `auth` block an import kept as @p stored's `postman` source,
- * while it still describes @p stored: mapping it through the importer again
- * gives the stored auth, so the user has not changed it since. Written
- * verbatim, it gives back everything the importer had no field for, in the
- * order and with the attribute types Postman wrote.
+ * The Postman `auth` an import kept as @p stored's `postman` source, while it
+ * still describes @p stored: importing it again gives the stored auth, so the
+ * user has not changed it. Written verbatim, it returns everything the importer
+ * had no field for, in Postman's order and attribute types.
  */
 std::optional<json> standing_source (const json& stored) {
     if (!postman_source_stands (nlohmann::json::parse (stored.dump ()))) {
@@ -992,15 +983,15 @@ json graphql_body (const std::string& content) {
         }
         graphql["variables"] = text;
     }
-    // Anything else the envelope holds (`operationName`) rides along; the
-    // importer keeps every key it does not rewrite.
-    // Moved out of the envelope, which is this function's own parse and is
-    // read no further: a value here can be as wide as the stored body.
+    // Anything else in the envelope (`operationName`) rides along; the importer
+    // keeps every key it does not rewrite. Moved out of the envelope, this
+    // function's own parse and read no further: a value can be as wide as the
+    // stored body.
     vayu::utils::reserve_members (graphql, envelope->size ());
     for (auto member = envelope->begin (); member != envelope->end (); ++member) {
         if (member.key () != "query" && member.key () != "variables") {
-            // The envelope's keys are distinct and neither is `query` or
-            // `variables`, which are already in `graphql`.
+            // The envelope's keys are distinct and none is `query` or
+            // `variables`, already in `graphql`.
             vayu::utils::append_unique_member (
             graphql, member.key (), std::move (member.value ()));
         }
@@ -1022,10 +1013,10 @@ json raw_body (const std::string& content, std::string_view language) {
 }
 
 /**
- * The language a stored raw body is written with: the `rawLanguage` an import
- * kept (`""` for none declared) while importing it again would still give the
- * stored mode, else the mode's own name. The check is what keeps a body edited
- * into another mode since from being labelled as what it was.
+ * The language a raw body is written with: the `rawLanguage` an import kept
+ * (`""` for none declared) while re-importing would still give the stored mode,
+ * else the mode's own name. The check keeps a body since edited into another
+ * mode from being labelled as what it was.
  */
 std::string raw_language (const json& body, const std::string& mode, const std::string& content) {
     const auto kept = body.find ("rawLanguage");
@@ -1073,9 +1064,9 @@ json form_part (const json& field, Walk& walk) {
 }
 
 /**
- * A `binary` body as Postman's `file` mode: `file.src`, the path, which is all
- * that mode carries - `{}` when no file is chosen, as Postman writes it. The
- * file's own `contentType` and `fileName` have no member there.
+ * A `binary` body as Postman's `file` mode: only `file.src`, the path, and `{}`
+ * when no file is chosen, as Postman writes it. The file's `contentType` and
+ * `fileName` have no member there.
  */
 json file_body (const json& body, Walk& walk) {
     const auto stored     = body.find ("file");
@@ -1150,8 +1141,8 @@ std::optional<json> postman_body (const json& body, Walk& walk) {
 // Scripts
 // ---------------------------------------------------------------------------
 
-/// Where an `event` sits: a request's script lists `exec` first, a folder's
-/// or the collection's lists it last.
+/// Where an `event` sits: a request's script lists `exec` first, a folder's or
+/// the collection's last.
 enum class EventOwner : std::uint8_t { Request, Container };
 
 json script_exec (const std::string& script) {
@@ -1174,7 +1165,7 @@ json postman_event (const char* listen, const std::string& script, EventOwner ow
     json event{ { "listen", listen }, { "script", std::move (body) } };
     if (!enabled) {
         // Postman's runtime skips a disabled event, as Vayu skips a turned-off
-        // element; the importer reads it back the same way.
+        // element; the importer reads it back so.
         event["disabled"] = true;
     }
     return event;
@@ -1209,11 +1200,10 @@ std::optional<json> element_event (const json& element, EventOwner owner, Walk& 
 }
 
 /**
- * A level's `event` array, or nothing when it has no script: one event per
- * script element, in element order. Postman runs every event of a listen in
- * the order listed, which is how Vayu runs several script elements of one
- * phase, so nothing is joined; the importer reads each back as its own
- * element.
+ * A level's `event` array, or nothing without a script: one event per script
+ * element, in element order. Postman runs every event of a listen in order, as
+ * Vayu runs a phase's script elements, so nothing is joined, and the importer
+ * reads each back as its own element.
  */
 std::optional<json> postman_events (const json& elements, EventOwner owner, Walk& walk) {
     json events = json::array ();
@@ -1241,9 +1231,9 @@ std::string variable_value_text (const json& variable) {
                                       vayu::utils::variable_value_text (*value);
 }
 
-/// Whether Postman's one `type` slot cannot say a stored variable's type: a
-/// `json` type has no Postman counterpart, and a secret's `number` or
-/// `boolean` type gives way to `secret`. Counted once per row either way.
+/// Whether Postman's one `type` slot cannot state a variable's type: `json` has
+/// no counterpart, and a secret's `number` or `boolean` gives way to `secret`.
+/// Counted once per row either way.
 bool variable_type_lost (const json& variable) {
     const std::string type = text_of (variable, "type");
     if (type == "json") {
@@ -1293,9 +1283,9 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
 // Requests
 // ---------------------------------------------------------------------------
 
-/// The Content-Type Postman's runtime adds for @p body (an exported Postman
-/// body) as a system header, or "" when it adds none: GraphQL's JSON envelope,
-/// and a raw body's declared language.
+/// The Content-Type Postman's runtime adds as a system header for @p body (an
+/// exported Postman body), or "" for none: GraphQL's JSON envelope and a raw
+/// body's declared language.
 std::string_view postman_implied_content_type (const std::optional<json>& body) {
     if (!body) {
         return {};
@@ -1321,11 +1311,10 @@ std::string_view postman_implied_content_type (const std::optional<json>& body) 
 }
 
 /**
- * @p headers without the row the body mode wrote (`source: "body-mode"`,
- * issue #1765) when Postman would add that same header on its own: Postman
- * treats the body's Content-Type as a system header, so writing it as a
- * declared row would make a `content-type` opt-out stop working there and
- * the next import read it as the user's.
+ * @p headers without the body-mode row (`source: "body-mode"`, #1765) when
+ * Postman would add that header itself: it treats the body's Content-Type as a
+ * system header, so a declared row would break a `content-type` opt-out there
+ * and read as the user's on the next import.
  */
 json without_implied_body_header (const json& headers, const std::optional<json>& body) {
     const std::string_view implied = postman_implied_content_type (body);
@@ -1372,7 +1361,7 @@ std::string preview_language (const std::string& content_type) {
     return "Text";
 }
 
-/// The first Content-Type header of an example's rows, as the importer reads it.
+/// An example's first Content-Type row, as the importer reads it.
 std::optional<std::string> declared_content_type (const json& headers) {
     if (!headers.is_array ()) {
         return std::nullopt;
@@ -1385,9 +1374,9 @@ std::optional<std::string> declared_content_type (const json& headers) {
     return std::nullopt;
 }
 
-/// Whether two row arrays say the same thing: the same named rows, in order,
-/// with the same value, state and description. Keys the rows do not state
-/// (a stored row's `source`) are not part of what they say.
+/// Whether two row arrays say the same: the same named rows in order, with the
+/// same value, state and description. Keys the rows do not state (a stored
+/// row's `source`) do not count.
 bool same_rows (const json& left, const json& right) {
     if (!left.is_array () || !right.is_array () || left.size () != right.size ()) {
         return false;
@@ -1405,8 +1394,8 @@ bool same_rows (const json& left, const json& right) {
     return true;
 }
 
-/// The values of the enabled `Set-Cookie` rows of @p rows, in order: what a
-/// saved response's `cookie[]` is built from.
+/// The enabled `Set-Cookie` rows' values, in order: what a saved response's
+/// `cookie[]` is built from.
 std::vector<std::string> set_cookie_values (const json& rows) {
     std::vector<std::string> out;
     if (!rows.is_array ()) {
@@ -1431,8 +1420,8 @@ struct Recorded {
     bool type_same = false;
     /// `headers` holds the enabled `Set-Cookie` rows the recorded `header[]`
     /// holds. Finer than `rows_same`: an unrelated header edit keeps a
-    /// `cookie[]` whose `Max-Age` expiry was counted from when the response
-    /// came in, which a rebuild at export time could only re-count from now.
+    /// `cookie[]` whose `Max-Age` expiry counted from when the response
+    /// arrived, which a rebuild could only count from now.
     bool cookies_same = false;
 };
 
@@ -1451,17 +1440,17 @@ const std::optional<std::string>& declared) {
 }
 
 /// @p value as a member to write. `std::optional<json>`'s converting
-/// constructor and `json`'s conversion operator both claim a plain `return
-/// value;`, so the one unambiguous spelling is this.
+/// constructor and `json`'s conversion operator both claim a plain
+/// `return value;`, so this is the one unambiguous spelling.
 std::optional<json> write (json value) {
     return std::optional<json> (std::in_place, std::move (value));
 }
 
 /**
- * A recorded request's `auth` in v2.1's shape. A v2.0 file states each type's
- * settings as an object (`"basic": {"username": ...}`), which the v2.1 schema
- * this document declares refuses; it becomes the attribute array Postman's own
- * v2.0 -> v2.1 conversion writes, typed the way `attribute` types one.
+ * A recorded request's `auth` in v2.1's shape. v2.0 states each type's settings
+ * as an object (`"basic": {"username": ...}`), which this document's v2.1
+ * schema refuses; it becomes the attribute array Postman's own v2.0 -> v2.1
+ * conversion writes, typed as `attribute` types one.
  */
 json v21_auth (const json& auth) {
     if (!auth.is_object ()) {
@@ -1490,9 +1479,9 @@ std::string_view trim_wsp (std::string_view text) {
     return text.substr (first, text.find_last_not_of (" \t") - first + 1);
 }
 
-/// The value of the `name=value` attribute @p attr, when it names @p name
-/// (case-insensitively). The name and value are trimmed as RFC 6265 5.2
-/// trims them, so `Max-Age = 60` is a `Max-Age` of `60`.
+/// The value of `name=value` attribute @p attr when it names @p name
+/// (case-insensitively), name and value trimmed as RFC 6265 5.2 trims them:
+/// `Max-Age = 60` is a `Max-Age` of `60`.
 std::optional<std::string> cookie_attribute (const std::string& attr, std::string_view name) {
     const std::size_t equals = attr.find ('=');
     if (equals == std::string::npos ||
@@ -1504,19 +1493,19 @@ std::optional<std::string> cookie_attribute (const std::string& attr, std::strin
     trim_wsp (std::string_view (attr).substr (equals + 1)));
 }
 
-/// When a cookie set at @p received_at expires, from its `Max-Age` (which
-/// wins, RFC 6265 5.3) or its `Expires`; nothing for a session cookie. An
-/// attribute that does not parse is ignored, as a cookie store ignores it,
-/// and so is a `Max-Age` when @p received_at is unknown (negative: what
-/// `std::time` answers when the clock cannot be read).
+/// When a cookie set at @p received_at expires, from `Max-Age` (which wins, RFC
+/// 6265 5.3) or `Expires`; nothing for a session cookie. An unparseable
+/// attribute is ignored, as a cookie store ignores it, and so is `Max-Age` when
+/// @p received_at is unknown (negative: `std::time`'s answer when the clock
+/// cannot be read).
 std::optional<std::time_t> cookie_expiry (const std::optional<std::string>& max_age,
 const std::optional<std::string>& expires,
 std::time_t received_at) {
     if (max_age && received_at >= 0) {
         if (const auto seconds = vayu::utils::parse_number<long long> (*max_age)) {
-            // A zero or negative age has already expired; an age past what
-            // the clock holds is held to its end. `received_at` is not
-            // negative, so the room left cannot overflow.
+            // A zero or negative age has expired; an age past what the clock
+            // holds is held to its end. `received_at` is not negative, so the
+            // room left cannot overflow.
             const long long room = std::numeric_limits<std::time_t>::max () - received_at;
             return received_at + std::clamp (*seconds, 0LL, room);
         }
@@ -1534,10 +1523,10 @@ std::time_t received_at) {
  * (`Fri Dec 31 9999 23:59:59 GMT+0000 (Coordinated Universal Time)`), or
  * nothing past the years `std::chrono::year_month_day` holds (+-32767).
  *
- * Calendar arithmetic rather than `gmtime`: Windows' `_gmtime64_s` refuses a
- * time before 1970 or after the year 3000, so ASP.NET's "never expires"
- * (`Expires=Fri, 31 Dec 9999 23:59:59 GMT`) would read differently per
- * platform. The names are spelled here, not through a locale.
+ * Calendar arithmetic, not `gmtime`: Windows' `_gmtime64_s` refuses times
+ * before 1970 or after 3000, so ASP.NET's "never expires"
+ * (`Expires=Fri, 31 Dec 9999 23:59:59 GMT`) would differ per platform. Names
+ * are spelled here, not through a locale.
  */
 std::optional<std::string> js_date_utc (std::time_t at) {
     using namespace std::chrono;
@@ -1567,13 +1556,12 @@ std::optional<std::string> js_date_utc (std::time_t at) {
 
 /**
  * One cookie as Postman's saved response lists it, in its member order.
- * `expires` is JavaScript's `Date.prototype.toString` of the expiry, which is
- * what Postman writes (in its own zone; UTC here), and `"Invalid Date"` with
- * `session: true` for a cookie with no expiry. The attributes read as RFC
- * 6265 5.2 and tough-cookie (Postman's cookie store) read them: an empty
- * `Domain` is ignored and a leading `.` dropped, the domain lowercased; a
- * `Path` that does not start with `/` is the default path. `hostOnly` is
- * what a cookie without a `Domain` is.
+ * `expires` is JavaScript's `Date.prototype.toString` of the expiry, as Postman
+ * writes it (in its zone; UTC here), and `"Invalid Date"` with `session: true`
+ * for no expiry. Attributes read as RFC 6265 5.2 and tough-cookie (Postman's
+ * store) read them: an empty `Domain` is ignored, a leading `.` dropped, the
+ * domain lowercased; a `Path` not starting with `/` is the default path.
+ * `hostOnly` means no `Domain`.
  */
 json postman_cookie (const vayu::http::SetCookie& cookie, std::time_t received_at) {
     std::optional<std::string> domain;
@@ -1608,8 +1596,8 @@ json postman_cookie (const vayu::http::SetCookie& cookie, std::time_t received_a
     const std::optional<std::string> written =
     expiry ? js_date_utc (*expiry) : std::optional<std::string> ();
     json out;
-    // A year past what the calendar holds prints as JavaScript's own
-    // unprintable date does.
+    // A year past the calendar prints as JavaScript prints its own unprintable
+    // date.
     out["expires"]  = written.value_or ("Invalid Date");
     out["hostOnly"] = !domain.has_value ();
     out["httpOnly"] = http_only;
@@ -1659,10 +1647,10 @@ void append_names (std::vector<std::string>& names, const std::vector<std::strin
 }
 
 /**
- * A recorded request's `url` (v2.0 wrote a string, v2.1 an object) with its
- * credentials blanked, by the rule `blank_url_credentials` states: `raw` and
- * `query[]` are one query written twice. `hash` is the tail of `raw` and is
- * blanked without a count of its own.
+ * A recorded request's `url` (a string in v2.0, an object in v2.1) with
+ * credentials blanked by `blank_url_credentials`'s rule: `raw` and `query[]`
+ * are one query written twice. `hash` is `raw`'s tail, blanked without a count
+ * of its own.
  */
 void blank_recorded_url (json& url, const std::vector<std::string>& param_names, Walk& walk) {
     vayu_ext::UrlOmitted in_url;
@@ -1696,11 +1684,10 @@ void blank_recorded_url (json& url, const std::vector<std::string>& param_names,
 }
 
 /**
- * A saved response's `originalRequest` as written: its auth in v2.1's shape,
- * and, unless secrets were asked for, every credential in it blanked - the
- * auth, a header such as `Authorization` and the url's query. The names an
- * API-key auth claims are the recorded auth's own and the request's. The
- * body is not judged.
+ * A saved response's `originalRequest` as written: auth in v2.1's shape and,
+ * unless secrets were asked for, every credential blanked (the auth, a header
+ * such as `Authorization`, the url's query). API-key names claimed are the
+ * recorded auth's and the request's. The body is not judged.
  */
 json recorded_request (const json& value, Walk& walk) {
     json request = value;
@@ -1753,8 +1740,8 @@ Walk& walk) {
         postman_rows (blank_response_headers (example.headers, walk), RowShape::Plain, walk));
     }
     if (key == "cookie") {
-        // Built from the Set-Cookie rows, so an edit that removes one must
-        // not leave its value behind here.
+        // Built from the Set-Cookie rows, so an edit removing one must not
+        // leave its value here.
         json cookies =
         recorded.cookies_same ? value : postman_cookies (example.headers, walk.now);
         blank_response_cookies (cookies, walk);
@@ -1774,27 +1761,27 @@ Walk& walk) {
 }
 
 /**
- * An example the import kept Postman's saved response for
+ * An example whose Postman saved response the import kept
  * (`request_examples.postman_response`), written back in the source's member
  * order.
  *
- * The rule that keeps an edit made in Vayu from being contradicted: a member
- * describing a column is written as stored only while that column still says
- * what was imported. `name`, `code` and `body` are always the columns. The
- * status text is kept while `status` is the code it was recorded with,
- * `header[]` (its `name` fields and number values included) while `headers`
- * reads the same through the importer's own row mapping, `cookie[]` while its
- * enabled `Set-Cookie` rows do, and the preview
- * language and type while the declared Content-Type is unchanged; otherwise
- * each is regenerated, and a regenerated preview type is left out, since it
- * is Postman's own guess. `originalRequest` is kept verbatim: it records the
- * request as it was sent when the response was saved, which differing from
- * the request's current state does not make wrong, and nothing in Vayu edits
- * it. Its auth is written in v2.1's shape and its credentials (auth, headers,
- * url query) are blanked like any other unless secrets were asked for; so are
- * the credentials in the `header[]` and `cookie[]` written back. A member the
- * source left out stays out while the column still holds the importer's
- * default for it.
+ * So an edit in Vayu is never contradicted, a member describing a column is
+ * written as stored only while the column still says what was imported. `name`,
+ * `code` and `body` are always the columns. Kept, each while its column agrees:
+ * the status text while `status` is the recorded code; `header[]` (its `name`
+ * fields and number values included) while `headers` reads the same through the
+ * importer's row mapping; `cookie[]` while its enabled `Set-Cookie` rows do;
+ * the preview language and type while the declared Content-Type is unchanged.
+ * Otherwise each is regenerated, and a regenerated preview type is left out,
+ * being Postman's own guess.
+ *
+ * `originalRequest` is kept verbatim: it records the request as sent when the
+ * response was saved, which a different current state does not make wrong, and
+ * nothing in Vayu edits it. Its auth is written in v2.1's shape and its
+ * credentials (auth, headers, url query) blanked unless secrets were asked for,
+ * as are those in the written-back `header[]` and `cookie[]`. A member the
+ * source left out stays out while the column holds the importer's default for
+ * it.
  */
 json stored_response (const PostmanExportExample& example,
 const std::optional<std::string>& declared,
@@ -1846,8 +1833,8 @@ Walk& walk) {
         return stored_response (example, declared, walk);
     }
     // Saved in Vayu (or from an OpenAPI document): no recorded request, so the
-    // request's current state stands in for it, as it would in Postman for a
-    // response saved just now.
+    // request's current state stands in, as in Postman for a response saved
+    // just now.
     json out;
     out["name"]                     = example.name;
     out["originalRequest"]          = original_request;
@@ -1861,11 +1848,10 @@ Walk& walk) {
     return out;
 }
 
-/// The largest millisecond count written as an integer (2^53, where a double
-/// stops holding every integer).
+/// The largest millisecond count written as an integer: 2^53, past which a
+/// double stops holding every integer.
 constexpr double MAX_EXACT_MS = 9007199254740992.0;
 
-/// The request-level behaviours Postman keeps beside the request.
 /// Whether @p body would put bytes on the wire.
 bool body_has_content (const std::optional<json>& body) {
     if (!body) {
@@ -1909,11 +1895,11 @@ json disabled_headers_object (const std::vector<std::string>& names) {
 }
 
 /**
- * Write @p state under @p key of @p out unless what is there already reads as
- * it. "Reads as" is the importer's reading: a boolean is itself, anything else
- * (absent included) is @p fallback - so a carried spelling the typed column
- * still agrees with, explicit default and all, is kept byte for byte, and an
- * edit since the import overwrites it in place (or appends it when absent).
+ * Writes @p state under @p key of @p out unless the value there reads as it, by
+ * the importer's reading: a boolean is itself, anything else (absent included)
+ * is @p fallback. A carried spelling the typed column still agrees with,
+ * explicit default and all, is kept byte for byte; an edit since the import
+ * overwrites it in place, or appends it when absent.
  */
 void reconcile_flag (json& out, const char* key, bool state, bool fallback) {
     const auto found = out.find (key);
@@ -1925,7 +1911,7 @@ void reconcile_flag (json& out, const char* key, bool state, bool fallback) {
 }
 
 /// The names @p headers (a `disabledSystemHeaders` object) turns off, sorted:
-/// the set the importer stored, read by the importer's own rule.
+/// the set the importer stored, by the importer's own rule.
 std::vector<std::string> truthy_header_set (const json& headers) {
     std::vector<std::string> names = postman_disabled_system_headers (headers);
     std::ranges::sort (names);
@@ -1933,8 +1919,8 @@ std::vector<std::string> truthy_header_set (const json& headers) {
     return names;
 }
 
-/// The carried object with every key Vayu owns brought back in line with the
-/// typed columns - see `protocol_profile`.
+/// The carried object with every key Vayu owns brought in line with the typed
+/// columns (`protocol_profile`).
 json reconciled_profile (const PostmanExportRequest& request,
 const std::vector<std::string>& disabled,
 bool prunable_body) {
@@ -1958,8 +1944,8 @@ bool prunable_body) {
     if (truthy_header_set (carried != out.end () ? *carried : json ()) != stored_set) {
         out["disabledSystemHeaders"] = disabled_headers_object (disabled);
     }
-    // A body added in Vayu to an imported GET or HEAD: Postman would strip it
-    // unless told not to, and the carrier only says so when the source had one.
+    // A body added in Vayu to an imported GET or HEAD: Postman strips it unless
+    // told not to, and the carrier says so only when the source had one.
     if (prunable_body) {
         const auto pruning = out.find ("disableBodyPruning");
         if (pruning == out.end () || !pruning->is_boolean () || !pruning->get<bool> ()) {
@@ -1972,20 +1958,20 @@ bool prunable_body) {
 /**
  * The item's `protocolProfileBehavior`, or nothing when it would say nothing.
  *
- * With a carried object (`requests.postman_protocol_behavior`, issue #1765)
- * the export starts from it, so keys Vayu does not apply, explicit defaults
- * and the source's member order all survive; each key Vayu owns is then
- * checked against its typed column (`reconcile_flag`). `disabledSystemHeaders`
- * compares as a set of the names set to `true`: equal keeps the object
- * verbatim (`{}` and `false` entries included), different writes the stored
- * list. Unknown keys are the carrier's, and so is `disableBodyPruning` except
- * on a GET or HEAD with a body, where it is set `true` in place (appended when
- * absent) because Postman would otherwise strip the body Vayu sends.
+ * With a carried object (`requests.postman_protocol_behavior`, #1765) the
+ * export starts from it, so keys Vayu does not apply, explicit defaults and the
+ * source's member order survive; each key Vayu owns is checked against its
+ * typed column (`reconcile_flag`). `disabledSystemHeaders` compares as the set
+ * of names set to `true`: equal keeps the object verbatim (`{}` and `false`
+ * entries included), different writes the stored list. Unknown keys are the
+ * carrier's, and so is `disableBodyPruning` except on a GET or HEAD with a
+ * body, where it is set `true` in place (appended when absent) because Postman
+ * would otherwise strip the body Vayu sends.
  *
- * Without one the object is generated in the order
- * `strictSSL, followRedirects, maxRedirects, disableUrlEncoding,
- * disableCookies, disabledSystemHeaders, disableBodyPruning`, which agrees with
- * every relative order Postman's own exports in the corpus show.
+ * Without one, the object is generated in the order `strictSSL`,
+ * `followRedirects`, `maxRedirects`, `disableUrlEncoding`, `disableCookies`,
+ * `disabledSystemHeaders`, `disableBodyPruning`, which agrees with every
+ * relative order in Postman's exports in the corpus.
  */
 std::optional<json> protocol_profile (const PostmanExportRequest& request, bool has_body) {
     const std::vector<std::string> disabled = stored_disabled_headers (request);
@@ -2041,11 +2027,11 @@ void note_request_losses (const PostmanExportRequest& request, Walk& walk) {
 }
 
 /**
- * The auth in force for what a container holds: its own, else the one it
- * inherits, by the rule `POST /compose` applies (`resolve_inherited_auth`) -
- * `noauth` ends the walk with nothing, `none` and an unset auth defer upward.
- * A null result is no auth. Walked here, not called: `resolve_inherited_auth`
- * takes the database's collection chain, and this exporter reads none.
+ * The auth in force for a container's contents: its own, else the inherited
+ * one, by `POST /compose`'s rule (`resolve_inherited_auth`): `noauth` ends the
+ * walk with nothing; `none` and an unset auth defer upward. Null is no auth.
+ * Walked here, not called: `resolve_inherited_auth` takes the database's
+ * collection chain, and this exporter reads none.
  */
 json container_auth_in_force (const json& own, const json& inherited) {
     const std::string mode = text_of (own, "mode");
@@ -2062,19 +2048,19 @@ json request_auth_in_force (const json& own, const json& inherited) {
     return mode.empty () || mode == "inherit" ? inherited : own;
 }
 
-/// A header or credential name without the spaces and tabs a paste leaves
-/// around it: `apply_auth` and header composition both compare it trimmed.
+/// A header or credential name without the spaces and tabs a paste leaves:
+/// `apply_auth` and header composition both compare it trimmed.
 std::string_view trimmed_name (std::string_view name) {
     return vayu::http::trim_optional_whitespace (name);
 }
 
 /**
- * The header @p auth (the auth in force) writes when the request is sent, or
- * "" when it writes none, by the rules of `apply_auth`: bearer and basic write
- * `Authorization` (a blank bearer token writes nothing), OAuth 2.0 does unless
- * it places its token in the query, and an API key writes its trimmed name
- * unless it is in the query or has none. The API key's name is
- * @p walk.apikey_headers, which `apikey_header_names` already filters.
+ * The header the auth in force (@p auth) writes on send, or "" for none, by
+ * `apply_auth`'s rules: bearer and basic write `Authorization` (a blank bearer
+ * token writes nothing), OAuth 2.0 does unless its token goes in the query, and
+ * an API key writes its trimmed name unless it is in the query or has none.
+ * That name is @p walk.apikey_headers, already filtered by
+ * `apikey_header_names`.
  */
 std::string_view header_written_by (const json& auth, const Walk& walk) {
     static constexpr std::string_view AUTHORIZATION = "Authorization";
@@ -2109,11 +2095,10 @@ bool types_header (const json& rows, std::string_view name) {
 }
 
 /**
- * A request's Postman `auth`. A header the user typed under the name the auth
- * in force would write wins in Vayu, because `apply_auth` skips a name the
- * request already carries; postman-runtime lets the auth overwrite the header
- * instead, so the auth is written as No Auth and the typed header keeps the
- * wire the same (#3243).
+ * A request's Postman `auth`. In Vayu a header typed under the name the auth in
+ * force writes wins, since `apply_auth` skips a name the request carries;
+ * postman-runtime lets the auth overwrite it, so the auth is written as No Auth
+ * and the typed header keeps the wire the same (#3243).
  */
 std::optional<json> request_auth_block (const PostmanExportRequest& request,
 const json& auth_in_force,
@@ -2160,9 +2145,9 @@ Walk& walk) {
 
     json responses = json::array ();
     if (!request.examples.empty ()) {
-        // Counted once per request rather than once per example: the rows
-        // are the request's own and were already counted above. The copy
-        // blanks what the real walk blanked and counts into itself.
+        // Counted once per request, not per example: the rows are the request's
+        // and were counted above. The copy blanks what the real walk blanked
+        // and counts into itself.
         Walk scratch        = walk;
         const json original = request_core (request, body, scratch);
         for (const PostmanExportExample& example : request.examples) {
@@ -2213,9 +2198,9 @@ Walk& walk) {
     return item;
 }
 
-/// Sub-folders and requests as one list in sibling order, the order the
-/// sidebar lists them and a run visits them in (#2535): Postman reads an
-/// `item[]` in document order, so an import of this file lists them the same.
+/// Sub-folders and requests as one list in sibling order, the order the sidebar
+/// lists and a run visits them (#2535): Postman reads `item[]` in document
+/// order, so an import lists them the same.
 json postman_items (const PostmanExportFolder& folder, const json& auth_in_force, Walk& walk) {
     std::vector<vayu::db::SiblingSlot> slots;
     slots.reserve (folder.folders.size () + folder.requests.size ());
@@ -2230,8 +2215,8 @@ json postman_items (const PostmanExportFolder& folder, const json& auth_in_force
         folder.folders.at (slot.index).order :
         folder.requests.at (slot.index).order;
     };
-    // The tie rule is `sibling_order.hpp`'s, a folder first; stable, so each
-    // kind keeps the order it arrived in.
+    // `sibling_order.hpp`'s tie rule, a folder first; stable, so each kind
+    // keeps its arrival order.
     std::stable_sort (slots.begin (), slots.end (),
     [&] (const vayu::db::SiblingSlot& a, const vayu::db::SiblingSlot& b) {
         const int left  = order_of (a);
@@ -2283,8 +2268,8 @@ nlohmann::json not_carried_json (const std::vector<PostmanNotCarried>& entries) 
     return out;
 }
 
-/// The `type` an environment row is written with: `secret`, else the stored
-/// type Postman has, else its own unset marker `default`.
+/// An environment row's `type`: `secret`, else the stored type if Postman has
+/// it, else Postman's unset marker `default`.
 std::string environment_row_type (const json& variable) {
     if (flag_of (variable, "secret", false)) {
         return "secret";
@@ -2346,8 +2331,8 @@ std::time_t received_at) {
     out["cookie"] = postman_cookies (example.headers, received_at);
     out["responseTime"] = nullptr;
     if (response_time_ms) {
-        // Whole milliseconds, as Postman records it; a value past what an
-        // integer holds exactly stays a double rather than overflowing.
+        // Whole milliseconds, as Postman records it; a value past an integer's
+        // exact range stays a double rather than overflowing.
         const double whole = std::round (*response_time_ms);
         out["responseTime"] =
         whole < MAX_EXACT_MS ? json (static_cast<std::int64_t> (whole)) : json (whole);
@@ -2370,7 +2355,7 @@ std::string postman_collection_uuid (const std::string& collection_id) {
         collection_id.substr (collection_id.size () - 36));
     }
     // An RFC 9562 version-8 UUID: custom bits, so nothing mistakes the
-    // derivation for a random or a name-based one.
+    // derivation for a random or name-based one.
     std::uint64_t high    = fnv1a (collection_id, 0xcbf29ce484222325ULL);
     std::uint64_t low     = fnv1a (collection_id, high ^ 0x9e3779b97f4a7c15ULL);
     high                  = (high & ~0xF000ULL) | 0x8000ULL;
