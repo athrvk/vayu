@@ -36,12 +36,16 @@ const packageJson = JSON.parse(
 	readFileSync(path.join(electronDir, "..", "package.json"), "utf8")
 ) as { dependencies: Record<string, string> };
 
-/** Every emitted `.ts` under electron/, recursively - what tsconfig.node.json compiles. */
+/** Every emitted `.ts` under electron/, recursively - what tsconfig.node.json compiles: no tests, no testkits. */
 function emittedSources(dir: string): string[] {
 	return readdirSync(dir).flatMap((entry) => {
 		const full = path.join(dir, entry);
 		if (statSync(full).isDirectory()) return emittedSources(full);
-		return entry.endsWith(".ts") && !entry.endsWith(".test.ts") ? [full] : [];
+		return entry.endsWith(".ts") &&
+			!entry.endsWith(".test.ts") &&
+			!entry.endsWith(".testkit.ts")
+			? [full]
+			: [];
 	});
 }
 

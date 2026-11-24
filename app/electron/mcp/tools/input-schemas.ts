@@ -450,7 +450,7 @@ export const collectionStreamEventsInput = streamEventsSchema
 /**
  * `run_request`'s own statement of the stream text path, not an `asOn` pointer:
  * `create_request` is a write tool and a read-only session lists none, so a
- * pointer there would dangle (`tool-list-budget.test.ts`).
+ * pointer there would dangle (`tool-list-shape.test.ts`).
  */
 export const streamTextPathSendInput = z
 	.string()
