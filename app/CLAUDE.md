@@ -369,7 +369,7 @@ cannot add a response header, and `route.fetch` reads the whole body before
 | `docs/app/COMPONENTS/`              | Adding or moving a module / shared component                                      |
 | `docs/app/architecture.md`          | Renderer-side structural decisions                                                |
 | `docs/app/state-management/`        | Adding a store, changing query keys or cache policy                               |
-| `docs/app/api-integration.md`       | Request/response shapes the renderer sends                                        |
+| `docs/app/api-integration/`         | Request/response shapes the renderer sends                                        |
 | `docs/app/variable-resolution.md`   | Resolution order, scopes, the resolver hook                                       |
 | `docs/app/import-collections/`      | Detectors, drafts, any format mapping                                             |
 | `docs/app/pm-api-compatibility.md`  | Which `pm.*` APIs the runtime supports                                            |

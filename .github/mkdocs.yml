@@ -153,7 +153,6 @@ nav:
       - Overview: app/architecture.md
       - Design System: design-system.md
       - UX Writing: ux-writing.md
-      - Talking to the Engine: app/api-integration.md
       - Variables: app/variable-resolution.md
       - Data-Driven Runs: app/data-driven-runs.md
       - OpenAPI Collections: app/openapi.md
@@ -180,6 +179,21 @@ nav:
   # Internals for someone changing the app, not for someone using it. The
   # section index (navigation.indexes) keeps the page at /app/COMPONENTS/.
   - Contributing:
+      - Talking to the Engine:
+          - Overview: app/api-integration/index.md
+          - HTTP Client and API Service: app/api-integration/http-client-and-service.md
+          - "Methods: Configuration and Local Services": app/api-integration/methods-local.md
+          - "Methods: Collections, Requests and Examples": app/api-integration/methods-saved.md
+          - "Methods: Specs": app/api-integration/methods-specs.md
+          - "Methods: Environments, Globals and Import": app/api-integration/methods-environments-import.md
+          - "Methods: Execution and Runs": app/api-integration/methods-execution.md
+          - "Methods: OAuth 2.0 and Scripting": app/api-integration/methods-oauth-scripting.md
+          - SSE Client: app/api-integration/sse-client.md
+          - API Endpoints: app/api-integration/endpoints.md
+          - Request Execution Flow: app/api-integration/execution-flow.md
+          - Streaming Request Execution: app/api-integration/streaming.md
+          - Errors and Connection Management: app/api-integration/errors-and-connection.md
+          - Testing and Troubleshooting: app/api-integration/testing-and-troubleshooting.md
       - UI Components:
           - app/COMPONENTS/index.md
           - App Shell: app/COMPONENTS/app-shell.md

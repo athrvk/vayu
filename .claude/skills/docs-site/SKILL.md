@@ -16,7 +16,7 @@ heading anchor, so:
 - **Do not rename or move a doc file** without checking for readers. Tests read
   doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`;
   `app/src/state-management-doc.test.ts` reads the pages of `docs/app/state-management/`,
-  `architecture.md` and `api-integration.md`, and fails on a `useXxx` or
+  `architecture.md` and the pages of `api-integration/`, and fails on a `useXxx` or
   `SCREAMING_CASE` name they quote that no longer exists in the app source),
   and every relative cross-link is validated by the build.
 - **Anchors follow GitHub's slug rules** (`pymdownx.slugs.slugify` is configured

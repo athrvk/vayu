@@ -274,7 +274,7 @@ jobs:
               - 'docs/design-system.md'
               - 'docs/app/state-management/**'
               - 'docs/app/architecture.md'
-              - 'docs/app/api-integration.md'
+              - 'docs/app/api-integration/**'
               - 'docs/app/data-driven-runs.md'
               - 'docs/app/COMPONENTS/**'
               - 'docs/index.md'

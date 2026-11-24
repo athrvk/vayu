@@ -196,7 +196,7 @@ An open request reaches the merge (#1436) through its detail key: a refetch deli
 
 **Retry policy:** the shared default is `shouldRetryQuery` (`lib/query-client.ts`), not a bare count.
 A 4xx from the engine is a verdict, not a hiccup - a 404 for a deleted row answers identically every time, so retrying it only delays the error the caller is waiting on. 4xx is never retried; everything else (5xx, timeout, unreachable engine - which `http-client.ts` throws as an `EngineUnreachableError`, not an `ApiError`) keeps the `DEFAULT_QUERY_RETRY` budget.
-The one exception is an engine that is still starting: while `engineStartWindow` is open, an `EngineUnreachableError` is retried without counting against the budget, every `ENGINE_START_RETRY_DELAY_MS` (`queryRetryDelay`), so a launch shows loading rather than error panes until the engine answers or the window expires (`docs/app/api-integration.md`, Health Checking).
+The one exception is an engine that is still starting: while `engineStartWindow` is open, an `EngineUnreachableError` is retried without counting against the budget, every `ENGINE_START_RETRY_DELAY_MS` (`queryRetryDelay`), so a launch shows loading rather than error panes until the engine answers or the window expires (`docs/app/api-integration/errors-and-connection.md`, Health Checking).
 
 **Cache policy lives in `config/cache.ts` (`QUERY_CACHE`), not in the call sites.**
 Name the constant when you need a duration; restating the number here is how this section drifted before.
