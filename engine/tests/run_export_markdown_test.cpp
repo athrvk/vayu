@@ -614,6 +614,37 @@ TEST (RunExportMarkdownTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
     EXPECT_EQ (text.find ("HTTP 0"), std::string::npos) << text;
 }
 
+// #3828: the classes in `summary.errorClasses` close the Errors table, in the
+// order transport, protocol, tool, each only when counted. Mutation check: drop
+// `append_error_class_rows` from `errors_table` and the first expectation fails.
+TEST (RunExportMarkdownTest, TheErrorsTableListsTheMcpFailureClassesTheRunCounted) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["summary"]["errorClasses"] = { { "tool", 2 },
+        { "transport", 1500 }, { "protocolCodes", { { "-32602", 4 } } } };
+    const std::string text = render_run_export_markdown (document);
+
+    const std::vector<std::string> expected{ "HTTP 500", "HTTP 503", "timeout",
+        "connection_reset", "MCP transport failures", "MCP tool failures" };
+    EXPECT_EQ (error_row_labels (text), expected) << text;
+    EXPECT_NE (text.find ("| MCP transport failures | 1,500    |"), std::string::npos)
+    << text;
+    EXPECT_NE (text.find ("| MCP tool failures      | 2        |"), std::string::npos)
+    << text;
+}
+
+TEST (RunExportMarkdownTest, NoClassRowWhereTheRunCountedNoClass) {
+    const std::vector<std::string> plain{ "HTTP 500", "HTTP 503", "timeout", "connection_reset" };
+    ordered_json document = read_document ("errors-and-budget-failed");
+    EXPECT_EQ (error_row_labels (render_run_export_markdown (document)), plain);
+
+    // `{}` is a run that counted and saw nothing fail.
+    document["report"]["summary"]["errorClasses"] = ordered_json::object ();
+    EXPECT_EQ (error_row_labels (render_run_export_markdown (document)), plain);
+
+    document["report"]["summary"]["errorClasses"] = { { "tool", 0 } };
+    EXPECT_EQ (error_row_labels (render_run_export_markdown (document)), plain);
+}
+
 TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
     const std::string text =
     render_run_export_markdown (read_document ("stopped-early"));

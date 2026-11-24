@@ -24,14 +24,18 @@ const MOCK_ISSUER_START_KEYS = [
 	"failureMode",
 	"slowMs",
 	"issueRefreshTokens",
+	"resourceScope",
 ] as const;
 
-/** The failure modes the issuer's `/token` endpoint can be put into. */
+/** The failure modes an issuer can be put into (`/token`, its metadata, `/register` or the authorize `iss`). */
 export const MOCK_ISSUER_FAILURE_MODES = [
 	"none",
 	"slow",
 	"server_error",
 	"invalid_client",
+	"metadata_not_found",
+	"registration_refused",
+	"wrong_iss",
 ] as const;
 
 /**
@@ -60,9 +64,10 @@ export function mockIssuerStartPayload(args: Record<string, unknown>): Record<st
  * The settings `PUT /mock-issuer/:id` will change under a bound listener.
  *
  * Deliberately a subset of the start keys rather than the same list: the engine
- * refuses `port`, `clients`, `claims` and `issueRefreshTokens` on a running
- * issuer with "stop it and start a new one" (`apply_mock_issuer_patch`), so
- * offering them here would be offering a call that always fails. It is also a
+ * refuses `port`, `clients`, `claims`, `issueRefreshTokens` and
+ * `resourceScope` on a running issuer with "stop it and start a new one"
+ * (`apply_mock_issuer_patch`), so offering them here would be offering a call
+ * that always fails. It is also a
  * subset of what the PUT accepts - `expiresInSeconds` is mutable engine-side
  * and is not offered, because a token's lifetime is fixed when it is minted, so
  * changing it mid-session changes nothing about the tokens already in the

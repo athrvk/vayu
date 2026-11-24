@@ -1140,6 +1140,17 @@ constexpr int64_t CODE_TTL_MS = oauth_authorize::ATTEMPT_TTL_MS;
 constexpr int64_t MAX_SLOW_MS = 60000;
 /// Ceiling on a minted token's lifetime (31 days).
 constexpr int64_t MAX_EXPIRES_IN_SECONDS = 31LL * 86400LL;
+/// Clients registered through `POST /register` held per issuer (oldest evicted
+/// first). Registration is open (RFC 7591 needs no credential to ask), so this
+/// is what bounds a caller that registers in a loop.
+constexpr size_t MAX_REGISTERED_CLIENTS = 64;
+/// Redirect URIs one registration may list, and the bytes of each: with
+/// `MAX_REGISTERED_CLIENTS` they bound what registration can make an issuer
+/// hold.
+constexpr size_t MAX_REDIRECT_URIS      = 8;
+constexpr size_t MAX_REDIRECT_URI_BYTES = 2048;
+/// Bytes of the `resourceScope` setting.
+constexpr size_t MAX_RESOURCE_SCOPE_BYTES = 512;
 } // namespace mock_issuer
 
 /**

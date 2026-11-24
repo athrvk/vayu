@@ -14,6 +14,10 @@
 // Main exports
 export { default as UnifiedResponseViewer } from "./UnifiedResponseViewer";
 export { default as ResponseBody } from "./ResponseBody";
+// An MCP tool result drawn above the raw reply: the request builder's Body tab
+// (#3841). Mounted there only, where the request's mode says the reply is MCP.
+export { default as McpResultView } from "./McpResultView";
+export type { McpResultViewProps } from "./McpResultView";
 // One file, three variants: the collapsible table, the compact slab, and the
 // Headers *tab* that stacks two tables with an empty state.
 export {

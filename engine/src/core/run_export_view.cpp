@@ -18,6 +18,7 @@
 #include "vayu/core/run_export_view.hpp"
 
 #include "vayu/core/load_pacing.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_compare.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -1065,9 +1066,26 @@ const std::vector<CountedLabel>& types) {
     codes, [] (const CountedLabel& code) { return code.count <= 0; });
 }
 
+/// One row per `summary.errorClasses` class the run counted (#3828), in the
+/// order the document lists them, labelled `MCP <class> failures`. A class is a
+/// view of the same failures, not a further population: a failed reply is also
+/// under its HTTP status or its `mcp_*` type, so these rows are never added to
+/// the ones above. A document without the key adds none.
+void append_error_class_rows (std::vector<Row>& rows, const ordered& document) {
+    for (const std::string_view name : MCP_ERROR_CLASS_NAMES) {
+        const double count =
+        number_at (document, { "report", "summary", "errorClasses", name }).value_or (0);
+        if (count > 0) {
+            rows.push_back ({ cell (words ("MCP " + std::string (name) + " failures")),
+            plain_cell (format_run_count (count)) });
+        }
+    }
+}
+
 /// Empty rows when the run recorded no error. Never an `HTTP 0` row: the
 /// requests that got no response appear under their types, plus one
-/// @ref NO_RESPONSE_LABEL row for any the types do not cover.
+/// @ref NO_RESPONSE_LABEL row for any the types do not cover. The MCP class
+/// rows close the table.
 Table errors_table (const ordered& document) {
     Table table{ { "Error", "Requests" }, {} };
     auto codes =
@@ -1077,6 +1095,7 @@ Table errors_table (const ordered& document) {
     settle_no_response (codes, types);
     append_capped (table.rows, std::move (codes), "codes");
     append_capped (table.rows, std::move (types), "types");
+    append_error_class_rows (table.rows, document);
     return table;
 }
 

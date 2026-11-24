@@ -13,6 +13,7 @@
 
 #include "vayu/core/run_export.hpp"
 
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/run_compare.hpp"
@@ -442,11 +443,20 @@ ordered assertions_section (const json& assertions) {
     return out;
 }
 
-/// The report's `summary`, its one nested member (`drainCut`, #3538) named.
+/// The report's `summary`, its two nested members (`drainCut`, #3538, and
+/// `errorClasses`, #3828) named.
 ordered summary_section (const json& summary) {
     ordered out = pick (summary, SUMMARY_KEYS);
     if (const json& drain_cut = member (summary, "drainCut"); drain_cut.is_object ()) {
         out["drainCut"] = pick (drain_cut, DRAIN_CUT_KEYS);
+    }
+    if (const json& classes = member (summary, "errorClasses"); classes.is_object ()) {
+        // `protocolCodes` beside the classes is a `{code: count}` map (#3828).
+        ordered error_classes = pick (classes, MCP_ERROR_CLASS_NAMES);
+        if (const json& codes = member (classes, "protocolCodes"); codes.is_object ()) {
+            error_classes["protocolCodes"] = count_map (codes);
+        }
+        out["errorClasses"] = std::move (error_classes);
     }
     return out;
 }

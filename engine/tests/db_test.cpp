@@ -2126,7 +2126,7 @@ TEST_F (DatabaseTest, ReconcileStoresALoadRunsLastTickAsAPartialSummary) {
     // Nothing the tick holds only for its last second, and nothing it never
     // measured: an absent key keeps the report's older-summary reading.
     for (const char* key : { "latency", "peak_concurrency", "avg_in_flight",
-         "queue_wait_avg", "error_types", "sending_duration", "sampling",
+         "queue_wait_avg", "error_types", "error_classes", "sending_duration", "sampling",
          "connection_replays", "http_version_downgraded", "setup_overhead" }) {
         EXPECT_FALSE (summary.contains (key)) << key << " in " << summary.dump ();
     }

@@ -3547,10 +3547,17 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     // Nine of the eleven steps sent; the other two are counted as steps only.
     inputs.status_codes            = { { 200, 6 }, { 500, 2 }, { 0, 1 } };
     inputs.http_version_downgraded = 3;
+    inputs.error_classes.record (vayu::McpErrorClass::Tool, std::nullopt);
 
     auto summary = vayu::core::build_scenario_summary_payload (inputs);
     EXPECT_EQ (summary["total_requests"].get<size_t> (), 9u);
     EXPECT_EQ (summary["http_version_downgraded"].get<size_t> (), 3u);
+    // #3828: always written, `{}` when no reply failed.
+    EXPECT_EQ (summary["error_classes"], (nlohmann::json{ { "tool", 1 } }))
+    << summary.dump ();
+    EXPECT_EQ (vayu::core::build_scenario_summary_payload (
+               vayu::core::ScenarioSummaryInputs{})["error_classes"],
+    nlohmann::json::object ());
     EXPECT_EQ (summary["status_codes"],
     (nlohmann::json{ { "0", 1 }, { "200", 6 }, { "500", 2 } }))
     << summary.dump ();

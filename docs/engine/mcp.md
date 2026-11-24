@@ -673,6 +673,12 @@ Notes:
   `peakConcurrency` or `avgQueueWaitMs` is written. Both are absent
   otherwise, never false; the tool description names them, `outputSchema` says what each means, and
   a failed run's `get_run` `nextStep` points at them. The app draws the same two reports as a notice and "not recorded".
+  `summary.errorClasses` (#3828) is the run's failed `mcp` replies by class
+  (`transport`, `protocol`, `tool`, and `protocolCodes` splitting `protocol` by
+  JSON-RPC code), each key only when counted: `{}` is a run that saw none, and
+  an absent key a run stored before the engine counted them - not recorded,
+  never `0`. `outputSchema` carries that statement; the History report's Error
+  classes card draws it.
   `progress` is `elapsedMs / plannedDurationMs` clamped to 0..1 for a run whose
   stored `duration` parses and whose mode is not `iterations`, and null otherwise
   rather than a guess. The poll interval in its `nextStep`, and in the
@@ -889,6 +895,12 @@ Notes:
   is unknown, not a difference. The
   history view's vs-baseline strip renders the same list from the same
   computation (`src/lib/run-compare.ts`), so the two cannot disagree.
+  The result also carries `errorClasses` (#3828), `{transport?, protocol?,
+  tool?}` of `{base, target}` counts of the two runs' failed `mcp` replies. It
+  is `{}` unless **both** runs recorded `summary.errorClasses`: a run stored
+  before the engine counted them has no figure, which is not `0` and would
+  otherwise read as a regression. `protocolCodes` is not compared; read it on
+  `get_run_report`.
 - **Run housekeeping** (issue #755) is the History surface an agent could
   otherwise only page through: `list_runs` takes the engine's own filters
   (`type`, `status`, `outcome`, `requestId`, `collectionId`, `q` over the
@@ -1415,12 +1427,16 @@ Notes:
 - **The mock-issuer tools** let an agent asked to "test this auth flow" mint its
   own tokens: `start_mock_issuer` stands up a
   [local OAuth 2.0 issuer](api-reference.md#local-mock-issuer) and returns its
-  `issuerId`, `tokenUrl`, `authorizeUrl` and `signingKey`, so the agent can
-  point a request's `oauth2` auth at the token URL, `run_request` it, and assert
-  on what the target received - offline, with no real provider's 2FA prompts or
+  `issuerId`, `tokenUrl`, `authorizeUrl`, `metadataUrl`, `discoverUrl` and
+  `signingKey`, so the agent can point a request's `oauth2` auth at the token
+  URL (or set its `discoverUrl` to the returned one and type no endpoint),
+  `run_request` it, and assert on what the target received - offline, with no real provider's 2FA prompts or
   rate limits in the loop. `expiresInSeconds` plus `issueRefreshTokens` is how
-  the 401-then-refresh path is exercised, and `failureMode` is how retry
-  handling is. **No allowlist entry is needed and none is checked**: the engine
+  the 401-then-refresh path is exercised, `failureMode` is how retry handling is
+  (`slow`, `server_error` and `invalid_client` break `/token`;
+  `metadata_not_found`, `registration_refused` and `wrong_iss` break discovery,
+  registration and the authorize redirect's `iss`), and `resourceScope` is the
+  scope the protected resource at `discoverUrl` requires of a token. **No allowlist entry is needed and none is checked**: the engine
   binds every issuer to `127.0.0.1` and takes no host for it, so an issuer is
   unreachable off the machine; the per-tool switch is what turns these off. The
   start body is forwarded verbatim under the engine's own key names, and the
@@ -1436,8 +1452,8 @@ Notes:
   issuer, flip it to `server_error` to watch the client retry, and flip it back
   without the token URL under test moving or the signing key changing. Those two
   are the only settings a bound listener will take - the engine refuses `port`,
-  `clients`, `claims` and `issueRefreshTokens` with "stop it and start a new
-  one", so the tool does not offer them at all rather than offering a call that
+  `clients`, `claims`, `issueRefreshTokens` and `resourceScope` with "stop it
+  and start a new one", so the tool does not offer them at all rather than offering a call that
   always fails. `expiresInSeconds` is mutable engine-side and is also left out:
   a token's lifetime is fixed when it is minted, so changing it says nothing
   about the tokens an agent already holds. An empty patch is refused here rather
@@ -3494,7 +3510,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing. Each takes the session's `host` so its refusal names that host's remedy. |
 | `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a description's tokens per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
-| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
+| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. Also diffs `summary.errorClasses` (#3828) per class, and only when both reports carry it, so a run stored before it never reads as zero failures; `protocolCodes` is not compared. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |

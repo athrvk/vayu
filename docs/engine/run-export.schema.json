@@ -133,6 +133,21 @@
               "required": ["cancelled"],
               "properties": {"cancelled": {"type": "integer", "minimum": 1}}
             },
+            "errorClasses": {
+              "description": "The run's failed mcp replies by class (issue #3828): transport, protocol and tool, each present only when counted, and protocolCodes, a protocol failure's JSON-RPC error.code by code, with every code outside -32700, -32600 to -32603 and -32000 to -32099 under other. Every failed reply is counted whatever its status, so a 4xx or 5xx failure is here and not in errors.types; each is an error inside failedRequests. {} for a run in which no reply failed; absent for a run stored before it.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "transport": {"type": "integer", "minimum": 1},
+                "protocol": {"type": "integer", "minimum": 1},
+                "tool": {"type": "integer", "minimum": 1},
+                "protocolCodes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "patternProperties": {"^(-[0-9]+|other)$": {"type": "integer", "minimum": 1}}
+                }
+              }
+            },
             "errorRate": {"type": "number"},
             "totalDurationSeconds": {"type": "number"},
             "avgRps": {"type": "number"},
@@ -768,6 +783,16 @@
                   "properties": {"base": {"type": "number"}, "target": {"type": "number"}}
                 }
               }
+            },
+            "errorClasses": {
+              "description": "The mcp failure classes (issue #3828) either run counted, a class one run never counted being 0, in the order transport, protocol, tool. {} unless both runs carry summary.errorClasses: a run stored before it is not a run with zero failures. protocolCodes is not compared.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "transport": {"$ref": "#/definitions/errorClassDelta"},
+                "protocol": {"$ref": "#/definitions/errorClassDelta"},
+                "tool": {"$ref": "#/definitions/errorClassDelta"}
+              }
             }
           }
         }
@@ -796,6 +821,12 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^-?[0-9]+$": {"type": "number"}}
+    },
+    "errorClassDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "target"],
+      "properties": {"base": {"type": "number"}, "target": {"type": "number"}}
     },
     "phase": {
       "type": "object",

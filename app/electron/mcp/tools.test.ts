@@ -48,6 +48,7 @@ import { composeLoadRunRequest } from "./tools/compose.js";
 import { argumentsSchema, INPUT_REQUIRED, jsonResult, structuredResult } from "./tools/kit.js";
 import { RUN_STATUSES } from "./tools/run-housekeeping.js";
 import { classifyRunStatus, PARTIAL_REPORT_NOTE } from "./tools/run-status.js";
+import { MOCK_ISSUER_FAILURE_MODES } from "./tools/mock-issuer.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
 import {
@@ -68,6 +69,7 @@ import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { describeImport, describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer, withholdRowSecrets } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
+import { FAILURE_MODE_LABELS } from "@/modules/services/failure-modes";
 
 /**
  * @p tool's description as a session under @p safety lists it - the defaults,
@@ -13312,6 +13314,7 @@ describe("mock issuer tools", () => {
 			failureMode: "slow",
 			slowMs: 2000,
 			issueRefreshTokens: false,
+			resourceScope: "mcp:read mcp:write",
 		};
 		const res = await dispatchTool("start_mock_issuer", args, ctxWith(client));
 		expect(res.isError).toBeFalsy();
@@ -13415,10 +13418,17 @@ describe("mock issuer tools", () => {
 			string,
 			z.ZodType
 		>;
-		// Port, clients, claims and issueRefreshTokens cannot change under a bound
-		// listener - the engine answers "stop it and start a new one" - so they
-		// are not offered here at all.
-		for (const key of ["port", "clients", "claims", "issueRefreshTokens", "expiresInSeconds"]) {
+		// Port, clients, claims, issueRefreshTokens and resourceScope cannot change
+		// under a bound listener - the engine answers "stop it and start a new
+		// one" - so they are not offered here at all.
+		for (const key of [
+			"port",
+			"clients",
+			"claims",
+			"issueRefreshTokens",
+			"resourceScope",
+			"expiresInSeconds",
+		]) {
 			expect(shape[key], key).toBeUndefined();
 		}
 		expect(shape.failureMode.safeParse("explode").success).toBe(false);
@@ -13503,6 +13513,8 @@ describe("mock issuer tools", () => {
 		// nothing like the one the agent asked for.
 		expect(shape.failureMode.safeParse("explode").success).toBe(false);
 		expect(shape.failureMode.safeParse("invalid_client").success).toBe(true);
+		expect(shape.resourceScope.safeParse("mcp:read mcp:write").success).toBe(true);
+		expect(shape.resourceScope.safeParse(["mcp:read"]).success).toBe(false);
 		expect(shape.claims.safeParse("sub=alice").success).toBe(false);
 		expect(shape.claims.safeParse({ sub: "alice" }).success).toBe(true);
 		expect(shape.port.safeParse(70000).success).toBe(false);
@@ -13515,6 +13527,22 @@ describe("mock issuer tools", () => {
 		// Every field is optional: an issuer with no config at all is the common
 		// "I just need a token" case.
 		expect(argumentsSchema(shape).safeParse({}).success).toBe(true);
+	});
+
+	test("both tools offer exactly the failure modes the app's issuer UI names", () => {
+		// The app's labels table is a `Record` over the engine's modes, so it is the
+		// list a new mode cannot be missing from; the tools' own list is a second
+		// copy and a mode absent from it is one an agent can never select.
+		const ui = Object.keys(FAILURE_MODE_LABELS).sort();
+		expect([...MOCK_ISSUER_FAILURE_MODES].sort()).toEqual(ui);
+		for (const name of ["start_mock_issuer", "update_mock_issuer"]) {
+			const shape = TOOLS.find((t) => t.name === name)!.inputSchema as Record<
+				string,
+				z.ZodType
+			>;
+			for (const mode of ui)
+				expect(shape.failureMode.safeParse(mode).success, mode).toBe(true);
+		}
 	});
 
 	test("an agent mints a token against its own issuer, end to end", async () => {
@@ -15259,7 +15287,11 @@ describe("run status reads (#2436)", () => {
 				status: "completed",
 				endTime: 1_700_000,
 			},
-			summary: { totalRequests: 5, drainCut: { cancelled: 2 } },
+			summary: {
+				totalRequests: 5,
+				drainCut: { cancelled: 2 },
+				errorClasses: { protocol: 1, tool: 2, protocolCodes: { "-32602": 1 } },
+			},
 			warnings: [
 				{ code: "unresolved_tokens", message: "1 request sent {{token}}", count: 1 },
 			],

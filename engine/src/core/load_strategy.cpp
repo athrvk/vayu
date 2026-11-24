@@ -314,6 +314,13 @@ const ResultAnnotations& annotations) {
     if (const auto completion = stream_completion_of (response)) {
         context->metrics_collector->record_stream_completion (*completion);
     }
+    // Before the split too (#3828): a failed `mcp` reply is counted by class
+    // whichever branch records it, a transfer error or a 4xx/5xx included.
+    if (const auto& reply = response.mcp_reply) {
+        if (const auto& error_class = reply->error_class) {
+            context->metrics_collector->record_mcp_failure (*error_class, reply->code);
+        }
+    }
 
     if (response.has_error ()) {
         record_failed_response (context, response, annotations);

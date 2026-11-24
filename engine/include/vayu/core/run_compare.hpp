@@ -57,7 +57,7 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
 
 /**
  * @p target against @p base, both `GET /runs/:id/report` bodies:
- * `{differences, deltas, statusCodes}`.
+ * `{differences, deltas, statusCodes, errorClasses}`.
  *
  * - `differences[]`: `{field, base, target}`, every way the two runs were not
  *   the same experiment, in `compareReports`' `comparability` order
@@ -74,6 +74,12 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
  *   judged per report. `pctChange` is `null` against a zero base.
  * - `statusCodes`: `{code: {base, target}}` over both runs' codes, a code one
  *   run never saw counting 0.
+ * - `errorClasses`: `{class: {base, target}}` over the `transport`, `protocol`
+ *   and `tool` classes either run's `summary.errorClasses` counted (#3828), a
+ *   class one run never counted being 0. `{}` unless *both* reports carry
+ *   `summary.errorClasses` as an object: a run stored before the engine
+ *   counted them has no figure, and reading it as 0 would show a regression
+ *   that never happened. `protocolCodes` is not compared.
  */
 [[nodiscard]] nlohmann::ordered_json
 compare_run_reports (const nlohmann::json& base, const nlohmann::json& target);

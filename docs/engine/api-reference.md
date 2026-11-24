@@ -1004,6 +1004,20 @@ the trace the run keeps for that completion (a status exemplar, a sampled or a
 slow result), which carries the same `mcp` node, so a `-32022` refusal or a
 legacy-era `400` still reads as one.
 
+**Every run counts its failed replies by class** (issue #3828), whatever their
+status, a failed transfer's `transport` included: the stored summary's
+`error_classes` and the report's
+[`summary.errorClasses`](#get-runsrunidreport), `{ "transport"?, "protocol"?,
+"tool"?, "protocolCodes"? }`, each class present only when counted and
+`protocolCodes` a `protocol` failure's `error.code` by code. It is therefore a
+superset of the three `mcp_*` error types: a 4xx or 5xx failure has a class and
+no error type, and a failed transfer keeps its own error type (`timeout`,
+`connection_failed`, ...) beside its `transport` class. A collection run
+counts the same, and buckets a failed reply under a 2xx or 3xx under status `0`
+as a load run does, so it is in the run's `errorRate` and its `maxErrorRatePct`
+budget on every run shape; the step's own row keeps the status the server
+sent.
+
 #### File references: `binary` bodies and file parts
 
 Two body shapes name a file on the machine running the engine. They carry a
@@ -5633,7 +5647,7 @@ breaking change bumps the integer and is noted here):
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `assertions` (the run's assertion block, #3537), `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
-| `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
+| `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes, errorClasses}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
 `statusCodes`, `errors.byStatusCode` and a tick's `status_codes` are objects,
@@ -5744,6 +5758,14 @@ answers. Its members:
   numbers are the entries' `base` values.
 - `statusCodes`: `{code: {base, target}}` over every code either run saw, a
   code one run never saw counting `0`.
+- `errorClasses`: `{class: {base, target}}` over the `transport`, `protocol`
+  and `tool` failure classes either run's
+  [`summary.errorClasses`](#get-runsrunidreport) counted (#3828), in that
+  order, a class one run never counted being `0`. It is `{}` unless **both**
+  runs carry `summary.errorClasses`: a run stored before the engine counted
+  them has no figure, and reading it as `0` would show a regression that never
+  happened. A recorded `{}` (nothing failed) is a figure and reads `0`.
+  `protocolCodes` is not compared.
 
 #### The Markdown report
 
@@ -5886,7 +5908,13 @@ The sections, in order:
     the per-type counts, whose types stop at the error store's cap; its count is
     the remainder (code 0 minus the types' sum), so the requests no type names
     are not lost and none is listed twice. With no error types at all it holds
-    the whole of code 0. The HTML report reads the same table.
+    the whole of code 0. A document whose `report.summary.errorClasses` counted
+    a class (#3828) closes the table with one `MCP transport failures`,
+    `MCP protocol failures` or `MCP tool failures` row per counted class, in
+    that order. They are the same failures seen by class, not further ones: a
+    failed reply is also under its HTTP status or its `mcp_*` type, so the rows
+    do not add up to the ones above them. Without the key, or with `{}`, there
+    are none. The HTML report reads the same table.
 12. `## Compared with <base reference>`, only when the document has a
     `comparison`: each metric's base, this run, change and a word from the
     delta's own `direction` (`improved`, `regressed`, `unchanged` for a change
@@ -8036,16 +8064,20 @@ A body that is not JSON, not an object, lacks `wwwAuthenticate`, or whose
 A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -
 no real identity provider, so no 2FA prompts, provider rate limits or
 "suspicious login" mail in the dev loop. Each issuer is an independent
-`127.0.0.1` listener serving `/token` and `/authorize`; point any OAuth 2.0
-config's `accessTokenUrl` at the `tokenUrl` it returns.
+`127.0.0.1` listener serving `/token`, `/authorize`, `/register`, its RFC 8414
+metadata and a protected resource (#3794); point any OAuth 2.0 config's
+`accessTokenUrl` at the `tokenUrl` it returns, or an MCP server's OAuth
+discovery at its `discoverUrl`.
 
-It is **not an IdP**. JWKS/RS256, OIDC discovery documents, token introspection,
-consent screens and multi-tenant realms are deliberate non-goals.
+It is **not an IdP**. It serves RFC 8414 authorization server metadata and RFC
+9728 protected resource metadata, but not the OIDC `openid-configuration`
+document; JWKS/RS256, token introspection, consent screens and multi-tenant
+realms are deliberate non-goals.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /mock-issuer/start` | Start one → `{issuerId, issuerUrl, tokenUrl, authorizeUrl, signingKey}` |
-| `GET /mock-issuer` | List the running issuers |
+| `POST /mock-issuer/start` | Start one → `{issuerId, issuerUrl, tokenUrl, authorizeUrl, metadataUrl, discoverUrl, signingKey}` |
+| `GET /mock-issuer` | List the running issuers → `{issuers: [{issuerId, issuerUrl, tokenUrl, authorizeUrl, metadataUrl, discoverUrl, signingKey, port, expiresInSeconds, failureMode, slowMs, issueRefreshTokens, resourceScope, clientCount, createdAt}]}`; the `PUT` answers one such object |
 | `PUT /mock-issuer/:id` | Update `failureMode` / `slowMs` / `expiresInSeconds` live |
 | `POST /mock-issuer/:id/stop` | Stop one → `{stopped: true}` (`404` if unknown) |
 
@@ -8059,7 +8091,8 @@ consent screens and multi-tenant realms are deliberate non-goals.
   "clients": [{ "clientId": "cid", "clientSecret": "s3cret" }],
   "failureMode": "none",
   "slowMs": 2000,
-  "issueRefreshTokens": true
+  "issueRefreshTokens": true,
+  "resourceScope": ""
 }
 ```
 
@@ -8069,7 +8102,12 @@ naming that listener, for the [same `SO_REUSEPORT`
 reason](#webhook-inbox) the inbox refuses one. `clients` empty accepts **any**
 client id; with clients configured, an id must be one of them and, at `/token`,
 one carrying a secret must present it (Basic header or body - both RFC 6749
-§2.3.1 placements); `/authorize` checks the id only.
+§2.3.1 placements); `/authorize` checks the id only. A client `/register`
+issued is accepted beside them (below). `resourceScope` is the space-separated
+scope `/resource` requires of a token (empty, the default, requires none):
+scope tokens of RFC 6749 §3.3 (visible ASCII but `"` and `\`) joined by single
+spaces, at most 512 bytes, fixed at start like `port`, `clients`, `claims` and
+`issueRefreshTokens`.
 A field present with the wrong type or an out-of-range value is a `400`
 (`mock_issuer_invalid_config`) rather than a silent fallback to the default - a
 mock issuer running with an expiry other than the one asked for would defeat the
@@ -8087,7 +8125,59 @@ purpose. At most 8 issuers run at once (`429 mock_issuer_limit_reached`).
   steps. PKCE is verified when a `code_challenge` is present;
   `code_challenge_method` must then be `S256` (`plain` is refused rather than
   quietly accepted). An unknown client or a missing `redirect_uri` answers in
-  place rather than redirecting (RFC 6749 §4.1.2.1).
+  place rather than redirecting (RFC 6749 §4.1.2.1). The redirect also carries
+  `iss`, the `issuerUrl` (RFC 9207); it answers no error by redirect, so no
+  error redirect needs one.
+- `POST /register` - RFC 7591 dynamic client registration, open (no
+  credential). The JSON body's `redirect_uris` must be a non-empty array of at
+  most 8 absolute URIs (a scheme, then `:`; no fragment, space or control
+  byte; at most 2048 bytes each), else `400 invalid_redirect_uri`; a body that
+  is not a JSON object is `400 invalid_client_metadata`. Answers `201
+  {client_id, client_id_issued_at, redirect_uris, token_endpoint_auth_method:
+  "none", grant_types: ["authorization_code", "refresh_token"],
+  response_types: ["code"]}` with no `client_secret`: every registered client
+  is public, whatever the request asked for. `/authorize` then requires a
+  registered client's `redirect_uri` to equal one it registered exactly (else
+  `400`, answered in place) and a PKCE `code_challenge`; `/token` takes its id
+  with no secret for those two grants and answers any other
+  `400 unauthorized_client`. An issuer keeps its 64 newest registrations: the
+  65th forgets the oldest, and from then on that `client_id` is any other id
+  the issuer was not given. With `clients` configured that is `400
+  invalid_client`; with none, it is accepted like any id, so `/authorize`
+  takes any `redirect_uri` and no PKCE for it and `/token` takes it for every
+  grant.
+- `GET /.well-known/oauth-authorization-server` - RFC 8414 metadata at the
+  `metadataUrl`: `issuer` (the `issuerUrl` byte for byte, no trailing `/`),
+  `authorization_endpoint`, `token_endpoint`, `registration_endpoint`,
+  `response_types_supported: ["code"]`, `grant_types_supported`,
+  `code_challenge_methods_supported: ["S256"]`,
+  `token_endpoint_auth_methods_supported` (`client_secret_basic`,
+  `client_secret_post`, `none`) and
+  `authorization_response_iss_parameter_supported: true`.
+- `GET /resource` - a protected resource, the `discoverUrl`. No bearer token
+  is `401` with `WWW-Authenticate: Bearer resource_metadata="<issuerUrl>/.well-known/oauth-protected-resource"`
+  (plus `scope="<resourceScope>"` when one is set); a token that is not an
+  unexpired HS256 JWT signed with this issuer's `signingKey` is the same `401`
+  with `error="invalid_token"` first; a good token whose `scope` lacks a word of
+  `resourceScope` is `403` with `Bearer error="insufficient_scope",
+  scope="<resourceScope>", resource_metadata="..."`; otherwise `200
+  {resource, scope}`.
+- `GET /.well-known/oauth-protected-resource` and
+  `GET /.well-known/oauth-protected-resource/resource` - RFC 9728 metadata for
+  it, at both section 3.1 locations (the second inserts the resource's path,
+  the form a strict client probes): `{resource: "<issuerUrl>/resource",
+  authorization_servers: ["<issuerUrl>"], bearer_methods_supported:
+  ["header"]}`.
+
+**MCP OAuth discovery against the mock.** Discovery accepts a protected
+resource only for a server URL it covers (same origin, its path a prefix), so
+the URL to enter as an MCP server's `discoverUrl` is the issuer's own
+`discoverUrl` (`<issuerUrl>/resource`), which both `POST /mock-issuer/start`
+and `GET /mock-issuer` return. Its unauthenticated `401` names the metadata,
+that names the issuer, and the issuer's metadata names the endpoints and
+registration, so a discovered sign-in completes with nothing else configured.
+Both URLs are loopback, so the rule that refuses a loopback endpoint named by a
+server that is not on this machine does not apply.
 
 The access token is an **HS256 JWT** signed with the per-issuer `signingKey` the
 start call returned - hand that key to the service under test as its shared
@@ -8097,18 +8187,24 @@ describe the token being issued), with `sub`, `client_id` and `scope` filled in
 only when the claims did not set them.
 
 `failureMode` is what makes retry and error handling testable, and can be
-flipped on a **running** issuer with the `PUT`:
+flipped on a **running** issuer with the `PUT`. Each mode changes one route;
+every other route answers normally (`slow` and `server_error` slow or fail
+`/token` only, never the metadata, registration or resource routes):
 
-| Mode | `/token` answers |
-|------|------------------|
-| `none` | Normally |
-| `slow` | Normally, after `slowMs` (at once when the issuer stops first) |
-| `server_error` | `500 {"error": "temporarily_unavailable"}` |
-| `invalid_client` | `401 {"error": "invalid_client"}` |
+| Mode | What changes |
+|------|--------------|
+| `none` | Nothing |
+| `slow` | `/token` answers normally, after `slowMs` (at once when the issuer stops first) |
+| `server_error` | `/token` answers `500 {"error": "temporarily_unavailable"}` |
+| `invalid_client` | `/token` answers `401 {"error": "invalid_client"}` |
+| `metadata_not_found` | `GET /.well-known/oauth-authorization-server` answers `404`, so discovery fails with `oauth_discovery_authorization_server_metadata_not_found` |
+| `registration_refused` | `POST /register` answers `400 {"error": "invalid_client_metadata"}` |
+| `wrong_iss` | The `/authorize` redirect's `iss` is `<issuerUrl>/other`, which a discovered sign-in refuses (RFC 9207) |
 
 Issuers bind `127.0.0.1` only - never configurable, because they mint bearer
 tokens and the engine has no route auth. State is in-memory: a restart forgets
-every issuer, and stopping one drops its codes and refresh tokens with it.
+every issuer, and stopping one drops its codes, refresh tokens and registered
+clients with it.
 
 ## Execution
 
@@ -12484,7 +12580,10 @@ keep-alive connection rather than the negative value it used to store.
 A load run counts a request as an **error** when its response status is outside
 2xx/3xx, or when it got no response at all - a transport failure (a timeout, a
 refused connection, a DNS or TLS failure), recorded under status code `0`. A
-3xx is a success. The count is derived from the run's status-code distribution
+3xx is a success, except an `mcp` request's reply that failed under one (a
+JSON-RPC `error` or a tool's `isError`), which is recorded under `0` too and
+counted by class in `summary.errorClasses` (issue #3828,
+[The `mcp` reply](#the-mcp-reply)). The count is derived from the run's status-code distribution
 (`vayu::count_status_failures`, issue #2124), so every surface reports the
 same number: the live tick's `totalErrors` / `errorRate`, the stored tick's
 `requests_failed` / `error_rate`, the stop response's `summary.errors` /
@@ -14241,7 +14340,8 @@ are HTTP-only, the same rule a failed assertion follows
     "httpVersionDowngraded": 0,
     "connectionReplays": 0,
     "sendingDurationSeconds": 60.0,
-    "completedWhileSending": 5990
+    "completedWhileSending": 5990,
+    "errorClasses": {}
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
@@ -14963,6 +15063,22 @@ stored summary records it (the status-code distribution never held them).
 cut the drain of a run that ended on its own: the part of `cancelledRequests`
 still unanswered when the drain was stopped, which keeps the run's verdict
 [not judged](#post-exportrun-report) unless a budget already failed it.
+
+`summary.errorClasses` (issue #3828) is the run's failed `mcp` replies by
+class, `{ "transport"?, "protocol"?, "tool"?, "protocolCodes"? }`, for example
+`{ "tool": 20, "protocol": 10, "transport": 5, "protocolCodes": { "-32602": 10 } }`.
+A class is present only when counted, so a run in which no reply failed (every
+run whose requests are not `mcp`) reads `{}`. `protocolCodes` counts a
+`protocol` failure's JSON-RPC `error.code`: each of `-32700`, `-32600` to
+`-32603` and `-32000` to `-32099` by its code, any other under `"other"`, and a
+JSON-RPC error with no integer code in `protocol` and none of them. Every
+failed reply is counted whatever its status, so each is an error inside
+`failedRequests` and `errorRate`, and the classes are a superset of
+`errors.types`' `mcp_*` names, which leave out a failure under a 4xx or 5xx
+([The `mcp` reply](#the-mcp-reply)). **Absent and `{}` are different answers**:
+absent is a run stored before the count existed, or one reported from its
+sampled results. A partial report of a running load run reads it from the live
+counter, and a collection run carries it too.
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load

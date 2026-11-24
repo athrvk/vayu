@@ -45,6 +45,7 @@ import { TIMING } from "@/config/timing";
 import { useHeldValue } from "@/hooks/useHeldValue";
 import {
 	ResponseBody as SharedResponseBody,
+	McpResultView,
 	ResponseStatusBar,
 	ResponseActions,
 	ResponseHeadersPanel,
@@ -873,6 +874,20 @@ export default function ResponseViewer() {
 										from the next Send.
 									</Callout>
 								</div>
+							)}
+							{/*
+							 * An MCP tool result drawn above the raw reply, which keeps the
+							 * rest of the height. Only the builder knows the request is MCP
+							 * (`bodyMode`); History and the Console mount the body pane
+							 * without it.
+							 */}
+							{request.bodyMode === "mcp" && (
+								<McpResultView
+									body={shown.body}
+									bodyRaw={shown.bodyRaw}
+									rawBytes={shown.rawBytes}
+									incomplete={shown.bodyCapped || shown.bodyTruncated}
+								/>
 							)}
 							<div className="flex-1 min-h-0">
 								<SharedResponseBody

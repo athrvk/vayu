@@ -38,6 +38,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/db/database.hpp"
@@ -539,14 +540,33 @@ TEST (McpReplyLoadTally, AFailureUnderASuccessStatusIsAnErrorOfItsClass) {
     const auto record = json::parse (errors.front ().trace_data);
     EXPECT_EQ (record["error_type"], "mcp_tool");
     EXPECT_EQ (record["mcp"]["errorClass"], "tool") << record.dump ();
+    EXPECT_EQ (context->metrics_collector->error_class_counts ().to_json (),
+    json ({ { "tool", 1 } }));
 }
 
-// One under a 400 is already an error by its status and is counted once, there;
-// the trace the run keeps for it names the cause. Mutation check: drop the
-// `stamp_mcp_failure` call in `record_successful_response` and every case
-// loses its `mcp` node.
+// A failed transfer is an error by its own type, and its reply's class is
+// counted beside it (#3828), not instead of it.
+TEST (McpReplyLoadTally, AFailedTransferKeepsItsErrorTypeAndCountsAsTransport) {
+    Response refused;
+    refused.error_code    = ErrorCode::ConnectionFailed;
+    refused.error_message = "Connection refused";
+    attach_mcp_reply (mcp_request (), refused);
+    const auto context  = handled (refused);
+    const auto& metrics = *context->metrics_collector;
+    EXPECT_EQ (metrics.total_errors (), 1u);
+    EXPECT_EQ (metrics.error_type_counts (),
+    (std::map<std::string, size_t>{ { "connection_failed", 1 } }));
+    EXPECT_EQ (metrics.error_class_counts ().to_json (), json ({ { "transport", 1 } }));
+}
+
+// One under a 4xx or 5xx is already an error by its status and is counted
+// once, there; the trace the run keeps for it names the cause, and its class
+// is counted (#3828), the one place a reader finds it in the summary.
+// Mutation check: drop the `stamp_mcp_failure` call in
+// `record_successful_response` and every case loses its `mcp` node.
 TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTrace) {
     struct StatusFailure {
+        int status;
         std::string content_type;
         std::string body;
         std::string error_class;
@@ -554,15 +574,17 @@ TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTr
         std::string message_part;
     };
     const std::vector<StatusFailure> cases = {
-        { "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch"}})",
+        { 400, "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch"}})",
         "protocol", -32020, "Header mismatch" },
-        { "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported","data":{"supported":["2025-11-25"]}}})",
+        { 400, "application/json", R"({"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported","data":{"supported":["2025-11-25"]}}})",
         "protocol", -32022, "server supports 2025-11-25; this request is" },
-        { "text/plain", "Bad Request: No valid session ID provided",
+        { 400, "text/plain", "Bad Request: No valid session ID provided",
         "transport", std::nullopt, "legacy-era" },
+        { 503, "text/plain", "Service Unavailable", "transport", std::nullopt,
+        "HTTP 503 with no JSON-RPC response" },
     };
     for (const auto& failure : cases) {
-        auto response = reply (400, failure.content_type, failure.body);
+        auto response = reply (failure.status, failure.content_type, failure.body);
         attach_mcp_reply (mcp_request (), response);
         const auto context  = handled (response);
         const auto& metrics = *context->metrics_collector;
@@ -570,8 +592,13 @@ TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTr
         EXPECT_TRUE (metrics.error_type_counts ().empty ()) << failure.body;
         EXPECT_TRUE (metrics.errors ().empty ()) << failure.body;
         const auto distribution = metrics.status_code_distribution ();
-        EXPECT_EQ (distribution.at (400), 1u) << failure.body;
+        EXPECT_EQ (distribution.at (failure.status), 1u) << failure.body;
         EXPECT_EQ (distribution.count (0), 0u) << failure.body;
+        json classes = { { failure.error_class, 1 } };
+        if (failure.code) {
+            classes["protocolCodes"] = { { std::to_string (*failure.code), 1 } };
+        }
+        EXPECT_EQ (metrics.error_class_counts ().to_json (), classes) << failure.body;
 
         const auto& kept = metrics.exemplar_results ();
         ASSERT_EQ (kept.size (), 1u) << failure.body;
@@ -587,6 +614,34 @@ TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTr
         EXPECT_NE (mcp.value ("message", "").find (failure.message_part), std::string::npos)
         << trace.dump ();
     }
+}
+
+// A server chooses the code, so it is counted into a fixed slot and never used
+// as a key: the reserved codes and the server band each by code, anything else
+// under `other`, and a code is counted only for the class that carries one.
+TEST (McpErrorCounts, AProtocolFailuresCodeIsCountedInItsSlotAndAnyOtherUnderOther) {
+    core::McpErrorCounts counts;
+    for (const std::int64_t code : { -32700, -32600, -32603, -32000, -32020, -32099 }) {
+        counts.record (McpErrorClass::Protocol, code);
+    }
+    for (const std::int64_t code : { -32100, -32604, -1, 0, 7 }) {
+        counts.record (McpErrorClass::Protocol, code);
+    }
+    counts.record (McpErrorClass::Protocol, std::nullopt);
+    counts.record (McpErrorClass::Tool, -32602);
+    counts.record (McpErrorClass::Transport, std::nullopt);
+    EXPECT_EQ (counts.to_json (), json::parse (R"({"protocol":12,"tool":1,"transport":1,
+        "protocolCodes":{"-32700":1,"-32600":1,"-32603":1,"-32000":1,"-32020":1,
+        "-32099":1,"other":5}})"));
+    EXPECT_EQ (core::McpErrorCounts{}.to_json (), json::object ());
+
+    // The collector keeps the same table.
+    core::MetricsCollector collector ("test-mcp-codes");
+    collector.record_mcp_failure (McpErrorClass::Protocol, -32602);
+    collector.record_mcp_failure (McpErrorClass::Protocol, 123);
+    collector.record_mcp_failure (McpErrorClass::Tool, -32602);
+    EXPECT_EQ (collector.error_class_counts ().to_json (),
+    json::parse (R"({"protocol":2,"tool":1,"protocolCodes":{"-32602":1,"other":1}})"));
 }
 
 // #3795: the scope reaches the trace a load run keeps, and the 403 is still the
@@ -1026,13 +1081,15 @@ class McpReplyRunTest : public ::testing::Test {
 
     /// The collection run's stored step rows.
     std::vector<db::Result> run_sequentially (const std::vector<json>& elements,
+    size_t iterations                   = ITERATIONS,
     const std::optional<StepSend>& send = std::nullopt) {
         auto execution = plan (elements, send.value_or (mcp_step ()));
-        execution.request.iterations = ITERATIONS;
+        execution.request.iterations = iterations;
         const json config            = { { "scenario",
         { { "source", "collection" }, { "collectionId", "col_mcp" },
-        { "iterations", ITERATIONS } } } };
+        { "iterations", iterations } } } };
         const std::string run_id = "run_mcp_sequential_" + std::to_string (++runs_);
+        last_run_id_ = run_id;
         run_row (run_id, RunType::Scenario, config);
         CookieJar jar;
         core::RunManager manager;
@@ -1048,16 +1105,18 @@ class McpReplyRunTest : public ::testing::Test {
     struct LoadOutcome {
         json summary;
         std::map<std::string, size_t> error_types;
+        core::McpErrorCounts error_classes;
     };
 
     /// A scenario load run of the plan, as `scenario_load_test.cpp` drives one.
     LoadOutcome run_scenario_load (const std::vector<json>& elements,
+    size_t iterations                   = ITERATIONS,
     const std::optional<StepSend>& send = std::nullopt) {
         const auto execution = std::make_shared<const core::ScenarioExecution> (
         plan (elements, send.value_or (mcp_step ())));
         auto context =
         std::make_shared<core::RunContext> ("test-mcp-scenario-load",
-        json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } });
+        json{ { "mode", "iterations" }, { "iterations", iterations }, { "concurrency", 1 } });
         context->scenario   = execution;
         context->event_loop = std::make_unique<EventLoop> (EventLoopConfig{});
         context->event_loop->start ();
@@ -1066,21 +1125,24 @@ class McpReplyRunTest : public ::testing::Test {
         core::execute_scenario_load (context, *db_, *execution, std::move (scopes));
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
         return LoadOutcome{ core::build_scenario_load_summary (*state, execution->plan),
-            context->metrics_collector->error_type_counts () };
+            context->metrics_collector->error_type_counts (),
+            context->metrics_collector->error_class_counts () };
     }
 
     /// A single-request load run of the fixture's call with @p elements as its
     /// `requestElements`, through `RunManager`; its stored summary. @p payload
     /// replaces the call, when set.
     json run_single_request_load (const std::vector<json>& elements,
+    size_t iterations                  = ITERATIONS,
     const std::optional<json>& payload = std::nullopt) {
         json config = payload.value_or (mcp_payload (*server_));
         config.update (json{ { "mode", "iterations" },
-        { "iterations", ITERATIONS }, { "concurrency", 1 } });
+        { "iterations", iterations }, { "concurrency", 1 } });
         if (!elements.empty ()) {
             config["requestElements"] = elements;
         }
         const std::string run_id = "run_mcp_load_" + std::to_string (++runs_);
+        last_run_id_             = run_id;
         last_load_run_id_        = run_id;
         run_row (run_id, RunType::Load, config);
         core::RunManager manager;
@@ -1097,11 +1159,40 @@ class McpReplyRunTest : public ::testing::Test {
         return json::parse (stored->summary);
     }
 
+    /// `GET /runs/:id/report`'s body for the last run a driver stored.
+    json last_report () {
+        auto [status, body] = routes::run_report_response (*db_, last_run_id_);
+        EXPECT_EQ (status, 200) << body.dump ();
+        return body;
+    }
+
     std::unique_ptr<db::Database> db_;
     std::unique_ptr<McpFixtureServer> server_;
     size_t runs_ = 0;
+    std::string last_run_id_;
     std::string last_load_run_id_;
 };
+
+/// Forty calls: four answer `isError`, two a JSON-RPC `-32602` under a 200 and
+/// one a legacy-era `400` (a transport failure under a 4xx), the rest succeed.
+std::vector<McpReplyOutcome> mixed_turns () {
+    std::vector<McpReplyOutcome> turns (40, McpReplyOutcome::Result);
+    for (const size_t call : { 3U, 13U, 23U, 33U }) {
+        turns.at (call) = McpReplyOutcome::ToolError;
+    }
+    for (const size_t call : { 7U, 27U }) {
+        turns.at (call) = McpReplyOutcome::RpcError;
+    }
+    turns.at (19) = McpReplyOutcome::LegacyBadRequest;
+    return turns;
+}
+
+/// What @p turns calls of `mixed_turns` count as, per class.
+json mixed_classes (size_t calls) {
+    const size_t cycles = calls / 40;
+    return json{ { "tool", 4 * cycles }, { "protocol", 2 * cycles },
+        { "transport", cycles }, { "protocolCodes", { { "-32602", 2 * cycles } } } };
+}
 
 /// The `passed` count a load summary's element row for @p id reports.
 size_t element_passed (const json& rows, const std::string& id) {
@@ -1211,7 +1302,7 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseFailsACollectionRunsStep) 
     for (const auto& ending : stream_endings ()) {
         server_->reply_with (ending.shape);
         for (const bool as_mcp : { true, false }) {
-            const auto rows = run_sequentially ({},
+            const auto rows = run_sequentially ({}, ITERATIONS,
             StepSend{ as_mcp ? mcp_payload (*server_) : plain_payload (*server_),
             bounds_of (ending) });
             ASSERT_EQ (rows.size (), ITERATIONS) << ending.end_reason;
@@ -1236,7 +1327,7 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsAScenarioLoadStepsError)
     for (const auto& ending : stream_endings ()) {
         server_->reply_with (ending.shape);
         for (const bool as_mcp : { true, false }) {
-            auto load = run_scenario_load ({},
+            auto load = run_scenario_load ({}, ITERATIONS,
             StepSend{ as_mcp ? mcp_payload (*server_) : plain_payload (*server_),
             bounds_of (ending) });
             if (as_mcp) {
@@ -1263,7 +1354,7 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsASingleRequestLoadRunsTr
             const json payload =
             as_mcp ? mcp_payload (*server_) : plain_payload (*server_);
             auto summary = run_single_request_load (
-            {}, std::optional<json>{ streaming (payload, ending) });
+            {}, ITERATIONS, std::optional<json>{ streaming (payload, ending) });
             EXPECT_EQ (summary["stream"]["completions"], ITERATIONS)
             << ending.end_reason << ": " << summary.dump ();
             EXPECT_EQ (summary["stream"]["capped"], ending.capped ? ITERATIONS : 0)
@@ -1278,6 +1369,63 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsASingleRequestLoadRunsTr
             }
         }
     }
+}
+
+// The run summary counts every failed reply by class (#3828), and each is an
+// error of the run: 35 of 200 calls, a 400's transport failure among them.
+// Mutation check: drop the `record_mcp_failure` call in `handle_result` and
+// `error_classes` reads `{}` here and in the scenario load case below.
+TEST_F (McpReplyRunTest, ASingleRequestLoadRunCountsItsFailedRepliesByClass) {
+    constexpr size_t CALLS = 200;
+    server_->reply_in_turn (McpReplyShape::Json, mixed_turns ());
+    auto summary = run_single_request_load ({}, CALLS);
+
+    EXPECT_EQ (summary["error_classes"], mixed_classes (CALLS)) << summary.dump ();
+    // The superset: a failure under the 400 has a class and no error type.
+    EXPECT_EQ (summary["error_types"],
+    json ({ { "mcp_tool", 20 }, { "mcp_protocol", 10 } }))
+    << summary.dump ();
+    EXPECT_EQ (summary["status_codes"],
+    json ({ { "0", 30 }, { "200", 165 }, { "400", 5 } }))
+    << summary.dump ();
+
+    auto report = last_report ();
+    EXPECT_EQ (report["summary"]["errorClasses"], mixed_classes (CALLS))
+    << report.dump ();
+    EXPECT_EQ (report["summary"]["totalRequests"], CALLS);
+    EXPECT_EQ (report["summary"]["failedRequests"], 35);
+    EXPECT_DOUBLE_EQ (report["summary"]["errorRate"].get<double> (), 17.5);
+}
+
+TEST_F (McpReplyRunTest, AScenarioLoadRunCountsItsFailedRepliesByClass) {
+    constexpr size_t CALLS = 40;
+    server_->reply_in_turn (McpReplyShape::EventStream, mixed_turns ());
+    const auto load = run_scenario_load ({}, CALLS);
+    EXPECT_EQ (load.error_classes.to_json (), mixed_classes (CALLS));
+}
+
+// A collection run counts the classes its own way, and a failure under a 200
+// goes under status 0 as on the load path, so its error rate counts it.
+// Mutation check: drop the `0` bucket in `tally_sent_step` and the error rate
+// reads 1 of 40; drop its `error_classes.record` and the classes read `{}`.
+TEST_F (McpReplyRunTest, ACollectionRunCountsItsFailedRepliesByClassAsErrors) {
+    constexpr size_t CALLS = 40;
+    server_->reply_in_turn (McpReplyShape::Json, mixed_turns ());
+    const auto rows = run_sequentially ({}, CALLS);
+    ASSERT_EQ (rows.size (), CALLS);
+
+    const auto stored = db_->get_run (last_run_id_);
+    ASSERT_HAS_VALUE (stored);
+    auto summary = json::parse (stored->summary);
+    EXPECT_EQ (summary["error_classes"], mixed_classes (CALLS)) << summary.dump ();
+    EXPECT_EQ (summary["status_codes"], json ({ { "0", 6 }, { "200", 33 }, { "400", 1 } }))
+    << summary.dump ();
+
+    auto report = last_report ();
+    EXPECT_EQ (report["summary"]["errorClasses"], mixed_classes (CALLS))
+    << report.dump ();
+    EXPECT_EQ (report["summary"]["failedRequests"], 7);
+    EXPECT_DOUBLE_EQ (report["summary"]["errorRate"].get<double> (), 17.5);
 }
 
 // #3795: a run of a refused call names the scope on what it keeps, counts the

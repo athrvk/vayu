@@ -153,7 +153,7 @@ export const PROMPTS: McpPromptDef[] = [
 			return {
 				messages: [
 					userText(
-						"Diagnose the errors in this Vayu run. Identify which status codes / error types " +
+						"Diagnose the errors in this Vayu run. Identify which status codes / error types / mcp failure classes (summary.errorClasses) " +
 							"dominate, whether failures correlate with load (latency climbing toward saturation), " +
 							`and suggest likely causes and the next checks to run. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report)}`
 					),

@@ -3465,6 +3465,15 @@ export interface RunAssertions {
 	teardownFailed?: number;
 }
 
+/** `RunReport.summary.errorClasses` (#3828): each class only when the run counted one. */
+export interface ErrorClassCounts {
+	transport?: number;
+	protocol?: number;
+	tool?: number;
+	/** `protocol` split by JSON-RPC `error.code`; `"other"` for a code outside the reserved and server bands. */
+	protocolCodes?: Record<string, number>;
+}
+
 export interface RunReport {
 	/**
 	 * What this run did not do (issue #1503): a request sent with an
@@ -3725,6 +3734,20 @@ export interface RunReport {
 		 * still in flight.
 		 */
 		summaryMissing?: boolean;
+		/**
+		 * The run's failed `mcp` replies by class (#3828): `transport` (no
+		 * reply), `protocol` (a JSON-RPC error) and `tool` (a tool result with
+		 * `isError`), each key only when counted. `protocolCodes` splits
+		 * `protocol` by the JSON-RPC `error.code` (`"-32602"`), codes outside the
+		 * reserved and server bands under `"other"`; a protocol error with no
+		 * integer code is in `protocol` and no code, so the codes can sum below it.
+		 *
+		 * Three states, which are not one: `{}` is a run that counted and saw no
+		 * failed reply (every non-`mcp` run), counts are the failures, and an
+		 * absent key is a run stored before the engine counted them - "not
+		 * recorded", never 0.
+		 */
+		errorClasses?: ErrorClassCounts;
 	};
 	/**
 	 * Absent for a run whose latency was never recorded: one with
