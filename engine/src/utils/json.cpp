@@ -6,7 +6,6 @@
  */
 
 /**
- * @file utils/json.cpp
  * @brief JSON utilities implementation
  */
 
@@ -1015,8 +1014,6 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
     if (entry == body_json.end () || entry->is_null ()) {
         if (is_form) {
             // The mode says the content is a field list and there is none.
-            // Before this was an error the request went out with an empty
-            // body, which is the same wrongness without the message.
             return Error{ ErrorCode::InternalError,
                 "Body mode 'x-www-form-urlencoded'/'form-data' requires a "
                 "'fields' array" };

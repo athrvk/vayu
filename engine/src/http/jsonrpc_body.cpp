@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/jsonrpc_body.cpp
  * @brief The JSON-RPC 2.0 call envelope. See `vayu/http/jsonrpc_body.hpp` for
  *        why the engine completes it rather than each client.
  */
