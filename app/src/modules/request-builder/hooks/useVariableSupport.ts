@@ -6,30 +6,15 @@
  */
 
 /**
- * The request builder's own variable scope, in the shape the variable-aware
- * inputs take as a prop.
- *
- * `VariableInput` and `KeyValueEditor` take a `VariableSupport` rather than
- * reaching for `useRequestBuilderContext()` themselves, which throws with no
- * provider above it (#564); this is the one adapter from the context to that
- * shape, rather than a `useMemo` copied into each of the five call sites inside
- * the builder.
- *
- * Memoised on its members: the object is a prop on a `memo`-wrapped row, so a
- * fresh identity each render would re-render every row of the densest table in
- * the app on every keystroke.
- *
- * `maskSecrets` reads the secrets when it is called, not when this memo builds,
- * so the memo never holds secret text; it is rebuilt only with `getAllVariables`,
- * which is what changes when a variable does (#1810).
- *
- * Every other member is read straight off the context, `dataColumns` (the
- * declared data contract, issue #600) and `deferredVariables` (the names a
- * pre-request script sets, #2741) included. The provider resolves those from
- * the collections and the compose it already holds rather than this hook
- * querying: a token painter that reached for the query cache would need a
- * `QueryClientProvider` above every mount of `VariableInput`, which is the
- * coupling the prop removed.
+ * The builder's variable scope in the shape variable-aware inputs take as a prop. `VariableInput`
+ * and `KeyValueEditor` take a `VariableSupport` rather than call `useRequestBuilderContext()`,
+ * which throws without a provider (#564); this is the one adapter, not a `useMemo` copied into each
+ * builder call site. Memoised on its members: it is a prop on a `memo` row, and a fresh identity
+ * would re-render every row of the densest table per keystroke. `maskSecrets` reads secrets when
+ * called, so the memo never holds secret text, and is rebuilt only with `getAllVariables`, which
+ * changes with any variable (#1810). Every other member comes off the context, `dataColumns` (#600)
+ * and `deferredVariables` (#2741) included: the provider resolves them from data it holds, as a
+ * token painter querying the cache would need a `QueryClientProvider` above every `VariableInput`.
  */
 
 import { useMemo } from "react";
