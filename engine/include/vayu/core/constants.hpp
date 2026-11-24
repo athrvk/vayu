@@ -358,7 +358,7 @@ compute_spin_tail_us (int64_t remaining_us, int64_t divisor, int64_t base_us, in
 /// behavior this constant had before it became a function argument.
 ///
 /// Named unconditionally (not inside the `#if` below), alongside every other
-/// platform's parameters, so `SpinTailUs.*` in `load_strategy_test.cpp` can
+/// platform's parameters, so `SpinTailUs.*` in `load_strategy_pacing_test.cpp` can
 /// exercise every platform's tail shape - through `detail::compute_spin_tail_us`
 /// directly - on whichever single platform actually built this translation
 /// unit.

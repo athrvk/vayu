@@ -124,11 +124,18 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   because that file is a `sanitizers.yml` trigger path (#970).
 - **A suite that outgrows one file keeps its name** and moves its fixture to a
   header (`script_engine_fixture.hpp`, `runs_route_fixture.hpp`,
-  `database_fixture.hpp`; cases in `script_engine_*_test.cpp` and kin, #3852).
+  `database_fixture.hpp`, `scenario_load_fixture.hpp`,
+  `scenario_runner_fixture.hpp`, `load_strategy_fixture.hpp`,
+  `sse_stream_fixture.hpp`; cases in `script_engine_*_test.cpp` and kin, #3852).
+  A suite of plain `TEST`s (`import_parse*_test.cpp`, `run_manager*_test.cpp`)
+  needs no fixture class, only a helper header.
   The suite name is what `vayu_scratch_database_suites`, ctest regexes and
   `--gtest_filter` key on, so a rename makes them silently stop matching. A
   helper two files read goes in that header; the fixture class stays out of an
   anonymous namespace (gtest refuses a suite whose `TEST_F`s name different classes).
+  Give each header a namespace of its own (`vayu::tests::scenario_load`): in one
+  shared namespace two headers' `ScenarioMockServer` or `TEST_DB_PATH` fold into one
+  definition with no linker error, and the cases run against the other file's class.
 - **A test waits on a condition with `vayu::tests::wait_until`**
   (`tests/wait_until.hpp`), never on a `sleep_for` followed by an assertion; its
   20s deadline only bounds how long a broken build takes to report, under the
