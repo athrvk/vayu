@@ -7,7 +7,7 @@
 
 /**
  * Text beside an icon is `cap-centred` (#1830, "Type Scale Conventions" in
- * docs/design-system.md). An `items-center` row centres a label's line box,
+ * docs/design-system/typography.md). An `items-center` row centres a label's line box,
  * and Space Grotesk's caps sit 0.57px above that centre at 13px, so every
  * chevron beside them read low; a rename field's text, centred by its own
  * rules, jumped a pixel as the label gave way to it. Three lucide glyphs are

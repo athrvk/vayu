@@ -45,7 +45,7 @@
       "long_lines": 1
     },
     "docs/app/COMPONENTS/ui-primitives.md": {
-      "max_line": 878,
+      "max_line": 892,
       "long_lines": 2
     },
     "docs/app/COMPONENTS/variables-and-settings.md": {
@@ -138,12 +138,18 @@
     "docs/building.md": {
       "max_cell": 313
     },
-    "docs/design-system.md": {
-      "lines": 4754,
-      "max_line": 1764,
-      "long_lines": 25,
-      "max_cell": 1091,
-      "history": 26
+    "docs/design-system/accessibility.md": {
+      "max_line": 527,
+      "long_lines": 1,
+      "max_cell": 451
+    },
+    "docs/design-system/component-patterns.md": {
+      "max_line": 1129,
+      "long_lines": 1,
+      "max_cell": 1091
+    },
+    "docs/design-system/dialogs.md": {
+      "max_cell": 259
     },
     "docs/engine/api-reference/authentication.md": {
       "max_cell": 372

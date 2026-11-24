@@ -99,7 +99,7 @@ function FailureCallout({ monitor }: { monitor: MonitorSection }): ReactNode {
 		return (
 			/* Block-level, not field-level: this is a condition about the whole
 			   pane rather than a control refusing a value, so it is a Callout -
-			   see the three error levels in docs/design-system.md. */
+			   see the three error levels in docs/design-system/component-patterns.md. */
 			<Callout severity="blocking" title="Every scrape failed">
 				{formatNumber(monitor.failures)} of {formatNumber(total)}
 				{cause}. Nothing was recorded, so there is no chart above - check that the monitor

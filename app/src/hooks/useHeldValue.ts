@@ -47,7 +47,7 @@ export interface HeldValue<T> {
  * `layout/Dock.tsx`'s `useSaveStatusDisplay` is the same shape specialised to
  * the save store (it also floors how long "Saving…" stays up, which is its
  * own concern); this is the general form the marks use. See "Motion
- * vocabulary" in `docs/design-system.md`.
+ * vocabulary" in `docs/design-system/motion.md`.
  *
  * **`T` is a primitive on purpose.** The held value is compared with
  * `Object.is`, so an object or an element rebuilt on every render would never

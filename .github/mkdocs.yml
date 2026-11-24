@@ -168,7 +168,6 @@ nav:
       - Benchmarks: engine/benchmarks.md
   - Desktop App:
       - Overview: app/architecture.md
-      - Design System: design-system.md
       - UX Writing: ux-writing.md
       - Variables: app/variable-resolution.md
       - Data-Driven Runs: app/data-driven-runs.md
@@ -238,6 +237,27 @@ nav:
           - "Shared: Variable Input": app/COMPONENTS/shared-variable-input.md
           - UI Primitives: app/COMPONENTS/ui-primitives.md
           - Patterns and State: app/COMPONENTS/patterns.md
+      - Design System:
+          - Overview: design-system/index.md
+          - Surface, Foreground and Border Tokens: design-system/surfaces.md
+          - Accent and Status Colors: design-system/accent-and-status.md
+          - Color Schemes: design-system/color-schemes.md
+          - Chart Series and Text Colors: design-system/chart-colors.md
+          - Scope, Decorative and Method Colors: design-system/categorical-colors.md
+          - Typography: design-system/typography.md
+          - Spacing and Chrome Floors: design-system/spacing-and-floors.md
+          - Geometry: design-system/geometry.md
+          - Animations and Motion: design-system/motion.md
+          - Focus and Interaction States: design-system/focus-states.md
+          - Accessibility: design-system/accessibility.md
+          - Row Actions and Drawer Panels: design-system/rows-and-drawers.md
+          - Overflowing Text and Flex Shrink: design-system/overflow-and-shrink.md
+          - Tree Navigation: design-system/tree-navigation.md
+          - Dialog Sizes: design-system/dialogs.md
+          - Layout Structure: design-system/layout.md
+          - Component Patterns: design-system/component-patterns.md
+          - Feedback and Dashboard Components: design-system/feedback-and-dashboard.md
+          - Utilities, Editor Widgets and Scrollbars: design-system/utilities-editor-scrollbar.md
       - State Management:
           - Overview: app/state-management/index.md
           - Tabs, Layout and Session Stores: app/state-management/tabs-layout-session.md

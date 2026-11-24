@@ -261,7 +261,7 @@ export function CapacitySummary({ capacity, stepDuration, className }: CapacityS
 				 *
 				 * The colour is a tint plus a `-text` token, never the bare
 				 * `--status-*` fill as a foreground - the three-token rule
-				 * (docs/design-system.md, "Status tokens").
+				 * (docs/design-system/accent-and-status.md, "Status tokens").
 				 */}
 				<Badge
 					variant="chip"

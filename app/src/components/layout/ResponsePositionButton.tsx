@@ -26,7 +26,7 @@ import { formatChord } from "@/lib/platform";
  * moves the response pane from beside the request to below it, and back.
  *
  * The icon names the **destination**, not the current state - the rule
- * "### Pane Toggles" in `docs/design-system.md` already holds for the
+ * "### Pane Toggles" in `docs/design-system/layout.md` already holds for the
  * `PanelLeft*` pair: `PanelBottom` while the response is beside ("Response
  * below"), `PanelRight` while it is below ("Response beside"). A glyph
  * showing the current arrangement would read as a status, and this strip has

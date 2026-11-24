@@ -134,12 +134,12 @@ function EngineStatus() {
 
 	/*
 	 * `status-success-text`: not the general `success-text`, and not the bare
-	 * `status-success`. A connection light is precisely what design-system.md
+	 * `status-success`. A connection light is precisely what design-system/accent-and-status.md
 	 * means by "Run, connection, and test status", so it belongs to the
 	 * `--status-*` family - the family a reader greps to find every status
 	 * surface. The comment this replaces rejected the *bare* token, which is the
 	 * right rejection and the wrong conclusion: as 12px text `status-success`
-	 * measures 2.21:1 on --panel (design-system.md's own figure, reproduced), and
+	 * measures 2.21:1 on --panel (design-system/accent-and-status.md's own figure, reproduced), and
 	 * the family's answer to that is its `-text` pair, not a different family.
 	 *
 	 * Measured on --panel, the Dock's own surface, in both themes: 5.43:1 light

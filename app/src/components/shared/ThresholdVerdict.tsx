@@ -147,7 +147,7 @@ export function ThresholdVerdict({
 				 * Text on a tint, never the bare fill as a foreground:
 				 * `--status-*` is an indicator token and fails contrast as a
 				 * label, so the three-token rule sends the word to `-text`
-				 * (docs/design-system.md, "Status tokens").
+				 * (docs/design-system/accent-and-status.md, "Status tokens").
 				 */}
 				<Badge
 					variant="chip"

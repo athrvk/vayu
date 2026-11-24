@@ -31,7 +31,7 @@
 import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { describe, it, expect } from "vitest";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, MONO_FONTS, UI_FONTS } from "./appearance";
 import { DEFAULT_EDITOR_FONT_SIZE } from "./client-settings";
 
@@ -200,8 +200,11 @@ describe("the bundled faces' x-heights", () => {
 	});
 });
 
-describe("the x-height table in docs/design-system.md", () => {
-	const doc = readFileSync(fromRepoRoot(DOC_READING_GUARDS.fontMetrics.paths[0]), "utf8");
+/** The page whose x-height table this reads. */
+const TYPOGRAPHY_PAGE = "docs/design-system/typography.md";
+
+describe("the x-height table in docs/design-system/typography.md", () => {
+	const doc = readFileSync(fromRepoRoot(TYPOGRAPHY_PAGE), "utf8");
 
 	/**
 	 * `| Face | Role | x-height ratio | at 13px | at 12px |` rows, parsed rather
@@ -220,6 +223,12 @@ describe("the x-height table in docs/design-system.md", () => {
 		.filter((cells) => cells.length === 5 && /^0\.\d+$/.test(cells[2]));
 
 	it("read the table", () => {
+		expect(
+			DOC_READING_GUARDS.fontMetrics.paths.some((entry) =>
+				entryCovers(entry, TYPOGRAPHY_PAGE)
+			),
+			`${TYPOGRAPHY_PAGE} is not routed by the registry`
+		).toBe(true);
 		expect(doc.length).toBeGreaterThan(1000);
 		// Six bundled faces plus the system-face reference row.
 		expect(rows.length).toBe(7);

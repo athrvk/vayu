@@ -192,7 +192,7 @@ export default function UrlBar() {
 					// `bg-card surface-card`, the pair. `surface-card` sets the
 					// background *and* declares the `--rule` that reads on it, but a
 					// `bg-*` utility beside it wins the cascade - so both are written,
-					// per docs/design-system.md. The separator below inherits `--rule`
+					// per docs/design-system/feedback-and-dashboard.md. The separator below inherits `--rule`
 					// from here.
 					// `min-w-[12rem]` is the field's floor (#3494): below it the Send group
 					// wraps to a second line (the row is `flex-wrap`) rather than the URL

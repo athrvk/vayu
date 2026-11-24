@@ -61,7 +61,7 @@ export function containsVariableToken(text: string | undefined | null): boolean 
  * component and a constant loses React Fast Refresh.
  *
  * `--scope-*` are real tokens, green/orange/blue in both themes, and
- * `docs/design-system.md` gives them the "icon/text solid, `/10` tint"
+ * `docs/design-system/categorical-colors.md` gives them the "icon/text solid, `/10` tint"
  * convention the classes below follow.
  */
 export const VARIABLE_SCOPE_CONFIG: Record<

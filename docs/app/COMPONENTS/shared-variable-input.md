@@ -326,7 +326,7 @@ They share **one** Tab stop between them, roving: the token holding it has
 `tabIndex={0}` and the rest `-1`, Left/Right move between them and Home/End jump
 to the ends, and whichever token takes focus keeps the stop. Without that, a URL
 with five variables put five stops between the URL and Send. It is the roving
-tabindex `design-system.md` describes for the collection tree, hand-wired rather
+tabindex `design-system/tree-navigation.md` describes for the collection tree, hand-wired rather
 than taken from the tree's machinery: `useRovingTreeFocus` navigates
 `[role="treeitem"]` and dispatches at the tree's own data attributes, so pointed
 at tokens it would silently do nothing, and `focusTreeRow` (`tree-focus.ts`)

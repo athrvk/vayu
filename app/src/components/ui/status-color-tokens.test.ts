@@ -15,7 +15,7 @@
  * clears AA as small text or a small glyph.
  *
  * Using the fill token as a foreground fails AA. The measured ratios live in
- * `docs/design-system.md` ("The bare token is the fill"), which is the one
+ * `docs/design-system/chart-colors.md` ("The bare token is the fill"), which is the one
  * record of them - every family fails at one end or the other, `destructive`
  * in dark, the three mode-consistent HTTP-status indicators (`status-warning`,
  * `status-redirect`, `status-no-response`) in both, the rest in light. That

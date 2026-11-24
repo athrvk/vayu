@@ -148,40 +148,41 @@ export const DOC_READING_GUARDS = {
 	},
 	designSystem: {
 		reader: "app/src/design-system-doc.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The second reader of that page, and the one that reads its prose: the
-	 * Type Scale Conventions table names the weight of the micro/badge step,
-	 * which the components either match or do not (#1199). `design-system-doc`
-	 * checks the page's colour *values* against `index.css` and says so - a
-	 * table cell is not a value, and neither guard covers the other's half.
+	 * The second reader of those pages, and the one that reads their prose: the
+	 * Type Scale Conventions table on `typography.md` names the weight of the
+	 * micro/badge step, which the components either match or do not (#1199).
+	 * `design-system-doc` checks the colour *values* against `index.css` and says
+	 * so - a table cell is not a value, and neither guard covers the other's
+	 * half. The directory entry routes the page.
 	 */
 	typeScale: {
 		reader: "app/src/components/ui/type-scale.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The third reader of that page, and the second of its prose (#1282): the
-	 * Accessibility section enumerates the `jsx-a11y` rules suppressed at the
-	 * line, and the guard holds that list to what `app/src` actually carries. A
-	 * site edited out of the doc alone is the drift it exists to catch, so the
-	 * page is one of its inputs in the same sense the sources are.
+	 * The third reader, and the second of the prose (#1282): `accessibility.md`
+	 * enumerates the `jsx-a11y` rules suppressed at the line, and the guard
+	 * holds that list to what `app/src` actually carries. A site edited out of
+	 * the page alone is the drift it exists to catch, so the page is one of its
+	 * inputs in the same sense the sources are.
 	 */
 	a11ySuppressions: {
 		reader: "app/src/components/a11y-suppressions.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The fourth reader of that page (#1202), and the only one that checks it
-	 * against something other than the app's own source: the x-height table in
-	 * the Typography section states what each bundled face measures, and the
-	 * guard parses the `@fontsource` files to hold the table to them. A number
-	 * edited into the page alone is the drift it exists to catch.
+	 * The fourth reader (#1202), and the only one that checks the pages against
+	 * something other than the app's own source: the x-height table on
+	 * `typography.md` states what each bundled face measures, and the guard
+	 * parses the `@fontsource` files to hold the table to them. A number edited
+	 * into the page alone is the drift it exists to catch.
 	 */
 	fontMetrics: {
 		reader: "app/src/constants/appearance.font-metrics.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",

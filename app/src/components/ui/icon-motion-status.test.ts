@@ -8,7 +8,7 @@
 /**
  * The half of the icon-motion policy that is a prohibition: **a glyph
  * conveying a state never animates** (#1683, refined by #1707;
- * docs/design-system.md under Motion).
+ * docs/design-system/motion.md under Motion).
  *
  * The other two guards are positive - `icon-motion.test.tsx` holds the
  * stylesheet to its rules, `icon-motion.call-sites.test.tsx` holds each call
@@ -46,7 +46,7 @@ const src = resolve(__dirname, "../..");
 
 /**
  * The glyphs that say "here is a state", by the name a call site imports them
- * under. Kept in step with the list in docs/design-system.md, which is the
+ * under. Kept in step with the list in docs/design-system/motion.md, which is the
  * policy; this is only its spelling.
  */
 const STATUS_ICONS = [

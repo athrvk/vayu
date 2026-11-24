@@ -71,7 +71,7 @@ Two consequences worth keeping in mind before adding anything here:
   the page the moment the queries land, which is what the skeleton exists to
   prevent. `max-w-2xl` is the widest size on the dialog scale, for the same
   reason that size exists: a surface whose work is reading and choosing.
-- Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
+- Styling follows `docs/design-system/index.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
 - **The "Open demo API" tile is a second first-run step, decided in issue
   #1694**: it is a tile rather than a strip, and on the Launcher it retires the

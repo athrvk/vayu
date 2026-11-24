@@ -118,7 +118,7 @@ describe("SettingsCategoryTree", () => {
  *
  * Two halves, and the second is the one worth keeping: a glyph *offering* an
  * action animates, and the same glyph *reporting* which panel you are on does
- * not (docs/design-system.md, Icon motion).
+ * not (docs/design-system/motion.md, Icon motion).
  */
 describe("SettingsCategoryTree - icon motion from the registries (#1707)", () => {
 	beforeEach(() => {

@@ -18,7 +18,7 @@
  * When `DEFAULT_UI_FONT` was `"inter"` all four disagreed: a fresh install
  * painted Space Grotesk from the stylesheet, then swapped to Inter the moment
  * React mounted, under a picker whose Space Grotesk option said "Default" and a
- * `docs/design-system.md` that named Space Grotesk as the UI face. Only the
+ * `docs/design-system/typography.md` that named Space Grotesk as the UI face. Only the
  * cross-file check catches that - each file alone is self-consistent.
  *
  * Read from disk rather than imported: vitest stubs a CSS import to `""`, and a

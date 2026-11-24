@@ -9,7 +9,7 @@
  * A faint band that sweeps across the pane while a re-send is in flight.
  *
  * `index.tsx`'s `busy` dim (opacity-60, no motion) is the pane's own reading
- * of the "Loading" rule in docs/design-system.md - a stale exchange stays
+ * of the "Loading" rule in docs/design-system/component-patterns.md - a stale exchange stays
  * exactly where it is and only its opacity says it is waiting. On its own that
  * read as inert rather than active: nothing there distinguishes "the new
  * response is on its way" from "the request stalled." This is deliberately

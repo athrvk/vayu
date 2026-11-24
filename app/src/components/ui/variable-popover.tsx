@@ -623,7 +623,7 @@ export function VariablePopover({
 							 * `w-72` card, so "Shopify QA - expiring tokens" rendered as
 							 * "Shopify QA - expiring…" and the popover clipped the one
 							 * fact it was opened to give. That is the shape the tooltips
-							 * already ruled out (issue #1195, `docs/design-system.md`);
+							 * already ruled out (issue #1195, `docs/design-system/color-schemes.md`);
 							 * this is the same shape one primitive over, so it takes the
 							 * same answer - the source stacks, full width, nothing
 							 * competing with it horizontally.

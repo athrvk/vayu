@@ -372,7 +372,7 @@ export default function BodyPanel() {
 		 * Source/Resolved swap keep their intrinsic height, the editor takes the
 		 * rest. `min-h-0` is what lets it take *less* than its content too - a
 		 * flex child refuses to shrink below its content without it, which is the
-		 * two-scrollbars bug in `docs/design-system.md`.
+		 * two-scrollbars bug in `docs/design-system/overflow-and-shrink.md`.
 		 */
 		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			<div className="flex items-center justify-between gap-3">

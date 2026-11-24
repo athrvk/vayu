@@ -12,7 +12,7 @@
  * the left edge with the right two-thirds empty, so the eye had to travel the
  * width of a monitor between a tile and the run list under it. It is a centred
  * column now, at the widest size on the dialog scale (`max-w-2xl`, 672px, the
- * "Browser" width in `docs/design-system.md`) - the same job as that size, a
+ * "Browser" width in `docs/design-system/dialogs.md`) - the same job as that size, a
  * surface whose work is reading and choosing.
  *
  * Declared once and shared by the three states the screen can be in - the
