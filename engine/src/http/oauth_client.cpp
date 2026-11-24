@@ -15,6 +15,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/file_ref.hpp"
+#include "vayu/http/oauth_discovery.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/jwt.hpp"
 #include "vayu/utils/logger.hpp"
@@ -193,10 +194,21 @@ struct TokenRequest {
     std::vector<std::pair<std::string, std::string>> query;
     vayu::Headers headers{ { "Content-Type", "application/x-www-form-urlencoded" },
         { "Accept", "application/json" } };
-    /// `ClientConfig::local_peer_rule` for the post: an exchange's own
-    /// (`InteractiveExchange::local_peer_rule`), none for every other grant.
-    std::optional<vayu::http::LocalPeerRule> local_peer_rule;
 };
+
+/// The connect-time rule every post to @p config's token endpoints runs under
+/// (#3800): a config discovered from a server that is not on this machine
+/// (`discoverUrl`) takes its endpoints from that server's metadata, so no
+/// grant, the long-lived refresh token included, goes to a loopback or
+/// link-local peer, whatever the endpoint's name resolves to by then. A config
+/// with no `discoverUrl` has endpoints the user typed and is held to none.
+std::optional<vayu::http::LocalPeerRule> token_peer_rule (const nlohmann::json& config) {
+    const std::string server_url = url_field (config, "discoverUrl");
+    if (server_url.empty ()) {
+        return std::nullopt;
+    }
+    return vayu::http::discovered_peer_rule (server_url);
+}
 
 // Apply client authentication per credentialsPlacement (RFC 6749 §2.3.1).
 // A public client (no secret) always sends client_id in the body.
@@ -348,7 +360,7 @@ const std::atomic<bool>* cancel) {
     vayu::http::ClientConfig client_config;
     client_config.transport       = vayu::http::resolve_transport_policy (db);
     client_config.cancel          = cancel;
-    client_config.local_peer_rule = req.local_peer_rule;
+    client_config.local_peer_rule = token_peer_rule (config);
     vayu::http::Client client (client_config);
     const auto sent_at = std::chrono::steady_clock::now ();
     auto result        = client.post (
@@ -1005,7 +1017,6 @@ TokenRequest& req) {
         if (!interactive->code_verifier.empty ()) {
             req.form.emplace_back ("code_verifier", interactive->code_verifier);
         }
-        req.local_peer_rule = interactive->local_peer_rule;
     }
     for (const char* extra : { "scope", "audience", "resource" }) {
         if (const auto value = field (config, extra); !value.empty ()) {

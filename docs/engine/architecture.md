@@ -891,9 +891,11 @@ applied to the outgoing request rather than being left to the UI. This lives in
   then appended); its `issuer` must equal the issuer it was fetched for, and
   a server whose `code_challenge_methods_supported` does not list `S256` is
   refused. A server that is not on this machine may not name a loopback or
-  link-local URL, and its fetches, its client registration and the attempt's
-  code exchange run under an empty `LocalPeerRule`, decided once by
-  `discovered_peer_rule`. Every
+  link-local URL, and its fetches, its client registration and every token
+  request of the config (the code exchange, a refresh, a headless grant) run
+  under an empty `LocalPeerRule`, decided once by `discovered_peer_rule`; the
+  token requests derive it from the config's `discoverUrl` in
+  `post_token_request` (#3800). Every
   member is type-checked, each failure carries a stable
   `oauth_discovery_*` code, and validated metadata is cached by issuer for
   five minutes. `POST /oauth2/authorize/start` calls it for a config naming

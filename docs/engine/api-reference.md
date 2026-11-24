@@ -7867,6 +7867,14 @@ name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
 proxy you configured is still used. A server on this machine may name anything
 on it.
 
+The rule follows the config, not the attempt: every token request of a config
+that still names `discoverUrl` runs under it - a refresh, `client_credentials`
+and the other headless grants, `/execute`, `/runs` and `POST /oauth2/token` -
+so the refresh token goes to no loopback or link-local peer either, whatever
+`refreshTokenUrl` resolves to after sign-in (#3800). Turning discovery off
+removes `discoverUrl` and with it the rule: the endpoints are then ones you
+typed, and a config with no `discoverUrl` is held to none.
+
 **Two known limitations of a registered client.**
 
 - A registered client is bound to the loopback redirect of the attempt that
