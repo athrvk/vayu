@@ -34,12 +34,26 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DOC_READING_GUARDS, ENGINE_READING_GUARDS, repoRoot } from "@/lib/routed-inputs.testkit";
+import {
+	DOC_READING_GUARDS,
+	ENGINE_READING_GUARDS,
+	fromRepoRoot,
+	repoRoot,
+} from "@/lib/routed-inputs.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+/** A registry entry, as the pages it names: a directory entry is every Markdown page in it. */
+function pagesOf(entry: string): string[] {
+	if (!entry.endsWith("/")) return [entry];
+	return readdirSync(fromRepoRoot(entry))
+		.filter((name) => name.endsWith(".md"))
+		.sort()
+		.map((name) => `${entry}${name}`);
+}
+
 /** The docs whose identifiers this guards, held where CI can route them. */
-const DOCS = DOC_READING_GUARDS.rendererState.paths;
+const DOCS = DOC_READING_GUARDS.rendererState.paths.flatMap(pagesOf);
 
 /**
  * Identifiers the docs name that are declared outside `app/src`, with the file
@@ -51,7 +65,7 @@ const OWNED_ELSEWHERE: Record<string, string> = {
 	// The renderer's DEFAULT_MAX_RETAINED_TICKS and this are one number in two
 	// places, and state-management.md says so - so it has to still be there.
 	DEFAULT_MAX_LIVE_TICKS: ENGINE_CONSTANTS,
-	// api-integration.md explains which libcurl constant `httpVersion: "http2"`
+	// api-integration/endpoints.md explains which libcurl constant `httpVersion: "http2"`
 	// becomes; the mapping is the engine's.
 	CURL_HTTP_VERSION_2TLS: CURL_VERSION_MAP,
 };
@@ -62,7 +76,7 @@ const OWNED_ELSEWHERE: Record<string, string> = {
  * asserted, so re-introducing one fails until it leaves this list.
  */
 const REMOVED_ON_PURPOSE = [
-	// api-integration.md: the old SSE constant, replaced by /runs/:id/live.
+	// api-integration/streaming.md: the old SSE constant, replaced by /runs/:id/live.
 	"STATS_STREAM",
 ];
 
@@ -126,8 +140,11 @@ describe("renderer state docs name real identifiers", () => {
 	it("scanned a non-empty source tree and non-empty docs", () => {
 		expect(ids.size).toBeGreaterThan(2000);
 		expect(ids.has("useSaveManager")).toBe(true);
-		for (const { path, quoted } of docs) {
-			expect(quoted.size, `${path} yielded no quoted identifiers`).toBeGreaterThan(5);
+		for (const entry of DOC_READING_GUARDS.rendererState.paths) {
+			const quoted = docs
+				.filter(({ path }) => pagesOf(entry).includes(path))
+				.reduce((count, doc) => count + doc.quoted.size, 0);
+			expect(quoted, `${entry} yielded no quoted identifiers`).toBeGreaterThan(5);
 		}
 	});
 

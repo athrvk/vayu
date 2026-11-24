@@ -187,7 +187,7 @@ export const DOC_READING_GUARDS = {
 		paths: [
 			"docs/app/state-management.md",
 			"docs/app/architecture.md",
-			"docs/app/api-integration.md",
+			"docs/app/api-integration/",
 		],
 	},
 	rowPersistence: {
