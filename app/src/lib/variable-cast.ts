@@ -6,8 +6,6 @@
  */
 
 /**
- * castByType
- *
  * Coerces a stored variable's raw string `value` into its declared type
  * (`'string' | 'number' | 'boolean' | 'json'`). The on-disk shape is always a
  * string - `type` is a UI/script hint per the data-model PRD §5.2 - so this is
