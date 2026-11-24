@@ -7,10 +7,12 @@
 
 /**
  * The response status chip, one component, as a duplicate had lost the `status === 0` branch and
- * drew a connection failure as a literal `0`, not `ERR`. `variant="chip"`, not the default: other
- * Badge variants pair `bg-x` with `hover:bg-x/80`, and `cn()`'s tailwind-merge replaces `bg-*` but
- * files `hover:bg-*` apart, so the variant's hover would repaint a green 200 with the user's
- * accent. Nothing here is clickable.
+ * drew a connection failure as a literal `0`, not `ERR`.
+ *
+ * `variant="chip"`, not the default: other Badge variants pair `bg-x` with `hover:bg-x/80`, and
+ * `cn()`'s tailwind-merge replaces `bg-*` but files `hover:bg-*` apart, so the fill would win at
+ * rest and the variant's hover under the pointer, repainting a green 200 with the user's accent.
+ * Nothing here is clickable.
  */
 
 import { Badge } from "@/components/ui";
