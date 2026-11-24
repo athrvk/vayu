@@ -200,7 +200,6 @@
     "engine/src/core/scenario_data.cpp": 1,
     "engine/src/core/scenario_load.cpp": 1,
     "engine/src/core/scenario_plan.cpp": 2,
-    "engine/src/daemon.cpp": 2,
     "engine/src/db/config_seeds/general.cpp": 3,
     "engine/src/db/config_seeds/network.cpp": 1,
     "engine/src/db/config_seeds/observability.cpp": 1,
