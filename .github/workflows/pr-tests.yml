@@ -119,6 +119,7 @@ jobs:
       scripts: ${{ steps.area.outputs.scripts }}
       repo_js: ${{ steps.area.outputs.repo_js }}
       comment_lint: ${{ steps.area.outputs.comment_lint }}
+      test_size_lint: ${{ steps.area.outputs.test_size_lint }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -444,6 +445,8 @@ jobs:
               - 'scripts/comment-diff-check.py'
               - 'scripts/test/comment_lint_test.py'
               - 'scripts/test/comment_diff_check_test.py'
+              - 'scripts/test-size-lint.py'
+              - 'scripts/test/test_size_lint_test.py'
               - 'scripts/test/vcpkg_baseline_test.py'
               # The benchmark script's mode names are read out of types.hpp.
               - 'scripts/test/bench-compare.sh'
@@ -534,6 +537,19 @@ jobs:
               - 'engine/**'
               - 'scripts/comment-lint.py'
               - 'scripts/comment-lint-ceilings.json'
+              - '.github/workflows/pr-tests.yml'
+              - '!*.md'
+              - '!**/*.md'
+            # The test files `scripts/test-size-lint.py` holds to a line cap
+            # (#3854): any file under `app/` or `engine/`, since a new test file
+            # starts at zero and a split one is smaller. The script reads the tree
+            # with git, not this list, so the list is only the trigger. The
+            # exceptions file is an input of the job.
+            test_size_lint:
+              - 'app/**'
+              - 'engine/**'
+              - 'scripts/test-size-lint.py'
+              - 'scripts/test-size-exceptions.json'
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
               - '!**/*.md'
@@ -1588,6 +1604,11 @@ jobs:
       - name: Test the comment-only token-diff checker
         run: python3 scripts/test/comment_diff_check_test.py
 
+      # The test file cap (#3854): the lint runs in `Test file size`, and this is
+      # what proves each of its rules still fires.
+      - name: Test the test-size lint
+        run: python3 scripts/test/test_size_lint_test.py
+
   # History phrasing in source comments (#3868), against per-file ceilings that
   # only go down. Python and git only, so it needs neither toolchain.
   #
@@ -1621,6 +1642,42 @@ jobs:
             args+=(--baseline "$RUNNER_TEMP/base-ceilings.json")
           fi
           python3 scripts/comment-lint.py "${args[@]}"
+
+  # Test files past the line cap (#3854), against exceptions that only shrink.
+  # Python and git only, so it needs neither toolchain. The cap is one number for
+  # app and engine tests alike, which is why this is not a test in either suite:
+  # an engine-only change would never run it from the app's.
+  #
+  # A pull request is compared with the base branch's copy of the exceptions, so
+  # it cannot raise one to make room. A base without the file (the pull request
+  # that introduced it) has nothing to hold the exceptions to, and runs without
+  # a baseline.
+  test-size-lint:
+    name: Test file size
+    runs-on: ubuntu-26.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.test_size_lint == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Hold test files to the line cap
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          args=()
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          if git cat-file -e FETCH_HEAD:scripts/test-size-exceptions.json 2>/dev/null; then
+            git show FETCH_HEAD:scripts/test-size-exceptions.json > "$RUNNER_TEMP/base-exceptions.json"
+            args+=(--baseline "$RUNNER_TEMP/base-exceptions.json")
+          fi
+          python3 scripts/test-size-lint.py "${args[@]}"
 
   # Shell and Python (#887) - the two languages nothing else in this workflow
   # reads. Both checks are seconds of work on a runner that needs neither a C++
@@ -1805,7 +1862,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, engine-format, installer, build-script, comment-lint, scripts]
+    needs: [changes, quality, app, engine, engine-format, installer, build-script, comment-lint, test-size-lint, scripts]
     # The gate grades a pull request. A push to master runs only the engine
     # build (see `on.push`), and the gate's first check - change detection
     # succeeded - would fail on the skipped `changes`.
@@ -1964,6 +2021,7 @@ jobs:
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
           check comment-lint "${{ needs['comment-lint'].result }}"
+          check test-size-lint "${{ needs['test-size-lint'].result }}"
           check scripts   "${{ needs.scripts.result }}"
 
           if [[ $status -ne 0 ]]; then
