@@ -174,7 +174,8 @@ export interface StepListFilter {
  * live row does not have, so matching it would make the box search less while
  * a run streams than it does once the run ends - a control that quietly
  * changes what it covers is worse than one that covers one field always. What
- * it matches is stated on the field itself and in `docs/app/COMPONENTS.md`.
+ * it matches is stated on the field itself and in
+ * `docs/app/COMPONENTS/history.md`.
  */
 function matchesQuery(step: ScenarioStepRow, query: string): boolean {
 	return step.name.toLowerCase().includes(query);

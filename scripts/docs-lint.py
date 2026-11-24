@@ -16,8 +16,10 @@ A page over a budget has an entry in scripts/docs-lint-ceilings.json holding the
 value it had when the entry was written, and is held to that instead. The file
 may only shrink: an entry whose page is now within budget (or gone) fails as
 stale, and with --baseline an entry that is new or higher than the baseline's
-fails. A page without an entry meets the budget. A missing description is never
-grandfathered.
+fails. A split is the one way an entry may be new: the pages a page was split
+into may together hold what its entries held (counts summed, maxima each), and
+no more. A page without an entry meets the budget. A missing description is
+never grandfathered.
 
 A reference page is one matching a glob in the file's `reference_pages`.
 
@@ -221,12 +223,52 @@ def stale_entries(pages: dict, ceilings: dict) -> list[tuple[str, str]]:
     ]
 
 
-def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
+_COUNT_METRICS = ("lines", "long_lines", "history")
+
+
+def new_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
+    """Entries for pages the baseline has none for: only a split may add them.
+
+    A split retires the entries of the page it replaces, and the pages it
+    produces may hold what they held, no more: the sum of a count (`lines`,
+    `long_lines`, `history`), and for a maximum (`max_line`, `max_cell`) each
+    page's own value. With nothing retired a new page meets the budget.
+    """
+    fresh = {p: e for p, e in ceilings["pages"].items() if p not in baseline["pages"]}
+    retired = [e for p, e in baseline["pages"].items() if p not in ceilings["pages"]]
+    if fresh and not retired:
+        return [
+            (page, "is a new ceiling; a page not in the baseline meets the budget")
+            for page in fresh
+        ]
     found = []
+    for metric in METRICS:
+        held = [entry.get(metric, 0) for entry in retired]
+        if metric in _COUNT_METRICS:
+            running = 0
+            for page, entry in fresh.items():
+                running += entry.get(metric, 0)
+                if running > sum(held):
+                    found.append(
+                        (page, f"{metric} ceilings of new pages total more than the "
+                               f"{sum(held)} the retired pages held")
+                    )
+                    break
+            continue
+        for page, entry in fresh.items():
+            if entry.get(metric, 0) > max(held, default=0):
+                found.append(
+                    (page, f"{metric} ceiling {entry[metric]} is above the {max(held, default=0)} "
+                           "the retired pages held")
+                )
+    return found
+
+
+def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
+    found = new_entries(ceilings, baseline)
     for page, entry in ceilings["pages"].items():
         base = baseline["pages"].get(page)
         if base is None:
-            found.append((page, "is a new ceiling; a page not in the baseline meets the budget"))
             continue
         for metric, value in entry.items():
             if metric not in base:

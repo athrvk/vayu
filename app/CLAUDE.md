@@ -18,7 +18,7 @@ everything.
 - Feature-organized: `app/src/modules/<feature>/` (collections, console,
   dashboard, history, inbox, logs, mock-server, palette, request-builder,
   services, settings, trash, variables, welcome); shared shell and primitives in `app/src/components/`
-  (layout, shared, ui). See `docs/app/COMPONENTS.md`.
+  (layout, shared, ui). See `docs/app/COMPONENTS/index.md`.
 - **Import holds no parser** (#877). `app/src/services/importers/` is the batch
   ledger, the temp ids and the apply; `parseImport` is one `POST /import/parse`
   call, and every format is read by `engine/src/core/import_document.cpp`. A
@@ -366,7 +366,7 @@ cannot add a response header, and `route.fetch` reads the whole body before
 | ----------------------------------- | --------------------------------------------------------------------------------- |
 | `docs/design-system.md`             | Any token value, colour rule, radius, or shared UI primitive                      |
 | `docs/ux-writing.md`                | Voice, error-message templates, terminology, or any user-facing string convention |
-| `docs/app/COMPONENTS.md`            | Adding or moving a module / shared component                                      |
+| `docs/app/COMPONENTS/`              | Adding or moving a module / shared component                                      |
 | `docs/app/architecture.md`          | Renderer-side structural decisions                                                |
 | `docs/app/state-management.md`      | Adding a store, changing query keys or cache policy                               |
 | `docs/app/api-integration.md`       | Request/response shapes the renderer sends                                        |

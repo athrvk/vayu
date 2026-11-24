@@ -180,7 +180,7 @@ The `assert.jsonschema` element itself is the engine's (`docs/engine/elements.md
 evaluate fails the assertion naming it. Its failures arrive in the response's
 Elements section as any other `assert.*` outcome does. The builder offers it in the
 Assert group, with a multi-line schema field; see the Shared ElementList section of
-`COMPONENTS.md`.
+`COMPONENTS/shared-element-list.md`.
 
 **`assert.snapshot` (#3807)** holds the items a list method answers to a recorded
 `baseline`: `method` is `tools/list` (default), `resources/list` or `prompts/list`,

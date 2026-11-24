@@ -12,8 +12,8 @@
  * bare name a bound row answers, then the generator table, then the scopes.
  * A name the engine defers past a pre-request script (#2741) comes right after
  * the reserved namespaces, ahead of the scopes: its stored value is not what is
- * sent. The order is load-bearing and documented in `docs/app/COMPONENTS.md`:
- * a scope that defines `$guid` wins and takes the editable token, while a
+ * sent. The order is load-bearing and documented in
+ * `docs/app/COMPONENTS/shared-variable-input.md`: a scope that defines `$guid` wins and takes the editable token, while a
  * variable someone named `data.email` or `$vu` answers for neither the column
  * nor the identity and must not paint as though it had.
  *
