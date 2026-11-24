@@ -6,43 +6,36 @@
  */
 
 /**
- * @brief `POST /specs/bind` - store a document, bind a collection to it, and
- *        make every request's recorded identity agree with it, in one
- *        transaction (issue #862).
+ * `POST /specs/bind`: stores a document, binds a collection to it and makes
+ * every request's recorded identity agree with it, in one transaction (#862). A
+ * bind is three writes (the document, the binding, the stamps), and two of its
+ * rules are ones a client must not be trusted with:
  *
- * A bind is three writes: the document, the binding that moves to it, and the
- * stamps. Two of the three rules are ones a client must not be trusted with.
- *
- * - **Stamping goes both ways** (issue #718). After a bind, a request's
+ * - **Stamping goes both ways** (#718). After a bind, a request's
  *   `specOperation` is the operation it matched in the bound document, or
- *   *nothing*. Writing only the matches leaves every non-matcher carrying
- *   identity from the document the collection was bound to before - and
- *   coverage resolves a stamp by `operationId` first, so such a stamp does not
- *   merely go unread: it claims whichever operation of the new document happens
- *   to share the id. Here the clearing is not a second list a caller could
- *   forget, it is the same walk that produced the matches.
- * - **The three writes are one transaction.** A bind that stored the document
- *   and then failed to move the binding leaves an unreferenced row; one that
- *   moved the binding and then failed to stamp leaves a collection measured
- *   against a contract its requests do not name. `POST /specs/sync` already
- *   established that a multi-row spec write commits whole, and this write is
- *   worse to land half of, because an agent retrying a partial bind re-stores a
- *   document against a binding that has already moved.
+ *   nothing. Writing only the matches leaves non-matchers with the previous
+ *   document's identity, and coverage resolves a stamp by `operationId` first,
+ *   so such a stamp claims whichever new operation shares the id. The clearing
+ *   is the same walk that produced the matches, not a second list a caller
+ *   could forget.
+ * - **The three writes are one transaction.** Storing the document and failing
+ *   to move the binding leaves an unreferenced row; moving the binding and
+ *   failing to stamp leaves a collection measured against a contract its
+ *   requests do not name. A partial bind is worse than a partial sync: an agent
+ *   retrying one re-stores a document against a binding already moved.
  *
- * **The match is this route's, and it is `core::match_operations`** - the same
- * rule `POST /specs/match` answers with, over the same subtree walk, never a
- * third matcher. The caller sends a document, not a pairing: an agent over MCP
- * has bytes and nothing else, and a pairing it worked out would be a second
- * opinion about what the document declares - exactly what #761's phase B moved
- * the reader engine-side to end. The operations matched against are the ones
- * *about to be stored*, read back from the index this write derives, so a
- * stamp and the index coverage resolves it through cannot disagree.
+ * **The match is `core::match_operations`**, the rule `POST /specs/match`
+ * answers with over the same subtree walk, never a third matcher. The caller
+ * sends a document, not a pairing: an agent over MCP has bytes only, and its
+ * own pairing would be a second opinion on what the document declares, which
+ * #761 phase B ended by moving the reader engine-side. The operations matched
+ * are the ones about to be stored, read back from the index this write derives,
+ * so a stamp and the index coverage resolves it through agree.
  *
- * Unbinding stays `PUT /collections/:id` with `openapi: null`: it writes one
- * row, deliberately leaves the stamps alone so that unbind-then-rebind is
- * lossless, and has no document to read. Both it and a bind to different bytes
- * forget the operations deletes declined under the old document (#3031),
- * which were decisions about that document.
+ * Unbinding stays `PUT /collections/:id` with `openapi: null`: one row, stamps
+ * left alone so unbind-then-rebind is lossless, no document to read. It and a
+ * bind to different bytes both forget the operations deletes declined under the
+ * old document (#3031), decisions about that document.
  */
 
 #include "vayu/core/openapi_document.hpp"
@@ -72,9 +65,9 @@ std::pair<int, nlohmann::json> body_error (const std::string& message) {
 nlohmann::json operation_json (const vayu::core::MatchableOperation& operation) {
     nlohmann::json out{ { "method", operation.method }, { "path", operation.path } };
     if (!operation.operation_id.empty ()) {
-        // Absent rather than "", the spelling `POST /specs/match` answers with
-        // and the one `apply_spec_operation_field` stores: an operation that
-        // declares no `operationId` is not one whose id is empty.
+        // Absent rather than "", as `POST /specs/match` answers and
+        // `apply_spec_operation_field` stores: no `operationId` is not an empty
+        // one.
         out["operationId"] = operation.operation_id;
     }
     return out;
@@ -82,11 +75,9 @@ nlohmann::json operation_json (const vayu::core::MatchableOperation& operation) 
 
 /**
  * The document row this bind stores, and the base paths its servers name
- * (#3030), which the match reads beside the operations.
- *
- * The document is read here and nowhere else in this route. One that cannot be
- * read is a 400 *before* anything is written, which is what leaves the
- * collection bound to whatever it was bound to.
+ * (#3030), which the match reads beside the operations. Read here and nowhere
+ * else in the route; an unreadable one is a 400 before anything is written,
+ * leaving the collection bound as it was.
  */
 std::optional<std::pair<int, nlohmann::json>> read_bound_document (
 const nlohmann::json& spec_item,
@@ -126,17 +117,14 @@ struct StampOutcome {
 };
 
 /**
- * Which request carries which operation, and which carries none any more.
- *
- * The pairing is `core::match_operations` - the rule `POST /specs/match`
- * previews with. The operations it matches against are read back out of the
- * index this write is about to store rather than out of the document a second
- * time: the identity a request is stamped with has to be one
- * `OperationIndex::resolve` will find in the stored column, and reading both out
- * of one derivation is what guarantees it. @p base_paths come off that same
- * read (`read_bound_document`). `parse_declared_operations` returns
- * nothing for a document that declares none, which matches nothing and clears
- * everything - the honest outcome of binding a contract with no operations in it.
+ * Which request carries which operation, and which none any more. The pairing
+ * is `core::match_operations`, `POST /specs/match`'s rule, against the
+ * operations read back from the index this write stores rather than from the
+ * document again: a stamped identity must be one `OperationIndex::resolve`
+ * finds in the stored column, and one derivation guarantees it. @p base_paths
+ * come off the same read (`read_bound_document`). `parse_declared_operations`
+ * returns nothing for a document declaring none, which matches nothing and
+ * clears everything, the honest outcome.
  */
 std::optional<std::pair<int, nlohmann::json>> stamp_subtree (vayu::db::Database& db,
 const std::vector<vayu::db::Request>& stored,
@@ -170,9 +158,8 @@ StampOutcome& outcome) {
         row.updated_at        = now;
         const nlohmann::json fields{ { "specOperation",
         operation_json (operations[pair.operation]) } };
-        // Through the applier every other write of this column uses, so a
-        // stamp written by a bind and one written by an import are the same
-        // bytes, validated by the same rule.
+        // Through the applier every write of this column uses, so a bind's
+        // stamp and an import's are the same bytes under the same rule.
         if (auto applied = apply_request_fields (db, row, fields, /*is_create=*/false);
         !applied) {
             return as_response (applied.error ());
@@ -181,9 +168,8 @@ StampOutcome& outcome) {
     }
 
     for (size_t i = 0; i < stored.size (); ++i) {
-        // Only a request that *carries* one: clearing a column that is
-        // already NULL would rewrite rows a bind never touched, and
-        // `updated_at` is read.
+        // Only a request that carries one: clearing an already-NULL column
+        // would rewrite rows a bind never touched, and `updated_at` is read.
         const auto& carried = stored[i].spec_operation;
         if (matched_requests.contains (i) || !carried || carried->empty ()) {
             continue;
@@ -270,12 +256,11 @@ const std::string& content) {
 
 
 /**
- * Testable core of `POST /specs/bind`, returning {http_status, json_body}.
- *
- * Read-decide-write under one lock, on `delete_spec_document`'s rule (#386):
- * the subtree, the requests matched against and the write itself are one scope,
- * or a request created between the match and the commit is stamped as nothing
- * while the collection reports itself measured.
+ * Testable core of `POST /specs/bind`, {http_status, json_body}.
+ * Read-decide-write under one lock (`delete_spec_document`'s rule, #386): the
+ * subtree, the requests matched and the write are one scope, or a request
+ * created between match and commit is stamped as nothing while the collection
+ * reports itself measured.
  */
 std::pair<int, nlohmann::json>
 bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
@@ -361,10 +346,10 @@ void register_spec_bind_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (response.dump (), "application/json");
         } catch (const vayu::db::MissingRowError& e) {
-            // The lookups run under the same lock as the write, so this is the
-            // narrow window a retry after a busy database opens - the same
-            // conflict `POST /specs/sync` reports, and for the same reason:
-            // nothing was written and re-reading is what the client should do.
+            // The lookups run under the write's lock, so this is the narrow
+            // window a retry after a busy database opens: the conflict
+            // `POST /specs/sync` reports, for the same reason. Nothing was
+            // written, and re-reading is the cure.
             vayu::utils::log_warning (
             "http", "POST /specs/bind - 409: " + std::string (e.what ()));
             send_error (res, 409, e.what ());

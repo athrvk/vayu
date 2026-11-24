@@ -6,17 +6,15 @@
  */
 
 /**
- * @brief `GET /changes` - the workspace change feed (issue #3420): one SSE
- *        event per committed write, so a client caching rows hears about a
- *        write any other client made - and `POST /changes/subscriptions`, the
- *        only way to get the id a stream needs.
- *
+ * `GET /changes`, the workspace change feed (#3420): one SSE event per
+ * committed write, so a client caching rows hears of another client's writes;
+ * and `POST /changes/subscriptions`, the only way to get the id a stream needs.
  * The relay is `GET /runs/:id/events`' poll-and-keep-alive loop over the
- * `ChangeFeed` `Database` publishes to, with the resume parsing of
- * `GET /inbox/:id/live`. Every client reads the same feed, up to
- * `MAX_READERS` at once, and each stream is opened with a single-use
- * subscription id: a plain `GET` (all a web page can send without an
- * `Origin`) holds no slot, so a page cannot fill the feed and lock the app out.
+ * `ChangeFeed` `Database` publishes to, with `GET /inbox/:id/live`'s resume
+ * parsing. Every client reads one feed, up to `MAX_READERS` at once, each
+ * stream opened with a single-use subscription id: a plain `GET` (all a web
+ * page can send without an `Origin`) holds no slot, so a page cannot fill the
+ * feed and lock the app out.
  */
 
 #include "vayu/core/constants.hpp"

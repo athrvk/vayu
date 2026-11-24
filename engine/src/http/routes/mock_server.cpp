@@ -6,15 +6,12 @@
  */
 
 /**
- * @brief The collection mock server: an engine-hosted listener that answers a
- *        collection's saved example responses (issue #481 phase 2), plus the
- *        routes that drive it. Lives with the routes for the same reason
- *        inbox.cpp does - the listener needs httplib, which is linked into the
- *        engine and the tests.
- *
- * The route table is a start-time snapshot of the collection tree, so the listener
- * thread reads immutable state and the manager's lock never has to be taken
- * from a handler.
+ * The collection mock server: an engine-hosted listener answering a
+ * collection's saved example responses (#481 phase 2), and the routes that
+ * drive it; with the routes, as inbox.cpp is, because the listener needs
+ * httplib, linked into the engine and the tests. The route table is a
+ * start-time snapshot of the collection tree, so the listener thread reads
+ * immutable state and never takes the manager's lock.
  */
 
 #include "vayu/http/mock_server.hpp"
@@ -68,10 +65,10 @@ std::string trimmed (std::string_view value) {
     return std::string (value.substr (begin, end - begin + 1));
 }
 
-/// True when @p authority looks like a host rather than the first segment of a
-/// relative path: it carries a dot, a port colon, or is `localhost` itself.
-/// A stored request URL needs a host to be executable, so this errs towards
-/// treating a leading token as one - but `pets` alone stays a path segment.
+/// True when @p authority looks like a host, not a relative path's first
+/// segment: a dot, a port colon, or `localhost` itself. A stored request URL
+/// needs a host to execute, so this leans towards one, but `pets` alone stays a
+/// path segment.
 bool looks_like_authority (std::string_view authority) {
     return authority == "localhost" ||
     authority.find_first_of (".:") != std::string_view::npos;
@@ -102,8 +99,8 @@ std::string normalize_mock_path (const std::string& url) {
         work = work.substr (0, cut);
     }
 
-    // Scheme and host, or the variable standing in for both, name where the
-    // real service lives. The mock *is* the host, so they go.
+    // Scheme and host, or the variable standing for both, name where the real
+    // service lives; the mock is the host, so they go.
     if (const auto scheme = work.find ("://"); scheme != std::string::npos) {
         const auto slash = work.find ('/', scheme + 3);
         work = slash == std::string::npos ? std::string () : work.substr (slash);
@@ -243,12 +240,11 @@ bool header_is (const std::string& name, const char* wanted) {
 }
 
 /**
- * True for a header describing the *wire encoding* the example was captured
- * with - `Content-Encoding`, `Content-Length`, `Transfer-Encoding` - rather
- * than its content. A mock always serves the stored body as literal,
- * already-decoded bytes, so replaying `Content-Encoding` verbatim is a lie a
- * browser's `fetch` believes and fails trying to gunzip plain text; the
- * other two httplib recomputes itself and this is belt-and-braces.
+ * True for a header describing the wire encoding the example was captured with
+ * (`Content-Encoding`, `Content-Length`, `Transfer-Encoding`), not its content.
+ * A mock serves the stored body as literal decoded bytes, so a replayed
+ * `Content-Encoding` is a lie a browser's `fetch` believes and fails gunzipping
+ * plain text; httplib recomputes the other two, so those are belt-and-braces.
  */
 bool header_is_stale_transfer_encoding (const std::string& name) {
     return header_is (name, "content-encoding") ||
@@ -256,9 +252,9 @@ bool header_is_stale_transfer_encoding (const std::string& name) {
 }
 
 /**
- * RFC 9110 §6.4.1: a 1xx, 204 or 304 response has no content. A stored 1xx can
- * only predate the refusal at example create; it is served as bodyless rather
- * than as an interim response that never gets a final one.
+ * RFC 9110 §6.4.1: a 1xx, 204 or 304 response has no content. A stored 1xx
+ * predates the refusal at example create and is served bodyless, not as an
+ * interim response that never gets a final one.
  */
 bool status_forbids_body (int status) {
     return status < 200 || status == 204 || status == 304;
@@ -309,10 +305,9 @@ const std::vector<std::pair<std::string, std::string>>& headers) {
 
 std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
-    // The whole subtree: an OpenAPI import files its requests under a folder
-    // per tag, so a mock reading only direct children would serve nothing. In
-    // the sidebar's order, which is the order a tie between two equally
-    // specific routes falls to.
+    // The whole subtree: an OpenAPI import files requests under a folder per
+    // tag, so direct children alone would serve nothing. In the sidebar's
+    // order, which breaks a tie between two equally specific routes.
     std::vector<MockRoute> routes;
     for (const auto& request : db.get_requests_in_subtree (collection_id)) {
         if (routes.size () > constants::mock_server::MAX_ROUTES) {
@@ -363,13 +358,11 @@ std::string route_shape_key (const MockRoute& route) {
     return key;
 }
 
-/// The route that answers @p method among the ones whose path already matched.
-///
-/// Specificity decides, not registration order: `/pets/mine` must beat
-/// `/pets/{{petId}}`, otherwise which one answers depends on the order an
-/// import happened to write the two requests in. Among equally specific
-/// routes the query is not part of the route, so `/q?kind=a` and
-/// `/q?kind=b` collide and the one with an example answers (#3115).
+/// The route answering @p method among those whose path matched. Specificity
+/// decides, not registration order: `/pets/mine` must beat `/pets/{{petId}}`
+/// whatever order an import wrote them in. The query is not part of a route, so
+/// `/q?kind=a` and `/q?kind=b` collide and the one with an example answers
+/// (#3115).
 std::optional<std::size_t> best_route_for_method (const std::vector<MockRoute>& routes,
 const std::vector<std::size_t>& path_matches,
 const std::string& method) {
@@ -463,9 +456,9 @@ const std::string& path) {
         return match;
     }
 
-    // `best` carried whole rather than dereferenced and re-wrapped: both fields
-    // are the same optional, and the round trip is a dereference that only the
-    // `if` above makes safe.
+    // `best` copied whole, not dereferenced and re-wrapped: both fields are the
+    // same optional, and the round trip is a dereference only the `if` above
+    // makes safe.
     match.route_index   = best;
     match.matched_route = best;
     return match;
@@ -473,9 +466,9 @@ const std::string& path) {
 
 namespace {
 
-/// `resolve_mock_route` sets `matched_route` on both of the miss kinds that
-/// name a route, which is what makes the index below safe to take. A match
-/// built by hand can still break that, and this is what it would cost.
+/// `resolve_mock_route` sets `matched_route` on both miss kinds that name a
+/// route, which makes the index below safe; a hand-built match can break that,
+/// and this is the message it costs.
 constexpr std::string_view MATCHED_ROUTE_INVARIANT =
 "a mock miss kind that names a route carries its index (resolve_mock_route)";
 
@@ -583,10 +576,10 @@ nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
 
 namespace {
 
-/// One splitmix64 step of @p counter - the raw 64 bits, before either caller
-/// reduces it to a percentage or an index. Shared so should_inject_error's
-/// error roll and pick_example's random-example roll cannot drift into two
-/// different sequences for what is conceptually the same kind of decision.
+/// One splitmix64 step of @p counter, the raw 64 bits before a caller reduces
+/// them to a percentage or an index. Shared so `should_inject_error`'s and
+/// `pick_example`'s rolls cannot drift into two sequences for one kind of
+/// decision.
 std::uint64_t splitmix64_roll (std::atomic<std::uint64_t>& counter) {
     std::uint64_t x = counter.fetch_add (0x9E3779B97F4A7C15ULL) + 0x9E3779B97F4A7C15ULL;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -595,11 +588,9 @@ std::uint64_t splitmix64_roll (std::atomic<std::uint64_t>& counter) {
     return x;
 }
 
-/// Whether this completion should be turned into a synthesized 500.
-///
-/// 0 and 100 are exact by construction rather than by probability, which is
-/// what makes them the only rates worth a test. In between, the roll is
-/// splitmix64_roll of a per-mock counter.
+/// Whether this completion becomes a synthesized 500. 0 and 100 are exact by
+/// construction, not probability, which makes them the only rates worth a test;
+/// in between, the roll is `splitmix64_roll` of a per-mock counter.
 bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     if (rate_pct <= 0) {
         return false;
@@ -620,9 +611,8 @@ pick_example (const MockRoute& route, std::atomic<std::uint64_t>& roll_counter) 
                 return example;
             }
         }
-        // The target was deleted or suppressed since the mode was set -
-        // fall back to "first" rather than refuse an otherwise-servable
-        // route.
+        // The target was deleted or suppressed since the mode was set: fall
+        // back to "first" rather than refuse a servable route.
         return route.examples.front ();
     }
     if (route.mode == "random") {
@@ -642,25 +632,24 @@ struct MockServerManager::MockServer {
     int64_t created_at = 0;
     /// Set before the listener starts and never written again, like `routes`.
     routes::CorsPolicy cors;
-    /// Built once at start and never written again, so the handler reads it
-    /// with no lock at all. A running mock does not hot-reload the collection -
-    /// restart it, which is documented and is what keeps this true.
+    /// Built at start, never written again, so the handler reads it with no
+    /// lock. A running mock does not hot-reload its collection (restart it, as
+    /// documented), which keeps that true.
     std::vector<MockRoute> routes;
     int routes_without_example = 0;
     int duplicate_routes       = 0;
     /// Feeds the error-injection roll. Atomic because every pool thread bumps
     /// it; nothing else about a served response is mutable.
     std::atomic<std::uint64_t> served{ 0 };
-    /// Feeds pick_example's random-example roll - its own counter, separate
-    /// from `served`, so an error-rate roll and an example roll never share
-    /// one sequence.
+    /// Feeds `pick_example`'s random-example roll, apart from `served`, so an
+    /// error roll and an example roll never share one sequence.
     std::atomic<std::uint64_t> example_roll{ 0 };
     /// One counter per route, same order as `routes`, bumped on every served
     /// (not missed) response. Read out as a plain snapshot by route_hits().
     std::vector<std::atomic<std::uint64_t>> hits;
-    /// Bounded log of what this mock has served (issue #481 phase 3), sized
-    /// once at construction - never resized, so its own mutex is the only
-    /// lock a listener thread ever takes here.
+    /// Bounded log of what this mock served (#481 phase 3), sized at
+    /// construction and never resized, so its mutex is the only lock a listener
+    /// thread takes here.
     MockActivityLog activity{ constants::mock_server::MAX_ACTIVITY_ENTRIES };
 
     /// Requested when the mock stops, before its listener is joined.
@@ -717,24 +706,20 @@ struct MockConfig {
 };
 
 /**
- * One mock exchange: the configured latency, the injected-failure roll, then the
- * route table's answer.
- *
- * A free function rather than the handler lambda itself so the responder each
- * listener installs stays small, and this reads as what a mock answers with.
- *
- * **Reads the method and the path only.** It is installed as a pre-routing
- * handler (see `MockServerManager::start`), which cpp-httplib runs before it
- * reads the request body - `req.body` is empty here whatever the client sent.
+ * One mock exchange: the configured latency, the injected-failure roll, then
+ * the route table's answer, outside the handler lambda so each listener's
+ * responder stays small. **Reads the method and the path only**: it is a
+ * pre-routing handler (`MockServerManager::start`), which cpp-httplib runs
+ * before reading the body, so `req.body` is empty whatever the client sent.
  */
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
 httplib::Response& res) {
-    // A mock that names its readers answers only requests addressed to its own
-    // loopback name, the management API's Host rule: a rebound page is
-    // same-origin with the mock and would otherwise read it with no Origin to
-    // check. `local_port` is the bound port, known even when the start asked
-    // for any. A mock with no list is readable by any page by design.
+    // A mock naming its readers answers only requests addressed to its own
+    // loopback name (the management API's Host rule): a rebound page is
+    // same-origin with the mock and would read it with no Origin to check.
+    // `local_port` is the bound port, known even when the start asked for any.
+    // A mock with no list is readable by any page by design.
     if (!mock.cors.allowed_origins.empty () &&
     !routes::names_this_listener (req, req.local_port)) {
         routes::send_error (res, 403, routes::foreign_host_message (req.local_port));
@@ -744,19 +729,18 @@ httplib::Response& res) {
     routes::apply_cors_headers (req, res, mock.cors);
 
     // A real preflight (Access-Control-Request-Method present) is browser
-    // plumbing, not application traffic, and always gets the synthesized
-    // 204 - breaking one to surface a stored route's 404/501 helps nobody,
-    // route_index or not. A plain `OPTIONS` with neither header is ordinary
-    // traffic and falls through to the route table below like any other verb.
+    // plumbing and always gets the synthesized 204: breaking one to surface a
+    // stored route's 404 or 501 helps nobody. A plain `OPTIONS` with neither
+    // header is ordinary traffic for the route table.
     if (req.has_header ("Access-Control-Request-Method")) {
         res.status = 204;
         routes::finalize_cors_expose_headers (res);
         return;
     }
 
-    // A stop cuts the wait short and the answer goes out without the rest of
-    // it: everything below reads the mock's own state, which the stop's join
-    // keeps alive until this returns.
+    // A stop cuts the wait short and the answer goes out without the rest; all
+    // below reads the mock's state, which the stop's join keeps alive until
+    // this returns.
     if (mock.latency_ms > 0) {
         mock.stop_signal.wait_for (std::chrono::milliseconds (mock.latency_ms));
     }
@@ -813,10 +797,10 @@ httplib::Response& res) {
     for (const auto& [name, value] : headers) {
         if (!header_is (name, "content-type") && !header_is_stale_transfer_encoding (name) &&
         !routes::is_cors_response_header (name)) {
-            // Appended rather than set: a repeated `Set-Cookie` is exactly
-            // why an example stores its headers as an ordered array. CORS
-            // headers are skipped outright - apply_cors_headers already
-            // answered, and append would duplicate it.
+            // Appended, not set: a repeated `Set-Cookie` is why an example
+            // stores its headers as an ordered array. CORS headers are skipped:
+            // `apply_cors_headers` already answered, and appending would
+            // duplicate.
             res.headers.emplace (name, value);
         }
     }
@@ -842,10 +826,9 @@ const MockStartRequest& request) {
         out.ok          = false;
         out.http_status = 404;
         out.error_code  = "not_found";
-        // No display name to give instead: this collection does not exist
-        // (or was just deleted), so its id is genuinely all there is to say -
-        // the id itself is not shown, since it means nothing to a person and
-        // the 404 plus error_code already tell an API caller what happened.
+        // No display name to give: the collection does not exist (or was just
+        // deleted). Its id means nothing to a person, and the 404 and
+        // `error_code` already tell an API caller.
         out.error_message = "This collection could not be found - it may have "
                             "been deleted";
         return out;
@@ -903,26 +886,20 @@ const MockStartRequest& request) {
     MockServer* raw = server.get ();
 
     httplib::Server& svr = server->listener.server ();
-    // Every method cpp-httplib routes, on every path: the route table decides
-    // what answers, not httplib's own matcher. A pre-routing handler is how
-    // that stays true, rather than the `.*` route per method it replaces:
-    // since cpp-httplib 0.53.1 a regex route refuses outright any path longer
-    // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256) before it reaches
-    // std::regex_match, so `.*` turned a long mocked path into a 404 that
-    // never saw `resolve_mock_route` (issue #1139). Raising that limit is the
-    // wrong lever: `.*` is precisely the quantified pattern whose
-    // per-character backtracking the limit exists to bound, and this listener
-    // answers whatever a collection's requests spell.
+    // Every method on every path: the route table decides what answers, not
+    // httplib's matcher, which a pre-routing handler keeps true. A `.*` regex
+    // route is no alternative: since cpp-httplib 0.53.1 a regex route refuses
+    // any path over CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256) before
+    // std::regex_match, so a long mocked path would 404 without reaching
+    // `resolve_mock_route` (#1139). Raising the limit is the wrong lever: `.*`
+    // is the quantified pattern whose per-character backtracking the limit
+    // bounds, and this listener answers whatever a collection's requests spell.
     //
-    // Pre-routing also widens the method set to every one httplib parses -
-    // CONNECT, TRACE and PRI drew httplib's own 400 as unroutable before and
-    // now reach the route table, which answers its own miss for them. That is
-    // the sentence above meant literally, not a second change.
-    //
-    // It runs ahead of the body read, which is why `serve_mock_request` may
-    // read the method and the path and nothing else. An unconsumed framed
-    // body is drained by httplib after the response, so keep-alive is
-    // unaffected.
+    // Pre-routing also reaches every method httplib parses: CONNECT, TRACE and
+    // PRI get the route table's own miss, not httplib's unroutable 400. It runs
+    // ahead of the body read, which is why `serve_mock_request` reads only the
+    // method and the path; httplib drains an unconsumed framed body after the
+    // response, so keep-alive is unaffected.
     svr.set_pre_routing_handler (
     [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
      raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors,
@@ -1087,10 +1064,9 @@ void handle_mock_activity (RouteContext& ctx, const httplib::Request& req, httpl
     const std::string mock_id = req.matches[1];
     std::size_t limit         = 50;
     if (req.has_param ("limit")) {
-        // parse_number rejects what std::stoul would silently accept: "0"
-        // (parses fine, but is not positive), a leading "-" (unsigned
-        // from_chars refuses the sign rather than wrapping to a huge value)
-        // and trailing garbage like "5abc" (the ptr != end check).
+        // `parse_number` refuses what `std::stoul` would accept: "0" (not
+        // positive), a leading "-" (unsigned `from_chars` refuses the sign
+        // rather than wrapping) and trailing garbage like "5abc".
         const auto parsed =
         vayu::utils::parse_number<std::size_t> (req.get_param_value ("limit"));
         if (!parsed || *parsed == 0) {
@@ -1116,7 +1092,8 @@ void handle_mock_activity (RouteContext& ctx, const httplib::Request& req, httpl
 void register_mock_server_routes (RouteContext& ctx) {
     /**
      * POST /mock/start
-     * Body: {collectionId (required), port, latencyMs, errorRatePct}.
+     * Body: {collectionId (required), port, latencyMs, errorRatePct,
+     * allowedOrigins}.
      * Starts a loopback listener answering the collection tree's saved
      * examples. Returns the started mock: {mockId, collectionId,
      * collectionName, url, port, latencyMs, errorRatePct, routeCount,

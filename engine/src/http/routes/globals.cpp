@@ -6,9 +6,8 @@
  */
 
 /**
- * @brief Global variables routes: `GET /globals` and `POST /globals`, both
- *        answering the row's `ETag`, the write judging an optional `If-Match`
- *        (#2988).
+ * Global variables routes: `GET /globals` and `POST /globals`, both answering
+ * the row's `ETag`, the write judging an optional `If-Match` (#2988).
  */
 
 #include "vayu/http/routes.hpp"
@@ -80,23 +79,21 @@ const std::function<void ()>& before_write) {
 } // namespace
 
 /**
- * Testable core of POST /globals, returning {http_status, json_body}.
- *
- * Globals is a singleton with no create/update split - there is one row, always
- * addressed by the same id, so `POST /globals` saves it whole. That makes every
- * write a "create" as far as the one null-vs-absent rule is concerned (issue
- * #95, helpers in routes.hpp): absent and `null` both mean the default, `{}`.
- * A stored text `null` would read back as no globals at all; the shared helper
- * keeps this resource from drifting from the other three.
+ * Testable core of POST /globals, {http_status, json_body}. Globals is a
+ * singleton with no create/update split (one row, one id), so `POST /globals`
+ * saves it whole and every write is a "create" to the null-vs-absent rule (#95,
+ * routes.hpp): absent and `null` mean the default, `{}`. A stored text `null`
+ * would read back as no globals at all; the shared helper keeps this resource
+ * in step with the other three.
  *
  * **The read, the precondition and the write are one lock scope**: a client
- * that merges across two round trips (MCP's `update_globals`) closes its own
- * window with @p if_match, judged against the row this write replaces (#2988).
- * The never-written row is version 0.
+ * merging across two round trips (MCP's `update_globals`) closes its window
+ * with @p if_match, judged against the row this write replaces (#2988). The
+ * never-written row is version 0.
  *
  * @param if_match The request's `If-Match`; a row it no longer names is a 412.
- * @param before_write Test seam, invoked inside the lock scope with the new
- *        row staged and immediately before it is written.
+ * @param before_write Test seam, invoked inside the lock scope with the new row
+ *        staged and immediately before it is written.
  */
 std::pair<int, nlohmann::json> save_globals_response (vayu::db::Database& db,
 const nlohmann::json& json,
