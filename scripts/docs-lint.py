@@ -21,6 +21,12 @@ into may together hold what its entries held (counts summed, maxima each), and
 no more. A page without an entry meets the budget. A missing description is
 never grandfathered.
 
+A change that retires a page (a split, a move) re-aims every link to it, which
+lengthens a line by the difference in path, and rewraps text, which can join a
+phrase a line break hid. So in that change, and only there, a maximum may rise
+by MOVE_LINK_SLACK characters, on the new pages and on every page that links to
+the old one, and the new pages' `history` may total a tenth more.
+
 A reference page is one matching a glob in the file's `reference_pages`.
 
 `history` counts `used to`, `until #N`, `since #N landed|merged|shipped`,
@@ -44,6 +50,7 @@ nothing on success.
 import argparse
 import fnmatch
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -224,6 +231,20 @@ def stale_entries(pages: dict, ceilings: dict) -> list[tuple[str, str]]:
 
 
 _COUNT_METRICS = ("lines", "long_lines", "history")
+_MAX_METRICS = ("max_line", "max_cell")
+
+# What a move itself adds, allowed only in a change that retires a page. Re-aiming
+# a link at a page one directory down lengthens its line by the path (the longest
+# page name is 26 characters, `../` makes 29), so a maximum may rise by this much.
+# One sentence per line joins a phrase a line break had hidden from `history`, so
+# the new pages may hold a tenth more of it, rounded up.
+MOVE_LINK_SLACK = 32
+MOVE_HISTORY_SLACK = 0.1
+
+
+def moved(ceilings: dict, baseline: dict) -> bool:
+    """Whether the change retires a page's entry, as a split or a move does."""
+    return any(page not in ceilings["pages"] for page in baseline["pages"])
 
 
 def new_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
@@ -245,20 +266,24 @@ def new_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
     for metric in METRICS:
         held = [entry.get(metric, 0) for entry in retired]
         if metric in _COUNT_METRICS:
+            allowed = sum(held)
+            if metric == "history":
+                allowed += math.ceil(allowed * MOVE_HISTORY_SLACK)
             running = 0
             for page, entry in fresh.items():
                 running += entry.get(metric, 0)
-                if running > sum(held):
+                if running > allowed:
                     found.append(
                         (page, f"{metric} ceilings of new pages total more than the "
-                               f"{sum(held)} the retired pages held")
+                               f"{allowed} the retired pages held")
                     )
                     break
             continue
+        allowed = max(held, default=0) + (MOVE_LINK_SLACK if held else 0)
         for page, entry in fresh.items():
-            if entry.get(metric, 0) > max(held, default=0):
+            if entry.get(metric, 0) > allowed:
                 found.append(
-                    (page, f"{metric} ceiling {entry[metric]} is above the {max(held, default=0)} "
+                    (page, f"{metric} ceiling {entry[metric]} is above the {allowed} "
                            "the retired pages held")
                 )
     return found
@@ -266,6 +291,7 @@ def new_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
 
 def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
     found = new_entries(ceilings, baseline)
+    slack = MOVE_LINK_SLACK if moved(ceilings, baseline) else 0
     for page, entry in ceilings["pages"].items():
         base = baseline["pages"].get(page)
         if base is None:
@@ -273,7 +299,7 @@ def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
         for metric, value in entry.items():
             if metric not in base:
                 found.append((page, f"{metric} gained a ceiling the baseline does not have"))
-            elif value > base[metric]:
+            elif value > base[metric] + (slack if metric in _MAX_METRICS else 0):
                 found.append((page, f"{metric} ceiling raised from {base[metric]} to {value}"))
     return found
 

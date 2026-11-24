@@ -48,7 +48,9 @@ heading anchor, so:
   in `docs.yml` before the MkDocs build: 600 lines (1,000 for a reference page),
   400 characters a line, 200 a table cell, no history narration. A page over a
   budget has a ceiling in `scripts/docs-lint-ceilings.json`, which may only be
-  lowered (a split page's new pages may carry its entry between them); a ceiling
+  lowered (a split page's new pages may carry its entry between them, and a change
+  that retires a page may let a maximum rise by 32 characters for the links it
+  re-aims); a ceiling
   whose page is now within budget fails as stale. A reference
   page is one matching `reference_pages` in that file, so a new one is added
   there. `CONTRIBUTING.md` has the rules and the local command.
