@@ -6,7 +6,6 @@
  */
 
 /**
- * @file scenario-runs.ts
  * @brief A collection as the unit of work: the pre-flight walk over a
  *        scenario's steps and the scenario load run.
  */

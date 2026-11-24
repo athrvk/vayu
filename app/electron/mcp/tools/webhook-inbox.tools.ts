@@ -6,7 +6,6 @@
  */
 
 /**
- * @file webhook-inbox.tools.ts
  * @brief Webhook inboxes: start, list, stop, delete, captures and the canned
  *        response.
  */

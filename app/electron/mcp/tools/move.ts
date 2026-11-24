@@ -6,7 +6,6 @@
  */
 
 /**
- * @file move.ts
  * @brief Moving an item to another parent: where it lands among its new
  *        siblings.
  */
