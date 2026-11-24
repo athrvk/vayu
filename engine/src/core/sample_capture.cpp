@@ -20,9 +20,9 @@ namespace vayu::core {
 
 namespace {
 
-/// Media types (or suffixes of them) whose payload is text by definition.
-/// Anything else with a declared type is treated as binary without reading a
-/// byte, which is what makes `image/png` cheap to classify.
+/// Media types (or their suffixes) that are text by definition. Any other
+/// declared type is binary without reading a byte, which keeps `image/png`
+/// cheap to classify.
 bool text_shaped (std::string_view type) {
     if (type.rfind ("text/", 0) == 0) {
         return true;
@@ -35,12 +35,9 @@ bool text_shaped (std::string_view type) {
 }
 
 /**
- * @brief Validate a bounded prefix as UTF-8, rejecting NUL.
- *
- * A truncated capture can cut a multi-byte sequence in half, so a sequence
- * that runs off the end of the inspected window is *not* a failure - the
- * bytes we did see were well-formed, and the split is an artefact of our own
- * cap rather than anything about the body.
+ * Whether a bounded prefix is UTF-8 without NUL. A sequence running off the end
+ * of the window is not a failure: a truncated capture can split one, and that
+ * split is our cap's artefact, not the body's.
  */
 bool prefix_is_utf8_text (std::string_view bytes) {
     const size_t inspect = std::min (bytes.size (), SNIFF_BYTES);
@@ -65,8 +62,8 @@ bool prefix_is_utf8_text (std::string_view bytes) {
         }
 
         if (i + extra >= inspect) {
-            // The sequence runs past the window. Whatever we have seen so far
-            // was valid, so stop here rather than blaming our own cap.
+            // Runs past the window: what was seen was valid, so do not blame
+            // our own cap.
             return true;
         }
         for (size_t k = 1; k <= extra; k++) {
@@ -86,7 +83,6 @@ std::string media_type (std::string_view content_type) {
     std::string_view head =
     semi == std::string_view::npos ? content_type : content_type.substr (0, semi);
 
-    // Trim ASCII whitespace both ends.
     while (!head.empty () &&
     (std::isspace (static_cast<unsigned char> (head.front ())) != 0)) {
         head.remove_prefix (1);
