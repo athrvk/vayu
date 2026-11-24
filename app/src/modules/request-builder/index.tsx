@@ -249,7 +249,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 			});
 			// A text button, so the acknowledgement is the toast rather than a
 			// check swap (design-system.md, Component Patterns) - and `useCopy`
-			// owns the failure path, which this used to duplicate by hand.
+			// owns the failure path.
 			await copy(snippet.code, "cURL command");
 		} catch (error) {
 			console.error("Failed to build the request as curl:", error);
@@ -350,7 +350,7 @@ export default function RequestBuilder() {
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
 
 	// Variable resolver for the current request's collection
-	// Preview-only since #226: execution resolves engine-side (POST /compose).
+	// Preview-only (#226): execution resolves engine-side (POST /compose).
 	// `resolveObject` still backs the load dialog's OAuth token-expiry guard,
 	// which previews the effective config without sending anything.
 	const { resolveObject, resolveString } = useVariableResolver({
