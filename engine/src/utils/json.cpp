@@ -6,7 +6,6 @@
  */
 
 /**
- * @file utils/json.cpp
  * @brief JSON utilities implementation
  */
 

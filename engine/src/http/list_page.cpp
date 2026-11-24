@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/list_page.cpp
  * @brief The paging the whole-list routes share (issue #2443).
  */
 

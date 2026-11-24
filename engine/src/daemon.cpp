@@ -7,7 +7,6 @@
 
 
 /**
- * @file daemon.cpp
  * @brief Vayu Engine daemon entry point
  *
  * This is the background process that handles high-concurrency requests.

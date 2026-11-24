@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/server.cpp
  * @brief HTTP Server implementation with modular route registration
  */
 
