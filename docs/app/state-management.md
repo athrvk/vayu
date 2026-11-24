@@ -3190,7 +3190,7 @@ channel to this renderer, so an open request kept the version it had read
 until a reload, and Send sent it (#3420). The engine publishes one event per
 committed write of a collection, a request, an example, an environment, the
 globals or a trash entry on `GET /changes` (see
-[the API reference](../engine/api-reference.md#change-feed)), and
+[the API reference](../engine/api-reference/changes.md#change-feed)), and
 `services/change-feed-service.ts` holds that stream for the app's life;
 `useChangeFeed()`, beside `useMcpDataInvalidation()` in `App.tsx`, opens it
 while the engine store says `connected` and closes it otherwise.

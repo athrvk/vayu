@@ -7,7 +7,7 @@ description: >-
 
 The receiving half of the app (issue #480): an engine-hosted listener that records the requests
 sent to it, so building a webhook consumer needs no cloud tunnel. Engine contract:
-`docs/engine/api-reference.md` (Webhook Inbox).
+`docs/engine/api-reference/inbox.md`.
 
 - `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop/clear/delete, the URL with a copy
   control and a text **Copy for agent** button (`inboxReference`, #2047), the running/live badge, the `Notify` toggle (`NotifyOnCaptureToggle`, whose two gates

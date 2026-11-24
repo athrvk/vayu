@@ -9,7 +9,7 @@ Reads the YAML document Insomnia 11 and later write when you export a collection
 
 - **Source:** `engine/src/core/import_document.cpp` (`InsomniaV5Flattener`, then `parse_insomnia_resources`, which v4 shares)
 - **`meta.format`:** `Insomnia Export v5`, for a collection document and an environment document alike
-- **Reader:** the engine's one reader, behind [`POST /import/parse`](../../engine/api-reference.md#post-importparse). A v5 document is YAML in practice, and the same reader takes a JSON-encoded copy of one.
+- **Reader:** the engine's one reader, behind [`POST /import/parse`](../../engine/api-reference/import.md#post-importparse). A v5 document is YAML in practice, and the same reader takes a JSON-encoded copy of one.
 
 > **The field spellings on this page are assumed.** They come from Insomnia's v5 schema, not from a real export checked against this reader. A member that a real export spells differently reads as **absent**: the request imports without it, with no error. See [Assumed field spellings](#assumed-field-spellings-not-yet-checked-against-a-real-export) for the full list.
 

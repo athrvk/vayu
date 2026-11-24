@@ -188,11 +188,11 @@ four more are opened on demand, and the rule that separates them is where each m
 
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
-| Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
+| Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference/index.md](api-reference/index.md) |
 | OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode (at most 16 unsettled) | One `/callback` path, until the attempt settles or its 5-minute TTL expires, polled or not |
-| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token`, `/authorize`, `/register`, its RFC 8414 metadata and a protected `/resource` with its RFC 9728 metadata, until stopped |
-| [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
-| [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
+| [Mock OAuth 2.0 issuer](api-reference/authentication.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token`, `/authorize`, `/register`, its RFC 8414 metadata and a protected `/resource` with its RFC 9728 metadata, until stopped |
+| [Webhook inbox](api-reference/inbox.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
+| [Collection mock server](api-reference/mock-server.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
 
 Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
 route answers a live read of state that changes under the client, so nothing here is valid to replay
@@ -203,7 +203,7 @@ servers of their own (see the table above) and do not set it.
 CORS header, refuses a `Host` that is not a loopback spelling of its own port (DNS rebinding), and
 refuses any request carrying `Origin`; an `OPTIONS` that passes the Host check is answered `204`
 with nothing else. The Electron shell strips the renderer's `Origin` and supplies the renderer's
-CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-the-api).
+CORS headers itself. See [Who may call the API](api-reference/index.md#who-may-call-the-api).
 
 **A mock server and an inbox do answer browsers**, under a `CorsPolicy` fixed when the listener
 starts (`routes.hpp`, issue #2367). With no `allowedOrigins`, the default, every response is
@@ -317,7 +317,7 @@ printed the listening banner, unwound through the graceful-shutdown path and exi
 
 ### Change feed
 
-`GET /changes` (#3420, [api-reference.md](api-reference.md#get-changes)) tells every client about
+`GET /changes` (#3420, [api-reference/changes.md](api-reference/changes.md#get-changes)) tells every client about
 every committed write of a collection, request, example, environment, the globals or a trash entry,
 so a row one client changed (the stdio MCP server, `vayu-cli`, a script, a second window) does not
 stay stale in another's cache. `Database` owns the feed (`engine/include/vayu/db/change_feed.hpp`)
@@ -603,7 +603,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   sample. The percentiles, the max and the mean share this one population (the mean divides
   by the sample count, not by successes). A stored error row (`results.latency_ms`) carries
   the same duration, and `0` where there is none; see
-  [Latency population](api-reference.md#latency-population).
+  [Latency population](api-reference/metrics.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
 - **Status classes by completion second** (issue #2866, `core/status_seconds.hpp`): beside the
@@ -830,7 +830,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
   into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
-  (`bind_step_iteration`, see [Scenario runs](api-reference.md#scenario-runs)).
+  (`bind_step_iteration`, see [Scenario runs](api-reference/scenario-runs.md#scenario-runs)).
   **What is deferred is decided by the credentials, not by the run's shape**
   (issue #1055): a build defers because these credentials carry a token, so a
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
@@ -934,7 +934,7 @@ wider and why, is [above](#listeners).
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See
-the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
+the [API reference](api-reference/authentication.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (engine-owned via POST /compose)
 
@@ -2158,7 +2158,7 @@ record shape, the category list, the redaction rule and the file layout
   redirect loop refuses a `Location` naming another scheme before making the
   hop (`resolve_redirect_target`). One
   rule for Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
-  [api-reference.md](api-reference.md#url-schemes).
+  [api-reference/compose.md](api-reference/compose.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a
   `form-data` file part - and sends one only when *it lies under a folder the
@@ -2189,7 +2189,7 @@ record shape, the category list, the redaction rule and the file layout
   binds is opened per submission, through the check again);
   `engine/CLAUDE.md` states what remains. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
-  path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
+  path. See [api-reference/request-body.md](api-reference/request-body.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: one engine per data directory, held from before the
   database opens until after it closes (`InstanceLock` in `daemon.cpp`). On
   Linux and macOS it is a `flock` on the data directory plus one on

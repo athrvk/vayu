@@ -600,7 +600,7 @@ Each entry is `{ event, id, data, receivedAt }`:
 **`pm.response.streamText` is the reply, assembled.** A stream whose request
 declares a `streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an
 OpenAI-compatible chat completion or `$.delta.text` for an Anthropic-style one,
-see [`POST /execute`](api-reference.md#post-execute)) gets every event's `text`
+see [`POST /execute`](api-reference/execute.md#post-execute)) gets every event's `text`
 joined in order, the events the path missed skipped (a role-only chunk, a
 ping, the `[DONE]` sentinel). It covers every event the body kept, past
 `sseMaxStoredEvents` too, so it is the whole reply unless the body itself was
@@ -690,7 +690,7 @@ above is the one guard on every path.
 
 A request whose body mode is `mcp` is answered with one JSON object or with an
 event stream ending in the final JSON-RPC response
-([the `mcp` reply](api-reference.md#the-mcp-reply)). A script reads that reply
+([the `mcp` reply](api-reference/request-body.md#the-mcp-reply)). A script reads that reply
 **as it arrived**, on every path: `pm.response.json()` and `text()` are the
 body exactly as for any other request (the JSON object, or for an event stream
 its `event:`/`data:` bytes, on a streamed send as on a buffered one), and the
@@ -715,7 +715,7 @@ stored bytes by the same rule.
 A streaming send is answered `202` before its script has run, so the results go
 to the run's trace rather than into a response body - the app's Tests and
 Console panes show them when the stream finishes, and
-[`GET /runs/:runId/report`](api-reference.md#get-runsrunidreport) carries them
+[`GET /runs/:runId/report`](api-reference/runs.md#get-runsrunidreport) carries them
 under the trace's `scripts` node. A buffered send returns them *and* stores the
 same object there (issue #725), so reopening either kind of run from History
 shows the assertions it made.
@@ -724,7 +724,7 @@ A **collection run's step** is the same story with no live half at all: the run
 was answered `202` when it started, so each step's results reach the app only on
 its stored trace, under the same `scripts` node (issue #724). What a step
 publishes while the run is still going is the count - `tests: {passed, failed}`
-on its [`step` event](api-reference.md#get-runsrunidlive) - because the event
+on its [`step` event](api-reference/live-metrics.md#get-runsrunidlive) - because the event
 ring is fixed-size and a script may make hundreds of assertions. Both count
 **both scripts'** assertions (issue #810), which is what fails the step in the
 first place: a failing `pm.test` ends a step whichever script made it, and the
@@ -1039,7 +1039,7 @@ means the ones the engine derives at send time are there too - the body-implied
 -> `text/plain`, `xml` -> `application/xml`, `x-www-form-urlencoded` ->
 `application/x-www-form-urlencoded`; a bodyless `POST` sends none, issue #2464)
 and the
-[default headers](api-reference.md#default-request-headers) the send added - the
+[default headers](api-reference/health-config.md#default-request-headers) the send added - the
 `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id where one is
 switched on. So a test
 asserting on the Content-Type a GraphQL request sent reads the header the engine
@@ -1047,7 +1047,7 @@ supplied, rather than the `undefined` it read before (#483) - with one exception
 the method decides: a `graphql` body on a **GET** travels as query parameters
 and sends no body at all, so there is nothing for a Content-Type to describe and
 the engine derives none (issue #1228, see
-[the `graphql` envelope](api-reference.md#the-graphql-envelope)).
+[the `graphql` envelope](api-reference/request-body.md#the-graphql-envelope)).
 
 Four consequences worth knowing:
 
@@ -1386,7 +1386,7 @@ Rules worth knowing before you rely on them:
   the whole plan: when any step's script or extractor writes a variable before
   a send (`script.teardown` aside), every step defers, so a token one step's
   test script stores reaches a later step's `Bearer {{token}}` on every run
-  ([Scenario runs](api-reference.md#scenario-runs)).
+  ([Scenario runs](api-reference/scenario-runs.md#scenario-runs)).
 - **A load run runs a pre-request script only inline.** A `script.pre`
   element runs under load, in a single-request run's `requestElements` and in
   a scenario step's elements, only when its `config.inline` is `true` or the
@@ -1660,7 +1660,7 @@ undo:
 - **`remove(name)` takes every match.** Removing `page` from `?page=1&page=2`
   and getting one back has removed nothing the caller can observe.
 - **`add` and `upsert` encode what they are given**, by the rule the send
-  writes a query with ([Query encoding](api-reference.md#query-encoding)):
+  writes a query with ([Query encoding](api-reference/compose.md#query-encoding)):
   `add({ key: 'k', value: 'a b' })` sends `k=a%20b`, and `get('k')`, `all()`
   and `getQueryString()` then read `a%20b`, because the query is the wire bytes.
   `%` is never encoded, so a value already encoded passes as it is; under
@@ -1827,7 +1827,7 @@ pm.info.run.assertionsFailed  // number
 ```
 
 On a load run `errorRate` is the figure the report prints, by the
-[one error definition](api-reference.md#what-counts-as-an-error); on a
+[one error definition](api-reference/metrics.md#what-counts-as-an-error); on a
 sequential collection run it is the share of steps that errored.
 
 **A throwing `script.setup` fails the run before anything is sent.** Its
@@ -2325,7 +2325,7 @@ mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`. So does a URL
 whose scheme is not `http` or `https` once its variables resolve
 (`file:///...`, `ftp://...`): `err.code` is `INVALID_URL`, the message names
 the scheme, and nothing is read - the same refusal a Send of that URL gets
-([URL schemes](api-reference.md#url-schemes)).
+([URL schemes](api-reference/compose.md#url-schemes)).
 
 **Vayu's own ports are never a target.** A URL naming the engine's own port or
 the MCP port (9877, or the daemon's `--mcp-port`) on this machine -
@@ -2336,7 +2336,7 @@ engine's API would take the script's request for the app's. A redirect that
 leads there, or a host name that resolves there, is refused by the transport
 instead and reaches the callback as `err` with `.code` `INVALID_URL` and the
 same sentence. Every other local server is reachable as before. See
-[Reserved local ports](api-reference.md#reserved-local-ports).
+[Reserved local ports](api-reference/compose.md#reserved-local-ports).
 
 `res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
@@ -2394,7 +2394,7 @@ of one send's records share one `maxTraceBodyBytes` for their bodies: a body
 past what is left is cut and says so (`bodyTruncated`, `bodyBytes`). The script
 itself still receives the whole response. A load run records nothing and keeps
 only the line. The shape is [`scriptRequests` in the API
-reference](api-reference.md#post-execute).
+reference](api-reference/execute.md#post-execute).
 
 **Three bounds, all hard.**
 
@@ -2468,7 +2468,7 @@ send (a collection run's, for every script of that run), and every script of a
 load run takes the one the run's own transfers left by - resolved once when the
 run starts and kept for it, so a Settings edit made while the run was in flight
 cannot send an assertion by a route the responses it is asserting on never took
-(issues #1256, #2841). The [default headers](api-reference.md#default-request-headers)
+(issues #1256, #2841). The [default headers](api-reference/health-config.md#default-request-headers)
 the engine adds follow the same rule: a load run's scripts send the load
 scope's set its transfers carried, a design-mode send's scripts the design
 scope's.
@@ -2503,7 +2503,7 @@ bound row lacks throws naming the column, the same way `replaceIn` does.
 the URL is percent-encoded component by component as `postman-url-encoder`'s
 `toNodeUrl` writes it (`core::encode_url_as_postman`): the path, query,
 fragment and user info each by its own Postman set (listed under
-[Query encoding](api-reference.md#query-encoding)), a backslash before the
+[Query encoding](api-reference/compose.md#query-encoding)), a backslash before the
 query as `/`, the host lowercased. So `pm.sendRequest("https://x/a b?q=c d&r=\"x\"", cb)`
 sends `/a%20b?q=c%20d&r=%22x%22`, where before the space made libcurl refuse
 the URL. `&` and `=` in the query stay separators, and `%` is never encoded, so
@@ -2514,7 +2514,7 @@ enclosing request's `disableUrlEncoding` nor anything in the options reaches
 it. A `{{name}}` nothing answered goes out as written, where Postman would
 encode its braces in the path. A non-ASCII host is dialled by its punycode
 name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
-path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
+path; see [Non-ASCII hosts](api-reference/compose.md#non-ascii-hosts).
 
 Send writes the same request line for every URL with its Send URL without
 encoding toggle off (#2465): the encoder is the same one.
@@ -2889,7 +2889,7 @@ before failing is ignored, because it came from code that did not finish. A
 skip the pre-request script asked for has still happened - nothing was sent -
 but where the iteration goes next is the plan's order, not the script's.
 `stopOnError: true` on the run ends the iteration at that step instead (see
-[api-reference.md](api-reference.md#scenario-runs), Outcomes). A step that
+[api-reference/scenario-runs.md](api-reference/scenario-runs.md#scenario-runs), Outcomes). A step that
 errors this way runs no `step.between` element either, so a `timer.think` or
 a `control.loop` decision after it does not happen for that step.
 
@@ -2969,7 +2969,7 @@ pm.metrics.rate('cacheHit', pm.response.headers.get('X-Cache') === 'HIT'); // on
 beside a `count` of calls (#1937), so a counter only ever given `0` is still recorded and is judged
 by a `custom.<name>.value` threshold; `rate` is the percentage of calls whose value was true. All three share the same
 32-distinct-name cap the
-`metric.record` element does (`api-reference.md`'s `customMetrics` section), across every name
+`metric.record` element does (`api-reference/collection-runs.md`'s `customMetrics` section), across every name
 either surface records under - a script that introduces a 33rd name past what the collection's own
 `metric.record` elements already declared has that call silently do nothing, since the cap is
 enforced loudly only where it can be, at `POST /collections` / `POST /requests` validate time for a
@@ -3018,7 +3018,7 @@ script an unquoted integer or decimal cell as a number (#2540).
 story.** `pm.iterationData` hands a script the cell as the value it is - a
 number stays a number, a `null` stays `null`, and a branch can read either.
 `{{data.column}}` (see
-[api-reference.md](api-reference.md#scenario-runs)) hands
+[api-reference/scenario-runs.md](api-reference/scenario-runs.md#scenario-runs)) hands
 the *request* the cell as **text**, because a URL, a header and a body are text;
 its type only survives where the surrounding document has types of its own,
 which is why placement inside or outside a JSON string literal is what decides
@@ -3039,7 +3039,7 @@ Both scripts then read it as `pm.iterationData`, and `pm.info.iteration` is `0`
 with `pm.info.iterationCount` `1` - the send *is* row 0 of 1. This is how a
 script that reads a row gets an edit loop that is not "start a run, find the
 step, read the result"; the row binds `{{data.column}}` in the request as well.
-See [api-reference.md](api-reference.md#post-execute).
+See [api-reference/execute.md](api-reference/execute.md#post-execute).
 
 **`pm.iterationData` is `undefined` where there is no row** - an ordinary Send,
 and any run started without a data set. Where a run *was* given rows, its
@@ -3080,7 +3080,7 @@ or **credential** carrying `{{data.email}}` has it substituted with the
 iteration's row immediately before the send. It is a namespace, not a variable
 scope - it cannot be read or written through `pm.variables` - and it is
 documented under
-[Scenario runs](api-reference.md#scenario-runs). **A bare `{{email}}` binds the
+[Scenario runs](api-reference/scenario-runs.md#scenario-runs). **A bare `{{email}}` binds the
 same way while a row is bound** (issue #1007), and unlike the prefixed
 spelling it *is* readable through `pm.variables.get("email")` too - see
 [`pm.variables`](#variables-pmvariables) above.
@@ -3164,7 +3164,7 @@ another prints `{}`.
 "level": "log" | "info" | "warn" | "error", "message": "...",
 "scriptRequest"?: <index> }` - `scriptRequest` only on a `pm.sendRequest`
 summary line, naming the call's record (#3633) - see
-[`consoleLogs` in the API reference](api-reference.md#post-execute). The four
+[`consoleLogs` in the API reference](api-reference/execute.md#post-execute). The four
 methods are bound to one C function distinguished by QuickJS's `magic`
 argument (`setup_console`), so the level is captured at the call; it cannot be
 recovered from the text afterwards, which is why it used to be lost. The app's
@@ -3218,7 +3218,7 @@ step, on that step's `tests` (`scenario.steps[].tests`), so the same line from
 two steps appears under each and the run's own `testValidation` carries none.
 The replay's failures are its validation row and `testValidation`'s counts; see
 [Load Test Scripts](#load-test-scripts) and the
-[API reference](api-reference.md#get-runsrunidreport).
+[API reference](api-reference/runs.md#get-runsrunidreport).
 
 ## Examples
 
@@ -4407,7 +4407,7 @@ The **language** is current; what is missing is the **host environment**:
   silent about it (issue #1503): a load run reports each as
   `preRequestScript: "skipped"` in its `scenario.steps` breakdown, and the
   run's `warnings` array carries one line naming how many steps did (see
-  [api-reference.md](api-reference.md#the-scenario-block-collection-runs)).
+  [api-reference/load-runs.md](api-reference/load-runs.md#the-scenario-block-collection-runs)).
 
 ### Test Scripts (Post-request)
 
@@ -4532,7 +4532,7 @@ The **language** is current; what is missing is the **host environment**:
   was meant to fill goes on the wire literally instead of being refused, and
   since issue #1503 the run counts it: `unresolvedTokens` per step, and one
   line in the run's `warnings` array naming a few of the affected variables
-  (see [api-reference.md](api-reference.md#the-scenario-block-collection-runs))
+  (see [api-reference/load-runs.md](api-reference/load-runs.md#the-scenario-block-collection-runs))
 
 **All three variable scopes are readable, and none of them is written back.** A
 deferred replay reads the run's own environment (the `environmentId` the run was
@@ -4762,4 +4762,4 @@ script made before it threw.
 
 ## API Reference
 
-For complete API documentation, see the [Scripting Completions API](api-reference.md#scripting) which lists all available `pm.*` functions and properties.
+For complete API documentation, see the [Scripting Completions API](api-reference/scripting.md#scripting) which lists all available `pm.*` functions and properties.

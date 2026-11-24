@@ -45,7 +45,7 @@ names (the bind owns them), `$` names (a generator is generated once, the
 iteration identity is bound), a name whose value reaches one of those, and a
 file path (a script can never choose which file is sent). The rest of this page
 says what each case means in detail; the engine's `POST /compose` contract is
-[`deferredVariables`](../engine/api-reference.md#deferredvariables).
+[`deferredVariables`](../engine/api-reference/compose.md#deferredvariables).
 
 **A third reader, MCP (issue #1207):** the same rule set is served as the MCP
 resource `vayu://variables/resolution`, and the `resolve_variables` tool
@@ -78,7 +78,7 @@ token's text before the lookup (`trim_variable_name`,
 from its trim - `" host"`, `"host "` - could therefore never be referenced, so
 the engine refuses to store one: `POST`/`PUT /environments`, `POST /globals` and
 `POST`/`PUT /collections` answer `400` naming the key
-([accepted field shapes](../engine/api-reference.md#accepted-field-shapes)). A
+([accepted field shapes](../engine/api-reference/resource-writes.md#accepted-field-shapes)). A
 space or dot *inside* a name (`my var`, `a.b`) is a name like any other. An
 import trims the names it reads and skips a row whose name trims to nothing, so
 a padded row in a document never fails the import. The variables table trims a
@@ -143,7 +143,7 @@ those refusals say.
 engine fills it wherever a dataset is known (a collection or scenario run's
 plan, a single-request load run, a single send carrying one row), and a client
 composing ahead of a run of its own states it explicitly as the `dataColumns`
-field of [`POST /compose`](../engine/api-reference.md#post-compose): an array
+field of [`POST /compose`](../engine/api-reference/compose.md#post-compose): an array
 of the data file's column names, absent or `null` meaning no dataset and
 composition exactly as before.
 
@@ -175,7 +175,7 @@ run.
 
 The conformance fixture pins all three cases, so the two resolvers cannot
 drift on them. See
-[api-reference.md](../engine/api-reference.md#scenario-runs) for what the
+[api-reference/scenario-runs.md](../engine/api-reference/scenario-runs.md#scenario-runs) for what the
 engine does with the token once a row exists.
 
 ### `$vu` and `$iteration` are reserved too, for the same reason
@@ -261,7 +261,7 @@ compatibility here: Postman binds a dataset's columns bare, so every imported
 data-driven collection is already written `{{username}}`, and #402's guarantee
 was making every one of those requests send the literal token instead of the
 row's value (see [`{{data.*}}` puts the row into the request
-itself](../engine/api-reference.md#scenario-runs)). A collection that never
+itself](../engine/api-reference/scenario-runs.md#scenario-runs)). A collection that never
 attaches a data file, or whose columns share no variable's name, pays nothing.
 
 **Why the reserved `data.*` spelling is kept too.** `{{data.username}}` still

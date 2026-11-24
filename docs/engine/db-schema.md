@@ -201,7 +201,7 @@ it rather than deriving it from `outcome`. Two rules the readers depend on:
 `Database` reads the marker once at construction and exposes it as
 `Database::recovery()`, so the polled `GET /health` costs no file access. That
 endpoint reports it as a `recovery` node, absent on a clean start - see
-[api-reference.md](api-reference.md#get-health) - and the app renders it as a
+[api-reference/health-config.md](api-reference/health-config.md#get-health) - and the app renders it as a
 dismissible banner naming the database path and, when there is one, the
 quarantined file, how to copy it back to undo the recovery and the `.recover`
 command that reads it.
@@ -294,7 +294,7 @@ nothing left to touch pays close to nothing for it:
 `POST /reorder` and a restore did not, so such a row tied with the first root, and a delete and
 restore of it came back with `reparentedToRoot: true`, as if its parent were gone. The write
 paths now store `""` as `NULL` (`read_parent_id_field`, see
-[Accepted field shapes](api-reference.md#accepted-field-shapes)); this pass is the rows written
+[Accepted field shapes](api-reference/resource-writes.md#accepted-field-shapes)); this pass is the rows written
 before.
 
 - **No done marker and no schema bump.** Both statements, the count and the `UPDATE`, are served
@@ -625,7 +625,7 @@ Stores folder/group hierarchy for requests.
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
 | `spec_file`          | TEXT    | JSON: the spec file the Spec tab was picked from (issue #2765); default `"{}"` |
 | `data_file`          | TEXT    | JSON: the data file a run reads its rows from (issue #2765); default `"{}"` |
-| `order`              | INTEGER | Position among the parent's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
+| `order`              | INTEGER | Position among the parent's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference/resource-writes.md#ordering)); default 0 |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
 | `deleted_at`         | INTEGER | Unix ms; NULL while the collection is live (issue #988) |
@@ -766,7 +766,7 @@ crash mid-cascade cannot leave a half-deleted subtree. See `Database::purge_coll
 set and is **cycle-safe**: a self-parent (`parent_id == id`) or an `A -> B -> A` loop terminates
 instead of growing the work list forever under the global DB mutex (which would hang every
 endpoint, including `/health`). `POST /collections` rejects the writes that would create such a
-cycle (see [api-reference.md](api-reference.md) - POST /collections), so cycles only arise from
+cycle (see [api-reference/index.md](api-reference/index.md) - POST /collections), so cycles only arise from
 data written before that validation existed; the visited set is what lets deletion recover from it.
 
 ---
@@ -790,7 +790,7 @@ Stores individual HTTP request definitions.
 | `body_type`           | TEXT    | Denormalized mirror of `body.mode`; kept for queries |
 | `auth`                | TEXT    | JSON discriminated union (see below)                 |
 | `elements`            | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
-| `order`               | INTEGER | Position among the collection's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
+| `order`               | INTEGER | Position among the collection's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference/resource-writes.md#ordering)); default 0 |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `timeout_ms`          | INTEGER | The request's own whole-transfer timeout in ms, `1`-`86400000`; NULL for the `defaultTimeout` setting (issue #2937) |
@@ -819,7 +819,7 @@ Duplicate keys are allowed. A query row may carry `"valueless": true` for a
 bare `key` with no `=` (issue #1772). The enabled query rows of `params` follow
 `url`: a write that states `url` and no `params` reconciles them with the URL's
 query, and rewrites the column only when that changes a row (issue #3551, see
-[`POST /requests`](api-reference.md#post-requests)); no startup pass touches
+[`POST /requests`](api-reference/requests.md#post-requests)); no startup pass touches
 rows stored before it. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issues-1487-1491)
 disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
@@ -895,7 +895,7 @@ an array of `{key, value, enabled, sendAs?}` rows. `sendAs` is `body`, `url` or
 because the authorization request carries its parameters in the authorize
 URL's query. A config with no extra parameters omits the lists. What the
 engine sends from them, and how they enter the token cache key, is in
-[api-reference.md](api-reference.md#post-oauth2token). A Postman
+[api-reference/authentication.md](api-reference/authentication.md#post-oauth2token). A Postman
 import fills them from the block's `tokenRequestParams`, `authRequestParams`
 and `refreshRequestParams`
 ([postman.md](../app/import-collections/postman.md#oauth-20-extra-request-parameters)).
@@ -1271,7 +1271,7 @@ housekeeping and no 10 MiB blob is loaded to decide its fate.
 `json::MAX_FIELD_SIZE`) is a `400` naming the size and the cap, on both write
 paths - never a truncation, and never the engine's general body cap refusing the
 whole request without naming the document
-([Request bodies](api-reference.md#request-bodies)).
+([Request bodies](api-reference/index.md#request-bodies)).
 
 **operations** is what the document *declares* - a JSON array of
 `{operationId?, method, path, responses[]}` in document order - read by
@@ -1339,7 +1339,7 @@ The table itself was new when it landed, so `sync_schema()` created it outright;
 The operations a person declined by deleting the request for them (schema
 version 10, #3031), or by moving it out of the contract (#3446), so that a sync
 of the document does not re-create them.
-[`POST /specs/diff`](api-reference.md#post-specsdiff) lists such an operation
+[`POST /specs/diff`](api-reference/specs.md#post-specsdiff) lists such an operation
 under `declined` instead of `added`, and a `policy: "safe"` sync never creates
 it.
 
@@ -1464,7 +1464,7 @@ The registry that maps a host to the client certificate Vayu presents to it
 (issue #707). Read into the transport policy at the point of use - once per run
 on the load and collection paths - and applied by the shared applier every
 outbound transfer goes through. See
-[api-reference.md](api-reference.md#client-certificates) for the routes and the
+[api-reference/cookies-and-certificates.md](api-reference/cookies-and-certificates.md#client-certificates) for the routes and the
 matching rule.
 
 | Column       | Type    | Notes                                                     |
@@ -1532,7 +1532,7 @@ The folders a request-body file may be read from without being picked file by
 file (schema version 3). A file reference (see [`requests.body`](#requests)) is
 sent when its canonical path lies under one of these or is a
 [`file_grants`](#file_grants) row; both are read once per design send and once
-per run. See [api-reference.md](api-reference.md#allowed-folders-file-roots)
+per run. See [api-reference/file-access.md](api-reference/file-access.md#allowed-folders-file-roots)
 for the routes.
 
 | Column       | Type         | Notes                                                    |
@@ -1568,7 +1568,7 @@ read with it exactly, never resolving the stored path again: a link re-pointed a
 resolves to another file and is refused. The
 [schema version 6 migration](#the-file-grants-migration-schema-version-6) wrote the first rows,
 one per file a stored body marked chosen. See
-[api-reference.md](api-reference.md#picked-files-file-grants) for the routes; like `file_roots`,
+[api-reference/file-access.md](api-reference/file-access.md#picked-files-file-grants) for the routes; like `file_roots`,
 this table is written only by a caller holding the engine's grant secret.
 
 ---
@@ -1664,7 +1664,7 @@ while `status` is `pending` or `running` and the column once it is terminal, thr
 reconciliation, so it reports the end it kept, or its `start_time`.
 
 **`baseline`** is the pin set by
-[`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
+[`PUT /runs/:runId/baseline`](api-reference/runs.md#put-runsrunidbaseline): the
 known-good run later runs of the same request (or, for a load run, the same collection) are compared against. Several rows
 may carry it at once - the engine records the pin and leaves the choice of which
 baseline applies to a given run to the client. NOT NULL with a `default_value`,
@@ -1678,7 +1678,7 @@ below.
 `summary` and sets this column to whether that JSON's `warnings` array (issue
 #1503) is non-empty, in the same row write. The two columns are stamped
 together and can never disagree. It exists apart from `summary` so
-[`GET /runs`](api-reference.md#get-runs)'s paginated list can read it straight
+[`GET /runs`](api-reference/runs.md#get-runs)'s paginated list can read it straight
 off the row it already fetched for every page - no extra query, and no risk
 of the compact-summary cache (`RunSummaryCache`, keyed on the immutable
 `config_snapshot`) ever caching a completion-time fact. The same cache's
@@ -1689,7 +1689,7 @@ second table holds a terminal load or collection run's list-row
 **`origin` / `origin_client`** (#1817, schema version 5) record who started
 the run, as the starting client asserted it on `POST /execute` or `POST /runs`
 (`read_run_origin`, `http/routes/execution.cpp`; the rules are in
-[POST /execute](api-reference.md#post-execute)). Client-asserted metadata, not
+[POST /execute](api-reference/execute.md#post-execute)). Client-asserted metadata, not
 identity: any caller can claim any kind and nothing authorises on it.
 `origin_client` is set only for `mcp`, trimmed and capped at 128 characters,
 and stored as the client sent it. The `default_value` on `origin` is what lets
@@ -1697,7 +1697,7 @@ and stored as the client sent it. The `default_value` on `origin` is what lets
 honest answer for every row stored before: nobody recorded one. No data
 migration. The client's `origin` object is kept out of `config_snapshot`
 (`sanitize_config_snapshot`), so these two columns are its one record.
-[`GET /runs?origin=<kind>`](api-reference.md#get-runs) filters on `origin`
+[`GET /runs?origin=<kind>`](api-reference/runs.md#get-runs) filters on `origin`
 (`run_filter_where`, `db/db_runs.cpp`) with no index: History's list is already
 bounded by retention and ordered by `idx_runs_start_time`. The column sits past
 `config_snapshot` in the stored row, so reading it walks the snapshot's overflow
@@ -1705,14 +1705,14 @@ pages; like every filter there, the term is a `CASE` that reads its column only
 when the filter is set (#2548).
 
 **`outcome`** (#3547, schema version 11) is the verdict a run's
-[`GET /runs`](api-reference.md#get-runs) row draws from its own
+[`GET /runs`](api-reference/runs.md#get-runs) row draws from its own
 `resultSummary`, stored so the list can filter on it
 (`?outcome=<verdict>`, the same `CASE` term and no index, for the same
 reasons as `origin`). Derived like `has_warnings`, never written by a caller:
 `vayu::core::stored_run_outcome` (`core/run_result_summary.hpp`) builds the
 row's `resultSummary` from `type`, `status` and `summary` and judges it by the
 app's row rule (`rowOutcome`; the rules are in
-[GET /runs](api-reference.md#get-runs)). `Database` re-derives it in every
+[GET /runs](api-reference/runs.md#get-runs)). `Database` re-derives it in every
 write of either column, inside the same retried callback as the write
 (`stamp_run_outcome`, `db/db_runs.cpp`): `transition_run_status`, because a
 worker stores `summary` while the row is still `running` and the terminal
@@ -1890,7 +1890,7 @@ only an upper bound once an iteration is abandoned, issue #2914), and the second
 submitted in: load start to the moment it stopped submitting, before the end-of-run drain that
 `test_duration` includes. An `iterations` run that reached its own end stores its whole
 `test_duration` there instead (see the report's
-[two clocks](api-reference.md#get-runsrunidreport)). `send_rate` is `requests_sent` over
+[two clocks](api-reference/runs.md#get-runsrunidreport)). `send_rate` is `requests_sent` over
 `sending_duration`; `rps` and `throughput` stay completed requests over `test_duration`, and so
 does every threshold that reads them. A failed run stores its wall-clock `test_duration` in
 `sending_duration` too. Always written, zeros included: a summary with no `sending_duration` key
@@ -1950,7 +1950,7 @@ the `phases` rule. Its `sampled` count is stored rather than derived because it 
 denominator that says these tallies describe the run's bounded reservoir and not the run -
 unlike `coverage` beside it, which is exact. `thresholds` follows
 the same rule and for the same reason: absent when the run declared no
-[budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
+[budgets](api-reference/load-runs.md#the-thresholds-block-passfail-budgets), so the report's
 `thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
 keys are the wire names the payload declared, carried through unchanged; the report derives
 `verdict` from `failed` rather than storing it, so the two cannot contradict. Each check's
@@ -2108,7 +2108,7 @@ with its credentials withheld. Composition has already written every
 design ([architecture](architecture.md#security)). Rows stored before #1803 stay
 as they were written: nothing rewrites a stored snapshot, and the schema
 version did not change. A run exported as a file is held to a stricter rule than
-the snapshot: [`POST /export/run-report`](api-reference.md#post-exportrun-report)
+the snapshot: [`POST /export/run-report`](api-reference/export.md#post-exportrun-report)
 copies an allowlist of the snapshot (header and parameter names, the body's mode
 and size, the URL with its credentials blanked) and none of its values.
 
@@ -2126,7 +2126,7 @@ stored string's full length on every call that uses them. The by-id route
 re-derives or re-truncates.
 
 **`config_snapshot` for a scenario run** - a run started from a `scenario` block
-(see [POST /runs](api-reference.md#post-runs)) stores a **step manifest**, never
+(see [POST /runs](api-reference/load-runs.md#post-runs)) stores a **step manifest**, never
 the resolved plan. The manifest *replaces* the block as sent, rather than
 sitting beside it (`scenario_snapshot`, `http/routes/execution.cpp`).
 
@@ -2167,7 +2167,7 @@ run's snapshot also carries the run's resolved default-header decision at
 start: `{"userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding":
 true, "expectContinue": false}` (`expectContinue`, #2516, is
 `DefaultHeaderPolicy::expect_continue`). This is a deliberate, narrow exception to
-[Default request headers](api-reference.md#default-request-headers)'s "nothing
+[Default request headers](api-reference/health-config.md#default-request-headers)'s "nothing
 here is stored" rule - that rule is about not writing an applied default back
 into a *saved request*, the way the renderer used to freeze `X-Request-ID`
 into one before issue #1229. Here nothing is applied to anything: the value is
@@ -2193,7 +2193,7 @@ their `monitor_samples` + their `results`), batched inside transactions that rel
 backlog cannot stall `/health`, SSE, or the runs poll. Because victims are chosen under an
 earlier acquisition, each batch re-reads its rows under its own lock and spares one that has
 since been pinned, gone back in flight or been deleted (issue #1906); that batch loop is
-`remove_unexempt_runs`. "Clear run history" ([`DELETE /runs`](api-reference.md#delete-runs),
+`remove_unexempt_runs`. "Clear run history" ([`DELETE /runs`](api-reference/runs.md#delete-runs),
 `Database::clear_runs`, issue #2429) is its second caller: every stored id is a candidate, and the
 same per-row exemption under the batch lock keeps baselines and in-flight runs. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `remove_unexempt_runs` call, so a new
@@ -2223,7 +2223,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f grantType \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](api-reference.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource). A row keyed before `grantType` joined the key (#3689) is orphaned, never reused and never pruned |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f grantType \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](api-reference/authentication.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource). A row keyed before `grantType` joined the key (#3689) is orphaned, never reused and never pruned |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |
@@ -2302,7 +2302,7 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
 ```
 
 `requests_failed`, `http_errors` and `no_response` count errors by the one definition
-([What counts as an error](api-reference.md#what-counts-as-an-error)); the breakdown pair is
+([What counts as an error](api-reference/metrics.md#what-counts-as-an-error)); the breakdown pair is
 absent from a tick an engine older than issue #2124 stored, whose `requests_failed` counted
 no-response failures only. `cancelled` is the requests a user stop has cancelled so far, which
 none of the three counts (issue #2136); absent from a tick stored before that issue.
@@ -2439,7 +2439,7 @@ Individual request outcomes - all errors plus sampled successes (sampling is con
 | `timestamp`   | INTEGER    | Unix ms                                                      |
 | `status_code` | INTEGER    | HTTP status, or **0 for transport errors** (so totals reconcile) |
 | `status_text` | TEXT       | Wire reason phrase or canonical IANA text                    |
-| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time. On a load run's error row, the time until the transfer gave up (#2412); `0` for a request with no duration, which a real `0` reading cannot be told apart from (see [Latency population](api-reference.md#latency-population)) |
+| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time. On a load run's error row, the time until the transfer gave up (#2412); `0` for a request with no duration, which a real `0` reading cannot be told apart from (see [Latency population](api-reference/metrics.md#latency-population)) |
 | `error`       | TEXT       | Error message for failures; empty on success                 |
 | `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
@@ -2467,10 +2467,10 @@ chunks already committed. Blob dedup spans the whole flush, not one chunk.
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
 latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME` less its wait for a connection slot (#2394);
 `queueWaitMs = totalMs − wireMs` is time spent queued before the wire, inside the generator or in
-libcurl (see [the split](api-reference.md#post-execute)). A buffered design send adds a ninth, **`engineMs`** (#2132):
+libcurl (see [the split](api-reference/execute.md#post-execute)). A buffered design send adds a ninth, **`engineMs`** (#2132):
 Vayu's own cost for that exchange, the handler's elapsed time less `wireMs`, script time and an OAuth 2.0 token fetch, taken
 before the write (see [One timing
-convention](api-reference.md#post-execute)), and a tenth, **`scriptMs`** (#3676): the script time `engineMs` leaves out
+convention](api-reference/execute.md#post-execute)), and a tenth, **`scriptMs`** (#3676): the script time `engineMs` leaves out
 (pre-request, test and `pm.sendRequest`, `0` with no script), not part of `totalMs`. Only the design writer and the
 scenario step writer store `scriptMs`, and only the design writer stores `engineMs`.
 
@@ -2481,7 +2481,7 @@ than assuming all eight are there and flat (`engineMs` and `scriptMs` aside, abo
 |--------|----------------------------|
 | Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys. Written for a completion the 1-in-`success_sample_rate` sampler selects (only while `save_timing_breakdown` is on), **or** one that crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`, and is stored whether or not the breakdown toggle is on). The two have separate retention budgets - `max_success_results` and `max_slow_results` - and an outlier never consumes a sampling slot. A **scenario** load run started with `scenario.data` adds **`dataRowIndex`**, the row that iteration bound - the only per-result record of it, since a scenario load run stores no per-step rows. |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0`, plus **`dataRowIndex`** for a scenario load run given `scenario.data`. A `data_binding_failed` error is written for a request that was never sent at all - a `{{data.column}}` naming a column its row does not carry - so it has no timing. |
-| Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** and **`scriptMs`** for a buffered send, the one value each the live `timing.engineMs` / `timing.scriptMs` returned; both absent for a streaming send, an auth-failure row and any row stored before #2132 (`scriptMs`: before #3676). Written on **every** single request, alongside a nested `request` object plus `error_type` / `error_message` when the exchange failed and `response` when it did not. The two can coexist (#3423): every driver reports a failure at status 0 (`mark_failed`, the stream's `settle_end_reason`), and one that came after a header block arrived (an undecodable body, a timeout mid-body, a redirect limit, a proxy's refusal) keeps its whole `response` node beside the error, as the live answer shows it, so `response` is not a success flag. A failure that received no header block (a refused connection, an unresolved host, a failed handshake) has no `response` node; a proxy's answer counts as one, so headers a proxy sent on its tunnel are kept too. The `response` node carries `headers` (the folded, lower-cased map), `headerLines` (#2460: the lossless `{name, value}` list in wire order with `Set-Cookie` per line, written only when non-empty - absent on a load sample and on any row stored before the field, so a reader falls back to `headers`), `redirects` (#2461: the followed 3xx hops as `{status, statusText, headerLines, url, schemeDowngrade}` - `url` the request that hop answered with its credential query values written as `<redacted>`, `schemeDowngrade` true when it went over `https` and the next hop over `http` (#2949) - written only when non-empty - absent when nothing was followed and on any row stored before the field; a hop stored before #2949 lacks `url` and `schemeDowngrade`), `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
+| Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** and **`scriptMs`** for a buffered send, the one value each the live `timing.engineMs` / `timing.scriptMs` returned; both absent for a streaming send, an auth-failure row and any row stored before #2132 (`scriptMs`: before #3676). Written on **every** single request, alongside a nested `request` object plus `error_type` / `error_message` when the exchange failed and `response` when it did not. The two can coexist (#3423): every driver reports a failure at status 0 (`mark_failed`, the stream's `settle_end_reason`), and one that came after a header block arrived (an undecodable body, a timeout mid-body, a redirect limit, a proxy's refusal) keeps its whole `response` node beside the error, as the live answer shows it, so `response` is not a success flag. A failure that received no header block (a refused connection, an unresolved host, a failed handshake) has no `response` node; a proxy's answer counts as one, so headers a proxy sent on its tunnel are kept too. The `response` node carries `headers` (the folded, lower-cased map), `headerLines` (#2460: the lossless `{name, value}` list in wire order with `Set-Cookie` per line, written only when non-empty - absent on a load sample and on any row stored before the field, so a reader falls back to `headers`), `redirects` (#2461: the followed 3xx hops as `{status, statusText, headerLines, url, schemeDowngrade}` - `url` the request that hop answered with its credential query values written as `<redacted>`, `schemeDowngrade` true when it went over `https` and the next hop over `http` (#2949) - written only when non-empty - absent when nothing was followed and on any row stored before the field; a hop stored before #2949 lacks `url` and `schemeDowngrade`), `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference/execute.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 | Load run, script validation (`store_validation_failures` in `run_manager.cpp`) | not a captured request: the one synthetic row the post-run replay of the un-inlined `script.post` elements leaves when an assertion failed (`status_code` 0, `error` `Script validation failures`; none is written for a run that failed nothing). `trace_data` is `{failures, failureCounts, failuresDistinct, totalFailed, totalPassed}`. `failures` holds each **distinct** failure message once, in first-seen order, at most 10 (`MAX_FAILURE_MESSAGES`); a scenario step's name prefixes it (`step name: assertion: message`) and is part of its identity. `failureCounts` is parallel to `failures`: how many times each failed across the sampled responses. `failuresDistinct` is every distinct message the replay saw, kept or not, so `failuresDistinct - len(failures)` were turned away. `totalFailed` / `totalPassed` count assertions, each occurrence once, so the counts sum to `totalFailed` unless messages were turned away. `failureCounts` and `failuresDistinct` are absent on a row stored before #3127, which also repeated a message once per sample; a reader falls back to a count of 1 each. The number of responses replayed is the report's `testValidation.samplesTested`, not stored here. `trace.failures` is the only field that tells the row from a captured sample. |
 
 | Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored` / `stopped`, the last a step a Stop or shutdown cut short, #3397), a flat **`scriptMs`** (#3676: the step's pre-request and test script time, `pm.sendRequest` included, `0` for a step with no script, absent for a row that could not bind and on a row stored before the key), and **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that failed, errored or was skipped is kept and successes, with `stopped` steps, fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
@@ -2516,7 +2516,7 @@ trace around them these records are **masked when written** - a credential
 header's value is `"<redacted>"` (the challenge headers `WWW-Authenticate`,
 `Proxy-Authenticate` and `Authentication-Info` excepted), a URL's credentials
 read `<redacted>` rather than a blank (see
-[POST /execute](api-reference.md#post-execute)) - and their bodies share one
+[POST /execute](api-reference/execute.md#post-execute)) - and their bodies share one
 `maxTraceBodyBytes` between them, applied when the `scripts` node is built,
 because the live answer is the same object; `cap_trace_bodies` does not reach
 them here either. A sequential scenario run's `runs.summary.lifecycle` rows
@@ -2524,7 +2524,7 @@ carry the same records for its setup and teardown scripts. A load run stores
 none, and a row stored before the field has no key.
 
 The `request` node also carries **`rawRequest`** - the message the transfer actually put on the
-wire, the same string the live [`POST /execute`](api-reference.md#post-execute) response returns
+wire, the same string the live [`POST /execute`](api-reference/execute.md#post-execute) response returns
 (issue #348). It is what a restored raw-request view reads, because it is the only copy that
 carries what libcurl added on our own behalf: the [cookie jar](architecture.md#cookie-jar)'s
 `Cookie` line, `Accept`, the real `Content-Length`. Values in it are **not redacted**, matching
@@ -2536,12 +2536,12 @@ falls back to rebuilding the view from `method`/`url`/`headers`/`body` -
 `restore-response.ts`'s `sentSide` is that reader.
 
 The `request` node carries a second header map, **`sentHeaders`** - the record of what the
-transfer issued, the same map the live [`POST /execute`](api-reference.md#post-execute) response
+transfer issued, the same map the live [`POST /execute`](api-reference/execute.md#post-execute) response
 returns as `requestHeaders` (issue #664). It is `headers` minus the entries the transfer
 suppresses (a `form-data` `Content-Type`, which libcurl writes itself with the boundary) and a
 blank `Content-Type` or `Cookie` row, which is not sent (any other blank row is sent empty and
 recorded as `""`, issue #3220), plus what the engine derives at send time: the body-implied
-`Content-Type` and the [default headers](api-reference.md#default-request-headers) this send
+`Content-Type` and the [default headers](api-reference/health-config.md#default-request-headers) this send
 added - the `User-Agent`, a negotiated `Accept-Encoding`, a correlation id where one is switched
 on. None of those is written into the request row itself (issue #1229): they are applied per send,
 so a stored request cannot carry a stale one. Both maps are stored because both are read, and they
@@ -2628,7 +2628,7 @@ same row, read by two routes for two different callers.
 ### `result_bodies`
 
 The response captured for one sampled **load-run** result, one-to-one with a `results` row.
-Struct is `db::ResultBody`. Read only by [`GET /runs/:runId/samples`](api-reference.md#get-runsrunidsamples);
+Struct is `db::ResultBody`. Read only by [`GET /runs/:runId/samples`](api-reference/runs.md#get-runsrunidsamples);
 nothing on the report path touches it.
 
 | Column         | Type       | Notes                                                              |
@@ -2663,7 +2663,7 @@ still keeps its body.
 
 **`stream_events` is a count, not a list.** The stored body of a streaming
 sample already *is* the `text/event-stream` bytes, so
-[`GET /runs/:runId/samples`](api-reference.md#get-runsrunidsamples) parses the
+[`GET /runs/:runId/samples`](api-reference/runs.md#get-runsrunidsamples) parses the
 events back out of it with the same `SseParser` the live path feeds rather than
 storing a second copy that could disagree with the first. What a reader cannot
 recover from those bytes is how many events the transfer actually delivered -
@@ -2723,7 +2723,7 @@ so a body with a zero byte further in is stored here as text, with all its bytes
 with all of them through the same `db::BodyBytes` mapping `inbox_requests.body` uses (#3159). The
 column is still `TEXT` and the write always bound the full length, so rows stored before the
 mapping read whole too. `GET /runs/:id/samples` lists such a body as base64
-([`bodyEncoding`](api-reference.md#get-runsrunidsamples)).
+([`bodyEncoding`](api-reference/runs.md#get-runsrunidsamples)).
 
 Load-test responses are overwhelmingly identical, so 1000 samples of one 2 KiB body store 2 KiB,
 not 2 MB. The digest is taken over the **stored** (already truncated) bytes: two bodies that
@@ -2743,7 +2743,7 @@ rows in them.
 
 ### `inbox_requests`
 
-What a [webhook inbox](api-reference.md#webhook-inbox) listener captured. Struct is
+What a [webhook inbox](api-reference/inbox.md#webhook-inbox) listener captured. Struct is
 `db::InboxRequest`.
 
 | Column           | Type       | Notes                                                            |
@@ -2770,7 +2770,7 @@ newest `inboxMaxCaptures` rows per inbox (default 500, settable 1-10000) and del
 cannot tie. A capture the caller was told had landed can therefore never be missing its insert, nor
 an untrimmed table its bound. The retention and body limits are resolved by `read_inbox_limits`
 once, when the inbox starts, so every row belonging to one inbox was truncated and retained by the
-same rule - see [api-reference.md](api-reference.md#webhook-inbox) for the settings.
+same rule - see [api-reference/inbox.md](api-reference/inbox.md#webhook-inbox) for the settings.
 
 **Cleared at startup.** An inbox lives only as long as the engine process that opened it, so after
 a restart every row here belongs to an inbox nothing can list. `Database::init` calls
@@ -2937,7 +2937,7 @@ retroactively.
 ```
 It sits beside three plain `string` entries, `proxyUrl`, `proxySystemUrl` and
 `proxyBypass`, and the four are read together as one policy at the point of use
-- see [Proxy settings](api-reference.md#proxy-settings) for the values, the
+- see [Proxy settings](api-reference/health-config.md#proxy-settings) for the values, the
 cross-field rule `POST /config` enforces over `proxyMode` + `proxyUrl`, and why
 `proxyUrl` holds credentials in plaintext exactly as `oauth_tokens` does.
 `proxySystemUrl` is the one config row the **app** writes rather than the user:
@@ -2951,7 +2951,7 @@ is a rendering distinction rather than a value-space one: the app draws a
 textarea for it because what it holds is pasted PEM whose line breaks are the
 format. The certificates themselves are public, so nothing here is a
 credential; the engine materializes them as `ca-bundle.pem` beside this
-database (see [TLS trust settings](api-reference.md#tls-trust-settings)), which
+database (see [TLS trust settings](api-reference/health-config.md#tls-trust-settings)), which
 is derived state a delete only costs a rewrite.
 
 **`dbSynchronous`** is the exception: SQLite's durability levels (`"0"` Off,

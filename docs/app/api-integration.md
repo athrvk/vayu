@@ -84,7 +84,7 @@ sidecar's version can lag the app's) still yields its string as the message, and
 a body carrying neither falls back to `HTTP <status>: <statusText>`. `response`
 keeps the raw body, which is where per-error detail lives - `error.item` on a
 failed bulk import, the provider fields on `/oauth2`. See
-[the engine's error contract](../engine/api-reference.md).
+[the engine's error contract](../engine/api-reference/index.md).
 
 **Error Types:**
 - `isTimeout`: Request timeout
@@ -214,7 +214,7 @@ mapping (`orchestrator.payload-conformance.test.ts`); the engine drops it there
 too. A refused file comes back as a send failure (status 0, the engine's message
 naming the field or "Body file", the path and what to do), which the response
 pane's `ClientErrorView` prints as-is under
-"Couldn't send the request". See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
+"Couldn't send the request". See [the engine's `body` union](../engine/api-reference/request-body.md#the-request-body-union)
 for the full contract.
 
 ### API Methods
@@ -299,7 +299,7 @@ apiService.deleteFileRoot(id: string): Promise<void>           // main's DELETE 
 The folders a request-body file may be sent from without a per-file pick -
 the second half of the trust rule under [Request bodies](#request-bodies).
 Only the list is an engine call from the renderer. Both writes need the
-engine's grant secret ([who may call the API](../engine/api-reference.md#who-may-call-the-api)),
+engine's grant secret ([who may call the API](../engine/api-reference/index.md#who-may-call-the-api)),
 which only the main process holds, so they cross the Electron bridge
 (#2356):
 
@@ -489,7 +489,7 @@ out-of-range value is a `400` rather than a clamp.
 
 The mock is literal: it resolves no variables, so a `{{variable}}` in an example body
 is served as written, and it drops a leading `{{baseUrl}}` whole, so a path inside the
-variable's value is not part of any route ([the engine's Mock Server section](../engine/api-reference.md#mock-server)).
+variable's value is not part of any route ([the engine's Mock Server section](../engine/api-reference/mock-server.md#mock-server)).
 
 Two surfaces, deliberately split. `CollectionDetail/MockServerControl` is the
 only one that can **start** one, because a mock needs a collection and the
@@ -553,7 +553,7 @@ keeps one method per verb:
   body; a body `id` disagreeing with the path is a `400`.
 
 The full contract, including the null-vs-absent table and which fields have no
-default, is in [engine/api-reference.md](../engine/api-reference.md) under
+default, is in [engine/api-reference/index.md](../engine/api-reference/index.md) under
 "Resource writes". `src/services/api.write-verbs.test.ts` pins the method and
 path of every one of these calls - a regression here is invisible at every other
 layer, because the payload shape does not change.
@@ -679,7 +679,7 @@ rendering; for `"html"`, one self-contained page with the charts),
 `application/json` (`text/markdown`, `text/html`), and `notes.urlCredentialsOmitted`, the
 count of values the URL lost. A missing run or base is a `404`, a run still
 executing a `409 run_in_progress`, a design or collection-sequence run a `400
-unsupported_run_type` ([API reference](../engine/api-reference.md#post-exportrun-report)).
+unsupported_run_type` ([API reference](../engine/api-reference/export.md#post-exportrun-report)).
 `useRunReportExport` (`queries/exports.ts`) is its mutation, and
 `EngineClient.exportRunReport` the MCP server's call.
 
@@ -900,7 +900,7 @@ entry plus `purged: true`, or a `404` if the trash does not hold that id.
 
 The full contract - request/response bodies, the restore's cohort and
 re-parent rules, and the startup retention sweep - is in
-[engine/api-reference.md](../engine/api-reference.md#trash) under Trash.
+[engine/api-reference/trash.md](../engine/api-reference/trash.md#trash) under Trash.
 
 #### Reorder
 
@@ -923,7 +923,7 @@ between two folders; the per-kind `{ type, parentId | collectionId }` entries
 earlier engines took are a `400`. `modules/collections/reorder-math.ts`
 computes both arrays from the merged sibling list the tree is already showing;
 the full contract is in
-[engine/api-reference.md](../engine/api-reference.md#post-reorder) under
+[engine/api-reference/collections.md](../engine/api-reference/collections.md#post-reorder) under
 `POST /reorder`.
 
 Unlike the other writes, the response is **read**: it is the rows as written, and
@@ -1011,7 +1011,7 @@ a `$ref` a document asked for rather than a URL a person typed (issue
 sourceUrl? }` adds those two fields to the body of both the buffered and the
 streamed form, and the engine then follows no redirect and refuses a loopback or
 link-local peer other than the source's own host and port (see
-[POST /import/fetch](../engine/api-reference.md#post-importfetch)). Only
+[POST /import/fetch](../engine/api-reference/import.md#post-importfetch)). Only
 `ref-bundler` sets it, with `sourceUrl` the URL of the document the ref was found
 in (the intermediate document for a nested ref) and absent for a picked or pasted
 document, whose references can then reach no local peer. Without it the body is
@@ -1033,7 +1033,7 @@ the payload is one shape. Imported **globals** are not in this payload: they
 are a singleton written through `updateGlobals` after the apply succeeds. See
 [import-collections/README.md](./import-collections/README.md#3-persist---orchestratorts)
 for the pipeline and
-[engine/api-reference.md](../engine/api-reference.md#post-importapply) for the
+[engine/api-reference/import.md](../engine/api-reference/import.md#post-importapply) for the
 contract.
 
 #### Execution
@@ -1072,7 +1072,7 @@ another. The engine records it on the run, and History reads it back: an
 unstamped run is `other`, indistinguishable from one a script started. The
 type is `RunOrigin` (`types/domain.ts`); `listRuns` takes the kind as
 `origin` and sends `GET /runs?origin=`. See
-[engine/api-reference.md](../engine/api-reference.md) for what the engine
+[engine/api-reference/index.md](../engine/api-reference/index.md) for what the engine
 validates.
 
 **`executeRequest` also stamps `includeParsedBody: false`** (#2544), at the same
@@ -1166,7 +1166,7 @@ A scenario run also takes a top-level `elements` override (issue #1495, wired
 into `RunCollectionDialog` by issue #1552):
 `{timers?: "asConfigured" | "off", scripts?: "asMarked" | "allInline" | "allDeferred", includeScriptTime?: boolean}`,
 documented in full at
-[api-reference.md](../engine/api-reference.md#the-elements-block-element-pipeline-override).
+[api-reference/load-runs.md](../engine/api-reference/load-runs.md#the-elements-block-element-pipeline-override).
 It rides beside `mode`/`scenario`, never inside the `scenario` block, and
 `RunCollectionDialog` sends only the fields the user changed from the engine's
 own default - the same omitted-when-default rule `failOnSchemaError` follows.
@@ -1277,7 +1277,7 @@ and the step counts, #3458, #3539) and the MCP `list_runs` rows read the whole
 summary. A `"passed"` verdict changes nothing on the row. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
-[GET /runs](../engine/api-reference.md#get-runs)), plus, on a run that asserted
+[GET /runs](../engine/api-reference/runs.md#get-runs)), plus, on a run that asserted
 or errored, the stored `assertions` block (`{exact, sampled, errored,
 teardownFailed}`, #3537) with `assertionsPassed` and `assertionsFailed` summed
 over its two populations (#2820, #3458). The renderer reads the block (the row's
@@ -1355,7 +1355,7 @@ carries the target's `environmentId` onto the execute payload, which is what
 scopes the engine's cookie jar - without it a cookie-session endpoint answered
 real requests and failed introspection alone. Every other send site omits the
 flag and is recorded as usual; see
-[api-reference.md](../engine/api-reference.md#post-execute).
+[api-reference/execute.md](../engine/api-reference/execute.md#post-execute).
 
 #### Run Management
 
@@ -1939,7 +1939,7 @@ non-ASCII byte is a `400` with code `invalid_header_name`, quoting the name, fro
 `POST /compose`, `POST /execute` and `POST /runs` alike. A name of only spaces
 and tabs is no name (`empty_header_name`). A bearer token and an API key's name
 and value are trimmed the same way when auth is resolved; see the
-[API reference](../engine/api-reference.md#post-compose).
+[API reference](../engine/api-reference/compose.md#post-compose).
 
 **Example Request:**
 ```typescript
@@ -2191,7 +2191,7 @@ inherited level is named in `preScriptError` / `postScriptError`
 that was called. A bare `string` is the pre-structured shape an older engine
 sidecar sends; `console/parse-logs.ts` decodes both and is the only place that
 knows the difference (see
-[the engine API reference](../engine/api-reference.md#post-execute)).
+[the engine API reference](../engine/api-reference/execute.md#post-execute)).
 
 `scriptRequests` is every `pm.sendRequest` the scripts made (issue #3633), one
 record per call in execution order, in the stored trace's own shape
@@ -2340,7 +2340,7 @@ agree - see `client-certificate-funnels.test.ts`.
 `timing.engineMs` is Vayu's own cost for the exchange: the engine's elapsed time
 less the transfer, the user's scripts and an OAuth 2.0 token fetch (issue #2132,
 #2185; the engine's definition
-is under [One timing convention](../engine/api-reference.md#post-execute)). It
+is under [One timing convention](../engine/api-reference/execute.md#post-execute)). It
 is optional - a stream, an auth-failure reply and rows stored before the key
 existed carry none - and the stored trace holds it **flat** as
 `trace.engineMs` where the live body nests it under `timing`, so
@@ -2770,7 +2770,7 @@ engine evaluates `thresholds` for a design-mode run and a load run of the same
 folder alike - so the same `thresholdValidation` section and `ThresholdVerdict`
 rendering apply whichever executor ran the sequence: the history Overview for a
 load run, `ScenarioRunView` above its step list for a collection run. See
-[POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for
+[POST /runs](../engine/api-reference/load-runs.md#post-runs)'s thresholds section for
 how a collection run's error rate, latency percentiles and throughput are
 derived from the steps it actually sent.
 
@@ -2819,7 +2819,7 @@ metrics against the same declared budgets a load run's are judged against.
 
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under
-[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits
+[POST /runs](../engine/api-reference/load-runs.md#post-runs)). The renderer's own limits
 live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
 inside the engine's.
 

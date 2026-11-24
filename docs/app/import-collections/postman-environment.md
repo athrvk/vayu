@@ -23,7 +23,7 @@ Neither is the collection export; see [postman.md](./postman.md) for that. The t
 > `engine/tests/fixtures/import-conformance.json` was recorded from the parser
 > this replaced and is asserted against on every build - it is simply read by
 > `engine/src/core/import_document.cpp` now, behind
-> [`POST /import/parse`](../../engine/api-reference.md#post-importparse), rather
+> [`POST /import/parse`](../../engine/api-reference/import.md#post-importparse), rather
 > than in the renderer. Module names in C++ style below name that file's
 > functions; the app holds no parser.
 
@@ -52,7 +52,7 @@ That position is not load-bearing. An environment export carries neither `info` 
 
 ### Globals merge, they do not replace
 
-`POST /globals` **replaces** the whole set - the engine has no merge verb (see [api-reference.md](../../engine/api-reference.md#post-globals)). Writing the imported record straight to it would delete every global the user already had, so `ImportOrchestrator.applyGlobals` reads the current set first and writes the union.
+`POST /globals` **replaces** the whole set - the engine has no merge verb (see [api-reference/environments.md](../../engine/api-reference/environments.md#post-globals)). Writing the imported record straight to it would delete every global the user already had, so `ImportOrchestrator.applyGlobals` reads the current set first and writes the union.
 
 `POST /import` merges the same way engine-side, and there a replaced global keeps its stored `createdAt` (or its lack of one): the import stamps every row it reads, and an existing variable is never restamped ([db-schema.md](../../engine/db-schema.md#variablevalue-shape)). `ImportOrchestrator.applyGlobals` does the same on the app's path, so re-importing a globals file does not move a variable it already had to the end of the Variables tab.
 
@@ -141,7 +141,7 @@ The toast has a single action slot. When the file also has an import report, **R
 
 ## Export (inverse)
 
-`POST /export/postman-environment` (`export_postman_environment`, `core/postman_export.cpp`; wire contract in the [API reference](../../engine/api-reference.md#post-exportpostman-environment)) writes one environment back as this format: `{id, name, values: [{key, value, type, enabled}], _postman_variable_scope: "environment"}`, rows in the stored key order. It reverses the table above: a secret variable is `type: "secret"` (its value blanked unless `includeSecrets`), a stored `string` / `number` / `boolean` type is written as itself, anything else is `"default"`, and `enabled` is the stored flag. Importing the result gives back the same names, values, enabled flags and secret flags, and the types of every variable that is neither `json` nor a secret: Postman's row has one `type` slot, and a secret's goes to `secret`.
+`POST /export/postman-environment` (`export_postman_environment`, `core/postman_export.cpp`; wire contract in the [API reference](../../engine/api-reference/export.md#post-exportpostman-environment)) writes one environment back as this format: `{id, name, values: [{key, value, type, enabled}], _postman_variable_scope: "environment"}`, rows in the stored key order. It reverses the table above: a secret variable is `type: "secret"` (its value blanked unless `includeSecrets`), a stored `string` / `number` / `boolean` type is written as itself, anything else is `"default"`, and `enabled` is the stored flag. Importing the result gives back the same names, values, enabled flags and secret flags, and the types of every variable that is neither `json` nor a secret: Postman's row has one `type` slot, and a secret's goes to `secret`.
 
 What Postman has no place for is reported in `notes.notCarried`, not dropped silently: a variable typed `json` is written as `default`, and a secret typed `number`, `boolean` or `json` is written as `secret`, each counted once under `variable_types`. The document carries no `description`, no `createdAt` and no export timestamp. Only environments export; there is no globals exporter.
 
