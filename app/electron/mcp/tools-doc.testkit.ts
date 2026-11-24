@@ -47,14 +47,18 @@ function hintsOf(annotations: ToolAnnotations): string {
 	return set.length > 0 ? set.join(", ") : "-";
 }
 
-/** A table cell: the pipe is the one character that would split it. */
-function cell(text: string): string {
-	return text.replace(/\|/g, "\\|");
+/**
+ * A table cell. The backslash is escaped first, so a title that ends in one, or
+ * holds `\|`, cannot swallow the pipe that follows it; the pipe would split the
+ * cell and a newline would end the row.
+ */
+export function tableCell(text: string): string {
+	return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 function row(tool: McpTool): string {
 	const title = tool.annotations.title ?? "-";
-	return `| \`${tool.name}\` | ${tool.category} | ${cell(title)} | ${hintsOf(tool.annotations)} |`;
+	return `| \`${tool.name}\` | ${tool.category} | ${tableCell(title)} | ${hintsOf(tool.annotations)} |`;
 }
 
 /** The whole page, as committed. Tools are sorted by name, one row each. */

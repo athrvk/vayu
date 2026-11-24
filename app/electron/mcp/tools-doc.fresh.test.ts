@@ -19,7 +19,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { TOOLS_DOC_PATH, renderToolsDoc } from "./tools-doc.testkit";
+import { TOOLS_DOC_PATH, renderToolsDoc, tableCell } from "./tools-doc.testkit";
 import { TOOLS } from "./tools.js";
 
 const REGENERATE = "pnpm docs:mcp-tools";
@@ -51,5 +51,12 @@ describe("the generated MCP tools page", () => {
 
 		expect(names).toHaveLength(TOOLS.length);
 		expect(names).toEqual(TOOLS.map((tool) => tool.name).sort());
+	});
+
+	it("escapes the backslash before the pipe, and a newline, in a cell", () => {
+		expect(tableCell("a|b")).toBe("a\\|b");
+		expect(tableCell("ends\\")).toBe("ends\\\\");
+		expect(tableCell("has\\|both")).toBe("has\\\\\\|both");
+		expect(tableCell("two\nlines")).toBe("two lines");
 	});
 });
