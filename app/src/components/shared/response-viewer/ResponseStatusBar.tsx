@@ -47,8 +47,8 @@ export interface ResponseStatusBarProps {
 	headers?: Record<string, string>;
 	/**
 	 * Vayu's own share of `time` (#2132), in ms (`timing.engineMs`); absent for a stream, an
-	 * auth-failure reply and older rows, when the bar shows nothing rather than zero. Drawn beside
-	 * `time`, so needs it.
+	 * auth-failure reply and rows stored before the engine reported it, when the bar shows nothing
+	 * rather than zero. Drawn beside `time`, so needs it.
 	 */
 	engineMs?: number;
 	/**

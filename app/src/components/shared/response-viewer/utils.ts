@@ -255,9 +255,10 @@ export function responseSizeTip(headers: Record<string, string> | undefined): st
  * line, body.
  *
  * `httpVersion` is the negotiated protocol as a *display* string (`"HTTP/2"`, `"HTTP/1.1"`, or `""`
- * when nothing was negotiated, the engine's convention, `Response::http_version`), never the
- * request-side `auto`/`http1.1`/`http2` union. It defaults to `"HTTP/1.1"`, so older callers and
- * older stored runs print as before, and an explicit `""` collapses to it: the engine's builder
+ * when nothing was negotiated, the engine's convention, `Response::http_version` in
+ * `engine/src/http/client.cpp`), never the request-side `auto`/`http1.1`/`http2` union; do not pass
+ * that here. It defaults to `"HTTP/1.1"`, so callers predating this parameter and runs stored
+ * before the field print as before, and an explicit `""` collapses to it: the engine's builder
  * falls back to the *requested* protocol there, but this display-string-only formatter would need
  * the request union threaded in, the value-space merge this field's docs warn against.
  */

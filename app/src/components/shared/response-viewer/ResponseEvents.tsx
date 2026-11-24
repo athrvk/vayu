@@ -93,8 +93,8 @@ export interface ResponseEventsProps {
 	/**
 	 * What identifies the list for the render window (#1158), which resets when this changes. A
 	 * live stream passes its run id, as its list grows in place and the default (the row count)
-	 * would reset the window on every batch; a list arriving whole (a stored trace, a capture)
-	 * wants that default.
+	 * would reset the window to its first slice on every batch; a list arriving whole (a stored
+	 * trace, a load run's captured sample) wants that default.
 	 */
 	listKey?: string;
 }
@@ -411,7 +411,7 @@ export default function ResponseEvents({
 	const received = totalEvents ?? events.length;
 	const otherMediaType = nonEventStreamType(contentType);
 	// The engine joins `streamText` over every stored event, so a capped list does not shorten it;
-	// without one, the text is as long as the list.
+	// without one, the text is only as long as the list.
 	const showCutNotice = !!eventsTruncated && !(showText && streamText !== undefined);
 
 	return (

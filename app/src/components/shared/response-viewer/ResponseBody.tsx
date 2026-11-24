@@ -62,8 +62,9 @@ export default function ResponseBody({
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
 	/*
-	 * Past `LARGE_BODY_BYTES` the pane shows a raw prefix. The bigger string decides, as either can
-	 * reach the editor (`body` in Pretty, `bodyRaw` in Raw), and the cost is the rendered one.
+	 * Past `LARGE_BODY_BYTES` the pane stops formatting and shows a raw prefix. The bigger string
+	 * decides, as either can reach the editor (`body` in Pretty, `bodyRaw` in Raw), and the cost is
+	 * the rendered one.
 	 */
 	const bodyLength = Math.max(body.length, bodyRaw?.length ?? 0);
 	const isLargeBody = bodyLength > LARGE_BODY_BYTES;

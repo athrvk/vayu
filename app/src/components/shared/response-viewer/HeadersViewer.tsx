@@ -231,10 +231,11 @@ export interface ResponseHeadersPanelProps {
  * stored viewer's Headers tab is a pair of `CompactHeadersViewer`s since going compact-only (#75,
  * #76), a deliberate difference, as a table needs width the compact pane lacks. The request section
  * is one list: the request as it went out (`wireRequestHeaders`, #2464) when recorded, else its own
- * lines (`requestHeaderLines`, #2466), and only for an older answer the folded sent record, so a
- * failed send or an older row still lists every header the request carried. A display, never an
- * input. The empty-state fallback is this panel's own: `HeadersViewer` renders `null` with no
- * entries, which would leave a header-less response as an unexplained blank pane.
+ * lines (`requestHeaderLines`, #2466), and only for an answer predating both, the folded sent
+ * record, so a failed send or a row stored before the frame was kept still lists every header the
+ * request carried. A display, never an input. The empty-state fallback is this panel's own:
+ * `HeadersViewer` renders `null` with no entries, which would leave a header-less response as an
+ * unexplained blank pane.
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
