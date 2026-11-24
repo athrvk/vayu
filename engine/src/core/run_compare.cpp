@@ -19,6 +19,7 @@
 #include "vayu/core/run_compare.hpp"
 
 #include "js_json.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -463,11 +464,8 @@ void collect_codes (const json& report, const char* side, json& merged) {
 
 // --- error classes ----------------------------------------------------------------
 
-/// The classes `summary.errorClasses` counts (#3828), in the order every reader
-/// shows them. `protocolCodes` is the finer split of `protocol` and is not
-/// compared.
-constexpr auto ERROR_CLASS_KEYS =
-std::to_array<std::string_view> ({ "transport", "protocol", "tool" });
+// The classes `summary.errorClasses` counts (#3828) are `MCP_ERROR_CLASS_NAMES`.
+// `protocolCodes` is the finer split of `protocol` and is not compared.
 
 /// A report's `summary.errorClasses` is recorded when it is an object: `{}`
 /// says nothing failed, and an absent or non-object value says the run never
@@ -486,7 +484,7 @@ ordered error_class_deltas (const json& base, const json& target) {
     if (!has_recorded_error_classes (base) || !has_recorded_error_classes (target)) {
         return out;
     }
-    for (const std::string_view key : ERROR_CLASS_KEYS) {
+    for (const std::string_view key : MCP_ERROR_CLASS_NAMES) {
         const Path path  = { "summary", "errorClasses", key };
         const json* from = number_node (base, path);
         const json* to   = number_node (target, path);

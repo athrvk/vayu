@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -113,6 +114,17 @@ struct McpErrorCounts {
 // does: a class appended to the enum must raise `CLASS_COUNT`.
 static_assert (static_cast<size_t> (McpErrorClass::Tool) + 1 == McpErrorCounts::CLASS_COUNT,
 "McpErrorClass grew: raise McpErrorCounts::CLASS_COUNT to count the new class");
+/// The wire name of each class (`transport`, `protocol`, `tool`), indexed by
+/// `McpErrorClass`: the keys of `summary.errorClasses`, in the order every
+/// reader lists them. Read from `to_string`, so the two cannot disagree.
+inline constexpr std::array<std::string_view, McpErrorCounts::CLASS_COUNT> MCP_ERROR_CLASS_NAMES = [] {
+    std::array<std::string_view, McpErrorCounts::CLASS_COUNT> names{};
+    for (size_t slot = 0; slot < names.size (); ++slot) {
+        names.at (slot) = to_string (static_cast<McpErrorClass> (slot));
+    }
+    return names;
+}();
+
 static_assert (McpErrorCounts::code_slot (-32099) + 1 == McpErrorCounts::OTHER_CODE_SLOT,
 "the server band's last slot sits just before the other-code slot");
 static_assert (

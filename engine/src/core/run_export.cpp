@@ -13,6 +13,7 @@
 
 #include "vayu/core/run_export.hpp"
 
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/run_compare.hpp"
@@ -172,9 +173,6 @@ constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 "partial", "summaryMissing", "skippedRequests", "stalledMs" });
 constexpr auto DRAIN_CUT_KEYS =
 std::to_array<std::string_view> ({ "cancelled" });
-// `protocolCodes` beside these is a `{code: count}` map (#3828).
-constexpr auto ERROR_CLASS_KEYS =
-std::to_array<std::string_view> ({ "transport", "protocol", "tool" });
 constexpr auto LATENCY_KEYS = std::to_array<std::string_view> (
 { "min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999" });
 constexpr auto RATE_CONTROL_KEYS = std::to_array<std::string_view> (
@@ -452,7 +450,8 @@ ordered summary_section (const json& summary) {
         out["drainCut"] = pick (drain_cut, DRAIN_CUT_KEYS);
     }
     if (const json& classes = member (summary, "errorClasses"); classes.is_object ()) {
-        ordered error_classes = pick (classes, ERROR_CLASS_KEYS);
+        // `protocolCodes` beside the classes is a `{code: count}` map (#3828).
+        ordered error_classes = pick (classes, MCP_ERROR_CLASS_NAMES);
         if (const json& codes = member (classes, "protocolCodes"); codes.is_object ()) {
             error_classes["protocolCodes"] = count_map (codes);
         }

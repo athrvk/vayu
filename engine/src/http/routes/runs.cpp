@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_result_summary.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/file_access_policy.hpp"
@@ -745,12 +746,10 @@ void apply_summary_error_classes (const nlohmann::json& summary, ReportExtras& e
         return;
     }
     nlohmann::json classes = nlohmann::json::object ();
-    for (const auto error_class :
-    { McpErrorClass::Transport, McpErrorClass::Protocol, McpErrorClass::Tool }) {
-        const char* name = vayu::to_string (error_class);
+    for (const std::string_view name : core::MCP_ERROR_CLASS_NAMES) {
         if (const auto count = stored->find (name); count != stored->end () &&
         count->is_number_unsigned () && count->get<size_t> () > 0) {
-            classes[name] = *count;
+            classes[std::string (name)] = *count;
         }
     }
     if (const auto codes = stored->find ("protocolCodes");
