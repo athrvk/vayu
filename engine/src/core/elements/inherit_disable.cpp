@@ -6,7 +6,6 @@
  */
 
 /**
- * @file inherit_disable.cpp
  * @brief The one phase-0 behaviour kind: `inherit.disable` (issue #1513).
  *
  * Not itself a behaviour - it names an inherited element's id to drop when

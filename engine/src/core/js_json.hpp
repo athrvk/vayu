@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/js_json.hpp
  * @brief The JavaScript the renderer's import parsers were written in, once
  *        (issues #865, #877).
  *

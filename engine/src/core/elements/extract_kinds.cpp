@@ -6,7 +6,6 @@
  */
 
 /**
- * @file extract_kinds.cpp
  * @brief `extract.json`, `extract.regex`, `extract.header` (issue #1514),
  *        `extract.boundary` (issue #1518, JMeter's Boundary Extractor).
  *

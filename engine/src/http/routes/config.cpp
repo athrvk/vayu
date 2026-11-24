@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/config.cpp
  * @brief Configuration management routes
  */
 
@@ -438,7 +437,7 @@ const std::function<void ()>& before_write) {
     }
 
     // Validate every key first; apply nothing unless all pass (all-or-nothing).
-    // True on both halves since #1453: the caller's lock (see
+    // True on both halves (#1453): the caller's lock (see
     // apply_config_update below) holds this validation and the write below to
     // one scope, so no reader can observe the keys that passed applied one at
     // a time, and the write itself is one transaction (Database::with_lock is
@@ -579,8 +578,7 @@ parse_default_header_scope (std::string_view scope) {
  * A client renders these as the auto rows beside a request's own headers, and
  * sends the names it wants back off as `disabledDefaultHeaders`. It is
  * deliberately the engine that declares them: a renderer re-deriving the set
- * from the config entries would be a second definition of the same rule, which
- * is how the two came to disagree before issue #1229.
+ * from the config entries would be a second definition of the same rule (issue #1229).
  *
  * @p scope decides which compression key the answer reflects, because that is
  * the one default a load run resolves differently from a Send (#1338). The

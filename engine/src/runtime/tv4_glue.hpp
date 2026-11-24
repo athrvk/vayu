@@ -8,7 +8,6 @@
  */
 
 /**
- * @file tv4_glue.hpp
  * @brief The factory around the vendored `tv4` (engine/vendor/tv4, #2656).
  *
  * `TV4_GLUE_OPEN + TV4_JS + TV4_GLUE_CLOSE` is the source the shelf evaluates.

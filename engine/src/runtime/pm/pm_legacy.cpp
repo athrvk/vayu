@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_legacy.cpp
  * @brief Postman's pre-`pm.*` globals (#2577): the `postman` object and the
  *        values Postman binds beside it.
  *

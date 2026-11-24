@@ -8,7 +8,6 @@
  */
 
 /**
- * @file pm_auth.hpp
  * @brief Postman's `{ type, <type>: params }` auth block, read for both
  *        surfaces that take one: `pm.sendRequest`'s `options.auth` and
  *        `pm.request.auth` (#3131).
