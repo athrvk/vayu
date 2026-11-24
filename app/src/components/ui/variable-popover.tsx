@@ -6,8 +6,6 @@
  */
 
 /**
- * Variable Popover
- *
  * What opens when you click a `{{token}}`, and the switch between its states:
  *
  *   resolved   the value, editable (`ResolvedValueEditor`), with the environment
@@ -15,25 +13,16 @@
  *   undefined  a value field and a scope to create it in (`CreateVariableForm`)
  *   read-only  the value, when there is no way to change it from here
  *
- * **A bound data row outranks all of them** (#1007, #1064). While one is picked
- * its column answers a bare name above every scope, so the popover names the row
- * as the origin and strikes the definitions beneath it.
- *
- * **Not resolving is not the same as not being defined** (#1083). A name whose
- * every definition is switched off arrives unresolved, so the list of
- * definitions is drawn under every state rather than under the resolved one
- * alone.
- *
- * **A create writes only into a scope the caller says is writable**:
- * `updateVariable` silently no-ops when the target scope has no active target
- * (no environment selected, no collection), so offering any other scope is a
- * Create button that does nothing.
- *
- * The edit buffer, the reveal flag, the picked scope, the create form's secret
- * flag and the Escape/auto-save flow stay here rather than in the two children,
- * which `PopoverContent` unmounts on close: the close path saves or discards the
- * buffer and re-masks the secret, and a picked scope or secret flag survives a
- * re-open.
+ * **A bound data row outranks all of them** (#1007, #1064): while one is picked its column answers
+ * a bare name above every scope, so the popover names the row as the origin and strikes the
+ * definitions beneath. **Not resolving is not being undefined** (#1083): a name whose every
+ * definition is off arrives unresolved, so the definitions are listed under every state. **A create
+ * writes only into a scope the caller says is writable**: `updateVariable` silently no-ops without
+ * an active target (no environment, no collection), so any other scope is a Create that does
+ * nothing. The edit buffer, reveal flag, picked scope, create form's secret flag and the
+ * Escape/auto-save flow stay here, not in the children `PopoverContent` unmounts on close: the
+ * close path saves or discards the buffer and re-masks the secret, and a picked scope or secret
+ * flag survives a re-open.
  */
 
 import { useState, useRef, useMemo, useEffect } from "react";
@@ -52,67 +41,56 @@ import type { ResolvedVariable, VariableCreateOptions, VariableOrigin } from "@/
 import { Eyebrow } from "./eyebrow";
 import { Callout } from "@/components/shared/Callout";
 
-// Re-export ResolvedVariable as VariableInfo for backward compatibility
+// `ResolvedVariable` re-exported as `VariableInfo`, the name older importers use.
 export type { ResolvedVariable as VariableInfo };
 
 /** Highest precedence first - the scope a new variable most likely belongs in. */
 const SCOPE_PREFERENCE: VariableScope[] = ["environment", "collection", "global"];
 
 /**
- * What a `"row"` origin calls itself. A row has no `sourceName` to give - it is
- * the one row currently picked, not a file or an environment someone named.
+ * What a `"row"` origin calls itself: a row has no `sourceName`, being the one row picked, not
+ * something someone named.
  */
 const BOUND_ROW_LABEL = "Bound row";
 
 /**
- * The shape of every chip beside the name (a `Badge variant="chip"` with its
- * colour added per state). Shared so a shape fix reaches all of them; pinned to
- * 18px, the scope badge's height, so no chip drifts when it gains an icon.
+ * Every chip beside the name (a `Badge variant="chip"`, coloured per state), shared so a shape fix
+ * reaches all, pinned to the scope badge's 18px so no chip drifts on gaining an icon.
  */
 const NAME_CHIP = "h-[18px] px-1.5 py-0 text-micro leading-none";
 
 /**
- * The bare spelling's own sentence, and deliberately not the `data.*` one.
- *
- * `{{data.email}}` is disjoint from the scopes, so "defining one with this name
- * would change nothing" is true of it. A bare `{{email}}` is not: defining that
- * variable does something - it answers every send that carries no row - it just
- * loses to the row while one is picked. Telling the reader it would change
- * nothing would be false, which is why the two messages are two messages.
+ * The bare spelling's sentence, deliberately not the `data.*` one: `{{data.email}}` is disjoint
+ * from the scopes, so "defining one would change nothing" holds for it, while defining a bare
+ * `{{email}}` answers every send carrying no row and only loses to a picked one. Saying "nothing"
+ * would be false.
  */
 const BOUND_ROW_NOTE =
 	"While a row is picked, its column answers this name. The definition above still resolves on a send that carries no row.";
 
 /**
- * The same note when every definition under the row is switched off.
- *
- * `BOUND_ROW_NOTE` cannot be reused there: "still resolves on a send that
- * carries no row" is precisely what an off definition does not do, and the row
- * would be reassuring the reader about a fallback they do not have. Drop the
- * row and the token goes red - which is the thing worth saying, and only became
- * sayable when the list stopped being drawn for won names alone (issue #1083).
+ * The same note when every definition under the row is off. `BOUND_ROW_NOTE`'s "still resolves on a
+ * send that carries no row" is what an off definition does not do, so the row would reassure about
+ * a fallback that does not exist. Drop the row and the token goes red, which is worth saying
+ * (#1083).
  */
 const BOUND_ROW_NOTE_ALL_OFF =
 	"While a row is picked, its column answers this name. Every definition below is switched off, so a send that carries no row resolves nothing.";
 
 export interface VariablePopoverProps {
-	/** Variable name */
 	name: string;
-	/** Variable information (value and scope) */
+	/** The value and scope, or null. */
 	varInfo: ResolvedVariable | null;
-	/** Whether the variable is resolved */
 	resolved: boolean;
 	/**
-	 * A sentence qualifying the answer drawn below it, for a stored value that is
-	 * not what a send will carry (a name a pre-request script sets, #2741). The
-	 * value stays editable: it is still the definition.
+	 * A sentence qualifying the answer below it, for a stored value a send will not carry (a name a
+	 * pre-request script sets, #2741); the value stays editable, being the definition.
 	 */
 	note?: string;
 	/**
-	 * Callback when value changes (required for editable mode). An edit of the
-	 * resolved definition passes its `sourceId` so the write lands there; a
-	 * create passes none (#3683) and always carries `options`, which an edit
-	 * never does.
+	 * Required for editing. An edit of the resolved definition passes its `sourceId` so the write
+	 * lands there; a create passes none (#3683) and always carries `options`, which an edit never
+	 * does.
 	 */
 	onValueChange?: (
 		name: string,
@@ -121,99 +99,69 @@ export interface VariablePopoverProps {
 		sourceId?: string,
 		options?: VariableCreateOptions
 	) => void;
-	/** Save mode: 'manual' shows Save/Cancel buttons, 'auto' saves on close */
+	/** `manual` shows Save/Cancel; `auto` saves on close. */
 	saveMode?: "manual" | "auto";
-	/** Whether editing is disabled */
 	disabled?: boolean;
-	/** Custom trigger element */
 	trigger: React.ReactNode;
-	/** Custom className for trigger */
 	triggerClassName?: string;
 	/**
-	 * Every definition of this name, lowest precedence first, disabled ones
-	 * included. Rendered whenever it holds a definition the popover is not
-	 * already showing - which is when the question "why is this the value?" has
-	 * a non-obvious answer, whether or not the name resolves (issue #1083).
+	 * Every definition of the name, lowest precedence first, disabled ones included; drawn whenever
+	 * it holds one the popover is not already showing, when "why is this the value?" has a
+	 * non-obvious answer, resolved or not (#1083).
 	 */
 	origins?: VariableOrigin[];
 	/**
-	 * Scopes a create can actually be written to. An empty list (or omitted)
-	 * means an undefined variable falls back to explaining where to define it,
-	 * because there is nowhere this popover could put it.
+	 * Scopes a create can be written to; empty or omitted, an undefined variable explains where to
+	 * define it instead, as this popover could put it nowhere.
 	 */
 	writableScopes?: VariableScope[];
 	/**
-	 * The trigger's position in a host's roving tab order (issue #1215).
-	 * `VariableInput` paints a strip of tokens over one field and passes `-1` to
-	 * all but one, so the strip costs a single Tab stop. Defaults to `0`: a token
-	 * standing on its own is an ordinary tab stop, and `disabled` still wins.
+	 * The trigger's place in a host's roving tab order (#1215): `VariableInput` paints a strip of
+	 * tokens over one field and passes `-1` to all but one, so the strip is one Tab stop. Defaults
+	 * to `0`, an ordinary stop; `disabled` still wins.
 	 */
 	tabIndex?: number;
 	/**
-	 * Open on mount, for a host that has already decided to open it (issue
-	 * #1220): a `{{token}}` in a Monaco editor has no DOM node to click, so the
-	 * editor mounts this over the token's screen rectangle already open - a
-	 * fresh instance per open, since there is no persistent trigger element to
-	 * drive a controlled `open` on instead.
+	 * Open on mount, for a host that already decided to open it (#1220): a token in Monaco has no
+	 * DOM node to click, so the editor mounts this already open over the token's rectangle, a fresh
+	 * instance per open, as there is no persistent trigger to drive a controlled `open`.
 	 */
 	defaultOpen?: boolean;
 	/**
-	 * Drives `isOpen` from outside instead of `defaultOpen`'s once-at-mount
-	 * value (issue #1220 hover redesign) - for a host with a real, persistent
-	 * trigger element, like `EditableVariable`'s token, that needs to open the
-	 * *same* instance for more than one reason (a hover with no focus, a
-	 * keyboard chord with one). Mounting a fresh instance per open instead, as
-	 * Monaco's anchor does, replaces that element's own DOM node - invisible for
-	 * an anchor with nothing else on screen, but for a real, hoverable token it
-	 * is a live node destroyed and recreated under the pointer, which the
-	 * browser reports as a leave-then-enter of two different elements. That
-	 * retriggers whatever hover logic is watching, which is how a hover-driven
-	 * remount produced a flicker loop rather than one clean open.
-	 *
-	 * Left undefined, `isOpen` falls back to `defaultOpen`'s local state,
-	 * unchanged from before this prop existed.
+	 * Drives `isOpen` from outside, instead of `defaultOpen`'s once-at-mount value (#1220), for a
+	 * host with a real, persistent trigger (`EditableVariable`'s token) that opens the *same*
+	 * instance for more than one reason (a hover without focus, a chord with it). A fresh instance
+	 * per open, as Monaco's anchor uses, would replace a hoverable token's live node under the
+	 * pointer, which the browser reports as a leave-then-enter of two elements, retriggering the
+	 * hover logic in a flicker loop. Undefined, `isOpen` falls back to `defaultOpen`'s local state.
 	 */
 	open?: boolean;
 	/**
-	 * Told whenever the popover opens or closes, after the save this component
-	 * already does on close. A host that positioned the trigger itself uses it
-	 * to unmount and to put focus back where it came from - or, with `open`
-	 * above, to notice a request to open the same instance it already owns.
+	 * Told on every open and close, after this component's own save on close: a host that
+	 * positioned the trigger itself unmounts and restores focus, or, with `open`, notices a request
+	 * to open the instance it owns.
 	 */
 	onOpenChange?: (open: boolean) => void;
 	/**
-	 * Let focus move into the popover when it opens, instead of leaving it where
-	 * it was. Off by default, and that default is the one `VariableInput` needs:
-	 * its tokens sit over a live `<input>`, so pulling focus out of the field on
-	 * a click in the middle of a URL would take the caret with it. An editor's
-	 * token has the opposite need - the popover is opened by a chord, and a
-	 * keyboard user who cannot reach what opened is no better off than before.
+	 * Move focus into the popover on open. Off by default, as `VariableInput` needs: its tokens sit
+	 * over a live `<input>`, and taking focus on a click mid-URL would take the caret. An editor's
+	 * token needs the opposite: it opens by chord, and a keyboard user must reach what opened.
 	 */
 	focusOnOpen?: boolean;
 	/**
-	 * Forwarded straight onto the trigger span (issue #1220 hover redesign): a
-	 * host driving its own hover-open/close timers off this exact token needs
-	 * the listener on the one element that visually *is* the token, not on an
-	 * extra wrapper around it - `VariableInput/`'s font and layout guards read
-	 * `[data-variable-token] span` expecting this trigger to be the first span
-	 * inside, and a wrapper would put a different one there instead.
+	 * Forwarded onto the trigger span (#1220): a host running hover timers off this token needs the
+	 * listener on the element that *is* the token, not a wrapper, as `VariableInput/`'s font and
+	 * layout guards read `[data-variable-token] span` expecting this trigger first.
 	 */
 	onMouseEnter?: () => void;
 	onMouseLeave?: () => void;
 	/**
-	 * Told when the pointer enters or leaves the popover's *content*, once it
-	 * renders (issue #1220 leave-grace hardening) - ordinary React props on
-	 * `PopoverContent` itself, wired below. A host with a leave-grace timer for
-	 * a hover-opened popover needs to know when the pointer has actually
-	 * reached the content, to cancel a pending close, and when it has left the
-	 * content again, to restart one.
-	 *
-	 * `PopoverContent` is rendered directly in this component's own JSX, so
-	 * these fire as part of the very same commit that creates the content's DOM
-	 * node - there is no "has the node mounted yet" race to route around, the
-	 * way a host reaching for the node from outside (a `document.querySelector`
-	 * after a `setTimeout`, or a document-level `mouseover`/`mouseout`
-	 * delegation) would have to.
+	 * Told when the pointer enters or leaves the rendered *content* (#1220), as ordinary props on
+	 * `PopoverContent`: a host's leave-grace timer for a hover-opened popover cancels a pending
+	 * close when the pointer reaches the content and restarts one when it leaves. `PopoverContent`
+	 * is in this JSX, so these fire in the commit that creates its node, with no mount race of the
+	 * kind a host reaching for the node from outside (`querySelector` after `setTimeout`,
+	 * document-level `mouseover` delegation) would face.
 	 */
 	onContentMouseEnter?: () => void;
 	onContentMouseLeave?: () => void;
@@ -242,10 +190,9 @@ export function VariablePopover({
 	onContentMouseLeave,
 }: VariablePopoverProps) {
 	/*
-	 * Uncontrolled unless a host passes `open` (see that prop's own comment):
-	 * `isOpen` then tracks the prop directly, and `setIsOpen` becomes a no-op
-	 * for the host's own state to drive on the next render via `onOpenChange`
-	 * instead of writing here twice.
+	 * Uncontrolled unless a host passes `open`: `isOpen` then tracks the prop, and `setIsOpen` is a
+	 * no-op, the host's state driving the next render via `onOpenChange` rather than a second
+	 * write.
 	 */
 	const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
 	const isOpen = open ?? uncontrolledOpen;
@@ -258,16 +205,10 @@ export function VariablePopover({
 	const pendingCancelRef = useRef(false);
 
 	/**
-	 * Seeds the edit buffer on the transition into open, wherever it came from -
-	 * this component's own trigger, or a controlled `open` a host flipped
-	 * directly (a hover that never touches the trigger at all).
-	 *
-	 * Gated on the edge (`isOpen` true, `wasOpen` false) rather than run on every
-	 * `isOpen`/`varInfo` change: an effect that re-seeded whenever the parent
-	 * handed down a fresh `varInfo` object reset `editValue` under a user
-	 * mid-type. The guard makes that impossible - `varInfo` changing while
-	 * already open never re-enters the body - which is what lets one effect
-	 * cover every path safely instead of each host reseeding by hand.
+	 * Seeds the edit buffer on the transition into open, from this trigger or a controlled `open` a
+	 * host flipped (a hover never touching the trigger). On the edge (`isOpen` true, `wasOpen`
+	 * false), not every `isOpen`/`varInfo` change: re-seeding on a fresh `varInfo` object reset
+	 * `editValue` under a user mid-type. The edge guard is what lets one effect serve every path.
 	 */
 	const wasOpenRef = useRef(isOpen);
 	useEffect(() => {
@@ -292,39 +233,25 @@ export function VariablePopover({
 	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
 
 	/*
-	 * A `data.*` name is not an undefined variable, so none of the undefined
-	 * treatment applies to it: it addresses the reserved data namespace (#402),
-	 * which is disjoint from the scopes. Creating a variable of that name writes
-	 * something that can never answer for the column - both resolvers skip the
-	 * scopes for these names by design - so the offer would be a dead end that
-	 * leaves the token exactly as it was.
-	 *
-	 * Guarded here rather than only at the painter because the popover takes its
-	 * name as a prop and is reachable from any caller that renders a token.
+	 * A `data.*` name is not an undefined variable: it addresses the reserved data namespace
+	 * (#402), disjoint from the scopes, so a variable of that name could never answer for the
+	 * column (both resolvers skip the scopes for it) and the create offer would be a dead end.
+	 * Guarded here, not only at the painter, as any caller rendering a token reaches this popover.
 	 */
 	const isDataName = isDataVariableName(name);
 
 	/**
-	 * The bound row's answer for this name, if it has one (issue #1064).
-	 *
-	 * Read off `origins` rather than taken as a prop of its own: the resolver
-	 * already ranks the row against the definitions it beats, and a second
-	 * channel carrying the same fact is how the winner here and the winner there
-	 * come to disagree.
+	 * The bound row's answer for this name, if any (#1064), read off `origins`, not its own prop:
+	 * the resolver ranks the row against the definitions it beats, and a second channel is how two
+	 * winners come to disagree.
 	 */
 	const boundRowOrigin = origins?.find((o) => o.scope === "row");
 
 	/**
-	 * The definitions this name has that are switched off (issue #1083).
-	 *
-	 * A name resolves exactly when some definition is enabled, so a name that
-	 * does not resolve and still has definitions is one whose every definition
-	 * is off - the shape the origin list was built for and the one it could not
-	 * reach, because the list only rendered where the name had already won.
-	 *
-	 * Filtered on `enabled` rather than inferred from `resolved`: the two arrive
-	 * as separate props, and a list that describes itself cannot be wrong about
-	 * what it holds.
+	 * This name's switched-off definitions (#1083). A name resolves exactly when some definition is
+	 * enabled, so an unresolved name with definitions has every one off. Filtered on `enabled`, not
+	 * inferred from `resolved`: the two are separate props, and a list describing itself cannot be
+	 * wrong about what it holds.
 	 */
 	const switchedOffDefinitions = (origins ?? []).filter((o) => o.scope !== "row" && !o.enabled);
 
@@ -335,20 +262,18 @@ export function VariablePopover({
 	);
 	const canCreate =
 		!resolved && !isDataName && !!onValueChange && !disabled && creatableScopes.length > 0;
-	// Held here rather than in the form, which unmounts on close: a scope picked
-	// once survives a re-open of the same token.
+	// Here, not in the form, which unmounts on close: a picked scope survives a re-open.
 	const [createScope, setCreateScope] = useState<VariableScope | null>(null);
-	// Held beside the value it masks: reopening shows the typed value again, and
-	// it must not come back in the clear.
+	// Beside the value it masks: reopening shows the typed value, which must not return in the
+	// clear.
 	const [createSecret, setCreateSecret] = useState(false);
 
 	/*
-	 * The create form shares `editValue` with the edit buffer, which the seed
-	 * effect above filled from the definition. When that definition goes (an
-	 * environment switch, a deleted variable) the buffer would carry the old value,
-	 * a secret's included, into a plain field of the create form (#3719). Cleared on
-	 * the set-to-unset edge only: a `varInfo` that stays set must never reset a
-	 * value mid-edit, whatever its object identity does.
+	 * The create form shares `editValue`, which the seed effect filled from the definition. When it
+	 * goes (an environment switch, a deleted variable) the buffer would carry the old value, a
+	 * secret's included, into the create form's plain field (#3719). Cleared on the set-to-unset
+	 * edge only: a `varInfo` staying set must never reset a value mid-edit, whatever its identity
+	 * does.
 	 */
 	const hadDefinitionRef = useRef(!!varInfo);
 	useEffect(() => {
@@ -364,7 +289,7 @@ export function VariablePopover({
 		if (open) {
 			openPopover();
 		} else {
-			// Closing: auto-save if in auto mode and value changed (unless cancelled)
+			// Closing: auto-save in auto mode when the value changed, unless cancelled.
 			if (!pendingCancelRef.current && saveMode === "auto" && onValueChange && varInfo) {
 				if (editValue !== openValueRef.current) {
 					onValueChange(name, editValue, varInfo.scope, varInfo.sourceId);
@@ -396,15 +321,10 @@ export function VariablePopover({
 	};
 
 	/*
-	 * `e.preventDefault()` on both keys. Closing hands focus back to the host -
-	 * for a Monaco token that is `editor.focus()`, called synchronously inside
-	 * this same handler via `onClose` (`useEditorVariableTokens.ts`'s `open`) -
-	 * and an unprevented key event applies its own default action to whatever
-	 * ends up focused when the browser gets to it, not to the element that was
-	 * focused when the event was dispatched. Left unprevented, Enter's default
-	 * (insert a newline) landed on Monaco, which this same keydown had just
-	 * refocused: editing a token in the body split its line the instant the
-	 * popover closed.
+	 * `e.preventDefault()` on both keys. Closing hands focus back to the host (for a Monaco token,
+	 * `editor.focus()`, synchronously via `onClose` in `useEditorVariableTokens.ts`'s `open`), and
+	 * an unprevented key applies its default to whatever is focused when the browser gets to it:
+	 * Enter's newline landed in the refocused Monaco, splitting the line as the popover closed.
 	 */
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (saveMode === "manual") {
@@ -416,13 +336,13 @@ export function VariablePopover({
 				handleCancel();
 			}
 		} else {
-			// Auto mode: Enter saves, Escape cancels
+			// Auto mode: Enter saves, Escape cancels.
 			if (isCommitEnter(e)) {
 				e.preventDefault();
 				handleOpenChange(false);
 			} else if (e.key === "Escape") {
 				e.preventDefault();
-				// Mark as cancelled before Radix fires its own onOpenChange for Escape
+				// Marked cancelled before Radix fires its own onOpenChange for Escape.
 				pendingCancelRef.current = true;
 				closePopover();
 			}
@@ -432,19 +352,11 @@ export function VariablePopover({
 	const isSecret = !!varInfo?.secret;
 
 	/**
-	 * The trigger is a `<span>`, because a `{{variable}}` token sits inline in the
-	 * middle of a URL or a header value and must not break the text flow.
-	 *
-	 * Radix's `asChild` clones its click handler and `aria-*` onto this span, but
-	 * it does not make a span focusable - it assumes the child is already an
-	 * interactive element. So every variable token in the app was mouse-only: a
-	 * keyboard user could not open the popover to see what a variable resolved
-	 * to, or edit it, anywhere in the URL bar, headers, params or auth fields.
-	 *
-	 * `role="button"` plus `tabIndex` plus Enter/Space is what a `<button>` would
-	 * have given for free, minus the block-level layout that would wreck the
-	 * inline flow. `disabled` tokens leave the tab order rather than sitting in it
-	 * doing nothing.
+	 * The trigger is a `<span>`: a token sits inline mid-URL or mid-header and must not break the
+	 * flow. Radix's `asChild` clones its click handler and `aria-*` onto it but does not make a
+	 * span focusable, which left every token mouse-only. `role="button"`, `tabIndex` and
+	 * Enter/Space give what a `<button>` would, without its block layout. `disabled` tokens leave
+	 * the tab order.
 	 */
 	const triggerElement = (
 		<span
@@ -456,20 +368,16 @@ export function VariablePopover({
 			onClick={(e) => {
 				if (disabled) return;
 				/*
-				 * A click dispatched by the "Edit variable" menu command
-				 * (`lib/context-menu.ts`) carries this sentinel instead of an
-				 * ordinary click count - a deliberate, explicit request to open,
-				 * unlike an ordinary pointer click, which places a caret in the
-				 * underlying text instead (`VariableInput/index.tsx`) and must
-				 * open nothing here.
+				 * A click from the "Edit variable" menu command (`lib/context-menu.ts`) carries
+				 * this sentinel instead of a click count: an explicit request to open. An ordinary
+				 * pointer click places a caret in the text beneath (`VariableInput/index.tsx`) and
+				 * opens nothing.
 				 */
 				if (e.detail !== MENU_TRIGGERED_CLICK_DETAIL) {
 					/*
-					 * `PopoverTrigger asChild` composes Radix's own click-to-toggle
-					 * handler with this one (`composeEventHandlers`), which still
-					 * runs unless the event's default was prevented - so an ordinary
-					 * click would otherwise open the popover through Radix's own
-					 * handler regardless of anything decided here.
+					 * `PopoverTrigger asChild` composes Radix's click-to-toggle with this handler
+					 * (`composeEventHandlers`), which runs unless the default was prevented, so an
+					 * ordinary click would open through Radix regardless.
 					 */
 					e.preventDefault();
 					return;
@@ -480,8 +388,8 @@ export function VariablePopover({
 			onKeyDown={(e) => {
 				if (disabled) return;
 				if (e.key === "Enter" || e.key === " ") {
-					// Space in particular: the token is usually inside a text input,
-					// where it would otherwise type a space.
+					// Space especially: the token is usually in a text input, where it would type a
+					// space.
 					e.preventDefault();
 					e.stopPropagation();
 					openPopover();
@@ -496,10 +404,8 @@ export function VariablePopover({
 		<Popover open={isOpen} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>{triggerElement}</PopoverTrigger>
 			<PopoverContent
-				// `w-sm` (24rem), not `w-96`: the card holds the variable's name,
-				// value and source, a text measure, and `w-96` rides `--spacing` -
-				// 288px at the Default density rather than the 384px `w-sm` reads
-				// as.
+				// `w-sm` (24rem), not `w-96`: name, value and source are a text measure, and `w-96`
+				// rides `--spacing` (288px at Default, not 384px).
 				className="w-sm max-w-[calc(100vw-2rem)] p-2.5"
 				aria-label={`Variable ${name}`}
 				align="start"
@@ -514,44 +420,33 @@ export function VariablePopover({
 				}}
 				onEscapeKeyDown={() => {
 					/*
-					 * Radix's `DismissableLayer` closes on Escape through a
-					 * document-level listener that runs before this component's own
-					 * `<Input>` ever sees the key (capture beats the input's bubble
-					 * handler) - so the flag set there arrived too late, and Radix's
-					 * own call to `onOpenChange(false)` (`handleOpenChange` below)
-					 * ran its auto-save check first, committing whatever was typed.
-					 * Setting it here, in the callback Radix itself invokes as part
-					 * of that same dismissal, guarantees it lands before
-					 * `handleOpenChange` reads it, however either handler races.
+					 * Radix's `DismissableLayer` closes on Escape through a document-level capture
+					 * listener running before the `<Input>`'s bubble handler, so a flag set there
+					 * arrived after `handleOpenChange`'s auto-save check had committed what was
+					 * typed. Set here, in the callback Radix invokes in that dismissal, it lands
+					 * first however the handlers race.
 					 */
 					pendingCancelRef.current = true;
 				}}
 				onOpenAutoFocus={(e) => {
-					// See `focusOnOpen`: a token over a live input must not take the
-					// caret with it, and a token opened by a chord must be reachable.
+					// See `focusOnOpen`: a token over a live input keeps the caret; one opened by
+					// chord must be reachable.
 					if (!focusOnOpen) e.preventDefault();
 				}}
 			>
 				<div className="flex flex-col gap-2">
 					{/*
-					 * Name, whether it is a secret, and where it came from.
-					 *
-					 * `items-center` throughout, not `items-baseline`. Baseline
-					 * alignment lines up the *text* baselines of boxes whose contents
-					 * differ, and the Secret chip carries an icon while the scope badge
-					 * does not - so the two chips sat at visibly different heights.
-					 * Chips beside a title are centred, not baselined.
-					 *
-					 * Both chips are pinned to the same 18px so neither can drift when
-					 * one gains content the other has not.
+					 * Name, secret mark and origin. `items-center`, not `items-baseline`: baseline
+					 * lines up text baselines of boxes whose contents differ, and the Secret chip
+					 * has an icon the scope badge lacks, so they sat at different heights. Both
+					 * chips are pinned to 18px so neither drifts when one gains content.
 					 */}
 					<div className="flex flex-row items-center justify-between gap-2">
 						<span className="font-mono text-sm font-semibold truncate">{name}</span>
 						<div className="flex shrink-0 items-center gap-1.5">
 							{/*
-							 * The secret mark sits here beside the scope rather than
-							 * owning a labelled row of its own. It is a property of the
-							 * variable, like its scope - not a section.
+							 * The secret mark sits beside the scope, not on a labelled row: like
+							 * the scope, a property of the variable, not a section.
 							 */}
 							{isSecret && (
 								<Badge
@@ -584,10 +479,9 @@ export function VariablePopover({
 								</Badge>
 							) : boundRowOrigin ? (
 								/*
-								 * Answered, so not "undefined" - and in the accent rather
-								 * than the destructive red, which states a token that will
-								 * reach the server with its braces still on. This one will
-								 * not: the row carries the column.
+								 * Answered, so not "undefined", and in the accent, not the
+								 * destructive red, which means a token reaching the server with its
+								 * braces on; the row carries the column.
 								 */
 								<Badge
 									variant="chip"
@@ -616,23 +510,14 @@ export function VariablePopover({
 					{resolved && varInfo ? (
 						<>
 							{/*
-							 * Where the value lives, on a line of its own (issue #1320).
-							 *
-							 * It used to share the footer with the Enter and Esc keycaps:
-							 * a `truncate` span beside a `shrink-0` chip group inside a
-							 * `w-72` card, so "Shopify QA - expiring tokens" rendered as
-							 * "Shopify QA - expiring…" and the popover clipped the one
-							 * fact it was opened to give. That is the shape the tooltips
-							 * already ruled out (issue #1195, `docs/design-system/color-schemes.md`);
-							 * this is the same shape one primitive over, so it takes the
-							 * same answer - the source stacks, full width, nothing
-							 * competing with it horizontally.
-							 *
-							 * Two lines at most, with the whole name on `title` for the
-							 * environment named at essay length. A definition with no
-							 * source name - a global - prints its scope word instead, so
-							 * the line is always here and the card does not change height
-							 * between scopes.
+							 * Where the value lives, on its own line (#1320): sharing the footer
+							 * with the keycaps truncated "Shopify QA - expiring tokens" to "Shopify
+							 * QA - expiring…", clipping the fact the popover was opened for. The
+							 * tooltips' answer (#1195, `docs/design-system/color-schemes.md`), one
+							 * primitive over: the source stacks, full width. Two lines at most, the
+							 * whole name on `title`. A definition with no source name (a global)
+							 * prints its scope word, so the line is always there and the card keeps
+							 * its height across scopes.
 							 */}
 							<p
 								className="line-clamp-2 text-label leading-snug text-muted-foreground"
@@ -682,10 +567,10 @@ export function VariablePopover({
 						</div>
 					) : boundRowOrigin ? (
 						/*
-						 * Undefined everywhere, but the picked row carries the column, so
-						 * the send resolves it. "Not defined in any scope" in destructive red
-						 * is the one thing this must not say: the red states a token that
-						 * will reach the server with its braces on, and this one will not.
+						 * Undefined everywhere, but the picked row carries the column, so the send
+						 * resolves it. "Not defined in any scope" in destructive red is what this
+						 * must not say: the red means a token reaching the server with its braces
+						 * on.
 						 */
 						<div className="text-sm text-muted-foreground">
 							Answered by the bound data row&rsquo;s{" "}
@@ -694,11 +579,9 @@ export function VariablePopover({
 						</div>
 					) : switchedOffDefinitions.length > 0 ? (
 						/*
-						 * Defined, and still red: the token does not resolve, so the red
-						 * is honest. What was not honest is the sentence - "not defined"
-						 * printed directly above a list showing where it is defined, with
-						 * an `off` badge on it, tells the reader to go and do the one
-						 * thing they have already done (issue #1083).
+						 * Defined and still red: the token does not resolve, so the red is honest.
+						 * "Not defined" above a list showing where it is defined, with an `off`
+						 * badge, would send the reader to do what they already did (#1083).
 						 */
 						<Callout severity="blocking">
 							Defined, but every definition is switched off, so this token does not
@@ -711,15 +594,11 @@ export function VariablePopover({
 						</Callout>
 					)}
 					{/*
-					 * Outside the branch chain, because "where could this have come
-					 * from" is the same question in every state above, and the state
-					 * most likely to raise it - a name whose only definition is switched
-					 * off - is one of the ones that could not ask it (issue #1083).
-					 *
-					 * `data.*` is the exception rather than an oversight: the reserved
-					 * namespace is disjoint from the scopes, so a definition of that
-					 * name never answers for the column and listing it would say it
-					 * might.
+					 * Outside the branch chain: "where could this have come from" is the same
+					 * question in every state, and a name whose only definition is off, the state
+					 * most likely to raise it, is one that could not ask it (#1083). `data.*` is
+					 * excluded: the namespace is disjoint from the scopes, so listing a definition
+					 * of that name would say it might answer.
 					 */}
 					{!isDataName && <ShadowedBy origins={origins} />}
 				</div>
@@ -729,17 +608,14 @@ export function VariablePopover({
 }
 
 /**
- * One line of the "where could this have come from" list.
- *
- * Shared by the winning row and the definitions beneath it so the two cannot
- * drift apart: the only difference between them is the strike-through, which is
- * the whole message - a struck value is one the send will not use.
+ * One line of the "where could this have come from" list, shared by the winner and the definitions
+ * beneath so they cannot drift: the strike-through, the only difference, is the message (a struck
+ * value the send will not use).
  */
 function OriginRow({ origin, beaten }: { origin: VariableOrigin; beaten: boolean }) {
-	// A disabled definition is not competing at all, so it does not get a
-	// colour. The row gets the accent rather than a fourth scope colour: it is
-	// not a place a variable lives, it is the answer that is live right now, and
-	// the accent is what this app already paints a live answer in.
+	// A disabled definition competes with nothing, so no colour. The row takes the accent, not a
+	// fourth scope colour: it is no place a variable lives but the live answer, which the app
+	// paints in the accent.
 	const dot = !origin.enabled
 		? "bg-subtle-foreground"
 		: origin.scope === "row"
@@ -765,32 +641,19 @@ function OriginRow({ origin, beaten }: { origin: VariableOrigin; beaten: boolean
 }
 
 /**
- * Where the value comes from, and what it beat.
- *
- * Rendered when the list holds a definition the popover is not already showing,
- * so the ordinary case stays short: a name with one definition that wins has
- * nothing to add - the field above it *is* that definition - and lists nothing.
- * Three row states, not two - a definition can lose by precedence *or* by being
- * switched off, and the second is the more common surprise: the value you set is
- * being skipped rather than missing. A list that only showed shadowing would
- * answer the easy question and stay silent on the hard one.
- *
- * The gate used to be `origins.length < 2`, which reached the same answer for a
- * winner and the wrong one for a name whose *only* definition is switched off:
- * one entry, nothing above it showing that entry, and the list suppressed
- * anyway (issue #1083). Counting entries was standing in for the question the
- * next line actually asks - is any of them not the winner.
- *
- * A bound row's cell is listed above them all, unstruck (issue #1064). Without
- * it the popover explained a value the send would not use: the editable field at
- * the top of the popover is the *variable*, which is still the thing you can
- * change, while the row is what answers the name until the pick is dropped.
+ * Where the value comes from, and what it beat. Drawn when the list holds a definition the popover
+ * is not already showing, asking "is any of them not the winner" rather than counting entries: a
+ * name whose one definition wins has nothing to add (the field *is* it), while a name whose only
+ * definition is off must still list it (#1083). Three row states: a definition loses by precedence
+ * *or* by being off, the more common surprise (your value skipped, not missing), and a list showing
+ * only shadowing would stay silent on it. A bound row's cell is listed above all, unstruck (#1064):
+ * the editable field is the *variable*, still what you can change, while the row answers the name
+ * until the pick is dropped.
  */
 function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 	if (!origins || origins.length === 0) return null;
 
-	// Highest precedence first: reading down the list is reading the order the
-	// resolver rejected them in.
+	// Highest precedence first: reading down is reading the order the resolver rejected them in.
 	const ranked = [...origins].reverse();
 	const row = ranked.find((o) => o.scope === "row");
 	const others = ranked.filter((o) => !o.winner && o.scope !== "row");
@@ -805,10 +668,9 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 				</>
 			)}
 			{/*
-			 * Still "also defined" with a row above, not "shadowed": the list holds
-			 * definitions that lost by precedence *and* ones that are switched off,
-			 * and an off definition is not shadowed by anything. The row block above
-			 * already says which answer wins.
+			 * "also defined" even with a row above, not "shadowed": the list holds definitions lost
+			 * by precedence *and* switched off, and an off one is shadowed by nothing. The row
+			 * block says which answer wins.
 			 */}
 			<Eyebrow size="xs">also defined</Eyebrow>
 			{others.map((o, i) => (
