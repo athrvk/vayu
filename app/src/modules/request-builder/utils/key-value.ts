@@ -6,45 +6,36 @@
  */
 
 /**
- * Execution-shaped key/value helpers.
- *
- * The row-model half of this file - `createEmptyKeyValue`, `withTrailingBlank`,
- * `toKeyValueItems`, `toKeyValueEntries` - moved to
- * `components/shared/KeyValueEditor/key-value.ts` with the table it describes
- * (issue #567). What is left is the one helper no table asks for: the ordered
- * header lines the engine's execute and compose endpoints take.
+ * Execution-shaped key/value helpers: the ordered header lines the engine's execute and compose
+ * endpoints take. The row model (`createEmptyKeyValue`, `withTrailingBlank`, `toKeyValueItems`,
+ * `toKeyValueEntries`) lives with its table in `components/shared/KeyValueEditor/key-value.ts`
+ * (#567).
  */
 
 import type { HeaderLine, KeyValueEntry, KeyValueItem } from "@/types";
 
 /**
- * A key without the spaces and tabs around it, which is all the engine trims
- * (`trim_optional_whitespace`). Not `String.prototype.trim`: that also strips
- * newlines and Unicode spaces, which the engine refuses as a bad name instead,
- * so the two would answer differently for the same row.
+ * A key without surrounding spaces and tabs, all the engine trims (`trim_optional_whitespace`). Not
+ * `String.prototype.trim`, which also strips newlines and Unicode spaces the engine refuses as a
+ * bad name, so the two would disagree on one row.
  */
 const headerName = (key: string): string => key.replace(/^[ \t]+|[ \t]+$/g, "");
 
 /**
- * A row that reaches the wire: not switched off (a stored row with no flag is
- * on, as the engine reads it) and naming a header once its padding is trimmed.
+ * A row reaching the wire: not off (a stored row with no flag is on, as the engine reads it) and
+ * naming a header once trimmed.
  */
 const isSentRow = (item: { key: string; enabled?: boolean }): boolean =>
 	item.enabled !== false && headerName(item.key) !== "";
 
 /**
- * The Headers table as the engine takes it: every enabled row with a non-empty
- * key, in row order, a repeated name repeated, each in the case it was typed
- * but without the spaces and tabs around it (issues #2466, #2467). A key of
- * other whitespace (a newline) is a name, and the engine refuses it by name
- * rather than the table dropping it quietly. The engine's `stored_header_rows`
- * is the other copy and `engine/tests/fixtures/header-rows-conformance.json`
- * holds the two to one answer (`header-rows.conformance.test.ts`).
- *
- * Never a record: a record keeps one value per key, so `X-Dup` twice, or
- * `Accept` beside `accept`, would send one line, and which one would depend on
- * key order rather than the table. Never for storage either - the rows are what
- * is stored.
+ * The Headers table as the engine takes it: every enabled row with a non-empty key, in row order,
+ * repeats repeated, each in its typed case but without surrounding spaces and tabs (#2466, #2467).
+ * A key of other whitespace (a newline) is a name, refused by the engine by name rather than
+ * dropped here. The engine's `stored_header_rows` is the other copy, and
+ * `engine/tests/fixtures/header-rows-conformance.json` holds the two to one answer
+ * (`header-rows.conformance.test.ts`). Never a record (one value per key would send `X-Dup` once,
+ * or one of `Accept` / `accept`, by key order), and never for storage: the rows are stored.
  */
 export const toHeaderRows = (
 	items: ReadonlyArray<Pick<KeyValueEntry, "key" | "value"> & { enabled?: boolean }>
@@ -53,19 +44,12 @@ export const toHeaderRows = (
 
 /**
  * The names among {@link toHeaderRows}' lines whose last row the body mode wrote
- * (`source: "body-mode"`), as the compose field `bodyModeHeaders` - or nothing
- * when there are none, so a request without one sends the payload it always
- * did.
- *
- * The lines lose the marker, and the engine needs it (issue #1765): a body
- * mode's Content-Type is a system header in Postman's sense, which a stored
- * `content-type` opt-out removes, while a Content-Type the user typed is always
- * sent. A stored request composed by id carries the same list from its stored
- * rows.
- *
- * Names are matched without case, as the engine's `stored_header_rows` does: a
- * typed `content-type` after the body mode's `Content-Type` is the last row for
- * that name, and the name is listed as the first row spelled it, trimmed.
+ * (`source: "body-mode"`), as the compose field `bodyModeHeaders`, or nothing, so a request without
+ * one sends what it always did. The lines lose the marker, which the engine needs (#1765): a body
+ * mode's Content-Type is a Postman system header a stored `content-type` opt-out removes, while a
+ * typed one always goes. A request composed by id carries the same list from its rows. Names match
+ * without case, as `stored_header_rows` does: a typed `content-type` after the body mode's
+ * `Content-Type` is that name's last row, listed as its first row spelled it, trimmed.
  */
 export const bodyModeHeaders = (items: KeyValueItem[]): { bodyModeHeaders?: string[] } => {
 	const marked = new Map<string, { name: string; isBodyMode: boolean }>();

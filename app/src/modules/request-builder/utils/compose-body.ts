@@ -6,15 +6,11 @@
  */
 
 /**
- * The inline `POST /compose` body for an editor state (issue #2638): the one
- * place the request-to-compose mapping is written, so every send site puts the
- * same request on the wire. Send (buffered and streaming), the load run and the
- * History replay all build through it; a field added here reaches all of them.
- *
- * Raw (#226): the engine resolves `{{variables}}` and inherit auth at
- * compose time, so the editor state goes over as-is - resolving here too would
- * interpolate the payload twice. The inline shape (not compose-by-id) is
- * deliberate: the editor state may be ahead of the saved row.
+ * The inline `POST /compose` body for an editor state (#2638), the one place the mapping is
+ * written, so every send site (Send buffered and streaming, the load run, the History replay) sends
+ * the same request and a new field reaches all. Raw (#226): the engine resolves `{{variables}}` and
+ * inherit auth at compose time, and resolving here would interpolate twice. Inline, not by id,
+ * because the editor state may be ahead of the saved row.
  */
 
 import type {
@@ -31,18 +27,12 @@ import { bodyModeHeaders, toHeaderRows } from "./key-value";
 import { composePathParams } from "./path-variables";
 
 /**
- * Where the composed request's elements come from.
- *
- * `chain` is the live case: the collection chain root to leaf, then the
- * request's own, minus whatever an `inherit.disable` entry at any level of
- * that chain names (`elementsParts`, issue #1512). `resolved` is a list the caller already
- * built - the History replay runs the collection scripts as the run recorded
- * them, not as the chain reads now.
- *
- * `onlyRunnable` is Send's and code generation's (#3066): the request's own
- * draft elements that are disabled or fail the app's check against `kinds` are
- * left out (`sendElementsParts`). A load run composes the chain without it, so
- * it still carries every element the request holds.
+ * Where the composed elements come from. `chain` is live: the chain root to leaf, then the
+ * request's own, minus what any `inherit.disable` names (`elementsParts`, #1512). `resolved` is a
+ * caller-built list: the History replay runs the collection scripts as recorded. `onlyRunnable` is
+ * Send's and code generation's (#3066): the request's own disabled or check-failing draft elements
+ * (against `kinds`) are left out (`sendElementsParts`); a load run composes without it, carrying
+ * every element.
  */
 export type ComposeElementsSource =
 	| {
@@ -60,14 +50,13 @@ export interface ComposeBodyInput {
 	/** The active environment; an empty or null id is no environment. */
 	environmentId?: string | null;
 	/**
-	 * The bare column names a data row will bind after this composition (issue
-	 * #1007). Names only: a value here would be one row's value written into a
-	 * payload composed once. Absent composes exactly as without a data set.
+	 * Bare column names a row binds after this composition (#1007); names only, as a value would be
+	 * one row's in a once-composed payload.
 	 */
 	dataColumns?: string[];
 	/**
-	 * Leave the `{{$guid}}` family unresolved for a payload repeated per
-	 * iteration (issue #995). Only a caller that starts a run sets it.
+	 * Leave the `{{$guid}}` family unresolved for a payload repeated per iteration (#995); set only
+	 * by a run starter.
 	 */
 	deferDynamicVariables?: boolean;
 }
@@ -76,10 +65,7 @@ export interface ComposeBody {
 	body: ComposeRequestRequest;
 	/** The resolved elements the body carries, for the caller's after-send checks. */
 	elements: ResolvedElement[] | undefined;
-	/**
-	 * The incomplete draft elements `onlyRunnable` left out; empty when it is
-	 * not asked for.
-	 */
+	/** Incomplete draft elements `onlyRunnable` left out; empty when not asked for. */
 	leftOut: LeftOutElement[];
 }
 
@@ -108,35 +94,32 @@ export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 		request: {
 			method: request.method,
 			url: request.url,
-			// Always sent, `[]` included (#1764) - see composePathParams.
+			// Always sent, `[]` included (#1764); see composePathParams.
 			params: composePathParams(request.params),
-			// The user's enabled header rows as ordered lines and nothing else:
-			// what Vayu adds is the engine's since issue #1229.
+			// The user's enabled header rows as ordered lines, nothing else: what Vayu adds is the
+			// engine's (#1229).
 			headers: toHeaderRows(request.headers),
 			// Which of those the body mode wrote (issue #1765).
 			...bodyModeHeaders(request.headers),
 			body: buildExecBody(request, (s) => s),
 			auth: { ...request.auth },
 			elements,
-			// The next four are always sent, never elided: each has an
-			// engine-side default that would otherwise win silently. Following
-			// redirects is the engine's default, so an omitted `false` follows
-			// the redirect the user asked to see; and `verify_ssl` defaults to
-			// true, so an omitted `false` verifies the certificate the user
-			// turned verification off for (issue #706).
+			// The next four are always sent, never elided, as each has an engine default that would
+			// win silently: following redirects is the default, so an omitted `false` follows what
+			// the user asked to see, and `verify_ssl` defaults to true, so an omitted `false`
+			// verifies a certificate the user exempted (#706).
 			followRedirects: request.followRedirects,
 			maxRedirects: request.maxRedirects,
 			httpVersion: request.httpVersion,
 			verifySSL: request.verifySSL,
-			// The one setting not always sent (issue #2937): unset, the key stays off
-			// the body so the engine reads the `defaultTimeout` setting at the send,
-			// where a copy of it here would pin today's value into the request.
+			// The one setting not always sent (#2937): unset, the key stays off so the engine reads
+			// `defaultTimeout` at the send, where a copy here would pin today's value.
 			...(request.timeout !== null ? { timeout: request.timeout } : {}),
-			// Postman's protocol switches (issue #1765), always sent for the same
-			// reason: the editor's value, not the saved row's.
+			// Postman's protocol switches (#1765), always sent for the same reason: the editor's
+			// value, not the saved row's.
 			...protocolSettings(request),
-			// Identity for the script sandbox (pm.info), not an HTTP field - it
-			// rides through composition into `/execute` and `config_snapshot`.
+			// Identity for the script sandbox (pm.info), not an HTTP field; it rides through
+			// composition into `/execute` and `config_snapshot`.
 			...execIdentity(request),
 		},
 		...(input.collectionId !== undefined ? { collectionId: input.collectionId } : {}),
@@ -149,9 +132,8 @@ export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 }
 
 /**
- * @p response with the elements its Send left out (#3066) attached, so the
- * response can say they did not run. Returned as is when nothing was left out,
- * which keeps the field absent rather than an empty list.
+ * Attaches its Send's left-out elements (#3066) to @p response; unchanged when none, so the field
+ * stays absent, not `[]`.
  */
 export function withLeftOut<T extends ResponseState>(response: T, leftOut: LeftOutElement[]): T {
 	return leftOut.length > 0 ? { ...response, leftOutElements: leftOut } : response;
