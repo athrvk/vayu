@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/mcp_reply.cpp
  * @brief The MCP reply reader. See `vayu/http/mcp_reply.hpp`.
  */
 

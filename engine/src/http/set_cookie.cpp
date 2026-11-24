@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/set_cookie.cpp
  * @brief `Set-Cookie` parsing. See `vayu/http/set_cookie.hpp` for why this
  *        exists twice (here and in the renderer) and what pins the two copies.
  */

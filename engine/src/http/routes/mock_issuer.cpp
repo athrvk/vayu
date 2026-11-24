@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/mock_issuer.cpp
  * @brief The local OAuth 2.0 mock issuer - manager, spawned listener, and the
  *        `/mock-issuer` lifecycle routes.
  *

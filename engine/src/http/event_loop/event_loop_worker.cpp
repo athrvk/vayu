@@ -156,7 +156,6 @@ bool DnsCache::is_fresh (const Entry& entry, long ttl_seconds) {
 }
 
 std::string DnsCache::resolve (const std::string& hostname, long ttl_seconds) {
-    // Check cache first (read lock)
     {
         std::shared_lock<std::shared_mutex> lock (mutex_);
         auto it = cache_.find (hostname);
@@ -392,7 +391,6 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
             }
         }
 
-        // Acquire handle from pool (lock-free or specialized pool)
         CURL* easy = handle_pool_.acquire ();
         // Note: setup_easy_handle might take time, good to do it outside locks
         easy = setup_easy_handle (easy, data.get (), config, &dns_cache ());

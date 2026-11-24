@@ -170,14 +170,7 @@
     "engine/src/core/openapi_export.cpp": 1,
     "engine/src/core/scenario_data.cpp": 1,
     "engine/src/core/scenario_plan.cpp": 2,
-    "engine/src/daemon.cpp": 2,
-    "engine/src/http/client.cpp": 1,
-    "engine/src/http/event_loop/curl_utils.cpp": 2,
-    "engine/src/http/request_composer.cpp": 3,
-    "engine/src/http/request_exchange.cpp": 1,
     "engine/src/http/routes/script_types.cpp": 1,
-    "engine/src/http/sse_stream.cpp": 1,
-    "engine/src/http/transport_policy.cpp": 2,
     "engine/src/runtime/script_engine.cpp": 1
   }
 }

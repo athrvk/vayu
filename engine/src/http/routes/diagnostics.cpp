@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/diagnostics.cpp
  * @brief The transport connection test (`POST /diagnostics/connection`, issue
  *        #708) - one policy-honouring fetch that reports how it went and
  *        nothing about what came back.
