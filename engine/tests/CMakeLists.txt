@@ -248,6 +248,10 @@ add_executable(vayu_tests
     idn_host_test.cpp
     url_scheme_test.cpp
     openapi_document_test.cpp
+    import_parse_insomnia_test.cpp
+    import_parse_openapi_test.cpp
+    import_parse_postman_body_test.cpp
+    import_parse_postman_test.cpp
     import_parse_test.cpp
     script_api_scan_test.cpp
     jmeter_import_test.cpp
