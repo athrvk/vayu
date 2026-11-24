@@ -6,18 +6,12 @@
  */
 
 /**
- * The right-click menu primitive (#1360).
- *
- * A second Radix family beside `dropdown-menu` rather than a pointer offset on
- * the first: a context menu anchors to the point that was clicked, opens on
- * long-press where the platform expects it, answers Shift+F10 on its trigger,
- * and hands focus back to that trigger on close. A `DropdownMenu` positioned by
- * hand at the pointer would be a copy of this one that never receives its
- * fixes.
- *
- * Only the parts Vayu uses are wrapped. Items and separators take the same
- * classes as their dropdown counterparts, because a row's menu should not
- * change appearance with the gesture that opened it.
+ * The right-click menu primitive (#1360): a Radix family beside `dropdown-menu`, not a pointer
+ * offset on it, since a context menu anchors at the click, opens on long-press where the platform
+ * expects, answers Shift+F10 on its trigger and returns focus there on close; a hand-placed
+ * `DropdownMenu` would be a copy missing its fixes. Only the parts Vayu uses are wrapped. Items and
+ * separators take their dropdown counterparts' classes, so a row's menu looks the same whatever
+ * gesture opened it.
  */
 
 "use client";
@@ -85,8 +79,8 @@ function ContextMenuSeparator({
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup;
 
 /**
- * One of a set the menu picks from - the same classes and dot indicator as
- * `DropdownMenuRadioItem`, for the reason given at the top of the file.
+ * One of a set the menu picks from: `DropdownMenuRadioItem`'s classes and dot indicator, for the
+ * file header's reason.
  */
 function ContextMenuRadioItem({
 	className,

@@ -17,30 +17,20 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
- * The surface every command list sits on, and the reason it is `card` rather
- * than `popover`.
- *
- * A divider inside this tree - the input's, the footer's, the separator between
- * two sections - has to say `border-rule` to read on both themes, and
- * `border-rule` resolves through the nearest declared surface. `--popover` had
- * no surface class to declare, and adding a `surface-popover` that duplicated
- * `surface-card` would be a second definition with nothing behind it:
- * `--popover` and `--card` are the same three numbers in both themes, as are
- * their foregrounds. So this root declares the surface it already painted, and
- * every divider below it inherits the rule that reads on it.
- *
- * The pair `bg-card surface-card` rather than `surface-card` alone, per the
- * rule in `app/CLAUDE.md`: this element already carried a background utility,
- * and a surface class alone loses that cascade.
+ * The surface every command list sits on, `card` rather than `popover`: a divider in this tree (the
+ * input's, the footer's, a section separator) must say `border-rule` to read on both themes, which
+ * resolves through the nearest declared surface. `--popover` has no surface class, and a
+ * `surface-popover` copying `surface-card` would be a second definition with nothing behind it, as
+ * `--popover` and `--card` (and their foregrounds) are the same numbers in both themes. The pair
+ * `bg-card surface-card`, not the surface alone, per `app/CLAUDE.md`: this element had a background
+ * utility, and a surface class alone loses that cascade.
  */
 const COMMAND_SURFACE = "bg-card surface-card text-card-foreground";
 
 /**
- * The highlight cmdk is handed while it must have none. A controlled `value`
- * that matches no row leaves every row unselected, and it has to be non-empty:
- * cmdk reads an empty one as "nothing chosen yet" and highlights the first row.
- * `\u0001` survives the `.trim()` cmdk applies, and no row's text can start
- * with it.
+ * The highlight cmdk gets when it must have none: a controlled `value` matching no row selects
+ * none, and it must be non-empty, as cmdk reads empty as "nothing chosen" and highlights the first
+ * row. `\u0001` survives cmdk's `.trim()`, and no row's text starts with it.
  */
 export const NO_HIGHLIGHT = "\u0001no-highlight";
 
@@ -53,28 +43,19 @@ export interface CommandListboxState {
 }
 
 /**
- * Reports those ids to a control that lives outside the list.
- *
- * `cmdk` mints both itself - it writes `id` *after* the props it is handed, so
- * neither can be passed in - and a combobox that steers this list from outside
- * has to name them. `VariableInput` is that case: the field is two components
- * up, the list is never focused, and without the ids a screen reader is told
- * nothing about a highlight the arrow keys are moving (issue #1215).
- *
- * Read from `cmdk`'s own store rather than watched on the DOM, because a
- * highlight `cmdk` moves for itself - a pointer travelling over the rows -
- * re-renders this list and nothing above it.
- *
- * Render it inside a `CommandList`; `onChange` must be stable.
+ * Reports those ids to a control outside the list. `cmdk` mints both and writes `id` after the
+ * props, so neither can be passed in, and a combobox steering the list from outside must name them:
+ * in `VariableInput` the field is two components up and the list never focused, so without them a
+ * screen reader hears nothing of the highlight the arrows move (#1215). Read from `cmdk`'s store,
+ * not watched on the DOM, because a highlight cmdk moves itself (the pointer over rows) re-renders
+ * only this list. Render inside a `CommandList`; `onChange` must be stable.
  */
 export function CommandListboxProbe({ onChange }: { onChange: (s: CommandListboxState) => void }) {
 	/*
-	 * Subscribed to the highlight rather than to `state.selectedItemId`, which
-	 * `cmdk` only maintains for a list it highlights itself: a controlled `value`
-	 * is written straight into the store, so the id it caches is never recomputed
-	 * and stays undefined for exactly the case this probe exists to serve. The
-	 * highlight itself is always current, and the row carrying it is one scoped
-	 * query away - inside this list, never across the document.
+	 * Subscribed to the highlight, not `state.selectedItemId`, which cmdk maintains only for a list
+	 * it highlights itself: a controlled `value` is written straight to the store, so the cached id
+	 * stays undefined for exactly this probe's case. The highlight is always current, and its row
+	 * is one query away, scoped to this list.
 	 */
 	const highlight = useCommandState((state) => state.value);
 	const ref = React.useRef<HTMLSpanElement>(null);
@@ -82,11 +63,9 @@ export function CommandListboxProbe({ onChange }: { onChange: (s: CommandListbox
 	React.useEffect(() => {
 		const list = ref.current?.closest<HTMLElement>("[cmdk-list]");
 		/*
-		 * Matched on `data-value` rather than on the rendered `aria-selected`,
-		 * which lags: a row learns its own value in a layout effect and does not
-		 * re-render for it, so on a list's first paint the highlight sits on
-		 * nothing yet. That same layout effect writes `data-value`, and a passive
-		 * effect runs after all of them.
+		 * Matched on `data-value`, not the rendered `aria-selected`, which lags: a row learns its
+		 * value in a layout effect without re-rendering, so on first paint the highlight is on
+		 * nothing. That effect writes `data-value`, and a passive effect runs after all of them.
 		 */
 		const rows = list ? Array.from(list.querySelectorAll<HTMLElement>("[cmdk-item]")) : [];
 		onChange({
@@ -95,35 +74,21 @@ export function CommandListboxProbe({ onChange }: { onChange: (s: CommandListbox
 		});
 	}, [onChange, highlight]);
 
-	// `hidden`, so it is out of the accessibility tree rather than an extra
-	// child of a listbox that should hold options and nothing else.
+	// `hidden`: out of the accessibility tree, not an extra child of a listbox meant for options.
 	return <span ref={ref} hidden />;
 }
 
 /**
- * Scrolls the highlighted row into view, for a list steered from outside.
- *
- * `cmdk` scrolls on its own state path only. Its `setState("value", …)`
- * schedules the scroll before it emits, which is the path its `Command.Input`
- * arrow handling takes; a highlight arriving through the controlled `value`
- * *prop* lands somewhere else entirely - a layout effect that assigns the value
- * and emits, with no scroll and no `selectedItemId`. So a list driven the way
- * `CommandListboxProbe` exists to serve moves `[data-selected]` onto a row it
- * never brings into view, and past the eighth entry the highlight is below the
- * fold of `CommandList`'s own `max-h-[300px] overflow-y-auto` (issue #1333).
- *
- * Read from `cmdk`'s store rather than from a prop, so a highlight the pointer
- * moved and one the arrows moved are one code path - `cmdk` opts its own
- * pointer handler out of scrolling, and `block: "nearest"` is why that costs
- * nothing: a row already on screen, which every row the pointer can reach is,
- * does not move.
- *
- * The group heading rides along, matching what `cmdk` does for the first row of
- * a group: here the headings are what tells a generator from a stored variable.
- *
- * Render it inside a `CommandList`; anything driving a `Command` from a
- * controlled `value` wants it, which is why it lives beside the primitive
- * rather than in either caller.
+ * Scrolls the highlighted row into view for a list steered from outside. cmdk scrolls only on its
+ * own state path (`setState("value", ...)`, which its `Command.Input` arrows take); a highlight
+ * through the controlled `value` *prop* lands in a layout effect that assigns and emits with no
+ * scroll and no `selectedItemId`. So such a list moves `[data-selected]` to a row it never shows,
+ * below `CommandList`'s `max-h-[300px] overflow-y-auto` fold past the eighth entry (#1333). Read
+ * from cmdk's store, so pointer and arrow highlights share one path: cmdk opts its pointer handler
+ * out of scrolling, and `block: "nearest"` makes that free, as a row already on screen does not
+ * move. The group heading rides along, as cmdk does for a group's first row: here the headings tell
+ * a generator from a stored variable. Render inside a `CommandList`; anything driving a `Command`
+ * from a controlled `value` wants it, so it lives beside the primitive.
  */
 export function CommandScrollIntoView() {
 	const highlight = useCommandState((state) => state.value);
@@ -132,15 +97,10 @@ export function CommandScrollIntoView() {
 	React.useEffect(() => {
 		const list = ref.current?.closest<HTMLElement>("[cmdk-list]");
 		/*
-		 * Scoped to this list, never across the document: the app mounts several
-		 * of these and the highlight being scrolled to is this one's.
-		 *
-		 * On `aria-selected`, where `CommandListboxProbe` above deliberately reads
-		 * `data-value` instead: that probe has to name a row on the list's first
-		 * paint, when the rendered `aria-selected` still lags a layout effect.
-		 * This one has nothing to say about a paint that has not scrolled yet, so
-		 * it can use the selector `cmdk` uses for this job itself - which is the
-		 * point, since the scroll it is standing in for is `cmdk`'s.
+		 * Scoped to this list: the app mounts several, and this highlight is this one's. On
+		 * `aria-selected`, where the probe reads `data-value`: the probe must name a row on first
+		 * paint, when `aria-selected` lags, while this has nothing to do before a scroll, so it
+		 * uses the selector cmdk uses for the scroll it stands in for.
 		 */
 		const row = list?.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]');
 		if (!row) return;
@@ -171,25 +131,22 @@ function Command({ className, ...props }: React.ComponentProps<typeof CommandPri
 
 interface CommandDialogProps extends DialogProps {
 	/**
-	 * Names the dialog for assistive tech. Radix requires a `DialogTitle`, and
-	 * a palette has no visible heading - its search field is the whole header -
-	 * so the title is rendered `sr-only` rather than omitted.
+	 * Names the dialog for assistive tech: Radix requires a `DialogTitle`, and a palette has no
+	 * visible heading (its search field is the header), so it is `sr-only`, not omitted.
 	 */
 	title: string;
 	/** One line saying what typing here does, also `sr-only`. */
 	description: string;
 	className?: string;
 	/**
-	 * Forwarded to the inner `Command`, so a caller that ranks its own results
-	 * can stop cmdk scoring them a second time - the same escape hatch
-	 * `SuggestionList` and `VariableAutocomplete` take on a bare `Command`.
+	 * Forwarded to the inner `Command`, so a caller ranking its own results stops cmdk scoring them
+	 * again, the hatch `SuggestionList` and `VariableAutocomplete` take on a bare `Command`.
 	 */
 	shouldFilter?: boolean;
 	/**
-	 * Forwarded to the inner `Command`, which would otherwise never see them:
-	 * the rest of the props go to `Dialog`. A caller that controls the highlight
-	 * (the palette withholds it until the user moves it) needs `value`, and the
-	 * handlers are how it learns that the user did.
+	 * Forwarded to the inner `Command`, which otherwise never sees them (the rest go to `Dialog`).
+	 * A caller controlling the highlight (the palette withholds it until the user moves it) needs
+	 * `value`, and the handlers tell it the user did.
 	 */
 	value?: string;
 	onValueChange?: (value: string) => void;
@@ -211,16 +168,14 @@ const CommandDialog = ({
 }: CommandDialogProps) => {
 	return (
 		<Dialog {...props}>
-			{/* No corner close button: it would land on top of the search field,
-			    and Escape or a click outside is how a palette is dismissed.
-
-			    No `DialogBody` either (issue #773): a palette is its input,
-			    `CommandList` and a footer of hints, and the list caps and
-			    scrolls itself - so the band that would claim the leftover
-			    height already exists one level in, and the two around it are
-			    `shrink-0` rather than growing. The panel's cap still applies,
-			    and `overflow-hidden` keeps the list's own scroll the only
-			    one. */}
+			{/*
+			 * No corner close button: it would sit on the search field, and Escape or a click
+			 * outside dismisses a palette. No `DialogBody` (#773): a palette is its input,
+			 * `CommandList` and a hint footer, and the list caps and scrolls itself, so the band
+			 * claiming leftover height exists one level in and the two around it are `shrink-0`.
+			 * The panel's cap still applies, and `overflow-hidden` keeps the list's scroll the only
+			 * one.
+			 */}
 			<DialogContent showClose={false} className={cn("overflow-hidden p-0", className)}>
 				<DialogTitle className="sr-only">{title}</DialogTitle>
 				<DialogDescription className="sr-only">{description}</DialogDescription>
@@ -231,29 +186,16 @@ const CommandDialog = ({
 					onKeyDown={onKeyDown}
 					onPointerMove={onPointerMove}
 					/*
-					 * No row overrides here at all any more (#1177). This
-					 * string used to force `px-2 py-3` and 20px icons onto every
-					 * row, which made a 30px row a 44px one - about six of them
-					 * in a 300px list, so anything past the second section was
-					 * below the fold with nothing on screen saying it existed.
-					 * `CommandItem`'s own `px-2 py-1.5` is the single-line row
-					 * this app draws everywhere else, which is also the
-					 * launcher metric, so the fix is to stop overriding it. It
-					 * measures 30.0px in Chromium against the built stylesheet
-					 * - `abc2bd2` took that measurement, and
-					 * `docs/app/COMPONENTS/palette.md` records it along with the
-					 * eleven-row count that rests on it (#1260).
-					 *
-					 * The icon sizes went the same way and were never doing what
-					 * they said: `[&_[cmdk-item]_svg]:h-5` outranks the `size-icon-sm`
-					 * a row writes on its own icon - one class, one attribute
-					 * and a type against one class - so every palette row drew a
-					 * 20px icon beside the `h-icon-sm` rail meant to match it.
-					 *
-					 * The list's cap is the other half of the density and
-					 * belongs to whoever renders the list. Group headings carry
-					 * no typography here either - `CommandGroup` draws them with
-					 * `Eyebrow`.
+					 * No row overrides here (#1177): `CommandItem`'s `px-2 py-1.5` is the
+					 * single-line row drawn everywhere else and the launcher metric, 30.0px in
+					 * Chromium against the built stylesheet (`abc2bd2`;
+					 * `docs/app/COMPONENTS/palette.md` records it with the eleven-row count resting
+					 * on it, #1260). A forced `px-2 py-3` made it 44px, about six in a 300px list,
+					 * hiding everything past the second section. No icon sizes either:
+					 * `[&_[cmdk-item]_svg]:h-5` outranks a row's own `size-icon-sm`, drawing 20px
+					 * icons beside the `h-icon-sm` rail. The list's cap belongs to whoever renders
+					 * it; group headings carry no typography here (`CommandGroup` draws them with
+					 * `Eyebrow`).
 					 */
 					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12"
 				>
@@ -269,20 +211,13 @@ function CommandInput({
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
 	/*
-	 * The ring is on the wrapper, not on the input: the input sits flush in a
-	 * full-bleed row, so its own ring would trace a box the row does not have.
-	 * `ring-inset` because `CommandDialog` clips (`overflow-hidden`) - the same
-	 * reason `TabsTrigger` uses it, see docs/design-system/focus-states.md. Without this the
-	 * `outline-none` below left the one focusable element in the palette with no
-	 * indicator at all: it passes unnoticed only because nothing else in the
-	 * dialog can take focus (#1216).
-	 *
-	 * `rounded-t-lg` matches the `Command` root's own `rounded-lg`: this wrapper
-	 * is the root's first child, flush against its top edge, and the root clips
-	 * (`overflow-hidden`). Square corners here sit inside that rounded mask, so
-	 * the root cuts them off - taking the inset ring's top corners with them.
-	 * `CommandGroup` never hits this because it carries its own `p-1`; this is
-	 * the one child flush enough against the edge to need matching rounding.
+	 * The ring is on the wrapper, not the input: the input sits flush in a full-bleed row, so its
+	 * ring would trace a box the row lacks. `ring-inset` because `CommandDialog` clips
+	 * (`overflow-hidden`), as `TabsTrigger` does (docs/design-system/focus-states.md); without it
+	 * the `outline-none` below left the palette's one focusable element with no indicator (#1216).
+	 * `rounded-t-lg` matches the root's `rounded-lg`: this is its first child, flush with its top,
+	 * and the root clips, so square corners would cut off the inset ring's top corners.
+	 * `CommandGroup` has its own `p-1`; this is the one child flush enough to need it.
 	 */
 	return (
 		<div
@@ -316,18 +251,11 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
 }
 
 /**
- * The band under the list, for keyboard hints.
- *
- * Outside `CommandList` on purpose, and that is the whole rule: the list is the
- * one thing that scrolls here (issue #773), so hints placed inside it would
- * scroll away with the results they describe - the same reason `DialogFooter`
- * sits outside `DialogBody` in every other dialog. `shrink-0` keeps it a band
- * rather than the first thing a full panel squashes.
- *
- * `border-rule`, which the `Command` root's `surface-card` resolves - the same
- * token the input's divider one band up and the separators between sections
- * now use. It read `border-t` alone while nothing in this tree declared a
- * surface, since `border-rule` under none falls back to the invisible default.
+ * The band under the list, for keyboard hints, outside `CommandList` on purpose: the list is the
+ * one thing that scrolls (#773), so hints inside would scroll away, as `DialogFooter` sits outside
+ * `DialogBody` elsewhere. `shrink-0` keeps it a band, not the first thing a full panel squashes.
+ * `border-rule`, resolved by the root's `surface-card`, like the input's divider and the section
+ * separators; under no declared surface it falls back to the invisible default.
  */
 function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
 	return (
@@ -361,16 +289,11 @@ function CommandGroup({
 		<CommandPrimitive.Group
 			data-slot="command-group"
 			/*
-			 * A section label is an `Eyebrow` here as it is everywhere else in
-			 * the app, rather than a third spelling of the same eleven pixels -
-			 * the primitive exists because that string was hand-typed in about a
-			 * dozen components and two of them had already drifted.
-			 *
-			 * Wrapped only when the heading is text: a caller passing its own
-			 * node owns its typography, and a block element inside `Eyebrow`'s
-			 * `<p>` would be invalid markup. cmdk still renders the wrapper it
-			 * labels the group by, so the element every test and every
-			 * `aria-labelledby` reaches for is unchanged.
+			 * A section label is an `Eyebrow`, as everywhere, not a third spelling of the eleven
+			 * pixels (that string was hand-typed in about a dozen components and two had drifted).
+			 * Wrapped only for a text heading: a caller's node owns its typography, and a block
+			 * element in `Eyebrow`'s `<p>` is invalid. cmdk still renders the wrapper it labels the
+			 * group by, so what tests and `aria-labelledby` reach for is unchanged.
 			 */
 			heading={typeof heading === "string" ? <Eyebrow>{heading}</Eyebrow> : heading}
 			className={cn(
@@ -389,10 +312,8 @@ function CommandSeparator({
 	return (
 		<CommandPrimitive.Separator
 			data-slot="command-separator"
-			// `border-t border-rule`, not a 1px `bg-border` slab: the same one
-			// pixel, in the colour the `Command` root's surface declares. On a
-			// card `--border` is the card's own background in dark, so the old
-			// version drew a divider that was simply absent there.
+			// `border-t border-rule`, not a 1px `bg-border` slab: on a card `--border` is the
+			// card's background in dark, so the slab drew nothing there.
 			className={cn("-mx-1 border-t border-rule", className)}
 			{...props}
 		/>
