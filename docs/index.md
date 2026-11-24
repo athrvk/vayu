@@ -395,7 +395,7 @@ persists.
 | Document | Covers |
 |---|---|
 | [Overview](app/architecture.md) | Renderer-side structural decisions |
-| [UI Components](app/COMPONENTS.md) | The `modules/` + `components/` layout |
+| [UI Components](app/COMPONENTS/index.md) | The `modules/` + `components/` layout |
 | [Design System](design-system.md) | Tokens, elevation, typography, component patterns |
 | [State Management](app/state-management.md) | Zustand stores, TanStack Query keys, cache policy |
 | [Talking to the Engine](app/api-integration.md) | What the renderer sends the engine, and when |

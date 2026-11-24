@@ -35,6 +35,7 @@ import {
 	entryExists,
 	filterGlob,
 	fromRepoRoot,
+	markdownFiles,
 	routedPaths,
 } from "./routed-inputs.testkit";
 
@@ -175,6 +176,19 @@ describe("directory entries", () => {
 		expect(entryExists("docs/app/components/", root)).toBe(false);
 		mkdirSync(join(root, "docs", "app", "empty"));
 		expect(entryExists("docs/app/empty/", root)).toBe(false);
+	});
+
+	it("lists the Markdown under a directory at any depth, in name order, and nothing else", () => {
+		const root = tree([
+			"docs/app/components/b.md",
+			"docs/app/components/a.md",
+			"docs/app/components/deep/c.md",
+			"docs/app/components/schema.json",
+		]);
+		const names = markdownFiles(join(root, "docs", "app", "components")).map((path) =>
+			path.slice(join(root, "docs", "app", "components").length + 1).replace(/\\/g, "/")
+		);
+		expect(names).toEqual(["a.md", "b.md", "deep/c.md"]);
 	});
 
 	it("does not take a file for a directory", () => {

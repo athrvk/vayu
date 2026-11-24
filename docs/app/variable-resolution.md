@@ -163,7 +163,7 @@ thing to *show*: the builder used to render `{{data.email}}` red, hover it to
 namespace being disjoint, can never answer for the column. So a `data.*` token
 gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
 data file, and no surface offers to create one. See
-[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+[Shared Variable Input](COMPONENTS/shared-variable-input.md#shared-variable-input-componentssharedvariableinput)
 for the token states.
 
 A **collection run** is the one place that reading is not left to the user: a
@@ -469,7 +469,7 @@ Every surface that acts on a contract resolves it this way, including the **Run
 dialog**: running a sub-collection under a declaring parent offers the parent's
 declared file as the pre-fill and diffs the chosen file against the parent's
 columns, the same answer Send-with-row and the token painter give. See
-[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+[Shared Variable Input](COMPONENTS/shared-variable-input.md#shared-variable-input-componentssharedvariableinput)
 for the paint and
 [Data-Driven Runs](data-driven-runs.md) for the file itself.
 

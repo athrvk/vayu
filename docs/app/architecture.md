@@ -251,7 +251,7 @@ never read a query.
 `useRelevance` is a second, orthogonal function a section can opt into, asked
 only by the bar and only while it is open: whether the section has anything to
 say about *this* request, once its own data is in, rather than just this tab
-type. See `docs/app/COMPONENTS.md` for the three verdicts it can return and why
+type. See `docs/app/COMPONENTS/app-shell.md` for the three verdicts it can return and why
 the question was split off `appliesTo` rather than widening it (#1310).
 
 A section is a leaf component over the ordinary query layer - no bar-wide shared
@@ -259,7 +259,7 @@ state - and is **mounted only while its section is expanded**, so a collapsed
 section registers no queries; its `useRelevance` hook is the one thing that still
 runs collapsed, and only for a query its section already makes. That is what
 makes it safe for the bar to stay open on every tab the registry has entries
-for - request, collection and run. See `docs/app/COMPONENTS.md` for the
+for - request, collection and run. See `docs/app/COMPONENTS/app-shell.md` for the
 sections themselves.
 
 #### Services Layer

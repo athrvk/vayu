@@ -220,8 +220,8 @@ const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
  *
  * The two causes the service reports - a stream that gave up, and one the cap
  * left out - read as one state here. They differ in what will fix them, which
- * is a paragraph (`docs/app/COMPONENTS.md`) rather than a chip: a row is 32px
- * and the cause spelled out took the whole of it, leaving the URL beside it
+ * is a paragraph (`docs/app/COMPONENTS/services.md`) rather than a chip: a row
+ * is 32px and the cause spelled out took the whole of it, leaving the URL beside it
  * truncated to two characters.
  */
 function isNotNotifying(

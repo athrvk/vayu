@@ -241,7 +241,7 @@ const CommandDialog = ({
 					 * launcher metric, so the fix is to stop overriding it. It
 					 * measures 30.0px in Chromium against the built stylesheet
 					 * - `abc2bd2` took that measurement, and
-					 * `docs/app/COMPONENTS.md` records it along with the
+					 * `docs/app/COMPONENTS/palette.md` records it along with the
 					 * eleven-row count that rests on it (#1260).
 					 *
 					 * The icon sizes went the same way and were never doing what

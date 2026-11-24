@@ -17,8 +17,8 @@
  * store), but the cursor position, scroll position and undo/redo stack did
  * not. `RequestTabs` now force-mounts Body's and Elements' panels once the
  * user has looked at either, which is the memory trade recorded in
- * `docs/app/COMPONENTS.md`: a request opened on Params never mounts either
- * panel, and once mounted they stay alive - hidden, not destroyed - for the
+ * `docs/app/COMPONENTS/request-builder.md`: a request opened on Params never
+ * mounts either panel, and once mounted they stay alive - hidden, not destroyed - for the
  * rest of this builder instance rather than being rebuilt on every glance
  * elsewhere.
  *

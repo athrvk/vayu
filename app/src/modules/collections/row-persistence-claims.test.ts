@@ -20,14 +20,21 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { DOC_READING_GUARDS, fromRepoRoot, repoRoot } from "@/lib/routed-inputs.testkit";
+import {
+	DOC_READING_GUARDS,
+	fromRepoRoot,
+	markdownFiles,
+	repoRoot,
+} from "@/lib/routed-inputs.testkit";
 
 /*
- * The two doc pages are named through the testkit so CI routes an edit to them
- * back to this suite. They stay literal keys below - the keys are what `RETIRED`
- * points at, and a typo there should still be a type error.
+ * The doc page and the doc directory are named through the testkit so CI routes
+ * an edit to them back to this suite. They stay literal keys below - the keys
+ * are what `RETIRED` points at, and a typo there should still be a type error.
+ * The directory is one surface: every page under it is read, and a claim is
+ * retired from all of them.
  */
 const [DATA_DRIVEN_RUNS_DOC, COMPONENTS_DOC] = DOC_READING_GUARDS.rowPersistence.paths;
 
@@ -84,11 +91,18 @@ const RETIRED: ReadonlyArray<{ claim: RegExp; where: keyof typeof SURFACES }> = 
 	{ claim: /Rows are never persisted/i, where: "electron/mcp/tools/input-schemas.ts" },
 	{ claim: /Rows are never persisted on either side/i, where: "docs/app/data-driven-runs.md" },
 	{ claim: /## Nothing is stored/, where: "docs/app/data-driven-runs.md" },
-	{ claim: /nothing persists them, here or engine-side/i, where: "docs/app/COMPONENTS.md" },
+	{ claim: /nothing persists them, here or engine-side/i, where: "docs/app/COMPONENTS/" },
 ];
 
+function readSurface(path: string): string {
+	if (!statSync(path).isDirectory()) return readFileSync(path, "utf8");
+	return markdownFiles(path)
+		.map((page) => readFileSync(page, "utf8"))
+		.join("\n");
+}
+
 const text = new Map<string, string>(
-	Object.entries(SURFACES).map(([name, path]) => [name, readFileSync(path, "utf8")])
+	Object.entries(SURFACES).map(([name, path]) => [name, readSurface(path)])
 );
 
 /**

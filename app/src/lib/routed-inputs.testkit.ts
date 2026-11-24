@@ -51,18 +51,22 @@ export function fromRepoRoot(path: string): string {
 /**
  * A registry entry that ends in `/` names a directory of pages, and the filter
  * lists it as the `**` glob under it. A split page becomes a directory of pages
- * (`docs/app/components/`), and one entry then answers for every page added
+ * (`docs/app/COMPONENTS/`), and one entry then answers for every page added
  * to it, where a list of file names would need an edit per page.
  */
 export function filterGlob(entry: string): string {
 	return entry.endsWith("/") ? `${entry}**` : entry;
 }
 
-function hasMarkdown(directory: string): boolean {
-	return readdirSync(directory).some((name) => {
-		const path = join(directory, name);
-		return statSync(path).isDirectory() ? hasMarkdown(path) : name.endsWith(".md");
-	});
+/** Every `.md` file under a directory, at any depth, in name order. */
+export function markdownFiles(directory: string): string[] {
+	return readdirSync(directory)
+		.sort()
+		.flatMap((name) => {
+			const path = join(directory, name);
+			if (statSync(path).isDirectory()) return markdownFiles(path);
+			return name.endsWith(".md") ? [path] : [];
+		});
 }
 
 /**
@@ -73,7 +77,7 @@ function hasMarkdown(directory: string): boolean {
 export function entryExists(entry: string, root: string = repoRoot): boolean {
 	const path = join(root, ...entry.split("/"));
 	if (!entry.endsWith("/")) return existsSync(path);
-	return existsSync(path) && statSync(path).isDirectory() && hasMarkdown(path);
+	return existsSync(path) && statSync(path).isDirectory() && markdownFiles(path).length > 0;
 }
 
 /**
@@ -179,7 +183,7 @@ export const DOC_READING_GUARDS = {
 	},
 	rowPersistence: {
 		reader: "app/src/modules/collections/row-persistence-claims.test.ts",
-		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS.md"],
+		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS/"],
 	},
 	/*
 	 * The same page, read for what it says about how a data file's cells are
