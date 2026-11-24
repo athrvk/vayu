@@ -43,6 +43,7 @@ import { RunEvents } from "./RunEvents";
 import RunKeyMetrics from "./RunKeyMetrics";
 import { UnrecordedFiguresNotice } from "./UnrecordedFiguresNotice";
 import { unrecordedFiguresOf } from "./unrecorded-figures";
+import { ErrorClassesCard } from "./ErrorClassesCard";
 import { SlowRequestsCard } from "./SlowRequestsCard";
 import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
 import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
@@ -251,6 +252,10 @@ export default function OverviewTab({
 					</CardContent>
 				</Card>
 			)}
+
+			{/* An MCP run's failed replies by class. Absent for a run stored before
+			    the engine counted them, and for one that saw none. */}
+			<ErrorClassesCard errorClasses={report.summary.errorClasses} />
 
 			{/* Outside every count above and below; a stopped run can have this and no errors. */}
 			<CancelledRequestsNote count={report.summary.cancelledRequests} />
