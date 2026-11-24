@@ -99,8 +99,8 @@ There is no `--success-foreground`, `--warning-foreground` or `--info-foreground
 A solid status control takes the `-fill` token under a white label instead (`bg-status-warning-fill text-white`, 4.62:1 - the Restart engine button, the client-certificate chip).
 Its hover is the opaque `--status-warning-fill-hover` (`hover:bg-status-warning-fill-hover`, 5.70:1), never `hover:bg-status-warning-fill/90`, which composites to 3.87:1 under the same label.
 
-`--info` used to be one value in both modes, like `--warning` still is.
-It was never measured, and at `199 89% 48%` it scored **2.85** on a light card against the 3.0 bar - while painting three chart series (wire, send rate, connections).
+`--info` is split by mode, unlike `--warning`.
+One value, `199 89% 48%`, scores **2.85** on a light card against the 3.0 bar - while painting three chart series (wire, send rate, connections).
 Mode-consistency is deliberate for the `--status-*` indicators, where one value must read as the same signal on either surface; `--info` had no such reason, so it is split like everything else here.
 
 ## Run / Status Indicator Colors
@@ -170,7 +170,7 @@ a status branch with a colour class or a `variant=` prop within three lines, and
 | `no-response` | `0`, and anything not a valid code | `status-no-response` (neutral) |
 
 **This table has now been corrected twice, in opposite directions, so the reasoning is recorded rather than the conclusion alone.**
-It previously described the response badge's mapping: 3xx on `status-warning-fill`, 4xx on `status-stopped-fill`.
+The rejected mapping put 3xx on `status-warning-fill` and 4xx on `status-stopped-fill`.
 That ramp reads as principled - green to amber to orange to red - but it packs four classes into 38deg-0deg of hue, and measured as OKLab distance three of its ten pairs collide: 3xx/4xx at 0.073, 4xx/5xx at 0.095, and 5xx against a connection failure at **0.000**, because both used `status-error-fill`.
 The set above has no pair under 0.144.
 

@@ -138,59 +138,18 @@
     "docs/building.md": {
       "max_cell": 313
     },
-    "docs/design-system/accent-and-status.md": {
-      "history": 2
-    },
     "docs/design-system/accessibility.md": {
       "max_line": 527,
       "long_lines": 1,
-      "max_cell": 451,
-      "history": 1
-    },
-    "docs/design-system/categorical-colors.md": {
-      "history": 3
-    },
-    "docs/design-system/chart-colors.md": {
-      "history": 1
-    },
-    "docs/design-system/color-schemes.md": {
-      "history": 1
+      "max_cell": 451
     },
     "docs/design-system/component-patterns.md": {
       "max_line": 1129,
       "long_lines": 1,
-      "max_cell": 1091,
-      "history": 1
+      "max_cell": 1091
     },
     "docs/design-system/dialogs.md": {
       "max_cell": 259
-    },
-    "docs/design-system/feedback-and-dashboard.md": {
-      "history": 2
-    },
-    "docs/design-system/index.md": {
-      "history": 1
-    },
-    "docs/design-system/layout.md": {
-      "history": 3
-    },
-    "docs/design-system/overflow-and-shrink.md": {
-      "history": 1
-    },
-    "docs/design-system/rows-and-drawers.md": {
-      "history": 3
-    },
-    "docs/design-system/surfaces.md": {
-      "history": 3
-    },
-    "docs/design-system/tree-navigation.md": {
-      "history": 1
-    },
-    "docs/design-system/typography.md": {
-      "history": 2
-    },
-    "docs/design-system/utilities-editor-scrollbar.md": {
-      "history": 1
     },
     "docs/engine/api-reference/authentication.md": {
       "max_cell": 372

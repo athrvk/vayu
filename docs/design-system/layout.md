@@ -66,7 +66,7 @@ The rules live in one hook, `useOverlayPanel` (`app/src/components/layout/useOve
 
 ## The panels that resize, and the one handle that resizes them
 
-The drawer, the context bar and the bottom panel are the panels a user drags, and all use `PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one focusable `role="separator"` where each panel used to carry its own mouse-only copy.
+The drawer, the context bar and the bottom panel are the panels a user drags, and all use `PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one focusable `role="separator"`, not a mouse-only copy per panel.
 `side` sets the direction, so the drawer's right-edge handle widens on ArrowRight and the context bar's left-edge one widens on ArrowLeft; Page keys jump, Home and End take the bounds, and Enter or Space resets to the default - the keyboard equivalent of the double-click that was already there.
 The bottom panel's handle is `side="top"`: a horizontal separator on the panel's top edge, dragged on the vertical axis, where pointer up, ArrowUp and PageUp grow the panel.
 It takes its own `min` and `max`: the panel's floor and half the window, which is why the props are `size`, `setSize` and `defaultSize` rather than a width.
@@ -92,7 +92,7 @@ Layout does not exist in jsdom, so `run-pane-container-queries.test.ts` is a sou
 ## ActivityRail and ContextRail
 
 The primary navigation runs down the window's left edge, not along its bottom (#1615): the OS Dock auto-hides over the app's lowest 60-80px on macOS, so a switcher living there is the one target on screen the system can cover mid-use.
-`ActivityRail` (`app/src/components/layout/ActivityRail.tsx`) is a `<nav aria-label="Sidebar views">`, `w-[var(--rail-width)]`, holding the six `RailButton`s the Dock used to render, top-aligned rather than pinned to the rail's own bottom (a bottom cluster is the same Dock problem in miniature).
+`ActivityRail` (`app/src/components/layout/ActivityRail.tsx`) is a `<nav aria-label="Sidebar views">`, `w-[var(--rail-width)]`, holding the six `RailButton`s, top-aligned rather than pinned to the rail's own bottom (a bottom cluster is the same Dock problem in miniature).
 `ContextRail` (`ContextRail.tsx`) is the same shape on the right edge: one button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
 Both rails share one keyboard model: a single Tab stop (`useRovingStop`, so the stop is state and cannot be left stray by an arrow) with `ArrowUp`/`ArrowDown` moving focus, wrapping, without activating.
 `ActivityRail`'s stop is the selected view; `ContextRail`'s is the first expanded section, or the first section when all are collapsed.
@@ -105,7 +105,7 @@ Both rails share one keyboard model: a single Tab stop (`useRovingStop`, so the 
 - **Clicking the open view's button closes the drawer.**
   The buttons call `activateDrawerView`, which switches the view and toggles `drawerOpen` only when that view is already showing.
   A small `status-success-text` dot on the Services button is the one badge the footer carried that moved here - the running-services count itself stays in the Dock too (see below).
-- **ContextRail renders nothing when the context bar has nothing for the active tab** (`contextBarHasContent`, the same predicate the Dock's toggle used to read).
+- **ContextRail renders nothing when the context bar has nothing for the active tab** (`contextBarHasContent`, the same predicate the Dock's toggle reads).
   Clicking a section's icon opens the bar if closed, expands that section if collapsed, and scrolls it into view with `scrollWithin` (`@/lib/scroll-within`, #1612) rather than `Element.scrollIntoView`; clicking the icon of the section that is the only one expanded collapses the whole bar.
   Present in both of `ContextBar`'s layout modes - see below.
 

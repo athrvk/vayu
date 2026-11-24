@@ -5,7 +5,7 @@ description: >-
 
 # Accessibility
 
-Which tool holds a rule decides what breaking it looks like: a lint error on the line, a source scan naming the file, a rendered assertion, or - until #1216 - nothing at all.
+Which tool holds a rule decides what breaking it looks like: a lint error on the line, a source scan naming the file, a rendered assertion, or - for a rule no tool holds - nothing at all.
 `eslint-plugin-jsx-a11y`'s recommended set now runs on every `.tsx` under `pnpm lint`, underneath the behavioural guards rather than instead of them: the lint reads markup, and none of the rules below are things it can see.
 
 | Rule | Enforced by |

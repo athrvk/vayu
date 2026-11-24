@@ -81,7 +81,7 @@ Add a step, add it there, and `cn-font-size.test.ts` is where that is held.
 
 **The micro/badge step is semibold because 600 is the heaviest face the code font ships.**
 `fonts.css` loads JetBrains Mono - the default `--font-mono` - at 400/500/600, and Fira Code and IBM Plex Mono at 400/500; only Space Mono, one of four selectable code faces, has a real 700.
-So `font-mono font-bold` on a chip renders a synthesised weight for every user who has not picked that one face - which is what this row used to specify while `MethodBadge`, the primitive that owns the step, shipped `font-semibold` (#1199).
+So `font-mono font-bold` on a chip renders a synthesised weight for every user who has not picked that one face - which is why this row specifies `font-semibold`, as `MethodBadge`, the primitive that owns the step, ships (#1199).
 
 **The same step in the UI face is semibold too, and the reason is the row itself.**
 The mono row settled one half of 10px and left the other half with no row to read, so the chips that are not `font-mono` picked a weight each - four different values, one pair of them inside a single primitive: `VariableScopeBadge` rendered `font-medium` compact and `font-semibold` full, because compact overrode `Badge`'s base and full did not (#1222).
@@ -129,7 +129,7 @@ So **`text-base` (16px) is written nowhere in `src`**, and every step above the 
 Each allowlisted file is asserted to still use its step, so a file that stops rendering one drops off the list instead of quietly licensing a heading there later.
 
 `heading-step.test.tsx` also reads the dialog half, by scanning every non-test `.tsx` for a `<DialogTitle>` whose `className` carries a `text-` or `font-` class other than `sr-only`.
-Rendering the primitive cannot find an override, because the caller's classes win through `cn()` (Import's title was `text-sm font-bold` until #2316).
+Rendering the primitive cannot find an override, because the caller's classes win through `cn()` (Import's title carried `text-sm font-bold`, #2316).
 
 **The type register is a measurement, not a preference.**
 Perceived size follows x-height, not nominal size, and the six bundled faces differ by 13% at the same `font-size`.

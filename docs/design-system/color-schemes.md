@@ -34,8 +34,8 @@ It takes only a long environment name beside an unbroken value (issue #1195), or
 A short label beside a short one (`TooltipIconButton`'s shortcut hint) has neither ingredient and stays a row. → `tooltip-value-layout.test.ts` reads every tooltip block for the shape.
 
 `VariablePopover`'s source line is the same rule, one primitive over (issue #1320).
-It used to share the footer with the Enter and Esc keycaps - a `truncate` span beside a `shrink-0` chip group - so "Shopify QA - expiring tokens" clipped exactly as an unbroken tooltip value would.
-The source now stacks under the header, full width, with nothing beside it to hand its space away: a source name never shares a row with something that will not shrink, whether the row is a tooltip's or a popover's.
+A `truncate` span beside a `shrink-0` chip group (the Enter and Esc keycaps) would clip "Shopify QA - expiring tokens" exactly as an unbroken tooltip value does.
+The source stacks under the header, full width, with nothing beside it to hand its space away: a source name never shares a row with something that will not shrink, whether the row is a tooltip's or a popover's.
 Because `TooltipContent` cannot see inside a `Popover`, this one is guarded by a rendered-class check in `variable-popover.test.tsx` rather than by `tooltip-value-layout.test.ts`'s block scan.
 
 **The root `TooltipProvider` (`main.tsx`) sets `disableHoverableContent`.**

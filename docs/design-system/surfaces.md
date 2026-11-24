@@ -133,11 +133,11 @@ A `bg-muted` block has to be defined by its fill instead, which separates from a
 
 That fill-not-border guidance is about a *block* separating from its parent.
 An edge that is itself the point is different: the import drop zone's dashed border is a drag-target affordance, and it uses `surface-sunken` + `border-rule` - the alpha-of-`--foreground` rule is the one edge that does work on this fill, and the strongest available in both themes (1.356 light / 1.343 dark).
-The `border-border-strong` it previously kept "for prominence" is in fact the *faintest* option there in dark (1.11, per the table above).
+`border-border-strong`, which reads as prominent, is in fact the *faintest* option there in dark (1.11, per the table above).
 Decided in issue #69; the detected-collections preview list in the same dialog got the same treatment.
 
 The switch on rows in the first table above are the default scheme (Ocean) with the track on `bg-primary-fill`.
-They used to read `--primary`, which brightens in dark: the track was 5.89 against the card but only 2.94 under the white thumb.
+They read `--primary-fill`, not `--primary`, which brightens in dark: that track was 5.89 against the card but only 2.94 under the white thumb.
 `checked-control-contrast.test.ts` holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme, and holds the on switch's edge against the card at 3.0 in every dark scheme.
 The track fill alone stays under the bar on `aurora` (2.98), so the checked state also paints the reserved 2px border with `--primary` (`data-[state=checked]:border-primary`): that edge measures 5.79 on the card at its weakest (`coral`) and 6.47 on `aurora`, and it carries the 3:1.
 In light `--primary` equals `--primary-fill` in `ocean` and `aurora`, where the edge is invisible; in the other six it is three to six points darker than the fill (#3499), a slightly deeper rim of the same hue.
@@ -146,7 +146,7 @@ The focus ring needed no work, which is the one that matters most for keyboard u
 
 `--border` at 1.00–1.30 is deliberate and stays: it is a seam between surfaces, not the thing identifying a control.
 
-**`--input` is not in that category, and the note above used to lump it in.**
+**`--input` is not in that category, and the note above does not lump it in.**
 For a field with `bg-transparent` - `Input`, `Textarea` and `SelectTrigger` all are - the border *is* the thing identifying the control, so 1.4.11 applies to it.
 In dark mode it was `240 6% 11%`, byte-identical to `--card`: a boundary of 1.00, absent rather than faint.
 Light mode masked the same weakness because `shadow-sm` gives a light field an edge and a shadow contributes nothing on a dark ground.

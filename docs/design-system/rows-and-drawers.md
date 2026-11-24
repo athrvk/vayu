@@ -116,7 +116,7 @@ All four now match exactly: one 32px header band, body below it.
 - **Full-bleed rows are square.**
   A rounded corner meeting the panel edge reads as a clipped rectangle, not a rounded row.
 - **The panel owns scrolling** - vertically only.
-  Views used to differ: some were wrapped in a `ScrollArea` by the Drawer, others managed their own.
+  A view is not wrapped in a `ScrollArea` by the Drawer, and does not manage a scroll region of its own.
 - **Indent with padding inside the row, never margin around it.**
   Margin pushes the row's _background_ in too, so a nested row's hover and selection fill stops short of the panel edge while a top-level row's reaches it.
   Depth is shown by where the content sits, not where the row starts: `paddingLeft: rowInsetPx(depth)` (`constants/layout`, `8 + depth * INDENT_STEP`, a 16px step; the collections tree, Move to, and the GraphQL schema explorer all read it, so the app has one indent).
@@ -145,7 +145,7 @@ All four now match exactly: one 32px header band, body below it.
 
 **Single-line drawer rows are `h-8` (24px at the default density, 32px at Comfortable - see Spacing Scale above).**
 State the height; do not let it fall out of the content.
-It previously did - a 28px chevron set the collection row, padding set the others - so the four drawer views ran **34 / 36 / 38 / 40px** and the rhythm shifted every time the user switched view, one click apart in the same panel.
+Left to the content - a 28px chevron setting the collection row, padding setting the others - the four drawer views run **34 / 36 / 38 / 40px** and the rhythm shifts every time the user switches view, one click apart in the same panel.
 Collection and request rows differed by 4px inside a *single* tree.
 
 Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and `VariablesCategoryTree` rows.
@@ -186,7 +186,7 @@ The row is a second, pointer-only entrance to the same handler.
 
 Together the two changes take all three rows to **100% of their own pixels** - measured by sweeping `elementFromPoint` across the row box in the running app.
 The only pixels a row does not own are the chevron, the `⋯` menu and the drawer's 8px `cursor-col-resize` handle at the panel edge.
-Both halves are guarded by `drawer-row-hit-area.test.tsx`: the height as a `className` assertion (jsdom has no layout, so an `offsetHeight` assertion would pass while measuring nothing), the delegation behaviourally, because `fireEvent.click(row)` targets the row itself - exactly the pointer that used to land on dead padding.
+Both halves are guarded by `drawer-row-hit-area.test.tsx`: the height as a `className` assertion (jsdom has no layout, so an `offsetHeight` assertion would pass while measuring nothing), the delegation behaviourally, because `fireEvent.click(row)` targets the row itself - exactly the pointer that would land on dead padding.
 
 The shared `ElementList`'s element card header (`components/shared/ElementList/`, issue #1608) is the same `h-8` row with two embedded controls beyond its own toggle - an enable switch and a `⋯` menu - each a real interactive child rather than a row-level click delegated by target equality:
 with the header's own click handled by two real buttons (the chevron and the label), there is no ambiguous "click landed on the row itself" case left for `isRowSurface` to resolve.

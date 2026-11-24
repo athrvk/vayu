@@ -79,7 +79,7 @@ Each page holds the tokens or the patterns of one family.
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - the ActivityRail, the drawer row, the content column (TabStrip, main, ContextBar, ContextRail), the Dock, and the window chords |
-| `app/src/components/layout/ActivityRail.tsx` | Left-edge nav - the six view buttons the Dock used to hold, with roving tabindex |
+| `app/src/components/layout/ActivityRail.tsx` | Left-edge nav - the six view buttons, with roving tabindex |
 | `app/src/components/layout/ContextRail.tsx` | Right-edge nav - one icon per applicable context-bar section |
 | `app/src/components/layout/RailButton.tsx` | The icon button shared by both rails - edge-indicator and tile variants |
 | `app/src/components/layout/Dock.tsx` | The bottom strip - status in the centre (engine light, version, services, save state, pending restart), per-tab view controls on the right |

@@ -35,9 +35,9 @@ At rest the clipped edge fades (`.scroll-on-overflow`, a `mask-image`, not an el
 
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no tooltip.
 
-### A row that holds a name, a chip and some controls (#3494, #3495)
+### A row that holds a name, a chip and some controls
 
-The "reflow guarantee" (Interface scale, above) is met with class rules, not a media query per surface. jsdom has no layout, so each is held as a class guard (`reflow-floors.test.ts` and the component's own test), and none can prove a pixel.
+The "reflow guarantee" (Interface scale, above) is met with class rules, not a media query per surface. jsdom has no layout, so each is held as a class guard (`reflow-floors.test.ts` and the component's own test), and none can prove a pixel (#3494, #3495).
 
 - **A chip never shrinks or breaks.**
   A status chip, a pill or a metric group is `shrink-0 whitespace-nowrap`.

@@ -90,7 +90,7 @@ Three shapes, one rule each, decided once here rather than per module (issue #16
 A screen reaching for a fourth idiom, or for the wrong one of these three, is the bug this rule exists to catch.
 
 **Refreshing something already on screen is none of the three: it is a dim.**
-A skeleton and a full-pane spinner both begin by throwing away the content the user is reading, which is right for a first load and wrong for a re-fetch - re-sending a request whose response is on screen used to blank the response pane, so the exchange being replaced was gone from the press of Send.
+A skeleton and a full-pane spinner both begin by throwing away the content the user is reading, which is right for a first load and wrong for a re-fetch - re-sending a request whose response is on screen would blank the response pane, so the exchange being replaced would be gone from the press of Send.
 The rule is the second bullet's, read to its end: the control that was clicked shows the work, and *nothing else on the pane moves size or position*.
 So the stale content stays exactly where it is, the pane takes `aria-busy` and drops to `opacity-60` with a `transition-opacity duration-150`, and the dim lifting is what says the new data landed.
 No spinner, no bar, no reflow - anything that *reflows* is the thing this replaces.

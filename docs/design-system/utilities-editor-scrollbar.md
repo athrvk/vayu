@@ -51,8 +51,8 @@ The guard's scope and its two exemptions are described under "Decorative categor
 
 ## Monaco Editor Widgets
 
-`CodeEditor` used to hand Monaco its own built-in theme names (`vs` / `vs-dark`), so every widget Monaco draws around the text - the suggest list, the find and replace widget, the hover card, the context menu - painted VS Code's palette next to the app's Radix popovers and tokens.
-`lib/monaco-theme.ts` now defines `vayu-light` and `vayu-dark` through `monaco.editor.defineTheme`: each inherits the built-in theme's syntax colours and replaces only the chrome, so a token change reaches the editor the same way it reaches every other surface.
+`CodeEditor` does not hand Monaco its built-in theme names (`vs` / `vs-dark`): every widget Monaco draws around the text - the suggest list, the find and replace widget, the hover card, the context menu - would paint VS Code's palette next to the app's Radix popovers and tokens.
+`lib/monaco-theme.ts` defines `vayu-light` and `vayu-dark` through `monaco.editor.defineTheme`: each inherits the built-in theme's syntax colours and replaces only the chrome, so a token change reaches the editor the same way it reaches every other surface.
 `WIDGET_COLORS` in that file is the mapping below; a key it does not name keeps whatever the base theme says, which is correct for anything the tokens have no opinion about (bracket-pair colours, the diff editor).
 
 **The editor canvas itself**, so it reads as the app's surface rather than Monaco's own near-black default in dark mode:

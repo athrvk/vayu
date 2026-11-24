@@ -120,7 +120,7 @@ A copy is acknowledged one of two ways, and which one is decided by the control,
   A text button that stands alone may instead swap its label in place with `LabelSwap` ("Copy install command" to "Copied" in the updates card, "Copy" to "Copied" in the MCP settings panel); a text button among several siblings toasts, because the toast is what says which of them landed.
 
 **One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.**
-This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
+A call site that keeps its own `copied` flag and its own `setTimeout` drifts to its own duration (1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section); one hook owning both keeps it to one.
 
 **Every clipboard write goes through `useCopy`.**
 `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else.
@@ -155,7 +155,7 @@ The rule is every surface, not a list of them.
   The Cookies tab lists those attributes one chip each and renders every chip through the same `HeaderValue` (exported from `HeadersViewer.tsx`), so an `Expires=` date there carries the card as it does on the Headers tab.
   An editable field (a request header or param, a variable) cannot hold an element, so the card hangs off a `TimeMarker` beside it - a clock button in the key-value table's marker column, inside the field in the variables table - rather than off the field, which would open on every focus and cover the autocomplete.
   **A secret variable never gets one**, saved or not: the card is a tooltip a screen share catches.
-- **A surface with no visible time** puts the card on a trigger of its own with `TimeTooltip`: a history row hangs it off the row's stretched activator, with the status and the run's comment as extra rows, in place of the native `title` that used to say the same in one unnamed zone.
+- **A surface with no visible time** puts the card on a trigger of its own with `TimeTooltip`: a history row hangs it off the row's stretched activator, with the status and the run's comment as extra rows, in place of a native `title`, which says the same in one unnamed zone.
 - **No setting.**
   The OS locale and zone decide, as they always did.
 - **A test that renders a time needs a `TooltipProvider`** above it: `@/test/render-with-tooltips` is Testing Library's `render` inside one.

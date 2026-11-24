@@ -6,7 +6,7 @@ description: >-
 # Tree Navigation (roving tabindex)
 
 The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is one tab stop**.
-Previously every row and every control in it was a stop - a workspace with 2 collections and 4 requests cost 17 presses to tab past.
+Every row and every control in it being a stop would cost a workspace with 2 collections and 4 requests 17 presses to tab past.
 
 - Container: `role="tree"`, holding every visible row as **one flat list** in the order `flattenVisibleRows` (`tree-rows.ts`) gives it (#2543): no row renders another, and there is no `role="group"`.
   Rows: `role="treeitem"`, `aria-expanded` on collections, `aria-selected` for the open entity.

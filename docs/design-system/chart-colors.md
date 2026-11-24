@@ -76,8 +76,7 @@ Which mode a family fails in is not a property of the mode.
 That spread rules out "a dark-mode bug" as the diagnosis: the single cause is the fill token standing in for the foreground one, and which mode it shows up in just depends on where that fill sits relative to the surface.
 `destructive` on `bg-destructive/10` and on `bg-background` measures worse still (4.14 / 4.43 light, 1.69 / 1.99 dark), so a tinted error chip is the worst case, not the safe one.
 
-`status-warning` used to be recorded here as an exception with no `-text` variant.
-It has one - `--status-warning-text`, holding the same value as `--warning-text` in both themes, which is why its `-text` column repeats that row's figures rather than stating a second number for one colour.
+`status-warning` is not an exception: it has a `-text` variant, `--status-warning-text`, holding the same value as `--warning-text` in both themes, which is why its `-text` column repeats that row's figures rather than stating a second number for one colour.
 The bare amber is the family's worst case rather than its safe one: 3.98 on the card, 3.63 on `--background`, 3.38 on `--muted` / `--accent` and 3.54 on its own `/10` tint, so it clears the 3.0 icon floor everywhere and the 4.5 text floor nowhere.
 The `-text` variant clears both on all four (5.46 / 4.98 / 4.64 / 4.86 light).
 Its worst is the `--muted` case the light-amber floor above is quoted from, and the two figures differ in the last place - 4.64 computed from the declared triple, 4.63 measured in the browser, which quantises to 8-bit channels first.

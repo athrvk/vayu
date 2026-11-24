@@ -79,7 +79,7 @@ That is a kind rather than a status, so the app's one violet token - `--status-r
 ## HTTP Method Color Tokens
 
 **Always render methods with `MethodBadge`** (`components/shared`) - never a hand-rolled span or `Badge` with inline colours.
-It previously rendered seven different ways (three sizes, two weights, some tinted, two with no colour at all), and the history sidebar kept a private copy of the colour logic that omitted `getMethodColor`'s fallback, so an unrecognised method silently lost its colour.
+A hand-rolled badge renders differently each time (three sizes, two weights, some tinted, two with no colour at all), and a private copy of the colour logic omits `getMethodColor`'s fallback, so an unrecognised method silently loses its colour.
 
 ```tsx
 <MethodBadge method={request.method} />                        // tinted chip, 10px
@@ -150,13 +150,11 @@ borderColor: `hsl(${c} / 0.3)`
 ```
 
 **Do not hand-roll that span for a method.**
-This section used to carry the badge's markup as a pattern to copy, naming `RunItem` and `DashboardHeader` as its users;
-both have rendered `MethodBadge` for some time, and the copy here had already drifted (`font-bold` against the primitive's `font-semibold`, `rounded` against `rounded-md`, and no fixed width at all - so a copy of it would have reintroduced the ragged left edge the primitive now prevents).
+A copy of the badge's markup drifts from the primitive (`font-bold` against the primitive's `font-semibold`, `rounded` against `rounded-md`, and no fixed width at all), so it reintroduces the ragged left edge the primitive prevents; `RunItem` and `DashboardHeader` render `MethodBadge`.
 A hand-rolled copy of a primitive does not receive the primitive's fixes.
 Render `MethodBadge`; the three `hsl()` forms above are how it, the tab strip and the method selector each build a colour from `getMethodColor`.
 
-**MethodSelector** used to carry its own `METHOD_COLORS` map of those utility classes - a second source of truth for the same seven colours, and the kind that quietly stops matching.
-It now takes the `getMethodColor` path above, like `MethodBadge` and the tab strip:
+**MethodSelector** takes the `getMethodColor` path above, like `MethodBadge` and the tab strip, rather than its own map of utility classes - a second source of truth for the same seven colours, and the kind that quietly stops matching:
 
 ```tsx
 style={{ color: `hsl(${getMethodColor(request.method)})` }}
