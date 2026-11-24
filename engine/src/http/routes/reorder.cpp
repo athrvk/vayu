@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/reorder.cpp
  * @brief POST /reorder - the atomic batch reorder/move for collections and
  *        requests (issue #365).
  */
@@ -487,13 +486,6 @@ std::vector<Move>& moves) {
  * The batch, from validation to commit. Runs with the DB mutex already held by
  * `reorder_response` - see there for why the whole of it has to.
  *
- * A drop that displaces N siblings used to have no sane write path: the only
- * write verbs are one row per `PUT`, so a renumber was N sequential requests -
- * non-atomic (a crash mid-sequence half-renumbers a parent), racy against a
- * concurrent create computing `max_order + 1` between two of them and against
- * `POST /import/apply`'s own transactional order slots, and an invalidation
- * storm on the client. This endpoint takes the whole batch instead.
- *
  * The order of business is fixed and load-bearing:
  *
  *  1. **Everything is validated first** - entry shapes, that every named row and
@@ -584,8 +576,8 @@ const std::function<void ()>& before_write) {
  * Testable core of POST /reorder - one drop, one round trip, one lock scope
  * (issues #365, #386), returning {http_status, json_body}.
  *
- * A drop that displaces N siblings used to have no sane write path: the only
- * write verbs are one row per `PUT`, so a renumber was N sequential requests -
+ * A drop that displaces N siblings has no sane write path in the single-row
+ * verbs: a renumber is N sequential requests -
  * non-atomic (a crash mid-sequence half-renumbers a parent), racy against a
  * concurrent create computing `max_order + 1` between two of them and against
  * `POST /import/apply`'s own transactional order slots, and an invalidation

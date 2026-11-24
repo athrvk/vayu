@@ -6,7 +6,6 @@
  */
 
 /**
- * @file script_kinds.cpp
  * @brief `script.pre` / `script.post` (issue #1513's registration, issue
  *        #1514's `compile` / `apply`), and `script.setup` / `script.teardown`
  *        (issue #1499), the same shape at the run's own boundary instead of a
@@ -358,10 +357,9 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
  * `RunContext::script_element_runs_inline`): a load run reads it to decide
  * whether this script runs on the producer/completion hooks or is left to the
  * deferred replay. The base schema above closes `additionalProperties`, so a
- * kind that does not add it here refuses the marking outright - which is what
- * made the opt-in unreachable through every validated write path there is
- * (`apply_elements_field`, `validate_request_elements_run_override`) until
- * issue #1594 exercised one end to end. `script.setup` / `script.teardown` do
+ * kind that does not add it here refuses the marking outright, so it is
+ * unreachable through every validated write path (`apply_elements_field`,
+ * `validate_request_elements_run_override`, #1594). `script.setup` / `script.teardown` do
  * not get it: a run-boundary kind has no inline-or-deferred choice to make.
  */
 void allow_inline_marking (ElementKind& kind) {

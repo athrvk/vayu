@@ -8,7 +8,6 @@
  */
 
 /**
- * @file pm_internal.hpp
  * @brief What the translation units behind the `pm` object share (issue
  *        #2092): `script_engine.cpp` and every file under `pm/`, nothing
  *        else.

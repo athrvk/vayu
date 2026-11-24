@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/environments.cpp
  * @brief Environment management routes
  */
 
@@ -26,14 +25,11 @@ namespace vayu::http::routes {
  * Applies the request body onto `e` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores.
  *
- * This is where the `"null"`-string bug died: the old handler wrote
- * `e.variables = json["variables"].dump()` with no null guard, so
- * `{"variables": null}` stored the four-character text `null` - a value that
- * parses as JSON but is not an object, so every reader silently saw no
- * variables at all. `apply_json_field` resets it to `{}` instead.
+ * `{"variables": null}` resets to `{}` (`apply_json_field`), because the text
+ * `null` stored instead parses as JSON but is not an object, so every reader
+ * would silently see no variables at all.
  *
- * `isActive` used to be honoured only on create, which left an update unable to
- * change it; it now follows the same rule on both verbs. Storing `true` here is
+ * `isActive` follows the same rule on both verbs. Storing `true` here is
  * how a client says "make this the active environment": the DB layer clears the
  * previous one in the same transaction (`deactivate_other_environments_locked`),
  * so the route needs no deactivate step of its own and there is no verb for

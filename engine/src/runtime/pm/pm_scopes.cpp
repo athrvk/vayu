@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_scopes.cpp
  * @brief `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`
  *        and `pm.iterationData`.
  */
@@ -122,8 +121,7 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
 
 // Which of the run's variable maps a binding reads and writes. The value is the
 // `magic` argument QuickJS hands back, so one implementation serves every
-// scope. They were three hand-written copies of get/set; seven methods each
-// would have tripled that, and a copy is exactly what stops a fix landing
+// scope: a hand-written copy per method is exactly what stops a fix landing
 // everywhere it belongs. `SCOPE_LOCAL` is the run-local scope behind
 // `pm.variables.set` / `unset` / `clear` (#2564); it has no accessor of its own
 // on `pm`, so it is not in the binding table below.
@@ -990,8 +988,8 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
 // rather than answer about a run that has finished.
 //
 // The message names every surface that binds a row, not just the collection run
-// #356 shipped with: #402 made a send-with-row one, and #599, #993 and #3124
-// made every script of a load run given rows another, so a message naming only
+// (#356): a send-with-row (#402) and every script of a load run given rows (#599,
+// #993, #3124) bind one too, so a message naming only
 // collection runs steers a user who stashed the object during one of those to
 // look for a mistake that is not there.
 //

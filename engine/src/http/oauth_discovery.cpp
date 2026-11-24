@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/oauth_discovery.cpp
  * @brief OAuth 2.0 discovery for an MCP server (#3766): the challenge parser,
  *        protected resource metadata, and authorization server metadata.
  */

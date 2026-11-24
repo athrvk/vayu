@@ -6,7 +6,6 @@
  */
 
 /**
- * @file user_regex.cpp
  * @brief The only translation unit that includes `<re2/re2.h>` (#1874).
  */
 

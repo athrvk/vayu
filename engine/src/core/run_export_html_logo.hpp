@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_export_html_logo.hpp
  * @brief The Vayu mark the HTML run report shows beside its wordmark (#2135).
  *
  * `shared/icon_png/vayu_icon_64x64.png` as base64, for a `data:image/png`

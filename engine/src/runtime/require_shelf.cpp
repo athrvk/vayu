@@ -6,7 +6,6 @@
  */
 
 /**
- * @file require_shelf.cpp
  * @brief `require()` and the library globals Postman binds, over a fixed shelf
  *        of bundled libraries (#2578).
  *

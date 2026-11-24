@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/spec_coverage.cpp
  * @brief Implementation of contract coverage (issue #629). See the header for
  *        why the operation index is supplied rather than parsed here.
  */

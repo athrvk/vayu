@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_visualizer.cpp
  * @brief `pm.visualizer` (#2577): Postman's calls, accepted and not rendered.
  *
  * Postman draws a Handlebars template over the response in its Visualize tab.
