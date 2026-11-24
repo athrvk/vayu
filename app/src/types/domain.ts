@@ -8,10 +8,9 @@
 // Core Domain Types
 
 /**
- * HTTP protocol to negotiate. Declared in `@/constants/request` (derived from
- * the `HTTP_VERSIONS` list, the single source of truth also consumed by the
- * Settings tab picker) and re-exported here, same pattern as `ColorScheme` in
- * `types/ui.ts`, so `Request.httpVersion` below can reference it.
+ * HTTP protocol to negotiate. Declared in `@/constants/request`, derived from
+ * `HTTP_VERSIONS` (which the Settings picker also reads); re-exported for
+ * `Request.httpVersion`.
  */
 import type { HttpVersion } from "@/constants/request";
 export type { HttpVersion };
@@ -47,26 +46,17 @@ export type AuthMode =
 	| "jwt";
 
 /**
- * A single key-value entry (headers, params, form fields).
- * `enabled: false` rows are preserved in storage and excluded only at HTTP-execution time.
- * Duplicates are allowed (useful for multiple `Accept` headers etc.).
- */
-/**
- * A header row a *setting* wrote on its way in - the body mode's
- * `Content-Type`, the Event stream toggle's `Accept` - so the setting can tell
- * its own row apart from one the user typed, including across a reload (issue
- * #1481). An in-memory record of "which row did I write" cannot survive that;
- * the fact has to live with the row it describes.
+ * A header row a setting wrote (the body mode's `Content-Type`, the Event
+ * stream toggle's `Accept`), marked on the row itself so the setting can tell
+ * it from a typed one after a reload, which in-memory state cannot (#1481).
  */
 export type AutoHeaderSource = "body-mode" | "stream";
 
 /**
- * `source` on a stored row: an app setting's own marker (`AutoHeaderSource`),
- * or `"legacy-default"` - the engine's header-strip repair pass stamps this on
- * a row it disabled because its value was the exact shape a pre-#1229 client
- * wrote (`X-Vayu-Version`, `X-Request-ID`, `User-Agent`), so the row survives
- * disabled rather than deleted and the user can re-enable it if the match was
- * wrong (issue #1491).
+ * `"legacy-default"`: a row the engine's header-strip repair disabled, not
+ * deleted, because its value matched what a pre-#1229 client saved
+ * (`X-Vayu-Version`, `X-Request-ID`, `User-Agent`), so a wrong match can be
+ * re-enabled (#1491).
  */
 export type HeaderRowSource = AutoHeaderSource | "legacy-default";
 
@@ -83,6 +73,10 @@ export type MethodSource = "graphql";
 /** Which saved example a mock server answers with (issue #481 phase 3). */
 export type MockResponseMode = "first" | "fixed" | "random";
 
+/**
+ * A key-value row (header, param, form field). A disabled row is stored and
+ * skipped only at send time; duplicate keys are allowed (two `Accept` headers).
+ */
 export interface KeyValueEntry {
 	key: string;
 	value: string;
@@ -123,21 +117,14 @@ export interface VariableValue {
 }
 
 /**
- * One part of a `form-data` body: typed text, or a file read from disk when the
- * request is sent.
- *
- * A file part names a path in `src` instead of carrying bytes in `value` - the
- * engine opens it at send time, so nothing here (and nothing in storage) holds
- * the contents. `fileName` and `contentType` override what the part declares
- * about itself; absent means the engine lets libcurl derive them from the path.
- * A text part may carry `contentType` as well (a Postman import keeps the one
- * the source declared, #2539): the part is sent with that type and none
- * otherwise. `src` and `fileName` stay file-only.
- *
- * `unresolved` is read-only: the engine's answer, on a read, to whether it
- * would refuse the path on this machine, and what the editor's warning reads.
- * It is never sent (`lib/file-trust.ts`). `x-www-form-urlencoded` has no file
- * form, so a file part is only ever valid under `form-data`.
+ * One `form-data` part: text, or a file named by `src` that the engine reads at
+ * send time (no bytes here or in storage). On a file part `fileName` and
+ * `contentType` override what the part declares; absent, libcurl derives them
+ * from the path. A text part carries a type only when `contentType` is set
+ * (#2539, a Postman import keeps it). `unresolved` is read-only, the engine's
+ * answer on a read to whether it would refuse the path here (the editor warns
+ * on it), never sent (`lib/file-trust.ts`). `x-www-form-urlencoded` has no
+ * file form.
  */
 export interface FormFieldEntry extends KeyValueEntry {
 	type?: "text" | "file";
@@ -199,11 +186,6 @@ export type RequestBody =
 	| { mode: "x-www-form-urlencoded"; fields: KeyValueEntry[] }
 	| { mode: "binary"; file: FileRef };
 
-/**
- * Auth configuration for requests.
- * `inherit` resolves by walking the parent collection chain at execution time.
- * Collections never use `inherit` - they are always the auth source.
- */
 export type OAuth2GrantType =
 	"authorization_code" | "client_credentials" | "password" | "jwt_bearer";
 
@@ -302,22 +284,13 @@ export type OAuth2DiscoveredField =
 	"authorizationUrl" | "accessTokenUrl" | "clientId" | "resource" | "scope";
 
 /**
- * `none` vs `noauth` - the distinction the inheritance walk turns on.
- *
- * On a collection, `none` means "nothing configured here": the walk steps past
- * it and a descendant `inherit` keeps climbing. `noauth` means "configured to
- * send nothing", which *terminates* the walk - descendants inherit no
- * credentials. Postman draws the same line (a folder set to No Auth blocks
- * inheritance; a folder left on Inherit does not), and collapsing the two is how
- * an imported No Auth folder used to leak its parent's bearer token (issue
- * #195). `resolveAuthSource` in `modules/request-builder/utils/auth-resolution.ts`
- * is the app's half of that read; the engine's is `resolve_inherited_auth` in
- * `engine/src/http/request_composer.cpp`, which `POST /compose` (and so MCP)
- * walks.
- *
- * On a *request* the two coincide - a request's own auth is never walked, so
- * `none` already means send nothing - which is why only the collection editor
- * offers `noauth`.
+ * `inherit` walks the parent collection chain at send time; a collection never
+ * uses it. On a collection, `none` is "nothing set here" (the walk steps past)
+ * and `noauth` is "send nothing" (the walk stops), as in Postman; merging the
+ * two leaks a parent's token into an imported No Auth folder (#195). The walk
+ * is `resolveAuthSource` here and `resolve_inherited_auth` in the engine
+ * (`POST /compose`, so MCP). On a request the two coincide, its own auth never
+ * being walked, so only the collection editor offers `noauth`.
  */
 export type RequestAuth =
 	| { mode: "none" | "noauth" | "inherit" }
@@ -331,17 +304,11 @@ export type RequestAuth =
 	  };
 
 /**
- * The data contract a collection declares (issue #599): which columns a run's
- * data file is expected to carry, so `{{data.*}}` and `pm.iterationData` have
- * something to be checked against at authoring time.
- *
- * The *schema* rides the engine row, and so does where the file is
- * (`Collection.dataFile`); the file's **rows** are persisted nowhere at all -
- * they are user data of unknown sensitivity, and that rule is older than this
- * field.
- *
- * `{}` - every field absent - is how "declares no contract" is spelled, which
- * is also what the engine stores by default.
+ * The data contract a collection declares (#599): the columns a run's data file
+ * should carry, so `{{data.*}}` and `pm.iterationData` can be checked while
+ * authoring. The schema and the file's location (`Collection.dataFile`) are on
+ * the engine row; the file's rows are stored nowhere (user data of unknown
+ * sensitivity). `{}` declares no contract and is the engine's default.
  */
 export interface CollectionDataSchema {
 	/** Declared column names, in the order the file listed them. */
@@ -353,18 +320,12 @@ export interface CollectionDataSchema {
 }
 
 /**
- * The OpenAPI document a collection is bound to (issue #637, phase 1 of #625).
- *
- * The document itself is a top-level engine resource (`/specs`) rather than a
- * column here: several collections may bind the same spec, so the binding names
- * it by id and nothing about the document travels on the collection row.
- *
- * `specHash` records which *version* the collection was last synced to, which is
- * what makes drift detectable at all - a re-fetch that hashes the same is "up to
- * date", and a run of a bound collection is stamped with both values.
- *
- * `{}` - every field absent - is how "bound to nothing" is spelled, which is
- * also what the engine stores by default.
+ * The OpenAPI document a collection is bound to (#637, phase 1 of #625). The
+ * document is a top-level engine resource (`/specs`) named by id, since several
+ * collections may bind one spec. `specHash` is the version last synced to,
+ * which is what makes drift detectable (a re-fetch hashing the same is up to
+ * date); a run of a bound collection is stamped with both. `{}` is bound to
+ * nothing and the engine's default.
  */
 export interface CollectionOpenApiBinding {
 	/** The stored spec document's engine id. */
@@ -376,15 +337,11 @@ export interface CollectionOpenApiBinding {
 }
 
 /**
- * Where a collection's spec document was picked from (issue #638): a picked
- * file's location, beside `Collection.openapi`, for the specs that came from a
- * file rather than a URL. A URL-sourced spec has none; its origin is
- * `spec_documents.source_url`.
- *
- * Stored on the engine row (#2765), so a workspace backup carries it and a
- * restore names the file again - on another machine, a path that may not
- * exist there. A stored path grants nothing: the main process reads a file
- * only if the user picked it (`electron/file-grants.ts`).
+ * Where a file-sourced spec was picked from (#638); a URL-sourced one has none
+ * (its origin is `spec_documents.source_url`). Stored on the engine row
+ * (#2765), so a backup carries it and a restore names it again, possibly as a
+ * path missing on that machine. A stored path grants nothing: the main
+ * process reads only a file the user picked (`electron/file-grants.ts`).
  */
 export interface SpecFileLocation {
 	/** Absolute path, obtained from the preload `getFilePath` bridge at pick time. */
@@ -421,18 +378,12 @@ export interface DataFileLocation {
 
 /**
  * One row of the declared-operation index stored beside a spec document
- * (issue #629): an operation's identity plus the status patterns its `responses`
- * map declares.
- *
- * The index exists because contract coverage has to know which operations a
- * document declares and which responses each promises, without re-reading the
- * document on every run. **The engine derives it** from the bytes it stores
- * (issue #853) rather than taking one from a client, so what a document declares
- * has one reader; this type is how the app reads the stored result back.
- *
- * `responses` keeps the patterns verbatim and in document order: `"200"`, `"4XX"`
- * and `"default"` are three different promises, and expanding a range into codes
- * would report a contract the document never wrote.
+ * (#629): an operation's identity and the status patterns its `responses`
+ * declares, so contract coverage needs no re-read of the document per run. The
+ * engine derives it from the stored bytes (#853), never from a client, so a
+ * document's declarations have one reader. `responses` keeps the patterns
+ * verbatim, in document order: `"200"`, `"4XX"` and `"default"` are different
+ * promises, and expanding a range would report a contract never written.
  */
 export interface DeclaredOperation {
 	operationId?: string;
@@ -443,14 +394,11 @@ export interface DeclaredOperation {
 
 /**
  * One response schema a document declares, by status pattern and media type
- * (issue #628).
- *
- * `status` is the pattern verbatim - `"200"`, `"4XX"`, `"default"` - for the
- * same reason `DeclaredOperation.responses` keeps them that way. `schema` is
- * JSON Schema, translated out of OpenAPI's dialect by the engine as the document
- * was stored (`core/openapi_document.hpp`, issue #860), and may legally be
- * `true` or `false` as well as an object. A status that declares no schema is
- * a status-only row: `contentType` is `""` and `schema` is absent (#3028).
+ * (#628). `status` is the pattern verbatim (`"200"`, `"4XX"`, `"default"`), as
+ * in `DeclaredOperation.responses`. `schema` is JSON Schema, translated from
+ * OpenAPI's dialect by the engine on store (`core/openapi_document.hpp`, #860),
+ * and may be `true` or `false` as well as an object. A status declaring no
+ * schema is a status-only row: `contentType` `""`, `schema` absent (#3028).
  */
 export interface DeclaredResponseSchema {
 	status: string;
@@ -499,15 +447,12 @@ export interface SchemaFailure {
 }
 
 /**
- * What checking one response against its declared schema found (issue #628).
- *
- * `checked: false` carries a `reason` and **no** `valid`: a response nothing
- * checked has no validity to report, and rendering one as a failure is the
- * confusion this shape exists to prevent.
- *
- * `unevaluatedKeywords` is the dialect disclosure - schema keywords the
- * validator could not evaluate, by name and count. Non-empty means part of the
- * contract went unread, so a `valid: true` beside it is narrower than it looks.
+ * What checking one response against its declared schema found (#628).
+ * `checked: false` carries a `reason` and **no** `valid`: an unchecked response
+ * has no validity, and rendering one as a failure is the confusion this shape
+ * prevents. `unevaluatedKeywords` discloses the schema keywords the validator
+ * could not evaluate, by name and count; non-empty means part of the contract
+ * went unread, so a `valid: true` beside it is narrower than it looks.
  */
 export interface ResponseValidation {
 	checked: boolean;
@@ -581,21 +526,14 @@ export interface RunCoverage {
 }
 
 /**
- * What checking a load run's **sampled** responses against its bound contract
- * found (issue #682). See {@link RunReport.schemaValidation} for when it is
- * present.
- *
- * The sibling of {@link RunCoverage}, and the opposite of it in the one way that
- * matters to a reader: coverage counts every send, this checks the bounded
- * reservoir the run stored. `sampled` is therefore not decoration - it is the
- * denominator that stops `failed: 0` being read as "no response failed" when it
- * means "no sampled response failed".
- *
- * `checked` is what a schema could speak about; `uncheckedReasons` accounts for
- * the rest by engine reason code, so `sampled - checked` is never an unexplained
- * gap. `unevaluated` counts checked responses whose schema carried a keyword the
- * draft-07 validator could not evaluate - they passed every check that *ran*,
- * which is a narrower claim than valid.
+ * What checking a load run's sampled responses against its bound contract
+ * found (#682; present per {@link RunReport.schemaValidation}). Unlike
+ * {@link RunCoverage}, which counts every send, this checks the bounded
+ * reservoir the run stored: `sampled` is the denominator that keeps `failed: 0`
+ * reading as "no sampled response failed". `uncheckedReasons` explains
+ * `sampled - checked` by engine reason code. `unevaluated` counts checked
+ * responses whose schema had a keyword the draft-07 validator cannot evaluate:
+ * they passed every check that ran, a narrower claim than valid.
  */
 export interface RunSchemaValidation {
 	sampled: number;
@@ -611,23 +549,16 @@ export interface RunSchemaValidation {
 	/** Every failure found, the cap included - so "3 of 90" stays readable. */
 	failuresTotal: number;
 	/**
-	 * Whether `sampled` is the whole population rather than a reservoir (issue
-	 * #681).
-	 *
-	 * A collection run checks **every step it executed**, so its figures are
-	 * exact and the block must not tell a reader they describe a sample. A load
-	 * run omits this, and the sampled reading below is the default - the safer
-	 * one to fall back to, since a report from an engine older than this field
-	 * was sampled.
+	 * Whether `sampled` is the whole population (#681): a collection run checks
+	 * every step it executed, so its figures are exact. A load run omits it, and
+	 * absent reads as sampled, the safe default for a report from an engine older
+	 * than this field.
 	 */
 	exact?: boolean;
 	/**
-	 * Whether a schema failure was allowed to fail its step (collection runs).
-	 *
-	 * Set from the Run dialog and disclosed by `SampledSchemaValidation`
-	 * (issue #720): the step list's failure count means a different thing
-	 * depending on it, so the block that carries the tally says which run this
-	 * was rather than leaving a reader to infer it.
+	 * Whether a schema failure could fail its step (collection runs), set from the
+	 * Run dialog and disclosed by `SampledSchemaValidation` (#720): the step list's
+	 * failure count means a different thing depending on it.
 	 */
 	failOnSchemaError?: boolean;
 }
@@ -657,30 +588,22 @@ export interface Collection {
 	auth: Exclude<RequestAuth, { mode: "inherit" }>; // Collections are auth sources, never inherit
 	/**
 	 * Typed behaviours run at fixed phases of every step beneath this collection
-	 * (issue #1512): extractors, assertions, timers and scripts, in list order.
-	 * Replaces `preRequestScript`/`postRequestScript` - a script is now a
-	 * `script.pre`/`script.post` element like any other kind. This is the
-	 * collection's **own** list only; a request beneath it sees these plus its
-	 * ancestors', resolved by the engine at compose/execute time and shown in
-	 * the app by walking the chain (see `InheritedElementsNotice`).
+	 * (#1512): extractors, assertions, timers and scripts (`script.pre` /
+	 * `script.post`), in list order. The collection's own list only: a request
+	 * sees these plus its ancestors', resolved by the engine at compose/execute
+	 * time and shown by walking the chain (`InheritedElementsNotice`).
 	 */
 	elements: ElementDef[];
 	/**
-	 * Optional the way `parentId` is: most collections declare no contract, and
-	 * absent and `{}` are the same state to every reader. Use
-	 * {@link hasDataContract} rather than hand-rolling the check - a collection
-	 * that declared and then cleared one holds `{}`, not `undefined`.
-	 *
-	 * The transformer always produces a value, so a `Collection` off the wire
-	 * carries one; the optionality is for the fixtures and partials that do not
-	 * care, not a claim that the field can go missing in flight.
+	 * Absent and `{}` are the same state (no contract); check with
+	 * {@link hasDataContract}, since a declared-then-cleared contract is `{}`. The
+	 * transformer always sets it, so a `Collection` off the wire has one; it is
+	 * optional for fixtures and partials.
 	 */
 	dataSchema?: CollectionDataSchema;
 	/**
-	 * Optional for the same reason `dataSchema` is: most collections are bound to
-	 * no spec, and absent and `{}` are the same state to every reader. Use
-	 * {@link hasSpecBinding} rather than hand-rolling the check - a collection
-	 * that was bound and then unbound holds `{}`, not `undefined`.
+	 * Absent and `{}` are the same state (unbound); check with
+	 * {@link hasSpecBinding}, since a bound-then-unbound collection is `{}`.
 	 */
 	openapi?: CollectionOpenApiBinding;
 	/** The file the spec was picked from; absent when it was not a file, or unbound. */
@@ -707,32 +630,24 @@ export function hasSpecBinding(binding: CollectionOpenApiBinding | undefined): b
 }
 
 /**
- * The contract that answers for a request, and which collection declared it
- * (issue #600).
- *
- * A contract is declared on one collection but binds every request beneath it,
- * so "which columns are in scope here" is a *chain* answer, not a row read -
- * see `lib/data-contract.ts` for the walk and `docs/app/variable-resolution.md`
- * for the rule. The declaring collection travels with the columns because every
- * surface that shows them has to say where they came from: a token painted
- * amber in a sub-collection is only actionable if the tooltip names the
- * collection whose Data tab would fix it.
+ * The contract that answers for a request and the collection that declared it
+ * (#600). A contract binds every request beneath its collection, so the
+ * columns in scope are a chain answer (walk: `lib/data-contract.ts`, rule:
+ * `docs/app/variable-resolution.md`). The declaring collection travels with
+ * them because a surface showing a column must say where it came from: an
+ * amber token in a sub-collection is actionable only if the tooltip names the
+ * collection whose Data tab fixes it.
  */
 export interface DataContractScope {
 	/**
-	 * The name of the collection that declared it - an ancestor, or the leaf.
-	 *
-	 * The name and not the id, because every consumer *shows* this: the token
-	 * tooltip, the two completion lists.
+	 * The declaring collection (an ancestor or the leaf), by name because every
+	 * consumer shows it: the token tooltip and the two completion lists.
 	 */
 	collectionName: string;
 	/**
-	 * The id of that collection (issue #601).
-	 *
-	 * Added the day something needed to reach the declaring collection rather
-	 * than name it: Send-with-row looks up that collection's bound data file,
-	 * which belongs to the collection whose Data tab declared the contract -
-	 * under the chain rule an ancestor as often as the request's own parent.
+	 * The declaring collection's id (#601): Send-with-row reads that collection's
+	 * bound data file, and under the chain rule it is an ancestor as often as the
+	 * request's own parent.
 	 */
 	collectionId: string;
 	/** Declared column names, in the order the contract lists them. */
@@ -760,34 +675,19 @@ export interface OrderedTreeRow {
 const KIND_RANK: Record<TreeRowKind, number> = { collection: 0, request: 1 };
 
 /**
- * The one ordering rule for collections and requests alike: `order` ascending,
- * then kind (a sub-folder before a request), then creation time, remaining ties
- * by id. A collection's sub-folders and requests share one `order` space
- * (#2535), so this sorts the merged sibling list the sidebar renders and a
- * recursive run walks; within one kind it is the `order, createdAt, id` rule
- * unchanged.
+ * The one ordering rule for collections and requests: `order`, then kind (a
+ * sub-folder first), then `createdAt`, then id. Sub-folders and requests share
+ * one `order` space (#2535); this sorts the merged list the sidebar renders and
+ * a recursive run walks. It must match the engine's (`db/sibling_order.hpp`,
+ * pinned by `engine/tests/fixtures/tree-order-conformance.json`, #360) so a run
+ * executes in the order shown, never by a rowid `INSERT OR REPLACE` reassigns.
  *
- * There used to be two comparators with two different tie rules - collections
- * tiebroke by id, requests by `createdAt` - while the engine tiebroke by
- * neither, leaving ties to a rowid that `INSERT OR REPLACE` reassigns on every
- * edit. So "run this folder" could execute in a different order than the
- * sidebar showed, and either order could change after an unrelated rename.
- *
- * The rule is now identical on both sides, pinned by
- * `engine/tests/fixtures/tree-order-conformance.json` (issues #360, #2535;
- * the engine's copy is `engine/include/vayu/db/sibling_order.hpp`). Three
- * details are load-bearing rather than incidental:
- *
- *  - **Kind before `createdAt`.** A workspace from before the shared space has
- *    rows of both kinds tied at `0`; ranking the folder first keeps the
- *    folders-first display they were created under.
- *  - **`createdAt` before `id`.** Every request created before explicit orders
- *    existed sits at `order: 0`, so creation time is what the user has been
- *    seeing; making the id primary would visibly reshuffle their tree.
- *  - **`<` rather than `localeCompare`.** The engine's tiebreak is SQLite's
- *    BINARY collation, which is byte-wise; locale collation disagrees with it
- *    on case ("Row-A" vs "row-a"), and this comparator's job is to match the
- *    engine exactly.
+ *  - **Kind before `createdAt`:** a workspace from before the shared space has
+ *    both kinds tied at `0`; folder first keeps its folders-first display.
+ *  - **`createdAt` before `id`:** requests created before explicit orders sit
+ *    at `order: 0`, so creation time is the order the user has seen.
+ *  - **`<`, not `localeCompare`:** the engine's tiebreak is SQLite's byte-wise
+ *    BINARY collation; locale collation disagrees on case ("Row-A", "row-a").
  */
 export function compareTreeOrder(a: OrderedTreeRow, b: OrderedTreeRow): number {
 	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
@@ -807,18 +707,10 @@ export function compareTreeOrder(a: OrderedTreeRow, b: OrderedTreeRow): number {
 }
 
 /**
- * One part of a script that runs for a request, and where it came from.
- *
- * The clients used to join the collection chain's scripts with the request's
- * own and send a single string, so a stored run could not say which part came
- * from where - and writing that string back to a request would put the
- * collection's script inside it permanently. The engine joins them now.
- *
- * `origin`/`id`/`name` are sent and persisted starting with this change, but
- * nothing in the app reads them back yet - that is intentional groundwork for
- * the run/history views (not yet built) to attribute a script failure to the
- * collection or request it came from. Do not read this as dead weight; it is
- * the next layer's job to add the reader.
+ * One part of a request's scripts as a run recorded it before elements
+ * replaced script parts (#1514): the collection chain's and the request's own,
+ * each with its origin. Read only from such a run's snapshot
+ * (`modules/history/main/design-run-seed.ts`).
  */
 export interface ScriptPart {
 	origin: "collection" | "request";
@@ -869,16 +761,11 @@ export interface ElementConfigProperty {
 }
 
 /**
- * A JSON Schema object, scoped to what the element registry emits (issue
- * #1512).
- *
- * A property's value is `| null` because JSON Schema lets an unconstrained
- * property be written that way rather than as `{}` - `assert.jsonpath`'s
- * `expected` does this, since it legally holds any JSON value. Read through
- * `GenericElementForm`'s `PropertyRow`, which treats `null` the same as `{}`:
- * a property that declares nothing still renders, as a JSON value field,
- * rather than the type checker's non-null promise crashing the one place that
- * reads it.
+ * A JSON Schema object, scoped to what the element registry emits (#1512). A
+ * property may be `null`, JSON Schema's spelling of an unconstrained one
+ * (`assert.jsonpath`'s `expected` holds any JSON value), and is typed so that
+ * its one reader, `GenericElementForm`'s `PropertyRow`, cannot assume an
+ * object: it reads `null` as `{}` and renders a JSON value field.
  */
 export interface ElementConfigSchema {
 	type: "object";
@@ -902,16 +789,13 @@ export interface ElementKindSchema {
 }
 
 /**
- * One typed behaviour attached to a request or collection (issue #1512): an
- * extractor, assertion, timer, controller or script, run by the engine's
- * element pipeline at the phase its `kind` implies (`GET /elements/kinds`
- * names each kind's phases; never stored here). Replaces the two script
- * columns - a script is now a `script.pre` / `script.post` element like any
- * other kind, edited through the same `ElementList` as the rest.
- *
+ * One typed behaviour on a request or collection (#1512): an extractor,
+ * assertion, timer, controller or script (`script.pre` / `script.post`), run
+ * by the engine's element pipeline at the phases its `kind` implies (listed by
+ * `GET /elements/kinds`, never stored here) and edited in `ElementList`.
  * `config` is validated against the kind's schema engine-side on save; the
- * app's own check is `validateElementConfig` (`lib/elements.ts`), which covers
- * the keywords the registry uses and reports every failing field.
+ * app's check, `validateElementConfig` (`lib/elements.ts`), covers the keywords
+ * the registry uses and reports every failing field.
  */
 export interface ElementDef {
 	id: string;
@@ -1018,15 +902,12 @@ export interface Request {
 	 */
 	httpVersion: HttpVersion;
 	/**
-	 * Verify the TLS certificate this endpoint presents. Engine default is
-	 * `true`, and it is sent on every payload rather than elided at the default
-	 * for exactly that reason: an omitted `false` verifies the certificate the
-	 * user asked the engine not to check (issue #706).
-	 *
-	 * Per-request, not app-wide: it describes the one internal host with the
-	 * self-signed certificate. Trusting an authority everywhere is the other
-	 * control, Settings > Network & connectivity > Custom CA certificates, and
-	 * it is the one to reach for first.
+	 * Verify the TLS certificate this endpoint presents. Engine default `true`, and
+	 * sent on every payload rather than elided at the default: an omitted `false`
+	 * would verify what the user asked the engine not to check (#706). Per request
+	 * because it describes one internal host's self-signed certificate; trusting
+	 * an authority everywhere is Settings > Network & connectivity > Custom CA
+	 * certificates, the control to reach for first.
 	 */
 	verifySSL: boolean;
 	/**
@@ -1125,15 +1006,12 @@ export type RequestSummary = Pick<
 >;
 
 /**
- * A saved example response stored against a request (issue #481).
- *
- * What an importer found next to the request - Postman's saved responses, an
- * OpenAPI operation's documented ones - what the user kept from a live response
- * (issue #588), and what a mock server for the collection answers with.
- *
- * The engine's row carries `order` and timestamps too. They are absent here on
- * purpose: the list arrives already in `order`, and no surface displays either,
- * so typing them would claim readers this app does not have.
+ * A saved example response stored against a request (#481): what an importer
+ * found (Postman saved responses, an OpenAPI operation's documented ones), what
+ * the user kept from a live response (#588), and what a mock server answers
+ * with. The engine row's `order` and timestamps are not typed: the list arrives
+ * in `order` and nothing displays either, so typing them would claim readers
+ * this app does not have.
  */
 export interface RequestExample {
 	id: string;
@@ -1146,25 +1024,19 @@ export interface RequestExample {
 	/** `""` when the source stated no media type - not a guess. */
 	contentType: string;
 	/**
-	 * Who wrote this row: `import` for what an importer or a spec sync produced,
-	 * `user` for what was saved from a live response (issues #588, #722).
-	 *
-	 * Typed here because the panel reads it, and it had to be: the two kinds
-	 * behave differently and the difference was invisible. A sync rewrites the
-	 * imported rows of every request it touches, so an imported example is the
-	 * document's to change and a saved one is not - and what deleting one means
-	 * differs with it. Always present: the engine has recorded an origin on
-	 * every row since #588 and defaults the column to `import`.
+	 * Who wrote the row (#588, #722): `import` for an importer or a spec sync,
+	 * `user` for a save from a live response. The two behave differently: a sync
+	 * rewrites the imported rows of every request it touches, so an imported
+	 * example is the document's to change and a saved one is not, and deleting
+	 * one means something different for each. Always present; the engine defaults
+	 * the column to `import`.
 	 */
 	origin: "import" | "user";
 	/**
-	 * True when `body` is only the first slice of the response this was saved
-	 * from (issue #659).
-	 *
-	 * Typed here because the panel paints a chip from it: a mock server serves
-	 * the stored body verbatim, so an example nobody marked as partial is
-	 * indistinguishable from a complete one. Absent on rows written before the
-	 * engine had the column, which are all complete by construction.
+	 * True when `body` is only the first slice of the response it was saved from
+	 * (#659). The panel paints a chip from it: a mock server serves the stored body
+	 * verbatim, so an unmarked partial is indistinguishable from a complete one.
+	 * Absent on rows older than the column, all complete by construction.
 	 */
 	bodyTruncated?: boolean;
 }
@@ -1220,49 +1092,33 @@ export interface ResolvedVariable {
 	type?: VariableValue["type"];
 	typedValue?: unknown;
 	/**
-	 * Which collection or environment this value came from. Absent for `global`,
-	 * which is a singleton and has no name to give.
-	 *
-	 * These sat on `VariableInfo` for a long time, declared and never written by
-	 * anything in `src/` - so the popover could say a variable came from "an
-	 * environment" but not *which* one, in an app where having several is the
-	 * point. Moved down to `ResolvedVariable` because the resolver is what knows,
-	 * and it produces this type.
+	 * Which collection or environment the value came from; absent for `global`, a
+	 * singleton with no name. On this type because the resolver, which produces
+	 * it, is what knows.
 	 */
 	sourceId?: string;
 	sourceName?: string;
 }
 
 /**
- * Where an answer for a name came from: one of the three writable scopes, or the
- * bound data row - the tier above all of them (D18, issue #1007).
- *
- * Deliberately a second union rather than a fourth member of `VariableScope`.
- * Every *write* path is typed on that union - `updateVariable`, the
- * `writableScopes` a caller advertises, the popover's create picker - and a row
- * is not somewhere a variable can be written. Widening `VariableScope` would
- * have offered "Bound row" as a create target that silently no-ops, which is the
- * defect the writable-scope list exists to prevent.
+ * Where an answer for a name came from: a writable scope, or the bound data
+ * row, the tier above them all (D18, #1007). A second union rather than a
+ * fourth `VariableScope` member, because every write path is typed on that
+ * union (`updateVariable`, a caller's `writableScopes`, the popover's create
+ * picker) and a row cannot be written: widening it would offer "Bound row" as
+ * a create target that silently no-ops.
  */
 export type VariableOriginScope = VariableScope | "row";
 
 /**
- * One definition of a variable name, at one scope.
- *
- * The resolver flattens every scope into a single winner, which is all execution
- * needs and strictly less than the UI needs: "why is this the value?" cannot be
- * answered from the winner alone. Two cases in particular are invisible without
- * the losers - a name defined at several scopes, and a name whose highest-scope
- * definition is *disabled*, which is the most common reason a value is not the
- * one you expected.
- *
- * Disabled definitions are therefore kept here even though they never resolve.
- *
- * A `"row"` origin is not a definition at all - nobody wrote it and nothing can
- * edit it - but it is an answer for the name, and the one the send will use, so
- * it belongs in the list the UI reads to explain the winner. It is layered on by
- * `getVariableOrigins`, never by the scope ladder itself; see
- * `ScopeVariableOrigin`.
+ * One definition of a variable name at one scope. The resolver's single winner
+ * is enough to execute but not to explain the value: a name defined at several
+ * scopes, or whose highest-scope definition is disabled (the commonest reason a
+ * value surprises), needs the losers, so disabled definitions are kept though
+ * they never resolve. A `"row"` origin is no definition (nobody wrote it,
+ * nothing edits it) but it is the answer the send uses, so it is listed too;
+ * `getVariableOrigins` layers it on, never the scope ladder (see
+ * `ScopeVariableOrigin`).
  */
 export interface VariableOrigin {
 	scope: VariableOriginScope;
@@ -1276,14 +1132,10 @@ export interface VariableOrigin {
 	/** A disabled definition is listed but never wins. */
 	enabled: boolean;
 	/**
-	 * The definition that actually resolves. Exactly one origin per name carries
-	 * this, unless every definition is disabled, in which case none does.
-	 *
-	 * Explicit rather than "the last one", because precedence order and win order
-	 * are not the same list once disabled definitions are included.
-	 *
-	 * "Winner" means what the send will use, not what the scope ladder settled
-	 * on, so a bound row's cell takes it away from every definition beneath.
+	 * The definition the send uses: exactly one origin per name, or none when
+	 * every definition is disabled. Explicit rather than "the last one", since
+	 * precedence order and win order differ once disabled definitions are listed;
+	 * a bound row's cell takes it from every definition beneath.
 	 */
 	winner: boolean;
 }
@@ -1384,15 +1236,10 @@ export interface RunConfigSnapshot {
 }
 
 /**
- * How one step execution of a scenario run ended.
- *
- * `skipped` is a step the runner did not execute (flow control), and is never
- * a pass: it asserted nothing. The four exist from the first release of the
- * runner even though nothing produces `skipped` yet, so neither the wire shape
- * nor a summary that counts them has to widen later.
- *
- * `stopped` is a step a Stop or an engine shutdown cut short (#3397). It ends
- * the run, and is no error: it is in no failure count.
+ * How one step execution of a scenario run ended. `skipped` is a step stopped
+ * before the wire (a controller or `pm.execution.skipRequest()`, #180): never
+ * a pass, since it asserted nothing. `stopped` is a step a Stop or an engine
+ * shutdown cut short (#3397): it ends the run and is in no failure count.
  */
 export type StepOutcome = "passed" | "failed" | "skipped" | "errored" | "stopped";
 
@@ -1406,14 +1253,12 @@ export const STEP_OUTCOMES: readonly StepOutcome[] = [
 ] as const;
 
 /**
- * The size a collection run resolved to - the `plan` SSE event that opens
- * `GET /runs/:runId/live` for a sequential run, built by `build_plan_data`
- * (engine/src/core/scenario_runner.cpp), issue #1398.
- *
- * The engine is the only side that holds these numbers: the client sends no
- * step count, so a run's denominator arrives here or not at all. It arrives
- * once, ahead of the first `step` frame, and a client that attached past its
- * eviction from the tick ring simply never sees it.
+ * The size a collection run resolved to: the `plan` SSE event opening
+ * `GET /runs/:runId/live` for a sequential run (`build_plan_data`,
+ * `engine/src/core/scenario_runner.cpp`, #1398). Only the engine holds these
+ * numbers (the client sends no step count). It arrives once, before the first
+ * `step` frame; a client attaching after its eviction from the tick ring never
+ * sees it.
  */
 export interface ScenarioRunPlanEvent {
 	/** The plan's length - steps in one pass, not executions. */
@@ -1474,14 +1319,10 @@ export interface ScenarioStepEvent {
 	 */
 	unresolvedTokens?: number;
 	/**
-	 * The stored request this step ran (issue #831), the same id
-	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
-	 * step's request exists while the run streams, which is when a step that has
-	 * just failed is being read.
-	 *
-	 * Absent for a step whose plan entry names no stored request; the frame
-	 * sends no key rather than an empty id, and absent means the card offers no
-	 * link at all.
+	 * The stored request this step ran (#831), the id `stamp_step_identity` writes
+	 * onto the stored trace, so a just-failed step links to its request while the
+	 * run streams. Absent (no key, never an empty id) for a step whose plan entry
+	 * names no stored request; the card then offers no link.
 	 */
 	requestId?: string;
 	/**
@@ -1542,15 +1383,12 @@ export const STREAM_END_REASONS = [
 ] as const;
 
 /**
- * Why a streaming run's event stream ended (issue #573).
- *
- * Every stream ends by a rule that can name itself - the engine never reports
- * "the timeout happened to fire" - and the same words reach the relay's
- * `complete` frame and the stored trace. `"completed"` is the only one that
- * means the *server* closed the stream; the rest are bounds this side applied
- * or a stop the user did not ask for (`"shutdown"`: the engine itself went
- * down, #3342), which is why the Events tab says which one fired rather than
- * just stopping.
+ * Why a streaming run's event stream ended (#573). Every stream ends by a rule
+ * that can name itself, never "the timeout happened to fire", and the same
+ * words reach the relay's `complete` frame and the stored trace. Only
+ * `"completed"` means the server closed it; the rest are bounds this side
+ * applied or a stop the user did not ask for (`"shutdown"`: the engine went
+ * down, #3342), so the Events tab names the one that fired.
  */
 export type StreamEndReason = (typeof STREAM_END_REASONS)[number];
 
@@ -1635,14 +1473,10 @@ export interface RunResultStreamEvents {
 }
 
 /**
- * The `scripts` node a **streaming** design run adds to its stored trace
- * (issue #575) - the pre- and post-request scripts' output, keyed exactly as
- * the live `/execute` response body keys it.
- *
- * Every field is optional for the reason the engine builder makes it so: a key
- * is written only when it has something to say, so a run whose script logged
- * nothing and asserted nothing stores an absent node rather than three empty
- * lists.
+ * The `scripts` node a streaming design run adds to its stored trace (#575):
+ * the pre- and post-request scripts' output, keyed as the live `/execute`
+ * response body keys it. Every key is written only when it has something to
+ * say, so a run whose script logged and asserted nothing stores no node.
  */
 export interface RunResultScripts {
 	testResults?: TestResult[];
@@ -1653,16 +1487,13 @@ export interface RunResultScripts {
 }
 
 /**
- * One `pm.sendRequest` exchange a script made (#3633), in the stored trace's
- * own shape: `request`, `response`, the error pair and the eight `*Ms` timings
- * are {@link RunResultTrace}'s members for the call. The engine masks
- * credentials where it builds the record (`<redacted>` in a credential header's
- * value and in place of a URL's userinfo password or credential query value,
- * redirect hops included; the challenge headers shown), so a reader renders it
- * as written.
- *
- * `status` is `0` for a transport failure, with the code in `error_type` and
- * no `response` when nothing answered.
+ * One `pm.sendRequest` exchange a script made (#3633): `request`, `response`,
+ * the error pair and the eight `*Ms` timings are {@link RunResultTrace}'s
+ * members for the call. The engine masks credentials as it builds the record
+ * (`<redacted>` in a credential header's value and for a URL's userinfo
+ * password or credential query value, redirect hops included; challenge
+ * headers shown), so a reader renders it as written. `status` is `0` for a
+ * transport failure, the code in `error_type`, no `response` if none came.
  */
 export interface ScriptRequestRecord extends Pick<
 	RunResultTrace,
@@ -1739,10 +1570,9 @@ export interface RunResultTrace {
 	error_message?: string;
 	/**
 	 * Per-test validation failures from a load run's `validate_scripts`
-	 * (`run_manager.cpp`), stored on the summary result row's trace. Each entry
-	 * is a `"<test name>: <assertion>"` line (or a `Script error:` / `Exception:`
-	 * line when the whole script threw). Written by the engine but rendered
-	 * nowhere before issue #111.
+	 * (`run_manager.cpp`), on the summary result row's trace: one
+	 * `"<test name>: <assertion>"` line each, or a `Script error:` / `Exception:`
+	 * line when the whole script threw (#111).
 	 */
 	failures?: string[];
 	/**
@@ -1774,34 +1604,23 @@ export interface RunResultTrace {
 		/** The request body's original byte length, present only when truncated. */
 		bodyBytes?: number;
 		/**
-		 * The wire message the transfer actually sent - `build_result_trace`'s
-		 * copy of the live response's `rawRequest` (issue #348), stored so a
-		 * restored raw view shows the `Cookie` line the jar attached instead of
-		 * rebuilding a session-less request from `headers`. Absent on rows
-		 * written before that change and on a step that sent nothing, which is
-		 * why `restore-response.ts`'s `sentSide` keeps `buildRawRequest` as its
-		 * fallback. Values are **not redacted** - same contract as the live
-		 * field (see `docs/engine/api-reference.md`).
-		 *
-		 * Its body half is capped at `maxTraceBodyBytes` like `body` is; the
-		 * header block is never cut.
+		 * The wire message the transfer sent, `build_result_trace`'s copy of the live
+		 * response's `rawRequest` (#348), so a restored raw view shows the `Cookie`
+		 * line the jar attached. Absent on older rows and on a step that sent nothing,
+		 * so `restore-response.ts`'s `sentSide` falls back to `buildRawRequest`. Values
+		 * are **not redacted**, as on the live field (`docs/engine/api-reference.md`).
+		 * The body half is capped at `maxTraceBodyBytes`; the header block never is.
 		 */
 		rawRequest?: string;
 		/**
-		 * What the transfer actually issued - `build_result_trace`'s copy of the
-		 * live response's `requestHeaders` (issue #664), which is `headers`
-		 * minus the suppressed entries and a blank `Content-Type` or `Cookie`
-		 * row (any other blank row is sent empty, issue #3220) plus the two the
-		 * engine derives at send time (the body-implied `Content-Type`, the
-		 * default `User-Agent`).
-		 *
-		 * This is the map the response pane's "sent" disclosure means;
-		 * `headers` beside it is the *composed* request and stays because
-		 * `design-run-seed.ts` reseeds a request tab from it. Absent on rows
-		 * written before the field and on a step that sent nothing, which is
-		 * why `restore-response.ts`'s `sentSide` keeps `headers` as its
-		 * fallback. Values are **not redacted** - same contract as
-		 * `rawRequest`.
+		 * What the transfer issued, `build_result_trace`'s copy of the live response's
+		 * `requestHeaders` (#664): `headers` minus the suppressed entries and a blank
+		 * `Content-Type` or `Cookie` row (other blank rows are sent empty, #3220), plus
+		 * the body-implied `Content-Type` and default `User-Agent` derived at send time.
+		 * It is what the response pane's "sent" disclosure shows; `headers` is the
+		 * composed request, kept because `design-run-seed.ts` reseeds a tab from it.
+		 * Absent on older rows and on a step that sent nothing (`restore-response.ts`'s
+		 * `sentSide` then falls back to `headers`). Values are **not redacted**.
 		 */
 		sentHeaders?: Record<string, string>;
 		/**
@@ -1908,19 +1727,13 @@ export interface RunResultTrace {
 	 */
 	events?: RunResultStreamEvents;
 	/**
-	 * What a design run's scripts produced (issue #575), under the same four key
-	 * names the live `/execute` body uses - one engine object
-	 * (`build_script_result_node`) fills both, so a restored Tests pane and a
-	 * live one cannot disagree about what a failed assertion looks like.
-	 *
-	 * A streaming send has no alternative: it is answered `202` before its
-	 * post-request script has run, so the trace is the only route its results
-	 * take. A buffered send *also* stores the object it returns (issue #725) -
-	 * before that it stored none of them, and a restored ordinary send showed
-	 * the same empty Tests pane whether its assertions had passed or never run.
-	 *
-	 * Absent means the send ran no scripts, or predates #725 - never that
-	 * nothing passed.
+	 * What a design run's scripts produced (#575), under the four key names the
+	 * live `/execute` body uses: one engine object (`build_script_result_node`)
+	 * fills both, so a restored Tests pane cannot disagree with a live one. A
+	 * streaming send is answered `202` before its post-request script runs, so
+	 * the trace is its results' only route; a buffered send stores the object it
+	 * returns too (#725). Absent means the send ran no scripts or predates #725,
+	 * never that nothing passed.
 	 */
 	scripts?: RunResultScripts;
 	/**
@@ -1942,14 +1755,11 @@ export interface RunResultTrace {
 	 */
 	validation?: ResponseValidation;
 	/**
-	 * Which client-certificate registry entry this exchange presented, as
-	 * `host` or `host:port` (issue #707). Top level rather than under
-	 * `response` because it is a property of the transfer: the exchange that
-	 * most needs to name its certificate is the one whose handshake failed, and
-	 * that one has no `response` node at all.
-	 *
-	 * Absent means no certificate was used - which is also what a row stored
-	 * before the registry existed means, and the two are the same fact.
+	 * The client-certificate registry entry this exchange presented, as `host` or
+	 * `host:port` (#707). Top level, not under `response`: the exchange that most
+	 * needs to name its certificate is one whose handshake failed, which has no
+	 * `response` node. Absent means no certificate was used, also what a row
+	 * stored before the registry means.
 	 */
 	clientCertificate?: string;
 	/**
@@ -1977,16 +1787,12 @@ export interface RunResultTrace {
 	requestId?: string;
 	outcome?: StepOutcome;
 	/**
-	 * Which `data` row this iteration bound, absent for a run without a data
-	 * set. Present so the wrap is visible: with `iterations` above the row
-	 * count, iteration 4 of a 3-row set reads row 1, and the iteration number
-	 * alone cannot say that.
-	 *
-	 * A scenario **load** run writes it too (issue #449), on every retained
-	 * result, and there it is the *only* record of the row: that executor stores
-	 * no per-step `results` rows, so without it a failure is attributable to a
-	 * step but never to a row. It arrives on a flat load trace rather than
-	 * beside the `stepIndex` keys above, which is why it sits outside them.
+	 * Which `data` row this iteration bound; absent for a run without a data set.
+	 * It makes the wrap visible: with `iterations` above the row count, iteration 4
+	 * of a 3-row set reads row 1. A scenario load run writes it on every retained
+	 * result too (#449), its only record of the row, since that executor stores no
+	 * per-step `results` rows; it arrives on a flat load trace, hence its place
+	 * outside the `stepIndex` keys.
 	 */
 	dataRowIndex?: number;
 	/**
@@ -2027,17 +1833,13 @@ export interface RunResult {
 
 /**
  * What a collection run's list row says about the sequence that ran, from the
- * snapshot's scenario manifest (`add_scenario`,
- * `engine/src/http/routes/runs.cpp`). Present on a collection run's row, which
- * is `type: "scenario"` or a scenario `type: "load"` run - its presence is what
- * tells a row it is a collection run without a second fetch, and its
- * `collectionId` is the identity a load run's compare, trend and baseline are
- * scoped to when it has no `requestId`.
- *
- * `stepCount` and not the manifest's `steps` array: the array carries a name, a
- * method and a URL per step, and shipping it on every list row would undo the
- * reason the compact summary exists. The array stays on `GET /runs/:id`, which
- * is what the run tab's context bar reads.
+ * snapshot's scenario manifest (`add_scenario`, `routes/runs.cpp`). Present on a
+ * collection run's row (`type: "scenario"`, or a scenario `type: "load"`): it
+ * marks the row as a collection run without a second fetch, and its
+ * `collectionId` scopes a load run's compare, trend and baseline when there is
+ * no `requestId`. `stepCount`, not the manifest's `steps` (a name, method and
+ * URL per step), keeps list rows compact; the array stays on `GET /runs/:id`
+ * for the run tab's context bar.
  */
 export interface RunScenarioSummary {
 	/** The collection that ran. The name is resolved app-side, from the tree. */
@@ -2056,36 +1858,23 @@ export interface RunScenarioSummary {
 }
 
 /**
- * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Mirrors every key
- * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
- * omitted by the engine when absent from the stored snapshot, except
- * `httpVersion` which the engine always normalizes to a value (see
- * `add_http_version`, same file). The full snapshot is still available on
- * `GET /runs/:id`.
- *
- * `startConcurrency` / `rampUpDuration` / `followRedirects` / `maxRedirects`
- * are declared but **not read from a row's summary** - this type mirrors the
- * wire, so a field the engine sends is declared whether or not a screen reads
- * it, and a reader can trust that what is missing here is missing from the
- * payload too. The two ramp knobs are read from the *report's*
- * `metadata.configuration` instead, by the baseline comparison's
- * `comparability` list (issue #2162); the redirect settings are shown nowhere.
- * If you are looking for somewhere to surface them on a row, the history
- * sidebar row and the load test report both already show `httpVersion` and
- * would be the consistent home.
+ * The compact per-row summary the paginated `GET /runs` list carries instead of
+ * the full {@link RunConfigSnapshot} (on `GET /runs/:id`): every key
+ * `build_run_summary` (`routes/runs.cpp`) sends, each omitted when the stored
+ * snapshot lacks it, except `httpVersion`, always normalized (`add_http_version`).
+ * It mirrors the wire, so a missing field is missing from the payload too, and
+ * some keys are read from no row: the ramp knobs come from the report's
+ * `metadata.configuration` (the baseline `comparability` list, #2162) and the
+ * redirect settings are shown nowhere (their consistent home: beside `httpVersion`).
  */
 export interface RunSummary {
 	url?: string;
 	/**
-	 * The request's name, as the client sent it at run start -
-	 * `execIdentity` in `execute-mapping.ts` is what threads it through
-	 * composition. Never re-read from the requests table server-side, so it
-	 * is exactly what the editor showed at the moment this run started: a
-	 * renamed or since-deleted request does not retroactively change it, and
-	 * a run recorded before this field existed has none. The history row
-	 * falls back to `url` when this is absent or still the default name
-	 * (`DEFAULT_REQUEST_NAME`).
+	 * The request's name as the client sent it at run start (`execIdentity` in
+	 * `execute-mapping.ts` threads it through composition), never re-read
+	 * server-side: a renamed or deleted request does not change it, and a run
+	 * recorded before the field has none. The history row falls back to `url`
+	 * when it is absent or still `DEFAULT_REQUEST_NAME`.
 	 */
 	requestName?: string;
 	method?: string;
@@ -2198,16 +1987,12 @@ interface RunFields {
 	/** The exchange, present only for a design run once it has completed or failed. */
 	result?: RunResult;
 	/**
-	 * Whether this run is pinned - kept past the engine's retention and
-	 * findable through `GET /runs?baseline=true`. Toggled through
-	 * `PUT /runs/:id/baseline`, and any run type can carry it: a design run is
-	 * pinned to keep a known-good response, not to be compared. Only a load
-	 * run's pin is also read as *the* baseline the vs-baseline comparison
-	 * diffs (`useBaselineRunQuery`, `listBaselineRuns`) - it is the only type
-	 * with percentiles and throughput to diff.
-	 *
-	 * Optional because a run row from an engine older than this field has none;
-	 * absent reads the same as `false` everywhere.
+	 * Whether the run is pinned: kept past retention and listed by
+	 * `GET /runs?baseline=true`, toggled by `PUT /runs/:id/baseline`. Any run type
+	 * can be pinned (a design run keeps a known-good response); only a load run's
+	 * pin is *the* baseline the vs-baseline comparison diffs (`useBaselineRunQuery`,
+	 * `listBaselineRuns`), the one type with percentiles and throughput. Absent
+	 * (a row from an older engine) reads as `false`.
 	 */
 	baseline?: boolean;
 	/**
@@ -2248,16 +2033,12 @@ export type Run =
 	| (RunFields & { type: "scenario"; resultSummary?: CollectionResultSummary });
 
 /**
- * The outcome of a design run's single exchange, carried by its **list row**
- * from the paginated `GET /runs` (`get_runs_response`,
- * `engine/src/http/routes/runs.cpp`).
- *
- * Two numbers rather than the whole {@link RunResult}: that one carries the
- * exchange's `trace` - request and response bodies included - which is a
- * per-row cost a list cannot take. A row with no outcome recorded (a send still
- * in flight, or a result whose write failed) has **no `resultSummary` at all**,
- * which is not the same as `statusCode: 0` - the wire uses that for a request
- * that never reached a server.
+ * The outcome of a design run's single exchange on its list row from the
+ * paginated `GET /runs` (`get_runs_response`, `routes/runs.cpp`): two numbers,
+ * not the whole {@link RunResult}, whose `trace` (bodies included) is a per-row
+ * cost a list cannot take. A row with no outcome recorded (a send in flight, a
+ * failed result write) has no `resultSummary` at all, which differs from
+ * `statusCode: 0`, the wire's request that never reached a server.
  */
 export interface RunResultSummary {
 	statusCode: number;
@@ -2307,36 +2088,28 @@ export interface LoadResultSummary {
 	 */
 	drainCut?: { cancelled: number };
 	/**
-	 * What a **terminal capacity run's** search found (#2930): present on that
-	 * row alone, absent for every other mode and for a row an older engine sent.
-	 * `rps`, `p95Ms` and `errorRate` stay on the row, but they average a search
-	 * that stepped load up, so `resultSubtitle` prints these levels instead.
-	 *
-	 * `maxHealthyConcurrency` is the highest level that held its budgets and
-	 * `kneeConcurrency` the level that broke them; each is omitted, never
-	 * zeroed. A missing `maxHealthyConcurrency` beside a knee means the first
-	 * level already failed. `stopReason` is the key `STOP_REASONS` words.
+	 * What a terminal capacity run's search found (#2930), on that row alone
+	 * (absent for other modes and from an older engine). The row's `rps`, `p95Ms`
+	 * and `errorRate` average a search that stepped load up, so `resultSubtitle`
+	 * prints these levels instead. `maxHealthyConcurrency` is the highest level
+	 * that held its budgets, `kneeConcurrency` the one that broke them, each
+	 * omitted, never zeroed; a knee with no `maxHealthyConcurrency` means the first
+	 * level failed. `stopReason` is the key `STOP_REASONS` words.
 	 */
 	capacity?: LoadResultCapacity;
 }
 
 /**
- * A **terminal collection run's** list row, read engine-side from the stored
- * `summary.scenario` block (#2954). The counts are disjoint outcomes of the
- * run's steps, and `errored` sits beside `failed` because a run whose steps only
- * errored would otherwise read clean. `stopped` (#3397) is a step a Stop cut
- * short. Every key is absent when the run did not record it (a summary stored
- * before `stopped` has none), never zeroed; a row still pending or running has no
- * `resultSummary` at all, and `verdict` is present only when the run declared
- * budgets.
- *
- * `failed` and `errored` are what the history row reads (#3458): a completed run
- * with either reads as failed, and its subtitle prints the counts
- * (`rowOutcome`, `collectionSubtitle`). So does a `verdict` of `"failed"`
- * (#3539): a missed budget fails the row with or without "Fail the run". A
- * `"passed"` verdict changes nothing on the row. A run whose status is `failed`
- * reads as failed whatever these hold (#3643). The MCP `list_runs` row, which
- * passes the summary through, reads it too.
+ * A terminal collection run's list row, from the stored `summary.scenario`
+ * (#2954): disjoint step-outcome counts, `errored` beside `failed` so an
+ * all-errored run does not read clean, `stopped` (#3397) for a step a Stop cut
+ * short. An unrecorded key is absent, never zeroed (a summary from before
+ * `stopped` has none); a pending or running row has no `resultSummary`;
+ * `verdict` needs declared budgets. `rowOutcome` reads a completed run as
+ * failed on any `failed` or `errored` (#3458) or a `"failed"` verdict, "Fail
+ * the run" or not (#3539), and `collectionSubtitle` prints the counts;
+ * `"passed"` changes nothing; a `failed` status always reads failed (#3643).
+ * The MCP `list_runs` row passes the summary through.
  */
 export interface CollectionResultSummary {
 	passed?: number;
@@ -2472,18 +2245,13 @@ export interface RunThresholds extends RunThresholdBudgets {
 	 */
 	failRun?: boolean;
 	/**
-	 * `custom.<name>.<stat>` - a budget on a `metric.record` / `pm.metrics`
-	 * value (issue #1500), where `<name>` is the name it was recorded under and
-	 * `<stat>` one of `p50`, `p95`, `p99`, `max`, `value`, `rate`. Always a
-	 * ceiling, always a non-negative number.
-	 *
-	 * A *pattern* index signature rather than a blanket `[key: string]`: the fixed
-	 * fields above keep their own types, `failRun` keeps its `boolean` (it does
-	 * not match the pattern, so nothing has to be widened to accommodate it),
-	 * and a mistyped fixed key is still a type error rather than being swallowed
-	 * as "some other threshold". The engine checks the *shape* of these keys and
-	 * not that `<name>` is one this run records, so neither does this
-	 * (`docs/engine/api-reference.md`, the thresholds block).
+	 * `custom.<name>.<stat>`: a budget on a `metric.record` / `pm.metrics` value
+	 * (#1500), `<name>` as recorded and `<stat>` one of `p50`, `p95`, `p99`, `max`,
+	 * `value`, `rate`; always a non-negative ceiling. A pattern index signature,
+	 * not `[key: string]`, so the fixed fields keep their types, `failRun` keeps
+	 * `boolean` (it does not match the pattern), and a mistyped fixed key is still
+	 * a type error. Like the engine, this checks the key's shape, not that `<name>`
+	 * is recorded (`docs/engine/api-reference.md`, the thresholds block).
 	 */
 	[key: `custom.${string}`]: number | undefined;
 }
@@ -2518,10 +2286,9 @@ export interface LoadTestConfig {
 	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
 	start_concurrency?: number;
 	/**
-	 * Sampling **period** for stored success traces - keep 1 in N, engine-side
-	 * `counter % N`. Named for the unit on purpose: the dialog's control is a
-	 * percentage, and the two used to be the same number, so the slider meant
-	 * the inverse of its own label. `successSamplePeriod` does the conversion.
+	 * Sampling **period** for stored success traces: keep 1 in N (engine-side
+	 * `counter % N`). Named for the unit because the dialog's control is a
+	 * percentage, its inverse; `successSamplePeriod` converts.
 	 */
 	success_sample_period?: number;
 	slow_threshold_ms?: number;
@@ -2558,42 +2325,30 @@ export interface LoadTestConfig {
 	/** Capacity only: how long each concurrency level is held before it is judged. */
 	step_duration_seconds?: number;
 	/**
-	 * Streaming runs only (issue #576): the wall-clock ceiling on one stream,
-	 * in seconds, and the ceiling on the events it delivers.
-	 *
-	 * Both absent means "the engine's `sseMaxStreamDurationMs` /
-	 * `sseMaxStreamEvents`", which is what a stream is bounded by when the
-	 * dialog is left alone - never "unbounded". They are on the run rather than
-	 * on the request because they describe how much of a stream *this run*
-	 * measures, while whether the request streams at all is the request's own
-	 * Settings-tab flag.
-	 *
-	 * Seconds here and milliseconds on the wire, like `duration_seconds`: the
-	 * dialog's other duration is in seconds and two units in one form is how a
-	 * user enters 600 meaning ten minutes and gets 0.6.
+	 * Streaming runs only (#576): the wall-clock ceiling on one stream, in
+	 * seconds, and on the events it delivers. Both absent means the engine's
+	 * `sseMaxStreamDurationMs` / `sseMaxStreamEvents`, never unbounded. On the
+	 * run, not the request, because they bound how much of a stream this run
+	 * measures; whether the request streams is its own Settings-tab flag. Seconds
+	 * here, ms on the wire, like `duration_seconds`: two units in one form is how
+	 * 600 meant as ten minutes becomes 0.6.
 	 */
 	stream_duration_seconds?: number;
 	stream_max_events?: number;
 	/**
-	 * The rows this run binds, one object per row (issue #993) - the parsed
-	 * file the dialog's picker holds, never a re-parse of it.
-	 *
-	 * Absent when no file was picked, which is what leaves the run on the path
-	 * it took before data-driven single-request runs existed. Named `data`
-	 * rather than snake_cased like its neighbours because it is the engine's own
-	 * field name, the same reason {@link RunThresholds} and
-	 * {@link RunMonitorConfig} are camelCase here.
+	 * The rows this run binds, one object per row (#993): the parsed file the
+	 * dialog's picker holds, never a re-parse. Absent when no file was picked,
+	 * which keeps the run on the single-request path without data. `data`, not
+	 * snake_case, because it is the engine's field name, as for
+	 * {@link RunThresholds} and {@link RunMonitorConfig}.
 	 */
 	data?: Record<string, unknown>[];
 	/**
-	 * The column names of that same file (issue #1007) - what composition must
-	 * leave for the per-row bind, so a Postman-shaped `{{username}}` is not
-	 * resolved from a same-named environment variable before any row is bound.
-	 *
-	 * Carried beside the rows rather than derived from them at the compose call:
-	 * the picker's parse already names the columns (a JSON row may simply omit
-	 * one), and re-unioning the keys here would be a second answer to a question
-	 * `ParsedDataFile` has already answered. Absent exactly when `data` is.
+	 * That file's column names (#1007): what composition must leave for the
+	 * per-row bind, so a Postman-shaped `{{username}}` is not resolved from a
+	 * same-named environment variable first. Carried rather than derived from the
+	 * rows, since a JSON row may omit a column and `ParsedDataFile` already names
+	 * them. Absent exactly when `data` is.
 	 */
 	dataColumns?: string[];
 	/**
@@ -2609,14 +2364,12 @@ export interface LoadTestConfig {
 	 */
 	dataFileCastNumbers?: boolean;
 	/**
-	 * The `elements` run override (issue #1594), single-request runs only:
-	 * whether an inherited `script.*` element's own `config.inline` decides
-	 * ("asMarked"), or every one runs inline / stays deferred regardless of
-	 * its own marking. The same override {@link StartScenarioRunRequest}
-	 * sends, restricted to `scripts` here - a load run has no per-run
-	 * `timers` control on this dialog. Absent means "asMarked", the engine's
-	 * own default, so the field is only sent when the user actually changed
-	 * it.
+	 * The `elements` run override (#1594), single-request runs only: whether an
+	 * inherited `script.*` element's own `config.inline` decides (`"asMarked"`) or
+	 * every one runs inline / stays deferred. The override
+	 * {@link StartScenarioRunRequest} sends, limited to `scripts` (this dialog has
+	 * no `timers` control). Absent means `"asMarked"`, the engine default, so it is
+	 * sent only when the user changed it.
 	 */
 	elements?: { scripts: "asMarked" | "allInline" | "allDeferred" };
 }
@@ -2637,28 +2390,20 @@ export interface MonitorSample {
 }
 
 /**
- * Per-request timing breakdown (milliseconds), as `POST /execute` returns it
- * (`serialize(Response)`, engine/src/utils/json.cpp). Phase fields
- * (dns…download) are sequential segments of the request; `wireMs` is libcurl's
- * transfer time and `queueWaitMs` is generator-side overhead (total − wire).
+ * Per-request timing breakdown in ms, as `POST /execute` returns it
+ * (`serialize(Response)`, `engine/src/utils/json.cpp`), in the engine's `*Ms`
+ * wire keys, the same as the stored trace ({@link RunResultTrace}), so a live
+ * and a restored response agree. The phases (dns…download) are sequential;
+ * `wireMs` is libcurl's transfer time and `queueWaitMs` generator-side overhead
+ * (total − wire), both optional because older engines' traces omit them.
  *
- * The field names are the engine's wire keys - the same `*Ms` convention the
- * stored trace ({@link RunResultTrace}) uses, so a live response and one
- * restored from a stored design run agree without renaming. `wireMs` /
- * `queueWaitMs` stay optional because traces stored by older engines omitted
- * them (current ones store all eight); consumers must treat both as optional.
- *
- * `engineMs` is Vayu's own cost for the exchange (#2132): the engine's elapsed
- * time less the transfer and the user's scripts. Not a phase and not part of
- * `totalMs`' arithmetic, and distinct from `queueWaitMs`, which is the sliver
- * before libcurl. Absent for a stream, an auth-failure reply and rows stored
- * before the key existed.
- *
- * `scriptMs` is the time the exchange's scripts took (#3676): the pre-request
- * and test scripts, `pm.sendRequest` inside them included. It is the other half
- * of what `engineMs` leaves out, and it is not part of `totalMs`, `wireMs` or
- * `engineMs` either. `0` for a send with no script; absent in the same cases as
- * `engineMs`.
+ * `engineMs` (#2132) is Vayu's own cost: the engine's elapsed time less the
+ * transfer and the user's scripts; not a phase, not in `totalMs`'s arithmetic,
+ * and not `queueWaitMs` (the sliver before libcurl). `scriptMs` (#3676) is the
+ * scripts' time (pre-request and test, `pm.sendRequest` included), the other
+ * half `engineMs` leaves out, in none of `totalMs`, `wireMs` or `engineMs`; `0`
+ * with no script. Both are absent for a stream, an auth-failure reply and rows
+ * stored before the key.
  */
 export interface ResponseTiming {
 	totalMs: number;
@@ -2685,19 +2430,14 @@ export interface HeaderLine {
 }
 
 /**
- * One redirect response the engine followed on the way to the final answer
- * (issue #2461): its status and every header line it carried. `headers` and
- * `headerLines` of the answer hold the last hop only, so a `Set-Cookie` or
- * `Location` here is readable nowhere else. It reports what the server sent,
- * not what the cookie jar kept.
- *
- * `url` and `schemeDowngrade` are issue #2949, and absent on a hop from an
- * engine or a stored trace from before it. `url` is the request the hop
- * answered: the requested URL for the first hop, the previous hop's `Location`
- * resolved against it for each later one, with
- * the values of credential query parameters blanked by the engine; `""` when
- * libcurl reported none. `schemeDowngrade` is true when that request went over
- * `https` and the next over `http`.
+ * One redirect response the engine followed (#2461), with every header line:
+ * the answer's `headers` and `headerLines` hold the last hop only, so a
+ * `Set-Cookie` or `Location` here is readable nowhere else (as the server sent
+ * it, not as the jar kept it). `url` and `schemeDowngrade` (#2949) are absent
+ * from an older engine or trace. `url` is the request the hop answered: the
+ * requested URL, then each previous `Location` resolved against it, credential
+ * query values blanked, `""` when libcurl reported none. `schemeDowngrade`
+ * means that request was `https` and the next `http`.
  */
 export interface RedirectHop {
 	status: number;
@@ -2773,28 +2513,23 @@ export interface HttpResponse {
 	 */
 	httpVersion?: string;
 	/**
-	 * The request asked for `http2` and the connection negotiated something
-	 * older. Computed engine-side (`http_version_downgraded`,
-	 * `engine/include/vayu/http/curl_version_map.hpp`) because only the engine
-	 * holds both halves at once - `httpVersion` above is the outcome, and the
-	 * outcome only becomes a complaint next to what was requested.
-	 *
-	 * Do not re-derive it here from the tab's `httpVersion` setting: a replay
-	 * or a restored response is shown beside request state that may since have
-	 * changed, and the answer belongs to the exchange, not to the editor.
+	 * The request asked for `http2` and negotiated something older, computed by the
+	 * engine (`http_version_downgraded`, `vayu/http/curl_version_map.hpp`), which
+	 * alone holds both halves: `httpVersion` is the outcome, a complaint only next
+	 * to what was requested. Never re-derive it from the tab's `httpVersion`
+	 * setting: a replay or restored response sits beside request state that may
+	 * have changed, and the answer belongs to the exchange.
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
-	 * The request was sent without the authentication it asked for: its auth
-	 * mode is one the engine stores but does not execute (`digest`, `ntlm`, ...;
-	 * issue #2474), or it is a bearer token that is empty or an API key with no
-	 * name (issue #3203); or its own Authorization header was sent and no
-	 * OAuth 2.0 token was fetched (issue #3202). A sentence naming the cause, written by
-	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
-	 * key and to `trace.request.authNotice` from one place. **Absent** when
-	 * there is nothing to say - credentials applied, no auth, or an engine older
-	 * than the key - and on a streaming send, which is answered before it
-	 * exists: only its stored trace carries it.
+	 * Why the request went without the authentication it asked for: an auth mode
+	 * the engine stores but does not execute (`digest`, `ntlm`, ...; #2474), an
+	 * empty bearer token or a nameless API key (#3203), or its own Authorization
+	 * header sent so no OAuth 2.0 token was fetched (#3202). One sentence, written
+	 * by `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) here and
+	 * to `trace.request.authNotice` from one place. **Absent** when there is
+	 * nothing to say (credentials applied, no auth, an older engine) and on a
+	 * streaming send, answered before it exists: only its stored trace has it.
 	 */
 	authNotice?: string;
 	/**
@@ -2816,17 +2551,11 @@ export interface HttpResponse {
 	/**
 	 * The engine stopped reading this body at `maxDesignResponseBodyBytes`
 	 * (Settings → Limits, default 32MB), so `body` / `bodyRaw` / `bodySize`
-	 * describe the prefix that was read rather than what the server sent
-	 * (issue #1157). Status and headers are the server's own - they arrive
-	 * first - so this is a successful response carrying a flag.
-	 *
-	 * Always present on a live body, like `clientCertificate` above and for the
-	 * same reason: an absent key is an engine too old to say, not "not capped".
-	 *
-	 * Not the same fact as the stored trace's `bodyTruncated`, which is
-	 * `maxTraceBodyBytes` shortening a body for storage *after* the whole of it
-	 * was read - a re-send recovers from that one, and re-sending under a
-	 * capped read reproduces the cap.
+	 * describe the prefix read (#1157); status and headers are the server's own,
+	 * so this is a successful response with a flag. Always present on a live body:
+	 * an absent key is an engine too old to say, not "not capped". Not the stored
+	 * trace's `bodyTruncated`, which is `maxTraceBodyBytes` shortening a body read
+	 * whole, for storage: a re-send recovers from that, not from this cap.
 	 */
 	bodyCapped?: boolean;
 }
@@ -2836,14 +2565,10 @@ export interface TestResult {
 	passed: boolean;
 	error?: string;
 	/**
-	 * Which script called `pm.test` (issue #810).
-	 *
-	 * Optional because a trace stored - or an engine sidecar answering - before
-	 * that issue listed the post-request script's assertions and nothing else,
-	 * so an absent source is a `"test"` one rather than an unknown phase. A
-	 * pre-request assertion used to fail its scenario step and appear in no
-	 * list; it is listed now, and the phase is what keeps "asserted before the
-	 * request went out" from reading as an assertion about the response.
+	 * Which script called `pm.test` (#810). Absent means `"test"`: a trace or an
+	 * engine from before #810 listed only the post-request script's assertions.
+	 * The phase keeps a pre-request assertion, made before the request went out,
+	 * from reading as an assertion about the response.
 	 */
 	source?: ScriptSource;
 	/**
@@ -2865,12 +2590,8 @@ export type ConsoleLevel = "log" | "info" | "warn" | "error";
 export type ScriptSource = "pre" | "test";
 
 /**
- * One line of script console output.
- *
- * The engine used to send a bare string and encode the source as a `"[pre] "`
- * text prefix, which was indistinguishable from a script that logged a line
- * starting with those characters - and carried no level at all, so the Console
- * tab drew `console.error` exactly like `console.log`. Both are fields now.
+ * One line of script console output. `source` and `level` are fields, never a
+ * `"[pre] "` text prefix, which a script's own logged line could forge.
  */
 export interface ConsoleLogEntry {
 	source: ScriptSource;
@@ -3183,11 +2904,10 @@ export interface LoadTestMetrics {
 	 */
 	status_seconds?: StatusSecondEntry[];
 	/**
-	 * The capacity search's state, on every live frame of a capacity run (issue
-	 * #2928). Absent means not a capacity run, or an engine from before #2928; it
-	 * is never zeroed. A stored tick never carries it. The renderer card that
-	 * reads it is item 2 of #2818 (#2929); until it lands the only reader is MCP
-	 * `get_live_metrics`, which forwards frames raw.
+	 * The capacity search's state, on every live frame of a capacity run (#2928),
+	 * read by the live capacity view (#2929, item 2 of #2818). Absent means not a
+	 * capacity run or an engine from before #2928, never zeroed; a stored tick
+	 * never carries it.
 	 */
 	capacity?: LiveCapacityState;
 	/**
@@ -3209,14 +2929,11 @@ export interface LoadTestMetrics {
 	 */
 	stream_time_to_first_event?: StreamDistribution;
 	/**
-	 * Custom trends, counters and rates recorded so far, riding the same tick
-	 * as the built-in phases above (issue #1500). Absent until the run has
-	 * recorded at least one value - not `{}`. Same shape as
-	 * `RunReport.customMetrics`, but snake_case here like every other field on
-	 * this interface: the stored time-series wire shape is `custom_metrics`,
-	 * and the live SSE tick's own `customMetrics` is renamed into this one by
-	 * `sse-client.ts`, the same way it renames `statusCodes` into
-	 * `status_codes` above.
+	 * Custom trends, counters and rates recorded so far, on the same tick as the
+	 * built-in phases (#1500); absent, not `{}`, until a value is recorded. The
+	 * shape of `RunReport.customMetrics`, snake_case like the rest of this
+	 * interface: the stored time-series key is `custom_metrics`, and `sse-client.ts`
+	 * renames the live tick's `customMetrics` into it, as it does `statusCodes`.
 	 */
 	custom_metrics?: Record<
 		string,
@@ -3233,28 +2950,20 @@ export interface LoadTestMetrics {
 }
 
 /**
- * One element's pass/fail/skip/defer tally within a load run's step, from
- * `scenario.steps[i].elements` (`StepElementTallies::build`,
- * `engine/src/core/scenario_load.cpp`) - the load-path sibling of the
- * sequential run's per-execution {@link ElementOutcome}. Aggregated across
- * every virtual user and iteration rather than one outcome per execution,
- * which is why the shape is a set of counts instead of a single `outcome`.
- *
- * `deferred` counts a post-request script (`script.post`) that the load path
- * left to the post-run replay against the sampled responses (issue #2144), so
- * its verdicts are in {@link RunReport.testValidation}, not in `passed` or
- * `failed`. It is **not** a kind of `skipped`: a script that did not run at
- * all (an un-inlined `script.pre`, a disabled element) stays `skipped`.
- * Absent from a report stored before #2144, which tallied the replayed script
- * as `skipped`; those rows keep their stored numbers.
- *
- * One count per outcome word of the sequential trace (issue #3051): `missing`
- * (an extractor that found nothing) and `error` (an element that could not run
- * its check) are no longer folded into `skipped` and `failed`. `required` is
- * present, as `true`, only for an extractor whose miss fails the step. `name`
- * and `origin` say which element the row is, present only when it carries
- * them. A report stored before #3051 has none of the five, and its `skipped`
- * and `failed` keep what they counted then.
+ * One element's tally within a load run's step, from `scenario.steps[i].elements`
+ * (`StepElementTallies::build`, `engine/src/core/scenario_load.cpp`): the load
+ * sibling of {@link ElementOutcome}, counts over every virtual user and
+ * iteration rather than one outcome per execution. One count per outcome word
+ * of the sequential trace (#3051): `missing` (an extractor found nothing) and
+ * `error` (an element could not run its check) are their own counts.
+ * `deferred` (#2144) is a `script.post` left to the post-run replay against the
+ * sampled responses, its verdicts in {@link RunReport.testValidation}; it is
+ * not a `skipped`, which is a script that did not run (an un-inlined
+ * `script.pre`, a disabled element). `required` is `true` only for an
+ * extractor whose miss fails the step; `name` and `origin` appear when the
+ * element has them. A report from before #2144 tallies the replay as
+ * `skipped`, one from before #3051 has none of the five newer keys; both keep
+ * their stored numbers.
  */
 export interface RunScenarioStepElementTally {
 	id: string;
@@ -3285,13 +2994,11 @@ export interface RunScenarioStepElementTally {
 /**
  * One `lifecycle.setup[]` / `teardown[]` row (#3455): the outcome of
  * {@link ElementOutcome} plus the script's own words, bounded and shaped as an
- * inline element's tally row carries them. `message` is empty or absent for a
- * row that ran clean; a failed row's carries the reason, including a failing
- * `pm.test`.
- *
- * `scriptRequests` is a sequential run's only (#3633): every `pm.sendRequest`
- * the script made, in call order. The `console` sample folds repeats, so no
- * line indexes a record and the records are listed on their own.
+ * inline element's tally row carries them; `message` is empty or absent for a
+ * clean row and carries a failed row's reason, a failing `pm.test` included.
+ * `scriptRequests` (#3633, sequential runs only) lists every `pm.sendRequest`
+ * in call order, on its own because the `console` sample folds repeats, so no
+ * line can index a record.
  */
 export interface LifecycleElementOutcome
 	extends
@@ -3476,15 +3183,14 @@ export interface ErrorClassCounts {
 
 export interface RunReport {
 	/**
-	 * What this run did not do (issue #1503): a request sent with an
-	 * unresolved `{{token}}` because load mode runs no residual pass, a step
-	 * whose pre-request script that mode never executes, a per-host connection
-	 * limit raised above its setting (#2394), or requests libcurl re-sent on a
-	 * new connection (#2799), or `Set-Cookie` headers the cookie engine dropped
-	 * (`cookies_dropped`, #3307). Never refuses the run - a literal `{{` can be
-	 * deliberate in a body - only names it, so a green run and one that quietly
-	 * sent every request unauthenticated do not read the same. Absent, not
-	 * empty, for a run with nothing to report.
+	 * What this run did not do (#1503): a request sent with an unresolved
+	 * `{{token}}` (load mode runs no residual pass), a step whose pre-request
+	 * script that mode never executes, a per-host connection limit raised above
+	 * its setting (#2394), requests libcurl re-sent on a new connection (#2799), or
+	 * `Set-Cookie` headers the cookie engine dropped (`cookies_dropped`, #3307).
+	 * Never refuses the run (a literal `{{` can be deliberate), only names it, so a
+	 * green run and one that sent everything unauthenticated do not read the same.
+	 * Absent, not empty, with nothing to report.
 	 */
 	warnings?: Array<{
 		code: string;
@@ -3601,15 +3307,12 @@ export interface RunReport {
 			specId: string;
 			specHash: string;
 			/**
-			 * Whether the binding came from an **ancestor** of the collection
-			 * this run named (issue #716).
-			 *
-			 * An OpenAPI import binds the root and files every request under tag
-			 * sub-collections, so running one tag folder is measured against the
-			 * whole document - most of its operations honestly uncovered. Absent
-			 * means the run's own collection carries the binding and there is
-			 * nothing to disclose; {@link RunReport.coverage}'s block is the
-			 * reader, and prints one line when it is set.
+			 * Whether the binding came from an ancestor of the collection this run named
+			 * (#716). An OpenAPI import binds the root and files requests under tag
+			 * sub-collections, so a tag folder's run is measured against the whole
+			 * document, most operations honestly uncovered. Absent means the run's own
+			 * collection carries the binding; {@link RunReport.coverage}'s block prints one
+			 * line when it is set.
 			 */
 			inherited?: boolean;
 		};
@@ -3686,34 +3389,24 @@ export interface RunReport {
 		bytesReceived?: number;
 		throughputBytesPerSec?: number;
 		/**
-		 * How many of the run's transfers asked for HTTP/2 and negotiated
-		 * something older. The only figure in `summary` that is about the
-		 * report's validity rather than its performance: non-zero means the
-		 * latency and throughput above were measured over a protocol other than
-		 * the one `metadata.configuration.httpVersion` names, which is exactly
-		 * the mislabelling issue #215 describes.
-		 *
-		 * `0` is "none recorded", not "none happened" - an engine from 0.15.0
-		 * always emits the key, including for a run whose stored summary
-		 * predates the count and for one reported from its sampled results
-		 * because that summary was malformed or never written, neither of which
-		 * can produce a figure. `undefined` therefore only means the sidecar
-		 * itself is older than 0.15.0, and reads the same way as 0 here: no
-		 * warning. Weaker than the per-response `httpVersionDowngraded` above,
-		 * which is exact for its exchange.
+		 * Transfers that asked for HTTP/2 and negotiated something older: the one
+		 * `summary` figure about the report's validity, not its performance. Non-zero
+		 * means latency and throughput were measured over a protocol other than the
+		 * one `metadata.configuration.httpVersion` names (#215). `0` is "none
+		 * recorded", not "none happened": an engine from 0.15.0 always emits it, even
+		 * for a summary predating the count or a report rebuilt from sampled results;
+		 * absent is a pre-0.15.0 sidecar, read as `0` (no warning). Weaker than the
+		 * per-response `httpVersionDowngraded`, which is exact for its exchange.
 		 */
 		httpVersionDowngraded?: number;
 		/**
-		 * Requests libcurl re-sent on a new connection after the server dropped
-		 * or refused a reused one before answering (#2799). Each is counted once
-		 * in `totalRequests`, so the target received `totalRequests` plus this.
-		 * The `connection_replayed` entry in `warnings` is the surface the app
-		 * shows (its message carries the count); the number itself is for MCP
-		 * and export readers.
-		 *
-		 * Unlike `httpVersionDowngraded`, absent and `0` differ: `0` is a run
-		 * that counted and saw none, absent is a run stored before the count
-		 * existed, or reported from its sampled results.
+		 * Requests libcurl re-sent on a new connection after the server dropped or
+		 * refused a reused one before answering (#2799). Each counts once in
+		 * `totalRequests`, so the target received `totalRequests` plus this. The app
+		 * shows the `connection_replayed` warning (its message carries the count); the
+		 * number is for MCP and export readers. Absent and `0` differ, unlike
+		 * `httpVersionDowngraded`: `0` counted none, absent is a run stored before the
+		 * count or reported from its sampled results.
 		 */
 		connectionReplays?: number;
 		/**
@@ -3735,17 +3428,13 @@ export interface RunReport {
 		 */
 		summaryMissing?: boolean;
 		/**
-		 * The run's failed `mcp` replies by class (#3828): `transport` (no
-		 * reply), `protocol` (a JSON-RPC error) and `tool` (a tool result with
-		 * `isError`), each key only when counted. `protocolCodes` splits
-		 * `protocol` by the JSON-RPC `error.code` (`"-32602"`), codes outside the
-		 * reserved and server bands under `"other"`; a protocol error with no
-		 * integer code is in `protocol` and no code, so the codes can sum below it.
-		 *
-		 * Three states, which are not one: `{}` is a run that counted and saw no
-		 * failed reply (every non-`mcp` run), counts are the failures, and an
-		 * absent key is a run stored before the engine counted them - "not
-		 * recorded", never 0.
+		 * The run's failed `mcp` replies by class (#3828): `transport` (no reply),
+		 * `protocol` (a JSON-RPC error) and `tool` (a result with `isError`), each key
+		 * only when counted. `protocolCodes` splits `protocol` by JSON-RPC
+		 * `error.code` (`"-32602"`), codes outside the reserved and server bands under
+		 * `"other"`; an error with no integer code is in `protocol` only, so the codes
+		 * can sum below it. `{}` counted and saw none (every non-`mcp` run); absent is
+		 * a run stored before the count, "not recorded", never 0.
 		 */
 		errorClasses?: ErrorClassCounts;
 	};
@@ -3784,19 +3473,14 @@ export interface RunReport {
 		requestsExpected?: number;
 	};
 	/**
-	 * Two independent halves, either of which can be present without the other.
-	 *
-	 * `phases` comes from histograms fed by **every** completion, and is absent
-	 * only when the engine's `phaseHistograms` setting was off, nothing
-	 * succeeded, or the run predates the bank. The `avg*` fields are the means
-	 * of those histograms (issue #2782), so they average the same completions;
-	 * without `phases`, or for a run stored before the means existed, they are
-	 * means over the **retained trace sample** (the 1-in-N successes
-	 * `save_timing_breakdown` stores, plus any slow-request outliers) and are
-	 * absent for a run that stored no traces.
-	 *
-	 * Read each half by its own key. Treating the object's presence as proof of
-	 * either is what makes a phases-only report render as five zeroed averages.
+	 * Two independent halves; read each by its own key, since taking the object's
+	 * presence as proof of either renders a phases-only report as five zeroed
+	 * averages. `phases` comes from histograms fed by every completion, absent only
+	 * when `phaseHistograms` was off, nothing succeeded, or the run predates the
+	 * bank. The `avg*` fields are those histograms' means (#2782); without
+	 * `phases`, or on a run stored before the means, they average the retained
+	 * trace sample (the 1-in-N successes `save_timing_breakdown` stores, plus
+	 * slow-request outliers) and are absent when no traces were stored.
 	 */
 	timingBreakdown?: {
 		avgDnsMs?: number;
@@ -3826,39 +3510,29 @@ export interface RunReport {
 		percentage: number;
 	};
 	/**
-	 * What a streaming run's completions delivered (issue #576).
+	 * What a streaming run's completions delivered (#576). Absent is a run that
+	 * did not stream, not a stream that delivered nothing, so the engine omits the
+	 * section rather than writing zeros.
 	 *
-	 * `undefined` is a run that did not stream - not a stream that delivered
-	 * nothing - so a report without it renders exactly as it did before SSE
-	 * under load existed. That distinction is why the engine omits the section
-	 * rather than writing zeros.
+	 * - `events`: the per-completion distribution (500 streams of ~40 events have
+	 *   a p50 near 40, not 20000). `eventsPerSecond`: the whole-run rate, on the
+	 *   clock `rps` uses so the two compare; one long stream and 250 short ones
+	 *   can share a rate, hence both.
+	 * - `capped`: completions a cap ended rather than the server. All of them
+	 *   means the run measured its own bounds, and the dashboard says so.
+	 * - `timeToFirstEvent` is not `phases.firstByte` (which ends at the response
+	 *   headers): a gateway answering 200 at once and then thinking reads fast
+	 *   there and slow here (#3234). Absent when no stream delivered a timed event.
+	 * - `maxEventGap` and `eventRate` (#3776): per-stream pacing, which
+	 *   `eventsPerSecond` blends away and a first-event time never sees, over the
+	 *   streams with two timed events; absent (never 0) when none had.
+	 * - `timeToFirstMatch` (#3774): `timeToFirstEvent`'s clock stopped at the
+	 *   request's first content marker, so a preamble API's first token reads as
+	 *   its real wait; absent (never 0) when no stream matched or none declares a
+	 *   marker.
 	 *
-	 * `events` is the **per-completion** distribution: 500 streams of ~40
-	 * events each have a p50 near 40, not near 20000. `eventsPerSecond` is the
-	 * whole-run rate, derived engine-side from the same clock `rps` uses so the
-	 * two are comparable. Both are reported because they answer different
-	 * questions - one long stream and 250 short ones can share a rate.
-	 *
-	 * `capped` counts the completions a cap ended rather than the server. All
-	 * of them means the run measured its own bounds, not the target: the
-	 * dashboard says so rather than leaving it to be inferred.
-	 *
-	 * `timeToFirstEvent` is **not** `phases.firstByte`, which ends at the response
-	 * headers: a gateway that answers 200 at once and then thinks reads fast
-	 * there and slow here (issue #3234). It is absent when no stream delivered a
-	 * timed event, while `stream` itself is present.
-	 *
-	 * `maxEventGap` and `eventRate` (issue #3776) say how each stream paced its
-	 * events, which the whole-run `eventsPerSecond` blends away and a first-event
-	 * time never sees. Each is per stream, over the streams that had two timed
-	 * events to measure between, and absent (never 0) when none did. Report-only:
-	 * a live gate frame carries neither.
-	 *
-	 * `timeToFirstMatch` (issue #3774) is `timeToFirstEvent`'s clock stopped at
-	 * the request's first content marker instead of its first event, so a
-	 * preamble API's first token reads as its real wait. Absent, never 0, when
-	 * no stream matched, including every run whose request declares no marker.
-	 * Report-only: the live gate frame carries no match.
+	 * `maxEventGap`, `eventRate` and `timeToFirstMatch` are report-only: a live
+	 * gate frame carries none of them.
 	 */
 	stream?: {
 		completions: number;
@@ -3899,12 +3573,9 @@ export interface RunReport {
 	};
 	/**
 	 * What the run's server-vitals scrape recorded ({@link RunMonitorConfig}).
-	 *
-	 * `undefined` is a run that monitored nothing - not a target that reported
-	 * zeros - so a report without it renders exactly as it did before the
-	 * monitor existed. `samples` is what the history view gates its
-	 * `GET /runs/:id/monitor` fetch on: a run whose every scrape missed has a
-	 * section, a miss count, and no series to draw.
+	 * Absent is a run that monitored nothing, not a target that reported zeros.
+	 * `samples` gates the history view's `GET /runs/:id/monitor` fetch: a run whose
+	 * every scrape missed has a section, a miss count and no series to draw.
 	 */
 	monitor?: {
 		samples: number;
@@ -3925,17 +3596,13 @@ export interface RunReport {
 		series: Record<string, { min: number; max: number; avg: number; count: number }>;
 	};
 	/**
-	 * The run's verdict against the budgets it declared ({@link RunThresholds}).
-	 *
-	 * The aggregate half of pass/fail: `testValidation` replays a script against
-	 * individual responses and structurally cannot assert a p99 or an error
-	 * rate, so a run that meets every assertion can still miss its budget.
-	 *
-	 * `undefined` is a run that declared no budgets - which is *not* the same
-	 * claim as "passed nothing", so a report without it renders exactly as it
-	 * did before budgets existed. `metric` is typed loosely on purpose: it is
-	 * the engine's key, and a newer sidecar may judge a metric this build has
-	 * no label for.
+	 * The run's verdict against the budgets it declared ({@link RunThresholds}),
+	 * the aggregate half of pass/fail: `testValidation` replays a script per
+	 * response and cannot assert a p99 or an error rate, so a run meeting every
+	 * assertion can still miss its budget. Absent is a run that declared no
+	 * budgets, not one that passed nothing. `metric` is a loose `string` because
+	 * it is the engine's key, and a newer sidecar may judge a metric this build
+	 * has no label for.
 	 */
 	thresholdValidation?: {
 		checks: {
@@ -3945,12 +3612,10 @@ export interface RunReport {
 			actual?: number;
 			passed: boolean;
 			/**
-			 * False when the run recorded no sample for this metric (issue #1484:
-			 * a latency percentile with zero completions used to read as 0ms,
-			 * trivially meeting an "at most" ceiling). Absent on a report a
-			 * pre-fix engine wrote, which never carried the field and never had
-			 * the bug's blind spot corrected either - reads as evaluated, the
-			 * same value that engine effectively assumed everywhere.
+			 * False when the run recorded no sample for this metric (#1484), which would
+			 * otherwise read as 0ms and trivially meet an "at most" ceiling. Absent on a
+			 * report from an engine before the field, read as evaluated, as that engine
+			 * assumed.
 			 */
 			evaluated?: boolean;
 			/**
@@ -3979,17 +3644,12 @@ export interface RunReport {
 	 */
 	assertions?: RunAssertions;
 	/**
-	 * Custom trends, counters and rates the run recorded through a
-	 * `metric.record` element or `pm.metrics.trend` / `.counter` / `.rate`
-	 * (issue #1500). Keyed by the name the script or element chose, which is
-	 * why the key set is open - there is no fixed label table the way
-	 * `thresholdValidation.checks[].metric` has one.
-	 *
-	 * `undefined`, never `{}`, when the run recorded no custom metric - the
-	 * same "absent means never happened" convention `thresholdValidation`
-	 * follows. For `type: "trend"` the percentile fields are present; for
-	 * `type: "counter"` (a running total) or `type: "rate"` (0-100 percent
-	 * true) only `value` is.
+	 * Custom trends, counters and rates the run recorded through a `metric.record`
+	 * element or `pm.metrics.trend` / `.counter` / `.rate` (#1500), keyed by the
+	 * name the script or element chose, hence the open key set (no fixed label
+	 * table as `thresholdValidation.checks[].metric` has). Absent, never `{}`, when
+	 * nothing was recorded. A `"trend"` has the percentile fields; a `"counter"` (a
+	 * running total) or a `"rate"` (0-100 percent true) has only `value`.
 	 */
 	customMetrics?: Record<
 		string,
@@ -4004,82 +3664,56 @@ export interface RunReport {
 		}
 	>;
 	/**
-	 * Which operations of the collection's bound contract this run exercised, and
-	 * which of their declared responses it saw (issue #629).
-	 *
-	 * **Absent, never zeros**, for every run that was not measured against a
-	 * contract - an unbound collection, a single-request run, or a document
-	 * stored before the operation index existed. A run that was never judged
-	 * against a contract did not cover none of it.
-	 *
-	 * Computed against the document `metadata.openapi` names - the one the run
-	 * was *planned* with - so a binding that has since synced to a newer spec
-	 * cannot rewrite what an old report says was covered.
-	 *
-	 * Every number here is **exact**: the engine counts each send and each
-	 * response as it happens, rather than deriving them from the bounded
-	 * `results[]` sample a load run stores.
+	 * Which operations of the bound contract this run exercised, and which
+	 * declared responses it saw (#629). **Absent, never zeros**, for a run not
+	 * measured against a contract (an unbound collection, a single-request run, a
+	 * document stored before the operation index): never judged is not "covered
+	 * none". Computed against the document `metadata.openapi` names, the one the
+	 * run was planned with, so a later sync cannot rewrite an old report. Every
+	 * number is **exact**: the engine counts each send and response as it happens,
+	 * not from the bounded `results[]` sample.
 	 */
 	coverage?: RunCoverage;
 	/**
-	 * Whether what came back matched the schemas the run's bound document
-	 * declares (issues #682, #681).
-	 *
-	 * **Absent, never zeros**, for every run that checked nothing - an unbound
-	 * collection, a single-request run, a document carrying no response schemas.
-	 * A run whose responses were never checked did not pass a contract.
-	 *
-	 * Beside {@link RunReport.coverage} and computed against the same document -
-	 * the one the run was *planned* with, read when its plan resolved, so a sync
-	 * landing mid-run cannot change what the run was measured against.
-	 *
-	 * **What the numbers describe differs by run mode, and `exact` says which.**
-	 * A load run defers the check to run end over its bounded reservoirs, because
-	 * the load loop refills concurrency per completion and a schema walk there
-	 * would cost throughput - so its figures are sampled, and anything rendering
-	 * them has to say so. A collection run checks every step it executed.
+	 * How the responses matched the bound document's schemas (#682, #681).
+	 * **Absent, never zeros**, for a run that checked nothing (an unbound
+	 * collection, a single-request run, a document with no response schemas).
+	 * Computed against {@link RunReport.coverage}'s planned document, read when
+	 * the plan resolved, so a mid-run sync cannot change it. **`exact` says what
+	 * the numbers describe:** a load run checks its bounded reservoirs at run end
+	 * (a schema walk in the per-completion loop would cost throughput), so its
+	 * figures are sampled and a renderer must say so; a collection run checks
+	 * every step it executed.
 	 */
 	schemaValidation?: RunSchemaValidation;
 	/**
-	 * `script.setup` / `script.teardown` outcomes (issue #1499): what ran once
-	 * at `run.start` / `run.end` on the collection itself, never per step.
-	 *
-	 * Each key is present only when that phase ran at least one element - an
-	 * empty array would read as "a setup element ran and did nothing" rather
-	 * than "this collection declared none". `undefined` for a run whose
-	 * collection declared neither, and for a single-request run, which has no
-	 * collection to declare them on.
+	 * `script.setup` / `script.teardown` outcomes (#1499): what ran once at
+	 * `run.start` / `run.end` on the collection, never per step. Each key is
+	 * present only when that phase ran an element (an empty array would read as
+	 * "a setup element ran and did nothing"); absent for a run whose collection
+	 * declared neither and for a single-request run, which has no collection.
 	 */
 	lifecycle?: {
 		setup?: LifecycleElementOutcome[];
 		teardown?: LifecycleElementOutcome[];
 	};
 	/**
-	 * A single-request run's own step-level element outcomes (issues #1594,
-	 * #1641) - extractors, assertions, timers tallied across every submission,
-	 * the single-request sibling of {@link RunScenarioStepStat.elements}.
-	 *
-	 * `undefined` for a scenario run (its per-step tallies live nested under
-	 * {@link RunReport.scenario} instead - the two never coexist) and for a
-	 * single-request run that declared no `requestElements`, or one whose
-	 * elements never ran. Reuses {@link RunScenarioStepElementTally}: both
-	 * come off the same `{id, kind, passed, failed, skipped, deferred}` tally shape.
+	 * A single-request run's step-level element outcomes (#1594, #1641):
+	 * extractors, assertions and timers tallied across every submission, the
+	 * sibling of {@link RunScenarioStepStat.elements} and the same
+	 * {@link RunScenarioStepElementTally} shape. Absent for a scenario run (its
+	 * tallies are under {@link RunReport.scenario}; the two never coexist) and for
+	 * a single-request run with no `requestElements` or none that ran.
 	 */
 	elements?: RunScenarioStepElementTally[];
 	/**
-	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
-	 *
-	 * A run longer than its access token used to turn into a 401 storm the
-	 * report never explained; the engine now refreshes header-placed tokens
-	 * mid-run and records each swap here. `refreshFailures` with a `lastError`
-	 * is the other half of that answer: the run kept going with the credential
-	 * it had, so the 401s in `statusCodes` are explained by this, not by the
-	 * target.
-	 *
-	 * `undefined` is a run that could not refresh at all - no OAuth 2.0 auth, a
-	 * non-expiring or query-placed token, the user's `autoRefreshToken`
-	 * opt-out, or a sidecar older than mid-run refresh - which is *not* the
-	 * same claim as "watched and never needed to".
+	 * Whether the run's OAuth 2.0 credential was renewed while it ran: the engine
+	 * refreshes header-placed tokens mid-run and records each swap, so a run longer
+	 * than its token is not an unexplained 401 storm. `refreshFailures` with a
+	 * `lastError` explains the 401s in `statusCodes` (the run kept its old
+	 * credential), not the target. Absent is a run that could not refresh (no
+	 * OAuth 2.0, a non-expiring or query-placed token, the `autoRefreshToken`
+	 * opt-out, an older sidecar), not "watched and never needed to".
 	 */
 	auth?: {
 		/** Seconds into the run at which each successful refresh landed. */
@@ -4088,26 +3722,19 @@ export interface RunReport {
 		lastError?: string;
 	};
 	/**
-	 * What a capacity run's adaptive search found: the highest concurrency the
-	 * service held inside its latency budget, the level it gave out at, and the
-	 * per-level audit trail behind both.
-	 *
-	 * `undefined` for every other mode - a fixed-target run measured a point,
-	 * not a curve, so there is no knee to show. `maxHealthy*` is absent when the
-	 * very first level already breached (the search found no sustainable
-	 * capacity) and `knee*` when the search ended for a reason other than the
-	 * target giving out on latency (`slo_exceeded`) or errors
-	 * (`errors_exceeded`), so neither can be read as a measured zero.
-	 * `saturation*` is the lowest healthy level whose throughput was within the
-	 * plateau gain of the best healthy throughput, sent only when `stopReason`
-	 * is `plateau`; a plateau stored before the engine reported it carries none,
-	 * and its `maxHealthy*` is then the last level tried, which overshoots where
-	 * throughput stopped growing. The error
-	 * share (`maxErrorPct`, `kneeErrorPct`, `levels[].errorPct`, percent 0-100)
-	 * is absent for a run stored by an engine that did not judge errors, which
-	 * is not the claim "every level was clean". `stopReason` is typed
-	 * loosely for the same reason `thresholdValidation.metric` is: a newer
-	 * sidecar may stop for a reason this build has no words for.
+	 * What a capacity run's adaptive search found: the highest concurrency held
+	 * inside the latency budget, the level it gave out at, and the per-level audit
+	 * trail; absent for every other mode (a fixed-target run measures a point, not
+	 * a curve). No absent field is a measured zero: `maxHealthy*` is absent when the
+	 * first level breached, `knee*` when the search ended other than by latency
+	 * (`slo_exceeded`) or errors (`errors_exceeded`), and the error share
+	 * (`maxErrorPct`, `kneeErrorPct`, `levels[].errorPct`, percent 0-100) from an
+	 * engine that did not judge errors. `saturation*` is the lowest healthy level
+	 * within the plateau gain of the best healthy throughput, sent only for
+	 * `stopReason: "plateau"`; a plateau stored before it has none, and its
+	 * `maxHealthy*` is then the last level tried, past where throughput stopped
+	 * growing. `stopReason` is a loose `string` like `thresholdValidation.metric`: a
+	 * newer sidecar may stop for a reason this build has no words for.
 	 */
 	capacity?: {
 		sloMs: number;
@@ -4132,22 +3759,15 @@ export interface RunReport {
 		}[];
 	};
 	/**
-	 * How many records each of the run's bounded stores thinned away.
-	 *
-	 * Every store the engine keeps is capped, so a long run retains a *sample*
-	 * rather than the whole set - and past the cap a later record displaces a
-	 * uniformly chosen incumbent (reservoir retention), so what survives
-	 * describes the whole run rather than its opening. These counts are what
-	 * make that visible: all zeros means the stored traces and the tested
-	 * responses are complete, non-zero means they are a sample of a larger set.
-	 *
-	 * They describe those stores, not the `results` array: the report route
-	 * picks its rows from the stored traces by a failures-first rule, and says
-	 * so through {@link RunReport.resultsStored} / {@link RunReport.resultsCap}.
-	 *
-	 * `undefined` is a run whose stored summary predates the counts (or an older
-	 * sidecar), which is *not* the same claim as "nothing was dropped" - so the
-	 * UI stays silent rather than asserting completeness it cannot verify.
+	 * How many records each of the run's bounded stores thinned away. Every store
+	 * is capped and, past the cap, a later record displaces a uniformly chosen
+	 * incumbent (reservoir retention), so what survives describes the whole run,
+	 * not its opening; all zeros means the stored traces and tested responses are
+	 * complete, non-zero that they are a sample. These describe those stores, not
+	 * `results`, which the report route picks failures-first
+	 * ({@link RunReport.resultsStored}, {@link RunReport.resultsCap}). Absent is a
+	 * stored summary that predates the counts or an older sidecar, not "nothing
+	 * dropped", so the UI stays silent rather than assert completeness.
 	 */
 	sampling?: {
 		/**
@@ -4167,15 +3787,12 @@ export interface RunReport {
 		/** Responses displaced or dropped before test validation ran. */
 		responseSamplesDropped: number;
 		/**
-		 * Whether the run's response-sample **byte** budget
-		 * (`max_response_sample_bytes`) ended a sample. The count above cannot
-		 * say it: the store is bounded twice and both bounds report through it,
-		 * but only this one costs the tested set its uniformity - the count cap
-		 * displaces an incumbent, while a spent byte budget stops admitting, so
-		 * the run is graded on the part of it whose bodies fit.
-		 *
-		 * `undefined` is a run recorded before the marker existed, which is not
-		 * the same claim as `false` - see `SampleRetentionNote`.
+		 * Whether the response-sample **byte** budget (`max_response_sample_bytes`)
+		 * ended a sample, which the count above cannot say: both bounds report through
+		 * it, but only this one costs the tested set its uniformity. The count cap
+		 * displaces an incumbent; a spent byte budget stops admitting, so the run is
+		 * graded on the part whose bodies fit. Absent is a run recorded before the
+		 * marker, not `false` (`SampleRetentionNote`).
 		 */
 		responseSampleBudgetSpent?: boolean;
 		/**
@@ -4252,16 +3869,14 @@ export interface RunReport {
 		 */
 		stopped?: number;
 		/**
-		 * A scenario *load* run's exact assertion population (#2820): every
-		 * `assert.*` outcome, required `extract.*` miss and inline `pm.test` call,
-		 * counted on each completion. Not folded into `passed`, `failed` or the
-		 * report's error rate, which stay HTTP-only, so a run whose every assertion
-		 * failed against `200`s reads a 0% error rate and a non-zero
-		 * `assertions.failed`. The sampled replay of an un-inlined script is
-		 * `testValidation`, a different population.
-		 *
-		 * Absent, never `{0, 0}`, for a run that made none, a collection run and a
-		 * report stored before the field. Read it through `exactAssertionsOf`.
+		 * A scenario load run's exact assertion population (#2820): every `assert.*`
+		 * outcome, required `extract.*` miss and inline `pm.test` call, counted per
+		 * completion. Kept out of `passed`, `failed` and the error rate, which stay
+		 * HTTP-only, so a run whose every assertion failed against `200`s reads 0%
+		 * errors and a non-zero `assertions.failed`. The sampled replay of an
+		 * un-inlined script is `testValidation`, another population. Absent, never
+		 * `{0, 0}`, for a run that made none, a collection run and a report from
+		 * before the field; read it through `exactAssertionsOf`.
 		 */
 		assertions?: { passed: number; failed: number };
 		/** Step rows the run kept - the length `results[]` should have. */
@@ -4339,14 +3954,11 @@ export interface RunReport {
 	resultsStored?: number;
 	/**
 	 * The cap the report applied to `results`: 100 for a single-request run,
-	 * equal to {@link RunReport.resultsStored} for a scenario run.
-	 * `resultsStored > resultsCap` is the only signal that `results` is a
-	 * selection and not the whole stored set.
-	 *
-	 * That selection is failures first (every row outside 2xx/3xx, including
-	 * a status `0` transport failure, takes a slot before any success), the
-	 * successes filling the rest, and the chosen rows are listed by
-	 * `timestamp` - not a uniform sample of the run.
+	 * {@link RunReport.resultsStored} for a scenario run. `resultsStored >
+	 * resultsCap` is the only signal that `results` is a selection: failures first
+	 * (every row outside 2xx/3xx, a status `0` transport failure included, takes a
+	 * slot before any success), successes filling the rest, listed by `timestamp`;
+	 * not a uniform sample of the run.
 	 */
 	resultsCap?: number;
 	results?: Array<{
@@ -4402,18 +4014,14 @@ export interface RunSample {
 		binary?: boolean;
 		contentType?: string;
 		/**
-		 * What this sample's stream delivered, when the sampled transfer was a
-		 * stream (issue #657). The engine parses it back out of the stored body
-		 * with the same parser the live path feeds, so the list means exactly
-		 * what the design-mode Events tab's list means.
-		 *
-		 * Absent - not an empty node - for every sample that did not stream, and
-		 * for rows stored before the engine recorded a wire event count.
-		 * `totalEvents` is that wire count, so it stays truthful when
-		 * `bodyTruncated` cut the bytes the items were parsed from;
-		 * `eventsTruncated` covers both that cut and the `sseMaxStoredEvents`
-		 * cap. No `endReason`: under load a stream ends by server close or by
-		 * one of two caps, and nothing per sample says which.
+		 * What this sample's stream delivered (#657), parsed back out of the stored
+		 * body by the parser the live path feeds, so the list means what the
+		 * design-mode Events tab's does. Absent (not an empty node) for a sample that
+		 * did not stream and for rows stored before the wire event count. `totalEvents`
+		 * is that wire count, so it stays true when `bodyTruncated` cut the parsed
+		 * bytes; `eventsTruncated` covers that cut and the `sseMaxStoredEvents` cap. No
+		 * `endReason`: under load a stream ends by server close or one of two caps, and
+		 * nothing per sample says which.
 		 */
 		events?: Omit<RunResultStreamEvents, "endReason" | "startedAt">;
 	};
@@ -4431,21 +4039,18 @@ export interface RunSamplesResponse {
 }
 
 /**
- * What the engine's startup did about a database it could not open (issue
- * #922).
+ * What the engine's startup did about a database it could not open (#922).
+ * Every outcome but `restored_from_backup` is data loss (the user comes back to
+ * an empty workspace); they differ in what is left to salvage:
  *
- * Every outcome but `restored_from_backup` is data loss - the workspace the
- * user comes back to is empty. What separates them is what is left to salvage:
- *
- * - `restored_from_backup` - the `<db>.bak` beside it passed the same
- *   validation and was restored over it. Only what was saved since that backup
- *   was taken is gone.
- * - `started_fresh_quarantined` - nothing restored it (there was no backup), so
- *   it was moved aside and a fresh one created (issue #984).
- * - `backup_also_corrupt` - there *was* a backup and it failed the same
- *   validation, so it was left untouched rather than written over the original.
- * - `deleted_corrupt` - it was **deleted**. Written by engines before #984, and
- *   still by one whose quarantine rename failed; there is nothing to recover.
+ * - `restored_from_backup`: the `<db>.bak` passed the same validation and was
+ *   restored over it; only what was saved since that backup is gone.
+ * - `started_fresh_quarantined`: no backup, so it was moved aside and a fresh
+ *   one created (#984).
+ * - `backup_also_corrupt`: the backup failed the same validation and was left
+ *   untouched rather than written over the original.
+ * - `deleted_corrupt`: it was **deleted**, by an engine before #984 or one whose
+ *   quarantine rename failed; nothing to recover.
  *
  * The first three leave the bytes on disk, and `quarantinedPath` says where.
  */
@@ -4460,12 +4065,10 @@ export interface EngineRecovery {
 	/** The database file the outcome happened to - the data directory, in effect. */
 	databasePath: string;
 	/**
-	 * Where the unopenable database was moved to, when it was moved rather than
-	 * deleted - the file `sqlite3 <path> .recover` reads.
-	 *
-	 * Absent for a `deleted_corrupt` marker and for any written by an engine
-	 * that predates the quarantine, so it is tested for rather than derived
-	 * from `outcome`.
+	 * Where the unopenable database was moved, when moved rather than deleted: the
+	 * file `sqlite3 <path> .recover` reads. Absent for `deleted_corrupt` and from
+	 * an engine before the quarantine, so test for it rather than derive it from
+	 * `outcome`.
 	 */
 	quarantinedPath?: string;
 }
@@ -4507,10 +4110,9 @@ export interface ConfigEntry {
 	min?: string;
 	max?: string;
 	/**
-	 * Whether the running engine keeps the old value until it is restarted.
-	 * Typed metadata the engine always sends (`config_entry_json`), replacing
-	 * the "(Requires Restart)" label substring both this app and the MCP
-	 * `update_config` tool used to parse out of the prose.
+	 * Whether the running engine keeps the old value until it is restarted. Typed
+	 * metadata the engine always sends (`config_entry_json`), so nothing parses
+	 * "(Requires Restart)" out of the prose.
 	 */
 	requiresRestart: boolean;
 	/**
@@ -4520,29 +4122,23 @@ export interface ConfigEntry {
 	 */
 	advanced: boolean;
 	/**
-	 * Extra terms the settings search matches on - what a user types that this
-	 * entry's key, label and description never say ("ram" for `dbCacheSize`,
-	 * "deadline" for `defaultTimeout`). Always sent, empty for the entries that
-	 * declare none, so "no keywords" never has to be told from "not sent".
-	 *
-	 * **Never rendered**, which is the one deliberate exception to this repo's
-	 * "written but never read" rule: the reader is `buildSettingsIndex`
-	 * (`lib/settings-index.ts`), not a component. Do not go looking for the UI
-	 * that shows these - there is none, by design.
+	 * Extra terms the settings search matches on, which the key, label and
+	 * description never say ("ram" for `dbCacheSize`, "deadline" for
+	 * `defaultTimeout`). Always sent, `[]` for an entry declaring none. **Never
+	 * rendered**, the one deliberate exception to the "written but never read"
+	 * rule: the reader is `buildSettingsIndex` (`lib/settings-index.ts`), not a
+	 * component, and no UI shows these.
 	 */
 	keywords: string[];
 	/**
-	 * What a numeric entry's value measures - `"ms"`, `"sec"`, `"days"` or
-	 * `"bytes"` today. Absent means the number is a count (workers, retained
-	 * runs), which has no unit; the engine omits the key rather than sending
-	 * null, the same as `min` / `max` / `options`.
-	 *
-	 * Rendered as the suffix inside the input, which is where a unit is stated
-	 * once - so a description must not spell it out as well (the engine guards
-	 * its seeds for that). `"bytes"` additionally selects the human-readable
-	 * byte formatting for the value, the range hint and the default line; any
-	 * other unit is shown verbatim, so a unit this app has never heard of still
-	 * reaches the screen instead of vanishing.
+	 * What a numeric entry's value measures: `"ms"`, `"sec"`, `"days"` or
+	 * `"bytes"` today. Absent is a count (workers, retained runs), which has no
+	 * unit; the engine omits the key rather than send `null`, as for `min` / `max`
+	 * / `options`. Rendered once, as the suffix inside the input, so a description
+	 * must not repeat it (the engine guards its seeds for that). `"bytes"` also
+	 * selects human-readable byte formatting for the value, range hint and default
+	 * line; any other unit is shown verbatim, so an unknown one still reaches the
+	 * screen.
 	 */
 	unit?: string;
 	updatedAt: number;
@@ -4764,16 +4360,13 @@ export interface McpDataChangedEvent {
 	 */
 	mockId?: string;
 	/**
-	 * The run this call just started, and which run service watches it (#1419).
-	 *
-	 * The one field here that is not a scope hint: it says the run is *live*, and
-	 * `useRunWatchers` reads it to attach the matching service's stream to a run
-	 * no surface of this app started - which is what gives an agent's run the OS
-	 * progress indicator, the keep-awake hold and the finished notification it
-	 * would otherwise only get once its dashboard tab was opened.
-	 *
-	 * Present on the `run` event of `start_load_run` and `run_collection` and on
-	 * no other: the remaining `run` tools name a run that already exists.
+	 * The run this call just started and which run service watches it (#1419).
+	 * The one field that is not a scope hint: it says the run is live, and
+	 * `useRunWatchers` reads it to attach that service's stream to a run no
+	 * surface of this app started, which gives an agent's run the OS progress
+	 * indicator, keep-awake hold and finished notification without its dashboard
+	 * tab open. Only on the `run` event of `start_load_run` and `run_collection`:
+	 * the other `run` tools name a run that already exists.
 	 */
 	startedRun?: StartedRun;
 }
