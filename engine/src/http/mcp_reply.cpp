@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The MCP reply reader. See `vayu/http/mcp_reply.hpp`.
- */
+/** The MCP reply reader. See `vayu/http/mcp_reply.hpp`. */
 
 #include "vayu/http/mcp_reply.hpp"
 
