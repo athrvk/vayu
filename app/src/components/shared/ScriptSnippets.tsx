@@ -6,32 +6,21 @@
  */
 
 /**
- * The templates a script editor offers, insertable at the cursor.
+ * The templates a script editor offers, insertable at the cursor, the one surface listing them for
+ * both hosts (#1223). The engine's completion table carries every template with placeholders and
+ * docs, and Monaco shows them as you type; its `context` says which script kind each belongs in,
+ * which is what makes them listable.
  *
- * **It replaced two walls of prose.** Under every script editor sat a 14-line
- * `<pre>` and nine paragraphs of rules the reader could only retype (the request
- * panel), and a second, differently shaped four-card grid on the collection tab
- * (#1223). Neither could be inserted, and between them they restated a subset of
- * what the editor already knows: the engine's completion table carries every one
- * of those lines as a template with placeholders and documentation, and Monaco
- * shows them as you type. What the table could not say was which script kind a
- * template belongs in, so it could not be *listed*; it says so now (`context`),
- * and this is the one surface that lists it, for both hosts.
+ * **`Command`, not a hand-rolled list**: arrows, highlight, Enter and filtering are `cmdk`'s, as in
+ * the palette and header suggestions; a second copy of that keyboard handling is what
+ * `suggestion-list.tsx` ended.
  *
- * **`Command`, not a hand-rolled list.** Arrow keys, the highlight, Enter to
- * activate and filtering are all `cmdk`'s, which the palette and the header
- * suggestions already use - a second copy of that keyboard handling is the
- * defect `suggestion-list.tsx` was written to end.
- *
- * **Collapsed by default, remembered by the host.** The editor is what the
- * panel is for. A list open under every editor would be the wall it replaced
- * with a chevron on it. The collapsed flag is a controlled prop rather than
- * this component's own `layout-store` read (issue #1605): the Elements tab can
- * mount a `script.pre` and a `script.post` row on one screen, and a single
- * store subscription here would toggle both at once. The host (`ScriptElementForm`)
- * seeds its own per-row state from the store's persisted default and writes a
- * toggle back to it, so the *next* row a user opens still starts the way they
- * last left one - only two rows already on screen no longer share the toggle.
+ * **Collapsed by default, remembered by the host**: the editor is what the panel is for, and an
+ * open list under every editor would be a wall of prose with a chevron. The flag is a controlled
+ * prop, not a `layout-store` read here (#1605): the Elements tab can mount a `script.pre` and a
+ * `script.post` row at once, and one subscription would toggle both. The host (`ScriptElementForm`)
+ * seeds per-row state from the store's persisted default and writes toggles back, so the *next* row
+ * opens as the user last left one while two rows on screen do not share it.
  */
 
 import { useState } from "react";
@@ -58,9 +47,8 @@ import type { ScriptSnippetContext } from "@/types/domain";
 
 export interface ScriptSnippetsProps {
 	/**
-	 * Which editor this list sits under. `"both"` is a script that runs outside
-	 * any request (setup, teardown): only the templates that need neither
-	 * `pm.request` nor `pm.response`.
+	 * Which editor this list sits under; `"both"` is a script running outside any request (setup,
+	 * teardown), offering only templates needing neither `pm.request` nor `pm.response`.
 	 */
 	context: ScriptSnippetContext;
 	/** Whether the list is folded to its header. */
@@ -68,16 +56,15 @@ export interface ScriptSnippetsProps {
 	/** Called with the toggled value when the header is clicked. */
 	onCollapsedChange: (collapsed: boolean) => void;
 	/**
-	 * Insert the template. The host owns the editor instance, so it owns the
-	 * insertion; this list says which template was chosen and narrates what came
-	 * back.
+	 * Insert the template: the host owns the editor, so it owns insertion; this list says which
+	 * template was chosen and narrates what came back.
 	 */
 	onInsert: (snippet: string) => SnippetInsertion | null;
 }
 
 /**
- * How each landing reads out loud, in the shape the GraphQL explorer's
- * `PLACEMENT_PHRASE` set: "Inserted X <phrase>."
+ * How each landing reads aloud, in the GraphQL explorer's `PLACEMENT_PHRASE` shape: "Inserted X
+ * <phrase>."
  */
 const PLACEMENT_PHRASE: Record<SnippetPlacement, string> = {
 	cursor: "at the cursor",
@@ -96,11 +83,9 @@ export function ScriptSnippets({
 	const total = countSnippets(groups);
 
 	/*
-	 * What just happened, said out loud - the explorer's pattern and its reason
-	 * (`GraphQLBody.tsx`): an insertion lands out of sight of the list that
-	 * asked for it, and a live region only speaks when its text *changes*, so
-	 * the same template twice would be silent the second time and read as the
-	 * click not landing. The sequence number is what makes the repeat audible.
+	 * What just happened, said aloud (the explorer's pattern, `GraphQLBody.tsx`): an insertion
+	 * lands out of the list's sight, and a live region speaks only when its text *changes*, so the
+	 * same template twice would be silent; the sequence number makes the repeat audible.
 	 */
 	const [announcement, setAnnouncement] = useState<{ text: string; seq: number }>({
 		text: "",
@@ -109,10 +94,9 @@ export function ScriptSnippets({
 	const say = (text: string) => setAnnouncement((prev) => ({ text, seq: prev.seq + 1 }));
 
 	/*
-	 * The one outcome with nothing to look at. An insertion shows itself in the
-	 * editor; a refusal reaching `sr-only` text alone is a click that, to a
-	 * sighted user, did nothing - which is the defect this whole surface was
-	 * fixed for. Cleared by the next insertion that lands.
+	 * The one outcome with nothing to look at: an insertion shows in the editor, but a refusal in
+	 * `sr-only` text alone is, to a sighted user, a click that did nothing. Cleared by the next
+	 * insertion that lands.
 	 */
 	const [notice, setNotice] = useState("");
 
@@ -132,9 +116,8 @@ export function ScriptSnippets({
 	return (
 		<Collapsible open={!collapsed} onOpenChange={(open) => onCollapsedChange(!open)}>
 			{/*
-			 * The whole header is the control, per the composite-row hit-area rule:
-			 * a narrow activator in a wide bar leaves most of the row painting a
-			 * hover it does not act on.
+			 * The whole header is the control (the composite-row hit-area rule): a narrow activator
+			 * in a wide bar leaves most of it hovering without acting.
 			 */}
 			<CollapsibleTrigger
 				className={cn(
@@ -162,13 +145,11 @@ export function ScriptSnippets({
 
 			<CollapsibleContent className="mt-2">
 				{/*
-				 * A `Card`, not a sunken slab, because `Command` declares
-				 * `bg-card surface-card` itself (as `Card` does): a `bg-transparent`
-				 * override would replace the background utility and leave the surface
-				 * class standing, so the filter field's own `border-rule`
-				 * would resolve to the card's value inside a sunken box. One
-				 * surface for the box and its contents is the only spelling
-				 * where every rule inside it reads on what it sits on.
+				 * A `Card`, not a sunken slab: `Command` declares `bg-card surface-card` itself, so
+				 * a `bg-transparent` override would replace the background and leave the surface
+				 * class, and the filter's `border-rule` would resolve to the card's value in a
+				 * sunken box. One surface for box and contents is the only spelling where every
+				 * rule reads on what it sits on.
 				 */}
 				<Card className="overflow-hidden">
 					{isError ? (

@@ -22,17 +22,13 @@ export type ExactAssertions = AssertionPopulation;
 type AssertionSources = Pick<RunReport, "assertions" | "scenario" | "elements" | "testValidation">;
 
 /**
- * A load run's assertion block (#3537): the report's own `assertions`, or, from
- * an engine before the block, what its fields said then. A scenario run's
- * `scenario.assertions` is `exact` alone, its sampled replay unread; a
- * single-request run's top-level `elements` failures are `exact` and its
- * `testValidation` is `sampled` (#3458). Neither derives `errored` or
- * `teardownFailed`, so an old report keeps the verdict it had. `undefined`
- * when the report states none.
- *
- * The one read of the block for a report: the verdict (`reportOutcome`), the
- * key-metrics tile and the Overview's Assertions card (`exactAssertionsOf`)
- * all go through it, so a pill and a tile cannot come from two fields.
+ * A load run's assertion block (#3537): the report's `assertions`, or what an older engine's fields
+ * said. A scenario run's `scenario.assertions` is `exact` alone, its sampled replay unread; a
+ * single-request run's top-level `elements` failures are `exact` and its `testValidation` `sampled`
+ * (#3458). Neither derives `errored` or `teardownFailed`, so an old report keeps its verdict;
+ * `undefined` when the report states none. The one read of the block: the verdict
+ * (`reportOutcome`), the key-metrics tile and the Overview's Assertions card (`exactAssertionsOf`)
+ * all use it, so a pill and a tile cannot come from two fields.
  */
 export function reportAssertionsOf(report: AssertionSources): RunAssertions | undefined {
 	if (report.assertions) return report.assertions;
@@ -65,10 +61,9 @@ function singleRequestAssertionsBeforeBlock({
 }
 
 /**
- * The list row's assertion block (#3537), the row-side twin of
- * {@link reportAssertionsOf}. A row from an engine before the block carries
- * the flat `assertionsFailed` alone, read as `exact` - the reading it had,
- * since that row could not say which population a failure came from.
+ * The list row's assertion block (#3537), the row twin of {@link reportAssertionsOf}; an older
+ * row's flat `assertionsFailed` reads as `exact`, the reading it had, as it could not name a
+ * population.
  */
 export function rowAssertionsOf(summary: LoadResultSummary): RunAssertions | undefined {
 	if (summary.assertions) return summary.assertions;
@@ -77,12 +72,11 @@ export function rowAssertionsOf(summary: LoadResultSummary): RunAssertions | und
 }
 
 /**
- * A scenario load run's exact assertion population (#2820), or `undefined` when
- * the run made none: no `assert.*` element, no required `extract.*` and no
- * inline `pm.test`, or a collection run, or a report stored before the field.
- * A single-request run answers `undefined` too, which is how the cards know
- * there is no Assertions block: its exact tallies are the Overview's element
- * rows. The block's `exact` is written at zero; the card is not.
+ * A scenario load run's exact assertion population (#2820), or `undefined` when it made none (no
+ * `assert.*`, no required `extract.*`, no inline `pm.test`), for a collection run and for a report
+ * stored before the field. A single-request run answers `undefined` too, so the cards draw no
+ * Assertions block, its exact tallies being the Overview's element rows. The block's `exact` is
+ * written at zero; the card is not.
  */
 export function exactAssertionsOf(
 	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
@@ -104,9 +98,8 @@ export function assertionsFailedPhrase(failed: number | undefined): string | nul
 }
 
 /**
- * A load run's failed checks, by kind: what keeps met budgets from reading
- * passed (#3537). The two assertion populations stay apart because the reason
- * has to say which one failed (#3458).
+ * A load run's failed checks by kind, what keeps met budgets from reading passed (#3537); the two
+ * assertion populations stay apart, as the reason must say which failed (#3458).
  */
 export interface FailedChecks {
 	/** Every response: `assertions.exact.failed`. */
@@ -130,9 +123,8 @@ export function failedChecksOf(assertions: RunAssertions | undefined): FailedChe
 }
 
 /**
- * Why a run that met its budgets is still not a pass, for failed assertions:
- * `150 assertions failed`, `4 assertions failed in the sampled replay`, or both.
- * `null` when none failed.
+ * Why a run that met its budgets is not a pass, for failed assertions: `150 assertions failed`,
+ * `4 assertions failed in the sampled replay`, or both; `null` when none failed.
  */
 export function failedAssertionsReason(
 	exact: number | undefined,
@@ -146,10 +138,9 @@ export function failedAssertionsReason(
 }
 
 /**
- * Every failed check, worded and in the verdict's order: assertions, then
- * `3 elements errored`, then `1 teardown script failed`. The run-report
- * export's verdict line words them the same (`failed_checks_text`,
- * `engine/src/core/run_export_view.cpp`), held to this by
+ * Every failed check, worded, in the verdict's order: assertions, then `3 elements errored`, then
+ * `1 teardown script failed`. The run-report export's verdict line words them alike
+ * (`failed_checks_text`, `engine/src/core/run_export_view.cpp`), held by
  * `engine/tests/fixtures/run-verdict-conformance.json`. Empty when none failed.
  */
 export function failedCheckPhrases(checks: Partial<FailedChecks>): string[] {
@@ -165,10 +156,9 @@ export const TEST_VALIDATION_TITLE = "Test validation";
 export const SAMPLED_REPLAY_TITLE = "Sampled replay";
 
 /**
- * What the sampled-replay card is called on this report. A run that also shows
- * the exact assertions (#2820) retitles it, so the two populations are never
- * both "Test validation"; every pointer at the card (`ElementTally`'s deferred
- * row) asks here too, so the pointer names a card that exists.
+ * What the sampled-replay card is called on this report: a run also showing exact assertions
+ * (#2820) retitles it, so the two are never both "Test validation"; pointers at the card
+ * (`ElementTally`'s deferred row) ask here, naming a card that exists.
  */
 export function testValidationTitleOf(
 	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
@@ -177,9 +167,9 @@ export function testValidationTitleOf(
 }
 
 /**
- * The responses a step's deferred post-request scripts were left to replay
- * (`script.*` elements' `deferred`, summed). Zero for a step with none, and for
- * a report stored before #2144, which tallied the replayed script as `skipped`.
+ * The responses a step's deferred post-request scripts were left to replay (`script.*` elements'
+ * `deferred`, summed); zero without any, and for a report predating #2144, which tallied the
+ * replayed script as `skipped`.
  */
 export function deferredResponsesOf(step: Pick<RunScenarioStepStat, "elements">): number {
 	let total = 0;
@@ -214,10 +204,9 @@ export interface ReplayScope {
 }
 
 /**
- * What the sampled replay was a sample *of*, or `undefined` when the report is
- * not a scenario load run or no step deferred a script (#2824). The request
- * total is the wrong denominator there: most requests of a sequence carry no
- * test script at all, so they are not "not kept".
+ * What the sampled replay sampled, or `undefined` outside a scenario load run or when no step
+ * deferred a script (#2824): the request total is the wrong denominator there, as most of a
+ * sequence's requests carry no test script, so they are not "not kept".
  */
 export function replayScopeOf(
 	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined

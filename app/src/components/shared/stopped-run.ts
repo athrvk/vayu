@@ -6,13 +6,10 @@
  */
 
 /**
- * What the budgets card needs to say about a run that was stopped (issue #2194):
- * the engine judges a stopped run on what it measured before the stop, and a
- * verdict that reads "Passed" over three seconds of a twenty-second plan is a
- * weaker claim than the same word over the whole plan.
- *
- * Both hosts of {@link ThresholdVerdict} hold the full report, so the reading
- * is done here once rather than in each.
+ * What the budgets card says about a stopped run (#2194): the engine judges it on what it measured
+ * before the stop, and "Passed" over three seconds of a twenty-second plan is a weaker claim than
+ * the same word over the whole plan. Both hosts of {@link ThresholdVerdict} hold the full report,
+ * so the reading is done here.
  */
 
 import { durationSeconds } from "@/constants/load-test";
@@ -30,9 +27,8 @@ function positive(value: number | undefined): number | undefined {
 }
 
 /**
- * Seconds the run actually ran. The engine's own `totalDurationSeconds` is the
- * stored wall clock of the run, so it wins; the start/end stamps stand in for a
- * summary that never reported one.
+ * Seconds the run ran: the engine's `totalDurationSeconds`, the stored wall clock, wins; the
+ * start/end stamps stand in for a summary without one.
  */
 function elapsedSecondsOf(report: Pick<RunReport, "metadata" | "summary">): number | undefined {
 	const reported = positive(report.summary?.totalDurationSeconds);

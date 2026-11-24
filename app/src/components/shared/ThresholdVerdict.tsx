@@ -6,21 +6,13 @@
  */
 
 /**
- * The run's verdict against the pass/fail budgets it declared.
- *
- * The aggregate half of the report's judgement: a test script asserts one
- * response at a time and structurally cannot say whether the run's p99 or its
- * error rate met a budget, so a run where every assertion passed can still have
- * missed the thing it was run to check.
- *
- * The history detail's Overview shows it, which is also the dashboard's view of
- * a finished run (#2220). Silent when the run declared no budgets: an absent section says
- * "not judged", which is a different claim from "judged and passed nothing" and
- * is the reason a run without budgets renders exactly as it did before.
- *
- * A single check can itself be unmeasurable (issue #1484): a latency ceiling
- * checked against zero completed requests has no number to compare, and
- * showing "0ms" there would read as a real - and passing - measurement.
+ * The run's verdict against its declared pass/fail budgets: the aggregate half of the judgement, as
+ * a test script asserts one response at a time and cannot say whether the p99 or error rate met a
+ * budget, so a run passing every assertion can miss what it was run to check. Shown by the history
+ * Overview, the dashboard's view of a finished run (#2220). Silent without budgets: absent says
+ * "not judged", a different claim from "judged and passed nothing". A check can be unmeasurable
+ * (#1484): a latency ceiling over zero completed requests has no number, and "0ms" would read as a
+ * real, passing measurement.
  */
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -44,10 +36,9 @@ function formatSpan(seconds: number): string {
 }
 
 /**
- * The verdict's pass/fail counts are the engine's and stay as they are; this
- * only says how much of the plan they were judged over. The planned span is
- * dropped once the run reached it (a stop in the last instant), where "of a
- * planned" would describe a shortfall that did not happen.
+ * The pass/fail counts are the engine's; this says how much of the plan they covered. The planned
+ * span is dropped once the run reached it (a stop in the last instant), where "of a planned" would
+ * describe a shortfall that did not happen.
  */
 function stoppedNote({ elapsedSeconds, plannedSeconds }: StoppedRun): string {
 	const judged = "Judged on what was measured up to that point.";
@@ -66,9 +57,9 @@ function populationPhrase({ passed, failed }: AssertionPopulation, scope: string
 }
 
 /**
- * `sampleRate` is a keep-1-in-N period; absent only if a sidecar omitted it. The
- * wording names the period, not a share of the responses: the engine's reservoir
- * cap can leave the replayed set sparser than 1 in N on a long run.
+ * `sampleRate` is a keep-1-in-N period, absent only if a sidecar omitted it; the wording names the
+ * period, not a share, as the reservoir cap can leave a long run's replayed set sparser than 1 in
+ * N.
  */
 function sampledScope(sampleRate: number | undefined): string {
 	if (sampleRate === undefined) return "on sampled responses";
@@ -77,15 +68,14 @@ function sampledScope(sampleRate: number | undefined): string {
 }
 
 /**
- * Which population the assertion budget's verdict came from (#2892): it judges
- * the worse of the exact inline tally and the sampled `pm.test` replay, and a
- * rate over the blended count would hide a sampled test failing every time.
- * Silent unless the sampled population ran, so a report from before the split
- * and a run with no test script read as they always did.
+ * Which population the assertion budget's verdict came from (#2892): it judges the worse of the
+ * exact inline tally and the sampled `pm.test` replay, as a blended rate would hide a sampled test
+ * failing every time. Silent unless the sampled population ran, so older reports and runs without a
+ * test script read as before.
  */
 function assertionPopulationsNote(check: Check): string | null {
 	const { assertionsExact: exact, assertionsSampled: sampled, sampleRate } = check;
-	// An unmeasurable row reads "no samples"; a population line beside it would contradict that.
+	// An unmeasurable row reads "no samples", which a population line would contradict.
 	if (check.evaluated === false) return null;
 	if (!sampled || sampled.passed + sampled.failed === 0) return null;
 	const sampledPhrase = populationPhrase(sampled, sampledScope(sampleRate));
@@ -95,17 +85,14 @@ function assertionPopulationsNote(check: Check): string | null {
 
 export interface ThresholdVerdictProps {
 	verdict: RunReport["thresholdValidation"];
-	/**
-	 * Present for a run that was stopped (`stoppedRunOf`): the card then says the
-	 * verdict covers only what ran. Absent for every other run.
-	 */
+	/** For a stopped run (`stoppedRunOf`): the card says the verdict covers only what ran. */
 	stopped?: StoppedRun;
 	/** The run that was judged; each check's "Copy for agent" is absent without it. */
 	runId?: string;
 	/**
-	 * The `thresholds` keys the run's client sent as carried over rather than set
-	 * for it (issue #2195), from `metadata.configuration.carriedBudgets`. A check
-	 * whose metric is listed is tagged; a listed key with no check is ignored.
+	 * The `thresholds` keys the client sent as carried over rather than set (#2195), from
+	 * `metadata.configuration.carriedBudgets`: a listed check is tagged, a listed key with no check
+	 * ignored.
 	 */
 	carriedBudgets?: readonly string[];
 	className?: string;
@@ -121,12 +108,12 @@ export function ThresholdVerdict({
 	if (!verdict || verdict.checks.length === 0) return null;
 
 	const failed = verdict.failed > 0;
-	// Absent (a pre-#1484 engine) reads as evaluated - that engine never wrote
-	// the field and never had the gap it now closes either.
+	// Absent (a pre-#1484 engine) reads as evaluated: that engine never wrote the field nor had the
+	// gap.
 	const unmeasurable = verdict.checks.filter((check) => check.evaluated === false).length;
 	const carried = new Set(carriedBudgets);
-	// Counted over the checks, not the list: the list is the client's record and
-	// can name a key the engine did not judge.
+	// Counted over the checks, not the list, which is the client's record and can name an unjudged
+	// key.
 	const carriedCount = verdict.checks.filter((check) => carried.has(check.metric)).length;
 
 	return (
@@ -134,19 +121,13 @@ export function ThresholdVerdict({
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle>Pass/fail budgets</CardTitle>
 				{/*
-				 * `Badge variant="chip"`, not a hand-rolled span. `chip` is the
-				 * one variant that lets a caller own the background without
-				 * inheriting a `hover:bg-*` it cannot override - `cn()` is
-				 * tailwind-merge, which replaces `bg-*` but treats `hover:bg-*`
-				 * as a different group - and going through the primitive is also
-				 * what supplies the radius. A box with *no* radius class at all
-				 * is pinned square for a user who chose the Rounded setting, and
-				 * no source scan can flag that (app/CLAUDE.md, "No bare
-				 * `rounded`").
-				 *
-				 * Text on a tint, never the bare fill as a foreground:
-				 * `--status-*` is an indicator token and fails contrast as a
-				 * label, so the three-token rule sends the word to `-text`
+				 * `Badge variant="chip"`, not a hand-rolled span: `chip` lets a caller own the
+				 * background without a `hover:bg-*` it cannot override (`cn()`'s tailwind-merge
+				 * replaces `bg-*` but files `hover:bg-*` apart), and the primitive supplies the
+				 * radius: a box with none is square for a Rounded user, which no source scan flags
+				 * (app/CLAUDE.md, "No bare `rounded`"). Text on a tint, never the bare fill as
+				 * foreground: `--status-*` is an indicator token failing contrast as a label, so
+				 * the three-token rule sends the word to `-text`
 				 * (docs/design-system/accent-and-status.md, "Status tokens").
 				 */}
 				<Badge
@@ -174,13 +155,11 @@ export function ThresholdVerdict({
 					{verdict.checks.map((check) => {
 						const meta = THRESHOLD_METRICS[check.metric];
 						const unit = meta?.unit ?? "";
-						// The comparator has to follow the metric: a throughput
-						// floor passes *above* its limit, and printing it with a
-						// "≤" would describe the opposite budget from the one the
-						// verdict beside it was computed against.
+						// The comparator follows the metric: a throughput floor passes *above* its
+						// limit, and "≤" would describe the opposite budget from the one judged.
 						const comparator = meta?.floor ? "≥" : "≤";
-						// A pre-#1484 report has no `evaluated` key at all and reads as
-						// measured, the same value that engine effectively assumed.
+						// A pre-#1484 report has no `evaluated` key and reads as measured, as that
+						// engine assumed.
 						const evaluated = check.evaluated !== false;
 						const populations = assertionPopulationsNote(check);
 

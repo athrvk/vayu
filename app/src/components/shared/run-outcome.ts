@@ -6,62 +6,45 @@
  */
 
 /**
- * Did a load run pass, fail, or was it never judged (#2130)?
+ * Did a load run pass, fail, or was it never judged (#2130)? `status` says how a run *ended*:
+ * `completed` is ran-to-the-end, and a missed budget or half-erroring run is `completed` too, so
+ * the success glyph would read as an unearned pass. This is the one place budgets and error rate
+ * become a verdict, so the dashboard banner and header, the history detail's banner and the history
+ * row's glyph cannot disagree.
  *
- * `status` says how a run *ended*: `completed` means it ran to its end, not that
- * the target held up. A run with a missed budget, or with half its responses
- * erroring, is still `completed`, and drawing it with the success glyph reads as
- * a pass nobody earned. This is the one place that turns a run's budgets and its
- * error rate into a verdict, so the dashboard banner and header, the history
- * detail's banner and the history list's row glyph cannot disagree.
+ * - **failed** - the status is `failed`, or a declared budget was missed.
+ * - **passed** - every declared budget was met, no request errored and no check failed.
+ * - **not-judged** - nothing declared a pass/fail line, or the run's errors undercut the budgets
+ *   that passed (a latency ceiling met by all-instant 500s). Never green: no failure is not a pass.
  *
- * - **failed** - the run's status is `failed`, or a declared budget was missed.
- * - **passed** - every declared budget was met, no request errored and no check
- *   failed.
- * - **not-judged** - nothing declared a pass/fail line, or the run's own errors
- *   undercut the budgets that passed (a latency ceiling can be met by a run whose
- *   responses are all instant 500s). Never green: absence of a failure is not a
- *   pass.
+ * A failed check is evidence like an error: a scenario load run whose every `assert.*` failed
+ * against `200`s has 0% errors and met its latency budget, and drawing it green says the checks
+ * held (#2820). It is **not-judged**, as **failed** is reserved for a declared line missed (a
+ * broken `maxAssertionFailureRatePct` is already `failed` through the budgets). The failed checks
+ * are the run's assertion block (#3537), alike for every load run kind: a failed assertion of
+ * either population, exact or the sampled replay's (#3458), an errored element execution, a failed
+ * teardown script. The reason names each, on the met-budgets and no-budgets line alike, in the
+ * run-report export's words and order (`engine/tests/fixtures/run-verdict-conformance.json`).
  *
- * A failed check is the same kind of evidence as an error: a scenario load run
- * whose every `assert.*` failed against `200`s has a 0% error rate and met its
- * latency budget, and drawing it green says the checks held (#2820). It is
- * **not-judged**, not **failed**, because **failed** is reserved for a line the
- * run declared and missed - a run that declared `maxAssertionFailureRatePct`
- * and broke it is already `failed` through its budgets. The failed checks are
- * the run's assertion block (#3537), the same for every load run kind: a failed
- * assertion of either population, exact or the sampled replay's (#3458), an
- * element execution that errored and a teardown script that failed. The reason
- * names every one, on the met-budgets and the no-budgets line alike, in the
- * words and order of the run-report export's verdict line
- * (`engine/tests/fixtures/run-verdict-conformance.json`).
+ * A collection run is judged by `judgeCollection`, from its row (`rowOutcome`) or opened report
+ * (`collectionReportOutcome`, #3543), the same either way: **failed** when a step failed or errored
+ * or a budget was missed (#3539), else `null`, met budgets included.
  *
- * A collection run is judged by `judgeCollection`, not by the rules above, from
- * its list row (`rowOutcome`) or from its opened report
- * (`collectionReportOutcome`, #3543), with the same answer either way: it is
- * **failed** when a step failed or errored or its budgets were missed (#3539),
- * and otherwise says nothing (`null`), met budgets included.
+ * A Stop cutting the end-of-run drain with requests outstanding leaves the run `completed` with the
+ * budgets its answered requests met, but those are not the run: a cancelled request is in no total,
+ * rate or latency, and the ones the drain awaited are by construction its slowest and hung ones
+ * (#3538). Such a run (`summary.drainCut`, absent unless a Stop cut something) is **not-judged**,
+ * naming how many went unanswered and nothing else. It ranks below **failed** (a missed budget is
+ * already known) and above every met-budget and no-budget reason, failed checks and errors
+ * included; a Stop before the drain is **stopped**. The export's `drain_stopped` code is the same
+ * verdict (`run-verdict-conformance.json`).
  *
- * A Stop that cuts the end-of-run drain with requests still outstanding leaves
- * the run `completed` with the budgets its answered requests met, but those
- * answered requests are not the run: a cancelled request is in no total, rate or
- * latency, and the ones the drain was still waiting on are by construction its
- * slowest and hung ones (#3538). Such a run (`summary.drainCut`, absent unless a
- * Stop cut something) is **not-judged**, naming how many requests were
- * unanswered and nothing else. It ranks below **failed** (a missed budget is
- * already known) and above every met-budget and no-budget reason, the failed
- * checks and errors included; a Stop before the drain is **stopped**, as above.
- * The export's `drain_stopped` code is the same verdict
- * (`run-verdict-conformance.json`).
+ * A budget the run could not measure (`evaluated: false`, #1484) is counted failed by the engine
+ * (`passed: false`, in `failed`), so it lands in **failed** and is named like any missed budget.
  *
- * A budget the run could not measure (`evaluated: false`, issue #1484) is
- * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
- * **failed** here and is named like any other missed budget.
- *
- * `null` means there is nothing to say: the run is still pending or running, or
- * its report or list summary is missing. A banner built on `null` renders
- * nothing, because "not judged" over a report that has not arrived would claim
- * something about a run that has not been looked at.
+ * `null` means nothing to say: the run is pending or running, or its report or list summary is
+ * missing. A banner on `null` renders nothing, as "not judged" over an unarrived report would claim
+ * something about a run nobody looked at.
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -92,19 +75,19 @@ export interface RunJudgement {
 }
 
 /**
- * The failed checks (#3537) are optional: absent or 0 changes nothing, any
- * positive count keeps met budgets from reading `passed`.
+ * The failed checks (#3537) are optional: absent or 0 changes nothing, any positive count keeps met
+ * budgets from reading `passed`.
  */
 export interface RunOutcomeInput extends Partial<FailedChecks> {
 	status: string;
 	/**
-	 * The report's budget block - carries the metric names, so the reason can
-	 * name what was missed. Wins over {@link verdict} when both are given.
+	 * The report's budget block, whose metric names let the reason name what was missed; beats
+	 * {@link verdict} when both are given.
 	 */
 	thresholdValidation?: RunReport["thresholdValidation"];
 	/**
-	 * The list row's budget verdict, for a caller with no check names. Absent
-	 * means no budget judged the run.
+	 * The list row's budget verdict, for a caller without check names; absent means no budget
+	 * judged the run.
 	 */
 	verdict?: "passed" | "failed";
 	/** Percent, 0-100. Absent when the run recorded no request. */
@@ -149,10 +132,9 @@ function failedReason(budgets: Budgets): string {
 }
 
 /**
- * "1 of 3 budgets missed: p99" for a budget block that missed one, in the
- * failed verdict's words, or `null` when every budget was met or none was
- * declared. A collection run's terminal notification and its spoken ending say
- * it after the step counts (#3539).
+ * "1 of 3 budgets missed: p99" for a block that missed one, in the failed verdict's words, or
+ * `null` when all were met or none declared; a collection run's terminal notification and spoken
+ * ending say it after the step counts (#3539).
  */
 export function missedBudgetsReason(
 	thresholdValidation: RunReport["thresholdValidation"] | null | undefined
@@ -176,10 +158,9 @@ function drainCutReason(cancelled: number): string {
 }
 
 /**
- * The cancelled count of a `drainCut` block (`summary` of a report, a list row's
- * `resultSummary`), or `undefined` unless it is a positive integer: the engine
- * writes the block only for a cut that cancelled something, and a malformed one
- * must not turn a run not-judged.
+ * The cancelled count of a `drainCut` block (a report's `summary`, a row's `resultSummary`), or
+ * `undefined` unless a positive integer: the engine writes the block only for a cut that cancelled
+ * something, and a malformed one must not make a run not-judged.
  */
 export function drainCutCancelledOf(
 	summary: { drainCut?: unknown } | undefined
@@ -228,8 +209,8 @@ export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 }
 
 /**
- * The verdict for a loaded report. `null` for a missing report and for one
- * without a status, which is a report that does not say how the run ended.
+ * The verdict for a loaded report; `null` for a missing report or one without a status, which does
+ * not say how the run ended.
  */
 export function reportOutcome(report: RunReport | null | undefined): RunJudgement | null {
 	const status = report?.metadata?.status;
@@ -240,8 +221,8 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 		thresholdValidation: report.thresholdValidation,
 		...failedChecksOf(reportAssertionsOf(report)),
 		drainCutCancelled: drainCutCancelledOf(report.summary),
-		// A run that sent nothing has no error rate; the report's 0 there is
-		// an empty denominator, not 0.0% measured.
+		// A run that sent nothing has no error rate: the report's 0 is an empty denominator, not
+		// 0.0% measured.
 		errorRate: totalRequests && totalRequests > 0 ? errorRate : undefined,
 	});
 }
@@ -255,9 +236,8 @@ const STEP_COUNTS: ReadonlyArray<StepCount> = ["passed", "failed", "errored", "s
 const UNCLEAN_STEP_COUNTS: ReadonlyArray<StepCount> = ["failed", "errored"];
 
 /**
- * `2 passed, 1 failed, 4 errored`: the non-zero step counts among `which`, or
- * `null` when none is. A key the row did not record reads as none, the way the
- * wire leaves it absent rather than zeroed.
+ * `2 passed, 1 failed, 4 errored`: the non-zero step counts among `which`, or `null`; a key the row
+ * did not record reads as none, as the wire leaves it absent rather than zeroed.
  */
 export function stepCountsPhrase(
 	summary: CollectionResultSummary,
@@ -270,19 +250,14 @@ export function stepCountsPhrase(
 }
 
 /**
- * A completed collection run is not clean when a step failed or errored
- * (#3458) or when it missed a budget (#3539): `completed` says the sequence ran
- * to its end, not that its steps or its budgets held. Either one makes the run
- * `failed`, and the reason names both when both apply ("Budgets missed, 1
- * failed"). A clean run answers `null` and keeps the status glyph, whether its
- * budgets were met or it declared none: a collection run is never judged
- * `passed`, since neither a row nor a report holds an error rate or check count
- * that could undercut a met budget, and {@link judgeRun} is the load run's
- * judge, not this one's.
- *
- * The one core behind {@link rowOutcome} and {@link collectionReportOutcome}:
- * they differ only in where the counts and the budgets come from, so the list
- * row and the opened run's pill (#3543) cannot reach different verdicts.
+ * A completed collection run is not clean when a step failed or errored (#3458) or a budget was
+ * missed (#3539): `completed` says the sequence ran to its end, not that steps or budgets held.
+ * Either makes it `failed`, the reason naming both when both apply ("Budgets missed, 1 failed"). A
+ * clean run answers `null` and keeps the status glyph, budgets met or none: a collection run is
+ * never `passed`, as no row or report holds an error rate or check count that could undercut a met
+ * budget ({@link judgeRun} judges load runs). The one core of {@link rowOutcome} and
+ * {@link collectionReportOutcome}, which differ only in where counts and budgets come from, so the
+ * row and the opened run's pill (#3543) agree.
  */
 function judgeCollection(
 	status: string | undefined,
@@ -298,10 +273,9 @@ function judgeCollection(
 }
 
 /**
- * The verdict for a loaded collection run's report, in the row's terms: the
- * same steps and the same budget miss turn it `failed` (#3543). `null` for a
- * clean run, a run that did not complete, and a report with no step counts.
- * The reason names the missed budgets, which the row cannot.
+ * A loaded collection run's verdict in the row's terms: the same steps and budget miss make it
+ * `failed` (#3543). `null` for a clean run, one that did not complete, and a report without step
+ * counts; the reason names the missed budgets, which the row cannot.
  */
 export function collectionReportOutcome(report: RunReport | null | undefined): RunJudgement | null {
 	if (!report?.scenario) return null;
@@ -328,12 +302,10 @@ const STORED_OF_OUTCOME: Record<RunOutcome, StoredRunOutcome> = {
 };
 
 /**
- * A `failed` status is the verdict, for every run type and with or without a
- * summary (#3643): the list draws the failed mark from the status alone, so the
- * verdict cannot depend on a summary the run may have died before writing. The
- * reason is the unnamed budget miss when the row's own `verdict` says one was
- * missed, and "failed before it finished" otherwise - a design row's summary
- * carries no verdict, so it never reads one.
+ * A `failed` status is the verdict for every run type, with or without a summary (#3643): the list
+ * draws the failed mark from the status alone, so the verdict cannot rest on a summary the run died
+ * before writing. The reason is the unnamed budget miss when the row's `verdict` says one was
+ * missed, else "failed before it finished"; a design row's summary carries no verdict.
  */
 function failedRowOutcome(run: Run): RunJudgement {
 	const verdict = run.type === "design" ? undefined : run.resultSummary?.verdict;
@@ -343,12 +315,10 @@ function failedRowOutcome(run: Run): RunJudgement {
 }
 
 /**
- * The verdict a history list row can state from its own `status` and
- * `resultSummary`. A failed row is always `failed` (see {@link failedRowOutcome});
- * past that, only a terminal load or collection run's row carries a summary, so
- * every other row, and a row from an engine that predates the summary, answers
- * `null` and keeps its status glyph. A clean collection row also answers `null`,
- * met budgets included.
+ * The verdict a list row can state from its `status` and `resultSummary`. A failed row is always
+ * `failed` ({@link failedRowOutcome}); otherwise only a terminal load or collection row has a
+ * summary, so every other row, and one from an engine predating the summary, answers `null` and
+ * keeps its glyph, as does a clean collection row, met budgets included.
  */
 function derivedRowOutcome(run: Run): RunJudgement | null {
 	if (run.status === "failed") return failedRowOutcome(run);
@@ -372,21 +342,15 @@ function derivedRowOutcome(run: Run): RunJudgement | null {
 }
 
 /**
- * The verdict a history list row draws (#3547). The engine's stored
- * `run.outcome` is the authority for the category: it is what `GET
- * /runs?outcome=` filters on, so a row can never be listed under a verdict it
- * does not wear. The reason is the row's own derivation (`derivedRowOutcome`)
- * when that reaches the same category, which is every row of an engine and a
- * renderer that agree, and a generic line otherwise.
- *
- * A row with no stored outcome - one stored before the column, or one the
- * engine judged nothing about - is derived from its `status` and `resultSummary`
- * alone, the rule the engine's `judge_run_row` is held to by
- * `engine/tests/fixtures/run-row-outcome-conformance.json`. A row stored before
- * the column that failed therefore wears `failed` here though its stored
- * column stays NULL: the engine's `GET /runs?outcome=failed` does not list it,
- * so the History outcome filter, which fetches through that param, misses it
- * (#3643).
+ * The verdict a history row draws (#3547). The engine's stored `run.outcome` decides the category,
+ * as `GET /runs?outcome=` filters on it, so a row is never listed under a verdict it does not wear;
+ * the reason is the row's own derivation (`derivedRowOutcome`) when that reaches the same category
+ * (every row where engine and renderer agree), else a generic line. A row with no stored outcome
+ * (stored before the column, or the engine judged nothing) is derived from `status` and
+ * `resultSummary`, the rule the engine's `judge_run_row` is held to by
+ * `engine/tests/fixtures/run-row-outcome-conformance.json`. So a failed row stored before the
+ * column wears `failed` here while its column stays NULL, and the History outcome filter, fetching
+ * through `GET /runs?outcome=failed`, misses it (#3643).
  */
 export function rowOutcome(run: Run): RunJudgement | null {
 	const derived = derivedRowOutcome(run);
@@ -397,10 +361,9 @@ export function rowOutcome(run: Run): RunJudgement | null {
 }
 
 /**
- * The verdict as a lowercase word to say beside the status word (`completed,
- * verdict failed`), or `null` when it would add nothing: no verdict, or a
- * `failed` status that already says it. A failed status always judges failed
- * (#3643), so the pair would read "failed, verdict failed".
+ * The verdict as a lowercase word beside the status (`completed, verdict failed`), or `null` when
+ * it adds nothing: no verdict, or a `failed` status, which always judges failed (#3643), so the
+ * pair would read "failed, verdict failed".
  */
 export function verdictBesideStatus(
 	status: Run["status"],
@@ -412,9 +375,9 @@ export function verdictBesideStatus(
 }
 
 /**
- * The row's verdict in the engine's spelling, the one `GET /runs?outcome=`
- * takes and a stored `run.outcome` holds; `null` where {@link rowOutcome} draws
- * none, which is also where the engine stores none and matches no filter.
+ * The row's verdict in the engine's spelling (what `GET /runs?outcome=` takes and `run.outcome`
+ * holds); `null` where {@link rowOutcome} draws none, which is also where the engine stores none
+ * and matches no filter.
  */
 export function rowStoredOutcome(run: Run): StoredRunOutcome | null {
 	const judged = rowOutcome(run);
