@@ -420,6 +420,10 @@ struct ReportExtras {
     // that ended on its own (#3538), the report's `summary.drainCut`. Empty
     // for every other run, which leaves the key out.
     std::optional<size_t> drain_cut;
+    // The run's failed `mcp` replies by class (#3828), already in the
+    // report's `summary.errorClasses` shape. Empty for a summary stored before
+    // the key existed, which leaves it out rather than claiming none failed.
+    std::optional<nlohmann::json> error_classes;
     // Per-phase latency distributions, verbatim from the summary and already in
     // the report's shape. Empty for a run that recorded none - the toggle off,
     // nothing successful completed, or an engine older than the phase bank -
@@ -718,6 +722,46 @@ void apply_summary_error_types (const nlohmann::json& summary, vayu::DetailedRep
     }
 }
 
+/// The positive counts of @p from, by key; anything else in it is skipped.
+nlohmann::json positive_counts (const nlohmann::json& from) {
+    nlohmann::json counts = nlohmann::json::object ();
+    for (const auto& [key, count] : from.items ()) {
+        if (count.is_number_unsigned () && count.get<size_t> () > 0) {
+            counts[key] = count;
+        }
+    }
+    return counts;
+}
+
+/**
+ * The run's failed `mcp` replies by class (#3828), as `McpErrorCounts::to_json`
+ * stored them: the three classes and `protocolCodes`, each kept only as a
+ * positive count. Key-absent is a run stored before the counts existed, which
+ * leaves `summary.errorClasses` out.
+ */
+void apply_summary_error_classes (const nlohmann::json& summary, ReportExtras& extras) {
+    const auto stored = summary.find ("error_classes");
+    if (stored == summary.end () || !stored->is_object ()) {
+        return;
+    }
+    nlohmann::json classes = nlohmann::json::object ();
+    for (const auto error_class :
+    { McpErrorClass::Transport, McpErrorClass::Protocol, McpErrorClass::Tool }) {
+        const char* name = vayu::to_string (error_class);
+        if (const auto count = stored->find (name); count != stored->end () &&
+        count->is_number_unsigned () && count->get<size_t> () > 0) {
+            classes[name] = *count;
+        }
+    }
+    if (const auto codes = stored->find ("protocolCodes");
+    codes != stored->end () && codes->is_object ()) {
+        if (auto counted = positive_counts (*codes); !counted.empty ()) {
+            classes["protocolCodes"] = std::move (counted);
+        }
+    }
+    extras.error_classes = std::move (classes);
+}
+
 /**
  * The status-code map, which replaces the sampled one wholesale when stored.
  * An empty map keeps the sampled one, except on a sequential collection run:
@@ -951,6 +995,7 @@ ReportExtras& extras) {
     apply_summary_slow_requests (summary, report);
     apply_summary_phase_means (summary, report);
     apply_summary_error_types (summary, report);
+    apply_summary_error_classes (summary, extras);
     apply_summary_status_codes (summary, report, extras);
     apply_summary_sampling (summary, extras);
     apply_summary_scenario (summary, extras);
@@ -1990,6 +2035,9 @@ double target_rps) {
     if (const auto& drain_cut = extras.drain_cut) {
         json_report["summary"]["drainCut"] = drain_cut_json (*drain_cut);
     }
+    if (const auto& error_classes = extras.error_classes) {
+        json_report["summary"]["errorClasses"] = *error_classes;
+    }
     if (extras.summary_partial) {
         json_report["summary"]["partial"] = true;
     }
@@ -2180,6 +2228,7 @@ ReportExtras& extras) {
     extras.http_version_downgraded =
     static_cast<double> (collector.http_version_downgraded ());
     extras.connection_replays = collector.connection_replays ();
+    extras.error_classes      = collector.error_class_counts ().to_json ();
 }
 
 namespace {

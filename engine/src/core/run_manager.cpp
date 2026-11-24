@@ -451,6 +451,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.bytes_received          = mc.total_bytes_received ();
     inputs.status_codes            = mc.status_code_distribution ();
     inputs.error_types             = mc.error_type_counts ();
+    inputs.error_classes           = mc.error_class_counts ();
     inputs.latency                 = mc.calculate_percentiles ();
     inputs.latency_avg_ms          = mc.average_latency ();
     inputs.phases                  = mc.phase_percentiles ();
@@ -2319,6 +2320,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.bytes_received = context->metrics_collector->total_bytes_received ();
     inputs.status_codes = context->metrics_collector->status_code_distribution ();
     inputs.error_types    = context->metrics_collector->error_type_counts ();
+    inputs.error_classes  = context->metrics_collector->error_class_counts ();
     inputs.latency        = totals.latency;
     inputs.latency_avg_ms = totals.latency_avg_ms;
     inputs.phases         = context->metrics_collector->phase_percentiles ();
@@ -3209,6 +3211,10 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // Always written, `{}` included: an absent key is a run stored before
     // #2400, whose report still counts the stored error records by type.
     summary["error_types"] = nlohmann::json (inputs.error_types);
+    // Always written, `{}` included: absent is a run stored before #3828,
+    // whose report then leaves `summary.errorClasses` out rather than
+    // claiming no reply failed.
+    summary["error_classes"] = inputs.error_classes.to_json ();
     // What each bounded store thinned away. Always written: a reader that sees
     // the section and all zeros knows the stored set is complete, which a
     // missing section cannot say.

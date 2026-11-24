@@ -968,6 +968,16 @@ the trace the run keeps for that completion (a status exemplar, a sampled or a
 slow result), which carries the same `mcp` node, so a `-32022` refusal or a
 legacy-era `400` still reads as one.
 
+**Every run counts its failed replies by class** (issue #3828), whatever their
+status, a failed transfer's `transport` included: the stored summary's
+`error_classes` and the report's
+[`summary.errorClasses`](#get-runsrunidreport), `{ "transport"?, "protocol"?,
+"tool"?, "protocolCodes"? }`, each class present only when counted and
+`protocolCodes` a `protocol` failure's `error.code` by code. It is therefore a
+superset of the three `mcp_*` error types: a 4xx or 5xx failure has a class and
+no error type, and a failed transfer keeps its own error type (`timeout`,
+`connection_failed`, ...) beside its `transport` class.
+
 #### File references: `binary` bodies and file parts
 
 Two body shapes name a file on the machine running the engine. They carry a
@@ -12374,7 +12384,10 @@ keep-alive connection rather than the negative value it used to store.
 A load run counts a request as an **error** when its response status is outside
 2xx/3xx, or when it got no response at all - a transport failure (a timeout, a
 refused connection, a DNS or TLS failure), recorded under status code `0`. A
-3xx is a success. The count is derived from the run's status-code distribution
+3xx is a success, except an `mcp` request's reply that failed under one (a
+JSON-RPC `error` or a tool's `isError`), which is recorded under `0` too and
+counted by class in `summary.errorClasses` (issue #3828,
+[The `mcp` reply](#the-mcp-reply)). The count is derived from the run's status-code distribution
 (`vayu::count_status_failures`, issue #2124), so every surface reports the
 same number: the live tick's `totalErrors` / `errorRate`, the stored tick's
 `requests_failed` / `error_rate`, the stop response's `summary.errors` /
@@ -14131,7 +14144,8 @@ are HTTP-only, the same rule a failed assertion follows
     "httpVersionDowngraded": 0,
     "connectionReplays": 0,
     "sendingDurationSeconds": 60.0,
-    "completedWhileSending": 5990
+    "completedWhileSending": 5990,
+    "errorClasses": {}
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
@@ -14828,6 +14842,22 @@ stored summary records it (the status-code distribution never held them).
 cut the drain of a run that ended on its own: the part of `cancelledRequests`
 still unanswered when the drain was stopped, which keeps the run's verdict
 [not judged](#post-exportrun-report) unless a budget already failed it.
+
+`summary.errorClasses` (issue #3828) is the run's failed `mcp` replies by
+class, `{ "transport"?, "protocol"?, "tool"?, "protocolCodes"? }`, for example
+`{ "tool": 20, "protocol": 10, "transport": 5, "protocolCodes": { "-32602": 10 } }`.
+A class is present only when counted, so a run in which no reply failed (every
+run whose requests are not `mcp`) reads `{}`. `protocolCodes` counts a
+`protocol` failure's JSON-RPC `error.code`: each of `-32700`, `-32600` to
+`-32603` and `-32000` to `-32099` by its code, any other under `"other"`, and a
+JSON-RPC error with no integer code in `protocol` and none of them. Every
+failed reply is counted whatever its status, so each is an error inside
+`failedRequests` and `errorRate`, and the classes are a superset of
+`errors.types`' `mcp_*` names, which leave out a failure under a 4xx or 5xx
+([The `mcp` reply](#the-mcp-reply)). **Absent and `{}` are different answers**:
+absent is a run stored before the count existed, or one reported from its
+sampled results. A partial report of a running load run reads it from the live
+counter.
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load

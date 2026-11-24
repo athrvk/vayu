@@ -2877,6 +2877,7 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     collector.record_error (vayu::ErrorCode::ConnectionFailed, "refused");
     collector.record_cancelled ();
     collector.record_bytes (100, 400);
+    collector.record_mcp_failure (vayu::McpErrorClass::Transport, std::nullopt);
     // Two requests open since a second before the read (#3567).
     (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
     (void)collector.open_request (vayu::tests::steady_now_ms () - 1000);
@@ -2906,6 +2907,11 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     // #3567): the two open requests, which nothing has completed.
     ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
     EXPECT_GT (summary["avgInFlight"].get<double> (), 0.0);
+    // The run so far's failed `mcp` replies (#3828). Mutation check: drop the
+    // `error_classes` read in `apply_live_counters` and the key is absent.
+    EXPECT_EQ (summary.value ("errorClasses", nlohmann::json ()),
+    (nlohmann::json{ { "transport", 1 } }))
+    << summary.dump ();
     EXPECT_EQ (live["statusCodes"], nlohmann::json::parse ("[[0,1],[200,2],[503,1]]"));
     EXPECT_EQ (live["errors"]["byStatusCode"], nlohmann::json::parse ("[[0,1],[503,1]]"));
     // The percentiles are read from histograms the run is still writing.
@@ -3238,6 +3244,61 @@ TEST_F (RunsRouteTest, ReportErrorTypesFallBackToStoredRecordsOnlyWhenTheSummary
     EXPECT_EQ (body["errors"]["types"], (nlohmann::json{ { "timeout", 2 } }))
     << body["errors"].dump ();
     EXPECT_EQ (body["errors"]["withDetails"].get<size_t> (), 2u);
+}
+
+// #3828: the stored classes reach the report's `summary.errorClasses`, `{}`
+// for a run in which no reply failed. Mutation check: drop
+// `apply_summary_error_classes` from apply_run_summary and both read absent.
+TEST_F (RunsRouteTest, ReportErrorClassesAreTheSummarys) {
+    seed ({ .id = "run_classes", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    inputs.error_classes.record (vayu::McpErrorClass::Tool, std::nullopt);
+    inputs.error_classes.record (vayu::McpErrorClass::Tool, std::nullopt);
+    inputs.error_classes.record (vayu::McpErrorClass::Protocol, -32602);
+    db_->update_run_summary (
+    "run_classes", vayu::core::build_run_summary_payload (inputs).dump ());
+    seed ({ .id = "run_classes_none", .start_time = 1000 });
+    db_->update_run_summary ("run_classes_none",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_classes");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"].value ("errorClasses", nlohmann::json ()),
+    nlohmann::json::parse (R"({"tool":2,"protocol":1,"protocolCodes":{"-32602":1}})"))
+    << body["summary"].dump ();
+    auto [none_status, none] =
+    vayu::http::routes::run_report_response (*db_, "run_classes_none");
+    ASSERT_EQ (none_status, 200);
+    EXPECT_EQ (none["summary"].value ("errorClasses", nlohmann::json ()),
+    nlohmann::json::object ())
+    << none["summary"].dump ();
+}
+
+// A summary stored before #3828 has no `error_classes`, and the report leaves
+// the key out rather than reading `{}`, which would say no reply failed; a
+// stored count that is not a positive integer is skipped.
+TEST_F (RunsRouteTest, ReportErrorClassesAreAbsentForAnOlderSummaryAndReadTolerantly) {
+    seed ({ .id = "run_classes_legacy", .start_time = 1000 });
+    auto legacy = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_EQ (legacy.erase ("error_classes"), 1u);
+    db_->update_run_summary ("run_classes_legacy", legacy.dump ());
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_classes_legacy");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body["summary"].contains ("errorClasses")) << body["summary"].dump ();
+
+    seed ({ .id = "run_classes_odd", .start_time = 1000 });
+    auto odd = vayu::core::build_run_summary_payload (summary_inputs ());
+    odd["error_classes"] = nlohmann::json::parse (
+    R"({"transport":2,"tool":0,"protocol":"3","bogus":5,
+        "protocolCodes":{"-32602":-1,"-32000":1,"other":1.5}})");
+    db_->update_run_summary ("run_classes_odd", odd.dump ());
+    auto [odd_status, odd_body] =
+    vayu::http::routes::run_report_response (*db_, "run_classes_odd");
+    ASSERT_EQ (odd_status, 200);
+    EXPECT_EQ (odd_body["summary"].value ("errorClasses", nlohmann::json ()),
+    nlohmann::json::parse (R"({"transport":2,"protocolCodes":{"-32000":1}})"))
+    << odd_body["summary"].dump ();
 }
 
 // ============================================================================
