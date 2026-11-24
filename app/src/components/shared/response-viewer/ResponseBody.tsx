@@ -27,7 +27,7 @@
  * of the body (`RawRequestResponse`) and shows the same notice.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
 import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { formatBytes } from "@/lib/format-number";
@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { Callout } from "../Callout";
 import { detectBodyType, getMonacoLanguage, formatBody, LARGE_BODY_BYTES } from "./utils";
 import { LargeBodyNotice } from "./LargeBodyNotice";
+import { ImagePreview } from "./ImagePreview";
 import { buildPreviewDocument } from "./preview-document";
 import type { BodyType, ResponseBodyProps, ViewMode } from "./types";
 import {
@@ -365,32 +366,4 @@ function NonTextBody({
 			</div>
 		</div>
 	);
-}
-
-/**
- * The image, from an object URL over its own bytes, revoked when they change
- * or the preview unmounts. Set on the element in the effect rather than held in
- * state, so a StrictMode remount creates a fresh URL instead of keeping the one
- * its first cleanup revoked.
- */
-function ImagePreview({
-	bytes,
-	contentType,
-}: {
-	bytes: Uint8Array<ArrayBuffer>;
-	contentType: string;
-}) {
-	const ref = useRef<HTMLImageElement>(null);
-	useEffect(() => {
-		const img = ref.current;
-		if (!img) return;
-		const url = URL.createObjectURL(new Blob([bytes], { type: contentType || "image/png" }));
-		img.src = url;
-		return () => {
-			img.removeAttribute("src");
-			URL.revokeObjectURL(url);
-		};
-	}, [bytes, contentType]);
-
-	return <img ref={ref} alt="Response" className="max-w-full h-auto border border-rule" />;
 }

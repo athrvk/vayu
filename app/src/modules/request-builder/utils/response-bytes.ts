@@ -170,7 +170,8 @@ function decodeText(
 	}
 }
 
-function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
+/** Throws when the text is not base64. */
+export function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
 	let binary: string;
 	try {
 		binary = atob(base64);
