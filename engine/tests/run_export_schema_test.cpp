@@ -643,6 +643,21 @@ TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
     EXPECT_FALSE (comparison["statusCodes"].empty ());
 }
 
+// #3828: a comparison with classes in it, so the schema reads their shape.
+TEST_F (RunExportSchemaTest, AComparisonCarryingFailureClassesValidates) {
+    json healthy             = healthy_summary ();
+    healthy["error_classes"] = json{ { "tool", 1 } };
+    json failing             = failing_summary ();
+    failing["error_classes"] =
+    json{ { "transport", 4 }, { "tool", 6 }, { "protocolCodes", { { "other", 1 } } } };
+    seed ("run_healthy", vayu::RunStatus::Stopped, healthy);
+    seed ("run_failing", vayu::RunStatus::Completed, failing);
+    const json document =
+    expect_valid (json{ { "runId", "run_failing" }, { "baseRunId", "run_healthy" } });
+    EXPECT_EQ (document["comparison"]["errorClasses"],
+    json::parse (R"({"transport":{"base":0,"target":4},"tool":{"base":1,"target":6}})"));
+}
+
 // #2386: a second with no completion is stored without percentile keys, and
 // the export carries the tick without them rather than refusing the document.
 // Mutation check: put the three keys back in the schema's `required` and this

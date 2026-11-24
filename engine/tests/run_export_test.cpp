@@ -546,6 +546,39 @@ TEST_F (RunExportTest, ComparesWithAFinishedLoadBase) {
     json::parse (R"({"200":{"base":90,"target":200},"503":{"base":10,"target":0}})"));
 }
 
+// #3828: the comparison carries the mcp failure classes only when both runs
+// recorded them; a run stored before the engine counted them is not a run with
+// zero failures.
+TEST_F (RunExportTest, ComparesFailureClassesOnlyWhenBothRunsRecordedThem) {
+    const json request = { { "url", "https://x.test/a" }, { "method", "GET" } };
+    const auto summary = [] (const json& classes) {
+        json out{ { "total_requests", 100 }, { "test_duration", 6.0 } };
+        if (!classes.is_null ()) {
+            out["error_classes"] = classes;
+        }
+        return out;
+    };
+    seed_run ("run_target", vayu::RunType::Load, vayu::RunStatus::Completed, request,
+    summary (json{ { "tool", 7 }, { "protocol", 3 },
+    { "protocolCodes", { { "-32602", 3 } } } }));
+    seed_run ("run_recorded", vayu::RunType::Load, vayu::RunStatus::Completed,
+    request, summary (json{ { "tool", 2 }, { "transport", 1 } }));
+    seed_run ("run_clean", vayu::RunType::Load, vayu::RunStatus::Completed,
+    request, summary (json::object ()));
+    seed_run ("run_legacy", vayu::RunType::Load, vayu::RunStatus::Completed,
+    request, summary (json ()));
+    const auto classes = [this] (const char* base) {
+        return export_ok (json{ { "runId", "run_target" }, { "baseRunId", base } })
+        .second["comparison"]["errorClasses"];
+    };
+
+    EXPECT_EQ (classes ("run_recorded"), json::parse (R"({"transport":{"base":1,"target":0},"protocol":{"base":0,"target":3},
+        "tool":{"base":2,"target":7}})"));
+    EXPECT_EQ (classes ("run_clean"),
+    json::parse (R"({"protocol":{"base":0,"target":3},"tool":{"base":0,"target":7}})"));
+    EXPECT_EQ (classes ("run_legacy"), json::object ());
+}
+
 // Two runs that differ only in sendExpectContinue are not the same experiment
 // (issue #2516), and an old run with no key reads as "not allowed".
 TEST_F (RunExportTest, ComparingRunsThatDifferOnlyInExpectContinueSaysSo) {
@@ -1023,7 +1056,8 @@ json engine_shape (const json& expected) {
         { "base", warning.at ("base") }, { "target", warning.at ("target") } });
     }
     return { { "differences", differences }, { "deltas", deltas },
-        { "statusCodes", expected.at ("statusCodes") } };
+        { "statusCodes", expected.at ("statusCodes") },
+        { "errorClasses", expected.at ("errorClasses") } };
 }
 
 TEST (RunCompareConformance, EveryCaseDiffsAsTheAppDiffsIt) {

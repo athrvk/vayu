@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { ERROR_CLASS_KEYS } from "../compare.js";
 import type { EngineClient } from "../engine-client.js";
 import { secretsShape, withholdRequestUrl } from "../withhold.js";
 import type { ToolContext } from "./contract.js";
@@ -37,6 +38,15 @@ export const runComparisonSchema = z.object({
 	throughput: z.array(metricDeltaSchema),
 	reliability: z.array(metricDeltaSchema),
 	statusCodes: z.record(z.string(), z.object({ base: z.number(), target: z.number() })),
+	// The mcp failure classes (issue #3828) of two runs that both recorded
+	// them: each class either run counted, the other side's missing count 0.
+	// `{}` when either run did not record them (a run stored before the engine
+	// counted them) - never a zero, which would read as a regression. The
+	// engine's `protocolCodes` split is not compared.
+	errorClasses: z.partialRecord(
+		z.enum(ERROR_CLASS_KEYS),
+		z.object({ base: z.number(), target: z.number() })
+	),
 	// Whether the two runs negotiated a compressed response differently
 	// (issue #1488) - true means the byte and latency deltas above are not
 	// measuring the same thing. A run recorded before this field existed

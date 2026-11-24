@@ -771,6 +771,16 @@
                   "properties": {"base": {"type": "number"}, "target": {"type": "number"}}
                 }
               }
+            },
+            "errorClasses": {
+              "description": "The mcp failure classes (issue #3828) either run counted, a class one run never counted being 0, in the order transport, protocol, tool. {} unless both runs carry summary.errorClasses: a run stored before it is not a run with zero failures. protocolCodes is not compared.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "transport": {"$ref": "#/definitions/errorClassDelta"},
+                "protocol": {"$ref": "#/definitions/errorClassDelta"},
+                "tool": {"$ref": "#/definitions/errorClassDelta"}
+              }
             }
           }
         }
@@ -799,6 +809,12 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^-?[0-9]+$": {"type": "number"}}
+    },
+    "errorClassDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "target"],
+      "properties": {"base": {"type": "number"}, "target": {"type": "number"}}
     },
     "phase": {
       "type": "object",

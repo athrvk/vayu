@@ -5590,7 +5590,7 @@ breaking change bumps the integer and is noted here):
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `assertions` (the run's assertion block, #3537), `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
-| `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
+| `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes, errorClasses}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
 `statusCodes`, `errors.byStatusCode` and a tick's `status_codes` are objects,
@@ -5701,6 +5701,14 @@ answers. Its members:
   numbers are the entries' `base` values.
 - `statusCodes`: `{code: {base, target}}` over every code either run saw, a
   code one run never saw counting `0`.
+- `errorClasses`: `{class: {base, target}}` over the `transport`, `protocol`
+  and `tool` failure classes either run's
+  [`summary.errorClasses`](#get-runsrunidreport) counted (#3828), in that
+  order, a class one run never counted being `0`. It is `{}` unless **both**
+  runs carry `summary.errorClasses`: a run stored before the engine counted
+  them has no figure, and reading it as `0` would show a regression that never
+  happened. A recorded `{}` (nothing failed) is a figure and reads `0`.
+  `protocolCodes` is not compared.
 
 #### The Markdown report
 
