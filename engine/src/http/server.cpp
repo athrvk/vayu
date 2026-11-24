@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief HTTP Server implementation with modular route registration
- */
+/** The management API's HTTP server and its route registration. */
 
 #include "vayu/http/server.hpp"
 
@@ -126,7 +124,7 @@ bool Server::start () {
 
     vayu::utils::log_info ("startup", "Vayu Engine " + std::string (vayu::Version::string));
 
-    // Load and display config
+    // The stored config, logged once at startup.
     auto entries = db_.get_all_config_entries ();
     nlohmann::json config;
     for (const auto& entry : entries) {
@@ -229,21 +227,20 @@ const std::string& Server::bind_error () const {
 
 void Server::set_shutdown_callback (routes::ShutdownCallback callback) {
     shutdown_callback_ = std::move (callback);
-    // Update the route context if it exists
     if (route_ctx_) {
         route_ctx_->on_shutdown = shutdown_callback_;
     }
 }
 
 void Server::setup_routes () {
-    // One request line per call (issue #1510), before anything else touches
-    // server_: a route registered below that never logged its own entry now
-    // always does, at the level its status calls for. The gate rides the same
-    // pre-routing handler, so a refused request gets its line too. The Host
-    // and Origin rules run first. The body caps need the headers only, and the
-    // import one goes before the general one because it names the setting.
-    // A refusal is a 4xx, on which cpp-httplib closes the connection rather
-    // than draining the unread body.
+    // One request line per call (issue #1510), installed before anything else
+    // touches server_, so every route registered below gets its line at the
+    // level its status calls for. The gate rides the same pre-routing handler,
+    // so a refused request gets its line too. The Host and Origin rules run
+    // first. The body caps need the headers only, and the import one goes
+    // before the general one because it names the setting. A refusal is a 4xx,
+    // on which cpp-httplib closes the connection rather than draining the
+    // unread body.
     install_request_logger (server_,
     [this, port = port_] (const httplib::Request& req, httplib::Response& res) {
         constexpr auto handled = httplib::Server::HandlerResponse::Handled;
