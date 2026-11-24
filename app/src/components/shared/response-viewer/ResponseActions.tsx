@@ -6,29 +6,16 @@
  */
 
 /**
- * Copy and download, the pair that sits at the right of a response tab strip.
- *
- * Only the request builder's response pane mounts it; the history viewer has no
- * copy or download. The caller passes the body as received (`receivedBody`),
- * never the indented copy the Pretty view reads: Copy and Download hand back
- * what the server sent (issue #2459).
- *
- * The file is named after the response's own Content-Type
- * (`extensionForContentType`), the same rule for a text and a byte body, so a
- * `text/javascript` body saves as `.js` and a type with no usable subtype
- * (absent, or an `application/vnd...` label) saves a text body as `.txt`,
- * never `response-1234.undefined` and never `.bin` for something readable
- * (issue #3140).
- *
- * The tick-for-a-moment feedback is `useCopy`'s (`TIMING.COPY_RESET_MS`) for the
- * whole app.
- *
- * A body the engine sent as base64 (`rawBytes`, issue #2458) downloads as its
- * exact bytes under the response's own Content-Type; its text, when it has
- * one, is a decoding and is what Copy takes. One with no text has nothing to
- * copy, so Copy says so instead of copying base64.
- *
- * A save that fails is a toast; a cancelled save dialog is not (#3246).
+ * Copy and download at the right of a response tab strip, mounted only by the request builder's
+ * pane (the history viewer has neither). The caller passes the body as received (`receivedBody`),
+ * never Pretty's indented copy: both hand back what the server sent (#2459). The file is named from
+ * the response's Content-Type (`extensionForContentType`), text and bytes alike, so
+ * `text/javascript` saves as `.js` and a text body with no usable subtype (absent,
+ * `application/vnd...`) as `.txt`, never `.undefined` or `.bin` (#3140). The copy feedback is
+ * `useCopy`'s (`TIMING.COPY_RESET_MS`). A base64 body (`rawBytes`, #2458) downloads as its exact
+ * bytes under its Content-Type; its text, when it has one, is a decoding, which Copy takes, and
+ * with none Copy says so rather than copying base64. A failed save is a toast; a cancelled dialog
+ * is not (#3246).
  */
 
 import { Copy, Check, Download } from "lucide-react";
@@ -54,8 +41,8 @@ export interface ResponseActionsProps {
 	/** The text to copy and to download: the body as received, not its indented copy. */
 	content: string;
 	/**
-	 * The body's exact bytes, when the engine sent it as base64. Download then
-	 * writes them, typed and named by `contentType`.
+	 * The body's exact bytes when the engine sent base64; Download writes them, typed and named by
+	 * `contentType`.
 	 */
 	rawBytes?: ResponseBytes;
 	/** The response's Content-Type: names the file, and types a `rawBytes` download. */
@@ -102,9 +89,10 @@ export function ResponseActions({
 			onClick={() => void copy(content, "Response")}
 			aria-label="Copy response"
 		>
-			{/* The check is the only feedback that the copy happened -
-			    and, through `useCopy`, a denied clipboard now says so
-			    instead of leaving the glyph untouched. */}
+			{/*
+			 * The check is the only sign the copy happened, and via `useCopy` a denied clipboard
+			 * says so.
+			 */}
 			<IconSwap
 				state={copied ? "copied" : "copy"}
 				icons={{

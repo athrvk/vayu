@@ -6,21 +6,14 @@
  */
 
 /**
- * The MCP tool result above the raw reply in the request builder's Body tab
- * (#3841): the `content[]` blocks as what they are, `structuredContent` as a
- * JSON body, and `isError` as a banner. Reading is `readMcpResult`; this only
- * draws.
- *
- * It declines (renders nothing) for a reply the pane cannot read whole - one
- * the engine capped or storage truncated, or one with no text view - because a
- * half-read envelope would show a result the server did not send. The raw body
- * below is always there.
- *
- * Every string here is the server's. Text is text, never markup; an image is an
- * `<img>` over its bytes and only for an `image/*` type; a link is a button
- * that hands an http(s) URL to the system browser. Audio is named and sized but
- * not played: the renderer's policy has no `media-src`, so `default-src 'self'`
- * refuses a `data:` or `blob:` source (`electron/renderer-csp.ts`).
+ * The MCP tool result above the raw reply in the request builder's Body tab (#3841): `content[]`
+ * blocks as what they are, `structuredContent` as a JSON body, `isError` as a banner.
+ * `readMcpResult` reads; this draws. It renders nothing for a reply the pane cannot read whole
+ * (capped, truncated, or without a text view), as a half-read envelope would show a result the
+ * server did not send; the raw body is always below. Every string is the server's: text is never
+ * markup, an image is an `<img>` over its bytes and only for `image/*`, a link a button handing an
+ * http(s) URL to the browser. Audio is named and sized, not played: the policy has no `media-src`,
+ * so `default-src 'self'` refuses a `data:` or `blob:` source (`electron/renderer-csp.ts`).
  */
 
 import { useMemo } from "react";

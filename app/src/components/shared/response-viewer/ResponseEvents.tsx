@@ -6,44 +6,27 @@
  */
 
 /**
- * ResponseEvents Component
+ * The Events tab: what a `text/event-stream` request received (#574).
  *
- * The Events tab: what a `text/event-stream` request received (issue #574).
+ * **Two sources, one list**, the handoff `ScenarioRunView` makes: while the stream is open the rows
+ * come from `execution-events-store`, fed by the relay; once it ends, the stored trace is the
+ * record and the provider swaps it in. The caller, knowing which it holds, decides the changeover;
+ * this renders the list it gets and says which it is. **A third source** (#657): a load run's
+ * captured sample, its events parsed by the engine out of the stored body and served by
+ * `GET /runs/:id/samples`, which is why this lives in `components/shared`.
  *
- * **Two sources, one list**, the handoff `ScenarioRunView` makes. While the
- * stream is open the rows come from `execution-events-store`, fed by the
- * relay; once it ends, the run's stored trace is the record and the provider
- * swaps them in. The changeover is decided by the caller, which knows which of
- * the two it is holding - this component renders whichever list it is given and
- * says which one that is.
+ * **The tab always renders**, on every response (the strip's constant-tab-set rule, #59): a normal
+ * response gets an honest empty state, which makes "was this a stream?" readable. **The list is
+ * windowed and its rows memoized** (#1158): a stream runs to 100,000 events by default, each row a
+ * chip, a monospace preview and an expandable payload, so rows arrive in slices that grow as the
+ * end is scrolled to, and an unchanged row does not re-render when later ones arrive.
  *
- * **A third source, same list** (issue #657): a load run's captured sample. Its
- * events are parsed back out of the stored `text/event-stream` body by the
- * engine and arrive on `GET /runs/:id/samples`, so the sampled-capture viewers
- * render them here rather than growing their own row - which is why this now
- * lives in `components/shared` and not under the request builder.
- *
- * **The tab always renders**, on every response, per the constant-tab-set rule
- * the strip has followed since #59. A normal response gets an honest empty
- * state rather than a missing tab, which is also what makes "was this a
- * stream?" a question you can go and read.
- *
- * **The list is windowed and its rows are memoized** (issue #1158). A stream
- * runs to a cap of 100,000 events by default, and every row here is a chip, a
- * monospace preview and an expandable payload - so rows arrive in slices that
- * grow as the end is scrolled to, and a row that has not changed does not
- * re-render because the ones after it arrived.
- *
- * **A Text view beside the rows** (issue #3773) when the request declared a
- * stream text path: the events' `text`, joined, as the reply reads. It renders
- * what the engine put on each event and never reads `data` - no provider shape
- * is known here, so there is no finish-reason callout either, only what the
- * stream itself says: an event named `error` and the end reason.
- *
- * **Every disclosure is in band.** A stream that ended by a cap and one the
- * server closed are different facts, and a list of 100 rows out of 4,000
- * received is a different thing from a complete list of 100. Neither is left to
- * be inferred from the row count.
+ * **A Text view beside the rows** (#3773) when the request declared a text path: the events'
+ * `text`, joined, as the reply reads. It renders what the engine put on each event and never reads
+ * `data`: with no provider shape known there is no finish-reason callout, only what the stream says
+ * (an event named `error`, the end reason). **Every disclosure is in band**: a capped stream and a
+ * server-closed one are different facts, and 100 rows of 4,000 is not a complete 100; neither is
+ * left to the row count.
  */
 
 import { memo, useMemo, useState, type ReactNode } from "react";
@@ -70,19 +53,17 @@ export interface ResponseEventsProps {
 	/** The events to render, oldest first. */
 	events: StreamEvent[];
 	/**
-	 * Every event the run received. Differs from `events.length` when the list
-	 * was capped, which is the whole reason it is carried separately.
+	 * Every event the run received, differing from `events.length` when the list was capped, the
+	 * reason it is carried apart.
 	 */
 	totalEvents?: number;
 	/** The list is a prefix of what arrived. */
 	eventsTruncated?: boolean;
 	/**
-	 * The reply the stream text path read, joined over every event - the
-	 * engine's own string for a stored run, the store's running one for a live
-	 * stream. It outranks joining `events`, whose list the stored-items cap can
-	 * cut short. Absent when the request declared no path (or, live, nothing
-	 * has matched yet); the Text view then appears only if an event carries
-	 * `text`.
+	 * The reply the text path read, joined over every event: the engine's string for a stored run,
+	 * the store's running one live. It beats joining `events`, which the stored-items cap can cut
+	 * short. Absent without a path (or, live, before a match), when the Text view shows only if an
+	 * event carries `text`.
 	 */
 	streamText?: string;
 	/** Why the stream ended, or undefined while it is still open. */
@@ -90,48 +71,39 @@ export interface ResponseEventsProps {
 	/** The stream is still open and rows are still arriving. */
 	isStreaming?: boolean;
 	/**
-	 * Whether this response came from a streaming send at all. False for an
-	 * ordinary response, which gets the "not an event stream" empty state
-	 * rather than "no events yet" - they are different answers.
+	 * Whether this response came from a streaming send; false gets the "not an event stream" empty
+	 * state, not "no events yet", a different answer.
 	 */
 	isStream?: boolean;
 	/**
-	 * The `Content-Type` the server answered with, when the caller has one.
-	 *
-	 * Read only for the empty state: a stream request whose reply was not an
-	 * event stream (a JSON 404, NDJSON) has no events and never will, and
-	 * "the server sent no events" would hide that the reply is on the Body tab
-	 * (issue #3238). Absent or empty keeps the generic wording.
+	 * The server's `Content-Type`, when known, read only for the empty state: a stream request
+	 * whose reply was not an event stream (a JSON 404, NDJSON) has no events and never will, and
+	 * "the server sent no events" would hide that the reply is on the Body tab (#3238). Absent or
+	 * empty keeps the generic wording.
 	 */
 	contentType?: string;
 	/**
-	 * When the stream was started, epoch ms (#3775): each row's offset is its
-	 * `receivedAt` less this. Absent for a list with no send time - a stream
-	 * restored from History, a load run's sampled capture - and those rows show
-	 * no offset rather than one measured from a guess.
+	 * When the stream started, epoch ms (#3775): a row's offset is its `receivedAt` less this.
+	 * Absent without a send time (a stream restored from History, a load run's capture), when rows
+	 * show no offset rather than one measured from a guess.
 	 */
 	sentAt?: number;
 	/** A transport failure on the relay, if the live stream hit one. */
 	error?: string | null;
 	/**
-	 * What identifies the list, for the render window (issue #1158).
-	 *
-	 * The window resets when this changes, so a live stream passes its run id:
-	 * its list grows in place, and the default - the row count - would reset the
-	 * window to its first slice on every batch that arrived. A list that only
-	 * ever arrives whole (a stored trace, a load run's captured sample) has no
-	 * identity to give and wants exactly that default.
+	 * What identifies the list for the render window (#1158), which resets when this changes. A
+	 * live stream passes its run id, as its list grows in place and the default (the row count)
+	 * would reset the window on every batch; a list arriving whole (a stored trace, a capture)
+	 * wants that default.
 	 */
 	listKey?: string;
 }
 
 /**
- * What each termination means, in the user's terms.
- *
- * `completed` is the only one where the *server* decided; every other reason is
- * a bound this side applied or the engine going down (`shutdown`, which is not
- * the user's `stopped`), and a reader has to be able to tell "the stream
- * finished" from "we stopped listening" - they lead to different next actions.
+ * Each termination in the user's terms. `completed` is the only one the *server* decided; every
+ * other is a bound this side applied, or the engine going down (`shutdown`, not the user's
+ * `stopped`), and "the stream finished" versus "we stopped listening" lead to different next
+ * actions.
  */
 const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }> = {
 	completed: {
@@ -165,20 +137,17 @@ const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }
 };
 
 /**
- * Pretty-print a payload that parses as JSON; hand back anything else as-is.
- *
- * Not exported: a second export beside the component costs this file its fast
- * refresh, and the behaviour is reachable through the rendered row anyway
- * (`events-tab.test.tsx` expands one and reads the formatting).
+ * Pretty-prints a payload parsing as JSON, else returns it as-is. Not exported: a second export
+ * costs the file fast refresh, and the rendered row reaches it (`events-tab.test.tsx` expands one
+ * and reads the formatting).
  */
 function formatEventData(data: string): string {
 	return formatJson(data);
 }
 
 /**
- * The `type/subtype` the server answered with when it is not an event stream,
- * else `undefined`: no header, or one that names `text/event-stream` (a
- * `; charset=` parameter does not change that).
+ * The server's `type/subtype` when not an event stream, else `undefined` (no header, or one naming
+ * `text/event-stream`; a `; charset=` does not change that).
  */
 function nonEventStreamType(contentType: string | undefined): string | undefined {
 	if (!contentType) return undefined;
@@ -220,8 +189,8 @@ function replyText(events: readonly StreamEvent[], streamText: string | undefine
 }
 
 /**
- * Events the server itself named `error`: the one mid-stream failure the app
- * can read without knowing a provider's shape, since SSE gives the event a name.
+ * Events the server named `error`: the one mid-stream failure readable without a provider's shape,
+ * as SSE names the event.
  */
 function errorEventsOf(events: readonly StreamEvent[]): StreamEvent[] {
 	return events.filter((event) => event.event === "error");
@@ -276,8 +245,8 @@ function StreamTextView({
 }
 
 /**
- * A row's "+1.50 s" / "+120 ms" figure, with the words a screen reader and a
- * hover need to say what it is measured from.
+ * A row's "+1.50 s" / "+120 ms" figure, with the words a screen reader and hover need to say what
+ * it is measured from.
  */
 function EventElapsed({ ms, since }: { ms: number; since: string }) {
 	return (
@@ -292,15 +261,11 @@ function EventElapsed({ ms, since }: { ms: number; since: string }) {
 }
 
 /**
- * One event: a summary row that expands to the full payload.
- *
- * Memoized, because a live stream re-renders the list around it (issue #1158).
- * Up to a window's worth of these are mounted while rows arrive several times a
- * second, and all but the newest render exactly what they rendered before. Every
- * prop holds its identity across such a render - an event object is appended
- * once and never replaced, and the rest are numbers - so the default shallow
- * comparison is the whole requirement; a custom comparator would be a second
- * copy of that fact, free to disagree with it.
+ * One event, a summary row expanding to the full payload. Memoized, as a live stream re-renders the
+ * list around it (#1158): up to a window of these are mounted while rows arrive several times a
+ * second, all but the newest unchanged. Every prop keeps its identity (an event is appended once
+ * and never replaced; the rest are numbers), so the default shallow comparison suffices, and a
+ * custom comparator would be a second copy of that fact.
  */
 const EventRow = memo(function EventRow({
 	event,
@@ -326,15 +291,11 @@ const EventRow = memo(function EventRow({
 					variant="listRow"
 					onClick={() => setExpanded((e) => !e)}
 					aria-expanded={expanded}
-					// The `Button` primitive's own baseline already gives this row its
-					// hover/press transitions (index.css's `:where(button, ...)` rule) -
-					// no hand-rolled `transition-*` needed. The chevron states its own
-					// `size-icon-sm` (issue #1679), which the primitive's
-					// `[&_svg:not([class*='size-'])]:size-icon` default leaves alone -
-					// no wrapper override needed. `rounded-none` overrides the base's
-					// `rounded-md`: this row is full-bleed inside its list
-					// (`border-b last:border-b-0` below), so a rounded hover fill would
-					// float oddly inside its own square edges.
+					// The `Button` baseline gives the row its transitions (index.css's
+					// `:where(button, ...)`), and the chevron's own `size-icon-sm` (#1679) is left
+					// alone by the primitive's `[&_svg:not([class*='size-'])]:size-icon`.
+					// `rounded-none` overrides `rounded-md`: the row is full-bleed in its list
+					// (`border-b last:border-b-0`), where a rounded hover would float.
 					className="gap-2 rounded-none px-4 py-1.5 hover:bg-muted/40"
 				>
 					<Chevron
@@ -345,10 +306,9 @@ const EventRow = memo(function EventRow({
 						{index + 1}
 					</span>
 					{/*
-					 * `variant="chip"` because this Badge paints its own background:
-					 * every other variant pairs `bg-x` with `hover:bg-x/80`, and
-					 * tailwind-merge replaces `bg-*` but not `hover:bg-*`, so the
-					 * caller's fill would win at rest and the variant's on hover.
+					 * `variant="chip"`, as this Badge paints its own background: other variants
+					 * pair `bg-x` with `hover:bg-x/80`, and tailwind-merge keeps `hover:bg-*`, so
+					 * the variant's fill would show on hover.
 					 */}
 					<Badge variant="chip" className="shrink-0 bg-muted text-muted-foreground">
 						{event.event}
@@ -358,8 +318,10 @@ const EventRow = memo(function EventRow({
 							id {event.sourceId}
 						</span>
 					)}
-					{/* `min-w-0` plus `truncate`, or the preview refuses to shrink and
-				    pushes the timestamp out of the row. */}
+					{/*
+					 * `min-w-0` plus `truncate`, or the preview will not shrink and pushes the
+					 * timestamp out.
+					 */}
 					<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
 						{event.data}
 					</span>
@@ -411,11 +373,9 @@ export default function ResponseEvents({
 	listKey,
 }: ResponseEventsProps) {
 	/*
-	 * Render a slice and grow it as the end is reached, the way the console and
-	 * a scenario run's steps do (issue #1158). A stream is capped at 100,000
-	 * events by default and ten million at the ceiling, so "how many rows can
-	 * this be asked to draw" has no small answer - and the rows are DOM-heavy,
-	 * with a chip, a monospace preview and an expandable payload each.
+	 * A slice grown as the end is reached, as the console and a scenario run's steps do (#1158): a
+	 * stream caps at 100,000 events by default and ten million at the ceiling, and each row is
+	 * DOM-heavy (a chip, a monospace preview, an expandable payload).
 	 */
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(
 		events.length,
@@ -423,8 +383,8 @@ export default function ResponseEvents({
 		listKey ?? events.length
 	);
 
-	// The user's pick, or none: Text opens by default once there is any, because
-	// a request that declared a path is asking for the reply, not the frames.
+	// The user's pick, or none: Text opens by default once there is any, as a request declaring a
+	// path asks for the reply, not the frames.
 	const [chosenView, setChosenView] = useState<EventsView | null>(null);
 	const hasText = useMemo(() => hasStreamText(events, streamText), [events, streamText]);
 	const view: EventsView = hasText ? (chosenView ?? "text") : "rows";
@@ -435,9 +395,8 @@ export default function ResponseEvents({
 	);
 	const errorEvents = useMemo(() => (showText ? errorEventsOf(events) : []), [showText, events]);
 
-	// Two different absences, two different answers. A response that was never a
-	// stream has no timeline to show and never will; a stream that has produced
-	// nothing yet is still going to.
+	// Two absences, two answers: a response that was never a stream has no timeline and never will;
+	// a stream that produced nothing yet still may.
 	if (!isStream) {
 		return (
 			<EmptyState
@@ -448,12 +407,11 @@ export default function ResponseEvents({
 	}
 
 	const note = endReason ? END_REASON_NOTE[endReason] : null;
-	// The received total, which is what the header counts. `totalEvents` is the
-	// engine's own and outranks the row count whenever it is there.
+	// The received total, which the header counts; the engine's `totalEvents` beats the row count.
 	const received = totalEvents ?? events.length;
 	const otherMediaType = nonEventStreamType(contentType);
-	// The engine joins `streamText` over every stored event, so a capped list
-	// does not shorten it; without one, the text is only as long as the list.
+	// The engine joins `streamText` over every stored event, so a capped list does not shorten it;
+	// without one, the text is as long as the list.
 	const showCutNotice = !!eventsTruncated && !(showText && streamText !== undefined);
 
 	return (
@@ -475,8 +433,8 @@ export default function ResponseEvents({
 				{hasText && (
 					<ToggleGroup
 						value={view}
-						// Radix clears the value when the active item is pressed again;
-						// a view has no "off".
+						// Radix clears the value when the active item is pressed again; a view has
+						// no "off".
 						onValueChange={(next) => next && setChosenView(next as EventsView)}
 						size="xs"
 						aria-label="Events view"
@@ -529,9 +487,8 @@ export default function ResponseEvents({
 				) : (
 					<div className={cn(error || note || showCutNotice ? "pt-2" : undefined)}>
 						{events.slice(0, visible).map((event, i) => (
-							// Index-keyed deliberately: the list only ever grows at the
-							// end, and an event carries no id of its own that is unique
-							// (`sourceId` is the origin's and repeats freely).
+							// Index-keyed deliberately: the list only grows at the end, and an
+							// event has no unique id (`sourceId` is its origin's and repeats).
 							<EventRow
 								key={i}
 								event={event}
@@ -542,10 +499,9 @@ export default function ResponseEvents({
 						))}
 						{hasMore && (
 							/*
-							 * The sentinel. Reaching it renders the next slice -
-							 * nothing is withheld, it arrives when you get there. The
-							 * count is stated rather than left to be inferred from a
-							 * scrollbar, exactly as the console's is.
+							 * The sentinel: reaching it renders the next slice, so nothing is
+							 * withheld. The count is stated rather than left to a scrollbar, as the
+							 * console's is.
 							 */
 							<p
 								ref={sentinelRef}

@@ -6,26 +6,16 @@
  */
 
 /**
- * The dense timing breakdown: one small tile per network phase, label over
- * value, wrapped in an auto-fitting grid.
- *
- * **The tiles are deliberately neutral.** Colour is an encoding in the two
- * chart-like renderers - the builder's timeline segments and the dashboard's
- * waterfall bars, where the bar's hue is how you tell the phases apart - and
- * decoration here, where the label is right there in the tile. Carrying a
- * per-phase hue in a grid of labelled boxes bought nothing and cost the raw
- * palette that `docs/design-system/categorical-colors.md` had to keep an exception open for.
- *
- * `surface-card`, not `bg-card` + `border-border`: these tiles sit on a
- * `bg-muted/30` panel rather than on the canvas, and `--border` is the same
- * colour as `--card` in dark, so the outline was simply absent in one theme.
- * The surface class declares the `--rule` that reads on it.
- *
- * **Script time is a tile here and not a phase** (#3739). It is no network phase
- * and never part of a total, so it is not in `TIMING_PHASES` (the waterfall and
- * the averages card would draw it as one); a step that waited on its script has
- * no other place to say so, and a reported `0` is drawn, because "ran, took no
- * time" is not "unreported".
+ * The dense timing breakdown: a small tile per network phase, label over value, in an auto-fitting
+ * grid. **Neutral tiles**: colour encodes the phase only in the chart-like renderers (the builder's
+ * timeline, the dashboard's waterfall), and is decoration where the label is in the tile, costing
+ * the raw-palette exception `docs/design-system/categorical-colors.md` kept open. `surface-card`,
+ * not `bg-card` + `border-border`: the tiles sit on a `bg-muted/30` panel, and `--border` is
+ * `--card`'s colour in dark, so the outline vanished; the surface class declares a `--rule` that
+ * reads. **Script time is a tile, not a phase** (#3739): no network phase and never in a total, so
+ * not in `TIMING_PHASES` (the waterfall and averages card would draw it as one), yet a step waiting
+ * on its script has nowhere else to say so; a reported `0` is drawn, as "ran, took no time" is not
+ * "unreported".
  */
 
 import { InfoChip } from "@/components/ui";
@@ -38,8 +28,8 @@ export interface TimingPhaseTilesProps {
 	/** Usually from `phasesFromTrace()`. A phase with no value renders "-". */
 	phases: readonly (ResolvedTimingPhase | MaybeResolvedTimingPhase)[];
 	/**
-	 * `trace.scriptMs` / `timing.scriptMs`: drawn as a "Scripts" tile after the
-	 * phases when reported (`isReportedMs`, so `0` draws and absent does not).
+	 * `trace.scriptMs` / `timing.scriptMs`, a "Scripts" tile after the phases when reported
+	 * (`isReportedMs`: `0` draws, absent does not).
 	 */
 	scriptMs?: number;
 	/** Smallest tile before the grid wraps to another row. */
@@ -56,9 +46,8 @@ function TimingTile({
 	tip: string;
 	value: number | undefined;
 }) {
-	// `formatPhaseDuration`, never a raw `.toFixed(1)`: a 0.04ms cached
-	// DNS lookup is the only signal a cached lookup gives, and one
-	// decimal place rounds it away to "0.0ms".
+	// `formatPhaseDuration`, never `.toFixed(1)`: a 0.04ms DNS lookup is the only sign of a cached
+	// lookup, which one decimal rounds to "0.0ms".
 	const duration = value !== undefined ? formatPhaseDuration(value) : undefined;
 
 	return (

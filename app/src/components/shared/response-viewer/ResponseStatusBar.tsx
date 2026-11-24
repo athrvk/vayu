@@ -6,17 +6,10 @@
  */
 
 /**
- * The bar above a response: status chip, elapsed time, payload size.
- *
- * This existed twice - `ResponseViewer/ResponseHeader.tsx` in the request
- * builder and a local `ResponseStatusBar` at the bottom of
- * `UnifiedResponseViewer` - as the same wrapper and the same three children,
- * class for class. The only difference was that the history copy made time and
- * size optional, so this takes the superset.
- *
- * It is the same duplication that produced the `status === 0` drift in
- * `StatusCodeBadge` (one copy lost the branch and rendered a literal `0`), and
- * the reason the invisible-divider fix had to be applied to this bar twice.
+ * The bar above a response: status chip, elapsed time, payload size. One component for the request
+ * builder and the stored viewer (time and size optional for the latter), as two copies drifted: one
+ * lost `StatusCodeBadge`'s `status === 0` branch and printed a literal `0`, and a divider fix had
+ * to be made twice.
  */
 
 import { useEffect, useState } from "react";
@@ -48,81 +41,61 @@ export interface ResponseStatusBarProps {
 	/** Omitted by callers that have no size. */
 	size?: number;
 	/**
-	 * The response headers, read only for the size hover (#2787): a Content-Length
-	 * beside a Content-Encoding is the compressed length, which `size` is not.
+	 * The response headers, read only for the size hover (#2787): a Content-Length beside a
+	 * Content-Encoding is the compressed length, which `size` is not.
 	 */
 	headers?: Record<string, string>;
 	/**
-	 * Vayu's own share of `time` (#2132), in ms - `timing.engineMs`. Absent for a
-	 * stream, an auth-failure reply and rows stored before the engine reported
-	 * it; the bar then shows nothing rather than a zero. Drawn beside `time`, so
-	 * it needs `time` to be present too.
+	 * Vayu's own share of `time` (#2132), in ms (`timing.engineMs`); absent for a stream, an
+	 * auth-failure reply and older rows, when the bar shows nothing rather than zero. Drawn beside
+	 * `time`, so needs it.
 	 */
 	engineMs?: number;
 	/**
-	 * The scripts' share of the send (#3676), in ms - `timing.scriptMs`, which is
-	 * outside `time`'s arithmetic and outside `engineMs`. The bar draws it only
-	 * when it exceeds `wireMs`, i.e. when scripts, not the network, are what made
-	 * the send slow; the Timing tab shows it every time it is reported.
+	 * The scripts' share of the send (#3676), in ms (`timing.scriptMs`), outside `time` and
+	 * `engineMs`; the bar draws it only above `wireMs`, when scripts, not the network, made the
+	 * send slow. The Timing tab always shows it.
 	 */
 	scriptMs?: number;
 	/** `timing.wireMs`, the bar of comparison for `scriptMs`. Absent: no script figure is drawn. */
 	wireMs?: number;
 	/**
-	 * The protocol this exchange negotiated - a display string ("HTTP/1.1"),
-	 * not the request-side `HttpVersion` union. Only read when
-	 * `httpVersionDowngraded` is set; the bar does not show the protocol of a
-	 * response that got the one it asked for.
+	 * The negotiated protocol as a display string ("HTTP/1.1"), not the request-side `HttpVersion`
+	 * union; read only with `httpVersionDowngraded`, as a response that got what it asked for shows
+	 * none.
 	 */
 	httpVersion?: string;
 	/**
-	 * The request named `http2` and the connection negotiated something older.
-	 *
-	 * The engine decides this (`http_version_downgraded`,
-	 * `engine/include/vayu/http/curl_version_map.hpp`); the bar's only job is to
-	 * stop it being invisible. Until this existed a downgrade was
-	 * indistinguishable from success - a 200, a latency, a size, and no hint
-	 * that the protocol on the request was not the protocol on the wire. Three
-	 * releases shipped with every Windows request downgraded this way and
-	 * nothing on this bar changed (issue #215).
+	 * The request named `http2` and the connection negotiated older. The engine decides it
+	 * (`http_version_downgraded`, `engine/include/vayu/http/curl_version_map.hpp`); the bar makes
+	 * it visible, as a downgrade otherwise looks like success: three releases shipped with every
+	 * Windows request downgraded and nothing here changed (#215).
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
-	 * The client-certificate registry entry this exchange presented, as `host`
-	 * or `host:port` (issue #707); absent when none matched.
-	 *
-	 * Shown because a per-host registry decides this without the request
-	 * mentioning it: two calls to what looks like the same API can differ only
-	 * in which entry matched, and nothing else on screen would say so.
+	 * The client-certificate registry entry presented, as `host` or `host:port` (#707), absent when
+	 * none matched; shown because a per-host registry decides it unmentioned by the request, so two
+	 * calls to what looks like one API can differ only in the entry.
 	 */
 	clientCertificate?: string;
 	/** ISO time this response arrived. Live sends only. */
 	receivedAt?: string;
 	/**
-	 * Set when this response was rebuilt from a stored run rather than sent just
-	 * now. See the age chip below for why the difference is shown.
+	 * Set when rebuilt from a stored run rather than sent now; the age chip below says why the
+	 * difference shows.
 	 */
 	restoredFrom?: { runId?: string; at: string };
 	/**
-	 * A stream is open on this response, and how many events have arrived
-	 * (issue #574).
-	 *
-	 * On the bar rather than only in the Events tab because a stream has no
-	 * completed exchange to describe: `time` and `size` say nothing while it
-	 * runs, and without this the band would announce a 200 and then look
-	 * finished for as long as the stream kept going. Omitted entirely on a
-	 * response that is not a live stream - a chip present on every response is a
-	 * chip nobody reads.
-	 *
-	 * `sentAt` (epoch ms) is when the stream started: with it, the time slot
-	 * counts up from there instead of showing `time`, which a stream has not
-	 * settled and holds at 0 (#3775).
+	 * A stream is open on this response, with its event count (#574). On the bar, not only the
+	 * Events tab: a stream has no finished exchange, so `time` and `size` say nothing while it runs
+	 * and the band would announce a 200 and look done. Omitted on non-live responses: a chip on
+	 * every response is read by nobody. `sentAt` (epoch ms) is the stream's start: the time slot
+	 * counts up from it, rather than `time`, which a stream holds at 0 (#3775).
 	 */
 	streaming?: { events: number; sentAt?: number };
 	/**
-	 * What checking this response against its declared schema found (issue
-	 * #628). Absent for a request whose collection binds no OpenAPI document -
-	 * the bar then shows nothing, because there is nothing to say.
+	 * What schema checking found (#628); absent for a collection binding no OpenAPI document, when
+	 * the bar shows nothing.
 	 */
 	validation?: ResponseValidation;
 	className?: string;
@@ -134,9 +107,8 @@ function scriptsDominate(scriptMs?: number, wireMs?: number): scriptMs is number
 }
 
 /**
- * The time since @p sentAt, recomputed on its own interval so only this text
- * re-renders on a tick. The interval is torn down with the component, which
- * is when the stream ends and the bar reverts to `time`.
+ * The time since @p sentAt, recomputed on its own interval so only this text re-renders per tick;
+ * torn down with the component, when the stream ends and the bar reverts to `time`.
  */
 function ElapsedClock({ sentAt }: { sentAt: number }) {
 	const [now, setNow] = useState(() => Date.now());
@@ -166,11 +138,9 @@ export function ResponseStatusBar({
 	className,
 }: ResponseStatusBarProps) {
 	/*
-	 * A relative time has to be recomputed to stay true. Nothing else in the app
-	 * does this - every other relative `TimeValue` renders once and then says
-	 * "now" for as long as it stays mounted - and the restored-response chip here
-	 * had the same rot. The response pane is where it matters most,
-	 * because the pane sits open while you keep editing the request beside it.
+	 * A relative time must be recomputed to stay true; every other relative `TimeValue` renders
+	 * once and says "now" while mounted. It matters most here, as the pane stays open while you
+	 * edit the request beside it.
 	 */
 	const [, tick] = useState(0);
 	const at = receivedAt ?? restoredFrom?.at;
@@ -190,40 +160,29 @@ export function ResponseStatusBar({
 
 	return (
 		/*
-		 * `border-rule`: this bar sits inside the response pane's `surface-card`,
-		 * which declares what the rule resolves to. Hardcoding a border token here
-		 * is what made it invisible in dark - `--border` is the same colour as
-		 * `--card`, 1.003. See index.css, "Surfaces, and the rule colour that
-		 * reads on each".
+		 * `border-rule`: the bar sits in the response pane's `surface-card`, which declares the
+		 * rule. A border token made it invisible in dark (`--border` is `--card`'s colour, 1.003;
+		 * index.css, "Surfaces, and the rule colour that reads on each").
 		 */
 		<div
 			className={cn(
 				/*
-				 * `py-1.5`, not `py-3`. This was the loosest padding left in the
-				 * builder - a 40px band above what was then a 24px tab row - while
-				 * everything around it had been taken to `py-1`/`py-1.5`. The tab
-				 * row above it is the 32px `band` floor now (issue #1679); this bar
-				 * stays on the `--spacing` rhythm rather than a fixed step, so it is
-				 * deliberately not pinned to a round number here any more.
-				 *
-				 * It stays a band rather than folding into the tab row below: the
-				 * status of a response is the first thing you look at, and a row
-				 * shared with eight tab triggers and the action buttons is not
-				 * where a headline goes. The tint is what keeps two stacked rows
-				 * of similar height from reading as one repeated thing.
-				 *
-				 * It wraps (#3494): at a narrow pane or a 200% interface scale the
-				 * groups below move to a second line whole. They are `shrink-0
-				 * whitespace-nowrap`, because a flex item that may shrink breaks
-				 * "120 ms" into a column of characters before the row wraps.
+				 * `py-1.5`, on the `--spacing` rhythm rather than a fixed step, under the 32px
+				 * `band` tab row (#1679). A band of its own, not folded into the tab row: a
+				 * response's status is the first thing read, and a row shared with eight tab
+				 * triggers and the actions is no place for a headline; the tint keeps the two
+				 * similar rows from reading as one. It wraps (#3494): at a narrow pane or 200%
+				 * scale the groups move to a second line whole, being `shrink-0 whitespace-nowrap`,
+				 * as a shrinkable flex item breaks "120 ms" into a column first.
 				 */
 				"flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 border-b border-rule bg-muted/30",
 				className
 			)}
 		>
-			{/* Compact, so the chip does not make the band taller than its text.
-			    It is still the loudest thing in the row - it is the only thing
-			    here carrying a fill. */}
+			{/*
+			 * Compact, so the chip does not make the band taller than its text; still the loudest
+			 * thing in the row, the only one with a fill.
+			 */}
 			<StatusCodeBadge
 				status={status}
 				statusText={statusText}
@@ -231,11 +190,9 @@ export function ResponseStatusBar({
 			/>
 
 			{/*
-			 * A live stream, and its running count. First after the status chip
-			 * because while it is there it is the thing that is still happening -
-			 * the numbers to its right describe an exchange that has not finished.
-			 * The pulsing dot is the same mark the load-test button uses, for the
-			 * same reason: no static colour says "live".
+			 * A live stream and its running count, first after the status chip, as the thing still
+			 * happening; the numbers to its right describe an unfinished exchange. The pulsing dot
+			 * is the load-test button's mark, as no static colour says "live".
 			 */}
 			{streaming && (
 				<div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-status-success-text">
@@ -251,10 +208,9 @@ export function ResponseStatusBar({
 			)}
 
 			{/*
-			 * Beside the streaming chip and among status/time/size, because like
-			 * them it describes this exchange. Text with an icon rather than a
-			 * `Badge`: it paints no background, and the variant="chip" rule in
-			 * badge-hover.test.tsx is for the ones that do.
+			 * Beside the streaming chip among status, time and size, as it describes this exchange;
+			 * text with an icon, not a `Badge`, painting no background (badge-hover.test.tsx's
+			 * variant="chip" rule).
 			 */}
 			{validation && (
 				<ValidationChip validation={validation} className="shrink-0 whitespace-nowrap" />
@@ -295,10 +251,8 @@ export function ResponseStatusBar({
 			)}
 
 			{/*
-			 * Protocol downgrade. Shown only when it happened - a response that
-			 * negotiated what it asked for says nothing here. It sits among
-			 * status/time/size rather than at the far end with the age, because
-			 * like them it describes the exchange itself.
+			 * Protocol downgrade, only when it happened, among status, time and size rather than at
+			 * the end with the age, as it describes the exchange.
 			 */}
 			{httpVersionDowngraded && (
 				<HttpVersionDowngradeNote
@@ -308,12 +262,10 @@ export function ResponseStatusBar({
 			)}
 
 			{/*
-			 * The client certificate this exchange offered (issue #707).
-			 * Shown only when one matched, on the same rule as the downgrade
-			 * above: a chip on every response is a chip nobody reads. "Offered",
-			 * not "accepted": the server decides, and an `http://` send offers
-			 * nothing, so it never has the chip (#3260). Text, no
-			 * background - see the variant="chip" rule in badge-hover.test.tsx.
+			 * The client certificate offered (#707), only when one matched, as for the downgrade.
+			 * "Offered", not "accepted": the server decides, and an `http://` send offers nothing,
+			 * so never has it (#3260). Text, no background (badge-hover.test.tsx's variant="chip"
+			 * rule).
 			 */}
 			{clientCertificate && (
 				<div
@@ -329,20 +281,12 @@ export function ResponseStatusBar({
 			)}
 
 			{/*
-			 * Response age - for a restored response *and* a live one.
-			 *
-			 * `time` beside it is a duration: how long the exchange took. This is
-			 * a different question, and the one a duration cannot answer - whether
-			 * what you are looking at is the response to the request beside it *as
-			 * it is now*, or to a version of it from twenty minutes and several
-			 * edits ago.
-			 *
-			 * The two are labelled apart: "from run" carries the run's identity
-			 * and its id in the tooltip; a live one is just its age.
-			 *
-			 * No `bg-`, so no Badge - see the variant="chip" rule in
-			 * badge-hover.test.tsx. It is text, and it sits at the far end rather
-			 * than among status/time/size, which describe the exchange itself.
+			 * Response age, for a restored *and* a live response. `time` beside it is how long the
+			 * exchange took; this answers what a duration cannot: whether this answers the request
+			 * beside it as it is now, or a version from several edits ago. Labelled apart: "from
+			 * run" carries the run's identity and id in the tooltip; a live one is its age. Text,
+			 * no `bg-`, so no Badge (badge-hover.test.tsx), at the far end rather than among the
+			 * exchange's own figures.
 			 */}
 			{age && (
 				<div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-label text-muted-foreground">
