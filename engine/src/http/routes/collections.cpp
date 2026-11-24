@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/collections.cpp
  * @brief Collection management routes
  */
 

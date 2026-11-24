@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_export.cpp
  * @brief `POST /specs/export` - a collection back out as an OpenAPI document
  *        (issue #630's exporter, moved engine-side by #855).
  *

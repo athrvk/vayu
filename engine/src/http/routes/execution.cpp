@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/execution.cpp
  * @brief Request execution routes (Design mode & Load test)
  *
  * HTTP Status Code Philosophy:

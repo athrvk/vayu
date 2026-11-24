@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/specs.cpp
  * @brief OpenAPI documents - stored once, bound by collections (issue #637).
  *
  * A spec is not owned by a collection: several may bind the same document, and

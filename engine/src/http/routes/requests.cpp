@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/requests.cpp
  * @brief Request management routes
  */
 

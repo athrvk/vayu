@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/health.cpp
  * @brief Health check and shutdown routes
  */
 

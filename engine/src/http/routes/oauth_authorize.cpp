@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/oauth_authorize.cpp
  * @brief Interactive OAuth 2.0 authorization-code manager (engine-hosted
  *        loopback + PKCE) plus the URL builder. Lives with the routes because
  *        the loopback listener needs httplib (linked into the engine + tests).

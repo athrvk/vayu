@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/import.cpp
  * @brief Import endpoints - the URL proxy (`/import/fetch`) that fetches a
  *        remote collection/spec past browser CORS, and the atomic bulk write
  *        (`/import/apply`) that persists a parsed import in one call.

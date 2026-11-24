@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/mock_server.cpp
  * @brief The collection mock server: an engine-hosted listener that answers a
  *        collection's saved example responses (issue #481 phase 2), plus the
  *        routes that drive it. Lives with the routes for the same reason

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_diff.cpp
  * @brief `POST /specs/diff` - what a re-fetched document would change about the
  *        collection bound to it (issue #654's comparison, moved engine-side by
  *        #854).

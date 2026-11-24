@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/trash.cpp
  * @brief `GET /trash`, `POST /trash/:id/restore`, `DELETE /trash/:id` - what
  *        soft delete left recoverable (issue #988).
  *

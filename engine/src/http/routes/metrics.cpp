@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/metrics.cpp
  * @brief Metrics streaming routes (SSE endpoints for real-time stats)
  */
 

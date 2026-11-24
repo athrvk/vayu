@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/examples.cpp
  * @brief Saved example responses, nested under their request (issue #481).
  *
  * An example is the response an importer found next to a request - Postman's

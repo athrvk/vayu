@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/scripting.cpp
  * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
  */
 

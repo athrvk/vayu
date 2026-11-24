@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_bind.cpp
  * @brief `POST /specs/bind` - store a document, bind a collection to it, and
  *        make every request's recorded identity agree with it, in one
  *        transaction (issue #862).

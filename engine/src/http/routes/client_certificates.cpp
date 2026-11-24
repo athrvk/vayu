@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/client_certificates.cpp
  * @brief The client-certificate registry (issue #707).
  *
  * A certificate belongs to a *host*, not to a request, so this is a registry

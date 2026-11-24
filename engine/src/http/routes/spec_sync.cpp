@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_sync.cpp
  * @brief `POST /specs/sync` - apply an OpenAPI diff to a bound collection, whole
  *        or not at all (issue #655, the write half of #627).
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_match.cpp
  * @brief `POST /specs/match` - which request of a collection is which operation
  *        of a document (issue #638's matcher, moved engine-side by #761).
  *

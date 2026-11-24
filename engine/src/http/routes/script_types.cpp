@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/script_types.cpp
  * @brief Generates the TypeScript declarations Monaco's language service needs
  *        from the completion table, so there is no second copy of the surface.
  *

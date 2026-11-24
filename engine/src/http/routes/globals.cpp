@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/globals.cpp
  * @brief Global variables routes: `GET /globals` and `POST /globals`, both
  *        answering the row's `ETag`, the write judging an optional `If-Match`
  *        (#2988).

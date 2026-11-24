@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/reorder.cpp
  * @brief POST /reorder - the atomic batch reorder/move for collections and
  *        requests (issue #365).
  */

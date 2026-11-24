@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/environments.cpp
  * @brief Environment management routes
  */
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/config.cpp
  * @brief Configuration management routes
  */
 
