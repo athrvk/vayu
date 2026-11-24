@@ -350,7 +350,7 @@ See [scripting/request-mutation.md](../scripting/request-mutation.md#mutating-th
 **Redirect policy.**
 `followRedirects` defaults to **true**, so omitting it follows every 3xx and the final response is returned as the answer, with the earlier hops' status and header lines on its `redirects` member (field notes below the response example) - send `followRedirects: false` to make the 3xx itself the answer.
 A chain longer than `maxRedirects` (default 10) fails the send with `TOO_MANY_REDIRECTS` rather than returning the last 3xx.
-Both clients send these explicitly for exactly that reason (see [api-integration](../../app/api-integration.md)).
+Both clients send these explicitly for exactly that reason (see [api-integration](../../app/api-integration/index.md)).
 `POST /runs` accepts the same three fields with the same defaults, so a load test can be run under the policy the request was configured with.
 
 **TLS verification.**

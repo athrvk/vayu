@@ -11,7 +11,7 @@
  * Suites under `app/` assert against pages in `docs/` and against sources and
  * fixtures in `engine/`, and every area filter in `pr-tests.yml` routes on
  * `app/**` - so a token value rewritten in `docs/design-system.md`, a hook
- * renamed out of `docs/app/state-management.md`, or a bound raised in
+ * renamed out of `docs/app/state-management/`, or a bound raised in
  * `engine/include/vayu/core/constants.hpp` used to land green and fail on the
  * next change to `app/` as if that change had caused it (#1118 and #1121 for
  * the doc half, #1122 for the engine half).
