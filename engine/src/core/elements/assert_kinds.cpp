@@ -6,17 +6,15 @@
  */
 
 /**
- * @brief `assert.status`, `assert.jsonpath`, `assert.jsonschema`,
- *        `assert.snapshot`, `assert.contains`, `assert.duration`,
- *        `assert.size` (issue #1514; `assert.jsonschema` #3806,
- *        `assert.snapshot` #3807).
+ * `assert.status`, `assert.jsonpath`, `assert.jsonschema`, `assert.snapshot`,
+ * `assert.contains`, `assert.duration` and `assert.size` (#1514;
+ * `assert.jsonschema` #3806, `assert.snapshot` #3807).
  *
- * All seven run in `step.after` and report through the same channel a `pm.test`
- * call does: one `TestResult` appended to `ElementContext::post_script_result`
- * regardless of the verdict, so `classify_step`'s `describe_failed_tests` and
- * the SSE frame's `tests` tally count a declarative assertion exactly as they
- * count a scripted one (issue #1512's "Outcomes" section) - one mechanism,
- * not two.
+ * All seven run in `step.after` and report as a `pm.test` call does: one
+ * `TestResult` appended to `ElementContext::post_script_result` whatever the
+ * verdict, so `classify_step`'s `describe_failed_tests` and the SSE frame's
+ * `tests` tally count a declarative assertion as they count a scripted one
+ * (#1512, "Outcomes").
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -122,11 +120,11 @@ using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 
 // ---------------------------------------------------------------------------
 // Operands written with `{{name}}` tokens (#3779): `assert.contains`'s `text`
-// outside `matches`, and the strings of `assert.jsonpath`'s `expected`. They
-// resolve through `ElementContext::resolve_template` when the assertion
-// applies, the hook `control.if` reads. A token that cannot be answered fails
-// the assertion, because comparing the template as typed would turn a mistyped
-// column name into a verdict about the wrong operand.
+// outside `matches`, and `assert.jsonpath`'s `expected` strings. They resolve
+// through `ElementContext::resolve_template`, the hook `control.if` reads,
+// when the assertion applies. An unanswered token fails the assertion:
+// comparing the template as typed would turn a mistyped column name into a
+// verdict about the wrong operand.
 // ---------------------------------------------------------------------------
 
 constexpr std::string_view TOKEN_OPEN = "{{";

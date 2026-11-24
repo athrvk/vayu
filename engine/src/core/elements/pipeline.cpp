@@ -6,9 +6,8 @@
  */
 
 /**
- * @brief `compile_elements` and `ElementPipeline::run` (issue #1514): turning
- *        a resolved `elements` array into compiled behaviour and running it
- *        at one phase of a step.
+ * `compile_elements` and `ElementPipeline::run` (#1514): a resolved `elements`
+ * array compiled into behaviour, and run at one phase of a step.
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -94,9 +93,8 @@ SharedPacingClocks::SharedPacingClocks (const std::vector<std::string>& names) {
     for (const auto& name : names) {
         index_of_id_.try_emplace (name, index_of_id_.size ());
     }
-    // Sized exactly once, from the count just discovered above - growing a
-    // `vector<atomic<...>>` afterwards would need to move-construct an
-    // atomic, which is neither copyable nor movable.
+    // Sized once, from the count just found: growing a `vector<atomic<...>>`
+    // would move-construct an atomic, which is neither copyable nor movable.
     clocks_ = std::vector<std::atomic<int64_t>> (index_of_id_.size ());
     for (auto& clock : clocks_) {
         clock.store (0, std::memory_order_relaxed);
@@ -122,8 +120,8 @@ SharedThroughputBudgets::SharedThroughputBudgets (const std::vector<std::string>
     for (const auto& name : names) {
         index_of_id_.try_emplace (name, index_of_id_.size ());
     }
-    // Sized exactly once, from the count just discovered - a `std::mutex` is
-    // neither copyable nor movable, so this vector can never be grown.
+    // Sized once, from the count just found: a `std::mutex` is neither copyable
+    // nor movable, so this vector cannot grow.
     budgets_ = std::vector<Budget> (index_of_id_.size ());
 }
 
@@ -143,25 +141,25 @@ int64_t SharedThroughputBudgets::claim (const std::string& name, double target_r
         budget.last_tick_ms = now_ms;
     }
 
-    // At most one slot survives a stretch with no claims: a run that idled
-    // resumes at its rate rather than releasing everything it "saved up" at
-    // once, which is the burst this kind exists to prevent.
+    // At most one slot survives an idle stretch: a run that idled resumes at
+    // its rate instead of releasing all it "saved up" at once, the burst this
+    // kind exists to prevent.
     budget.balance = std::min (budget.balance, 1.0);
     budget.balance -= 1.0;
-    // A balance this close to zero is a slot the accrual paid for, arrived at
-    // through a rate that does not divide the elapsed time evenly - releasing
-    // it now rather than charging a rounded-up millisecond for a billionth of
-    // a slot is what keeps the rate exact over a long run.
+    // A balance this close to zero is a slot the accrual paid for, reached
+    // through a rate that does not divide the elapsed time evenly. Releasing it
+    // now, not charging a rounded-up millisecond for a billionth of a slot,
+    // keeps the rate exact over a long run.
     constexpr double kSettledSlot = 1e-9;
     if (budget.balance >= -kSettledSlot) {
         return 0;
     }
-    // The fraction is carried, never rounded away: the wait is computed from
-    // the whole outstanding balance each time, so a rate that does not divide
-    // a millisecond evenly stays on rate instead of drifting one rounding
-    // error per slot. Milliseconds first, then the rate: an exact balance
-    // over an exact rate then divides exactly (3 slots at 10/s is 300ms, not
-    // 300.00000000000006 rounded up to 301).
+    // The fraction is carried, never rounded away: each wait comes from the
+    // whole outstanding balance, so a rate that does not divide a millisecond
+    // stays on rate instead of drifting one rounding error per slot.
+    // Milliseconds first, then the rate, so an exact balance over an exact rate
+    // divides exactly (3 slots at 10/s is 300ms, not 300.00000000000006 rounded
+    // up to 301).
     return static_cast<int64_t> (std::ceil ((-budget.balance * 1000.0) / target_rps));
 }
 
@@ -395,9 +393,9 @@ namespace {
 /// A lifecycle element's `to_json` plus the `messages` and `console` lists an
 /// inline element's report row carries (#3455): the same samples, so the same
 /// cap, repeat counts and `*Dropped` keys. `to_json` stays without them, as a
-/// step trace already shows the whole script result. Its `pm.sendRequest`
-/// records ride as `scriptRequests` (#3633), in call order; a console line
-/// does not index one, as the sample folds repeated lines into one.
+/// step trace already shows the whole script result. `pm.sendRequest` records
+/// ride as `scriptRequests` (#3633) in call order; a console line does not
+/// index one, since the sample folds repeated lines.
 nlohmann::json lifecycle_row (const ElementOutcome& outcome) {
     nlohmann::json row = outcome.to_json ();
     DistinctMessageSample messages;
@@ -496,13 +494,12 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
 
         if (const auto* kind = registry.find (out.kind); kind != nullptr &&
         kind->compile && !is_blank_script_element (out.kind, out.config)) {
-            // Stamped onto a *copy* passed to `compile`, never onto
-            // `out.config` itself - `out.config` is what the load path's
-            // deferred `script.post` replay reads back verbatim
-            // (`run_manager.cpp`), which must stay exactly what the caller
-            // wrote. `timer.pacing` (issue #1498) is the one kind that reads
-            // `_elementId`, to key its per-node "last started" state by the
-            // same id `scenario_plan.cpp` also stamped `_scopeEntry` onto.
+            // Stamped onto a copy for `compile`, never onto `out.config`: the
+            // load path's deferred `script.post` replay (`run_manager.cpp`)
+            // reads `out.config` back verbatim, so it must stay as the caller
+            // wrote it. `timer.pacing` (#1498) alone reads `_elementId`, keying
+            // its per-node "last started" state by the id `scenario_plan.cpp`
+            // stamped `_scopeEntry` onto.
             nlohmann::json compile_config = out.config;
             compile_config["_elementId"]  = out.id;
             out.element                   = kind->compile (compile_config);

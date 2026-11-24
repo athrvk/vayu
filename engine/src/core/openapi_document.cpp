@@ -6,12 +6,12 @@
  */
 
 /**
- * @brief The engine's one reader of a stored OpenAPI document (issue #853).
- *        See the header for what it promises and why it lives here.
+ * The engine's one reader of a stored OpenAPI document (#853); the header says
+ * what it promises and why it lives here.
  *
- * This is the only translation unit in the engine that includes a YAML library.
- * Keep it that way: the DOM it produces is what every other reader takes, so a
- * second include is a second opinion about what a document says.
+ * The only translation unit in the engine that includes a YAML library, and it
+ * must stay so: every other reader takes the DOM it produces, so a second
+ * include is a second opinion about what a document says.
  */
 
 #include "vayu/core/openapi_document.hpp"
@@ -48,9 +48,8 @@ namespace {
 
 namespace limits = vayu::core::constants::spec_document;
 
-// The one walk over a document's operations, and the helpers it is built from,
-// live in `openapi_walk.hpp` so `openapi_drafts.cpp` reads the *same* operations
-// this file indexes (issue #865).
+// The walk over a document's operations lives in `openapi_walk.hpp`, so
+// `openapi_drafts.cpp` reads the operations this file indexes (#865).
 using walk::find_object;
 using walk::is_declared_status_key;
 using walk::resolve_single_hop;
@@ -103,17 +102,15 @@ throw_visit_error (ryml::csubstr message, const ryml::ErrorDataVisit& data, void
 }
 
 /**
- * Point rapidyaml's error handlers at an exception.
+ * Points rapidyaml's error handlers at an exception. The defaults call
+ * `abort()`, measured here as a killed process on a document with an
+ * unterminated flow sequence: the daemon taken down by an upload. rapidyaml
+ * documents a handler as a function that must not return, and names throwing
+ * first.
  *
- * Its default ones call `abort()`, which measured here as a killed process on a
- * document with an unterminated flow sequence - the daemon taken down by an
- * upload. rapidyaml documents an error handler as a function that must not
- * return, and throwing is the mechanism it names first.
- *
- * `set_callbacks` writes global state and says it is not thread-safe, so it is
- * installed exactly once behind a `call_once` and never swapped afterwards;
- * nothing else in the engine parses YAML, so there is no second owner to race
- * with.
+ * `set_callbacks` writes global state and is not thread-safe, so it is
+ * installed once behind a `call_once` and never swapped; nothing else in the
+ * engine parses YAML, so nothing races with it.
  */
 void install_yaml_callbacks () {
     static std::once_flag once;
@@ -133,24 +130,13 @@ bool is_decimal_digits (std::string_view text) {
 }
 
 /**
- * One *plain* (unquoted) YAML scalar, typed by js-yaml's core schema.
- *
- * Typed here rather than taken from the library because a YAML library's own
- * opinion is what would drift from the importer's: yaml-cpp, measured against
- * this corpus, reports the quoted string `"2.0"` - the very key Swagger 2.0
- * detection turns on - as the number 2.0.
- */
-/**
  * The constants YAML's core schema spells out, or nothing when @p text is not
- * one of them.
+ * one. JSON has no infinity or NaN, and `JSON.stringify` writes both as null,
+ * as the renderer does when it hands one to the engine.
  *
- * JSON has no infinity or NaN, and `JSON.stringify` writes both as null - so
- * does the renderer when it hands one of these to the engine.
- *
- * `make_optional` rather than a bare return, for `rows_for`'s reason: copy-
- * initializing an `optional<json>` from a `json` puts nlohmann's
- * `operator ValueType()` up against `optional`'s converting constructor, which
- * GCC reports as an ambiguity under `-Werror`.
+ * `make_optional`, not a bare return: copy-initializing an `optional<json>`
+ * from a `json` pits nlohmann's `operator ValueType()` against `optional`'s
+ * converting constructor, which GCC reports as an ambiguity under `-Werror`.
  */
 std::optional<nlohmann::ordered_json> plain_constant (const std::string& text) {
     if (text.empty () || text == "~" || text == "null" || text == "Null" || text == "NULL") {
@@ -186,6 +172,12 @@ int integer_base (std::string_view digits) {
     return 0;
 }
 
+/**
+ * One plain (unquoted) YAML scalar, typed by js-yaml's core schema. Typed here,
+ * not by the library, because a library's opinion is what would drift from the
+ * importer's: yaml-cpp, measured on this corpus, reads the quoted `"2.0"` that
+ * Swagger 2.0 detection turns on as the number 2.0.
+ */
 nlohmann::ordered_json plain_scalar (const std::string& text) {
     if (auto constant = plain_constant (text)) {
         return *constant;
@@ -227,17 +219,15 @@ nlohmann::ordered_json plain_scalar (const std::string& text) {
 }
 
 /**
- * The tree walk: rapidyaml nodes to a DOM, expanding aliases as it goes.
- *
- * Aliases are expanded here rather than by `Tree::resolve()` because that call
- * expands them all at once with no budget - it dies of `std::bad_alloc` on a
- * seven-level alias bomb - and because it does not implement merge keys, which
- * js-yaml does and real documents use. Doing it in the walk gives both, under
+ * The tree walk: rapidyaml nodes to a DOM, expanding aliases as it goes. Not
+ * `Tree::resolve()`: that expands them all at once with no budget (it dies of
+ * `std::bad_alloc` on a seven-level alias bomb) and does not implement merge
+ * keys, which js-yaml does and real documents use. The walk gives both under
  * one budget.
  *
- * Anchors are collected during the walk, which is depth-first and therefore
- * document order, so an alias can only see an anchor declared before it - the
- * rule YAML states and js-yaml enforces.
+ * Anchors are collected during the walk, depth-first and so in document order,
+ * so an alias sees only an anchor declared before it, the rule YAML states and
+ * js-yaml enforces.
  */
 class Converter {
     public:
@@ -246,11 +236,9 @@ class Converter {
     }
 
     /**
-     * One value position - the root, a mapping's value, or a sequence entry.
-     *
-     * Every node in the DOM passes through here exactly once per *expansion*,
-     * which is what makes the budget mean something: an alias converts what it
-     * names again, and pays for it again.
+     * One value position: the root, a mapping's value, or a sequence entry.
+     * Every DOM node passes here once per expansion, which is what gives the
+     * budget meaning: an alias converts what it names again, and pays again.
      */
     nlohmann::ordered_json convert_value (ryml::ConstNodeRef node, size_t depth) {
         if (depth > limits::MAX_READ_DEPTH) {
@@ -342,12 +330,11 @@ class Converter {
                 continue;
             }
             if (out.contains (key) && merged_keys.erase (key) == 0) {
-                // js-yaml refuses this too. A document that declares one key
-                // twice declares nothing definite, and choosing a winner here
-                // would choose a different one than the importer did. A key the
-                // *merge* put there is not that: overriding a default is what
-                // writing the key next to `<<` means, whichever side of it the
-                // key sits on.
+                // js-yaml refuses this too: a document declaring one key twice
+                // declares nothing definite, and picking a winner could differ
+                // from the importer's. A key the merge put there is not that:
+                // overriding a default is what writing a key beside `<<` means,
+                // on either side of it.
                 throw ReadFailure ("duplicated mapping key \"" + key + "\"");
             }
             out[key] = convert_value (child, depth + 1);
@@ -356,10 +343,10 @@ class Converter {
     }
 
     /**
-     * A merge key (`<<: *base`, or `<<: [*a, *b]`), with js-yaml's precedence:
-     * a key the mapping states itself always wins, and among merged sources the
-     * earlier one wins. Both are what "these are the defaults" means, and
-     * getting either backwards would silently rewrite an operation.
+     * A merge key (`<<: *base`, or `<<: [*a, *b]`) with js-yaml's precedence: a
+     * key the mapping states itself wins, and among merged sources the earlier
+     * wins. Both are what "these are the defaults" means; either backwards
+     * would silently rewrite an operation.
      */
     void merge_into (nlohmann::ordered_json& out,
     std::unordered_set<std::string>& merged_keys,
@@ -404,19 +391,16 @@ size_t node_budget_for (size_t bytes) {
 
 // --- Writing a DOM back out as YAML (issue #855) -----------------------------
 
-/// Spaces one nesting level indents by. Two, which is what every OpenAPI
-/// document in the wild is written with and what js-yaml's `dump` wrote before
-/// the export moved here.
+/// Spaces per nesting level: two, as every OpenAPI document in the wild is
+/// written and js-yaml's `dump` writes.
 constexpr size_t YAML_INDENT = 2;
 
 /**
- * Whether @p text survives being written as a *plain* (unquoted) YAML scalar.
- *
- * The reader's rule, asked rather than restated: a string a plain scalar would
- * retype - `2.0`, `007`, `true`, `~` - has to be quoted, and `plain_scalar` is
- * the one place that knows which those are. The rest is YAML's own syntax,
- * where a plain scalar cannot start with an indicator, carry `: ` or ` #`, hold
- * a control character, or keep surrounding space.
+ * Whether @p text survives as a plain (unquoted) YAML scalar. The reader's rule
+ * is asked, not restated: a string a plain scalar would retype (`2.0`, `007`,
+ * `true`, `~`) must be quoted, and `plain_scalar` alone knows which. The rest
+ * is YAML syntax: a plain scalar cannot start with an indicator, carry `: ` or
+ * ` #`, hold a control character, or keep surrounding space.
  */
 bool is_plain_safe (const std::string& text) {
     if (text.empty () || !plain_scalar (text).is_string ()) {
@@ -448,14 +432,11 @@ bool is_plain_safe (const std::string& text) {
 }
 
 /**
- * One scalar as YAML writes it.
- *
- * The quoted form is nlohmann's JSON string, because YAML's double-quoted style
- * takes JSON's escapes unchanged - one escaping table, already right, rather
- * than a second one here. `error_handler_t::replace` is what keeps a stored
- * example body that is not valid UTF-8 from throwing in the middle of an
- * export: the bytes came off somebody's server, and refusing the whole document
- * over one of them would be the wrong answer.
+ * One scalar as YAML writes it. The quoted form is nlohmann's JSON string:
+ * YAML's double-quoted style takes JSON's escapes unchanged, so one escaping
+ * table serves. `error_handler_t::replace` keeps a stored example body that is
+ * not valid UTF-8 from throwing mid-export: the bytes came off somebody's
+ * server, and refusing the whole document over one is wrong.
  */
 std::string scalar_text (const nlohmann::ordered_json& value) {
     const auto dump = [] (const nlohmann::ordered_json& node) {
@@ -517,10 +498,10 @@ void emit_map (const nlohmann::ordered_json& node, size_t indent, std::string& o
 void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& out) {
     for (const auto& item : node) {
         if ((item.is_object () || item.is_array ()) && !item.empty ()) {
-            // The compact form - `- name: petId` rather than a bare `-` and the
-            // mapping below it. The nested block is rendered one level in and
-            // its first line's indent is exactly the width of the `- ` that
-            // replaces it, so the two always line up.
+            // The compact form, `- name: petId` rather than a bare `-` with the
+            // mapping below. The nested block is rendered one level in, and its
+            // first line's indent is the width of the `- ` that replaces it, so
+            // the two line up.
             std::string nested;
             if (item.is_object ()) {
                 emit_map (item, indent + YAML_INDENT, nested);
@@ -542,21 +523,17 @@ void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& o
 constexpr const char* BUNDLED_KEY = "x-vayu-bundled";
 
 /**
- * Keys OpenAPI adds to its schema language that a JSON Schema validator has
- * never heard of. Dropped rather than passed through: each one is either
- * documentation (`example`, `externalDocs`, `xml`) or a serialization concern
- * (`discriminator`), and none of them constrains a body.
- *
- * `nullable` is deliberately absent - it *does* constrain a body, so it is
- * translated rather than dropped.
+ * Keys OpenAPI adds to its schema language that a JSON Schema validator does
+ * not know. Dropped: each is documentation (`example`, `externalDocs`, `xml`)
+ * or serialization (`discriminator`), and none constrains a body. `nullable` is
+ * absent on purpose: it does constrain a body, so it is translated.
  */
 constexpr std::array<std::string_view, 4> OPENAPI_ONLY_KEYS = { "discriminator",
     "xml", "externalDocs", "example" };
 
 /**
- * Where a keyword's value is itself a schema, or a list of them - one branch,
- * because translating a list is translating each entry of it and the walk below
- * already does that for any array it is handed.
+ * Where a keyword's value is a schema or a list of them: one branch, since the
+ * walk below translates each entry of any array it is handed.
  */
 constexpr std::array<std::string_view, 15> SUBSCHEMA_KEYS = { "not", "if",
     "then", "else", "contains", "additionalProperties", "propertyNames",
@@ -574,24 +551,21 @@ bool holds (const std::array<std::string_view, N>& keys, const std::string& key)
 }
 
 /**
- * Translate one schema - and everything below it - out of OpenAPI's dialect and
- * into JSON Schema.
- *
- * Recursion is over the *document's* structure, which is finite and bounded by
- * `MAX_READ_DEPTH`: a `$ref` is copied as-is rather than followed, so a
- * recursive schema terminates here for the same reason it terminates in storage.
+ * Translates one schema and everything below it from OpenAPI's dialect into
+ * JSON Schema. Recursion is over the document's structure, finite and bounded
+ * by `MAX_READ_DEPTH`: a `$ref` is copied, not followed, so a recursive schema
+ * terminates here as it does in storage.
  */
 nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema);
 
 /**
- * `exclusiveMinimum` / `exclusiveMaximum`, which changed meaning between drafts.
- *
- * draft-04 (and so OpenAPI 3.0) spells these as booleans modifying
- * `minimum`/`maximum`; draft-07 spells them as the bound itself. A boolean left
- * as-is is not a stricter check, it is a different one. `exclusiveMinimum: true`
- * with no bound leaves `minimum` doing the non-exclusive job the document did
- * not ask for - but dropping `minimum` too would lose a constraint the document
- * *did* state, so keeping it is the conservative half of the two.
+ * `exclusiveMinimum` / `exclusiveMaximum`, which changed meaning between
+ * drafts: draft-04 (so OpenAPI 3.0) spells them as booleans modifying `minimum`
+ * / `maximum`, draft-07 as the bound itself, so a boolean left as is is a
+ * different check. `exclusiveMinimum: true` with no bound leaves `minimum`
+ * doing a non-exclusive job the document did not ask for, but dropping
+ * `minimum` would lose a constraint it did state, so keeping it is the
+ * conservative half.
  */
 void translate_exclusive_bound (const nlohmann::ordered_json& schema,
 const std::string& key,
@@ -622,8 +596,8 @@ bool constrains_without_type (const nlohmann::ordered_json& out) {
 }
 
 /**
- * OpenAPI 3.0's `nullable`, applied once against whatever `type` ended up being
- * - doing it per key would depend on key order.
+ * OpenAPI 3.0's `nullable`, applied once against the final `type`; per key it
+ * would depend on key order.
  */
 void apply_nullable (const nlohmann::ordered_json& schema, nlohmann::ordered_json& out) {
     const auto nullable = schema.find ("nullable");
@@ -712,10 +686,10 @@ nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema) {
     return out;
 }
 
-/// Each value of a name-keyed schema map, translated. The map itself is not a
-/// schema - running the translation over the container would walk no further
-/// than the container, which is how a `$ref`-ed 3.0 schema kept its `nullable`
-/// and produced a wrong verdict for every null the document permits.
+/// Each value of a name-keyed schema map, translated. The map is not a schema:
+/// translating the container walks no further than it, which leaves a `$ref`-ed
+/// 3.0 schema's `nullable` in place and a wrong verdict for every null the
+/// document permits.
 nlohmann::ordered_json map_schemas (const nlohmann::ordered_json& map) {
     nlohmann::ordered_json out = nlohmann::ordered_json::object ();
     for (auto entry = map.begin (); entry != map.end (); ++entry) {
@@ -726,15 +700,12 @@ nlohmann::ordered_json map_schemas (const nlohmann::ordered_json& map) {
 
 /**
  * The subtrees an in-document `$ref` may resolve into, translated once per
- * document so a `$ref`-ed schema is in the same dialect as an inline one.
+ * document so a `$ref`-ed schema is in the same dialect as an inline one;
+ * `null` when there are none, which stores no `refRoots` at all.
  *
- * `null` when the document has none, which stores no `refRoots` at all rather
- * than an empty object.
- *
- * The rest of `components` - responses, parameters, examples, headers - is
- * deliberately dropped rather than carried: a schema `$ref` resolves to a
- * schema, so nothing here can point at them, and they are pure weight against
- * the byte cap the index shares with the document.
+ * The rest of `components` (responses, parameters, examples, headers) is
+ * dropped: a schema `$ref` resolves to a schema, so nothing points at them, and
+ * they are weight against the byte cap the index shares with the document.
  */
 nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
     nlohmann::ordered_json roots = nlohmann::ordered_json::object ();
@@ -751,9 +722,9 @@ nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
     }
 
     // A bundled file (#649) is a whole document inlined under its slug, and a
-    // ref into it keeps that document's own shape - so each is reduced by this
-    // same rule. One that carries neither container *is* a schema document (a
-    // bare `pet.yaml`), and is translated as one.
+    // ref into it keeps that document's shape, so each is reduced by this rule.
+    // One with neither container is a schema document (a bare `pet.yaml`) and
+    // is translated as one.
     if (const nlohmann::ordered_json* bundled = find_object (document, BUNDLED_KEY)) {
         nlohmann::ordered_json inlined = nlohmann::ordered_json::object ();
         for (auto entry = bundled->begin (); entry != bundled->end (); ++entry) {
@@ -786,11 +757,11 @@ const nlohmann::ordered_json& schema) {
     return row;
 }
 
-/// The row of a status that declares no schema to check a body against: just
-/// the status, with an empty `contentType` and no `schema`. It keeps the status
-/// in the index, because the contract check must agree with coverage on which
-/// statuses the operation declares - a body under it is unchecked, and a
-/// wildcard (`default`, `4XX`) must not judge it instead.
+/// The row of a status declaring no schema: the status, an empty `contentType`,
+/// no `schema`. It keeps the status in the index because the contract check
+/// must agree with coverage on which statuses the operation declares; a body
+/// under it is unchecked, and a wildcard (`default`, `4XX`) must not judge it
+/// instead.
 nlohmann::ordered_json status_only_response (const std::string& status) {
     nlohmann::ordered_json row;
     row["status"]      = status;
@@ -798,23 +769,21 @@ nlohmann::ordered_json status_only_response (const std::string& status) {
     return row;
 }
 
-/// A schema position that holds something JSON Schema cannot read - `null`, a
-/// string, a number - declares nothing checkable. Skipped like an absent one:
-/// storing the row would put a value in the index no validator can use, and
-/// refusing the whole document would block an import over one malformed
-/// response. Only an object and the two boolean schemas are schemas.
+/// A schema position holding what JSON Schema cannot read (`null`, a string, a
+/// number) declares nothing checkable and is skipped like an absent one: the
+/// row would hold a value no validator can use, and refusing the document would
+/// block an import over one malformed response. Only an object and the two
+/// boolean schemas are schemas.
 bool is_schema (const nlohmann::ordered_json& node) {
     return node.is_object () || node.is_boolean ();
 }
 
 /**
- * Appends the schemaful media types of one OpenAPI 3.x response to @p declared.
- *
- * Every media type is kept, not just the JSON one: what can be validated is
- * decided at response time by what the server actually sent, and a document
- * declaring both `application/json` and `application/xml` describes two real
- * responses. A media type that declares no schema is skipped - there is nothing
- * to check against, and an empty schema would claim everything is valid.
+ * Appends one OpenAPI 3.x response's schemaful media types to @p declared.
+ * Every media type is kept, not only JSON: what can be validated is decided by
+ * what the server sent, and a document declaring `application/json` and
+ * `application/xml` describes two real responses. A media type with no schema
+ * is skipped, since an empty schema would call everything valid.
  */
 void append_media_schemas_v3 (nlohmann::ordered_json& declared,
 const std::string& status,
@@ -837,14 +806,11 @@ const nlohmann::ordered_json& response) {
 }
 
 /**
- * An OpenAPI 3.x operation's declared responses.
- *
- * Every status the `responses` map names is in the result, the same set
- * `declared_responses_of` hands coverage; an `x-` extension key is not a status
- * and is left out of both (`is_declared_status_key`, #3084). A status with at
- * least one schemaful media type contributes those rows alone; any other - no
- * `content`, only schema-less media types, a response that is a `$ref` nothing
- * resolves - contributes a status-only row.
+ * An OpenAPI 3.x operation's declared responses: every status the `responses`
+ * map names, the set `declared_responses_of` gives coverage; an `x-` key is not
+ * a status in either (`is_declared_status_key`, #3084). A status with a
+ * schemaful media type contributes those rows alone; any other (no `content`,
+ * only schema-less types, a `$ref` nothing resolves) a status-only row.
  */
 nlohmann::ordered_json response_schemas_v3 (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& operation) {
@@ -870,10 +836,9 @@ const nlohmann::ordered_json& operation) {
 }
 
 /**
- * The media types a Swagger 2.0 operation produces: its own `produces`, the
- * document's when it states none, and JSON when neither does. 2.0 states them
- * once for the whole operation and the schema once per response, so one
- * response declares the same schema for each type it produces.
+ * The media types a Swagger 2.0 operation produces: its `produces`, else the
+ * document's, else JSON. 2.0 states them once per operation and the schema once
+ * per response, so a response declares the same schema for each type.
  */
 std::vector<std::string> produced_media_types (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& operation) {
@@ -966,10 +931,10 @@ DocumentRead read_document (const std::string& text) {
     // read by a JSON parser on both sides.
     auto parsed = utils::parse_ordered_json (text, utils::ORDERED_JSON_UNBOUNDED);
     if (parsed) {
-        // The YAML walk enforces `MAX_READ_DEPTH` as it converts; nlohmann's
-        // parser is iterative and has no depth of its own to run out of, but
-        // every reader below here recurses over subtrees the document's author
-        // shaped. So the bound is checked once, on the way in.
+        // The YAML walk enforces `MAX_READ_DEPTH` as it converts, and
+        // nlohmann's parser is iterative with no depth to run out of, but every
+        // reader below recurses over subtrees the author shaped, so the bound
+        // is checked once on the way in.
         if (!json_within_depth (*parsed, limits::MAX_READ_DEPTH)) {
             result.error = nesting_too_deep_message ();
             return result;
@@ -987,9 +952,9 @@ DocumentRead read_document (const std::string& text) {
         result.root  = nullptr;
         result.error = failure.what ();
     } catch (const std::exception& e) {
-        // Anything the YAML library throws that is not our own failure - an
-        // allocation it could not make, a state we have no sentence for. It is
-        // still the document's problem, never the daemon's.
+        // Anything else the YAML library throws (an allocation it could not
+        // make, a state with no sentence of ours) is still the document's
+        // problem, never the daemon's.
         result.root = nullptr;
         result.error = std::string ("could not be read as JSON or YAML: ") + e.what ();
     }
@@ -1010,10 +975,10 @@ std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_j
 namespace {
 
 /**
- * The path of a server URL - what follows the authority, or the whole URL when
- * it is already a path - without its query and fragment, and "" when it names
- * none. A URL relative to the document (`v1`) is "" too: its path depends on
- * where the document was fetched from, which a stored document does not say.
+ * A server URL's path (what follows the authority, or the whole URL when it is
+ * a path) without query and fragment, "" when it names none. A URL relative to
+ * the document (`v1`) is "" too: its path depends on where the document was
+ * fetched from, which a stored document does not say.
  */
 std::string_view server_url_path (std::string_view url) {
     url = url.substr (0, std::min (url.find_first_of ("?#"), url.size ()));
@@ -1081,9 +1046,9 @@ DocumentDescription describe_document (const nlohmann::ordered_json& document) {
     const walk::Dialect dialect = walk::spec_dialect (document);
     described.format            = walk::dialect_format_name (document, dialect);
     if (dialect == walk::Dialect::None) {
-        // Readable, and not a contract. Said as an empty format rather than as a
-        // failure, because the caller asked what these bytes are and "not an
-        // OpenAPI document" is an answer to that question.
+        // Readable, and not a contract: an empty format, not a failure, since
+        // the caller asked what these bytes are and "not an OpenAPI document"
+        // answers that.
         return described;
     }
 
@@ -1100,9 +1065,9 @@ DocumentDescription describe_document (const nlohmann::ordered_json& document) {
 }
 
 nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& document) {
-    // Which dialect to read is the walk's question already answered, through the
-    // same detector: a document it refuses walks no operations at all, so the
-    // arm chosen for a `None` document is never reached.
+    // The walk's detector already answered which dialect to read: a document it
+    // refuses walks no operations, so the arm chosen for `None` is never
+    // reached.
     const bool v3 = walk::spec_dialect (document) == walk::Dialect::V3;
 
     nlohmann::ordered_json rows = nlohmann::ordered_json::array ();
@@ -1141,11 +1106,9 @@ namespace {
 
 /**
  * The first response schema in @p index that loops without reaching a value,
- * named by operation and status, or nothing.
- *
- * Validating such a schema would recurse until the engine's stack ran out
- * (#3016), and the answer for it at the first response is "unchecked", so it is
- * refused when the document is added instead (#3018).
+ * named by operation and status, or nothing. Validating one would recurse until
+ * the stack ran out (#3016), and its answer at the first response is
+ * "unchecked", so it is refused when the document is added (#3018).
  */
 std::optional<std::string> looping_response_schema (const nlohmann::ordered_json& index) {
     const nlohmann::json roots = index.contains ("refRoots") ?
@@ -1211,10 +1174,10 @@ SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t inde
     }
     std::string stored = schemas.dump ();
     if (stored.size () > index_cap) {
-        // The document passed its own cap and its schemas did not: a document
-        // whose `components` are most of its bytes indexes to nearly its own
-        // size again. Named rather than truncated - an index silently cut short
-        // reports a body as unchecked with no reason a user can act on.
+        // The document passed its cap and its schemas did not: a document whose
+        // `components` are most of its bytes indexes to nearly its size again.
+        // Named, not truncated: a silently cut index reports a body unchecked
+        // with no reason a user can act on.
         indexes.error = "Response schema index is " + std::to_string (stored.size ()) +
         " bytes, over the limit of " + std::to_string (index_cap) +
         " (raise the 'maxSpecDocumentBytes' setting to allow more)";

@@ -6,31 +6,28 @@
  */
 
 /**
- * @brief `control.transaction` (issue #1515): one latency histogram per
- *        named transaction, fed from every member of the folder it sits on.
+ * `control.transaction` (#1515): one latency histogram per named transaction,
+ * fed from every member of the folder it sits on.
  *
- * Runs in `step.after`, once per member - inherited elements compile once
- * per occurrence, so a folder's several members each carry their own
- * instance rather than sharing one. Every occurrence adds its own response
- * latency, in microseconds (#2387: whole milliseconds dropped a fast
- * member entirely), to a running sum kept in
- * `ElementContext::controller_state` under `transaction_sum_key`, which folds
- * in this element's `id` and the current `iteration` so a later iteration -
- * or an abandoned one - never adds onto a stale total.
+ * Runs in `step.after`, once per member: inherited elements compile once per
+ * occurrence, so each member carries its own instance. Each adds its response
+ * latency in microseconds (#2387: whole milliseconds dropped a fast member
+ * entirely) to a running sum in `ElementContext::controller_state` under
+ * `transaction_sum_key`, which folds in the element's `id` and the `iteration`
+ * so a later or abandoned iteration never adds onto a stale total.
  *
- * The element never closes the sum itself in a run: a skipped member never
- * reaches `step.after`, and a member's failed assertion is decided by kinds
- * that may run after this one. Both runners call `settle_transactions` once a
- * step's outcome and the iteration's next position are known (#3054), and
- * that close is what they record into `TransactionHistograms`. A design send
- * has no accumulator, so there this one response is the whole transaction.
+ * In a run the element never closes the sum: a skipped member never reaches
+ * `step.after`, and a member's failed assertion is decided by kinds that may
+ * run after this one. Both runners call `settle_transactions` once the step's
+ * outcome and the iteration's next position are known (#3054), and record that
+ * close into `TransactionHistograms`. A design send has no accumulator, so its
+ * one response is the whole transaction.
  *
- * `includeTimers` (issue #1569) folds a between-member `timer.*` wait into
- * the same sum key: the fold is the caller's
- * (`fold_between_wait_into_open_transactions`, called from both run modes'
- * `step.between` dispatch), found through the registry's `category` rather
- * than a `kind ==` comparison outside `core/elements` (#1512's
- * extensibility contract, rule 1).
+ * `includeTimers` (#1569) folds a between-member `timer.*` wait into the same
+ * sum key. The caller folds it (`fold_between_wait_into_open_transactions`,
+ * from both run modes' `step.between` dispatch), finding the timers by the
+ * registry's `category`, not a `kind ==` comparison outside `core/elements`
+ * (#1512's extensibility contract, rule 1).
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -79,9 +76,9 @@ class ControlTransactionElement final : public Element {
             return;
         }
         if (ctx.controller_state == nullptr) {
-            // No accumulator to fold into (a design send) - this one
-            // response is the whole transaction. Its assertions may run
-            // after this element, so only the response is judged here.
+            // No accumulator (a design send): this one response is the whole
+            // transaction. Its assertions may run after this element, so only
+            // the response is judged here.
             report_close (ctx, config_.value ("name", ""),
             member_duration_us (*ctx.response),
             transaction_member_errored (ctx.response, false));
@@ -193,10 +190,10 @@ ElementKind make_control_transaction_kind () {
     kind.description =
     "Sums a folder's own member latencies into one named transaction, "
     "reported with its own percentiles.";
-    // Its own category, distinct from the other five `control.*` kinds
-    // (`"controller"`): `TransactionHistograms`' plan scan reads this to
-    // find every transaction name without a `kind ==` comparison outside
-    // `core/elements` (#1512's extensibility contract, rule 1).
+    // Not `"controller"` like the other five `control.*` kinds:
+    // `TransactionHistograms`' plan scan finds every transaction name by this
+    // category, without a `kind ==` comparison outside `core/elements` (#1512's
+    // extensibility contract, rule 1).
     kind.category   = "transaction";
     kind.hot_path   = HotPathClass::Declarative;
     kind.needs_span = true;

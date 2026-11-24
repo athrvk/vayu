@@ -8,23 +8,20 @@
  */
 
 /**
- * @brief The JavaScript the renderer's import parsers were written in, once
- *        (issues #865, #877).
+ * The JavaScript the renderer's import parsers were written in, once (#865,
+ * #877).
  *
- * Internal to `src/core`, and a header for the same reason `openapi_walk.hpp`
- * is one: two readers of a foreign document must not disagree about what its
- * bytes mean. These are not utilities - each is a JavaScript semantic the
- * parsers rest on and C++ does not share. `??` falls through `null` but not
- * `false`; `String(x)` on a number prints the shortest round-tripping form and
- * never a trailing `.0`; `if (content[ct])` is truthiness, so an empty object
- * passes and an empty string does not; `encodeURIComponent` leaves `!*\'()`
- * alone where a percent-encoder written for a URL does not.
+ * Internal to `src/core`, and a header for `openapi_walk.hpp`'s reason: two
+ * readers of a foreign document must not disagree about its bytes. Each is a
+ * JavaScript semantic the parsers rest on and C++ does not share. `??` falls
+ * through `null` but not `false`; `String(x)` on a number prints the shortest
+ * round-tripping form, never a trailing `.0`; `if (content[ct])` is truthiness,
+ * so an empty object passes and an empty string does not; `encodeURIComponent`
+ * leaves `!*'()` alone where a URL percent-encoder does not.
  *
- * They lived inside `openapi_drafts.cpp` while the drafts were their only
- * reader (#865). The import moved engine-side in #877 and reads Postman and
- * Insomnia documents by the same rules - both write their numbers the way
- * `JSON.stringify` does - so a second copy here is the repo\'s
- * hand-rolled-copy defect waiting to drift.
+ * One copy for every reader: the OpenAPI drafts (#865) and the engine-side
+ * import (#877), which reads Postman and Insomnia numbers as `JSON.stringify`
+ * writes them; a second copy would be the repo's hand-rolled-copy defect.
  */
 
 #include "vayu/core/query_encoding.hpp"
@@ -103,16 +100,14 @@ inline bool truthy (const json* node) {
 /**
  * `String(number)` / a number as `JSON.stringify` writes it.
  *
- * The renderer's drafts carry numbers as text - a parameter's declared value in
- * a row, a sampled body's fields in a JSON string - and both sides have to
- * spell them identically or the diff sees a change. JavaScript prints the
- * *shortest* representation that round-trips and never a trailing `.0`, where
- * `nlohmann::dump` writes `1.0` for a whole float.
+ * Drafts carry numbers as text (a parameter's declared value, a sampled body's
+ * fields), and both sides must spell them alike or the diff sees a change.
+ * JavaScript prints the shortest round-tripping form and never a trailing `.0`,
+ * where `nlohmann::dump` writes `1.0` for a whole float.
  *
- * Exact for every finite value below 1e21 in magnitude, which is every number a
- * document realistically declares; past that both sides switch to exponential
- * notation and JavaScript's exact threshold (an exponent of 21, or -7) is not
- * worth carrying for a value no OpenAPI example holds.
+ * Exact for every finite value below 1e21 in magnitude. Past that both sides
+ * use exponential notation, and JavaScript's exact threshold (an exponent of
+ * 21, or -7) is not worth carrying for a value no OpenAPI example holds.
  */
 inline std::string js_number_text (const json& value) {
     if (value.is_number_integer () || value.is_number_unsigned ()) {
@@ -123,12 +118,11 @@ inline std::string js_number_text (const json& value) {
         return "null"; // What `JSON.stringify` writes for NaN and Infinity.
     }
     if (std::trunc (real) == real && std::abs (real) < 1e21) {
-        // `std::format` rather than `snprintf ("%.0f")`: the same fixed
-        // notation with no fractional digits, without the vararg call
-        // (`cppcoreguidelines-pro-type-vararg`), the fixed buffer, or the
-        // short-write branch that a value bounded by 1e21 could never take.
-        // Rounding cannot differ between the two here - the guard above admits
-        // only values that are already whole.
+        // `std::format`, not `snprintf ("%.0f")`: the same fixed notation
+        // without the vararg call (`cppcoreguidelines-pro-type-vararg`), the
+        // fixed buffer, or a short-write branch a value bounded by 1e21 never
+        // takes. Rounding cannot differ: the guard above admits only whole
+        // values.
         const std::string text = std::format ("{:.0f}", real);
         // A negative zero formats as "-0"; JavaScript writes "0".
         return text == "-0" ? "0" : text;
@@ -279,13 +273,10 @@ inline std::string js_json_compact (const json& value) {
 }
 
 /**
- * `encodeURIComponent(value)`.
- *
- * Deliberately not `utils::url_encode`, which is a different function rather
- * than an older copy of this one: it percent-encodes `!*'()`, which
- * `encodeURIComponent` leaves alone. The renderer writes an imported URL with
- * the latter, and a URL spelled two ways is a field the diff reports as changed
- * every time it is asked.
+ * `encodeURIComponent(value)`. Not `utils::url_encode`, which is a different
+ * function: it percent-encodes `!*'()`, which `encodeURIComponent` leaves
+ * alone. The renderer writes an imported URL with the latter, and a URL spelled
+ * two ways is a field the diff reports as changed every time.
  */
 inline std::string encode_uri_component (const std::string& value) {
     static constexpr std::string_view HEX        = "0123456789ABCDEF";
@@ -341,12 +332,12 @@ inline std::string query_part (const std::string& text, QueryPart part, QueryEnc
 /**
  * The query the enabled, keyed rows write under @p encoding.
  *
- * An empty value writes `key=` and a `valueless` row a bare `key`, as
- * Postman's `QueryParam.unparseSingle` writes a string value and a null one.
- * `UriComponent` writes a bare `key` for any empty value: its sources hold no
- * null (Insomnia's own strict join writes `name` for an empty value), and an
- * OpenAPI draft's URL is what the sync diff compares stored URLs against.
- * A row type with no `valueless` member (`DraftField`) states none.
+ * An empty value writes `key=` and a `valueless` row a bare `key`, as Postman's
+ * `QueryParam.unparseSingle` writes a string and a null value. `UriComponent`
+ * writes a bare `key` for any empty value: its sources hold no null (Insomnia's
+ * strict join writes `name` for an empty value), and an OpenAPI draft's URL is
+ * what the sync diff compares stored URLs against. A row type with no
+ * `valueless` member (`DraftField`) states none.
  */
 template <typename Row>
 std::string query_string (const std::vector<Row>& params, QueryEncoding encoding) {
@@ -374,14 +365,11 @@ std::string query_string (const std::vector<Row>& params, QueryEncoding encoding
 }
 
 /**
- * @p url with @p params' query appended, which the import applies to every
- * draft it produced.
- *
- * The rows are appended rather than replacing the query, because `url` and
- * `params[]` are two independent statements by the source - and a request built
- * in the app carries its enabled query *inside* `url` (issue #590), which is
- * why a draft that skipped this step would differ from every stored request it
- * is compared against.
+ * @p url with @p params' query appended, as the import does for every draft.
+ * Appended, not replacing the query: `url` and `params[]` are two independent
+ * statements by the source, and a request built in the app carries its enabled
+ * query inside `url` (#590), so a draft without this would differ from every
+ * stored request it is compared against.
  */
 template <typename Row>
 std::string
