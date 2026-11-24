@@ -3332,6 +3332,13 @@ export interface RunScenarioStepStat {
 	index: number;
 	/** `requests.name` - what the sequence calls this step. */
 	name: string;
+	/**
+	 * What the step ran, in the protocol's own words, drawn beside {@link name} in
+	 * the Steps table: `tools/call search` for an MCP step (#3829). Absent for any
+	 * other step and for a report stored before the field; `name` stays the
+	 * identity either way.
+	 */
+	label?: string;
 	requestId: string;
 	method: string;
 	/** Step executions across every virtual user and iteration. */

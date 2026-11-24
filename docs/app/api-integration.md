@@ -1222,7 +1222,7 @@ history row reads it because a run whose work is a sequence has no `url` or
 
 A scenario load run's **report** carries the per-step breakdown the design-mode
 runner has no need for: `scenario.steps[]`
-(`{index, name, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`)
+(`{index, name, label?, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`)
 plus `virtualUsers`, `iterationsAbandoned` and, once a pass completed,
 `passDuration` (`{count, mean, min, p50, p95, p99, max}` in ms, #3570: each
 completed pass from the claim of its first step to the completion of its last,
@@ -1243,6 +1243,13 @@ that block, falling back to `scenario.assertions` from an older engine, through
 `reportAssertionsOf` (`components/shared/run-assertions.ts`): the verdict
 (`reportOutcome`) directly, `RunKeyMetrics`' fourth tile and the Overview's
 Assertions card through `exactAssertionsOf`.
+
+A step's `label` (#3829) is the engine's name for what the step ran, `tools/call
+search` for an MCP step, and is present only on those; `name` stays the request's
+name and the step's identity. The Steps table draws it beside the name in a muted
+monospace (`StepLabelCell`), so a sequence of tool calls reads as which call each
+step made. The engine renders the report's exports, so the app has no second place
+that formats the steps.
 
 A step's `errors` is the run's one error definition (a response outside 2xx/3xx,
 or no response) and equals `httpErrors + noResponse`. Only a `noResponse`

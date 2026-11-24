@@ -229,6 +229,7 @@ export default function ScenarioStepsTab({
 										index={step.index}
 										method={step.method}
 										name={step.name || step.requestId}
+										label={step.label}
 									/>
 									<ExecutedCell
 										executed={step.executed}
