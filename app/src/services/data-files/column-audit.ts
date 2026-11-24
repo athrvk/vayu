@@ -35,7 +35,7 @@
  * unreferenced. Telling someone a column is unused when a script reads it is
  * the worse error, and it is the one that gets a working column deleted.
  *
- * **Auth credentials are request fields too** (issue #729). Since #591 a row
+ * **Auth credentials are request fields too** (issues #729, #591). A row
  * binds into the credentials a step sends - the flagship case being a
  * collection whose contract declares `user` and `password` for a basic-auth
  * pair - so a walk that stopped at URL, headers and body reported those two

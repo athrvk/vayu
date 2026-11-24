@@ -201,7 +201,7 @@ function discoveredStartTimeoutMs(): number {
 /**
  * Drop `id` from a create payload before it is sent.
  *
- * Since #97 the engine assigns every id and answers a create carrying one with a
+ * The engine assigns every id (#97) and answers a create carrying one with a
  * `400`, so this is the difference between a save working and failing, not
  * cosmetics. The `Create*Request` types already have no `id`, but that is not a
  * guarantee: excess-property checking only fires on object literals, so a call
@@ -272,7 +272,7 @@ export const apiService = {
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		// PUT, not POST: since #95 the engine's POST is create-only and answers a
+		// PUT, not POST: the engine's POST is create-only (#95) and answers a
 		// known id with 409. The id travels in the path (it is the identity);
 		// the rest of the object is a merge-patch, where an omitted field keeps
 		// its stored value and an explicit null resets it to the default.
@@ -453,7 +453,7 @@ export const apiService = {
 	/**
 	 * Bind a collection to a document (issue #862).
 	 *
-	 * One call for what used to be three - store the document, move the
+	 * One call, not three - store the document, move the
 	 * binding, stamp the requests - because the three are one state: a bind that
 	 * stopped after the second leaves a collection measured against a contract
 	 * its requests do not name. The engine does the pairing itself, from the

@@ -116,7 +116,7 @@ export function registerHttpLanguage(monaco: MonacoApi): void {
 			body: [
 				/*
 				 * A status line ends the request's body and starts the response's
-				 * head. This is what the separator used to do, and doing it from
+				 * head. Doing it from
 				 * the protocol's own shape means there is no marker string for the
 				 * component and the grammar to disagree about.
 				 */
