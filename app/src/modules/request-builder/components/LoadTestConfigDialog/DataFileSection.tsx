@@ -15,18 +15,18 @@ interface DataFileSectionProps {
 }
 
 /**
- * A data file, for a run that parameterises its request (issue #993). Beside
- * the profile rather than under Recording & limits: rows change what each
- * submission *sends*, which is the same kind of decision the profile fields
- * are, while everything folded away below changes only what the run keeps.
+ * A data file, for a run that parameterises its request (#993). Beside the profile, not under
+ * Recording & limits: rows change what each submission sends, a profile-kind decision, while the
+ * folded sections change only what the run keeps.
  */
 export function DataFileSection({ dataFile, disabled }: DataFileSectionProps) {
 	return (
 		<>
-			{/* A file that could not be re-read is a warning, not a blocker -
-			    the run is startable without one, and picking the file again
-			    is the whole remedy. Same rule, same words, as the Run
-			    collection dialog (issue #1039). */}
+			{/*
+			 * An unreadable remembered file warns, never blocks: the run starts without it and
+			 * picking it again is the remedy. Same rule and words as the Run collection dialog
+			 * (#1039).
+			 */}
 			{dataFile.prefillNote && (
 				<Callout severity="warning" title="The remembered data file">
 					{dataFile.prefillNote}
@@ -43,10 +43,9 @@ export function DataFileSection({ dataFile, disabled }: DataFileSectionProps) {
 			)}
 
 			{/*
-			    `loadTest` is set, so the picker describes what a row means here -
-			    one per submission off a shared cursor that wraps - rather than the
-			    design-mode "one row is one iteration" reading, which would be wrong
-			    for every run this dialog starts.
+			 * `loadTest` makes the picker describe a row as one per submission off a shared
+			 * wrapping cursor, not design mode's "one row is one iteration", which is wrong for
+			 * every run this dialog starts.
 			 */}
 			<DataFilePicker
 				selected={dataFile.file}

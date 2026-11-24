@@ -6,21 +6,13 @@
  */
 
 /**
- * Where the open request lives, as crumbs for `TabBreadcrumb`.
- *
- * This was `RequestBreadcrumb`, a component of its own, until the same line was
- * wanted on the collection, run-report and dashboard tabs (#1691). What is
- * builder-specific is only the chain: the collection ancestors, then the
- * request's own name. Drawing it is `TabBreadcrumb`'s job now, so the knowledge
- * that a request sits under a collection stays in this module and the shape of
- * a crumb row is defined once for the whole app.
- *
- * The chain comes from `useCollectionAncestors`, which carries the cycle guard
- * and reads the collections query - so a rename or a drag-move updates the line
- * from the cache without a refetch. Clicking a collection crumb opens that
- * collection's tab; the request's own crumb is inert, because you are already
- * there, and renaming is the Info tab's job - the one rename surface in the
- * builder.
+ * Where the open request lives, as crumbs for `TabBreadcrumb` (#1691). Only the chain is
+ * builder-specific (collection ancestors, then the request's name); `TabBreadcrumb` draws it, so
+ * this module knows a request sits under a collection and the crumb row is defined once for the
+ * app. The chain is `useCollectionAncestors` (cycle guard, collections query), so a rename or
+ * drag-move updates it from the cache without a refetch. A collection crumb opens its tab; the
+ * request's own is inert (you are there), and renaming is the Info tab's, the builder's one rename
+ * surface.
  */
 
 import { useMemo } from "react";
@@ -43,8 +35,8 @@ export function useRequestCrumbs(): BreadcrumbCrumb[] {
 				label: collection.name,
 				onSelect: () => openTab({ type: "collection", entityId: collection.id }),
 			})),
-			// The blank case is filtered by `TabBreadcrumb`, which is also what
-			// makes a request with no collection and no name draw no band at all.
+			// `TabBreadcrumb` filters the blank case, so a request with no collection and no name
+			// draws no band.
 			{ id: "request", label: name },
 		],
 		[ancestors, name, openTab]

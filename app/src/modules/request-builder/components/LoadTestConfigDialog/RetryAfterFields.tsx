@@ -23,10 +23,9 @@ interface RetryAfterFieldsProps {
 }
 
 /**
- * The Retry-After back-off switch and its cap (#3782), shared by the request
- * dialog and the collection run dialog. Renders nothing in a mode with no
- * "next request" to hold back (`appliesRetryAfter`), so the caller never offers
- * a control the engine would skip with a warning.
+ * The Retry-After back-off switch and its cap (#3782), shared by the request and collection run
+ * dialogs. Renders nothing in a mode with no "next request" to hold (`appliesRetryAfter`), so no
+ * caller offers a control the engine would skip with a warning.
  */
 export function RetryAfterFields({
 	mode,
