@@ -8,7 +8,7 @@
  */
 
 /**
- * @brief The factory around the vendored `ajv` (engine/vendor/ajv, #2656).
+ * The factory around the vendored `ajv` (engine/vendor/ajv, #2656).
  *
  * `AJV_GLUE_OPEN + AJV_JS + AJV_GLUE_CLOSE` is the source the shelf evaluates.
  * The library is npm's `dist/ajv.min.js`, unchanged: a browserify bundle of
