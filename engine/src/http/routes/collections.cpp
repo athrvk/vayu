@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Collection management routes
- */
+/** Collection management routes. */
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
@@ -36,27 +34,20 @@
 namespace vayu::http::routes {
 
 /**
- * Testable core of the parent-id validation for POST /collections. Fails with
- * the error response to send when the proposed parent would form a cycle in the
- * collection tree, and succeeds when the assignment is legal.
+ * Testable core of POST /collections' parent validation: an error response when
+ * the proposed parent would form a cycle, success when the assignment is legal.
+ * Both rejections are 400s:
+ *   - self-parent (`parentId == id`);
+ *   - reparent into a descendant: the proposed parent's ancestor chain reaches
+ *     the collection being saved. A cycle makes `delete_collection`'s BFS loop
+ *     forever under the global DB mutex, hanging every endpoint (#79).
  *
- * Two shapes are rejected, both with 400:
- *   - Self-parent (`parentId == id`): a collection cannot be its own parent.
- *   - Reparent into a descendant: walking the proposed parent's ancestor chain
- *     reaches the collection being saved, so the move would make a node its own
- *     ancestor. A cycle here is what let `delete_collection`'s BFS loop forever
- *     under the global DB mutex, hanging every endpoint (see issue #79).
- *
- * The walk carries a visited set so pre-existing corrupt data (a cycle written
- * before this validation existed) cannot hang the validator itself. A parent id
- * that does not resolve to a stored collection ends the walk cleanly - parent
- * *existence* is intentionally not required here, because the import
- * orchestrator creates collections in bulk and an existence check would couple
- * this fix to import ordering.
- *
- * Extracted so the wiring is covered without an in-process HTTP server - see
- * collections_route_test.cpp. The error body is built by `error_body`, like
- * every other error the engine emits.
+ * The walk carries a visited set, so corrupt stored data (an older cycle)
+ * cannot hang the validator. An unresolvable parent id ends the walk cleanly:
+ * existence is not required, because the import orchestrator creates
+ * collections in bulk and an existence check would couple this to import
+ * ordering. The error body is `error_body`'s; `collections_route_test.cpp`
+ * covers the wiring.
  */
 RouteResult validate_parent_assignment (vayu::db::Database& db,
 const std::string& id,
@@ -111,17 +102,12 @@ using vayu::core::constants::data_schema::MAX_COLUMN_CHARS;
 using vayu::core::constants::data_schema::MAX_COLUMNS;
 
 /**
- * Contents-validation for `dataSchema`, run after `apply_json_field` has settled
- * the *shape* (object or null; anything else is its 400).
- *
- * A schema that stored garbage would not fail here - it would fail much later,
- * as a refusal message naming columns that are not column names, or as a diff in
- * the Data tab that no file can ever satisfy. So `columns` must be an array of
- * unique, non-empty strings and `declaredAt` a number if it is present at all.
- *
- * Deliberately independent of every other row: `POST /import/apply` validates
- * with `is_create=true` while the payload's parents are still unwritten, so a
- * check that reached for another record would refuse a legal bulk import.
+ * `dataSchema`'s contents, after `apply_json_field` has settled its shape
+ * (object or null). Stored garbage would fail much later, as a refusal naming
+ * columns that are not column names or a Data tab diff no file satisfies, so
+ * `columns` must be an array of unique non-empty strings and `declaredAt`, if
+ * present, a number. Independent of every other row: `POST /import/apply`
+ * validates with `is_create=true` while the payload's parents are unwritten.
  */
 static RouteResult validate_data_schema (const nlohmann::json& schema) {
     if (schema.contains ("columns")) {
@@ -166,24 +152,17 @@ static RouteResult validate_data_schema (const nlohmann::json& schema) {
 }
 
 /**
- * Contents-validation for the `openapi` binding (issue #637), run after
- * `apply_json_field` has settled the shape - the same split `validate_data_schema`
- * above draws, and for the same reason.
+ * The `openapi` binding's contents (#637), after `apply_json_field` settles the
+ * shape, the split `validate_data_schema` draws. `{}` is unbound and always
+ * legal; a non-empty binding with no `specId` names nothing (it would claim a
+ * spec nobody can fetch), so it is a 400, not a stored half-edge.
  *
- * An empty object is the *unbound* state and is always legal. A non-empty one is
- * a binding, and a binding without a `specId` names nothing: it would serialize
- * as a collection that claims a spec and read back as one nobody can fetch, so
- * it is a 400 rather than a stored half-edge.
- *
- * Whether that `specId` resolves is deliberately **not** checked here. This
- * applier also runs under `POST /import/apply`, against a payload whose spec
- * rows are not written yet - the same reason `reject_missing_collection` sits in
- * the request route cores rather than in `apply_request_fields`. Resolution is
- * `reject_unbindable_spec`'s, called by each write path with whatever it knows
- * is about to exist.
- *
- * `specHash` and `syncedAt` are not judged: `binding_without_version` drops
- * whatever the client sent for them.
+ * Whether `specId` resolves is not checked here: this applier also runs under
+ * `POST /import/apply`, whose spec rows are unwritten, the reason
+ * `reject_missing_collection` sits in the request route cores. Resolution is
+ * `reject_unbindable_spec`'s, called by each write path with what it knows is
+ * about to exist. `specHash` and `syncedAt` are not judged:
+ * `binding_without_version` drops them.
  */
 static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
     if (binding.empty ()) {
@@ -229,17 +208,18 @@ static RouteResult reject_binding_on_update (const nlohmann::json& json) {
 }
 
 /**
- * Refuses a collection write whose `auth` states `{"mode":"inherit"}` (#3445).
- * A collection is a link of the chain a request inherits through, and the
- * composer walks past an `inherit` link, so one that was stored would show the
+ * Refuses a collection write whose `auth` states `{"mode":"inherit"}` (#3445):
+ * a collection is a link of the chain a request inherits through, and the
+ * composer walks past an `inherit` link, so a stored one would show the
  * parent's credential in the app and hold it back at send time.
  *
- * Runs after `reject_unknown_auth_mode`. Only a stated `auth` object is judged:
- * absent keeps the stored value (which may be a legacy `inherit` the composer
- * already steps past, so an unrelated PUT must not fail on it) and `null` resets to none. The create and update
- * cores call it and `apply_collection_fields` does not, because `POST
- * /import/apply` and `POST /specs/sync` share that applier and an importer's
- * `inherit` must not fail an atomic import (the `reject_blank_name` split).
+ * Runs after `reject_unknown_auth_mode`, on a stated `auth` object only: absent
+ * keeps the stored value (possibly a legacy `inherit` the composer steps past,
+ * so an unrelated PUT must not fail on it), and `null` resets to none. The
+ * create and update cores call it, not `apply_collection_fields`:
+ * `POST /import/apply` and `POST /specs/sync` share that applier, and an
+ * importer's `inherit` must not fail an atomic import (the `reject_blank_name`
+ * split).
  */
 static RouteResult reject_inherit_auth (const nlohmann::json& json) {
     const auto auth = json.find ("auth");
@@ -370,16 +350,12 @@ bool is_create) {
 }
 
 /**
- * Applies the request body onto `c` under the one null-vs-absent rule (see the
- * helpers in routes.hpp). Shared by the create and update cores so the two
- * verbs cannot drift apart on what a field means - the only thing that differs
- * between them is `is_create`.
- *
- * Returns an error response when a no-default field (`name`) is missing or
- * null, or when the proposed parent would form a cycle or is in the trash.
- *
- * Declared in routes.hpp because `POST /import/apply` applies the same fields to
- * every collection in a bulk payload (issue #96).
+ * Applies the request body onto `c` under the one null-vs-absent rule (the
+ * helpers in routes.hpp), shared by the create and update cores, which differ
+ * only in `is_create`. Fails when `name` (no default) is missing or null, or
+ * the proposed parent would form a cycle or is in the trash. Declared in
+ * routes.hpp because `POST /import/apply` applies it to every collection in a
+ * bulk payload (#96).
  */
 RouteResult apply_collection_fields (vayu::db::Database& db,
 vayu::db::Collection& c,
@@ -407,12 +383,11 @@ bool is_create) {
             return outcome;
         }
     } else if (is_create || reparented || json.contains ("order")) {
-        // "Append after the current siblings" *is* this field's default, so the
-        // one null-vs-absent rule lands all three of these on it: create (absent
-        // or null), a reparent that states no order, and an explicit null on
-        // update ("reset to the default").
-        // The siblings are the parent's requests too (#2535). On a create the
-        // id is not stored yet, so excluding it is a no-op there.
+        // "Append after the current siblings" is this field's default, so the
+        // null-vs-absent rule lands three cases on it: create (absent or null),
+        // a reparent stating no order, and an explicit null on update. The
+        // siblings include the parent's requests (#2535); on a create the
+        // unstored id makes the exclusion a no-op.
         if (auto outcome = append_sibling_order (db, c.parent_id, c.order, c.id); !outcome) {
             return outcome;
         }
@@ -430,8 +405,7 @@ bool is_create) {
     }
     // The same rule as a request's auth (`without_stale_postman_source`).
     c.auth = vayu::core::without_stale_postman_source (std::move (c.auth));
-    // Scripts are elements now (issue #1514's clean cut) - see the
-    // equivalent comment in requests.cpp's apply_request_fields.
+    // Scripts are elements (#1514); see requests.cpp's `apply_request_fields`.
     if (auto refusal = refuse_legacy_script_fields (json)) {
         return route_error (400, *refusal);
     }
@@ -478,25 +452,20 @@ bool is_create) {
     if (auto outcome = reject_trashed_parent (db, json, c.parent_id); !outcome) {
         return outcome;
     }
-    // Reject writes that would put a cycle in the collection tree (self-parent,
-    // or reparent into a descendant) before they reach the DB - a cycle makes
-    // cascade delete loop forever under the global mutex. Cycle/self checks
-    // only; parent existence is not required (import creates in bulk).
+    // Cycles only (self-parent, or reparent into a descendant), refused before
+    // the DB: a cycle makes cascade delete loop forever under the global mutex.
+    // Parent existence is not required (import creates in bulk).
     return validate_parent_assignment (db, c.id, c.parent_id);
 }
 
 /**
- * Testable core of POST /collections - **create only**, returning
- * {http_status, json_body}.
- *
- * An id that already exists is a 409 and the caller is told to use PUT; POST
- * only ever creates. A body `id` is rejected outright (#97) - the
- * engine owns id generation, and bulk import wires a tree together with the
- * temp ids of `POST /import/apply` (#96) rather than pre-assigning real ones.
- *
- * The 409 therefore only fires on a `generate_id` collision, which 122 bits of
- * entropy make unreachable in practice. It stays because the alternative on
- * that one-in-2^122 draw is `create_collection` overwriting a live record.
+ * Testable core of POST /collections, **create only**, {http_status,
+ * json_body}: an existing id is a 409 pointing at PUT. A body `id` is refused
+ * (#97): the engine owns ids, and bulk import wires a tree with
+ * `POST /import/apply`'s temp ids (#96). So the 409 fires only on a
+ * `generate_id` collision, unreachable at 122 bits of entropy; it stays because
+ * the alternative on that draw is `create_collection` overwriting a live
+ * record.
  */
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json) {
@@ -526,16 +495,13 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     c.created_at = now_ms ();
     c.updated_at = now_ms ();
 
-    // The checks and the write are one composite, so they are one lock scope
-    // (issue #386's rule). The spec check proves a spec exists, and between
-    // that read and this write a concurrent `DELETE /specs/:id` would otherwise
-    // see no binder, delete the document, and leave this collection bound to
-    // nothing - the one state the check exists to prevent. The delete side
-    // holds the lock across its own check-and-remove for the same reason. The
-    // applier's parent checks are the same shape: a parent trashed between
-    // them and the write would strand this row under it (#1883).
-    // `reject_unbindable_spec` is here rather than in the shared applier because
-    // bulk import binds specs it is about to write - see its declaration.
+    // The checks and the write are one lock scope (#386's rule): between the
+    // spec check and the write, a concurrent `DELETE /specs/:id` would see no
+    // binder, delete the document and leave this collection bound to nothing
+    // (the delete holds the lock across its own check-and-remove too). The
+    // applier's parent checks are the same shape: a parent trashed in between
+    // would strand this row (#1883). `reject_unbindable_spec` is here, not in
+    // the shared applier, because bulk import binds specs it is about to write.
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
         if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/true); !outcome) {
@@ -675,25 +641,21 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * Testable core of PUT /collections/:id - **update only**, returning
- * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ * Testable core of PUT /collections/:id, **update only**, {http_status,
+ * json_body}: a missing id is a 404, never a create. Merge-patch, absent fields
+ * keeping their stored value, under PUT rather than a PATCH verb
+ * (docs/engine/api-reference/resource-writes.md) because every renderer call
+ * site expects it. A body `id` disagreeing with the path is a 400 (#97); the
+ * path is the identity.
  *
- * Semantics are merge-patch: absent fields keep their stored value. We use PUT
- * loosely rather than adding a separate PATCH verb (documented in
- * docs/engine/api-reference/resource-writes.md) because that is what the update branch has always done and
- * what every renderer call site expects. A body `id` that disagrees with the
- * path is a 400 (#97); the path is the identity.
+ * **The read, the merge and the write are one lock scope** (#1440): the create
+ * core's argument extended to the read the merge comes from. The write carries
+ * every field the body did not name, read a moment earlier, so two PUTs
+ * interleaved read, read, write, write silently lay the second writer's stale
+ * copy over the first's changes.
  *
- * **The read, the merge and the write are one lock scope** (#1440). The create
- * core states why the spec check and the write cannot be separate acquisitions;
- * merge-patch extends the same argument to the read the merge is computed from.
- * The write carries every field the body did not name, read a moment earlier,
- * so two PUTs interleaved as read, read, write, write leave the second writer's
- * stale copy of the untouched fields on top of the first writer's changes -
- * silently, on both sides.
- *
- * @param if_match The request's `If-Match`, judged inside the same scope; a
- *        row it no longer names is a 412 (#2433).
+ * @param if_match The request's `If-Match`, judged inside the same scope; a row
+ *        it no longer names is a 412 (#2433).
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -814,8 +776,7 @@ const ListPageQuery& page_query) {
 void register_collection_routes (RouteContext& ctx) {
     /**
      * GET /collections
-     * Retrieves all collections from the database.
-     * Collections are folders that organize requests in a hierarchy.
+     * Every live collection (the folders requests are organized in).
      * Query params: q, limit, offset (optional) - any of them answers one page
      * of the collections whose name holds `q`, in the `{data, pagination}`
      * envelope (#2443).
