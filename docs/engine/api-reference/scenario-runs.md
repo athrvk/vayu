@@ -98,7 +98,7 @@ the bearer **token**, basic auth's **username** and **password**, and an api key
 Script text is never interpolated at all (a script reads its row through `pm.iterationData`, or through `pm.variables` for a bare name - see [scripting.md](../scripting.md#variables-pmvariables)).
 
 The pass runs over the **composed** text, not the text as it was authored, so a token that arrived as a *variable's value* binds like any other:
-a variable `endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after composition - it is rescanned since issue #1009, but the `data.` namespace is deferred to bind time (issue #1007), so this token survives it - and the data pass then binds it.
+a variable `endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after composition - it is rescanned (issue #1009), but the `data.` namespace is deferred to bind time (issue #1007), so this token survives it - and the data pass then binds it.
 That is usable, and it is also why the no-data refusal below says "or from the variable value it was written into" - the token it names may not appear anywhere in the request as you wrote it.
 
 **`{{$vu}}` and `{{$iteration}}` are the second reserved namespace** (issue #994), and they bind at the same moment out of the same walk - a field carrying one of each is one string, so both are split once and joined together.

@@ -582,7 +582,6 @@ An `assert.*` or `extract.*` element's entry carries the `scope` of the level th
 
 **The script keys are stored the same way** (issue #725).
 `testResults`, `consoleLogs`, `preScriptError`, `postScriptError` and `scriptRequests` are returned in the body above *and* written to the design run's `trace_data.scripts` as one object, so a response restored from History carries the assertions the live one showed.
-This used to hold for a streaming send only, which made a restored ordinary send's Tests pane empty whether its assertions passed or never ran.
 A send whose scripts said nothing stores no `scripts` node at all - absent means no scripts, not no results - and a `transient` execution stores neither, as it stores nothing.
 
 | Field | Meaning |
@@ -765,7 +764,7 @@ A local dev server on `http://` with the protocol set to HTTP/2 will show the wa
 A server there that speaks only h2c never gets as far as a downgrade: it cannot read the HTTP/1.1 request, so the send fails as `PROTOCOL_MISMATCH` with the h2c hint instead, and `auto` meets the same failure without the hint.
 
 This exists because the failure it names is invisible otherwise: a `200`, a latency and a body look identical whether or not the protocol you asked for was granted.
-Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215)); nothing in the API said so.
+A build whose HTTP/2 is unreachable puts every request silently on HTTP/1.1, and nothing else in the API says so ([#215](https://github.com/athrvk/vayu/issues/215)).
 The same field is stored on a design run's `trace_data.response`, and load runs and collection runs carry the whole-run count as `summary.httpVersionDowngraded` in [`GET /runs/:runId/report`](runs.md#get-runsrunidreport).
 
 **One timing convention.**

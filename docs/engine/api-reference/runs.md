@@ -863,7 +863,7 @@ An empty history answers `{"deleted": 0, "keptPinned": 0, "deletedIds": []}`.
 Delete a run and all associated metrics/results.
 
 **An active run is stopped first.**
-Deleting a run that is still executing used to remove its rows while its worker kept writing new metrics and results against the same id - orphan rows that no run owns, and a run that partially reappeared as it finished.
+Removing the rows of a run that is still executing would leave its worker writing new metrics and results against the same id - orphan rows that no run owns, and a run that partially reappeared as it finished.
 So a run that is still active is stopped exactly as `POST /runs/:runId/stop` stops it, and the rows are removed only once its worker has completed its final writes.
 Expect the call to take as long as the stop does (up to ~5s for a large run).
 

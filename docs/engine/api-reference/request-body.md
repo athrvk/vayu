@@ -84,7 +84,7 @@ The order the author wrote is the order sent: the parameters follow the envelope
 The encoding re-renders numbers from their parsed value rather than copying the text: an integer up to 64 bits unsigned (`18446744073709551615`) is exact, a larger one becomes a double (`18446744073709551616` is sent as `1.8446744073709552e+19`), and a fraction or exponent form is a double (`1e2` is sent as `100.0`).
 The POST transport is unaffected and stays byte for byte.
 
-These parameters are merged into whatever query string the request's URL already has, not used to replace it - a `GET` sent to `/graphql?debug=1` keeps `debug=1` alongside `query=…`.
+These parameters are merged into whatever query string the request's URL already has rather than replacing it - a `GET` sent to `/graphql?debug=1` keeps `debug=1` alongside `query=…`.
 The engine sends a body on a GraphQL `GET` in three cases, each because dropping the alternative would send a request the caller did not write rather than the one it wrote:
 `content` is empty, `content` is envelope-shaped but does not parse (the same unreadable-envelope case above), or the envelope carries a member this transport has no parameter for, or one of `operationName` / `variables` / `extensions` whose value is not the type the specification gives it.
 A fourth case is an envelope nested deeper than 128 levels, its own root counted (issue #2672): `content` is a string, so the request-body depth bound never looks inside it, and encoding `variables` or `extensions` would re-serialize them recursively.
@@ -149,13 +149,11 @@ A `method` or protocol version that cannot be a header line is left out, since n
 A body that is not one JSON object (an unresolved `{{token}}`) derives only `Accept` and `MCP-Protocol-Version`.
 A correlation id cannot be configured under any of these names (`correlationIdHeader`).
 
-**The constant `id` under concurrency** (#3832, measured).
+**The constant `id` under concurrency** (#3832).
 Every bare call is stamped `"id":1`, so a load run sends the same id on every request.
-Measured against the official TypeScript SDK server (`@modelcontextprotocol/sdk` 1.32.2, Streamable HTTP, stateless: a fresh transport per POST, `sessionIdGenerator` unset) with `constant_concurrency`, 50 virtual users, 5 s, engine 0.51.1:
-4,421 POSTs, every one `"id":1`, every one answered `200` with its own result, 49 in flight at the peak, no refusal, no deduplication and no id-keyed throttle, and the run's `totalRequests` (4,421) agreed with the server's count.
-Under the stateless transport each POST is its own exchange, so the id only pairs a reply to its request on that connection; the stamping stays constant (a replay sends the same bytes) and no per-VU id exists.
-This was measured on one SDK server: a server that keys a cache or a rate limit on the id is not excluded, and would show as a run whose latency collapses.
-The SDK's newest release at the time speaks revisions up to `2025-11-25`, so the call carried `params._meta."io.modelcontextprotocol/protocolVersion": "2025-11-25"`, which the derived `MCP-Protocol-Version` header follows; the revision does not touch the id.
+Under a stateless Streamable HTTP transport (a fresh transport per POST) each POST is its own exchange, so the id only pairs a reply to its request on that connection; the stamping stays constant (a replay sends the same bytes) and no per-VU id exists.
+A server that keys a cache or a rate limit on the id is the case this does not cover, and would show as a run whose latency collapses.
+A call carrying `params._meta."io.modelcontextprotocol/protocolVersion"` (`"2025-11-25"`, say) has the derived `MCP-Protocol-Version` header follow it; the revision does not touch the id.
 
 **`mcpTool`** is the tool a `tools/call` body calls, stored inside the body object, so it needs no column and a `PUT` that leaves `body` out keeps it:
 

@@ -209,8 +209,7 @@
       "history": 1
     },
     "docs/engine/api-reference/execute.md": {
-      "max_cell": 294,
-      "history": 1
+      "max_cell": 294
     },
     "docs/engine/api-reference/export.md": {
       "max_line": 726,
@@ -246,14 +245,10 @@
     "docs/engine/api-reference/load-runs.md": {
       "max_line": 754,
       "long_lines": 2,
-      "max_cell": 659,
-      "history": 2
+      "max_cell": 659
     },
     "docs/engine/api-reference/metrics.md": {
       "max_cell": 244
-    },
-    "docs/engine/api-reference/request-body.md": {
-      "history": 1
     },
     "docs/engine/api-reference/resource-writes.md": {
       "history": 3
@@ -261,14 +256,12 @@
     "docs/engine/api-reference/runs.md": {
       "max_line": 416,
       "long_lines": 1,
-      "max_cell": 358,
-      "history": 1
+      "max_cell": 358
     },
     "docs/engine/api-reference/scenario-load.md": {
       "max_line": 989,
       "long_lines": 4,
-      "max_cell": 953,
-      "history": 5
+      "max_cell": 953
     },
     "docs/engine/api-reference/scenario-runs.md": {
       "max_line": 529,
