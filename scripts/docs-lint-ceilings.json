@@ -65,19 +65,13 @@
     },
     "docs/app/architecture.md": {
       "max_line": 2047,
-      "long_lines": 25,
-      "history": 2
+      "long_lines": 25
     },
     "docs/app/building.md": {
-      "lines": 656,
-      "history": 2
+      "lines": 654
     },
     "docs/app/data-driven-runs.md": {
-      "lines": 693,
-      "history": 1
-    },
-    "docs/app/graphql.md": {
-      "history": 2
+      "lines": 693
     },
     "docs/app/import-collections/README.md": {
       "lines": 748,
@@ -120,15 +114,13 @@
     },
     "docs/app/openapi.md": {
       "lines": 1106,
-      "max_cell": 233,
-      "history": 3
+      "max_cell": 233
     },
     "docs/app/pm-api-compatibility.md": {
-      "lines": 2388,
+      "lines": 2385,
       "max_line": 840,
       "long_lines": 3,
-      "max_cell": 814,
-      "history": 7
+      "max_cell": 814
     },
     "docs/app/state-management.md": {
       "lines": 4217,
