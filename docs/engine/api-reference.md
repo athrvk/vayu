@@ -931,7 +931,7 @@ leaves the elements the raw body.
 
 | `errorClass` | When |
 |---|---|
-| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream that ended before the final response |
+| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream that ended before the final response, whether the server closed it or a `maxStreamEvents` / `maxStreamDurationMs` cap ended it (#3831) |
 | `protocol` | the final response carries an `error` member, whatever the status (`-32020` header mismatch, `-32022` version refusal, `-32600` and the rest) |
 | `tool` | the call succeeded and `result.isError` is `true` |
 
@@ -10284,7 +10284,7 @@ transfer that never completes leaks its slot for the rest of the run.
 **Reaching a cap is a *successful* completion**, not a timeout and not an error:
 it is the stream's intended end under load, so it lands in the run's success
 counts, its latency histogram and its status-code distribution like any other
-200. Three other endings stay exactly what they were:
+200. Every ending, the cap's included:
 
 | Ending | Reported as |
 |--------|-------------|
@@ -10293,6 +10293,17 @@ counts, its latency histogram and its status-code distribution like any other
 | The server closing the stream | Success, not counted in `stream.capped` |
 | `maxResponseBodyBytes` exceeded | **Error** - a refusal to buffer, unchanged. The event cap bounds how many events arrive, not how large one is |
 | The whole-transfer timeout | **Error** - it sits a grace period *past* the duration cap, so reaching it means the cap never fired |
+| A cap or the server's close before the final JSON-RPC response, on an `mcp` request (#3831) | **Error** (`mcp_transport`); a cap still counts in `stream.capped` |
+
+An `mcp` request is the one exception to the first and third rows, because its
+stream is request-scoped: a tool call's reply ends with its response, so a
+stream that ends before the response arrived is a call that did not complete.
+The transfer ends exactly as a plain stream's does, so its slot and its
+`stream` section are unchanged; [the reply reader](#the-mcp-reply) then judges
+it `transport`, which the run counts under `mcp_transport`. A plain `stream`
+request with the same cap or close stays a success. A design send
+(`POST /execute` with `stream: true`) and a sequential collection run's
+streaming step read the reply by the same rule.
 
 Events are counted on the write path by a frame counter that agrees with the
 design path's parser about what an event is: a frame carrying no `data` field
@@ -10332,7 +10343,7 @@ argument: each streaming step reads its events through its stored request's own
 `streamTextPath`, which its scripts, its stored trace and its captured samples
 carry as on a single-request run. A collection **load** run sends a streaming step through
 the same event loop as a streaming single-request run, so the table above
-holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`), its events
+holds per step: a cap or the server's close ends an event stream as a success (any other reply is no stream, and a cap on it is a `Timeout`; an `mcp` step's stream that ends before its final response is `mcp_transport`), its events
 land in the report's `stream` section, its stored exchange keeps its event
 count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
 connect phase - the whole-transfer timeout is the duration cap plus the 5s
@@ -10341,7 +10352,8 @@ plus that backstop, or for the run's `timeout` where that is longer (its
 ordinary steps are still bounded by it), before cancelling what is still in
 flight. A sequential
 (design-mode) collection run sends a streaming step through the single-request
-client by the same rules: a cap or the server's close ends it as a pass, its
+client by the same rules: a cap or the server's close ends it as a pass (an
+`mcp` step's before its final response fails it as `transport`), its
 own `timeout` bounds only its connect phase, and a `POST /runs/:runId/stop`
 ends the stream in flight rather than waiting out its cap (a stream the server
 had not yet answered is a cancelled step). The body is the `text/event-stream`

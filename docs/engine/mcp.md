@@ -800,7 +800,10 @@ Notes:
   refuses a cap without the flag. Worth telling an agent
   explicitly: **reaching either cap completes the stream successfully**, so a
   streaming run's 0% error rate is not evidence the caps were never hit -
-  `get_run_report`'s `stream.capped` is what answers that. The report's `stream`
+  `get_run_report`'s `stream.capped` is what answers that. The exception is a
+  load run of an `mcp` request, whose stream ends with the tool call's
+  response: a cap or a close before that response is an `mcp_transport` error,
+  still counted in `stream.capped` (#3831). The report's `stream`
   section also carries the per-completion event distribution, a derived
   `eventsPerSecond` and `timeToFirstEvent` (issue #3234), the wait from submit
   to each stream's first event, which `timingBreakdown.phases.firstByte` does

@@ -1554,6 +1554,13 @@ Either cap ends the transfer through libcurl's documented abort, and the
 completion path turns that back into a **success** carrying the response's real
 status code. That is the point of the cap - it is the stream's intended end -
 and it is what keeps `handle_result`-exactly-once and the refill loop untouched.
+An `mcp` request's reply is judged only after that, by `attach_mcp_reply` in
+the event loop's `complete_transfer` and in `execute_exchange` after the
+single-request `Client` (`read_mcp_reply` over the live events on the design
+stream), so a stream a cap or the server
+ended before its final JSON-RPC response is a `transport` failure (#3831)
+while the transfer layer stays unaware of MCP: the slot is released the same
+way, and only the tally the completion lands in differs.
 `maxResponseBodyBytes` is unchanged and still an error: it is a refusal to
 buffer, not an ending, and the event cap bounds how many events arrive rather
 than how large one is.
