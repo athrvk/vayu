@@ -195,8 +195,7 @@ export default function DataFilePicker({
 	const readRows = (text: string, fileName: string, castNumbers: boolean): ParsedDataFile => {
 		const parsed = parseDataFile(text, fileName, { castNumbers });
 		// The same sentence a re-read of a remembered path refuses with
-		// (`read-declared.ts`), from one place - the two used to be one
-		// refusal and one silent acceptance.
+		// (`read-declared.ts`), from one place.
 		const overRowCap = describeRowCapRefusal(parsed.rows.length, maxRows);
 		if (overRowCap) throw new DataFileError(overRowCap);
 		return parsed;

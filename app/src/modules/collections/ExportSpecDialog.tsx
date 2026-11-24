@@ -7,7 +7,7 @@
 
 /**
  * ExportSpecDialog - a collection back out as an OpenAPI document (issue #630,
- * assembled engine-side since #855).
+ * assembled engine-side, #855).
  *
  * The dialog exists because the export is not the same act in both directions,
  * and the user has to know which one they are about to perform *before* the file
@@ -16,12 +16,9 @@
  * Both statements are on screen, and so is what the export could not carry
  * that a user would miss - a new request left out, a secret written empty.
  *
- * **The assembly is the engine's** (`POST /specs/export`). It used to be three
- * reads and ~900 lines here: the subtree's requests, every request's examples,
- * the stored document, then a parse and a patch on the render thread - seconds
- * of synchronous work on a 12MB spec, which #721 had to move off the render into
- * a scheduled task behind a pending line. All of that is one request now, and
- * what is left here is the choice, the summary and the download.
+ * **The assembly is the engine's** (`POST /specs/export`): assembled here it
+ * would be seconds of synchronous work on the render thread for a 12MB spec
+ * (#721). What is left here is the choice, the summary and the download.
  *
  * Delivery is the repo's one file-to-disk path, `downloadTextFile`, the same
  * one `ResponseActions` uses. It answers what became of the file (#3246), so

@@ -6,8 +6,6 @@
  */
 
 /**
- * SaveRunToRequestDialog
- *
  * Confirms copying a stored run's values back onto the request it came from.
  * It asks first because it cannot be undone - the request's current values are
  * simply replaced.

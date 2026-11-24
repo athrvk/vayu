@@ -6,8 +6,6 @@
  */
 
 /**
- * RunCollectionDialog
- *
  * Starts a collection run. Two options and nothing else, because the scenario
  * *is* the folder: the sequence is its requests by `order` (and, with
  * Recursive, its sub-folders and requests as one list by the shared `order`,
@@ -354,7 +352,7 @@ export default function RunCollectionDialog({
 	 * is what the store holds when no contract is in scope at all.
 	 *
 	 * ...and the file that contract was last run with, pre-filled (issue #599;
-	 * through the chain since #729; shared with the load dialog since #1039).
+	 * through the chain, #729; shared with the load dialog, #1039).
 	 *
 	 * Still part of the dialog's mount-is-reset contract: the options start at
 	 * their defaults every time this component appears, and one of those

@@ -10,8 +10,8 @@
  * apply the parts the user ticks (issues #654 and #655, phase 2 of #625).
  *
  * The read half and the write half stayed separate all the way down. Every
- * judgement about what changed is `POST /specs/diff`'s (issue #854 moved it
- * engine-side, where the reader that says what a document produces already
+ * judgement about what changed is `POST /specs/diff`'s (engine-side, #854, where
+ * the reader that says what a document produces already
  * lives), and every judgement about what to *write* lives in `spec-apply`; the
  * first stores nothing and the second only builds a payload, so the rules that
  * matter - a field somebody edited is never overwritten unless they ask, a
@@ -35,13 +35,10 @@
  * the two it is about to be, because an unlabelled one would be a write nobody
  * asked for.
  *
- * **The stored document is never read here at all** (issues #712, #854). This
- * section used to be handed the document the tab had preloaded, which kept
- * Check disabled until a transfer of up to `maxSpecDocumentBytes` had finished
- * for a comparison nobody had asked for; then it read the bytes on the click
- * instead. Now the engine compares its own stored bytes against the re-fetched
- * ones, so all this needs of the binding is `sourceUrl` - where to re-fetch
- * from - which is what `useSpecMetaReader` answers without the document.
+ * **The stored document is never read here at all** (issues #712, #854). The
+ * engine compares its own stored bytes against the re-fetched ones, so all this
+ * needs of the binding is `sourceUrl` - where to re-fetch from - which is what
+ * `useSpecMetaReader` answers without the document.
  *
  * The counts are stated in full, zeros included, for the reason `MatchSummary`
  * states its three: "4 changed" alone reads as the whole answer, while "4
@@ -86,7 +83,7 @@ interface SpecSyncProps {
 	/**
 	 * The bound document's id, from the collection's own binding (issue #712).
 	 *
-	 * The id rather than the document, and since #854 not even for the bytes: the
+	 * The id rather than the document, not even for the bytes (#854): the
 	 * engine compares its own stored document, so this is used to look up where
 	 * that document was fetched from and for nothing else.
 	 */
@@ -249,8 +246,7 @@ export default function SpecSync({
 						onClick={() => void handleCheck()}
 						// Pressable as soon as the collection names a document (issue
 						// #712): what it needs is fetched by the click, and the checking
-						// spinner covers that wait honestly. The old gate waited on a
-						// preloaded document the tab no longer transfers.
+						// spinner covers that wait honestly.
 						disabled={state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (

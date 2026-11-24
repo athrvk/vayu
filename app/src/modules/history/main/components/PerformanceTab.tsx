@@ -6,8 +6,6 @@
  */
 
 /**
- * PerformanceTab Component
- *
  * Displays latency distribution, rate control metrics, and time-series charts.
  */
 

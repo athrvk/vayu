@@ -6,8 +6,6 @@
  */
 
 /**
- * RunKeyMetrics Component
- *
  * The p99-led glance at the top of the Overview tab: the latency the run is
  * judged on, how much it sent and how much of it worked. Success rate is the
  * HTTP one; a scenario run with failed assertions (#2820) gains a fourth tile
