@@ -14,7 +14,7 @@
  * all derive from the arrays (font, radius) and the scale range below. Font
  * stacks reference faces bundled by src/fonts.css (Space Grotesk, Inter and the
  * four mono faces) or system fonts, so switching never triggers a network
- * fetch - and since #1149 that is true offline too, the faces being files in
+ * fetch - and that is true offline too (#1149), the faces being files in
  * the app rather than a Google Fonts stylesheet.
  */
 
