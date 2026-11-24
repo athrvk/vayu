@@ -32,8 +32,8 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
 				className={cn(
 					// `min(var(--radius-md),25%)`, not `rounded-md`: `--radius-md` is 10px at
 					// Rounded, past half a 12-16px box, which made a small checkbox a circle (a
-					// radio button) while a 24-28px one stayed square. The cap only removes
-					// roundness from a small box, and Square (`--radius: 0`) is unaffected.
+					// radio button) while a 24-28px one stayed a rounded square. The cap only
+					// removes roundness from a small box, and Square (`--radius: 0`) is unaffected.
 					"peer inline-flex shrink-0 cursor-pointer appearance-none rounded-[min(var(--radius-md),25%)] border border-input bg-background transition-colors",
 					"checked:border-primary-fill checked:bg-primary-fill",
 					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
