@@ -215,7 +215,7 @@ The app uses a dual-state management approach:
    - `layout-store.ts`: Drawer and sidebar visibility/state, the bottom panel's open state, height and active tab
    - `session-store.ts`: Active environment id (mirrored from the engine) and the last-used collection
    - `engine-store.ts`: Engine health, connectivity status
-   - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), the run phase
+   - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management/run-live-state.md`), the run phase
    - `response-store.ts`: The last response per request id - status, headers, body, script results. LRU-bounded at twice `MAX_OPEN_TABS` and by a 256 MiB byte budget (`RESPONSE_CACHE_MAX_BYTES`, #2544), since each entry holds a body plus its raw copy
    - `console-store.ts`: The session Console's rows (#3634) - each Send, collection-run step and their scripts' requests and lines, masked before they are stored. In memory only, bounded at 5,000 rows and 32 MiB, oldest out first, and emptied by Clear, a reload or a quit
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
@@ -285,7 +285,7 @@ sections themselves.
 - **`change-feed-service.ts`**: The engine's change feed (`GET /changes`, issue #3420), one stream for the app's life
   - Every committed write of a collection, request, example, environment, the globals or a trash entry, whoever made it, becomes an invalidation of the query keys that read it (`lib/change-feed-invalidation.ts`, through the MCP families of `lib/mcp-invalidation.ts`), coalesced over 200ms and held while a mutation is in flight
   - Asks `POST /changes/subscriptions` for a single-use id before every connection and opens `GET /changes?subscription=<id>` (a page cannot hold the engine's stream slots, so the app's stream is never the one refused)
-  - Reconnects on its own backoff and resumes by `?lastEventId=`, the inbox stream's shape; a `reset` refetches everything the feed covers. Opened by `useChangeFeed` only while the engine is connected. See `state-management.md`
+  - Reconnects on its own backoff and resumes by `?lastEventId=`, the inbox stream's shape; a `reset` refetches everything the feed covers. Opened by `useChangeFeed` only while the engine is connected. See `state-management/query-keys.md`
 
 - **`http-client.ts`**: Low-level fetch wrapper
   - Request/response transformation
