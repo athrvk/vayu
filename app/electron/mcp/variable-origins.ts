@@ -333,7 +333,7 @@ export function resolveVariableReports(
 /**
  * The resource that carries the full model. Every variable-writing tool points
  * at this rather than paraphrasing the rules a second time, which is what
- * `tools.test.ts`'s table-driven scan checks.
+ * `tools/variables.tools.test.ts`'s table-driven scan checks.
  */
 export const VARIABLE_RESOLUTION_URI = "vayu://variables/resolution";
 

@@ -23,7 +23,7 @@
  * The MCP schema holds a third copy of the `maxInFlight` bound and cannot be
  * checked from here - `src/` may not import from `electron/`, and the type-check
  * enforces it. That link is pinned from the other end, in
- * `electron/mcp/tools.test.ts`, which may import `@/constants` and so ties the
+ * `electron/mcp/tools/load.tools.test.ts`, which may import `@/constants` and so ties the
  * schema to the ceiling this file ties to the engine.
  */
 
@@ -214,7 +214,7 @@ describe("load-test limits parity with the engine", () => {
 
 	it("bounds the response-sample period at the 100000 the MCP schema mirrors", () => {
 		// `MAX_RESPONSE_SAMPLE_PERIOD` in `electron/mcp/tools/compose.ts` is a
-		// literal; `tools.test.ts` ties it to this number.
+		// literal; `tools/load.scenario.tools.test.ts` ties it to this number.
 		expect(executionCpp).toMatch(/\{\s*"response_sample_rate",\s*1,\s*100000\b/);
 	});
 

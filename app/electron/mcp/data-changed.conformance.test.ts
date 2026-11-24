@@ -17,7 +17,7 @@
  * invisible, which is the bug the channel exists to fix.
  *
  * This file is the one place the two meet. It reaches across the boundary the
- * way `tools.test.ts` already reaches for `@/constants/load-test`.
+ * way `tools/load.tools.test.ts` already reaches for `@/constants/load-test`.
  */
 
 import { describe, expect, test } from "vitest";
