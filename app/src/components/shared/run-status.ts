@@ -19,19 +19,13 @@ import type { Run } from "@/types";
 import type { RunOutcome } from "./run-outcome";
 
 /**
- * How a run's status is drawn, once: the history row's glyph and the dashboard
- * header's pill both read this map, so a status cannot be green in one and
- * neutral in the other (#1932, where a failed run showed as Completed).
- *
- * One glyph per status - shape first, colour second (#1691). A bare coloured dot
- * made the colour the whole message, and a red/green confusion, a monochrome
- * display or a pasted greyscale screenshot flattens five of them into one. The
- * shape and the word carry the status; the colour agrees with them.
- *
- * `text` is the `-text` token, not the bare fill: these are small glyphs and
- * words, and the bare token fails AA as a foreground
- * (`status-color-tokens.test.ts`). `tint` is the pill's own fill and edge, where
- * the bare token is correct because it is an area of colour.
+ * How a run's status is drawn, once: the history row's glyph and the dashboard header's pill read
+ * this map, so a status cannot be green in one and neutral in the other (#1932). One glyph per
+ * status, shape first, colour second (#1691): a coloured dot made colour the whole message, which a
+ * red/green confusion, a monochrome display or a greyscale screenshot flattens. `text` is the
+ * `-text` token, as small glyphs and words fail AA on the bare token
+ * (`status-color-tokens.test.ts`); `tint` is the pill's fill and edge, an area of colour, where the
+ * bare token is right.
  */
 export interface RunStatusDisplay {
 	label: string;
@@ -76,11 +70,10 @@ export const RUN_STATUS: Record<Run["status"], RunStatusDisplay> = {
 };
 
 /**
- * A `completed` run is not necessarily a good one (#2130), so once a run has a
- * verdict the success tick is only for a run that earned it. A failed verdict
- * is a ringed exclamation in the error family, an unjudged one a ringed question
- * mark in the neutral family: neither is the `failed` status's cross, because the
- * run did finish, and neither shares a shape with the tick.
+ * A `completed` run is not necessarily good (#2130), so once it has a verdict the tick is only for
+ * one that earned it: a failed verdict is a ringed exclamation (error family), an unjudged one a
+ * ringed question mark (neutral). Neither is the `failed` status's cross, as the run did finish,
+ * and neither shares the tick's shape.
  */
 const COMPLETED_OUTCOME: Record<Exclude<RunOutcome, "passed">, RunStatusDisplay> = {
 	failed: {
@@ -98,10 +91,9 @@ const COMPLETED_OUTCOME: Record<Exclude<RunOutcome, "passed">, RunStatusDisplay>
 };
 
 /**
- * How a run is drawn: its status, refined by its verdict when it has one. Only
- * a `completed` run is refined - every other status already says more than a
- * verdict could (`failed` is a failure, `stopped` was never judged, a live run
- * has no verdict yet), and `passed` keeps the tick.
+ * How a run is drawn: its status, refined by its verdict when it has one. Only `completed` is
+ * refined: every other status says more than a verdict could (`failed` is a failure, `stopped`
+ * never judged, a live run has none yet), and `passed` keeps the tick.
  */
 export function runStatusDisplay(status: Run["status"], outcome?: RunOutcome): RunStatusDisplay {
 	if (status === "completed" && outcome && outcome !== "passed") {
