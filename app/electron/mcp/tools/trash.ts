@@ -6,7 +6,6 @@
  */
 
 /**
- * @file trash.ts
  * @brief Naming a trash entry for the purge prompt, and the engine's refusals
  *        in its own words (#988, #1071).
  */

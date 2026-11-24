@@ -20,10 +20,8 @@
  *
  * - **ownership by marker, never by value.** A header the *user* typed must
  *   survive the setting changing, and it is indistinguishable by value.
- *   Ownership used to live in a ref the provider held, keyed by row id and
- *   value - which meant nothing survived a reload, and a stale auto-written
- *   row was then indistinguishable from the user's own (issue #1481). The
- *   `source` field on the row itself is the fact, stored where the row is.
+ *   The `source` field on the row itself is the fact, stored where the row is
+ *   (issue #1481).
  * - **never override a declaration**. A request that already declares the
  *   header - even with a *different* value - keeps what it has; silently
  *   replacing it would be a worse version of the bug this exists to fix.

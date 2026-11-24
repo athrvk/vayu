@@ -6,7 +6,6 @@
  */
 
 /**
- * @file read-body.ts
  * @brief `read_body` (#3704): which stored body a call names, how it is
  *        fetched, and the page of it one result carries - a byte window, the
  *        matches of a search, or a JSON pointer's subtree.

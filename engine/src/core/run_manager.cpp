@@ -603,7 +603,7 @@ ReplayFailures& failures) {
         replay.cookie_read_refusal =
         "pm.cookies.%s is not available here: a replayed script runs after "
         "the run, against a recorded response; the user's cookies at that "
-        "moment are not recorded. See docs/engine/scripting.md.";
+        "moment are not recorded. See docs/engine/scripting/cookies.md.";
         // The step's own request, so `pm.request` describes the step the
         // script is asserting on rather than a run-level request a
         // scenario payload does not have; as each sample sent it, where the
@@ -817,7 +817,7 @@ const ReplayBase& base) {
         "pm.cookies.%s is not available here: a single-request load run "
         "has no scenario and so no per-user cookie state to read. Use "
         "pm.response.cookies for the Set-Cookie of the response in hand. "
-        "See docs/engine/scripting.md.";
+        "See docs/engine/scripting/cookies.md.";
         // The rows this run bound, so a sampled submission reads the row it
         // actually carried as `pm.iterationData` - the same reading a scenario
         // step's replay gets, off the row index the sample was stamped with

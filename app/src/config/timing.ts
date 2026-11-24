@@ -133,12 +133,9 @@ export const TIMING = {
 	 * Radix tooltip open delay, set once on the root `TooltipProvider` in
 	 * `main.tsx` and inherited everywhere.
 	 *
-	 * This comment used to claim "used across the app" while the root provider
-	 * set nothing, so Radix's 700ms default governed almost everything and two
-	 * components opted into 150ms locally. Worse, two more mounted *bare* nested
-	 * providers, which do not inherit - a provider with no `delayDuration` prop
-	 * re-establishes 700ms for its subtree. Those are gone; a nested provider is
-	 * now the exception that has to say why.
+	 * A provider with no `delayDuration` prop re-establishes 700ms for its subtree
+	 * and does not inherit, so a nested provider is the exception that has to say
+	 * why.
 	 */
 	TOOLTIP_DELAY_MS: 150,
 
@@ -146,9 +143,8 @@ export const TIMING = {
 	 * How long a hover-opened `{{variable}}` popover stays up after the pointer
 	 * leaves the token, before closing (issue #1220 hover redesign).
 	 *
-	 * This used to reuse `TOOLTIP_DELAY_MS`, on the reasoning that one named
-	 * constant beats a second one for a closely related purpose - but the two
-	 * delays answer different questions. Opening is "has the pointer paused
+	 * This is not `TOOLTIP_DELAY_MS`: the two delays answer different questions.
+	 * Opening is "has the pointer paused
 	 * long enough to mean it", which 150ms already answers well. Closing is
 	 * "has the pointer had long enough to physically travel from the token to
 	 * the popover's own content", which is real mouse-travel distance and time,

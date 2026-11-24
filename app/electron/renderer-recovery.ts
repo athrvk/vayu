@@ -58,8 +58,7 @@ export type CrashAction = "reload" | "prompt";
  * Whether to reload again or stop and ask, given every crash seen so far
  * (including the one being handled) and the current time.
  *
- * Pure so the loop guard is testable without a window: the inline version of
- * this was the part that could silently become an infinite reload.
+ * Pure so the loop guard is testable without a window.
  */
 export function decideCrashAction(crashTimes: readonly number[], now: number): CrashAction {
 	const recent = crashTimes.filter((at) => now - at < CRASH_WINDOW_MS);

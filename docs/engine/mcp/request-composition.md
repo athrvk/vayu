@@ -129,7 +129,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   A hop's `Set-Cookie` is what the server sent, not what the cookie jar kept.
   A hop's `url` is the request it answered, masked as the result's own `url` is (issue #2949, [Secret values](secrets.md#secret-values)), and `schemeDowngrade` is true when that request went over `https` and the next over `http`: libcurl drops `Authorization` and `Cookie` there, an API key sent as a header travels.
   `requestHeaderLines` (and a stored trace's `sentHeaderLines`) is masked the same way, every repeated credential line on its own.
-  A `postRequestScript` reads the same set as `pm.request.headers` (see [scripting.md](../scripting.md#request-object-pmrequest)).
+  A `postRequestScript` reads the same set as `pm.request.headers` (see [scripting/request.md](../scripting/request.md#request-object-pmrequest)).
 - **Transport fields** - `httpVersion` rides the inline overlay for both tools, and `start_load_run` adds `followRedirects` / `maxRedirects` (issue #760).
   They belong here rather than beside the load shape because they describe the *request*: `POST /compose` emits all three on a stored request under the never-elided rule, so an agent's value has to be laid over the composed payload the same way a URL override is.
   A URL-only run has no stored row behind it, which makes this the only way its redirect policy gets stated at all.
@@ -198,7 +198,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `dataFileName` and `dataFileHash` (issue #2051) name the file the rows came from - a display name and the SHA-256 of its bytes as 64 lowercase hex, which the schema checks, refusing a name holding a `/` or `\` as a path - and are forwarded as given; the engine refuses either one sent without rows, by name.
     `dataFileCastNumbers` (issue #2540), a boolean, says the agent read the file's unquoted numeric cells as numbers; Vayu never converts the rows, it only records the reading, and it is forwarded and refused without rows on the same terms.
     See [Data files](saved-data.md#data-files).
-  - A stored `mcp` request is bound per row like any other: `{{data.column}}` in its `body.content` is escaped as a JSON string, and the wire body and the `Mcp-Method`, `Mcp-Name` and `Mcp-Param-*` headers are derived from the bound call, so each row sends headers that agree with its own body (`tests/scenario_runner_test.cpp`, #3808).
+  - A stored `mcp` request is bound per row like any other: `{{data.column}}` in its `body.content` is escaped as a JSON string, and the wire body and the `Mcp-Method`, `Mcp-Name` and `Mcp-Param-*` headers are derived from the bound call, so each row sends headers that agree with its own body (`tests/scenario_runner_data_test.cpp`, #3808).
     `Mcp-Param-*` needs the stored `mcpTool` (see above); a row whose `params.name` differs from `mcpTool.name` sends none.
   - `scenario.iterations` is offered on `run_collection` only.
     A load run reads the **top-level** `iterations` (total passes across all virtual users); the in-block count is the design runner's and the load executor never reads it, so offering it there would be an argument written and never read.
@@ -233,7 +233,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `run_collection` takes the same two arguments for a design-mode run.
     Neither tool ever sends `stream` for a collection - the engine answers it with a `400` there.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method, headers, body, auth) are applied to the request that is sent, so an agent can sign a request or override the engine-applied auth from `run_request` (with reveal on; the script itself is refused while it is off), and a saved request's stored pre-request script does the same under `run_collection_smoke`.
-  The write-back is engine-side ([scripting.md](../scripting.md#mutating-the-request-pre-request-scripts)), so both tools get it without composing anything extra.
+  The write-back is engine-side ([scripting/request-mutation.md](../scripting/request-mutation.md#mutating-the-request-pre-request-scripts)), so both tools get it without composing anything extra.
   A rejected edit comes back as `preScriptError` in the response.
   `start_load_run` did not offer the field at all before issue #1594 - `POST /runs` ran no pre-request hook on its single-target path.
   It still does not accept an ad-hoc `preRequestScript` argument (a saved request's own `script.pre` element is the only source), and a composed one only mutates the request when it is marked to run inline or this run's own `elements.scripts` override forces it - see *Load-testing a saved request* above.

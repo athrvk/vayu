@@ -6,7 +6,6 @@
  */
 
 /**
- * @file store.ts
  * @brief Disk persistence for the MCP safety config, so an allowlist / caps the
  *        user sets in Settings survive an app restart. Main-process only (uses
  *        `userData` through `json-store.ts`) - the shared tool registry and the

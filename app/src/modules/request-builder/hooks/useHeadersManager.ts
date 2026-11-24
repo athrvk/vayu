@@ -12,10 +12,8 @@
  * draft's commit is the provider's (`utils/bulk-drafts.ts`, #3666), since Send
  * and Save commit an open draft too.
  *
- * It used to re-impose three managed system rows on every change and answer
- * "may this row be edited / removed / disabled" for the table. Neither exists
- * since issue #1229: every row in the headers table is the user's, and what
- * Vayu adds is declared by the engine and shown beside the table rather than
+ * Every row in the headers table is the user's (issue #1229), and what Vayu
+ * adds is declared by the engine and shown beside the table rather than
  * written into it.
  */
 

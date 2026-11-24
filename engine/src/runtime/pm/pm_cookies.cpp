@@ -235,7 +235,7 @@ ContextData* jar_context (JSContext* ctx, const char* member) {
         "pm.cookies.%s is not available here: the cookie jar is a design-mode "
         "feature, and a load run's scripts have no jar to read. Use "
         "pm.response.cookies for the Set-Cookie of the response in hand. See "
-        "docs/engine/scripting.md.",
+        "docs/engine/scripting/cookies.md.",
         member);
         return nullptr;
     }
@@ -297,7 +297,7 @@ jar_cookies_from_context (JSContext* ctx, const char* member) {
     "pm.cookies.%s is not available here: the cookie jar is a design-mode "
     "feature, and this execution has no jar to read. Use "
     "pm.response.cookies for the Set-Cookie of the response in hand. See "
-    "docs/engine/scripting.md.";
+    "docs/engine/scripting/cookies.md.";
     if (const auto placeholder = refusal.find ("%s"); placeholder != std::string::npos) {
         refusal.replace (placeholder, 2, member);
     }
@@ -514,7 +514,7 @@ ContextData* jar_write_context (JSContext* ctx, const char* member) {
         JS_ThrowPlainError (ctx,
         "pm.cookies.%s is not available here: this execution has nowhere to "
         "apply a jar write, so accepting one would report success for a cookie "
-        "that goes nowhere. See docs/engine/scripting.md.",
+        "that goes nowhere. See docs/engine/scripting/cookies.md.",
         member);
         return nullptr;
     }
@@ -829,7 +829,7 @@ const std::string& outcome) {
     outcome + ": a jar " + access + " is limited to the request's own site" +
     (request_host ? " (" + *request_host + ")" : std::string{}) +
     " and to hosts this script has called through pm.sendRequest. See "
-    "docs/engine/scripting.md.");
+    "docs/engine/scripting/cookies.md.");
 }
 
 // Whether a jar read of @p url stays inside the scope. A URL libcurl reads no
@@ -901,7 +901,7 @@ const std::string& domain) {
         outcome +
         ": a single-label domain is refused unless it is the request's "
         "own host, as it would reach every site under it. See "
-        "docs/engine/scripting.md.");
+        "docs/engine/scripting/cookies.md.");
     } else {
         warn_out_of_jar_scope (ctx, data, "write", outcome);
     }

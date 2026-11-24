@@ -6,8 +6,6 @@
  */
 
 /**
- * OverviewTab Component
- *
  * Displays the key-metric glance, summary statistics, verdicts, status codes
  * and errors. The run's request and configuration sit above the tabs, in
  * `LoadTestDetail`'s scrolling body.

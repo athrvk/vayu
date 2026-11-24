@@ -11,9 +11,8 @@
  * Centralized type definitions for the request builder module.
  *
  * The key/value row model (`KeyValueItem`) and the table's props
- * (`KeyValueEditorProps`) used to live here. They moved to `types/ui.ts` with
- * the table itself (issue #567): a primitive under `components/shared/` cannot
- * take its props type from a feature module. Import them from `@/types` - there
+ * (`KeyValueEditorProps`) live in `types/ui.ts` (issue #567): a primitive under
+ * `components/shared/` cannot take its props type from a feature module. Import them from `@/types` - there
  * is deliberately no re-export shim here, so there is one path to each name.
  */
 
@@ -113,11 +112,7 @@ export type ResponseTab =
 
 /**
  * The builder holds the domain {@link RequestAuth} verbatim - `mode`, and
- * `apikey`'s `in`. It used to carry a second, flat vocabulary of its own
- * (`AuthType` + `AuthConfigState`, where `apikey` was `api-key` and `in` was
- * `addTo`), which existed only so the Auth tab could edit it, and which a
- * translation layer had to keep in step with the domain on every load, save and
- * execute. One shape means the shared `AuthFields` editor serves this host and
+ * `apikey`'s `in`. One shape means the shared `AuthFields` editor serves this host and
  * the collection editor unchanged, and nothing can be lost in translation.
  *
  * `digest` / `aws` / `ntlm` are not offered in the picker - the engine cannot
@@ -357,7 +352,7 @@ export interface ResponseState {
 	 * The response body's UTF-8 byte count: the original length when the body
 	 * was truncated, and on a stored stream the bytes delivered, which the held
 	 * body falls short of once `bodyCapped` cut it (issues #3238, #3770). A
-	 * restored row carries it on every response since #3423, a live one never -
+	 * restored row carries it on every response (#3423), a live one never -
 	 * so it is the size, never a truncation signal: `bodyTruncated` is.
 	 */
 	bodyBytes?: number;
@@ -458,9 +453,7 @@ export interface ResponseState {
 	 * the response to the request beside it *as it is now*, or to a version of
 	 * it from twenty minutes and several edits ago.
 	 *
-	 * A bare `timestamp` used to live here and was removed for having one writer
-	 * and no reader. This one has a reader; that is the whole difference, and
-	 * `response-age.test.tsx` is what keeps it true.
+	 * It has a reader, and `response-age.test.tsx` is what keeps it true.
 	 */
 	receivedAt?: string;
 	/**

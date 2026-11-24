@@ -81,6 +81,9 @@ add_executable(vayu_tests
     sse_frame_counter_test.cpp
     sse_load_stream_test.cpp
     load_stream_events_test.cpp
+    sse_stream_execute_body_test.cpp
+    sse_stream_execute_test.cpp
+    sse_stream_relay_test.cpp
     sse_stream_test.cpp
     change_feed_test.cpp
     server_bind_test.cpp
@@ -144,6 +147,9 @@ add_executable(vayu_tests
     live_metrics_route_test.cpp
     execution_timeout_test.cpp
     execution_http_version_test.cpp
+    load_strategy_capacity_test.cpp
+    load_strategy_elements_test.cpp
+    load_strategy_pacing_test.cpp
     load_strategy_test.cpp
     load_data_test.cpp
     load_identity_test.cpp
@@ -158,6 +164,9 @@ add_executable(vayu_tests
     threshold_eval_test.cpp
     capacity_controller_test.cpp
     monitor_test.cpp
+    run_manager_live_frames_test.cpp
+    run_manager_load_clock_test.cpp
+    run_manager_summary_test.cpp
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
@@ -220,8 +229,14 @@ add_executable(vayu_tests
     inline_collection_scope_test.cpp
     target_policy_test.cpp
     scenario_data_test.cpp
+    scenario_load_breakdown_test.cpp
+    scenario_load_rows_test.cpp
     scenario_load_test.cpp
+    scenario_load_variables_test.cpp
     scenario_plan_test.cpp
+    scenario_runner_data_test.cpp
+    scenario_runner_events_test.cpp
+    scenario_runner_flow_test.cpp
     scenario_runner_test.cpp
     script_levels_test.cpp
     tree_order_test.cpp
@@ -242,6 +257,10 @@ add_executable(vayu_tests
     idn_host_test.cpp
     url_scheme_test.cpp
     openapi_document_test.cpp
+    import_parse_insomnia_test.cpp
+    import_parse_openapi_test.cpp
+    import_parse_postman_body_test.cpp
+    import_parse_postman_test.cpp
     import_parse_test.cpp
     script_api_scan_test.cpp
     jmeter_import_test.cpp
@@ -501,6 +520,11 @@ set(vayu_scratch_database_suites
     LoadScriptScopesTest
     LoadTemplateScopesRunTest
     LoadFailureDedupTest
+    LoadClock
+    LoadDrain
+    LoadRunTimeoutTest
+    LoadRunToTerminalTest
+    LoadStream
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest

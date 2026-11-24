@@ -220,7 +220,7 @@ Both read the same row. They differ in _when_:
 - **`pm.iterationData`** is read by scripts, _after_ the step's request was
   composed, so it cannot change where the request goes. Use it for assertions
   and for values a script derives. See
-  [Data rows](../engine/scripting.md#data-rows-pmiterationdata).
+  [Data rows](../engine/scripting/execution-metrics-data.md#data-rows-pmiterationdata).
 
 `{{data.id}}` is a **reserved namespace, not a variable tier**: it and `{{id}}`
 are different names, so the *prefixed* spelling can neither shadow nor be

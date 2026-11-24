@@ -64,11 +64,8 @@ export const unreadParamLines = (text: string): UnreadLine[] => unreadLinesOf(sc
  * carries no `=`, so a header block pasted here parses instead of vanishing.
  * A leading `// ` disables the row (issue #1480).
  *
- * Two kinds of line used to be dropped in silence. `Authorization: Bearer abc`
- * has no `=`, so pasting a header block returned an empty array - which the
- * panel then wrote over the user's params. And `page`, a legal valueless
- * parameter, matched nothing either, so bulk-editing lost it. It is now a
- * `valueless` row (`?page`), where `page=` is an empty value (`?page=`).
+ * `page`, a legal valueless parameter, is a `valueless` row (`?page`), where
+ * `page=` is an empty value (`?page=`).
  *
  * A line that restates a row of `previous` (same key, value and `=`) keeps that
  * row's id, each row once. `buildUrlWithParams` reads the id to tell a row

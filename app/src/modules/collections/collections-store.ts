@@ -19,11 +19,9 @@ interface CollectionsUIState {
 	/**
 	 * Expand one collection, idempotently.
 	 *
-	 * The tree used to hand-roll `if (!expanded.has(id)) toggle(id)` at three
-	 * sites while this sat here with no callers - a toggle guarded by a read of
-	 * the set it toggles, which is this action with an extra dependency on
-	 * `expandedCollectionIds` bolted on. That dependency is why the ⋯ menu's
-	 * actions had to be rebuilt on every expand.
+	 * A toggle guarded by a read of the set it toggles would depend on
+	 * `expandedCollectionIds`, which forced the ⋯ menu's actions to be rebuilt on
+	 * every expand.
 	 */
 	expandCollection: (collectionId: string) => void;
 	expandCollections: (collectionIds: string[]) => void;

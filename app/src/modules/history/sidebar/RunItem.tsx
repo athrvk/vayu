@@ -337,8 +337,7 @@ function RunItem({
 				className={cn(
 					// focus-row: the row is the perceived target, so it paints the
 					// ring for the stretched activator inside it - see RequestItem.tsx,
-					// whose h-8/flat/hover-fill shape this row now shares rather than
-					// the bordered card every row used to be.
+					// whose h-8/flat/hover-fill shape this row shares.
 					//
 					// `transition-[background-color,border-color,box-shadow]`, not the
 					// bare `transition-colors` utility: `isSelected` below toggles a
@@ -587,12 +586,6 @@ function RunItem({
 				)}
 
 				{/*
-				 * The row used to be a <div onClick>: clickable by mouse, but not
-				 * focusable, not in the tab order and not operable by Enter or Space.
-				 * A keyboard user could reach "Delete run" inside a row but had no way
-				 * to *open* one - the destructive action was reachable and the primary
-				 * one was not.
-				 *
 				 * A stretched activator keeps the whole row clickable while being a
 				 * real button. It is last in the DOM and absolutely positioned so it
 				 * covers the content without disturbing layout; the actions group above

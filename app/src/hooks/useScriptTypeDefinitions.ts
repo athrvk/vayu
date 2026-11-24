@@ -6,8 +6,6 @@
  */
 
 /**
- * useScriptTypeDefinitions Hook
- *
  * Hands Monaco's TypeScript worker the engine-generated declarations for the
  * `pm.*` surface, which is what the completion provider beside it cannot give:
  * hover documentation over an existing call, signature help while typing
@@ -33,7 +31,7 @@ import { useScriptTypeDefinitionsQuery } from "@/queries";
  * tracks the language closely: `Object.hasOwn`, `Array.prototype.at`,
  * `toSorted`, `findLast`, `Object.groupBy` and `Promise.withResolvers` all run,
  * and a lib that stops short of one marks it as an error while it works (#3128,
- * see docs/engine/scripting.md). The price is the opposite error: a method
+ * see docs/engine/scripting/limitations.md). The price is the opposite error: a method
  * TypeScript adds to ESNext before quickjs-ng has it is offered and fails only
  * when the script runs.
  */
@@ -50,7 +48,7 @@ export const SCRIPT_LIB = ["esnext"];
  *   engine runs:
  *   - an assignment to an undeclared name (`jsonData = pm.response.json()`)
  *     creates a global in the sloppy-mode IIFE, which the engine permits and
- *     `docs/engine/scripting.md` names under "Isolation between scripts";
+ *     `docs/engine/scripting/sandbox.md` names under "Isolation between scripts";
  *   - quickjs-ng provides four globals `lib.esnext` does not declare
  *     (`queueMicrotask`, `performance`, `DOMException`, `InternalError`), each
  *     of which would need declaring and holding to the runtime.
@@ -122,7 +120,7 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	 * (`iterationData?: { ... }`, `get(name): string | undefined`), and with
 	 * this flag on the worker would report every one of those at once. Measured
 	 * against the real declarations over 57 scripts - the 54 `pm.*` examples in
-	 * `docs/engine/scripting.md` and `docs/app/pm-api-compatibility.md`, plus
+	 * `docs/engine/scripting/` and `docs/app/pm-api-compatibility.md`, plus
 	 * three realistic ones: 13 new diagnostics, of which **8 land on the docs'
 	 * own recommended lines** (`pm.iterationData.get('username')`, correct
 	 * inside the data-driven run those examples are about). Two more are on
@@ -168,7 +166,7 @@ export function useScriptTypeDefinitions() {
 			// quickjs-ng runs fine. `lib` in SCRIPT_COMPILER_OPTIONS pins the
 			// library surface exactly, so ESNext here costs nothing and
 			// mis-targeting would cost real false errors (see
-			// docs/engine/scripting.md).
+			// docs/engine/scripting/limitations.md).
 			target: monaco.typescript.ScriptTarget.ESNext,
 			...SCRIPT_COMPILER_OPTIONS,
 		});
