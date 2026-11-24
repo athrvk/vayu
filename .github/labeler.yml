@@ -126,7 +126,7 @@ area:scripting:
 # because globs are case-sensitive, and a lowercase `mcp-*.ts` under `app/src/`
 # is the obvious next file this rule should catch without a change here.
 #
-# Scoped to `app/**` so `docs/engine/mcp.md` stays `documentation` only, like
+# Scoped to `app/**` so `docs/engine/mcp/` stays `documentation` only, like
 # every other rule here.
 area:mcp:
   - changed-files:

@@ -15,7 +15,7 @@
  * graphql operation, a run sample, an element, a threshold) names that owner in
  * its tail instead.
  * The grammar, every kind's example and the fixture the examples are
- * formatted from are in `docs/engine/mcp.md` ("Naming what the user means"),
+ * formatted from are in `docs/engine/mcp/runs-and-reports.md` ("Naming what the user means"),
  * which `agent-reference.docs.test.ts` holds to this file.
  *
  * **No value ever rides in a reference.** Each formatter takes a `Pick<>` of

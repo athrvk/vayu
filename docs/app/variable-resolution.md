@@ -51,7 +51,7 @@ says what each case means in detail; the engine's `POST /compose` contract is
 resource `vayu://variables/resolution`, and the `resolve_variables` tool
 answers which definition wins for a given collection/environment context and
 every definition it shadowed. See
-[MCP - Variables](../engine/mcp.md#variables).
+[MCP - Variables](../engine/mcp/saved-data.md#variables).
 
 **One matcher in the renderer.** `{{name}}` is recognised by
 `VARIABLE_PATTERN` in `app/src/constants/variables.ts` and nowhere else -

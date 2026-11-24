@@ -105,7 +105,20 @@ nav:
       - Local Database: engine/db-schema.md
       - Elements: engine/elements.md
       - Command Line: engine/cli.md
-      - MCP Server: engine/mcp.md
+      - MCP Server:
+          - Overview: engine/mcp/index.md
+          - Transports: engine/mcp/transports.md
+          - Tools: engine/mcp/tools.md
+          - Tool Conventions: engine/mcp/conventions.md
+          - Load Runs and Specs: engine/mcp/load-and-specs.md
+          - Runs and Reports: engine/mcp/runs-and-reports.md
+          - Writes to Saved Data: engine/mcp/saved-data.md
+          - Collection Runs and Local Services: engine/mcp/collection-runs-and-mocks.md
+          - Request Composition: engine/mcp/request-composition.md
+          - Resources and Prompts: engine/mcp/resources-and-prompts.md
+          - Safety Model: engine/mcp/safety.md
+          - Secret Values: engine/mcp/secrets.md
+          - Configuration: engine/mcp/configuration.md
       - Logging: engine/logging.md
       - Benchmarks: engine/benchmarks.md
   - Desktop App:
@@ -167,6 +180,7 @@ nav:
           - "Shared: Variable Input": app/COMPONENTS/shared-variable-input.md
           - UI Primitives: app/COMPONENTS/ui-primitives.md
           - Patterns and State: app/COMPONENTS/patterns.md
+      - MCP Internals: engine/mcp/internals.md
 
 markdown_extensions:
   - admonition

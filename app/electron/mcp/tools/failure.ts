@@ -13,7 +13,7 @@
  * Every error result is built by `errorResult` (`kit.ts`), which records the
  * class here; `dispatchTool` reads it back once, through
  * {@link describeFailure}, and answers the text beside a machine-readable
- * `structuredContent.error`. The class table in `docs/engine/mcp.md` ("Error
+ * `structuredContent.error`. The class table in `docs/engine/mcp/conventions.md` ("Error
  * results") is this file's.
  */
 

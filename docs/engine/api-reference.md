@@ -5655,7 +5655,7 @@ code to count, in the document: the report itself writes the first two as
 `[[code, count], ...]` pairs.
 
 `run.reference` is the *Copy for agent* run line
-([MCP: Naming what the user means](mcp.md#naming-what-the-user-means)) with the
+([MCP: Naming what the user means](mcp/runs-and-reports.md#naming-what-the-user-means)) with the
 start in ISO-8601 UTC, because a file is read away from the locale and zone the
 app would print it in: `Vayu run "Create order" (run_5a7c...) - load test, POST
 /v1/orders, 2026-10-05T08:10:00Z, completed`. The title is the request name
@@ -8328,7 +8328,7 @@ never re-resolved - see [POST /execute](#post-execute) and
   erroring - composition works with no collection or environment at all. That
   rule is for the app and direct callers: the MCP server checks an
   `environmentId` against `GET /environments` before composing and refuses one
-  that names no environment ([MCP](mcp.md)).
+  that names no environment ([MCP](mcp/index.md)).
 
 #### deferredVariables
 
@@ -9502,7 +9502,7 @@ same guarantee from `POST /compose`, which always emits a stored request's
 execution options; its two ad-hoc tools (`run_request` / `start_load_run`)
 forward `httpVersion` only when the caller supplies it, since there is no
 saved request behind an ad-hoc call for an omission to silently override (see
-[mcp.md](mcp.md#request-composition)). It governs **both** Send and load test -
+[mcp/request-composition.md](mcp/request-composition.md#request-composition)). It governs **both** Send and load test -
 `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually
 stored (see [Requests](#requests) above); `POST /runs` (below) is simply the
 run-shaped way of stating the same field, not a second store.
@@ -10258,7 +10258,7 @@ non-boolean is a **400** (`'persistVariables' must be a boolean`) before any run
 row exists, for the reason `transient`'s is. It is independent of `transient`:
 that flag decides whether the *run* is recorded, this one whether the
 *variables* are. MCP's `run_request` sends `false` whenever write access is off
-([MCP](mcp.md#safety-model)).
+([MCP](mcp/safety.md#safety-model)).
 
 **`includeParsedBody: false` leaves the parsed copy out** (#2544). The answer's
 `body` is `null` and the engine skips the parse that would build it; `bodyRaw`,
@@ -10920,7 +10920,7 @@ resolved elements from the plan. This is the field MCP's `start_load_run`
 renames a composed request's chain-then-own `elements` onto, since `POST
 /compose` answers under the plain `elements` key and this endpoint's own
 `elements` key means something else (the override block above) - see
-[mcp.md](mcp.md#request-composition).
+[mcp/request-composition.md](mcp/request-composition.md#request-composition).
 
 **Only the kinds this run shape's own hooks actually dispatch are accepted**:
 `extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
@@ -12205,7 +12205,7 @@ sending `tests` gets the same refusal every other route already gives;
 MCP's `start_load_run` never sends it - it folds the
 agent-facing `postRequestScript` / `tests` argument into a `script.post`
 entry of `requestElements` client-side (see
-[mcp.md](mcp.md#request-composition)).
+[mcp/request-composition.md](mcp/request-composition.md#request-composition)).
 
 **A `script.pre` element only reaches the wire when it is marked to.** The
 ad-hoc `preRequestScript(s)` field itself is refused (see above, same as

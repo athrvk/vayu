@@ -108,7 +108,7 @@ export const APP_LOG_RETENTION_COUNT = 10;
 // MCP server (Model Context Protocol) - a TypeScript sidecar hosted in this
 // main process that exposes the engine's capabilities to agents (Claude Code,
 // Codex, Cursor, …) over Streamable HTTP. Bound to loopback only. See
-// docs/engine/mcp.md.
+// docs/engine/mcp/index.md.
 export const MCP_HOST = "127.0.0.1";
 /**
  * The MCP port when Settings has not set one, and only that (#3580). The

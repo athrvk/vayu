@@ -190,7 +190,7 @@ export const validationScriptAliasInput = z
  * The agent-facing half of what the app's Send-with-row does: `{{data.column}}`
  * tokens substitute against this row and both scripts read it as
  * `pm.iterationData`, without a collection run existing. `run_collection_smoke`
- * deliberately stays out of it - it has no scenario path at all (see mcp.md).
+ * deliberately stays out of it - it has no scenario path at all (see docs/engine/mcp/collection-runs-and-mocks.md).
  *
  * The failure shape is named in the description because it is the useful half:
  * a column the row does not carry is a `400` naming the token and the row's
