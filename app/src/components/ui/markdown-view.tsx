@@ -40,9 +40,9 @@ export function MarkdownView({ children, className }: MarkdownViewProps) {
 			)}
 		>
 			{/*
-			 * No skeleton: the chunk is on disk, so the wait is a frame or two, inside a panel
-			 * already drawn; a placeholder appearing and vanishing that fast is a flash. The layout
-			 * does not move either way.
+			 * No skeleton: the chunk is on disk beside the app, so the wait is a frame or two,
+			 * inside a panel already drawn; a placeholder appearing and vanishing that fast is a
+			 * flash. The layout does not move either way.
 			 */}
 			<Suspense fallback={null}>
 				<MarkdownRenderer>{children}</MarkdownRenderer>

@@ -356,7 +356,7 @@ export function VariablePopover({
 	 * flow. Radix's `asChild` clones its click handler and `aria-*` onto it but does not make a
 	 * span focusable, which left every token mouse-only. `role="button"`, `tabIndex` and
 	 * Enter/Space give what a `<button>` would, without its block layout. `disabled` tokens leave
-	 * the tab order.
+	 * the tab order rather than sitting in it doing nothing.
 	 */
 	const triggerElement = (
 		<span
@@ -646,9 +646,9 @@ function OriginRow({ origin, beaten }: { origin: VariableOrigin; beaten: boolean
  * name whose one definition wins has nothing to add (the field *is* it), while a name whose only
  * definition is off must still list it (#1083). Three row states: a definition loses by precedence
  * *or* by being off, the more common surprise (your value skipped, not missing), and a list showing
- * only shadowing would stay silent on it. A bound row's cell is listed above all, unstruck (#1064):
- * the editable field is the *variable*, still what you can change, while the row answers the name
- * until the pick is dropped.
+ * only shadowing would stay silent on it. A bound row's cell is listed above all, unstruck (#1064),
+ * or the popover explains a value the send will not use: the editable field is the *variable*,
+ * still what you can change, while the row answers the name until the pick is dropped.
  */
 function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 	if (!origins || origins.length === 0) return null;
