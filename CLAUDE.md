@@ -226,31 +226,15 @@ test that touches time, threads, sockets or a large render, check these rules:
 - Labels separate WHERE a change lands (`component:*`) from WHAT kind it is
   (`type:*`). See `.github/LABELING.md`; auto-labeling is `.github/labeler.yml`.
 
-## Comments - keep the constraint, cut the narration
+## Comments - the constraint, in the present tense
 
-A comment earns its place by carrying something the code and git history do
-not: a non-obvious constraint, an invariant, a platform or compiler quirk
-that isn't obvious from the code alone. It does not earn its place by
-narrating what an issue already tracks - a paragraph retelling what #928's
-backlog paydown did duplicates information a link already carries for free.
-**The issue number stays, the retelling of the issue does not.**
+A comment states what the code cannot: a constraint, an invariant, a unit, who owns or locks what, a platform or compiler quirk, a measurement, why not the obvious way. It says what is, not what was: the history is the issue's, so the comment keeps `(#NNNN)` and one sentence of constraint. `scripts/comment-lint.py` counts history phrasing (`used to`, `until #N`, `since #N`, `#N added ...`) in non-test source against per-file ceilings that only go down.
 
-A suppression's reason comment (`eslint-disable`, `NOLINT` and their kin) is
-a separate category from either of the above and is never trimmed: at least
-one is mechanically load-bearing, not just for a human reader -
-`app/src/components/a11y-suppressions.test.ts` parses the reason on the line
-above every a11y suppression, so what looks like narration to a skimming
-human can be the thing a test actually asserts on. Check for a
-source-scanning guard before trimming a suppression comment elsewhere.
+A comment that restates the name or the next line is deleted. A `file:line` in a comment is written as a symbol, because the line moves.
 
-Editing or removing an older comment in a file you are already touching is
-in scope for that change, not a drive-by edit that needs its own PR - a
-comment-only deletion cannot change runtime behaviour, so a reviewer
-verifies it by reading the diff once, unlike a code refactor bundled in for
-the same reason. It can still break a source-scanning guard (the a11y one
-above, or one like it), so run the tests a touched file's comments could
-affect before relying on that. This happens incrementally, as files are
-touched in the normal course of work, not as a standing bulk pass.
+Suppression reasons and directives are never trimmed: `NOLINT`, `eslint-disable`, `@ts-expect-error`, `@deliberate` (clang-tidy reads it in an empty catch), license headers. `a11y-suppressions.test.ts` parses the reason itself.
+
+A comment-only change proves itself: the comment-stripped files are identical before and after, the directive counts are unchanged, and the suites that read source text pass. Before deleting a whole block, `rg` for comments and docs that cite it.
 
 ## Docs - keep them in step with the code
 
