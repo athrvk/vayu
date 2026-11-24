@@ -214,6 +214,12 @@ export const runReportSchema = z.looseObject({
 			summaryMissing: optBool.describe(
 				"No summary saved: the counts are not run totals; latency, peakConcurrency and avgQueueWaitMs are absent. Never false."
 			),
+			errorClasses: z
+				.unknown()
+				.optional()
+				.describe(
+					"Failed mcp replies per class (`transport`, `protocol`, `tool`, `protocolCodes` by JSON-RPC code), when counted. `{}`: none failed; absent: not recorded."
+				),
 			drainCut: z
 				.looseObject({ cancelled: optNum })
 				.optional()
