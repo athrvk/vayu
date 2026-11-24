@@ -6,37 +6,26 @@
  */
 
 /**
- * The horizontal row of open tabs, rendered over the content area - main plus
- * the context bar - with the drawer to its left. It sits there rather than
- * across the window because that is the region tabs actually switch: the drawer
- * is a global navigator and keeps its own header band beside this row. Reads
- * from tabs-store; one TabItem per open tab plus a "+" button that opens a
- * welcome tab. No unsaved-dot - autosave is the safety net.
+ * The row of open tabs over the content area (main plus the context bar), with the drawer to its
+ * left: that is the region tabs switch, and the drawer is a global navigator keeping its own header
+ * band beside this row. Reads tabs-store; one TabItem per open tab plus a "+" button opening a
+ * welcome tab. No unsaved dot: autosave is the safety net.
  *
- * **A tab is as wide as its own name, and the strip overflows rather than
- * compressing.** It used to do the reverse - `min-w-20 max-w-50 shrink` shrank
- * every tab together, so opening a ninth made the other eight worse, and how
- * bad it got depended on the platform, because macOS, Windows and Linux each
- * leave a different amount of strip. With eight open at ~1450px each got about
- * 140px, of which 71px was chrome, leaving 93px for a name that wanted 104.
+ * **A tab is as wide as its own name, and the strip overflows rather than compressing.** Shrinking
+ * every tab together makes each new tab worsen the rest, by an amount that depends on the strip
+ * each platform leaves (at ~1450px eight tabs got about 140px each, 71px of it chrome, leaving 93px
+ * for a name wanting 104). So the chrome is small:
  *
- * Where that 71px went, and where it went instead:
+ * - **The method is a 2px colour rail**, not a word ("GET" cost 18px and "DELETE" 36px, so a tab's
+ *   width followed its verb); the colour is the point, said the way the sidebar says it.
+ * - **The close button is absolutely positioned over the trailing padding**: `opacity-0` hides a
+ *   control without giving back its space, so every tab would pay 22px for one shown on one tab.
+ * - **A clipped name fades at rest** (an ellipsis cannot engage inside `ScrollOnOverflow`'s `w-fit`
+ *   track) and stops short of the close button, as a hard clip mid-glyph reads as a rendering
+ *   fault; the hover-scroll still reads the full name.
  *
- * - **The method was a word.** "GET" cost 18px and "DELETE" 36px, so a tab's
- *   width depended on its verb. It is a 2px colour rail now. The colour was
- *   always the point - the sidebar says the same thing the same way - and a
- *   rail keeps it for 2px.
- * - **The close button was reserved on every tab.** `opacity-0` hides a control
- *   without giving back its space, so all eight paid 22px for something shown
- *   on one. It is absolutely positioned over the trailing padding now.
- * - **Nothing said the text was cut.** `ScrollOnOverflow` clips with
- *   `overflow-hidden`, so a name ended mid-glyph and eight tabs all looked like
- *   a rendering fault. A clipped name fades at rest now (an ellipsis cannot
- *   engage inside its `w-fit` track), and stops short of the close button;
- *   the hover-scroll still reads the full name.
- *
- * Path-shaped labels are cut from the *left*. `/v1/orders` and `/v1/orders/42`
- * differ only in the part a right-hand ellipsis removes first.
+ * Path-shaped labels are cut from the *left*: `/v1/orders` and `/v1/orders/42` differ only in the
+ * part a right-hand ellipsis removes first.
  */
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -75,13 +64,10 @@ import { TabStripDndContext } from "./TabStripDndContext";
 import { useTabStripDnd } from "./useTabStripDnd";
 
 /**
- * Which place the Alt chord sends the focused tab to, or `null` when the event
- * is not one of the four move chords.
- *
- * The index is the tab's place in the *store's* `openTabs`, not among the
- * rendered tabs: the strip draws only those that fit, and a move is a statement
- * about the whole list. Past an end the target is out of range and `moveTab`
- * clamps it.
+ * Which place the Alt chord sends the focused tab to, or `null` for an event that is not one of the
+ * four move chords. The index is the tab's place in the *store's* `openTabs`, not among the
+ * rendered tabs: the strip draws only those that fit, and a move is a statement about the whole
+ * list. Past an end the target is out of range and `moveTab` clamps it.
  */
 function focusedTabMove(
 	e: React.KeyboardEvent,
@@ -143,23 +129,14 @@ export function TabStrip() {
 	const dnd = useTabStripDnd({ stripRef: listRef, visibleIds, onMoved: setRovingId });
 
 	/**
-	 * Arrow-key navigation across the strip.
-	 *
-	 * `role="tablist"` is a promise that arrow keys work, and it was not being
-	 * kept - the only key handling was Enter/Space on an individual tab. Handled
-	 * here by delegation rather than per-tab so the tabs stay ignorant of their
-	 * neighbours, and read off the DOM so the order always matches what is
-	 * rendered.
-	 *
-	 * Focus moves without activating (`aria-selected` follows the click, not the
-	 * arrow). With a heavy tab like a dashboard in the strip, activate-on-arrow
-	 * would fire a mount for every tab you skate past. The Tab stop moves with
-	 * the focus, as state: a DOM write would leave the tabs' `tabIndex` props
-	 * disagreeing with the page.
-	 *
-	 * Alt+Arrow / Home / End move the focused tab instead (`focusedTabMove`), and
-	 * stop the event here: off macOS Alt+←/→ is also Go back, which `Shell` would
-	 * otherwise take from the window.
+	 * Arrow-key navigation across the strip, which `role="tablist"` promises. Delegated here rather
+	 * than per tab, so the tabs stay ignorant of their neighbours, and read off the DOM so the
+	 * order always matches what is rendered. Focus moves without activating (`aria-selected`
+	 * follows the click, not the arrow): with a heavy tab like a dashboard, activate-on-arrow would
+	 * fire a mount for every tab you skate past. The Tab stop moves with the focus, as state: a DOM
+	 * write would leave the tabs' `tabIndex` props disagreeing with the page. Alt+Arrow / Home /
+	 * End move the focused tab instead (`focusedTabMove`) and stop the event here: off macOS
+	 * Alt+←/→ is also Go back, which `Shell` would otherwise take from the window.
 	 */
 	const onKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -203,49 +180,36 @@ export function TabStrip() {
 		<div
 			ref={listRef}
 			/*
-			 * `w-full` is load-bearing, not cosmetic - it is the `flex-1` this
-			 * carried while the strip was a row item in the title bar, restated for
-			 * a column. Sized to its own content, the strip measures its own
-			 * clientWidth to decide how many tabs fit, which is a feedback loop:
-			 * measure the tabs, trim to fit "the space", the content shrinks, trim
-			 * again. It settled on a single tab with everything else in the overflow
-			 * menu regardless of how wide the window was. It has to be told to fill
-			 * the parent so the measurement is of available space, not of itself.
+			 * `w-full` is load-bearing: sized to its own content, the strip measures its own
+			 * clientWidth to decide how many tabs fit, a feedback loop (trim to fit, the content
+			 * shrinks, trim again) that settles on one tab with the rest in the overflow menu at
+			 * any window width. Filling the parent makes the measurement the available space, not
+			 * itself.
 			 *
-			 * The strip owns its height, from the token the drawer's header band
-			 * reads too - the two are one band across the window, and a step in it
-			 * is what a second literal would produce.
-			 *
-			 * No `app-region` anywhere in this file: nothing drags the window down here.
+			 * The strip owns its height, from the token the drawer's header band reads too: the two
+			 * are one band across the window, and a second literal would put a step in it. No
+			 * `app-region` anywhere in this file: nothing drags the window down here.
 			 */
-			// `text-sm` is the tab label's own size, declared here because this is
-			// the element the width measurement reads its font from. Inheriting it
-			// from `body` measured whatever the document default happened to be -
-			// 16px (#1202) - so every tab came out ~23% wider than its name.
+			// `text-sm` is the tab label's own size, declared here because the width measurement
+			// reads its font from this element. Inherited from `body` it measured the document
+			// default, 16px (#1202), and every tab came out ~23% wider than its name.
 			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel text-sm"
 		>
 			{/*
-			 * The tablist holds tabs and nothing else. The overflow trigger and the
-			 * New-tab button are siblings of it rather than children: a `role=tablist`
-			 * owns only `role=tab` children, and a button inside one is announced as
-			 * part of the tab set - "5 of 6" with a sixth tab that is a menu. The row
-			 * is unchanged visually, because the strip's flex layout is on the element
+			 * The tablist holds tabs and nothing else. The overflow trigger and the New-tab button
+			 * are its siblings, not children: a `role=tablist` owns only `role=tab` children, and a
+			 * button inside one is announced as part of the tab set ("5 of 6", with a sixth tab
+			 * that is a menu). The row looks the same, as the strip's flex layout is on the element
 			 * around all three.
 			 */}
 			{/*
-			 * No tabs open: a hint, not a blank band.
-			 *
-			 * The strip stays - it cannot collapse. Its height is the same token the
-			 * drawer's header band reads (see the className above), so a strip that
-			 * disappeared would leave the drawer's header as a 32px step in a rule
-			 * that runs across the window, and the content area would jump by that
-			 * much the moment the last tab closed. What was wrong was what it said:
-			 * an empty 32px band with a lone "+" in it, and nothing telling a user
-			 * whose last tab just closed where the app went.
-			 *
-			 * The chord comes from `constants/shortcuts.ts` through `formatChord`,
-			 * not from a literal: the modifier and the separator differ by platform,
-			 * and a hint naming the wrong key is worse than no hint.
+			 * No tabs open: a hint, not a blank band. The strip cannot collapse: its height is the
+			 * token the drawer's header band reads (see the className above), so a vanished strip
+			 * would leave a 32px step in a rule running across the window, and the content area
+			 * would jump by that much as the last tab closed. An empty band with a lone "+" tells a
+			 * user whose last tab just closed nothing about where the app went. The chord comes
+			 * from `constants/shortcuts.ts` through `formatChord`, not a literal: the modifier and
+			 * separator differ by platform, and a hint naming the wrong key is worse than no hint.
 			 */}
 			{openTabs.length === 0 && (
 				<span className="flex min-w-0 items-center truncate px-3 text-xs text-muted-foreground">
@@ -269,9 +233,7 @@ export function TabStrip() {
 				</TabStripDndContext.Provider>
 			</div>
 
-			{/*
-			 * The tabs that did not fit, reachable rather than scrolled out of sight.
-			 */}
+			{/* The tabs that did not fit, reachable rather than scrolled out of sight. */}
 			{overflowed.length > 0 && (
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
