@@ -6,18 +6,15 @@
  */
 
 /**
- * @brief `POST /export/postman` - a collection out as a Postman Collection
- *        v2.1.0 document - and `POST /export/postman-environment`, one
- *        environment out as a Postman environment export.
- *
- * The assembly is `core/postman_export.hpp`; this route owns the reads. The
- * whole subtree is exported, with no stop at a collection bound to another
- * OpenAPI document: a Postman collection has no contract to keep apart, and a
- * folder left out would be a folder silently missing. A collection's folders
- * and requests are read as one list in sibling order (`db/sibling_order.hpp`),
- * the order the sidebar draws, and examples through `get_request_examples`,
- * which leaves out the tombstones a deleted imported example keeps (#722).
- * Nothing is written.
+ * `POST /export/postman` (a collection as a Postman Collection v2.1.0 document)
+ * and `POST /export/postman-environment` (one environment as a Postman
+ * environment export). The assembly is `core/postman_export.hpp`; this route
+ * owns the reads. The whole subtree is exported, with no stop at a collection
+ * bound to another OpenAPI document: a Postman collection has no contract to
+ * keep apart, and a folder left out would be silently missing. Folders and
+ * requests are read as one list in sibling order (`db/sibling_order.hpp`, the
+ * sidebar's), and examples through `get_request_examples`, without the
+ * tombstones a deleted imported example keeps (#722). Nothing is written.
  */
 
 #include "vayu/core/postman_export.hpp"
