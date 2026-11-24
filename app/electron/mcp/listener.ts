@@ -6,7 +6,6 @@
  */
 
 /**
- * @file listener.ts
  * @brief The MCP port, bound at launch, with the SDK behind it loaded by the
  *        first request that needs it.
  *
