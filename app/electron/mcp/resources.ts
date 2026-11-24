@@ -6,7 +6,6 @@
  */
 
 /**
- * @file resources.ts
  * @brief MCP resources - read-only Vayu data an agent can read and attach as
  *        context. Static resources expose the current lists (runs, collections,
  *        environments, engine config); a templated resource

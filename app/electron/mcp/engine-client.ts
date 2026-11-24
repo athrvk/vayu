@@ -6,7 +6,6 @@
  */
 
 /**
- * @file engine-client.ts
  * @brief Thin main-process HTTP client for the Vayu engine REST API
  *        (http://127.0.0.1:9876). The Electron main process cannot import the
  *        renderer's `@/services` client, so this is a minimal standalone

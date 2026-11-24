@@ -6,7 +6,6 @@
  */
 
 /**
- * @file variable-origins.ts
  * @brief The variable resolution model as the MCP surface states it, and which
  *        definition of a name wins (the `resolve_variables` tool's core). The
  *        app answers the second question in the variable popover's origin list;

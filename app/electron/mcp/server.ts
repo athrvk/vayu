@@ -6,7 +6,6 @@
  */
 
 /**
- * @file server.ts
  * @brief Builds a configured MCP server (official SDK high-level `McpServer`)
  *        with the Vayu tool registry. Each enabled tool is registered with its
  *        strict Zod input schema (validated automatically), annotations, and

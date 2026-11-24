@@ -6,7 +6,6 @@
  */
 
 /**
- * @file collection-shape.ts
  * @brief A collection row as the MCP surface hands it back (issue #1742).
  *
  * The engine answers `dataSchema: {}` for a collection with no declared data
