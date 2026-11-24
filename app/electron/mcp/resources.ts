@@ -147,10 +147,8 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "scripting",
 		uri: "vayu://scripting/completions",
 		title: "Script sandbox API",
-		// Names no name: the enumeration this used to carry had already gone
-		// stale (it predated pm.info, pm.sendRequest and pm.test), which is the
-		// drift the resource exists to end - the body is the engine's own list,
-		// so the description must point at it rather than restate it.
+		// Names no name: the body is the engine's own list, so the description
+		// must point at it rather than restate it.
 		description:
 			"The engine's authoritative list of every pm.* name and global the pre-request / test " +
 			"script sandbox provides, with signatures and documentation. Read this before writing " +

@@ -8,9 +8,7 @@
 /**
  * @brief The variable resolution model as the MCP surface states it, and which
  *        definition of a name wins (the `resolve_variables` tool's core). The
- *        app answers the second question in the variable popover's origin list;
- *        before this module an agent could not ask it at all, and had to
- *        reconstruct the resolution order from a rule no tool stated
+ *        app answers the second question in the variable popover's origin list
  *        (issue #1207).
  *
  * The prose and the computation live together on purpose: a tool description

@@ -71,9 +71,8 @@ const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
  *
  * What does not: tool names. The user can disable any tool individually, so a
  * roster written here is a list of things that may not exist in the session
- * reading it - which is why this text used to end by telling the reader to
- * trust `tools/list` over it. Each tool's own description is the one copy of
- * its contract, and it ships only when the tool does.
+ * reading it. Each tool's own description is the one copy of its contract, and
+ * it ships only when the tool does.
  */
 const INSTRUCTIONS_HEAD =
 	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
