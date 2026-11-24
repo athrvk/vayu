@@ -121,6 +121,9 @@ json healthy_summary () {
         { "timeToFirstEvent",
         { { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
         { "max", 910.0 }, { "count", 9 }, { "unlisted", "dropped" } } },
+        { "timeToFirstMatch",
+        { { "p50", 1210.0 }, { "p95", 1480.0 }, { "p99", 1700.0 },
+        { "max", 2300.0 }, { "count", 8 }, { "unlisted", "dropped" } } },
         { "maxEventGap",
         { { "p50", 26.0 }, { "p95", 31.0 }, { "p99", 33.0 }, { "max", 310.0 },
         { "count", 9 }, { "unlisted", "dropped" } } },
@@ -378,6 +381,18 @@ TEST_F (RunExportSchemaTest, AStreamsTimeToFirstEventIsExported) {
     EXPECT_EQ (document["report"]["stream"].value ("timeToFirstEvent", json ()),
     (json{ { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
     { "max", 910.0 }, { "count", 9 } }));
+}
+
+// #3774: a stream's time to its first content marker survives the allowlist
+// the same way. Mutation check: drop `timeToFirstMatch` from
+// `STREAM_TIMED_SECTIONS` in run_export.cpp and the expectation fails; drop
+// its property from the schema and the validation does.
+TEST_F (RunExportSchemaTest, AStreamsTimeToFirstMatchIsExported) {
+    seed ("run_first_match", vayu::RunStatus::Completed, healthy_summary ());
+    json document = expect_valid (json{ { "runId", "run_first_match" } });
+    EXPECT_EQ (document["report"]["stream"].value ("timeToFirstMatch", json ()),
+    (json{ { "p50", 1210.0 }, { "p95", 1480.0 }, { "p99", 1700.0 },
+    { "max", 2300.0 }, { "count", 8 } }));
 }
 
 // #3776: a stream's largest event gap and its event rate survive the

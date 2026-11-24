@@ -26,12 +26,17 @@
  * The third is `assert.jsonschema`'s {@link JsonSchemaElementForm} (#3806): its
  * `path` exists only for one value of `source`, and its schema is a document
  * that wants a multi-line field.
+ *
+ * The fourth is `assert.snapshot`'s {@link SnapshotElementForm} (#3807): its
+ * `baseline` is an array of objects, which the generic array field (scalars
+ * split on commas) cannot hold.
  */
 
 import type { ComponentType } from "react";
 import { ScriptElementForm, type ScriptElementFormProps } from "./ScriptElementForm";
 import { ModeElementForm } from "./ModeElementForm";
 import { JsonSchemaElementForm } from "./JsonSchemaElementForm";
+import { SnapshotElementForm } from "./SnapshotElementForm";
 import type { VariableSupport } from "@/types";
 import { ELEMENT_MODES } from "./element-modes";
 
@@ -48,5 +53,6 @@ export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormPro
 	"script.setup": ScriptElementForm,
 	"script.teardown": ScriptElementForm,
 	"assert.jsonschema": JsonSchemaElementForm,
+	"assert.snapshot": SnapshotElementForm,
 	...Object.fromEntries(Object.keys(ELEMENT_MODES).map((kind) => [kind, ModeElementForm])),
 };

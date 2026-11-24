@@ -3712,6 +3712,7 @@ describe("document CRUD parity", () => {
 			["httpVersion", "http2"],
 			["stream", true],
 			["streamTextPath", "$.delta.text"],
+			["streamFirstContentMarker", "content_block_delta"],
 			["verifySSL", false],
 		] as const)("update_request forwards %s on its own", async (key, value) => {
 			const client = fakeClient();
@@ -3772,6 +3773,58 @@ describe("document CRUD parity", () => {
 			);
 			expect(callArgs(cleared.updateRequest)[1]).toEqual({ streamTextPath: null });
 			expect(schemaOf("update_request", "streamTextPath").safeParse(7).success).toBe(false);
+		});
+
+		// Mutation check: take "streamFirstContentMarker" out of
+		// REQUEST_SETTINGS_KEYS and neither verb sends it.
+		test("streamFirstContentMarker is forwarded by create_request, and null reaches update_request to clear it", async () => {
+			const marker = '"delta":{"content":"';
+			const created = fakeClient();
+			await dispatchTool(
+				"create_request",
+				{
+					collectionId: "col_1",
+					name: "Chat",
+					url: "https://api.example.com/chat",
+					stream: true,
+					streamFirstContentMarker: marker,
+				},
+				ctxWith(created, { allowWrites: true })
+			);
+			expect(callArgs(created.createRequest)[0]).toMatchObject({
+				stream: true,
+				streamFirstContentMarker: marker,
+			});
+
+			const cleared = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", streamFirstContentMarker: null },
+				ctxWith(cleared, { allowWrites: true })
+			);
+			expect(callArgs(cleared.updateRequest)[1]).toEqual({ streamFirstContentMarker: null });
+			expect(
+				schemaOf("update_request", "streamFirstContentMarker").safeParse(7).success
+			).toBe(false);
+		});
+
+		test("the marker is stated once, on create_request, and update_request points there", () => {
+			expect(schemaOf("create_request", "streamFirstContentMarker").description).toContain(
+				"content_block_delta"
+			);
+			expect(schemaOf("update_request", "streamFirstContentMarker").description).toBe(
+				"As on `create_request`; null clears it."
+			);
+		});
+
+		test("update_request's no-field refusal lists the marker among the fields it takes", async () => {
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1" },
+				ctxWith(fakeClient(), { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("streamFirstContentMarker");
 		});
 
 		test("the path is stated once, on create_request, and update_request points there", () => {
@@ -5229,6 +5282,7 @@ describe("run_collection_smoke", () => {
 				url: "https://api.example.com/chat",
 				stream: true,
 				streamTextPath: "$.choices[0].delta.content",
+				streamFirstContentMarker: "content_block_delta",
 			}),
 			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
 		});
@@ -5240,6 +5294,7 @@ describe("run_collection_smoke", () => {
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(outgoing).toMatchObject({ stream: false });
 		expect(outgoing).not.toHaveProperty("streamTextPath");
+		expect(outgoing).not.toHaveProperty("streamFirstContentMarker");
 	});
 
 	test("a request that fails to compose is reported failed, not dropped", async () => {
@@ -5852,6 +5907,107 @@ describe("run_collection_smoke", () => {
 			const row = firstRow(await smokeWith({ status: 500, testResults: [] }));
 			expect(row).toMatchObject({ ok: false, statusCode: 500 });
 			expect(row).not.toHaveProperty("error");
+		});
+	});
+
+	describe("an mcp request's failure on a row (#3809)", () => {
+		const smokeWith = (answer: Record<string, unknown>, overrides = {}) =>
+			dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1" },
+				ctxWith(
+					fakeClient({
+						listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+						composeRequest: vi.fn().mockResolvedValue({
+							method: "POST",
+							url: "https://api.example.com/mcp",
+						}),
+						executeRequest: vi.fn().mockResolvedValue(answer),
+						...overrides,
+					}),
+					{ allowlist: ["api.example.com"] }
+				)
+			);
+		const rowOf = (res: Awaited<ReturnType<typeof smokeWith>>) =>
+			(res.structuredContent as { results: Array<Record<string, unknown>> }).results[0];
+		const failedTest = [{ name: "mcp", passed: false, error: "tool failure" }];
+
+		test("a tool-class failure behind HTTP 200 names its class and message, and no code", async () => {
+			const res = await smokeWith({
+				status: 200,
+				testResults: failedTest,
+				mcp: { errorClass: "tool", message: "quota exceeded" },
+			});
+			const row = rowOf(res);
+			expect(row).toMatchObject({
+				ok: false,
+				statusCode: 200,
+				mcp: { errorClass: "tool", message: "quota exceeded" },
+			});
+			expect(row.mcp).not.toHaveProperty("code");
+			// The SDK refuses an undeclared row member, and zod's parse strips it,
+			// so a row member the schema does not declare is gone after the parse.
+			const parsed = TOOLS.find(
+				(t) => t.name === "run_collection_smoke"
+			)!.outputSchema!.parse(res.structuredContent) as {
+				results: Array<Record<string, unknown>>;
+			};
+			expect(parsed.results[0].mcp).toEqual(row.mcp);
+		});
+
+		test("a protocol failure carries the JSON-RPC code", async () => {
+			const row = rowOf(
+				await smokeWith({
+					status: 200,
+					testResults: failedTest,
+					mcp: { errorClass: "protocol", code: -32601, message: "Method not found" },
+				})
+			);
+			expect(row.mcp).toEqual({
+				errorClass: "protocol",
+				code: -32601,
+				message: "Method not found",
+			});
+		});
+
+		test("a success carries no mcp member, the engine's empty node included", async () => {
+			expect(
+				rowOf(await smokeWith({ status: 200, testResults: [], mcp: {} }))
+			).not.toHaveProperty("mcp");
+			expect(rowOf(await smokeWith({ status: 200, testResults: [] }))).not.toHaveProperty(
+				"mcp"
+			);
+		});
+
+		test("a transfer that failed is reported once, as the row's error", async () => {
+			const row = rowOf(
+				await smokeWith({
+					status: 0,
+					errorCode: "TIMEOUT",
+					errorMessage: "no response",
+					mcp: { errorClass: "transport", message: "no response" },
+				})
+			);
+			expect(row.error).toBe("TIMEOUT: no response");
+			expect(row).not.toHaveProperty("mcp");
+		});
+
+		test("the message is masked like the row's other server text", async () => {
+			const getGlobals = vi.fn().mockResolvedValue({
+				id: "globals",
+				variables: { api_key: { value: "SECRETVALUE", secret: true, enabled: true } },
+			});
+			const row = rowOf(
+				await smokeWith(
+					{
+						status: 200,
+						testResults: failedTest,
+						mcp: { errorClass: "tool", message: "bad key SECRETVALUE" },
+					},
+					{ getGlobals }
+				)
+			);
+			expect((row.mcp as { message: string }).message).toBe(`bad key ${REDACTED_MARKER}`);
 		});
 	});
 
@@ -8311,6 +8467,7 @@ describe("inline body bounds", () => {
 			rawRequest: `POST /x HTTP/1.1\r\nHost: api.example.com\r\n\r\n${huge}`,
 			runId: "run_d",
 			resultId: 7,
+			mcp: { errorClass: "protocol", code: -32601, message: "Method not found" },
 		});
 		const capped = executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyCapped: true });
 		const base64 = executeAnswer({ bodyRaw: base64PastCap, bodyEncoding: "base64" });
@@ -8370,6 +8527,41 @@ describe("inline body bounds", () => {
 			const declared = declaredPaths(advertisedOutputSchema("run_request"));
 			expect(declared.length).toBeGreaterThan(10);
 			expect(declared.filter((path) => !present.has(path))).toEqual([]);
+		});
+
+		// Mutation check: drop `mcp` from runRequestResultSchema and the declared
+		// -member lookups below throw. The answer is a loose object, so only a
+		// lookup of the advertised schema sees the member go (#3809).
+		test.each([
+			["tool", { errorClass: "tool", message: "quota exceeded" }, false],
+			[
+				"protocol",
+				{ errorClass: "protocol", code: -32601, message: "Method not found" },
+				true,
+			],
+		])("a %s-class mcp failure reaches the agent", async (_name, mcp, hasCode) => {
+			const res = await send(
+				{},
+				fakeClient({ executeRequest: vi.fn().mockResolvedValue(executeAnswer({ mcp })) })
+			);
+			expect(schema().safeParse(res.structuredContent).success).toBe(true);
+			const node = (res.structuredContent as { mcp: Record<string, unknown> }).mcp;
+			expect(node).toEqual(mcp);
+			expect("code" in node).toBe(hasCode);
+			for (const member of ["mcp", "mcp.errorClass", "mcp.code", "mcp.message"]) {
+				expect(outputMemberDescription("run_request", member)).toBeDefined();
+			}
+		});
+
+		test("an mcp request that succeeded carries the engine's empty node", async () => {
+			const res = await send(
+				{},
+				fakeClient({
+					executeRequest: vi.fn().mockResolvedValue(executeAnswer({ mcp: {} })),
+				})
+			);
+			expect(schema().safeParse(res.structuredContent).success).toBe(true);
+			expect((res.structuredContent as { mcp: unknown }).mcp).toEqual({});
 		});
 
 		// Mutation check: drop boundExecuteResponse from the no-runId branch of
@@ -8784,6 +8976,7 @@ describe("dispatchTool", () => {
 						url: "https://api.example.com/chat",
 						stream: true,
 						streamTextPath: PATH,
+						streamFirstContentMarker: "content_block_delta",
 						...composed,
 					}),
 					executeRequest: vi.fn().mockResolvedValue(started),
@@ -8886,7 +9079,94 @@ describe("dispatchTool", () => {
 				const sent = executedPayload(client);
 				expect(sent).toMatchObject({ stream: false });
 				expect(sent).not.toHaveProperty("streamTextPath");
+				expect(sent).not.toHaveProperty("streamFirstContentMarker");
 				expect(client.consumeStreamEvents).not.toHaveBeenCalled();
+			});
+
+			/*
+			 * #3818: an ad-hoc send has no stored path to carry, so the call states
+			 * one. The default fake composes as the engine does for an inline request,
+			 * copying its keys onto the payload.
+			 */
+			describe("stated on an ad-hoc send", () => {
+				const adHoc = (extra: Record<string, unknown>) => {
+					const events = tokens(12);
+					const read = { events, completed: true, capReached: false };
+					const client = fakeClient({
+						executeRequest: vi.fn().mockResolvedValue(started),
+						consumeStreamEvents: vi.fn().mockResolvedValue(read),
+					});
+					return {
+						client,
+						events,
+						result: dispatchTool(
+							"run_request",
+							{ url: "https://api.example.com/chat", method: "POST", ...extra },
+							ctxWith(client, allow)
+						),
+					};
+				};
+				const joined = (events: Array<Record<string, unknown>>) =>
+					events.map((e) => ("text" in e ? e.text : "")).join("");
+
+				// Mutation check: drop the `streamTextPath` line from the ad-hoc branch
+				// of `composeTarget` and neither the payload nor `text` carries it.
+				test("a streamed send with a path returns `text`, and `events: false` drops the rows", async () => {
+					const full = adHoc({ stream: true, streamTextPath: PATH });
+					const res = await full.result;
+					expect(res.isError).toBeFalsy();
+					expect(res.structuredContent).toMatchObject({
+						text: joined(full.events),
+						eventCount: 12,
+					});
+					expect((res.structuredContent as { events: unknown[] }).events).toHaveLength(
+						12
+					);
+					expect(executedPayload(full.client)).toMatchObject({
+						stream: true,
+						streamTextPath: PATH,
+					});
+
+					const rowless = adHoc({ stream: true, streamTextPath: PATH, events: false });
+					const out = (await rowless.result).structuredContent as Record<string, unknown>;
+					expect(out).not.toHaveProperty("events");
+					expect(out).toMatchObject({ text: joined(rowless.events), eventCount: 12 });
+				});
+
+				// Mutation check: take the `delete payload.streamTextPath` out of
+				// `setStreamFlag` and the buffered payload keeps the path.
+				test.each([
+					["stream: false", { stream: false }],
+					["no stream argument", {}],
+				])(
+					"the path is dropped from a send that does not stream (%s)",
+					async (_, extra) => {
+						const sent = adHoc({ ...extra, streamTextPath: PATH });
+						const res = await sent.result;
+						expect(res.isError).toBeFalsy();
+						const payload = executedPayload(sent.client);
+						expect(payload).toMatchObject({ stream: false });
+						expect(payload).not.toHaveProperty("streamTextPath");
+						expect(sent.client.consumeStreamEvents).not.toHaveBeenCalled();
+					}
+				);
+
+				test("a streamed send with no path has no `text`, and none is sent", async () => {
+					const sent = adHoc({ stream: true });
+					const res = await sent.result;
+					expect(res.structuredContent).not.toHaveProperty("text");
+					expect(res.structuredContent).toHaveProperty("events");
+					expect(executedPayload(sent.client)).not.toHaveProperty("streamTextPath");
+				});
+
+				test("the schema takes a string and refuses null and numbers", () => {
+					const schema = TOOLS.find((t) => t.name === "run_request")!.inputSchema
+						.streamTextPath;
+					expect(schema.safeParse(PATH).success).toBe(true);
+					expect(schema.safeParse(undefined).success).toBe(true);
+					expect(schema.safeParse(null).success).toBe(false);
+					expect(schema.safeParse(7).success).toBe(false);
+				});
 			});
 
 			test("`events` is declared on run_request alone and is boolean", () => {
@@ -9642,9 +9922,16 @@ describe("dispatchTool", () => {
 		expect(stream({ streamEventsPerSecondMin: 200 }).thresholds).toEqual({
 			streamEventsPerSecondMin: 200,
 		});
+		// Mutation check: drop the key from the schema and the catchall takes the
+		// 0 below as a number, so the engine's 400 is the only refusal.
+		expect(stream({ streamTimeToFirstMatchP95Ms: 900 }).thresholds).toEqual({
+			streamTimeToFirstMatchP95Ms: 900,
+		});
 		const refused: Record<string, number>[] = [
 			{ streamTimeToFirstEventP95Ms: 0 },
 			{ streamTimeToFirstEventP95Ms: 86_400_001 },
+			{ streamTimeToFirstMatchP95Ms: 0 },
+			{ streamTimeToFirstMatchP95Ms: 86_400_001 },
 			{ streamEventsPerSecondMin: 0 },
 			{ streamEventsPerSecondMin: -1 },
 			{ streamEventsPerSecondMin: 1_000_000_001 },
@@ -9662,6 +9949,8 @@ describe("dispatchTool", () => {
 		>;
 		const description = shape.thresholds.description ?? "";
 		expect(description).toContain("streamTimeToFirstEventP95Ms");
+		expect(description).toContain("streamTimeToFirstMatchP95Ms");
+		expect(description).toContain("streamFirstContentMarker");
 		expect(description).toContain("streamEventsPerSecondMin");
 		expect(description).toContain("not evaluated and count as failed");
 	});
@@ -10884,6 +11173,31 @@ describe("dispatchTool", () => {
 		const buffered = await sent({ stream: false });
 		expect(buffered).toMatchObject({ stream: false });
 		expect(buffered).not.toHaveProperty("streamTextPath");
+	});
+
+	// Mutation check: drop the marker's `delete` from setStreamFlag and it
+	// rides a buffered run, which POST /runs refuses.
+	test("start_load_run keeps a stored first content marker beside stream, and drops it when stream is forced off (#3774)", async () => {
+		const sent = async (extra: Record<string, unknown>) => {
+			const client = savedRequestClient({
+				stream: true,
+				streamFirstContentMarker: "content_block_delta",
+			});
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true, ...extra },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+		expect(await sent({})).toMatchObject({
+			stream: true,
+			streamFirstContentMarker: "content_block_delta",
+		});
+		const buffered = await sent({ stream: false });
+		expect(buffered).toMatchObject({ stream: false });
+		expect(buffered).not.toHaveProperty("streamFirstContentMarker");
 	});
 
 	test("start_load_run composes a saved request; the chain's assertions fold into `requestElements`", async () => {

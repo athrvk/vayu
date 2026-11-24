@@ -938,6 +938,12 @@ constexpr int64_t IDLE_TIMEOUT_MS_CEILING = 3600000;
 constexpr int RELAY_KEEPALIVE_MS          = 15000;
 constexpr int RELAY_POLL_INTERVAL_MS      = 50;
 constexpr int RELAY_CLAIM_STALE_INTERVALS = 2;
+
+/// Bytes of a request's `streamFirstContentMarker` (#3774). A marker is a
+/// token-shaped literal (`content_block_delta`, `"delta":{"content":"`); the
+/// bound keeps its compiled fallback table, one per streaming request of a
+/// run, a few kilobytes at most.
+constexpr std::size_t MAX_FIRST_CONTENT_MARKER_BYTES = 256;
 } // namespace sse
 
 /**
@@ -1597,5 +1603,17 @@ constexpr size_t MAX_BODY_DEPTH = 100;
 /// on, and `element_body_bound_test.cpp` pins it.
 constexpr std::string_view BODY_UNREADABLE_MESSAGE =
 "response body is not JSON, nests too deeply, or exceeds maxElementBodyBytes";
+
+/// Findings one `assert.snapshot` failure message lists (a removed item, an
+/// added one, a changed one), then ` (N more)`: the bounded-list discipline of
+/// `schema_validation::MAX_FAILURES`, for a list a server's own size can grow.
+constexpr size_t MAX_SNAPSHOT_FINDINGS = 10;
+
+/// Differing JSON Pointers one changed item names before `, and N more`.
+constexpr size_t MAX_SNAPSHOT_POINTERS = 3;
+
+/// Characters of one name or pointer an `assert.snapshot` message quotes before
+/// it ends in `...`: both are a server's text and can be any length.
+constexpr size_t MAX_SNAPSHOT_FRAGMENT_CHARS = 200;
 } // namespace elements
 } // namespace vayu::core::constants

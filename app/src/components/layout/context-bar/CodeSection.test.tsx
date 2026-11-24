@@ -124,6 +124,7 @@ const DRAFT: RequestState = {
 	disableUrlEncoding: false,
 	stream: false,
 	streamTextPath: "",
+	streamFirstContentMarker: "",
 };
 
 const CHAIN = [{ id: "col_1", name: "Users", elements: [] }] as unknown as Collection[];

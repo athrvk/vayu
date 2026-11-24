@@ -78,6 +78,24 @@ export const STREAM_TEXT_PATH_PRESETS = [
 ] as const;
 
 /**
+ * The first content marker (issue #3774): the literal a load run's stream is
+ * timed to, so `stream.timeToFirstMatch` is the wait for the first token and
+ * not for a preamble event. Empty is none.
+ */
+export const DEFAULT_STREAM_FIRST_CONTENT_MARKER = "";
+
+/**
+ * Offers, like the text path's: an Anthropic-style `content_block_delta` event
+ * name and the opening of an OpenAI-compatible chunk's content. The marker is
+ * matched against the stream's raw bytes, so a server whose JSON spacing
+ * differs needs its own spelling; each button is labelled with its literal.
+ */
+export const STREAM_FIRST_CONTENT_MARKER_PRESETS = [
+	"content_block_delta",
+	'"delta":{"content":"',
+] as const;
+
+/**
  * What an event-stream request declares it accepts.
  *
  * Added to the headers as a reversible side effect when the toggle goes on

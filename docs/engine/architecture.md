@@ -900,7 +900,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `discoverUrl`. The same unit's `classify_bearer_challenge` is the one
   reader of a 401/403 `Bearer` challenge's step-up facts (`insufficient_scope`
   with its scopes unioned into the held ones, `invalid_token` reported but
-  not a step-up); it is pure, and `POST /oauth2/step-up` is its route.
+  not a step-up); it is pure, and `POST /oauth2/step-up` is its route. Its
+  one other caller is the `mcp` reply reader (`mcp_reply.cpp`, #3795), which
+  names the required scopes in the message of a 401/403 reply, still reading
+  only: no retry, no refresh.
 - **`oauth_registration`** (`register_oauth_client`, #3766) - dynamic client
   registration (RFC 7591) of a public native client (`token_endpoint_auth_method`
   `none`, `application_type` `native`) for the one redirect an attempt uses,
@@ -1545,7 +1548,17 @@ The two caps are enforced in the two places that can see them:
   resolution is the chunk libcurl hands the callback, not the event: events
   in one write share a stamp, a keep-alive comment is no arrival, the frame
   `finish` completes at the close moves no stamp, and a proxy that buffers
-  the stream understates the gaps it holds back. Both caps,
+  the stream understates the gaps it holds back. A request's first content
+  marker (issue #3774, `StreamBounds::first_content_marker`) is stamped on the
+  same clock at the write that delivers its last byte, the report's
+  `stream.timeToFirstMatch`: `StreamContentMarker`
+  (`http/stream_content_marker.hpp`) is compiled once per request with its
+  Knuth-Morris-Pratt fallback table, so a partial match carries across writes
+  and a near miss cannot hide the real match, and the tally keeps only how many
+  marker bytes it has matched. The scan reads raw wire bytes, allocates
+  nothing, runs only on a reply that announced `text/event-stream`, and stops
+  at the first match; a stream that declares no marker pays one null check.
+  Both caps,
   the stamp and what the ended stream reports live in one `StreamTally`
   (`http/stream_tally.hpp`), which the event loop's `TransferData` and `Client`
   each keep one of (#3235).

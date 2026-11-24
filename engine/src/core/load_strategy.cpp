@@ -538,7 +538,7 @@ namespace {
  * override refusal used before this issue existed; extending the set is a
  * deliberate follow-up, not a schema oversight to work around.
  */
-constexpr std::array<std::string_view, 11> REQUEST_ELEMENTS_SUPPORTED_KINDS{
+constexpr std::array<std::string_view, 12> REQUEST_ELEMENTS_SUPPORTED_KINDS{
     "extract.json",
     "extract.header",
     "extract.regex",
@@ -546,6 +546,7 @@ constexpr std::array<std::string_view, 11> REQUEST_ELEMENTS_SUPPORTED_KINDS{
     "assert.status",
     "assert.jsonpath",
     "assert.jsonschema",
+    "assert.snapshot",
     "assert.contains",
     "assert.duration",
     "assert.size",

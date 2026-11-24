@@ -19,6 +19,8 @@
  * its editor (issue #1553) via `ElementList`'s `renderAboveForm` - this is
  * the one host that can answer `ScriptReferencesRow`'s props from
  * `useRequestBuilderContext`, which `ScriptElementForm` itself cannot depend on.
+ * An `assert.snapshot` row gets "Use the current reply as the baseline" the same
+ * way (#3807): the response it records from is the builder's.
  */
 
 import { useElementKindsQuery, useRequestQuery } from "@/queries";
@@ -30,10 +32,12 @@ import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import { startingElementConfigs } from "../../../utils/starting-element-configs";
 import InheritedElementsNotice from "./InheritedElementsNotice";
 import LegacyScriptNotice from "./LegacyScriptNotice";
+import SnapshotBaselineAction from "./SnapshotBaselineAction";
 
 export default function ElementsPanel() {
 	const {
 		request,
+		response,
 		updateField,
 		inheritedElements,
 		elementErrors,
@@ -55,6 +59,16 @@ export default function ElementsPanel() {
 	// collection's out of "Runs before your own" - they run at the run's
 	// boundary, not before this request (#3457).
 	const addableKinds = (kinds ?? []).filter((kind) => !kind.collectionOnly);
+
+	// The baseline a recording writes goes through the list's own `onChange`
+	// path, so it is the same edit as typing it.
+	const recordBaseline = (id: string, baseline: unknown[]) =>
+		updateField(
+			"elements",
+			request.elements.map((el) =>
+				el.id === id ? { ...el, config: { ...el.config, baseline } } : el
+			)
+		);
 
 	return (
 		<div className="space-y-4">
@@ -81,6 +95,15 @@ export default function ElementsPanel() {
 					savedRequest ? { type: "request", request: savedRequest } : undefined
 				}
 				renderAboveForm={(element) => {
+					if (element.kind === "assert.snapshot") {
+						return (
+							<SnapshotBaselineAction
+								element={element}
+								replyBody={response?.body}
+								onRecord={(baseline) => recordBaseline(element.id, baseline)}
+							/>
+						);
+					}
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
 						return null;
 					const script =

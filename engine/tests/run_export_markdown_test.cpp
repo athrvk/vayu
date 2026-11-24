@@ -415,8 +415,26 @@ TEST (RunExportMarkdownTest, TheGapAndRateColumnsAreThereOnlyWhenTheDocumentHasT
     const std::string section = stream_section_of (render_run_export_markdown (document));
     ASSERT_FALSE (section.empty ());
     EXPECT_EQ (section.find ("Largest event gap"), std::string::npos) << section;
+    EXPECT_NE (section.find (
+               "| Time to first event (ms) | Time to first match (ms) | Event "
+               "rate (events/s) |\n"),
+    std::string::npos)
+    << section;
+}
+
+// #3774: the time to first match is a column of its own on the same rule, so
+// a run whose streams never matched (or declared no marker) shows no zero for
+// it and keeps every other column. Mutation check: drop `timeToFirstMatch`
+// from `STREAM_MEASURED_COLUMNS` and the stream-load golden loses its column;
+// write it whatever the document holds and the first expectation fails.
+TEST (RunExportMarkdownTest, TheFirstMatchColumnIsThereOnlyWhenTheDocumentHasIt) {
+    ordered_json document = read_document ("stream-load");
+    document["report"]["stream"].erase ("timeToFirstMatch");
+    const std::string section = stream_section_of (render_run_export_markdown (document));
+    ASSERT_FALSE (section.empty ());
+    EXPECT_EQ (section.find ("Time to first match"), std::string::npos) << section;
     EXPECT_NE (
-    section.find ("| Time to first event (ms) | Event rate (events/s) |\n"), std::string::npos)
+    section.find ("| Time to first event (ms) | Largest event gap (ms) |"), std::string::npos)
     << section;
 }
 

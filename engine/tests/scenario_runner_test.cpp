@@ -199,6 +199,29 @@ class ScenarioMockServer {
             record (req);
             res.set_content (std::string (DELTA_STREAM), "text/event-stream");
         });
+        // An Anthropic-style stream (#3774): its preamble at once, its first
+        // content PREAMBLE_CONTENT_DELAY_MS later.
+        svr.Get ("/sse-preamble",
+        [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string preamble =
+                "event: message_start\ndata: {}\n\n";
+                if (!sink.write (preamble.data (), preamble.size ())) {
+                    return false;
+                }
+                std::this_thread::sleep_for (
+                std::chrono::milliseconds (PREAMBLE_CONTENT_DELAY_MS));
+                const std::string content =
+                "event: content_block_delta\ndata: {}\n\n";
+                if (!sink.write (content.data (), content.size ())) {
+                    return false;
+                }
+                sink.done ();
+                return true;
+            });
+        });
         svr.Get ("/sse-endless",
         [this, record] (const httplib::Request& req, httplib::Response& res) {
             record (req);
@@ -261,6 +284,8 @@ class ScenarioMockServer {
 
     /// The events `/sse-short` sends before it closes.
     static constexpr int SHORT_STREAM_EVENTS = 3;
+    /// How long `/sse-preamble` holds its content behind its preamble.
+    static constexpr int PREAMBLE_CONTENT_DELAY_MS = 300;
     /// What `/sse-deltas` sends: two text deltas around a ping, then `[DONE]`.
     static constexpr std::string_view DELTA_STREAM =
     "data: {\"delta\":{\"text\":\"Hel\"}}\n\n"
@@ -2259,6 +2284,37 @@ TEST_F (ScenarioRunnerTest, AStreamingStepReadsItsReplyThroughItsStoredTextPath)
     EXPECT_EQ (traces[0].at ("events").at ("streamText").get<std::string> (), "Hello")
     << traces[0].dump ();
     EXPECT_FALSE (traces[1].at ("events").contains ("streamText")) << traces[1].dump ();
+}
+
+// A streaming step whose stored request declares a `streamFirstContentMarker`
+// (#3774) is timed to it, and a step that declares none adds no match: the
+// run's `timeToFirstMatch` counts one stream, at least the 300 ms
+// `/sse-preamble` holds its content behind its first event (a lower bound
+// only, which a slow runner cannot fail). Mutation check: drop the marker
+// compile in `step_stream_bounds` and `timeToFirstMatch` is absent.
+TEST_F (ScenarioRunnerTest, AStreamingStepIsTimedToItsStoredFirstContentMarker) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_marker", 0, "/sse-preamble", /*timeout_ms=*/5000);
+    auto marked = db_->get_request ("req_marker");
+    ASSERT_HAS_VALUE (marked);
+    marked->stream_first_content_marker = "content_block_delta";
+    db_->save_request (*marked);
+    seed_streaming_request ("req_plain", 1, "/sse-preamble", /*timeout_ms=*/5000);
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    ASSERT_TRUE (summary.contains ("stream")) << summary.dump ();
+    const auto& stream = summary["stream"];
+    EXPECT_EQ (stream["completions"].get<size_t> (), 2u) << stream.dump ();
+    ASSERT_TRUE (stream.contains ("timeToFirstMatch")) << stream.dump ();
+    const auto& first_match = stream["timeToFirstMatch"];
+    EXPECT_EQ (first_match["count"].get<size_t> (), 1u)
+    << "only the marked step";
+    EXPECT_GE (first_match["max"].get<double> (),
+    static_cast<double> (ScenarioMockServer::PREAMBLE_CONTENT_DELAY_MS))
+    << stream.dump ();
 }
 
 // Either cap ends a streaming step as a pass, and the run's `stream` section

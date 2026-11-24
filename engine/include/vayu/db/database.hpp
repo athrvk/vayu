@@ -78,7 +78,8 @@ namespace vayu::db {
  * 10 - `spec_declined_operations`, the operations a person declined by
  *     deleting their request (#3031);
  * 11 - `runs.outcome` (#3547); `requests.stream_text_path` and
- *     `result_bodies.stream_text_path` (#3773), folded into the same
+ *     `result_bodies.stream_text_path` (#3773), and
+ *     `requests.stream_first_content_marker` (#3774), folded into the same
  *     unreleased version.
  */
 inline constexpr int SCHEMA_VERSION = 11;

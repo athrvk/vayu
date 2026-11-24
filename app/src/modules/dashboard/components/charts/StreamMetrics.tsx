@@ -30,6 +30,12 @@ import { StreamStat } from "./StreamStat";
  * carries no `timeToFirstEvent`, which is a run whose streams delivered no timed
  * event, not a first event that took 0ms.
  *
+ * The first-match row (issue #3774) is the same clock stopped at the request's
+ * first content marker, which is where a preamble API's first token shows. It is
+ * drawn only when the report carries `timeToFirstMatch`, so a run whose request
+ * declares no marker looks as it did. Report-only: the live panel stays on the
+ * first event, since a live frame carries no match.
+ *
  * The max-gap and events/s rows (issue #3776) are how each stream paced itself,
  * which the run's blended rate cannot show: the largest pause between two
  * events, and the stream's own rate. Each is drawn only when the report carries
@@ -42,7 +48,12 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 		return null;
 	}
 
-	const { timeToFirstEvent: firstEvent, maxEventGap, eventRate } = stream;
+	const {
+		timeToFirstEvent: firstEvent,
+		timeToFirstMatch: firstMatch,
+		maxEventGap,
+		eventRate,
+	} = stream;
 
 	// Every completion the caps ended rather than the server. All of them is
 	// not a failure - it is the honest reading that this run measured its own
@@ -89,6 +100,18 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 					<DurationValue value={firstEvent.p95} />
 					<DurationValue value={firstEvent.p99} emphasis />
 					<DurationValue value={firstEvent.max} />
+				</div>
+			)}
+			{firstMatch && (
+				<div className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5">
+					<span className="text-label text-muted-foreground flex items-center">
+						first match
+						<InfoChip tip={TOOLTIPS.streamFirstMatch} />
+					</span>
+					<DurationValue value={firstMatch.p50} />
+					<DurationValue value={firstMatch.p95} />
+					<DurationValue value={firstMatch.p99} emphasis />
+					<DurationValue value={firstMatch.max} />
 				</div>
 			)}
 			{maxEventGap && (

@@ -297,6 +297,23 @@ export function streamTextPathOf(request: Pick<RequestState, "stream" | "streamT
 }
 
 /**
+ * The first content marker a streaming load run declares (issue #3774), as the
+ * wire field - or nothing at all.
+ *
+ * Load runs only: a Send checks the field and times nothing with it, so a send
+ * that carried it would be a write nothing reads. Absent when the request does
+ * not stream (the engine refuses a marker beside a buffered request) and when
+ * the field is empty. Not trimmed: the engine matches the bytes as written.
+ */
+export function streamFirstContentMarkerOf(
+	request: Pick<RequestState, "stream" | "streamFirstContentMarker">
+): { streamFirstContentMarker?: string } {
+	return request.stream && request.streamFirstContentMarker
+		? { streamFirstContentMarker: request.streamFirstContentMarker }
+		: {};
+}
+
+/**
  * The string the pane's `body` holds, given the text the server sent: that text
  * indented when it is JSON (`lib/json-format.ts`), else as received.
  *

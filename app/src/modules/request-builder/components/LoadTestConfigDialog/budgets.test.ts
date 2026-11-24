@@ -294,23 +294,52 @@ describe("the payload the dialog builds", () => {
 describe("stream budgets (issue #3234)", () => {
 	const streamDraft = draft({
 		streamTimeToFirstEventP95Ms: "800",
+		streamTimeToFirstMatchP95Ms: "900",
 		streamEventsPerSecondMin: "200",
 	});
 
 	it("are the only fields a non-streaming run does not have", () => {
 		const streamOnly = BUDGET_FIELDS.filter((field) => field.streamOnly).map((f) => f.key);
-		expect(streamOnly).toEqual(["streamTimeToFirstEventP95Ms", "streamEventsPerSecondMin"]);
+		expect(streamOnly).toEqual([
+			"streamTimeToFirstEventP95Ms",
+			"streamTimeToFirstMatchP95Ms",
+			"streamEventsPerSecondMin",
+		]);
 		expect(budgetFieldsFor(true)).toHaveLength(BUDGET_FIELDS.length);
 		expect(budgetFieldsFor(false).map((f) => f.key)).toEqual(
 			BUDGET_FIELDS.filter((f) => !f.streamOnly).map((f) => f.key)
 		);
 	});
 
+	it("warns that a preamble event reads near zero on the time to first event budget (issue #3774)", () => {
+		const hint = BUDGET_FIELDS.find((f) => f.key === "streamTimeToFirstEventP95Ms")?.hint ?? "";
+		expect(hint).toMatch(/preamble event/);
+		expect(hint).toMatch(/reads near zero/);
+		expect(hint).toMatch(/not time to first token/);
+		expect(hint).toMatch(/passes falsely/);
+	});
+
 	it("round-trips into the engine's keys for a streaming request", () => {
 		expect(buildThresholds(streamDraft, false, [], true)).toEqual({
 			streamTimeToFirstEventP95Ms: 800,
+			streamTimeToFirstMatchP95Ms: 900,
 			streamEventsPerSecondMin: 200,
 		});
+	});
+
+	// Mutation check: delete the field from BUDGET_FIELDS and the thresholds
+	// above lose the key, the engine's own one, so the budget is never judged.
+	it("names the first match budget with the engine's key, label and the marker it needs (issue #3774)", () => {
+		const field = BUDGET_FIELDS.find((f) => f.key === "streamTimeToFirstMatchP95Ms");
+		expect(field?.label).toBe("Time to first match p95 at most");
+		expect(field?.hint).toMatch(/first content marker/);
+		expect(field?.hint).toMatch(/no stream matched/);
+		expect(field?.hint).toMatch(/budget fails/);
+	});
+
+	it("points the first event budget at the first match budget for a first token (issue #3774)", () => {
+		const hint = BUDGET_FIELDS.find((f) => f.key === "streamTimeToFirstEventP95Ms")?.hint ?? "";
+		expect(hint).toMatch(/first match/);
 	});
 
 	it("sends none of them for a request that does not stream", () => {
@@ -325,6 +354,9 @@ describe("stream budgets (issue #3234)", () => {
 		expect(bad({ streamTimeToFirstEventP95Ms: "0" })).toMatch(/time to first event p95/i);
 		expect(bad({ streamTimeToFirstEventP95Ms: "86400001" })).toMatch(/at most 86400000ms/);
 		expect(bad({ streamTimeToFirstEventP95Ms: "86400000" })).toBeNull();
+		expect(bad({ streamTimeToFirstMatchP95Ms: "0" })).toMatch(/time to first match p95/i);
+		expect(bad({ streamTimeToFirstMatchP95Ms: "86400001" })).toMatch(/at most 86400000ms/);
+		expect(bad({ streamTimeToFirstMatchP95Ms: "86400000" })).toBeNull();
 		expect(bad({ streamEventsPerSecondMin: "0" })).toMatch(/events per second/i);
 		expect(bad({ streamEventsPerSecondMin: "1000000001" })).toMatch(/events\/s/);
 		expect(bad({ streamEventsPerSecondMin: "1000000000" })).toBeNull();
@@ -337,7 +369,7 @@ describe("stream budgets (issue #3234)", () => {
 	});
 
 	it("counts on the closed card only when the request streams", () => {
-		expect(summariseBudgets(streamDraft, [], true)).toBe("2 budgets active");
+		expect(summariseBudgets(streamDraft, [], true)).toBe("3 budgets active");
 		expect(summariseBudgets(streamDraft, [], false)).toBe("No budgets");
 		expect(summariseBudgets(draft({ streamEventsPerSecondMin: "200" }), [], true)).toBe(
 			"1 budget active - Events per second at least 200 events/s"

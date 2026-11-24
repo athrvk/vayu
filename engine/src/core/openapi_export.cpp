@@ -1879,6 +1879,9 @@ Json settings_object_of (const ExportRequest& entry) {
         if (entry.stream_text_path) {
             settings["streamTextPath"] = *entry.stream_text_path;
         }
+        if (entry.stream_first_content_marker) {
+            settings["streamFirstContentMarker"] = *entry.stream_first_content_marker;
+        }
     }
     return settings;
 }

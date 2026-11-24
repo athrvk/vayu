@@ -245,6 +245,8 @@ export interface CreateRequestRequest {
 	stream?: boolean;
 	/** See {@link Request.streamTextPath}. Needs `stream: true`; absent or `null` stores none. */
 	streamTextPath?: string | null;
+	/** See {@link Request.streamFirstContentMarker}. Needs `stream: true`; absent or `null` stores none. */
+	streamFirstContentMarker?: string | null;
 	/** Skip the cookie jar - see {@link Request.disableCookies}. */
 	disableCookies?: boolean;
 	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
@@ -299,6 +301,8 @@ export interface UpdateRequestRequest {
 	 * clears it. A string needs `stream: true` once the write lands.
 	 */
 	streamTextPath?: string | null;
+	/** See {@link Request.streamFirstContentMarker}; absent keeps it, `null` clears it. */
+	streamFirstContentMarker?: string | null;
 	/** Skip the cookie jar - see {@link Request.disableCookies}. */
 	disableCookies?: boolean;
 	/** Stored automatic-header opt-outs - see {@link Request.disabledSystemHeaders}. */
@@ -897,6 +901,12 @@ export interface StartLoadTestRequest {
 	/** See {@link ExecuteRequestRequest.streamTextPath}; read off the request, like `stream`. */
 	streamTextPath?: string;
 	/**
+	 * The literal the run's streams are timed to (issue #3774), read off the
+	 * request like `stream`; a send does not carry it, because a Send checks
+	 * the field and times nothing with it. Absent means no marker.
+	 */
+	streamFirstContentMarker?: string;
+	/**
 	 * Wall-clock ceiling on one stream, in ms; omitted takes the engine's
 	 * `sseMaxStreamDurationMs`. Under load a stream is bounded by construction -
 	 * the load loop refills concurrency per completion, so a transfer that
@@ -1014,6 +1024,15 @@ export interface StartScenarioRunRequest {
 	 */
 	maxStreamDurationMs?: number;
 	maxStreamEvents?: number;
+	/**
+	 * Scenario load run only: hold a virtual user for a 429's or 503's
+	 * `Retry-After` (capped by `retryAfterMaxMs`) before its next step, so the
+	 * run does not hammer a limiter (#3782, #3799). **Omitted when off**: absent
+	 * already means off, and the cap is sent only with it.
+	 */
+	retryAfterBackoff?: boolean;
+	/** The longest one wait, 1-3600000 ms; the engine defaults it to 30000. */
+	retryAfterMaxMs?: number;
 	scenario: {
 		/**
 		 * The discriminator for a future stored scenario. `"collection"` is the

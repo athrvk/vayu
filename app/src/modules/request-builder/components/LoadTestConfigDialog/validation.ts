@@ -22,10 +22,10 @@ import {
 } from "./budgets";
 import { monitorError, type MonitorDraft } from "./monitor";
 import {
-	appliesRetryAfter,
 	concurrencyLabel,
 	durationLabel,
 	profileParams,
+	retryAfterCapError,
 	type ProfileParams,
 } from "./profile";
 import { scenarioOnlyError } from "./scenario-only";
@@ -111,20 +111,6 @@ function profileFieldError(
 	return null;
 }
 
-/** The cap is on screen only with the option on, in a mode that applies it. */
-function retryAfterCapError(
-	profile: LoadTestProfile,
-	limits: LoadTestLimits,
-	backoff: boolean,
-	capMs: number
-): string | null {
-	if (!backoff || !appliesRetryAfter(profile.mode)) return null;
-	return rangeError("Longest Retry-After wait", capMs, limits.RETRY_AFTER_MAX_MS, {
-		whole: true,
-		engineBound: true,
-	});
-}
-
 /**
  * The first field outside its range, among the ones this draft would send. A
  * field the mode does not send is hidden, so a stale value in it is nobody's
@@ -155,7 +141,7 @@ function rangeErrorOf(
 			whole: false,
 			engineBound: true,
 		}) ??
-		retryAfterCapError(profile, limits, retryAfterBackoff, retryAfterMaxMs) ??
+		retryAfterCapError(profile.mode, limits, retryAfterBackoff, retryAfterMaxMs) ??
 		(isStreamingRequest ? scenarioStreamCapError(profile, limits) : null)
 	);
 }

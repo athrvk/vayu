@@ -49,6 +49,9 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		...(r.httpVersion !== undefined ? { httpVersion: r.httpVersion } : {}),
 		...(r.stream !== undefined ? { stream: r.stream } : {}),
 		...(r.streamTextPath !== undefined ? { streamTextPath: r.streamTextPath } : {}),
+		...(r.streamFirstContentMarker !== undefined
+			? { streamFirstContentMarker: r.streamFirstContentMarker }
+			: {}),
 		...(r.disableCookies !== undefined ? { disableCookies: r.disableCookies } : {}),
 		...(r.disabledSystemHeaders !== undefined
 			? { disabledSystemHeaders: r.disabledSystemHeaders }

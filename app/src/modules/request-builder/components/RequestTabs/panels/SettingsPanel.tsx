@@ -36,6 +36,12 @@
  * turning the stream off empties it (`streamPatch`), because the engine refuses
  * a path stored beside a buffered request.
  *
+ * **The first content marker is the load run's first-token clock** (issue
+ * #3774): literal bytes the engine watches the raw stream for, so the report's
+ * Time to first match is the wait for content and not for a preamble event. It
+ * follows the text path's rules (a stream's field, emptied with the toggle) and
+ * is kept verbatim, never trimmed, because it is matched byte for byte.
+ *
  * **Verification off is loud, not hidden** (issue #706). The row was withheld
  * for years on the grounds that exposing it weakens transport security; what
  * that produced was an unreachable knob and users with no way to reach an
@@ -75,6 +81,7 @@ import {
 	MIN_MAX_REDIRECTS,
 	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
+	STREAM_FIRST_CONTENT_MARKER_PRESETS,
 	STREAM_TEXT_PATH_PRESETS,
 	isHttpVersion,
 } from "@/constants/request";
@@ -105,6 +112,7 @@ const TIMEOUT_LABEL = "Request timeout";
 const PROTOCOL_LABEL = "Protocol";
 const STREAM_LABEL = "Event stream";
 const STREAM_TEXT_PATH_LABEL = "Stream text path";
+const STREAM_MARKER_LABEL = "First content marker";
 const VERIFY_LABEL = "Verify TLS certificate";
 const COOKIES_LABEL = "Disable cookie jar";
 const ENCODING_LABEL = "Send URL without encoding";
@@ -123,6 +131,10 @@ export default function SettingsPanel() {
 	const activePreset =
 		STREAM_TEXT_PATH_PRESETS.find((preset) => preset.path === request.streamTextPath.trim())
 			?.path ?? "";
+	const activeMarkerPreset =
+		STREAM_FIRST_CONTENT_MARKER_PRESETS.find(
+			(preset) => preset === request.streamFirstContentMarker
+		) ?? "";
 	const followRedirects = request.followRedirects;
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 	const { data: config } = useConfigQuery();
@@ -174,6 +186,10 @@ export default function SettingsPanel() {
 		// Radix reports "" when the active preset is pressed again; the field is
 		// what holds the path, so there is nothing to switch off.
 		if (path) updateField("streamTextPath", path);
+	};
+
+	const handleMarkerPreset = (marker: string) => {
+		if (marker) updateField("streamFirstContentMarker", marker);
 	};
 
 	/** Keep the stored value inside the range the engine clamps to. */
@@ -457,6 +473,33 @@ export default function SettingsPanel() {
 								{STREAM_TEXT_PATH_PRESETS.map((preset) => (
 									<ToggleGroupItem key={preset.path} value={preset.path}>
 										{preset.label}
+									</ToggleGroupItem>
+								))}
+							</ToggleGroup>
+						</TextSettingRow>
+					</div>
+
+					<div className="enter-fade">
+						<TextSettingRow
+							label={STREAM_MARKER_LABEL}
+							value={request.streamFirstContentMarker}
+							onChange={(marker) => updateField("streamFirstContentMarker", marker)}
+							placeholder={STREAM_FIRST_CONTENT_MARKER_PRESETS[0]}
+							monospace
+							description="Load tests time each stream to the first appearance of these bytes, as Time to first match, so a preamble event does not read as the first token. It is matched against the raw stream, not the parsed JSON, and a server's spacing and escaping decide what it must say. Leave empty for none."
+						>
+							<ToggleGroup
+								value={activeMarkerPreset}
+								onValueChange={handleMarkerPreset}
+								aria-label="First content marker presets"
+							>
+								{STREAM_FIRST_CONTENT_MARKER_PRESETS.map((preset) => (
+									<ToggleGroupItem
+										key={preset}
+										value={preset}
+										className="font-mono"
+									>
+										{preset}
 									</ToggleGroupItem>
 								))}
 							</ToggleGroup>

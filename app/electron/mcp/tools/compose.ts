@@ -271,14 +271,16 @@ export const DEFAULT_STREAM_BUDGET_MS = 5_000;
 export const MAX_STREAM_BUDGET_MS = 60_000;
 
 /**
- * Set the stream flag on a composed payload. A `streamTextPath` rides only
- * beside `stream: true` (the engine refuses it on a buffered send, #3773), and
- * a by-id compose carries the saved request's, so forcing the flag off drops
- * the path with it.
+ * Set the stream flag on a composed payload. A `streamTextPath` and a
+ * `streamFirstContentMarker` ride only beside `stream: true` (the engine
+ * refuses either on a buffered send, #3773, #3774), and a by-id compose
+ * carries the saved request's, so forcing the flag off drops both with it.
  */
 export function setStreamFlag(payload: Record<string, unknown>, stream: boolean): void {
 	payload.stream = stream;
-	if (!stream) delete payload.streamTextPath;
+	if (stream) return;
+	delete payload.streamTextPath;
+	delete payload.streamFirstContentMarker;
 }
 
 /** The reply the request's stream text path read: each event's `text`, in order, joined with nothing between. */

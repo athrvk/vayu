@@ -560,6 +560,8 @@ export interface RequestDraft {
 	stream?: boolean;
 	/** The declared stream text path (issue #3773); only a Vayu export states it. */
 	streamTextPath?: string;
+	/** The declared first content marker (issue #3774); only a Vayu export states it. */
+	streamFirstContentMarker?: string;
 	/**
 	 * Postman's per-request protocol switches (issue #1765), when the item's
 	 * `protocolProfileBehavior` states them, and that object verbatim as the

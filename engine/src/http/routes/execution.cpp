@@ -343,6 +343,24 @@ bool read_stream_text_path (const nlohmann::json& json, StreamFlag& flag) {
     return true;
 }
 
+/// `streamFirstContentMarker` (#3774), held to
+/// `stream_first_content_marker_problem`; refused on @p flag otherwise. Only
+/// checked, never kept: see `read_stream_flag` in routes.hpp.
+bool check_stream_first_content_marker (const nlohmann::json& json, StreamFlag& flag) {
+    if (auto problem = stream_first_content_marker_problem (json)) {
+        flag.ok    = false;
+        flag.error = std::move (*problem);
+        return false;
+    }
+    return true;
+}
+
+/// Whether @p json states @p key as anything but `null`.
+bool has_non_null (const nlohmann::json& json, const char* key) {
+    const auto field = json.find (key);
+    return field != json.end () && !field->is_null ();
+}
+
 } // namespace
 
 /**
@@ -369,7 +387,8 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         flag.value = field->get<bool> ();
     }
 
-    if (!read_stream_caps (json, flag) || !read_stream_text_path (json, flag)) {
+    if (!read_stream_caps (json, flag) || !read_stream_text_path (json, flag) ||
+    !check_stream_first_content_marker (json, flag)) {
         return flag;
     }
 
@@ -388,6 +407,11 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
             flag.error =
             "'streamTextPath' applies to a streaming request only - set "
             "'stream': true, or drop it";
+        } else if (has_non_null (json, "streamFirstContentMarker")) {
+            flag.ok = false;
+            flag.error =
+            "'streamFirstContentMarker' applies to a streaming request only - "
+            "set 'stream': true, or drop it";
         }
         return flag;
     }
@@ -417,13 +441,20 @@ StreamFlag read_collection_run_stream_caps (const nlohmann::json& json) {
         "'maxStreamEvents' bound those steps without it, so drop 'stream'";
         return flag;
     }
-    if (const auto path = json.find ("streamTextPath");
-    path != json.end () && !path->is_null ()) {
+    if (has_non_null (json, "streamTextPath")) {
         flag.ok = false;
         flag.error =
         "'streamTextPath' is not valid on a collection run - a step reads its "
         "stream's text through its stored request's 'streamTextPath', so set "
         "it there and drop it here";
+        return flag;
+    }
+    if (has_non_null (json, "streamFirstContentMarker")) {
+        flag.ok = false;
+        flag.error =
+        "'streamFirstContentMarker' is not valid on a collection run - a step "
+        "watches its stream for its stored request's "
+        "'streamFirstContentMarker', so set it there and drop it here";
         return flag;
     }
     read_stream_caps (json, flag);

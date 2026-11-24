@@ -20,6 +20,7 @@
 #include "vayu/core/sample_capture.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/mcp_body.hpp"
+#include "vayu/http/oauth_discovery.hpp"
 #include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::http {
@@ -66,6 +67,33 @@ McpReply failed (McpReply reply, McpErrorClass error_class, std::string message)
     reply.error_class = error_class;
     reply.message     = std::move (message);
     return reply;
+}
+
+/// The scope a token needs, when the response is a 401 or 403 whose Bearer
+/// challenge says `insufficient_scope` (RFC 6750 section 3.1) - what a person
+/// reading a refused run wants named (#3795). Reads only: nothing is retried
+/// or re-authorized, and `invalid_token` or any other challenge is no answer.
+std::optional<std::string> insufficient_scope_message (const Response& response) {
+    if (response.status_code != 401 && response.status_code != 403) {
+        return std::nullopt;
+    }
+    const auto challenge = response.headers.find ("www-authenticate");
+    if (challenge == response.headers.end ()) {
+        return std::nullopt;
+    }
+    const auto step_up = classify_bearer_challenge ({ challenge->second }, "");
+    if (!step_up.step_up) {
+        return std::nullopt;
+    }
+    if (step_up.required_scopes.empty ()) {
+        return "insufficient_scope: the token lacks a scope the server did not "
+               "name";
+    }
+    std::string scopes;
+    for (const auto& scope : step_up.required_scopes) {
+        scopes += (scopes.empty () ? "" : " ") + scope;
+    }
+    return std::format ("insufficient_scope: needs \"{}\"", server_text (scopes));
 }
 
 /// `"server supports A, B; this request is V"`, or nothing when the refusal
@@ -137,14 +165,15 @@ std::string first_text_content (const ordered_json& result) {
     return {};
 }
 
-McpReply judge_final_response (McpReply reply, const ordered_json& frame, int status) {
+McpReply judge_final_response (McpReply reply, const ordered_json& frame, const Response& response) {
     if (const auto error = frame.find ("error");
     error != frame.end () && !error->is_null ()) {
         return protocol_failure (std::move (reply), *error);
     }
-    if (!is_2xx (status)) {
+    if (!is_2xx (response.status_code)) {
         return failed (std::move (reply), McpErrorClass::Transport,
-        std::format ("HTTP {} answered with a JSON-RPC result", status));
+        insufficient_scope_message (response).value_or (std::format (
+        "HTTP {} answered with a JSON-RPC result", response.status_code)));
     }
     const auto result = frame.find ("result");
     if (result != frame.end () && result->is_object () && result->value ("isError", false)) {
@@ -157,8 +186,12 @@ McpReply judge_final_response (McpReply reply, const ordered_json& frame, int st
 }
 
 /// What a reply without a final response says, when it is a failure at all.
-McpReply
-judge_missing_response (McpReply reply, int status, bool expects_response, bool streamed, bool saw_cut_event) {
+McpReply judge_missing_response (McpReply reply,
+const Response& response,
+bool expects_response,
+bool streamed,
+bool saw_cut_event) {
+    const int status = response.status_code;
     if (status == 400) {
         return failed (std::move (reply), McpErrorClass::Transport,
         std::format (
@@ -168,7 +201,8 @@ judge_missing_response (McpReply reply, int status, bool expects_response, bool 
     }
     if (!is_2xx (status)) {
         return failed (std::move (reply), McpErrorClass::Transport,
-        std::format ("HTTP {} with no JSON-RPC response", status));
+        insufficient_scope_message (response).value_or (
+        std::format ("HTTP {} with no JSON-RPC response", status)));
     }
     if (!expects_response) {
         return reply;
@@ -276,10 +310,10 @@ const McpReplyStream* live) {
     reply.response.empty () ? std::nullopt : parse_object (reply.response);
     if (!frame || !(frame->contains ("result") || frame->contains ("error"))) {
         reply.response.clear ();
-        return judge_missing_response (std::move (reply), response.status_code,
+        return judge_missing_response (std::move (reply), response,
         request_id.has_value (), streamed, saw_cut_event);
     }
-    return judge_final_response (std::move (reply), *frame, response.status_code);
+    return judge_final_response (std::move (reply), *frame, response);
 }
 
 void attach_mcp_reply (const Request& request, Response& response) {
