@@ -1612,8 +1612,19 @@ export interface DeleteInboxResponse {
 // the engine holds each issuer on its own loopback listener and a restart
 // forgets every one of them, so nothing here is stored client-side either.
 
-/** What `/token` answers with, so retry and error handling are testable. */
-export type MockIssuerFailureMode = "none" | "slow" | "server_error" | "invalid_client";
+/**
+ * How the issuer misbehaves, so retry, error and discovery handling are
+ * testable. The first three affect `/token` only; the rest each break one other
+ * route (the RFC 8414 document, `/register`, the `iss` on the authorize redirect).
+ */
+export type MockIssuerFailureMode =
+	| "none"
+	| "slow"
+	| "server_error"
+	| "invalid_client"
+	| "metadata_not_found"
+	| "registration_refused"
+	| "wrong_iss";
 
 /** One running issuer, as `GET /mock-issuer` and the `PUT` reply describe it. */
 export interface MockIssuer {
@@ -1622,6 +1633,10 @@ export interface MockIssuer {
 	issuerUrl: string;
 	tokenUrl: string;
 	authorizeUrl: string;
+	/** RFC 8414 authorization server metadata. */
+	metadataUrl: string;
+	/** The URL to enter in an OAuth config's discovery field: a protected resource whose 401 leads to the metadata. */
+	discoverUrl: string;
 	/** HS256 secret the service under test verifies this issuer's tokens with. */
 	signingKey: string;
 	port: number;
@@ -1630,6 +1645,8 @@ export interface MockIssuer {
 	/** How long `slow` mode waits before answering; ignored in every other mode. */
 	slowMs: number;
 	issueRefreshTokens: boolean;
+	/** Scope `/resource` requires of a token; empty requires none. */
+	resourceScope: string;
 	/** 0 accepts any client id; otherwise the id must be one of the configured ones. */
 	clientCount: number;
 	createdAt: number;
@@ -1649,6 +1666,8 @@ export interface StartMockIssuerRequest {
 	failureMode?: MockIssuerFailureMode;
 	slowMs?: number;
 	issueRefreshTokens?: boolean;
+	/** Space-separated scope tokens `/resource` requires; fixed once started. */
+	resourceScope?: string;
 }
 
 /**
@@ -1661,6 +1680,8 @@ export interface StartMockIssuerResponse {
 	issuerUrl: string;
 	tokenUrl: string;
 	authorizeUrl: string;
+	metadataUrl: string;
+	discoverUrl: string;
 	signingKey: string;
 }
 

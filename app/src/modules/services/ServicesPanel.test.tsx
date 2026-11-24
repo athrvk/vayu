@@ -88,12 +88,15 @@ function issuer(overrides: Partial<MockIssuer> = {}): MockIssuer {
 		issuerUrl: "http://127.0.0.1:42000",
 		tokenUrl: "http://127.0.0.1:42000/token",
 		authorizeUrl: "http://127.0.0.1:42000/authorize",
+		metadataUrl: "http://127.0.0.1:42000/.well-known/oauth-authorization-server",
+		discoverUrl: "http://127.0.0.1:42000/resource",
 		signingKey: "k".repeat(32),
 		port: 42000,
 		expiresInSeconds: 3600,
 		failureMode: "none",
 		slowMs: 0,
 		issueRefreshTokens: false,
+		resourceScope: "",
 		clientCount: 0,
 		createdAt: 1700000000000,
 		...overrides,
@@ -149,6 +152,8 @@ beforeEach(() => {
 		issuerUrl: "http://127.0.0.1:42001",
 		tokenUrl: "http://127.0.0.1:42001/token",
 		authorizeUrl: "http://127.0.0.1:42001/authorize",
+		metadataUrl: "http://127.0.0.1:42001/.well-known/oauth-authorization-server",
+		discoverUrl: "http://127.0.0.1:42001/resource",
 		signingKey: "s".repeat(32),
 	});
 	stopMockIssuer.mockReset().mockResolvedValue({ stopped: true });
@@ -522,7 +527,7 @@ describe("an inbox row", () => {
 });
 
 describe("an issuer row", () => {
-	it("hands over the two URLs and the signing key only once expanded", async () => {
+	it("hands over the URLs and the signing key only once expanded", async () => {
 		listMockIssuers.mockResolvedValue([issuer()]);
 		renderPanel();
 		// Collapsed: the row is the issuer's base URL and nothing else, so a
@@ -535,6 +540,12 @@ describe("an issuer row", () => {
 
 		expect(screen.getByText("http://127.0.0.1:42000/token")).toBeInTheDocument();
 		expect(screen.getByText("http://127.0.0.1:42000/authorize")).toBeInTheDocument();
+		// The URL an OAuth config's discovery field takes, so no endpoint is typed.
+		expect(screen.getByText("Discover")).toBeInTheDocument();
+		expect(screen.getByText("http://127.0.0.1:42000/resource")).toBeInTheDocument();
+		expect(
+			screen.getByText("http://127.0.0.1:42000/.well-known/oauth-authorization-server")
+		).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Copy signing key" }));
 		expect(writeText).toHaveBeenCalledWith("k".repeat(32));
 	});
@@ -557,6 +568,9 @@ describe("an issuer row", () => {
 	it.each([
 		["server_error", "answers with a server error"],
 		["invalid_client", "rejects every client id"],
+		["metadata_not_found", "hides its metadata document"],
+		["registration_refused", "refuses client registration"],
+		["wrong_iss", "sends a wrong iss on the authorize redirect"],
 	] as const)(
 		"summarises a %s issuer in its own words, not the Select label lowercased",
 		async (failureMode, summary) => {
@@ -705,6 +719,18 @@ describe("an issuer's copy buttons", () => {
 	}
 
 	it.each([
+		[
+			"discovery",
+			"Copy discovery URL for an OAuth config",
+			"http://127.0.0.1:42000/resource",
+			"lucide-copy",
+		],
+		[
+			"metadata",
+			"Copy metadata URL",
+			"http://127.0.0.1:42000/.well-known/oauth-authorization-server",
+			"lucide-copy",
+		],
 		["token", "Copy token URL", "http://127.0.0.1:42000/token", "lucide-copy"],
 		["authorize", "Copy authorize URL", "http://127.0.0.1:42000/authorize", "lucide-copy"],
 		["signing key", "Copy signing key", "k".repeat(32), "lucide-key-round"],
@@ -735,6 +761,7 @@ describe("an issuer's copy buttons", () => {
 	});
 
 	it.each([
+		["Copy discovery URL for an OAuth config", "lucide-copy"],
 		["Copy token URL", "lucide-copy"],
 		["Copy signing key", "lucide-key-round"],
 	] as const)(
@@ -775,6 +802,47 @@ describe("starting an issuer", () => {
 			expect(startMockIssuer).toHaveBeenCalledWith({
 				expiresInSeconds: 3600,
 				failureMode: "none",
+			})
+		);
+	});
+
+	it("sends the resource scope the user typed, trimmed", async () => {
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByLabelText(/resource scope/i), {
+			target: { value: "  mcp:read mcp:write " },
+		});
+		fireEvent.click(dialog.getByRole("button", { name: /start issuer/i }));
+		await waitFor(() =>
+			expect(startMockIssuer).toHaveBeenCalledWith({
+				expiresInSeconds: 3600,
+				failureMode: "none",
+				resourceScope: "mcp:read mcp:write",
+			})
+		);
+	});
+
+	it("shows the engine's refusal of a resource scope it cannot read", async () => {
+		startMockIssuer.mockRejectedValue(
+			new Error("resourceScope must be scope tokens separated by single spaces")
+		);
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByLabelText(/resource scope/i), { target: { value: 'a"b' } });
+		fireEvent.click(dialog.getByRole("button", { name: /start issuer/i }));
+		expect(await dialog.findByText(/single spaces/i)).toBeInTheDocument();
+	});
+
+	it("offers every discovery failure mode and sends the one picked", async () => {
+		const dialog = await openDialog();
+		fireEvent.click(dialog.getByRole("combobox"));
+		for (const name of ["Metadata not found", "Registration refused", "Wrong iss"]) {
+			expect(await screen.findByRole("option", { name })).toBeInTheDocument();
+		}
+		fireEvent.click(screen.getByRole("option", { name: "Wrong iss" }));
+		fireEvent.click(dialog.getByRole("button", { name: /start issuer/i }));
+		await waitFor(() =>
+			expect(startMockIssuer).toHaveBeenCalledWith({
+				expiresInSeconds: 3600,
+				failureMode: "wrong_iss",
 			})
 		);
 	});

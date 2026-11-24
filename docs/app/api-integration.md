@@ -455,9 +455,23 @@ to respect: `startMockIssuer` answers with the URLs and the signing key **only**
 not the full record, so the list is refetched rather than patched; and a stopped
 issuer leaves the list altogether, unlike an inbox, which stays listed with
 `running: false`. `updateMockIssuer` accepts only `expiresInSeconds`,
-`failureMode` and `slowMs` - a port, client list or claim set cannot move under a
-bound listener and the engine refuses one with a `400` rather than half-applying
-it.
+`failureMode` and `slowMs` - a port, client list, claim set or `resourceScope`
+cannot move under a bound listener and the engine refuses one with a `400`
+rather than half-applying it.
+
+The start answer and each list entry carry `metadataUrl` (the RFC 8414
+document) and `discoverUrl` (`<issuerUrl>/resource`, a protected resource whose
+`401` leads to that metadata). **`discoverUrl` is what to paste into an OAuth
+config's "Discover from the server URL" field**: sign-in then finds the
+authorize, token and registration endpoints itself, so no endpoint is typed. The
+Services drawer's expanded issuer row shows it (Discover) beside the metadata
+URL, each with its own copy button. `failureMode` is `none`, `slow`,
+`server_error`, `invalid_client` (all `/token` only), `metadata_not_found` (the
+RFC 8414 document answers `404`), `registration_refused` (`/register` answers
+`400`) or `wrong_iss` (the authorize redirect carries a wrong `iss`, which a
+discovered sign-in refuses). `StartMockIssuerRequest.resourceScope` is the
+space-separated scope `/resource` requires of a token; the start dialog sends
+it only when filled in and shows the engine's `400` when the scope is not valid.
 
 #### Collection mock server
 
