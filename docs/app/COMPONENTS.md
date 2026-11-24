@@ -2717,7 +2717,9 @@ which the engine refuses in the default `contains` mode), and `assert.jsonschema
 a `schema` that is an object or a boolean (typed text that is not JSON is stored
 as a string, which the engine refuses; an absent one is `missingRequiredKeys`')
 and, once its `source` is `jsonpath`, a `path`: its rule's `needs` is a function
-of the config, so the chip names the unmet half (#3806). The mode picker writes
+of the config, so the chip names the unmet half (#3806), and `assert.snapshot` a
+`baseline` that is an array (typed text that is not JSON is stored as a string; an
+empty list is a baseline, a server that answers none, #3807). The mode picker writes
 one key at a time, so the app never sends a mix the engine refuses; if one
 arrives anyway it is named on the row by the engine's own 400 (below). The
 engine refuses an element with none, and JSON Schema cannot say "one of", so
@@ -2834,9 +2836,10 @@ variant, so each one fills its column instead of stopping at the settings
 screen's `max-w-[12rem]` with the rest of the line empty.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
-inline in `ElementList`. There are three: `ScriptElementForm`, below,
-`ModeElementForm` for the five mutually-exclusive-strategy kinds, after it, and
-`JsonSchemaElementForm` for `assert.jsonschema` (#3806).
+inline in `ElementList`. There are four: `ScriptElementForm`, below,
+`ModeElementForm` for the five mutually-exclusive-strategy kinds, after it,
+`JsonSchemaElementForm` for `assert.jsonschema` (#3806) and `SnapshotElementForm`
+for `assert.snapshot` (#3807).
 Phase 0 ships a bespoke form for every `script.*`
 kind - `script.pre` / `script.post` and, since issue #1499, `script.setup` /
 `script.teardown` - which render `ScriptElementForm`'s Monaco editor and
@@ -2947,6 +2950,29 @@ indented, parsing typed text exactly as the one-line field does - instead of a
 one-line input that would show a schema as a scrolling strip. The collapsed row
 reads `body matches schema` or `<path> matches schema` (`summarize-element.ts`),
 never the schema itself, and its icon is `FileCheck`.
+
+**`assert.snapshot` is a bespoke form for its array** (`SnapshotElementForm.tsx`,
+#3807): `baseline` is an array of objects, which the generic form's array field
+(scalars split on commas) cannot hold, so the form is the catalogue's `method`
+select over a subset of the schema plus the same multi-line `JsonValueField`
+`assert.jsonschema` uses. The collapsed row reads `<method> - <n> items`
+(`summarize-element.ts`, `tools/list` while the element names no method), never the
+recorded items, and its icon is `Camera`. **Recording the baseline is an action of
+the request builder, not of the list**: the Elements tab renders
+`panels/SnapshotBaselineAction.tsx` through `renderAboveForm`, a **Use the current
+reply as the baseline** button that reads the builder's current response, takes
+the list at `result.tools` / `resources` / `prompts` for the element's `method`
+(`utils/list-snapshot-baseline.ts`: the reply is one JSON-RPC object or an event
+stream whose last `message` response is the answer; the engine matches the
+request's `id` and the app does not know it, so a stream whose responses carry
+more than one `id` is refused) and writes it into
+`config.baseline` through `updateField("elements", ...)`, the path a typed edit
+takes, so the summary and the field follow. It is disabled, with a `DisabledHint`
+saying why, before anything was sent and when the reply holds no such list (an
+error response, another method's answer, a body that is not JSON). The collection's
+Elements tab has no response and so no button. A failed comparison arrives in
+the response's Elements section as the engine's one line, shown verbatim like any
+`assert.*` message (`ElementOutcomes`).
 
 **A host can start a kind from more than the blank config** (`startingConfigs`
 on `ElementList`, #3806): the request builder's Elements tab passes

@@ -335,8 +335,8 @@ export function errorsWithin(
  * name here to a property the live catalogue declares. That guard cannot see
  * the C++ rule itself: a change to `assert_status_problem`,
  * `assert_jsonpath_problem`, `control_throughput_problem`, `timer_think_problem`,
- * `assert_jsonschema_shape_problem` or `assert_contains_problem` needs a hand
- * edit here. A rule gates on the
+ * `assert_jsonschema_shape_problem`, `assert_snapshot_problem` or
+ * `assert_contains_problem` needs a hand edit here. A rule gates on the
  * operand being missing; a mix the engine also refuses (`percent` beside
  * `everyN`, `exists` beside `expected`) is one the mode picker never writes, and
  * reaches the row through the engine's own refusal (`parseElementRefusal`).
@@ -413,6 +413,16 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 		isMet: (config) =>
 			(config.schema === undefined || isSchemaValue(config.schema)) &&
 			(config.source !== "jsonpath" || hasKey(config, "path")),
+	},
+	// `assert_snapshot_problem`: a `baseline` that is an array (typed text that
+	// is not one is stored as a string). An empty list is a baseline, a server
+	// that answers none; an absent one is `missingRequiredKeys`' to report. The
+	// items' own shape (an object with a name) is the engine's refusal to name.
+	"assert.snapshot": {
+		properties: ["baseline"],
+		judgesValue: true,
+		needs: "a baseline: a JSON array of the list's items",
+		isMet: (config) => config.baseline === undefined || Array.isArray(config.baseline),
 	},
 	// `assert_contains_problem`: `contains` (the default mode) with an empty
 	// `text`. `equals` and `matches` read an empty text as a value, and an
