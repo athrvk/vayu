@@ -6,7 +6,6 @@
  */
 
 /**
- * @file output-schemas.ts
  * @brief The structured output schemas, and the readers that fill them: run
  *        comparison, engine health, the smoke matrix and the config update,
  *        plus the loose schemas of the other object-rooted reads.

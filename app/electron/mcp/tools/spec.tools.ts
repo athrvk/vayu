@@ -6,7 +6,6 @@
  */
 
 /**
- * @file spec.tools.ts
  * @brief OpenAPI and import/export tools: reading, diffing, syncing, binding and
  *        exporting a collection's spec, plus document import and Postman export.
  */

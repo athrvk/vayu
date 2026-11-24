@@ -6,7 +6,6 @@
  */
 
 /**
- * @file sibling-order.ts
  * @brief A collection's children as one list: its sub-collections and its
  *        requests, in the order the sidebar shows them and a recursive run
  *        walks them (#2535).
