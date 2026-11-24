@@ -6,81 +6,36 @@
  */
 
 /**
- * The table/text toggle that sits above a `KeyValueEditor`, and the textarea it
- * swaps in.
+ * The table/text toggle above a `KeyValueEditor`, and the textarea it swaps in, shared by
+ * `ParamsPanel` and `HeadersPanel`. Only the *format* differs (headers `Name: value`, params
+ * `key=value`), so the caller passes a parse, a format and the syntax sentence.
  *
- * **This existed twice**, in `ParamsPanel` and `HeadersPanel`: the same
- * `isBulkEditMode` and `bulkEditText` state, the same `handleToggleMode` with
- * the same "save on the way out, load on the way in" comment, the same toolbar
- * row, and the same `<Textarea>` - both of them labelled `id="bulk-edit"`, so
- * the two would have collided had either ever rendered beside the other.
- *
- * Only the *format* differed, which is the part that genuinely differs: headers
- * are `Name: value`, params are `key=value`. So that is what the caller passes -
- * a parse, a format, and the sentence describing the syntax. Everything else is
- * here.
- *
- * **It stayed in this module when `KeyValueEditor` moved to
- * `components/shared/` (#567).** Nothing in it is key/value-shaped - it is a
- * toggle around whatever children it is given - but its only callers are this
- * module's two panels, and `components/shared/` is for what *several* features
- * share. It is imported directly rather than re-exported from the table: a shared
- * primitive cannot re-export something from a feature module.
- *
- * The draft is a staging area: you paste a block, fix it up, and it commits
- * when you switch back to the table. Parsing on every keystroke would rewrite
- * the request underneath a half-finished paste. It is controlled - the caller
- * holds it, and the request builder holds it per request in its provider
- * (`utils/bulk-drafts.ts`, #3666), so it survives a sub-tab switch and stays
- * with the request it was typed in. Send and Save commit an open draft too;
- * this component only knows about the toggle.
- *
- * **`after` renders in both modes.** "Added by Vayu" and the resolved-URL line
- * used to be part of `children`, so they vanished the moment you switched to
- * text - exactly when a bulk-pasted block of params most wants to be checked
- * against the URL it will produce. Only the table itself, and its empty-state
- * `tableHeader`, are table-only; everything that describes *this send* rather
- * than *this table* belongs in `after`.
- *
- * **Committing is still the only way out, but it is no longer the only way
- * back.** A draft that diverges from the table gets a `Discard` action beside
- * the mode toggle, so switching in to look something up and changing your mind
- * does not force a commit the way toggling back always did.
- *
- * **The toggle is a `ToggleGroup`, not a `Button` that swaps its own label.**
- * A pill `Button` at `size="sm"` (`h-control-sm` plus a border and `px-3`) reads
- * as a heavier control than anything else on this panel - the table rows it
- * sits above are a 36px grid with no border on their own inputs. `ToggleGroup`
- * is the app's existing primitive for exactly this - one choice out of a few,
- * all visible - and its `xs` step is the one `ResponseBody`'s own Pretty/Raw/
- * Preview switch already sits on a dense toolbar row.
- *
- * **`tableHeader` is not in the toggle row, and it renders below the table,
- * not above it.** It used to share a `justify-between` flex row with the
- * toggle, so the row's own height was `max(sentence, toggle)` - and the
- * sentence is a conditionally-mounted, sometimes two-line `<p>`
- * (`EmptyTableHint`), gone the moment the table gets its first row *or* the
- * moment bulk edit opens. Either trigger snapped the row from two-line-tall
- * down to the toggle's own ~24px, and everything below it jumped. Moving it
- * out of the toggle row fixed that jump, but the sentence was still *above*
- * the table at that point, so the table's own top edge (every row, the
- * caret you are typing into) still moved on the first keystroke into an
- * empty table - a shift right where the user is looking and typing.
- *
- * The remaining fix is order, not visibility: `tableHeader` renders *after*
- * `children`, below the table's own trailing blank row. Its mount/unmount
- * still moves content, but only content below the row the user's cursor is
- * in - the row itself, everything above it, and the toggle never move. This
- * is deliberately not "always show it": the sentence restates what the row
- * placeholder and the `{{token}}` colouring already say once there is a real
- * row, and a permanent two-line strip on every request forever is exactly
- * the furniture `EmptyTableHint`'s own doc comment describes removing.
- * Reserving its height so it fades instead of unmounting was considered and
- * rejected too - that keeps the clutter (an invisible box the same size as
- * the text) while still not being visible, the worst of both. Hiding it
- * behind a tooltip/info-icon was also rejected: burying the one thing this
- * sentence exists to teach (`{{variable}}` syntax) behind a disclosure is
- * wrong for the one moment - a genuinely empty tab - discovery matters most.
+ * - **It stays in this module** although `KeyValueEditor` is in `components/shared/` (#567):
+ *   nothing here is key/value-shaped, but only this module's two panels use it, and
+ *   `components/shared/` is for what several features share. Imported directly, since a shared
+ *   primitive cannot re-export from a feature module.
+ * - **The draft is a staging area**: paste a block, fix it, and it commits on switching back to the
+ *   table; parsing per keystroke would rewrite the request under a half-finished paste. Controlled:
+ *   the builder holds it per request in its provider (`utils/bulk-drafts.ts`, #3666), so it
+ *   survives a sub-tab switch and stays with its request. Send and Save commit an open draft too;
+ *   this knows only the toggle.
+ * - **`after` renders in both modes**: what describes *this send* ("Added by Vayu", the resolved
+ *   URL) must stay while bulk-editing, when a pasted block most wants checking against its URL.
+ *   Only the table and its `tableHeader` are table-only.
+ * - **A diverged draft gets `Discard`** beside the toggle, so looking something up in text mode
+ *   does not force a commit.
+ * - **The toggle is a `ToggleGroup`, not a label-swapping `Button`**: a pill `Button` at
+ *   `size="sm"` (`h-control-sm`, a border, `px-3`) outweighs the borderless 36px rows below it, and
+ *   `ToggleGroup`'s `xs` step is the app's one-of-a-few primitive, as in `ResponseBody`'s
+ *   Pretty/Raw/Preview.
+ * - **`tableHeader` renders below the table, not in the toggle row or above it.** It is a
+ *   conditional, sometimes two-line `<p>` (`EmptyTableHint`) that goes on the first row or on
+ *   opening bulk edit: in the toggle row it snapped the row's height, and above the table it moved
+ *   the row being typed into on the first keystroke. Below the trailing blank row, its mount moves
+ *   only content under the cursor's row. Not always shown (it restates the placeholder and token
+ *   colouring once a row exists, permanent furniture `EmptyTableHint` removes), not reserved
+ *   invisibly (clutter without content), not behind a tooltip (it teaches `{{variable}}` syntax at
+ *   the one moment discovery matters).
  */
 
 import { Edit3, Table2 } from "lucide-react";
@@ -95,12 +50,11 @@ export interface BulkEditorProps {
 	/** Opens (a fresh draft), edits, or discards (null) the draft. */
 	onDraftChange: (draft: BulkDraft | null) => void;
 	/**
-	 * Switching back to the table: the caller parses `draft.text` and closes the
-	 * draft. Parsing is the caller's because only it knows the syntax and what
-	 * the rows touch besides themselves - params rewrite the URL.
+	 * Back to the table: the caller parses `draft.text` and closes the draft, as only it knows the
+	 * syntax and what the rows touch besides themselves (params rewrite the URL).
 	 */
 	onCommit: () => void;
-	/** "Headers" / "Query parameters" - names the textarea. */
+	/** "Headers" / "Query parameters": names the textarea. */
 	label: string;
 	placeholder: string;
 	/** The syntax note under the field. Headers and params differ here. */
@@ -108,16 +62,13 @@ export interface BulkEditorProps {
 	/** The table, rendered when not in text mode. */
 	children: React.ReactNode;
 	/**
-	 * The empty-state hint, rendered directly below the table - table-only,
-	 * like `children`, and not part of the toggle row. See the module doc:
-	 * neither the toggle row nor the table's own top edge can carry this
-	 * without a mount/unmount of it moving content the user is looking at.
+	 * The empty-state hint, directly below the table, table-only like `children`; the module doc
+	 * says why nowhere higher.
 	 */
 	tableHeader?: React.ReactNode;
 	/**
-	 * Rendered below the table or the textarea, in both modes - what describes
-	 * the send rather than the table (the engine's declared headers, the
-	 * resolved URL). See the module doc for why this is not part of `children`.
+	 * Below the table or textarea in both modes: what describes the send (declared headers, the
+	 * resolved URL); see the module doc.
 	 */
 	after?: React.ReactNode;
 }
@@ -135,9 +86,8 @@ export function BulkEditor({
 	after,
 }: BulkEditorProps) {
 	const isText = draft !== null;
-	// Read against the text the draft opened with rather than a `format()` call,
-	// which would recompute against the table's *current* (unrelated) state on
-	// every render.
+	// Against the text the draft opened with, not `format()`, which recomputes from the table's
+	// current, unrelated state each render.
 	const isDirty = isText && draft.text !== draft.opened;
 
 	const enterText = () => {
@@ -145,25 +95,18 @@ export function BulkEditor({
 		onDraftChange({ text, opened: text });
 	};
 
-	// Radix's single-select toggle group reports "" on a click that would
-	// deselect the active item - ignored, the same way ResponseBody's own view
-	// mode switch ignores it, since a mode toggle here has no "neither" state.
+	// Radix's single-select group reports "" on a deselecting click; ignored, as in ResponseBody's
+	// view switch, since this toggle has no "neither".
 	const onModeChange = (next: string) => {
 		if (next === "text" && !isText) enterText();
 		if (next === "table" && isText) onCommit();
 	};
 
-	// Leaves text mode without committing. Only ever shown once the draft has
-	// actually diverged (`isDirty`), so this is never a second, quieter way to
-	// do what the toggle already does.
+	// Leaves text mode without committing; shown only once the draft diverged (`isDirty`), so it is
+	// never a quieter twin of the toggle.
 	const discard = () => onDraftChange(null);
 
-	/*
-	 * Derived from the label, so Headers and Query Parameters get different ids.
-	 * Both old copies hardcoded `id="bulk-edit"` with a `<Label htmlFor>` to
-	 * match - harmless only because one panel is mounted at a time, and exactly
-	 * the copy-paste tell this component exists to remove.
-	 */
+	// Derived from the label, so Headers and Query Parameters get distinct ids.
 	const fieldId = `bulk-edit-${label.replace(/\s+/g, "-").toLowerCase()}`;
 
 	return (
