@@ -868,6 +868,24 @@ one JSON object (an unresolved `{{token}}`) derives only `Accept` and
 `MCP-Protocol-Version`. A correlation id cannot be configured under any of
 these names (`correlationIdHeader`).
 
+**The constant `id` under concurrency** (#3832, measured). Every bare call is
+stamped `"id":1`, so a load run sends the same id on every request. Measured
+against the official TypeScript SDK server (`@modelcontextprotocol/sdk` 1.32.2,
+Streamable HTTP, stateless: a fresh transport per POST, `sessionIdGenerator`
+unset) with `constant_concurrency`, 50 virtual users, 5 s, engine 0.51.1:
+4,421 POSTs, every one `"id":1`, every one answered `200` with its own result,
+49 in flight at the peak, no refusal, no deduplication and no id-keyed
+throttle, and the run's `totalRequests` (4,421) agreed with the server's count.
+Under the stateless transport each POST is its own exchange, so the id only
+pairs a reply to its request on that connection; the stamping stays constant
+(a replay sends the same bytes) and no per-VU id exists. This was measured on
+one SDK server: a server that keys a cache or a rate limit on the id is not
+excluded, and would show as a run whose latency collapses. The SDK's newest
+release at the time speaks revisions up to `2025-11-25`, so the call carried
+`params._meta."io.modelcontextprotocol/protocolVersion": "2025-11-25"`, which
+the derived `MCP-Protocol-Version` header follows; the revision does not touch
+the id.
+
 **`mcpTool`** is the tool a `tools/call` body calls, stored inside the body
 object, so it needs no column and a `PUT` that leaves `body` out keeps it:
 
