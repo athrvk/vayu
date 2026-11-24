@@ -254,26 +254,22 @@
       "max_cell": 369
     },
     "docs/engine/architecture.md": {
-      "lines": 2269,
-      "history": 3
+      "lines": 2268
     },
     "docs/engine/benchmarks.md": {
-      "lines": 1244,
+      "lines": 1242,
       "max_line": 401,
       "long_lines": 1,
-      "max_cell": 366,
-      "history": 6
+      "max_cell": 366
     },
     "docs/engine/building.md": {
-      "lines": 1972,
-      "max_line": 1701,
+      "lines": 1937,
+      "max_line": 1688,
       "long_lines": 8,
-      "max_cell": 1690,
-      "history": 11
+      "max_cell": 1677
     },
     "docs/engine/cli.md": {
-      "max_cell": 316,
-      "history": 3
+      "max_cell": 284
     },
     "docs/engine/db-schema.md": {
       "lines": 3041,
@@ -283,8 +279,7 @@
       "history": 17
     },
     "docs/engine/elements.md": {
-      "lines": 894,
-      "history": 1
+      "lines": 894
     },
     "docs/engine/logging.md": {
       "max_cell": 277

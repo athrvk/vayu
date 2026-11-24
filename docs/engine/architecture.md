@@ -83,11 +83,11 @@ Three shapes, and the difference between them is the point:
   request a caller forgot to check for is then unreachable rather than merely
   unlikely (issues #926, #954).
 
-These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
-*empty* optional meant success (issue #901). That reads backwards at every call
+These are not `std::optional<std::pair<int, nlohmann::json>>`, where an
+*empty* optional means success (issue #901). That reads backwards at every call
 site - `if (err)` is the failure path, `return std::nullopt` means "fine" - and
-a dropped return value silently means "no error", which is why the two most
-dangerous of them carried `[[nodiscard]]` by hand. `std::expected` puts the
+a dropped return value silently means "no error", which would need
+`[[nodiscard]]` by hand on every one. `std::expected` puts the
 direction in the type: `if (auto outcome = f (...); !outcome) return outcome;`
 propagates, and the response is reachable only through `.error ()`.
 
@@ -681,11 +681,10 @@ JavaScript execution engine for pre-request and test scripts:
 
 **Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
 maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
-CMake on all three platforms. Until #226's review, Linux/macOS ran Bellard's
-original QuickJS while Windows ran NG (the original does not compile under
-MSVC) - two interpreters behind one `pm.*` surface, so an engine-level
-behaviour difference was a Windows-vs-Unix script divergence. The original
-copy is deleted.
+CMake on all three platforms. Running Bellard's original QuickJS on
+Linux/macOS and NG on Windows (the original does not compile under MSVC) would
+put two interpreters behind one `pm.*` surface, so an engine-level behaviour
+difference would be a Windows-vs-Unix script divergence (#226).
 
 ### Cookie Jar
 
@@ -1376,7 +1375,7 @@ the submit queue's hand-off, and a lock there would sit on the hot submission
 path.
 
 **Auth outlives its token.** A run resolves auth once, before the strategy
-starts, so a run longer than its OAuth 2.0 access token used to turn into a 401
+starts, so a run longer than its OAuth 2.0 access token would turn into a 401
 storm the report never explained. The watchdog closes that: it sleeps until
 `oauth2RefreshLeadMs` (default 60s) before the token expires, re-acquires it with
 a forced refresh, and publishes the new `Authorization` value on its
