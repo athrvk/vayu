@@ -6,15 +6,11 @@
  */
 
 /**
- * The load profile of a collection run: which modes a scenario accepts, the
- * fields a chosen mode sends in the scenario payload's spelling, and the rules
- * that stop Run.
- *
- * The per-mode field selection is `profileParams`, shared with the
- * single-request payload; only the spelling differs. A scenario's is camelCase
- * with `"Ns"` duration strings, and the same object seeds the dashboard's
- * `LoadTestRunConfig`, which reads those exact keys - so what the user is shown
- * while the run is live cannot drift from what the engine was sent.
+ * A collection run's load profile: the modes a scenario accepts, a mode's fields in the scenario
+ * payload's spelling, and the rules that stop Run. Field selection is `profileParams`, shared with
+ * the single-request payload; only the spelling differs (camelCase, `"Ns"` strings). The same
+ * object seeds the dashboard's `LoadTestRunConfig`, which reads those keys, so what the live run
+ * shows cannot drift from what was sent.
  */
 
 import { type LoadTestLimits, LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
@@ -30,19 +26,17 @@ import { profileParams, retryAfterCapError } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
- * `constant_rps` and `capacity` are a `400` engine-side for a scenario: an
- * open-loop rate over a multi-step sequence is an arrival-rate executor Vayu
- * does not implement, and a capacity search judges one p99 per level where a
- * sequence has one per step.
+ * `constant_rps` and `capacity` are a `400` for a scenario: an open-loop rate over a sequence is an
+ * arrival-rate executor Vayu lacks, and a capacity search judges one p99 per level where a sequence
+ * has one per step.
  */
 export const SCENARIO_LOAD_MODES = ["constant_concurrency", "iterations", "ramp_up"] as const;
 
 export type ScenarioLoadMode = (typeof SCENARIO_LOAD_MODES)[number];
 
 /**
- * The Retry-After pair lives here and not in `LoadTestProfile`: the request
- * dialog keeps its own copy beside the recording fields, and only a scenario
- * edits it with the profile.
+ * The Retry-After pair lives here, not in `LoadTestProfile`: the request dialog keeps its own copy
+ * by the recording fields, and only a scenario edits it with the profile.
  */
 export type ScenarioLoadProfile = LoadTestProfile & {
 	mode: ScenarioLoadMode;
@@ -55,14 +49,11 @@ export function isScenarioLoadMode(mode: string): mode is ScenarioLoadMode {
 }
 
 /**
- * A fresh collection run starts from its own numbers, not from the
- * single-request dialog's memo: a sequence multiplies its step count by the
- * virtual-user count (and by the pass count, in Fixed passes), so numbers
- * borrowed from a lone request would aim a folder's worth of requests at a
- * target nobody has decided to load. The fields no scenario mode reads (`rps`,
- * `stepDuration`, `sloMs`) are the single-request defaults and never leave
- * `profileParams`. The stream caps are read by `scenarioStreamCaps`, and only when
- * a step streams.
+ * A fresh collection run starts from its own numbers, not the request dialog's memo: a sequence
+ * multiplies its steps by the virtual users (and passes, in Fixed passes), so a lone request's
+ * numbers would aim a collection's worth of requests at a target nobody chose to load. Fields no
+ * scenario mode reads (`rps`, `stepDuration`, `sloMs`) keep the single-request defaults and never
+ * leave `profileParams`; `scenarioStreamCaps` reads the stream caps, and only when a step streams.
  */
 export const SCENARIO_PROFILE_DEFAULTS: ScenarioLoadProfile = {
 	mode: "constant_concurrency",
@@ -81,11 +72,9 @@ export const SCENARIO_PROFILE_DEFAULTS: ScenarioLoadProfile = {
 };
 
 /**
- * The run-level stream caps of a collection run, in the engine's spelling
- * (milliseconds). Sent whether or not the run is a load test, and only when a
- * step of the collection streams (#3235): the engine bounds the streaming steps
- * with them and ignores them for the rest, so a cap sent for a collection
- * without one would promise a bound nothing applies.
+ * A collection run's stream caps, in ms. Sent whether or not it is a load test, and only when a
+ * step streams (#3235): the engine bounds streaming steps with them and ignores them otherwise, so
+ * caps for a collection without one would promise a bound nothing applies.
  */
 export type ScenarioStreamCaps = Pick<
 	StartScenarioRunRequest,
@@ -100,9 +89,8 @@ export function scenarioStreamCaps(profile: ScenarioLoadProfile): ScenarioStream
 }
 
 /**
- * The load half of a scenario payload, and the dashboard's seed for the run.
- * The Retry-After pair rides along only when the option is on, and the cap only
- * with it: absent already means off, as in the single-request payload.
+ * The load half of a scenario payload, and the dashboard's seed. The Retry-After pair rides only
+ * when on, the cap only with it: absent means off, as in the single-request payload.
  */
 export type ScenarioLoadFields = Pick<
 	StartScenarioRunRequest,
@@ -132,9 +120,8 @@ export function scenarioLoadFields(profile: ScenarioLoadProfile): ScenarioLoadFi
 }
 
 /**
- * The message that stops Run, or null. Bounded by the user's Settings ceilings
- * (`limits`) so an over-ceiling value is refused here, before the request,
- * where the engine would accept it.
+ * The message that stops Run, or null. Bounded by the user's Settings ceilings (`limits`), so an
+ * over-ceiling value the engine would accept is refused here.
  */
 export function scenarioProfileError(
 	profile: ScenarioLoadProfile,
@@ -154,9 +141,9 @@ export function scenarioProfileError(
 }
 
 /**
- * The stream caps' own check, apart from `scenarioProfileError` because a design
- * run has caps and no load profile. The caller asks only when a step streams: the
- * fields are hidden otherwise, and a value the user cannot see must not hold Run.
+ * The stream caps' own check, apart from `scenarioProfileError` since a design run has caps and no
+ * profile. Asked only when a step streams: the fields are hidden otherwise, and an unseen value
+ * must not hold Run.
  */
 export function scenarioStreamCapError(
 	{

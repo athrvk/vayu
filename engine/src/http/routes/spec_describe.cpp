@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/spec_describe.cpp
  * @brief `POST /specs/describe` - what a picked document is, before anything is
  *        stored (issue #869).
  *

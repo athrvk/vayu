@@ -6,15 +6,11 @@
  */
 
 /**
- * A field this tab's draft has touched that an external write (typically an
- * MCP agent's `update_request`) has since changed to a different value
- * (issue #1436) - the per-field conflict `RequestBuilderProvider`'s merge
- * surfaces instead of silently overwriting either side.
- *
- * One callout per logical group rather than per `RequestState` key: the
- * fields the editor splits a request's body across (`bodyMode`, `body`,
- * `formData`, `urlEncoded`, `binaryFile`, `mcpTool`) are one thing to a user, and a
- * separate "body" callout per field would look like a bug of its own.
+ * A field this tab's draft touched that an external write (typically an MCP agent's
+ * `update_request`) has since changed (#1436): the per-field conflict `RequestBuilderProvider`'s
+ * merge surfaces instead of silently overwriting either side. One callout per logical group, not
+ * per `RequestState` key: the body's fields (`bodyMode`, `body`, `formData`, `urlEncoded`,
+ * `binaryFile`, `mcpTool`) are one thing to a user, and a callout per field would look like a bug.
  */
 
 import { ExternalChangeCallout } from "@/components/shared";

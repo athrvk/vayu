@@ -6,18 +6,10 @@
  */
 
 /**
- * RequestBuilderLayout Component
- *
- * Internal layout component that uses ResizablePanelGroup for the split between
- * the request editor and the response viewer - the response beside the request
- * or below it, per the `responsePosition` setting (issue #1711; `auto` is
- * resolved by `useResolvedResponsePosition` from this component's own width).
- *
- * Also handles the send shortcuts (Cmd/Ctrl+Enter, and Cmd/Ctrl+Shift+Enter for
- * a load test).
- *
- * The description no longer has a band of its own between the URL bar and the
- * tabs - it is the first request tab now. See `RequestTabs/panels/InfoPanel`.
+ * The split between the request editor and the response viewer: beside or below, per the
+ * `responsePosition` setting (#1711; `useResolvedResponsePosition` resolves `auto` from this
+ * component's width). Also the send chords: Cmd/Ctrl+Enter, and Cmd/Ctrl+Shift+Enter for a load
+ * test. The description is the first request tab (`RequestTabs/panels/InfoPanel`), not a band here.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
@@ -65,9 +57,9 @@ export default function RequestBuilderLayout() {
 	const crumbs = useRequestCrumbs();
 
 	/*
-	 * Into the ratio for the arrangement that was dragged. The arrangement is
-	 * captured with the ratio rather than read when the timer fires, so a flip
-	 * inside the debounce window cannot file a Beside drag under Below.
+	 * Saves into the dragged arrangement's ratio. The arrangement is captured with the ratio, not
+	 * read when the timer fires, so a flip inside the debounce cannot file a Beside drag under
+	 * Below.
 	 */
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const debouncedSetRatio = useCallback(
@@ -81,10 +73,8 @@ export default function RequestBuilderLayout() {
 		[setRequestSplitRatio, arrangement]
 	);
 
-	/*
-	 * `defaultSize` is read once at mount, so a ratio that changes on a group
-	 * that is already laid out has to go through the group's imperative handle.
-	 */
+	// `defaultSize` is read once at mount, so a ratio change on a laid-out group goes through the
+	// handle.
 	const applyRatio = useCallback(
 		(ratio: number) => {
 			groupRef.current?.setLayout({ request: share(ratio), response: share(1 - ratio) });
@@ -92,26 +82,18 @@ export default function RequestBuilderLayout() {
 		[groupRef]
 	);
 
-	/*
-	 * Double-click on the divider: back to an even split, for this arrangement
-	 * only.
-	 */
+	// Double-click on the divider: an even split, for this arrangement only.
 	const resetSplit = useCallback(() => {
 		setRequestSplitRatio(arrangement, DEFAULT_REQUEST_SPLIT_RATIO);
 		applyRatio(DEFAULT_REQUEST_SPLIT_RATIO);
 	}, [setRequestSplitRatio, arrangement, applyRatio]);
 
 	/*
-	 * A flip re-orients the group *in place* - the library re-lays out when its
-	 * `orientation` prop changes - and this effect then applies the ratio the
-	 * new arrangement owns. It is a layout effect so the new ratio is on screen
-	 * in the same frame as the new orientation, and it skips the mount, where
-	 * `defaultSize` has already done the job.
-	 *
-	 * Deliberately not a `key` on the group: a remount would tear down and
-	 * rebuild the request editor and the response viewer, code editors and all,
-	 * and that rebuild is a visible flash of the whole pane on every Auto flip
-	 * while the window is being resized.
+	 * A flip re-orients the group in place (the library re-lays out on an `orientation` change),
+	 * and this effect applies the new arrangement's ratio: a layout effect, so it lands in the same
+	 * frame, skipping the mount, where `defaultSize` did it. Not a `key` on the group: a remount
+	 * rebuilds both panes, code editors and all, a visible flash on every Auto flip while the
+	 * window resizes.
 	 */
 	const mountedArrangementRef = useRef(arrangement);
 	useLayoutEffect(() => {
@@ -122,9 +104,8 @@ export default function RequestBuilderLayout() {
 	}, [arrangement, applyRatio]);
 
 	/*
-	 * Stacked minimums are pixels, side-by-side ones a share: 20% of a short
-	 * window is a response pane that cannot show a status line and one row of
-	 * body, where 20% of a wide window is still a usable column.
+	 * Stacked minimums are pixels, side-by-side ones a share: 20% of a short window cannot show a
+	 * status line and a body row, where 20% of a wide one is a usable column.
 	 */
 	const paneBounds =
 		arrangement === "beside"
@@ -132,25 +113,16 @@ export default function RequestBuilderLayout() {
 			: { minSize: STACKED_PANE_MIN_HEIGHT };
 
 	/*
-	 * Send and Load Test from the keyboard.
+	 * Send and Load Test from the keyboard. Both chords are in `constants/shortcuts.ts`, so the
+	 * buttons advertising them and this handler read one definition. `matchesChord` compares
+	 * `shift` strictly: otherwise `mod+shift+Enter` also satisfies Send's `mod+Enter` and both
+	 * fire.
 	 *
-	 * Both chords live in `constants/shortcuts.ts` so the buttons that advertise
-	 * them and the handler that fires them read the same definition. `mod+Enter`
-	 * sends; `mod+shift+Enter` starts a load test.
-	 *
-	 * `matchesChord` compares `shift` strictly rather than ignoring it. Without
-	 * that, `mod+shift+Enter` also satisfies Send's `mod+Enter` and both fire -
-	 * the one failure a modifier-distinguished pair must not have.
-	 *
-	 * The editor exclusions are Send's original ones, and they apply to both:
-	 * a plain input (the URL) should still send, but a textarea, a Monaco editor
-	 * or a contenteditable owns Enter for its own purposes. They live in
-	 * `ownsEnterKey` so the collection tree's parallel guard reads the same list.
-	 *
-	 * A modal is the exclusion those three could not express: a dialog's name
-	 * field is a plain input, so it passed the guard and sent the request behind
-	 * the dialog (#935). `isModalOpen` is the one predicate both window handlers
-	 * consult - this one and the Shell's.
+	 * Both obey Send's editor exclusions: a plain input (the URL) sends, but a textarea, Monaco or
+	 * a contenteditable owns Enter. They are `ownsEnterKey`, so the collection tree's guard reads
+	 * the same list. A modal is what those cannot express: a dialog's name field is a plain input,
+	 * so it passed the guard and sent the request behind the dialog (#935). `isModalOpen` is the
+	 * one predicate both window handlers (this and the Shell's) consult.
 	 */
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -162,12 +134,9 @@ export default function RequestBuilderLayout() {
 			if (isModalOpen()) return;
 
 			/*
-			 * Don't trigger if the request is already in flight or the URL is
-			 * empty. The predicate lives in `utils/send-gate.ts` because the
-			 * palette's Send row asks the same question through
-			 * `SendRequestCommandSurface`, and the two must not drift (#1243); the
-			 * reasoning behind it - in particular why `isStreaming` counts - is
-			 * written there.
+			 * Not while a request is in flight or the URL is empty. The predicate is in
+			 * `utils/send-gate.ts` because the palette's Send row (`SendRequestCommandSurface`)
+			 * asks the same and must not drift (#1243); why `isStreaming` counts is written there.
 			 */
 			if (!canSendRequest({ url: request.url, isExecuting, isStreaming })) return;
 
@@ -177,11 +146,9 @@ export default function RequestBuilderLayout() {
 				return;
 			}
 			/*
-			 * The same gate the Load Test button honours. A detached copy of a
-			 * past design run is mounted without an `onStartLoadTest` handler, so
-			 * the button is hidden entirely - and a shortcut that still fired
-			 * would be an action with no visible affordance, on the one screen
-			 * where it is deliberately unavailable.
+			 * The Load Test button's gate. A detached past design run has no `onStartLoadTest`, so
+			 * the button is hidden, and a shortcut that still fired would be an action with no
+			 * affordance on the one screen where it is deliberately unavailable.
 			 */
 			if (!canStartLoadTest) return;
 			event.preventDefault();
@@ -198,28 +165,29 @@ export default function RequestBuilderLayout() {
 	return (
 		<div ref={containerRef} className="h-full flex flex-col">
 			{/*
-			 * Rendered unconditionally and outside the panels: the live region has
-			 * to exist before the response does, and it must survive the response
-			 * pane swapping between its loading, error and content states.
+			 * Unconditional and outside the panels: the live region must exist before the response
+			 * does and survive the pane's loading, error and content swaps.
 			 */}
 			<ResponseAnnouncer />
 
-			{/* Where this request lives, then the URL bar. The crumb renders
-			    nothing at all for a request with no collection and no name, so
-			    the header does not grow a permanent empty line - the mistake the
-			    description band made here before it became the Info tab. */}
+			{/*
+			 * Where the request lives, then the URL bar. The crumb renders nothing for a request
+			 * with no collection and no name, so the header grows no permanent empty line.
+			 */}
 			<TabBreadcrumb label="Request location" crumbs={crumbs} titlesPane />
 			<HeadingSection>
 				<UrlBar />
 
-				{/* A field the user is editing that an external write (typically an
-			    MCP agent) has changed to a different value (issue #1436). */}
+				{/*
+				 * A field being edited that an external write (typically an MCP agent) changed
+				 * (#1436).
+				 */}
 				<ExternalChangeNotice />
 
 				{/*
-				 * Only a user's own drag is persisted (`isUserInteraction`) - the
-				 * layout the library reports on mount, after a flip, or after a pixel
-				 * minimum clamps a stacked pane, is not a preference anyone expressed.
+				 * Only the user's own drag is persisted (`isUserInteraction`): the layout reported
+				 * on mount, after a flip, or after a pixel minimum clamps a stacked pane is no
+				 * one's preference.
 				 */}
 				<ResizablePanelGroup
 					groupRef={groupRef}
@@ -235,7 +203,8 @@ export default function RequestBuilderLayout() {
 					{/* Request Editor Panel */}
 					<ResizablePanel
 						id="request"
-						// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
+						// react-resizable-panels v4 reads bare numbers as pixels; percentages must
+						// be strings.
 						defaultSize={percent(requestSplitRatio)}
 						{...paneBounds}
 						className="flex flex-col"

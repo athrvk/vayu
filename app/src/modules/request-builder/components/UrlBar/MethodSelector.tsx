@@ -6,17 +6,10 @@
  */
 
 /**
- * MethodSelector Component
- *
- * HTTP method dropdown, colour-coded, living *inside* the URL field.
- *
- * Since the method and the URL are one thought ("this request"), it sits in the
- * URL field's own border, the way a browser's protocol chip does, and sizes to
- * its label.
- *
- * It stays a real dropdown rather than becoming a coloured rail with a text
- * label: the method is changed often, and dropping the caret would make a
- * control look like a status.
+ * The colour-coded HTTP method dropdown, *inside* the URL field: method and URL are one thought, so
+ * it sits in the field's border like a browser's protocol chip and sizes to its label. A real
+ * dropdown, not a coloured rail: the method changes often, and without the caret the control would
+ * look like a status.
  */
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui";
@@ -33,54 +26,40 @@ export default function MethodSelector() {
 		<Select
 			value={request.method}
 			onValueChange={(value) =>
-				// Both fields in one call: a method picked by hand is no longer
-				// GraphQL's, the same way retyping a marked header row clears its
-				// `source` (see `graphql-method.ts`, issue #1505).
+				// Both fields in one call: a hand-picked method is no longer GraphQL's, as retyping
+				// a marked header clears its `source` (`graphql-method.ts`, #1505).
 				setRequest({ method: value as HttpMethod, methodSource: undefined })
 			}
 		>
 			<SelectTrigger
 				aria-label="HTTP method"
 				className={cn(
-					// Borderless and transparent: the field around it draws the box.
-					// `w-auto` so the trigger is as wide as its verb.
+					// Borderless and transparent, as the field draws the box; `w-auto` so it is as
+					// wide as its verb.
 					"h-full w-auto shrink-0 gap-1.5 border-0 bg-transparent px-3 py-0 shadow-none",
-					// Semibold, not bold: 600 is the heaviest JetBrains Mono face
-					// `fonts.css` bundles, so `font-bold` here is a synthesised 700.
+					// Semibold, not bold: 600 is the heaviest JetBrains Mono face `fonts.css`
+					// bundles, so `font-bold` would be a synthesised 700.
 					"font-mono text-label font-semibold",
 					/*
-					 * It had no hover state at all after moving in here - the old
-					 * standalone control got its affordance from a `bg-accent` box,
-					 * and going transparent inside the field took that away without
-					 * putting anything back. A dropdown that does not respond to the
-					 * pointer does not look like a dropdown.
-					 *
-					 * `data-[state=open]` holds the wash while the menu is up, so the
-					 * trigger stays visibly the thing the list belongs to.
+					 * A hover wash: transparent inside the field, a dropdown that does not respond
+					 * to the pointer does not look like one. `data-[state=open]` holds the wash
+					 * while the menu is up, marking what the list belongs to.
 					 */
 					"transition-colors hover:bg-accent data-[state=open]:bg-accent",
 					/*
-					 * Rounded on the left only, matching the field's own corner, so
-					 * the hover wash follows the curve instead of squaring off
-					 * against it. `rounded-l-md` rather than a pixel value: the app
-					 * has a user-facing Roundedness setting and a hardcoded radius
-					 * would ignore it. The field cannot use `overflow-hidden` to do
-					 * this clipping for us - it would also clip the URL input's
-					 * variable-autocomplete popover, which is positioned inside it.
+					 * Rounded on the left only, the field's own corner, so the wash follows the
+					 * curve. `rounded-l-md`, not pixels: the Roundedness setting must apply. The
+					 * field cannot clip with `overflow-hidden`: it would clip the URL input's
+					 * variable-autocomplete popover, positioned inside it.
 					 */
 					"rounded-l-md rounded-r-none",
-					// The field owns the focus ring; a second one inside it reads as
-					// two controls, which is exactly what this stopped being.
+					// The field owns the focus ring; a second inside it would read as two controls.
 					"focus:ring-0 focus:ring-offset-0",
-					// `size-icon-sm` (issue #1679), not `[&>svg]:h-3 [&>svg]:w-3` -
-					// the same small-icon step every other 12px glyph in the app
-					// moved to; this rule was written as a per-axis arbitrary
-					// selector and the codemod that converted the rest of the app
-					// matched only bare `w-3 h-3`/`h-3 w-3` classes, so it missed it.
+					// `size-icon-sm` (#1679), the app's small-icon step for every 12px glyph.
 					"[&>svg]:size-icon-sm"
 				)}
-				// Inline `hsl()` from `getMethodColor`, matching `MethodBadge` - the
-				// one way method colour is applied in this app.
+				// Inline `hsl()` from `getMethodColor`, as `MethodBadge` does: the app's one way to
+				// apply method colour.
 				style={{ color: `hsl(${getMethodColor(request.method)})` }}
 			>
 				<SelectValue />

@@ -6,25 +6,16 @@
  */
 
 /**
- * The request builder's second contribution to the command registry: "send what
- * is on screen right now" (#1243).
+ * The builder's second command-registry entry: "send what is on screen" (#1243). A component for
+ * `LoadTestCommandSurface`'s reason: the handler lives inside `RequestBuilderProvider`, outside
+ * which the builder's own component sits. Renders nothing; mounted only from
+ * `modules/request-builder/index.tsx`, and `DesignRunView`'s detached copy does not render it, so
+ * "exactly one contributor" holds by construction.
  *
- * A component rather than a hook call in `RequestBuilder`, for the reason
- * `LoadTestCommandSurface` beside it gives: the handler it publishes lives
- * *inside* `RequestBuilderProvider`, and the builder's own component sits
- * outside the provider it renders.
- *
- * It renders nothing, and it is mounted from `modules/request-builder/index.tsx`
- * alone - `DesignRunView`'s detached copy of a past run simply does not render
- * it, so "exactly one contributor" holds by construction rather than by a
- * runtime guard.
- *
- * **The contribution is withdrawn while a send would be refused.** Unlike the
- * load test, whose gate is a property of the builder (a detached copy has no
- * handler at all), Send's gate moves during a session: it is unavailable with an
- * empty URL and for the whole of an open stream, where the button in front of
- * the user reads Stop. Passing `null` there takes the palette row away with it,
- * rather than leaving a row that would answer to nothing.
+ * **The entry is withdrawn while a send would be refused.** Unlike the load test's gate (a property
+ * of the builder), Send's moves during a session: unavailable with an empty URL and for a whole
+ * open stream, where the button reads Stop. Passing `null` removes the palette row rather than
+ * leave one that answers to nothing.
  */
 
 import { useCallback } from "react";
@@ -35,9 +26,9 @@ import { canSendRequest } from "../utils/send-gate";
 export default function SendRequestCommandSurface(): null {
 	const { request, isExecuting, isStreaming, executeRequest } = useRequestBuilderContext();
 
-	// No row: Send-with-row is a distinct action with its own picker, and a
-	// palette row that silently re-bound the last row would be sending something
-	// other than what it says. `executeRequest` un-binds it, as the chord does.
+	// No row: Send-with-row is its own action with a picker, and a palette row silently re-binding
+	// the last row would send something other than it says. `executeRequest` un-binds it, as the
+	// chord does.
 	const send = useCallback(() => void executeRequest(), [executeRequest]);
 
 	const sendable = canSendRequest({ url: request.url, isExecuting, isStreaming });

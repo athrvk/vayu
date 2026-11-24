@@ -6,32 +6,22 @@
  */
 
 /**
- * The schema explorer: the endpoint's own documentation, beside the editor that
- * needs it.
+ * The schema explorer: the endpoint's own documentation, beside the editor that needs it.
  *
- * **Beside the editor, not in the context bar.** The bar clamps to 220-480px
- * (`layout-store`), which is where Postman's explorer already lives and why
- * theirs reads as a cramped list rather than a document. Insertion also wants
- * to be next to the cursor it inserts at. The bar gets the *status* half in its
- * own section - freshness and an outline are glanceable, browsing is not.
+ * - **Beside the editor, not in the context bar.** The bar clamps to 220-480px (`layout-store`),
+ *   which is where Postman's explorer lives and why it reads as a cramped list, and insertion wants
+ *   to sit by the cursor. The bar gets the *status* half (freshness, an outline): glanceable,
+ *   unlike browsing.
+ * - **This header carries only the pane's own controls**: search and the descriptions toggle.
+ *   Status, Refresh and the pane's open control belong to the subject and sit in one fixed place in
+ *   the Query header, open or shut (#1224), so the schema's state is not described twice and the
+ *   layout does not change shape as the pane opens (#455).
+ * - **No introspection of its own.** The pane renders what the schema cache holds: #382 made the
+ *   body-tab lifecycle the whole consent budget for contacting the endpoint, and fetching on open
+ *   would widen it.
  *
- * **This header carries only what belongs to the pane** - the search box and the
- * descriptions show/hide. Status, Refresh and the control that opens and closes
- * the pane are the subject's, not the pane's, and they sit in one fixed place in
- * the Query header whether this pane is open or shut (#1224). They lived here
- * for a while because a visible Refresh in each corner doing the same thing, and
- * the schema's state described twice in two vocabularies, was the split #455 was
- * filed about; moving them to a home that does not depend on this pane's state
- * keeps that fixed without the layout changing shape as the pane opens.
- *
- * **It adds no introspection of its own.** The pane renders whatever the schema
- * cache is holding. #382 made the body-tab lifecycle the whole consent budget
- * for talking to the endpoint, and a pane that fetched on open would quietly
- * widen it.
- *
- * Search, expansion and scroll live in `explorer-store`, not in this component:
- * Radix unmounts the whole Body tab whenever the user glances at Headers, and
- * state here would not survive it.
+ * Search, expansion and scroll live in `explorer-store`: Radix unmounts the Body tab on every
+ * glance at Headers, and state here would not survive.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -64,12 +54,8 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 const ROW_WINDOW = 200;
 
 /**
- * A row on screen: a node, how deep it sits, and where the search term matched
- * it.
- *
- * Tree rows carry -1 for both, the same "no match" the search itself reports -
- * so a row draws its name and its description whole without needing to know
- * which of the two modes produced it.
+ * A row on screen: its node, depth, and where the search matched it. Tree rows carry -1 for both,
+ * search's own "no match", so a row draws name and description whole without knowing its mode.
  */
 interface NodeRowModel {
 	kind: "row";
@@ -79,14 +65,13 @@ interface NodeRowModel {
 	matchStart: number;
 	descriptionStart: number;
 	/**
-	 * Whether the *description* is why this row is in the results - not merely
-	 * whether it also contains the term. Only that earns the whole paragraph.
+	 * Whether the *description* is why the row is in the results, not merely contains the term;
+	 * only that earns the whole paragraph.
 	 */
 	descriptionMatched: boolean;
 	/**
-	 * Whether the row has to name its owner. In the tree the owner is the row
-	 * above it; in a flat result list it is the only thing telling
-	 * `App.accessScopes` from `AppInstallation.accessScopes`.
+	 * Whether the row names its owner: in the tree the owner is the row above; in a flat result
+	 * list it alone tells `App.accessScopes` from `AppInstallation.accessScopes`.
 	 */
 	showOwner: boolean;
 	/** Where this row lives in the tree, when it can be shown there. */
@@ -103,15 +88,10 @@ interface GroupRowModel {
 type ExplorerRowModel = NodeRowModel | GroupRowModel;
 
 /**
- * Search matches as rows, under the headings the tree uses.
- *
- * Flattened rather than nested inside a `role="group"` per branch: the roving
- * treeview walks the DOM to decide what is a parent of what, and a wrapper
- * holding several rows would make the first of them read as the parent of the
- * rest. The headings are `presentation`, so the tree still contains only
- * treeitems, and the disambiguation a screen reader needs rides on the row
- * itself as its owner prefix rather than on a heading it would have to
- * remember.
+ * Search matches as rows, under the tree's headings. Flat, not nested in a `role="group"` per
+ * branch: the roving treeview walks the DOM for parenthood, and a wrapper would make its first row
+ * read as the parent of the rest. Headings are `presentation`, so the tree holds only treeitems,
+ * and each row carries its owner prefix for a screen reader instead of a heading to remember.
  */
 function searchRows(matches: SchemaSearchMatch[]): ExplorerRowModel[] {
 	return groupSearchMatches(matches).flatMap((group) => [
@@ -132,27 +112,21 @@ function searchRows(matches: SchemaSearchMatch[]): ExplorerRowModel[] {
 
 export interface SchemaExplorerProps {
 	/**
-	 * The cache's own snapshot - status, schema, failure and freshness together.
-	 *
-	 * One object rather than four props for the reason `GraphQLBody` reads it as
-	 * one: they are four faces of a single state, and passed separately they can
-	 * be rendered a render apart from each other. It is also what the status
-	 * badge takes, so this header hands it straight on.
+	 * The cache's snapshot (status, schema, failure, freshness), as one object for `GraphQLBody`'s
+	 * reason: four faces of one state, which separate props could render a render apart. The status
+	 * badge takes the same object, so it is handed straight on.
 	 */
 	entry: SchemaEntry | null;
 	/** The schema's cache identity - what the view state is remembered under. */
 	schemaKey: string;
 	/**
-	 * Insert this row into the query document. The explorer does not know what
-	 * the document is; it knows which row was activated.
+	 * Insert this row into the query; the explorer knows which row was activated, not the document.
 	 */
 	onInsert: (node: SchemaTreeNode) => void;
 	/**
-	 * What the last activation could not do, in words, or null.
-	 *
-	 * The pane is where the click happened, so it is where the answer belongs.
-	 * The live region says the same thing to a screen reader; for everyone else
-	 * a refusal that only reaches `sr-only` text is a click that did nothing.
+	 * What the last activation could not do, or null. Shown in the pane, where the click happened;
+	 * the live region tells a screen reader, but for everyone else an `sr-only` refusal is a dead
+	 * click.
 	 */
 	notice?: string | null;
 }
@@ -178,17 +152,15 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	const expanded = useMemo(() => new Set(view?.expanded ?? []), [view?.expanded]);
 
 	/*
-	 * Built once per schema, not once per keystroke. It is a full pass over the
-	 * type map, which is cheap for the fixture and is a hitch per character on
-	 * the schema size this pane was designed for.
+	 * Built once per schema, not per keystroke: a full pass over the type map, cheap on the fixture
+	 * but a hitch per character at the schema size this pane is designed for.
 	 */
 	const searchIndex = useMemo(() => (schema ? buildSearchIndex(schema) : null), [schema]);
 
 	/*
-	 * The term drives the rows *and* the highlight, so it is trimmed once here
-	 * rather than in each place: the offsets `searchSchema` reports are into a
-	 * name matched against the trimmed needle, and slicing with an untrimmed
-	 * length would run the highlight past the end of the match.
+	 * Trimmed once here, since it drives rows and highlight: `searchSchema`'s offsets are into a
+	 * name matched against the trimmed needle, and an untrimmed length runs the highlight past the
+	 * match.
 	 */
 	const term = search.trim();
 
@@ -209,26 +181,18 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	}, [schema, searchIndex, term, expanded]);
 
 	/*
-	 * Showing a search result where it lives.
-	 *
-	 * Two steps that cannot be one: the store opens the path and clears the
-	 * search, and only the render *after* that has a row to focus. A counter
-	 * rather than the id in state, because the id is not drawn from - keeping it
-	 * in a ref is one render per reveal instead of two, and the effect that
-	 * consumes it clears it so a later re-render cannot replay a jump the user
-	 * has since scrolled away from.
+	 * Showing a result where it lives takes two steps: the store opens the path and clears the
+	 * search, and only the next render has a row to focus. A counter in state, the id in a ref (it
+	 * is not drawn: one render per reveal, not two), and the consuming effect clears it so a
+	 * re-render cannot replay a jump the user scrolled away from.
 	 */
 	const revealTarget = useRef<string | null>(null);
 	const [revealSeq, setRevealSeq] = useState(0);
 	/**
-	 * How far the window must stay open for a revealed row to exist.
-	 *
-	 * The growing window is what would otherwise swallow this: `visible` resets
-	 * to one step whenever the row count changes, and going from results to tree
-	 * changes it - so on a schema with more types than a step, the target is
-	 * expanded in the store and never rendered, and Reveal becomes the click
-	 * that does nothing all over again. Where it lands is knowable before the
-	 * render, so hold the window open at least that far.
+	 * How far the window must stay open for a revealed row to exist. `visible` resets to one step
+	 * when the row count changes, and results to tree changes it, so on a schema larger than a step
+	 * the target would be expanded but never rendered and Reveal would do nothing. Where it lands
+	 * is known before the render, so the window holds open that far.
 	 */
 	const [revealFloor, setRevealFloor] = useState(0);
 
@@ -249,18 +213,15 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 		const id = revealTarget.current;
 		if (!id) return;
 		revealTarget.current = null;
-		/*
-		 * Read the attribute rather than building a selector: a row id holds
-		 * `:`, `.` and `/`, all of which mean something to a selector parser.
-		 */
+		// Read the attribute, not a selector: a row id holds `:`, `.` and `/`, which a selector
+		// parses.
 		const rendered = treeRef.current?.querySelectorAll<HTMLElement>("[data-tree-id]") ?? [];
 		const row = Array.from(rendered).find((el) => el.getAttribute("data-tree-id") === id);
-		// Absent only when the schema changed under the reveal; `revealFloor`
-		// holds the window open far enough for every row the tree can show.
+		// Absent only when the schema changed under the reveal; `revealFloor` keeps every reachable
+		// row open.
 		if (!row) return;
-		// The pane's own overflow-hidden ancestors make scrollIntoView unsafe
-		// here too (#1612): it would keep scrolling past this scroller, which is
-		// the tree's own parent (the div carrying `ref={scrollerRef}` above).
+		// The pane's overflow-hidden ancestors make scrollIntoView unsafe here too (#1612): it
+		// would scroll past this scroller, the tree's parent (the `ref={scrollerRef}` div).
 		const scroller = treeRef.current?.parentElement;
 		if (scroller) scrollWithin(scroller, row, { block: "center" });
 		row.focus();
@@ -271,14 +232,10 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	const shown = Math.max(visible, revealFloor);
 
 	/*
-	 * Restore the scroll position the last mount left behind.
-	 *
-	 * A callback ref rather than an effect: the scroller mounts and unmounts
-	 * with the Body tab, and the position has to be written the moment the node
-	 * exists, before the browser paints the top of the list. Reading the store
-	 * through `getState` keeps this off the subscription - the scroll handler
-	 * writes on every frame of a drag, and re-rendering the tree for it would
-	 * be a render per scroll tick.
+	 * Restore the last mount's scroll position. A callback ref, not an effect: the scroller mounts
+	 * with the Body tab, and the position must be set when the node exists, before the top paints.
+	 * `getState` keeps it off the subscription: the scroll handler writes every frame, and a render
+	 * per tick would follow.
 	 */
 	const scrollerRef = useCallback(
 		(node: HTMLDivElement | null) => {
@@ -288,11 +245,9 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	);
 
 	/*
-	 * `/` focuses the search box, the way it does in a document viewer - and
-	 * only when the user is not already typing into one, since a slash is a
-	 * legitimate character in a search term. Everything else is the treeview
-	 * pattern, which `useRovingTreeFocus` already implements; this wraps it
-	 * rather than restating it, so the tree keeps whatever that hook learns.
+	 * `/` focuses search, as in a document viewer, unless the user is already typing (a slash is
+	 * legal in a term). The rest is the treeview pattern `useRovingTreeFocus` implements; this
+	 * wraps it, so the tree keeps whatever that hook learns.
 	 */
 	const onKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -310,12 +265,9 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	return (
 		<div className="flex flex-col h-full min-h-0 bg-panel" data-testid="graphql-explorer">
 			{/*
-			 * One row, since only the two pane-local controls are left. It was two
-			 * while the header also carried the status badge, Refresh and the close:
-			 * five affordances in a pane as narrow as 18% of the editor area left
-			 * the search box - the one control that wants width - competing with the
-			 * status text for it. Those three moved to the Query header (#1224), so
-			 * the search box has the row to itself again.
+			 * One row: only the two pane-local controls are left (status, Refresh and close moved
+			 * to the Query header, #1224), so the search box, the one control that wants width, has
+			 * the row to itself.
 			 */}
 			<div className="flex items-center gap-1 px-2 py-1 border-b border-border shrink-0">
 				<div className="relative flex-1 min-w-0">
@@ -325,8 +277,8 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 						ref={searchRef}
 						value={search}
 						onChange={(e) => {
-							// A new list is a new window; the last reveal's floor
-							// describes rows this one does not have.
+							// A new list is a new window; the last reveal's floor describes rows
+							// this one lacks.
 							setRevealFloor(0);
 							setSearch(schemaKey, e.target.value);
 						}}
@@ -336,13 +288,10 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 					/>
 				</div>
 				{/*
-				 * Descriptions are clipped to one line by default and the full
-				 * text is only in the row's native tooltip, which is no use to
-				 * anyone reading rather than pointing. This is the show/hide for
-				 * it - one pane-level control rather than a per-row disclosure,
-				 * because a third target inside a 24px row is exactly the
-				 * composite-row hit-area trap `drawer-row-hit-area` was written
-				 * against, and it would take its width from the activator.
+				 * Descriptions clip to one line and the full text is only in the native tooltip, no
+				 * use to a reader. One pane-level toggle, not per-row: a third target in a 24px row
+				 * is the composite-row hit-area trap `drawer-row-hit-area` guards, and would take
+				 * its width from the activator.
 				 */}
 				<TooltipIconButton
 					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
@@ -354,9 +303,8 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			</div>
 
 			{/*
-			 * A stale schema browses, with its age stated. Blanking the pane on a
-			 * failed refresh would throw away the only answer available - the
-			 * same call `schema-cache` makes when it keeps the last good schema.
+			 * A stale schema browses, its age stated: blanking on a failed refresh would discard
+			 * the only answer, as `schema-cache` keeps the last good schema.
 			 */}
 			{schema && status === "error" && (
 				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-micro text-warning-text border-b border-border shrink-0">
@@ -373,10 +321,8 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			)}
 
 			{/*
-			 * What the last click could not do, where the click happened. The
-			 * shared notice primitive rather than a second copy of the stale-schema
-			 * strip above: one treatment for the whole app, and one place its
-			 * contrast is tuned.
+			 * What the last click could not do, where the click happened, through the shared notice
+			 * primitive: one treatment app-wide, one place its contrast is tuned.
 			 */}
 			{notice && (
 				<div className="enter-fade px-2 py-1.5 shrink-0" data-testid="explorer-notice">
@@ -390,11 +336,9 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				onScroll={(e) => setScrollTop(schemaKey, e.currentTarget.scrollTop)}
 			>
 				{/*
-				 * The loading line and the group headings below take a root row's own
-				 * inset rather than a padding of their own: `rowInsetPx(0)` is where a
-				 * branch row starts, so the pane keeps one left edge whether it is
-				 * holding rows or waiting for them (#1378, the rule from #1372). The
-				 * two empty lines are `EmptyState`, centred in the pane (#3501).
+				 * The loading line and group headings take a root row's inset (`rowInsetPx(0)`,
+				 * where a branch row starts), so the pane keeps one left edge loading or not
+				 * (#1378, #1372). The two empty lines are `EmptyState`, centred (#3501).
 				 */}
 				{!schema && status === "loading" ? (
 					<p
@@ -478,8 +422,8 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 }
 
 /**
- * The row's full signature, the way a schema declares it: `users(first: Int):
- * [User]`. Null for a row that has none.
+ * The row's full signature as the schema declares it, `users(first: Int): [User]`; null without
+ * one.
  */
 function signatureLine(node: SchemaTreeNode): string | null {
 	return node.signature ? `${node.name}${node.signature}` : null;
@@ -528,46 +472,33 @@ function ExplorerRow({
 	const description = splitAtMatch(node.description ?? "", descriptionStart, matchLength);
 
 	/*
-	 * A branch, a "Returned by" heading and an "Arguments" heading hold rows;
-	 * they write nothing. Their activator opens them, so that pressing Enter on
-	 * one does what its chevron does rather than nothing at all.
+	 * A branch, "Returned by" or "Arguments" heading holds rows and writes nothing; its activator
+	 * opens it, so Enter does what the chevron does.
 	 */
 	const container =
 		node.kind === "branch" || node.kind === "returned-by" || node.kind === "arguments";
 
 	/*
-	 * What follows the name: the result type alone for a field that takes
-	 * arguments, the whole signature for every row that has no argument list to
-	 * lose. An argument list is unbounded - three arguments is ordinary - and
-	 * drawn inline it took the width the result type needed, so a row read
-	 * `users (first: Int, userId: In…` and never said what it answered with.
-	 *
-	 * The count replaces it rather than the names, which are as unbounded as the
-	 * list they came from. The names are one row down, under Arguments, and the
-	 * whole signature is on the hover.
+	 * After the name: the result type alone for a field with arguments, the whole signature
+	 * otherwise. An argument list is unbounded, and inline it took the result type's width, so a
+	 * row read `users (first: Int, userId: In…` and never said what it returned. A count replaces
+	 * it, not the names; they are a row down under Arguments, and the whole signature is on hover.
 	 */
 	const secondary = node.args.length > 0 ? `: ${node.returnType}` : node.signature;
 
 	/*
-	 * A description the term matched is always shown in full, whatever the
-	 * toggle says. Clipped to one line it is usually cut off *before* the word
-	 * that put the row in the results, which leaves the user a row they cannot
-	 * connect to what they typed - the failure the mark exists to prevent, and
-	 * the reason a description tier needs this and the name tier does not.
-	 *
-	 * It asks whether the description is *why* the row matched, not whether it
-	 * happens to contain the term: `Query.search` is named `search` and
-	 * described "Search across users and posts.", and the looser test drew every
-	 * such row's whole paragraph over the results the user was reading.
+	 * A description the term matched is shown whole, whatever the toggle: clipped, it is usually
+	 * cut before the word that matched, leaving a row the user cannot connect to their term. The
+	 * test is whether the description is *why* the row matched, not whether it contains the term:
+	 * `Query.search` is described "Search across users and posts.", and the looser test drew every
+	 * such paragraph over the results.
 	 */
 	const full = showDescription || descriptionMatched;
 	const title = [
 		/*
-		 * The signature leads, because it is the one thing on the row that the
-		 * row itself does not show whole: the arguments come off the line so the
-		 * result type survives the pane's width, and this is where they stayed
-		 * readable without dragging the splitter. A type row's "signature" is its
-		 * kind label, which the row already draws, so it adds nothing here.
+		 * The signature leads: it is the one thing the row does not show whole (the arguments come
+		 * off the line so the result type fits), so it is readable here without the splitter. A
+		 * type row's "signature" is its kind label, already drawn.
 		 */
 		node.kind === "type" ? null : signatureLine(node),
 		node.description,
@@ -581,20 +512,18 @@ function ExplorerRow({
 
 	return (
 		/*
-		 * The row is the perceived target and paints the hover fill; the
-		 * activator inside it is `self-stretch` so the fill and the hit area are
-		 * the same rectangle. A content-height activator in an `items-center`
-		 * row leaves the top and bottom of every row dead - measured at over 40%
-		 * of the drawer's rows before `drawer-row-hit-area` pinned it.
+		 * The row is the perceived target and paints the hover fill; the activator inside is
+		 * `self-stretch`, so fill and hit area are one rectangle. A content-height activator in an
+		 * `items-center` row left the top and bottom dead, over 40% of the drawer's rows before
+		 * `drawer-row-hit-area` pinned it.
 		 */
 		<div
 			// eslint-disable-next-line jsx-a11y/role-has-required-aria-props -- this tree has no selection model - a row inserts into the query and nothing stays selected - so `aria-selected` is omitted rather than faked
 			role="treeitem"
 			/*
-			 * Only a row that can actually open says it can. A search result is
-			 * derived from the index and has no children to show, so claiming
-			 * `aria-expanded` there both lies to a screen reader and hands the
-			 * treeview's Right arrow a toggle that changes nothing on screen.
+			 * Only a row that can open says so. A search result has no children to show, so
+			 * `aria-expanded` there lies to a screen reader and hands Right arrow a toggle that
+			 * changes nothing.
 			 */
 			aria-expanded={node.expandable && !reveal ? expanded : undefined}
 			aria-level={depth + 1}
@@ -607,11 +536,10 @@ function ExplorerRow({
 		>
 			{reveal ? (
 				/*
-				 * In the results, the leading control goes to the tree rather
-				 * than expanding in place. It takes the row-actions slot the
-				 * roving treeview already reaches (Shift+Enter, Menu, Shift+F10),
-				 * so it is not a mouse-only affordance the way a second tab stop
-				 * inside a single-tab-stop tree would be.
+				 * In the results, the leading control goes to the tree instead of expanding. It
+				 * takes the row-actions slot the roving treeview reaches (Shift+Enter, Menu,
+				 * Shift+F10), so it is not mouse-only as a second tab stop in a single-stop tree
+				 * would be.
 				 */
 				<button
 					type="button"
@@ -643,10 +571,9 @@ function ExplorerRow({
 			)}
 
 			{/*
-			 * One line or two, the activator stays a single button: the whole row
-			 * inserts, including the description, and splitting the description
-			 * onto its own control would carve a hole in the hit area the row
-			 * paints - the composite-row trap again.
+			 * One line or two, the activator is one button: the whole row inserts, and a separate
+			 * description control would carve a hole in the row's hit area (the composite-row
+			 * trap).
 			 */}
 			<button
 				type="button"
@@ -662,10 +589,8 @@ function ExplorerRow({
 					className={cn("flex min-w-0 max-w-full items-center gap-1", full && "w-full")}
 				>
 					{/*
-					 * The owner rides *beside* the name rather than inside it: the
-					 * name is what the search marked and what a screen reader
-					 * reads as the row's subject, and folding the owner into it
-					 * would move both. No gap between the two, because
+					 * The owner sits *beside* the name, not in it: the name is what the search
+					 * marked and what a screen reader reads as the row's subject. No gap:
 					 * `App.accessScopes` is one address, not two words.
 					 */}
 					<span className="flex shrink-0 items-center">
@@ -684,15 +609,12 @@ function ExplorerRow({
 							)}
 						>
 							{/*
-							 * Three segments rather than one string, so the matched run
-							 * can be marked without the row's own colour moving: a field
-							 * name is `text-primary` and a type name `text-foreground`,
-							 * and `text-inherit` keeps that distinction through the tint.
-							 * The `mark` element needs both properties set - a bare one
-							 * arrives with the user agent's yellow-on-black.
-							 *
-							 * The three concatenate to exactly `node.name`, which is what
-							 * keeps the accessible row text unchanged by highlighting.
+							 * Three segments, not one string, so the match is marked without moving
+							 * the row's colour: a field name is `text-primary`, a type
+							 * `text-foreground`, and `text-inherit` keeps that through the tint.
+							 * `mark` needs both properties set, or it arrives in the user agent's
+							 * yellow-on-black. The three concatenate to `node.name`, so the
+							 * accessible text is unchanged.
 							 */}
 							{name.before}
 							{name.match && (
@@ -715,11 +637,9 @@ function ExplorerRow({
 					)}
 					{node.description && !full && (
 						/*
-						 * `flex-1` is a basis of zero, so a clipped description
-						 * takes the width left over rather than competing for it:
-						 * the result type keeps its own, and a documented field is
-						 * not a field whose type is cut off. It still clips, which
-						 * is what the pane's show-descriptions toggle is for.
+						 * `flex-1` is a zero basis, so a clipped description takes leftover width:
+						 * the result type keeps its own. It still clips, which the
+						 * show-descriptions toggle is for.
 						 */
 						<span
 							data-tree-description

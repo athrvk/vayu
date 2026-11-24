@@ -6,17 +6,12 @@
  */
 
 /**
- * Which Content-Type a `binary` body goes out with, as far as the editor can
- * say without asking the engine.
- *
- * The engine's precedence is: an enabled `Content-Type` header row, then the
- * file's own `contentType`, then a type from the file's extension, then
- * `application/octet-stream` - an empty string counting as absent at every
- * tier. The first two are the request's own data and are answered here
- * exactly. The extension tier is the engine's table
- * (`media_type_for_extension`) and is deliberately **not** copied: a second
- * table here would drift from the one that reaches the wire, so the editor
- * says "from the file extension" rather than guessing a value.
+ * The Content-Type a `binary` body goes out with, as far as the editor can tell without the engine.
+ * The engine's order: an enabled `Content-Type` row, the file's own `contentType`, a type from the
+ * extension, then `application/octet-stream`, an empty string counting as absent at every tier. The
+ * first two are the request's data and are answered exactly. The extension tier is the engine's
+ * table (`media_type_for_extension`), deliberately **not** copied: a second table would drift from
+ * the one that reaches the wire, so the editor says "from the file extension" instead of guessing.
  */
 
 import type { FileRef, KeyValueItem } from "@/types";
@@ -28,8 +23,7 @@ export function binaryContentType(
 	headers: readonly KeyValueItem[],
 	file: FileRef | undefined
 ): BinaryContentType {
-	// The last enabled row wins, the way a header map built from the rows
-	// would keep it.
+	// The last enabled row wins, as a header map built from the rows keeps it.
 	let header = "";
 	for (const row of headers) {
 		if (row.enabled && row.key.trim().toLowerCase() === "content-type" && row.value.trim()) {

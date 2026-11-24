@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/vayu_extensions.cpp
  * @brief See the header: the `x-vayu-request` / `x-vayu-collection` vocabulary,
  *        its secret redaction, and the checks an import runs before trusting it.
  */

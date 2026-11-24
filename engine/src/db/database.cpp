@@ -6,7 +6,6 @@
  */
 
 /**
- * @file database.cpp
  * @brief Database construction, recovery-branch dispatch, locking and
  * transaction retry - the members `db_maintenance.cpp`'s repair passes and
  * the eight table-family units do not each need their own copy of (issue

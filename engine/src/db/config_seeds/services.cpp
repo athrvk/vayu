@@ -23,7 +23,7 @@ namespace vayu::db::config_seeds {
 // =============================================================================
 void seed_services (ConfigSeeder& seed, int64_t now) {
     // SSE requests (issue #573). All six - these five and `sseMaxStoredEvents`,
-    // which #703 moved to Data & retention as the per-run storage budget it is -
+    // which is in Data & retention (#703) as the per-run storage budget it is -
     // are read once when a stream starts, so a change applies to the next
     // stream - no restart - and one run's events are all bounded by a single
     // rule rather than by whatever the setting happened to be at each arrival.
@@ -127,9 +127,8 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
     // before it expires, so a run longer than its token does not turn into a
     // 401 storm. All five are read once when the run arms its watchdog, so a
-    // change applies to the next run started - no restart. They sat in Network
-    // & connectivity until #703, where they were five of its eight entries; a
-    // user tuning token renewal arrives at Services, which is where the Dock
+    // change applies to the next run started - no restart. A user tuning token
+    // renewal arrives at Services (#703), which is where the Dock
     // files the OAuth issuer itself.
     seed (unit ("ms") (ConfigEntry{ "oauth2RefreshLeadMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_runs.cpp
  * @brief Runs and every run-scoped artifact: metric ticks, monitor samples,
  * results and their captured bodies, and the webhook inbox's captures
  * (issue #480) (issue #1614).

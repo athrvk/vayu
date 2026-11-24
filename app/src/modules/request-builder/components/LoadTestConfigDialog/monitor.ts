@@ -6,14 +6,10 @@
  */
 
 /**
- * The dialog's server-monitoring block: what the user types, when it is
- * unusable, and what payload it builds.
- *
- * Kept component-free so the rules can be tested without rendering, exactly as
- * the budgets beside it are. The bounds mirror `engine/src/core/monitor.cpp`.
- * They are a courtesy, not the gate: the engine rejects an unusable block with
- * a 400 whatever this file thinks, and these exist so the user is told before
- * the run rather than after it fails to start.
+ * The server-monitoring block: what the user types, when it is unusable, and the payload it builds.
+ * Component-free like the budgets, to test without rendering. The bounds mirror
+ * `engine/src/core/monitor.cpp` as a courtesy, not the gate: the engine 400s an unusable block
+ * regardless, and these tell the user before the run, not after it fails to start.
  */
 
 import type { RunMonitorConfig } from "@/types";
@@ -29,9 +25,8 @@ export interface MonitorDraft {
 }
 
 /**
- * A blank draft. @p intervalMs is the configured default (`monitorIntervalMs`),
- * passed in rather than read here so this stays a pure function - the dialog
- * resolves it from engine config, and the seed stands in until that resolves.
+ * A blank draft. @p intervalMs is the configured default (`monitorIntervalMs`), passed in to keep
+ * this pure: the dialog resolves it from engine config, and the seed stands in until then.
  */
 export function emptyMonitorDraft(intervalMs: number = MONITOR_INTERVAL_MS.DEFAULT): MonitorDraft {
 	return {
@@ -51,12 +46,10 @@ export function monitorSeriesList(draft: MonitorDraft): string[] {
 }
 
 /**
- * The reason the engine would reject this block, phrased for the dialog.
- *
- * A blank URL is always fine - monitoring is opt-in, and clearing the field is
- * how a user turns it off. Once a URL is there the rest must hold, and it is
- * said out loud rather than dropped: a run started with a monitor the client
- * quietly discarded is a chart the user waits the whole run for and never gets.
+ * Why the engine would reject this block, phrased for the dialog. A blank URL is fine: monitoring
+ * is opt-in, and clearing the field turns it off. With a URL the rest must hold, and a fault is
+ * said, not dropped: a monitor the client quietly discarded is a chart the user waits a whole run
+ * for and never gets.
  */
 export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES): string | null {
 	const url = draft.url.trim();
@@ -87,20 +80,17 @@ export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES
 }
 
 /**
- * The engine's Prometheus series rule (`read_monitor_series` in
- * `engine/src/core/monitor.cpp`): the exposition parser reads a name up to its
- * first `{` or whitespace, so a name holding either never matches (#3120). A
- * JSON key may hold both, which is why the rule is the Prometheus format's.
+ * The engine's Prometheus series rule (`read_monitor_series` in `engine/src/core/monitor.cpp`): the
+ * parser reads a name up to its first `{` or whitespace, so a name holding either never matches
+ * (#3120). A JSON key may hold both; the rule is the Prometheus format's.
  */
 function isNotAPrometheusName(name: string): boolean {
 	return /[{ \t\r\n\f\v]/.test(name);
 }
 
 /**
- * The `monitor` payload for `POST /runs`, or `undefined` when no endpoint was
- * given - never a block with an empty `series`, which the engine rejects.
- *
- * Assumes {@link monitorError} passed.
+ * The `monitor` payload for `POST /runs`, or `undefined` without an endpoint, never an empty
+ * `series`, which the engine refuses. Assumes {@link monitorError} passed.
  */
 export function buildMonitor(draft: MonitorDraft): RunMonitorConfig | undefined {
 	const url = draft.url.trim();

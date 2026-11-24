@@ -6,21 +6,14 @@
  */
 
 /**
- * ElementsPanel (issue #1512)
- *
- * The request builder's Elements tab: replaces the separate Pre-request and
- * Tests tabs with one list of typed behaviours. Binds the shared
- * `ElementList` primitive to `RequestState.elements`, shows what the
- * collection chain contributes above it (`InheritedElementsNotice`), and
- * keeps the legacy glued-script notice for a design run recorded before
- * script parts existed.
- *
- * A `script.pre`/`script.post` row gets the "Names mentioned" chip row above
- * its editor (issue #1553) via `ElementList`'s `renderAboveForm` - this is
- * the one host that can answer `ScriptReferencesRow`'s props from
- * `useRequestBuilderContext`, which `ScriptElementForm` itself cannot depend on.
- * An `assert.snapshot` row gets "Use the current reply as the baseline" the same
- * way (#3807): the response it records from is the builder's.
+ * The builder's Elements tab (#1512): one list of typed behaviours bound to `RequestState.elements`
+ * through the shared `ElementList`, with what the collection chain adds above it
+ * (`InheritedElementsNotice`) and the legacy glued-script notice for a design run recorded before
+ * script parts existed. A `script.pre`/`script.post` row gets the "Names mentioned" chips above its
+ * editor (#1553) via `renderAboveForm`: this host can answer `ScriptReferencesRow`'s props from
+ * `useRequestBuilderContext`, which `ScriptElementForm` cannot depend on. An `assert.snapshot` row
+ * gets "Use the current reply as the baseline" the same way (#3807), since the builder holds the
+ * response.
  */
 
 import { useElementKindsQuery, useRequestQuery } from "@/queries";
@@ -49,19 +42,15 @@ export default function ElementsPanel() {
 	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
 	const { data: kinds } = useElementKindsQuery();
-	// The saved row, not the builder's draft: an unsaved rename would put a name
-	// in the line that the engine and the agent's tools do not know yet.
+	// The saved row, not the draft: the engine and the agent's tools do not know an unsaved rename.
 	const { data: savedRequest } = useRequestQuery(request.id ?? null);
 	const openRows = useOpenElementRows(request.id);
-	// `script.setup` / `script.teardown` are collection-only (issue #1499):
-	// the engine refuses them on a request's own `elements`, so a request's
-	// Add menu never offers them, and `InheritedElementsNotice` below leaves a
-	// collection's out of "Runs before your own" - they run at the run's
-	// boundary, not before this request (#3457).
+	// `script.setup` / `script.teardown` are collection-only (#1499): the engine refuses them on a
+	// request, so Add never offers them, and `InheritedElementsNotice` leaves a collection's out of
+	// "Runs before your own", since they run at the run's boundary (#3457).
 	const addableKinds = (kinds ?? []).filter((kind) => !kind.collectionOnly);
 
-	// The baseline a recording writes goes through the list's own `onChange`
-	// path, so it is the same edit as typing it.
+	// A recorded baseline goes through the list's `onChange`, so it is the same edit as typing it.
 	const recordBaseline = (id: string, baseline: unknown[]) =>
 		updateField(
 			"elements",

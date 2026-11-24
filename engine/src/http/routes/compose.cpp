@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/compose.cpp
  * @brief POST /compose - engine-owned request composition (issue #226).
  *
  * Pure: composes and returns an execute-ready payload, sends nothing, creates

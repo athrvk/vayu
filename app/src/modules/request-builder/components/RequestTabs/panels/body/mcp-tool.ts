@@ -6,16 +6,12 @@
  */
 
 /**
- * The text an `mcp` body's tool fields hold, and the tool it commits (#3762).
- *
- * The fields are typed one at a time, but the engine refuses a stored tool
- * with a blank name or an `inputSchema` that is not an object, and refuses the
- * whole save for it. The `outputSchema` (#3806) is held to the same rule, though
- * the engine does not read it: the builder does, and a value that is not an
- * object would be a default nothing could fill. So the editor state is not
- * committed key by key: it is read here, and only a tool the engine would
- * accept reaches the request. What is left over (a schema typed before its
- * tool is named, half-typed JSON) stays in the fields with its reason.
+ * The text an `mcp` body's tool fields hold, and the tool it commits (#3762). Fields are typed one
+ * at a time, but the engine refuses a stored tool with a blank name or a non-object `inputSchema`,
+ * failing the whole save. The `outputSchema` (#3806) gets the same rule though the engine never
+ * reads it: the builder does, and a non-object would be a default nothing could fill. So the state
+ * is read here and only a tool the engine would accept is committed; leftovers (a schema typed
+ * before the name, half-typed JSON) stay in the fields with their reason.
  */
 
 import type { McpTool } from "@/types";
@@ -101,11 +97,9 @@ export function readFields(fields: McpToolFields): McpToolReading {
 }
 
 /**
- * Whether the fields still describe @p tool. A request switch or an external
- * write changes the tool under the fields; typing does not, because the
- * fields are what produced it. Half-typed JSON describes whatever tool is
- * stored: the stored tool stays until the text is valid again, so an autosave
- * in between does not drop it.
+ * Whether the fields still describe @p tool. A request switch or external write changes the tool
+ * under them; typing does not, since the fields produced it. Half-typed JSON describes the stored
+ * tool, which stays until the text is valid, so an autosave in between does not drop it.
  */
 export function describes(fields: McpToolFields, tool: McpTool | undefined): boolean {
 	const reading = readFields(fields);
@@ -114,10 +108,9 @@ export function describes(fields: McpToolFields, tool: McpTool | undefined): boo
 }
 
 /**
- * Two JSON values are the same value whatever order their members were written
- * in: a stored schema read back from the engine need not keep the order it was
- * typed in, and a reordering is no edit. An `undefined` member counts as absent,
- * as it does in `JSON.stringify`.
+ * JSON values compare regardless of member order (a schema read back from the engine need not keep
+ * its typed order, and a reorder is no edit); an `undefined` member is absent, as in
+ * `JSON.stringify`.
  */
 function sameJson(a: unknown, b: unknown): boolean {
 	if (a === b) return true;
