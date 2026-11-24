@@ -11,14 +11,10 @@
  * The headers table, plus the text form of the same thing, plus a read-only
  * group naming what the engine adds on its own.
  *
- * The bulk-edit machinery - the mode flag, the draft text, the toggle handler,
- * the toolbar and the textarea - used to live here *and* in `ParamsPanel`, in
- * duplicate. It is `BulkEditor` now; only the format differs between the two,
- * and that is what this file passes.
+ * Bulk edit is `BulkEditor`; only the format differs between this and
+ * `ParamsPanel`, and that is what this file passes.
  *
- * **The table holds only the user's headers** (issue #1229). Three rows used to
- * be seeded into it by the app itself, uneditable and saved with the request.
- * The engine adds its own at send time now and declares them over
+ * **The table holds only the user's headers** (issue #1229). The engine adds its own at send time now and declares them over
  * `GET /request-defaults`, so they are *shown* here rather than written into
  * the request - and each can be switched off for this send.
  */

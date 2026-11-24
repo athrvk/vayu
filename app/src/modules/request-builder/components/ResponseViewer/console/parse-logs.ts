@@ -10,10 +10,7 @@
  *
  * The engine sends one entry per line carrying the script that wrote it and the
  * `console.*` method that was called - `{source, scope?, level, message,
- * scriptRequest?}`. Both used to be missing: the source was a `"[pre] "` text
- * prefix, indistinguishable from a script logging that string itself, and the
- * level was discarded at the QuickJS binding, so every line reached this panel
- * looking identical whether the script called `log` or `error`.
+ * scriptRequest?}`.
  *
  * A bare string is still accepted, because a renderer can be talking to an
  * older engine sidecar. It is decoded the way that engine meant it - the prefix

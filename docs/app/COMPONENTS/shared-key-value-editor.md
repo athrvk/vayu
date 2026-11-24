@@ -87,7 +87,7 @@ order, with the spare row keeping the current spare row's id; `carryIds` is the
 generic claim-each-once rule under it, which `parseParamsFromText` uses too. A
 fresh id is a remount: the row's inputs are replaced and the caret goes to
 `<body>`. The request builder's merge uses both (see
-`docs/app/state-management.md`). It
+`docs/app/state-management/draft-hooks.md`). It
 moved here from `modules/request-builder/utils/` with the table (issue #567),
 because a second mount site needs the same conversion and a primitive cannot
 take it from a feature module. What stayed in the request builder is what no

@@ -451,7 +451,7 @@ export interface CreateEnvironmentRequest {
 	/** Engine-assigned - see CreateCollectionRequest.id. */
 	id?: never;
 	name: string;
-	description?: string; // engine accepts this (environments.cpp); was missing from the TS type
+	description?: string; // engine accepts this (environments.cpp)
 	variables: Record<string, VariableValue>;
 	isActive?: boolean;
 }

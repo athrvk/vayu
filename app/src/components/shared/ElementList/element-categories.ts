@@ -25,7 +25,7 @@
  * exactly, so a genuinely new category is a visible, deliberate addition
  * here rather than a silent trailing group forever.
  *
- * The element card's icon (issue #1608, per-kind since #1651) draws from the
+ * The element card's icon (issues #1608, #1651) draws from the
  * same file, one level further: `kindIcon()` is what both the card and the
  * picker call, so the two can never show a different glyph for the same kind.
  * `KIND_ICONS` has no entry for `inherit.disable` - it never reaches a

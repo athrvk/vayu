@@ -12,10 +12,8 @@ import { cn } from "@/lib/utils";
 /**
  * A labelled number input with its unit inside the field.
  *
- * The unit used to live in the label - "Duration (seconds)", "Target RPS
- * (Requests per second)" - which made labels long and repeated the mode name
- * back at the user. `htmlFor`/`id` are wired because these were bare `<Label>`s
- * next to inputs, associated by proximity only.
+ * The unit sits inside the field rather than in the label, and `htmlFor`/`id`
+ * associate the label with the input.
  *
  * Shared rather than owned by one dialog (issue #1564): `RunCollectionDialog`
  * reuses it for the same pass/fail budget fields `LoadTestConfigDialog`

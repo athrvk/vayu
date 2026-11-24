@@ -160,10 +160,7 @@ const responseMarkAllowance = (id: ResponseTab) =>
  *
  * **Unmounting it is held by one fade** (`useHeldValue`,
  * `TIMING.MARK_FADE_MS`), the mirror of that `starting:` fade-in and the same
- * fix `TabCount` and the Dock's save line take: the `Badge` used to be
- * removed in the commit that put the track back to `0fr`, so the track spent
- * 150ms collapsing around nothing and the chip itself was cut - which the
- * collapse made easy to miss. It still leaves the tree entirely once the fade
+ * fix `TabCount` and the Dock's save line take. It still leaves the tree entirely once the fade
  * is over, so the stray-filled-pixel hazard above is unchanged: nothing is
  * mounted at rest.
  */
@@ -743,8 +740,7 @@ export default function ResponseViewer() {
 				    value. Every divider in this pane says the same thing and the
 				    surface decides what it resolves to - `--border` in light, where it
 				    measures 1.304, and `--border-strong` in dark, where `--border`
-				    would be 1.003 (the same colour as the card, which is why the tab
-				    strip used to float free of the content). See index.css,
+				    would be 1.003 (the same colour as the card). See index.css,
 				    "Surfaces, and the rule colour that reads on each". */}
 				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
 					{/*
