@@ -38,7 +38,6 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/sse_stream.hpp"
-#include "vayu/utils/diagnostics.hpp"
 #include "wait_until.hpp"
 
 #include "scenario_load_fixture.hpp"
@@ -245,7 +244,12 @@ namespace {
 std::vector<json> cookies_dropped_entries (const json& warnings) {
     std::vector<json> found;
     for (const auto& warning : warnings) {
-        if (warning.value ("code", "") == "cookies_dropped") {
+        // `find` rather than `value ("code", "")`: a release GCC inlines that
+        // accessor far enough to report a `-Wnull-dereference` inside nlohmann
+        // (the shape `default_headers_test.cpp`'s `row_source` reads a row by).
+        const auto code = warning.find ("code");
+        if (code != warning.end () && code->is_string () &&
+        code->get<std::string> () == "cookies_dropped") {
             found.push_back (warning);
         }
     }
@@ -1002,11 +1006,6 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
 // run stores no trace per request to keep one on. The one-line summary stays
 // on the step's element row. Mutation check: call `record_script_requests` on
 // the `script_config` `execute_scenario_load` builds and the flag reads true.
-//
-// GCC 15 at `-O3` reports `-Wnull-dereference` inside nlohmann's `is_string`
-// once the console loop is inlined; the element is never null (see
-// utils/diagnostics.hpp).
-VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 TEST_F (ScenarioLoadTest, AStepScriptsSendRequestBuildsNoRecordAndKeepsItsLine) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
@@ -1025,12 +1024,13 @@ TEST_F (ScenarioLoadTest, AStepScriptsSendRequestBuildsNoRecordAndKeepsItsLine) 
     const auto console = row.value ("console", json::array ());
     ASSERT_FALSE (console.empty ()) << row.dump ();
     for (const auto& line : console) {
-        EXPECT_TRUE (
-        line.value ("text", "").starts_with ("pm.sendRequest GET " + server.url ("/s0") + " -> 200 ("))
+        const auto text = line.find ("text");
+        EXPECT_TRUE (text != line.end () && text->is_string () &&
+        text->get<std::string> ().starts_with (
+        "pm.sendRequest GET " + server.url ("/s0") + " -> 200 ("))
         << row.dump ();
     }
 }
-VAYU_DIAGNOSTIC_POP
 
 // ============================================================================
 // Flow control is read the same on both run kinds (#2974)
