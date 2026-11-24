@@ -6,32 +6,23 @@
  */
 
 /**
- * The document the HTML Preview frame renders: the server's markup with a
- * policy and a link treatment placed in front of it.
+ * The document the HTML Preview frame renders: the server's markup with a policy and link treatment
+ * in front. The frame is `sandbox=""` (`ResponseBody.tsx`), so the opaque origin and the absence of
+ * script, forms, popups and top navigation are the sandbox's; this adds what a sandbox cannot say:
  *
- * The frame is `sandbox=""` (see `ResponseBody.tsx`), so the opaque origin,
- * the absence of script, forms, popups and top navigation are the sandbox's
- * doing. This adds the two things a sandbox cannot say:
+ * - **No network.** A srcdoc document resolves relative URLs against the renderer's base and
+ *   absolute ones reach any host, the engine's loopback port included, so a fetching preview would
+ *   send GETs wherever the response said. Images, fonts and media load only from `data:`,
+ *   stylesheets only inline; a CDN-reliant page renders unstyled, the price of contacting nobody.
+ * - **Inert links.** `<base target="_top">` aims an ordinary link at the top window, which the
+ *   sandbox refuses without `allow-top-navigation`. A `target="_self"` link still navigates in the
+ *   frame; the new page stays sandboxed (no script, opaque origin) and only loses this policy.
  *
- * - **No network.** A srcdoc document resolves relative URLs against the
- *   renderer's own base URL and an absolute one reaches any host, the engine's
- *   loopback port included, so a preview that fetched its subresources would
- *   send GETs wherever the response told it to. Images, fonts and media load
- *   only from `data:`; stylesheets only inline. A page that leans on a CDN
- *   renders unstyled, which is the price of a preview that contacts nobody.
- * - **Inert links.** `<base target="_top">` sends an ordinary link at the top
- *   window, which the sandbox refuses without `allow-top-navigation`. A link
- *   that names `target="_self"` still navigates inside the frame; the new page
- *   stays sandboxed (no script, opaque origin), it only loses this policy.
- *
- * Both go first in the document: a `<meta>` policy governs only what parses
- * after it, the first `<base>` with a target wins, and several policies
- * intersect, so markup that follows can tighten neither away.
- *
- * This is the preview's one policy (#1780), carried in the document rather
- * than an iframe `csp` attribute: under `sandbox=""` a `<meta>` policy is
- * enforced without `allow-same-origin`, and the renderer's own policy, which
- * a srcdoc frame inherits, intersects with it.
+ * Both go first: a `<meta>` policy governs only what parses after it, the first targeted `<base>`
+ * wins, and policies intersect, so later markup cannot loosen either. The preview's one policy
+ * (#1780), in the document, not an iframe `csp` attribute: under `sandbox=""` a `<meta>` policy is
+ * enforced without `allow-same-origin`, and the renderer's own policy, inherited by a srcdoc frame,
+ * intersects with it.
  */
 
 export const PREVIEW_CSP = [

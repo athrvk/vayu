@@ -6,23 +6,17 @@
  */
 
 /**
- * UnifiedResponseViewer Component
+ * The embedded exchange viewer: Load Test History's sampled responses (`SampleRequestCard`,
+ * `ScenarioStepCard`) and an inbox capture (`CaptureDetail`). Two shapes, by whether `response` is
+ * present:
+ * - With a `response`: the first tab, "Response", holds its body in a fixed-height panel (callers
+ *   cap the card with `max-h-*`).
+ * - Request only (a capture has no response): the first tab, "Body", holds `request.body`, and the
+ *   panels fill the card, which the caller sizes.
  *
- * The embedded exchange viewer: Load Test History's sampled responses
- * (`SampleRequestCard`, `ScenarioStepCard`) and an inbox capture
- * (`CaptureDetail`).
- *
- * Two shapes, told apart by whether `response` is present:
- * - With a `response`: the first tab is "Response" and holds the response body,
- *   in a fixed-height panel (the callers cap the card with `max-h-*`).
- * - Request only (a capture has no response): the first tab is "Body" and holds
- *   `request.body`, and the panels fill the card instead of a fixed height,
- *   because the caller sizes the card.
- *
- * Both list the request and response headers on the Headers tab, plus an Events
- * tab when the sample streamed. Beside a response, a request that carries a body
- * gets a Request tab for it (the session Console's rows, #3634); a caller that
- * passes none sees the viewer it always had.
+ * Both list request and response headers on the Headers tab, with an Events tab when the sample
+ * streamed. Beside a response, a request carrying a body gets a Request tab (the session Console's
+ * rows, #3634).
  */
 
 import { useState } from "react";
@@ -39,10 +33,7 @@ type ResponseTab = "body" | "request" | "headers" | "events";
 
 type BodySource = Pick<ResponseData, "body" | "bodyRaw" | "rawBytes" | "headers">;
 
-/**
- * What the first tab shows: the response's body, or - with no response - the
- * request's own.
- */
+/** What the first tab shows: the response's body, or without a response the request's own. */
 function bodySource({ response, request }: UnifiedResponseViewerProps): BodySource | null {
 	if (response) return response;
 	if (!request) return null;
@@ -56,13 +47,11 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 	const source = bodySource(props);
 	const sentBody = !requestOnly && (!!request?.body || !!request?.rawBytes);
 
-	// Empty state. Headers count as content, not just a body: a load-run sample
-	// whose body was binary or dropped for the run's capture budget (#174) has
-	// real headers and no body, and calling that "no response captured" would
-	// hide the only thing the run did keep.
+	// Empty state, counting headers as content: a load-run sample whose body was binary or dropped
+	// for the capture budget (#174) has real headers, and "no response captured" would hide what
+	// was kept.
 	const hasHeaders = !!response?.headers && Object.keys(response.headers).length > 0;
-	// A body with no text view (`rawBytes`, issue #2458) has an empty `body`
-	// and is still a body.
+	// A body without a text view (`rawBytes`, #2458) has an empty `body` and is still a body.
 	const hasBody = !!source?.body || !!source?.rawBytes;
 	if (!hasBody && !hasHeaders && !request && !events) {
 		return (
@@ -76,9 +65,9 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 		);
 	}
 
-	// A sampled response sits in a card its caller caps (`max-h-*`), so its panels
-	// carry their own height. A request-only card is sized by its caller, and the
-	// panels fill it: `ResponseBody`'s `h-full` needs a sized parent.
+	// A sampled response's card is capped by its caller, so its panels carry their height; a
+	// request-only card is caller-sized and the panels fill it (`ResponseBody`'s `h-full` needs a
+	// sized parent).
 	const panelClass = requestOnly
 		? "flex min-h-0 flex-1 flex-col overflow-auto"
 		: "h-[500px] overflow-auto";
@@ -86,12 +75,9 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 	return (
 		<Card className={cn("flex flex-col overflow-hidden", className)}>
 			{/*
-			 * The app's Tabs primitive, not two hand-rolled Buttons. The old pair
-			 * were their own tab stops with no arrow-key model and no
-			 * aria-controls, and they were a third tab look in an app that now
-			 * has one. A TabsContent per trigger, not a single panel for the
-			 * active value - Radix points each trigger's aria-controls at the
-			 * panel for its own value (tabs-panels.test.tsx).
+			 * The app's Tabs primitive, for its arrow-key model and `aria-controls`, the one tab
+			 * look. A TabsContent per trigger, not one panel for the active value: Radix points
+			 * each trigger's `aria-controls` at its own value's panel (tabs-panels.test.tsx).
 			 */}
 			<Tabs
 				value={activeTab}
@@ -111,12 +97,12 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 					<TabsTrigger value="headers">
 						<TabLabel>Headers</TabLabel>
 					</TabsTrigger>
-					{/* Only for a sample that streamed. The constant-tab-set rule
-					    belongs to the request builder's strip, which always knows
-					    whether a send was a stream; this viewer renders stored
-					    samples of every shape, and a permanent "Events" tab over
-					    "not an event stream" would be a tab that is empty for
-					    almost every row it shows. */}
+					{/*
+					 * Only for a sample that streamed: the constant-tab-set rule is the request
+					 * builder's, whose strip knows whether a send streamed; this viewer shows
+					 * stored samples of every shape, and a permanent "Events" over "not an event
+					 * stream" would be empty on most rows.
+					 */}
 					{events && (
 						<TabsTrigger value="events">
 							<Radio className="size-icon-sm" />
@@ -135,8 +121,8 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 							showModeToggle
 						/>
 					) : (
-						// `h-full` because this scroll container is not a flex column,
-						// so the primitive's `flex-1` has nothing to grow against.
+						// `h-full`, as this scroll container is not a flex column and the
+						// primitive's `flex-1` has nothing to grow against.
 						<EmptyState
 							icon={FileText}
 							title={requestOnly ? "No body" : "No response body"}
@@ -179,10 +165,10 @@ export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps)
 				</TabsContent>
 				{events && (
 					<TabsContent value="events" className={panelClass}>
-						{/* `isStream` is what the presence of the node already
-						    means, and the stream has ended by the time a sample is
-						    stored - so neither is a question this caller has to
-						    answer twice. */}
+						{/*
+						 * `isStream` is what the node's presence already means, and a stored
+						 * sample's stream has ended, so this caller answers neither twice.
+						 */}
 						<ResponseEvents
 							events={events.items}
 							totalEvents={events.totalEvents}

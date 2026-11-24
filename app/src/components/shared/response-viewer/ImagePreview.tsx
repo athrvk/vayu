@@ -8,10 +8,9 @@
 import { useEffect, useRef } from "react";
 
 /**
- * The image, from an object URL over its own bytes, revoked when they change
- * or the preview unmounts. Set on the element in the effect rather than held in
- * state, so a StrictMode remount creates a fresh URL instead of keeping the one
- * its first cleanup revoked.
+ * The image from an object URL over its bytes, revoked when they change or the preview unmounts;
+ * set on the element in the effect, not held in state, so a StrictMode remount makes a fresh URL
+ * rather than keeping one its first cleanup revoked.
  */
 export function ImagePreview({
 	bytes,

@@ -6,17 +6,11 @@
  */
 
 /**
- * The notice a pane shows when it holds back part of a body past
- * `LARGE_BODY_BYTES` (issue #3138). The Body tab and the Raw tab each apply the
- * cap on their own, so the wording lives here once rather than in both.
- *
- * Said by the pane that made the decision, because it is that pane's own limit,
- * not something the engine or the store did to the response. The separate "the
- * engine only read this much" notice lives in the request builder's viewer and
- * both can be on screen at once.
- *
- * The caller owns the Download sentence: only it knows whether a Download
- * button exists on screen, and where.
+ * The notice a pane shows when holding back a body past `LARGE_BODY_BYTES` (#3138); the Body and
+ * Raw tabs cap independently, so the wording lives once. Said by the pane that decided, as the
+ * limit is its own, not the engine's or the store's; the request builder's "the engine only read
+ * this much" notice is separate, and both can show. The caller owns the Download sentence: only it
+ * knows whether and where a Download button is.
  */
 
 import { Callout } from "../Callout";
