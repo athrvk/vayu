@@ -64,8 +64,8 @@ Update an existing environment.
 Merge-patch body, same rule as collections.
 
 `variables` replaces the whole map, so a caller doing a partial edit reads the current map first and sends the merged result under the version it read, `If-Match: W/"<updatedAt>"` (this is what the MCP `update_environment` tool does; see [Conditional updates](resource-writes.md#conditional-updates-with-if-match)).
-Sending `variables: null` resets it to `{}` - it no longer stores the literal string `null`, which is the bug this verb split fixed.
-`isActive` is honored here too; it used to be read only on create.
+Sending `variables: null` resets it to `{}`, never the literal string `null`.
+`isActive` is honored here too, not only on create.
 
 **Writing `isActive: true` is how a client switches the active environment**, and one request does the whole switch: the engine deactivates whichever environment held the flag in the same transaction, so at most one row is ever active and a client sends no companion write to clear the old one.
 Clearing entirely is `isActive: false` on the environment that holds it.
@@ -163,6 +163,6 @@ Every write is therefore a create as far as the [null-vs-absent rule](resource-w
 A caller that keeps the globals it did not name reads first, merges, and saves under the version it read with `If-Match: W/"<updatedAt>"` (this is what the MCP `update_globals` tool does).
 The engine judges the tag in the same lock acquisition as the write, so a save that landed after the caller's read turns its write into a `412` rather than a silent loss.
 
-`variables: null` used to store the literal four-character text `null`, which parses as JSON but is not an object.
-`GET /globals` returns `{}` for anything it cannot read as an object, so the failure showed up as globals silently disappearing rather than as an error.
-A non-object `variables` (`42`, a string, an array) had the same effect and is now a `400` - see [Accepted field shapes](resource-writes.md#accepted-field-shapes).
+`variables: null` is never stored as the literal four-character text `null`, which parses as JSON but is not an object.
+`GET /globals` returns `{}` for anything it cannot read as an object, so storing it would make globals silently disappear rather than fail.
+A non-object `variables` (`42`, a string, an array) would do the same and is a `400` - see [Accepted field shapes](resource-writes.md#accepted-field-shapes).

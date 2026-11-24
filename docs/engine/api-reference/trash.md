@@ -5,7 +5,7 @@ description: >-
 
 # Trash
 
-What deleting a collection, a request, an environment, a saved example or a client certificate now does, and how to undo it (issue #988; environments #2970; examples #2971; client certificates #2973).
+What deleting a collection, a request, an environment, a saved example or a client certificate does, and how to undo it (issue #988; environments #2970; examples #2971; client certificates #2973).
 `DELETE /collections/:id`, `DELETE /requests/:id`, `DELETE /environments/:id`, `DELETE /client-certificates/:id` and, for an example a person saved (`origin: "user"`), `DELETE /requests/:id/examples/:exampleId` stamp rows instead of removing them;
 every other read surface filters stamped rows out, so the tree, the environment list, a request's examples and the certificate registry look the same as after a hard delete, and these three endpoints are the whole of what the stamp buys.
 An imported example is not trashed: its delete leaves the tombstone a spec sync reads (see [DELETE /requests/:id/examples/:exampleId](examples.md#delete-requestsidexamplesexampleid)).

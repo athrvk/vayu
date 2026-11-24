@@ -142,16 +142,15 @@ Which formats work is a property of the build's TLS backend:
 | Backend | Builds | Presents |
 |---------|--------|----------|
 | OpenSSL | Linux, macOS, Windows | `pem` and `p12` |
-| Schannel | none since issue #851 | `p12` only |
+| Schannel | none (issue #851) | `p12` only |
 
-**Mutual TLS works on all three platforms** as of issue #851.
-It did not before: Windows built against Schannel, and curl's Schannel client-certificate path cannot complete the handshake - it imports the bundle with `PKCS12_NO_PERSIST_KEY` and the key that yields is one Schannel's credential path cannot use, so the transfer failed with `SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be contacted` (issue #842).
-Nothing in Vayu's configuration changed that, so #851 changed the backend instead.
+**Mutual TLS works on all three platforms** because no build uses Schannel (issue #851).
+curl's Schannel client-certificate path cannot complete the handshake - it imports the bundle with `PKCS12_NO_PERSIST_KEY` and the key that yields is one Schannel's credential path cannot use, so the transfer fails with `SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be contacted` (issue #842).
 
 **Before moving any leg back to Schannel, read closed issue #842.**
-The defect above is still open upstream: curl 8.21.0 carries **two** entries for it in its own `KNOWN_BUGS` (curl issues 17626 and 3145), one of them naming the exact call, and #842 is the measurement record - every driver, with a legacy-PBE and a PBES2 bundle alike.
+The defect above is open upstream: curl carries **two** entries for it in its own `KNOWN_BUGS` (curl issues 17626 and 3145), one of them naming the exact call, and #842 is the measurement record - every driver, with a legacy-PBE and a PBES2 bundle alike.
 A change that returns to Schannel has to re-instate the wire skip #851 deleted.
-Schannel also takes no PEM pair at all, so a `pem` entry would fail at handshake time again, which before issue #833 (when the engine named no type) meant a Windows build could present nothing a user registered.
+Schannel also takes no PEM pair at all, so a `pem` entry would fail at handshake time and a Windows build could present nothing a user registered (issue #833).
 
 Both formats are asserted on a wire on every leg (a design send, an SSE stream, a load run and a `pm.sendRequest` against a listener that demands a client certificate).
 

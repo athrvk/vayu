@@ -15,176 +15,7 @@ Set, a step that passed everything else and whose response did not match is clas
 A step failed only by this gate moves `scenario.failed` (and the run list's `resultSummary.failed`), the step's trace outcome and `results.error`, and `schemaValidation`; it does not move `summary.failedRequests`, `httpErrorRequests`, `successfulRequests`, `errorRate`, `statusCodes` (its `200` stays a `200`), the `maxErrorRatePct` input or `summary.assertions`.
 Those are HTTP-only, the same rule a failed assertion follows (see `assertions` under [Scenario load runs](scenario-load.md#scenario-load-runs)).
 
-
-**Response:**
-```json
-{
-  "metadata": {
-    "runId": "run_1234567890",
-    "runType": "load",
-    "status": "completed",
-    "startTime": 1234567890,
-    "endTime": 1234567950,
-    "requestUrl": "https://api.example.com/users",
-    "requestMethod": "GET",
-    "configuration": {
-      "mode": "constant_rps",
-      "duration": "60s",
-      "concurrency": 100,
-      "targetRps": 100,
-      "followRedirects": true,
-      "maxRedirects": 10,
-      "httpVersion": "auto",
-      "dataRowCount": 2,
-      "dataFileName": "users.csv",
-      "dataFileHash": "<sha256>",
-      "dataFileCastNumbers": true,
-      "carriedBudgets": ["latencyP99Ms"],
-      "acceptEncoding": true,
-      "expectContinue": false
-    },
-    "openapi": {
-      "specId": "spec_3f2b1c9a-...",
-      "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-    }
-  },
-  "summary": {
-    "totalRequests": 6000,
-    "successfulRequests": 5970,
-    "failedRequests": 30,
-    "httpErrorRequests": 20,
-    "noResponseRequests": 10,
-    "cancelledRequests": 0,
-    "errorRate": 0.5,
-    "totalDurationSeconds": 60.4,
-    "avgRps": 99.34,
-    "testDuration": 60.4,
-    "sendRate": 100.0,
-    "throughput": 99.34,
-    "setupOverhead": 0.12,
-    "cleanupOverhead": 0.03,
-    "peakConcurrency": 100,
-    "droppedRequests": 0,
-    "skippedRequests": 0,
-    "stalledMs": 0,
-    "avgQueueWaitMs": 0.4,
-    "avgInFlight": 4.2,
-    "bytesSent": 192000,
-    "bytesReceived": 7680000,
-    "throughputBytesPerSec": 127152.32,
-    "httpVersionDowngraded": 0,
-    "connectionReplays": 0,
-    "sendingDurationSeconds": 60.0,
-    "completedWhileSending": 5990,
-    "errorClasses": {}
-  },
-  "latency": {
-    "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
-    "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
-  },
-  "statusCodes": [[0, 10], [200, 5970], [500, 20]],
-  "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
-                   "requestsSent": 6000, "requestsExpected": 6000 },
-  "errors": {
-    "total": 30,
-    "withDetails": 10,
-    "types": { "timeout": 6, "connection_failed": 4 },
-    "byStatusCode": [[0, 10], [500, 20]]
-  },
-  "timingBreakdown": {
-    "avgDnsMs": 0.15, "avgConnectMs": 0.42, "avgTlsMs": 0.31,
-    "avgFirstByteMs": 3.1, "avgDownloadMs": 0.14,
-    "phases": {
-      "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 6000, "mean": 0.15 },
-      "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 6000, "mean": 0.42 },
-      "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 6000, "mean": 0.31 },
-      "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 6000, "mean": 3.1 },
-      "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000, "mean": 0.14 }
-    }
-  },
-  "slowRequests": { "count": 12, "thresholdMs": 1000, "tracesStored": 12, "percentage": 0.2 },
-  "warnings": [
-    { "code": "unresolved_tokens",
-      "message": "12 requests sent with unresolved variables: token",
-      "count": 12, "names": ["token"] },
-    { "code": "pre_request_script_skipped",
-      "message": "1 step carries a pre-request script that does not run under load",
-      "steps": 1 },
-    { "code": "cookies_dropped",
-      "message": "4 Set-Cookie headers were dropped across the run by libcurl's cookie engine (a line over 5000 bytes, a name and value over 4096 bytes, or more than 50 in one response), so the virtual users that received them sent their later steps without those cookies.",
-      "count": 4 }
-  ],
-  "stream": { "...": "streaming runs only - see below" },
-  "sampling": {
-    "errorsDropped": 0, "successTracesDropped": 29000,
-    "slowTracesDropped": 0, "responseSamplesDropped": 998000,
-    "exemplarsDropped": 0, "sampleBodiesDropped": 12,
-    "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
-  },
-  "monitor": {
-    "samples": 58, "failures": 2, "noMatchScrapes": 0, "lastError": "timed out",
-    "series": {
-      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 58 }
-    }
-  },
-  "testValidation": {
-    "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6,
-    "console": [ { "level": "warn", "text": "cache miss for /users", "count": 412 } ],
-    "consoleDropped": 3
-  },
-  "thresholdValidation": {
-    "checks": [
-      { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true, "evaluated": true }
-    ],
-    "passed": 1, "failed": 0, "verdict": "passed"
-  },
-  "assertions": {
-    "exact": { "passed": 0, "failed": 0 }, "sampled": { "passed": 498, "failed": 2 },
-    "errored": 0, "teardownFailed": 0
-  },
-  "customMetrics": {
-    "ttfb2": { "type": "trend", "count": 42, "p50": 10.0, "p95": 40.0, "p99": 47.0, "max": 50.0 },
-    "bytesOut": { "type": "counter", "count": 4, "value": 4096.0 },
-    "cacheHit": { "type": "rate", "count": 10, "value": 30.0 }
-  },
-  "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
-  "coverage": {
-    "operationsTotal": 18, "operationsCovered": 14,
-    "declaredResponsesTotal": 41, "declaredResponsesHit": 29,
-    "declaredResponseCoveragePct": 70.7, "undeclaredStatusesSeen": 1,
-    "operations": [
-      { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}",
-        "sent": 0, "statusesSeen": [], "declaredHit": [], "declaredMissed": ["204"],
-        "undeclaredSeen": [] }
-    ]
-  },
-  "schemaValidation": {
-    "sampled": 40, "checked": 36, "valid": 30, "failed": 6, "unevaluated": 0,
-    "uncheckedReasons": { "body_not_json": 4 },
-    "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
-    "failuresTotal": 6
-  },
-  "lifecycle": {
-    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok",
-                 "scriptRequests": [ { "scope": "collection", "status": 200, "request": { "...": "..." },
-                                       "response": { "...": "..." }, "totalMs": 41.2 } ] } ],
-    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
-                    "messages": [ { "kind": "error", "text": "Error: boom" } ],
-                    "console": [ { "level": "log", "text": "tearing down" } ] } ]
-  },
-  "elements": [
-    { "id": "el_1", "kind": "assert.status", "name": "Is 200",
-      "passed": 9, "failed": 1, "missing": 0, "error": 0, "skipped": 0, "deferred": 0 },
-    { "id": "el_2", "kind": "extract.json", "required": true,
-      "passed": 8, "failed": 0, "missing": 2, "error": 0, "skipped": 0, "deferred": 0 },
-    { "id": "el_3", "kind": "script.post",
-      "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 10 }
-  ],
-  "results": [ { "id": 41, "...": "request/response outcomes, failures first" } ],
-  "resultsStored": 4812,
-  "resultsCap": 100
-}
-```
+The sections below are fields of the [`GET /runs/:runId/report`](runs.md#get-runsrunidreport) response, whose example sits under that route, grouped by what each describes.
 
 **Two clocks, and which rate reads which** (issue #2392).
 `testDuration` (and `totalDurationSeconds`, the same figure) is the wall time from load start - the instant of the first submission -
@@ -497,7 +328,7 @@ A partial report of a running load run reads it from the live counter, and a col
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load run with no summary at all, whose counts are not a measurement.
 Neither report has a `latency` block (issue #2938).
-Each flag is absent otherwise, never `false`; "A run the engine died under" above says what each figure then holds.
+Each flag is absent otherwise, never `false`; the "A run the engine died under" paragraph of [`GET /runs/:runId/report`](runs.md#get-runsrunidreport) says what each figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked for HTTP/2 and negotiated something older - see [`httpVersionDowngraded` on a response](execute.md#post-execute).
 A collection run counts its sent requests the same way (#3262, [Scenario runs](scenario-runs.md#scenario-runs)); a collection run stored by an engine older than that fix reads `0` here although its steps' traces may say otherwise.
@@ -573,7 +404,7 @@ It is absent on reports served by an engine older than 0.15.0.
 The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`, `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` - each omitted when absent, and recording what the run was sent, never a default the engine filled in; issue #2437) plus `httpVersion`,
-which is always present with the same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see above), and `acceptEncoding` (issue #1488) and `expectContinue` (issue #2516),
+which is always present with the same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see [`GET /runs`](runs.md#get-runs)), and `acceptEncoding` (issue #1488) and `expectContinue` (issue #2516),
 read out of the snapshot's `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key `acceptEncoding` (`expectContinue` is on the report only, not in the list row: only the comparison reads it).
 `rps` in the raw snapshot is renamed to `targetRps` here, and `rps` is read first (`targetRps` is the rate only when `rps` is absent, null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` / `dataFileHash` (issue #2051) the file it came from, by display name and SHA-256 of its bytes, never its path, with `dataFileCastNumbers: true` (issue #2540) when that file's numbers were read as numbers.

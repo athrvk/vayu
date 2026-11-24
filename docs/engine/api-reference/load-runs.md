@@ -372,7 +372,7 @@ The app's load dialog and MCP's `start_load_run` leave them out of the payload t
 `vayu::core::ElementPipeline` runs the compiled list per submission, the same phases a design send uses: `script.pre` at `step.before`, `extract.*` / `assert.*` / `script.post` at `step.after`.
 **A `script.*` element runs inline only when marked or forced.**
 Unlike a design send or a sequential collection run, a load submission has no persistent per-VU object to defer a script onto, so a `script.pre` or `script.post` element runs inline, per submission, only when its own `config.inline` is `true` or this run's `elements.scripts` override (above) is `"allInline"`;
-left unmarked with no override, `script.post` still runs, but *deferred* - on the run's completion replay, the same way a plain `tests` string used to - while `script.pre` simply never runs at all, because there is no pre-request replay to defer it to.
+left unmarked with no override, `script.post` still runs, but *deferred* - on the run's completion replay - while `script.pre` simply never runs at all, because there is no pre-request replay to defer it to.
 `RunContext::script_element_runs_inline` is the one place that decision is made, shared with the scenario load path's own step dispatch.
 `timer.think`'s wait is folded into `maintain_concurrency`'s own backpressure (`RunContext::reserve_think_wait`) rather than a blocking sleep on a worker thread, so a request-level timer costs no new thread the way the scenario load path's per-VU wait does.
 That is the closed loop only: every mode but `constant_rps`.
@@ -522,7 +522,7 @@ A collection edited mid-run therefore cannot change the sequence underneath itse
 
 **A valid block answers `202 {runId}`** and creates a run with `type: "scenario"` - unless a load `mode` sits beside it, which makes it a [scenario load run](scenario-load.md#scenario-load-runs) with `type: "load"` instead.
 The lifecycle is a load run's either way - the run is registered, streams over [`GET /runs/:runId/live`](live-metrics.md#get-runsrunidlive), stops through [`POST /runs/:runId/stop`](runs.md#post-runsrunidstop) and reports through [`GET /runs/:runId/report`](runs.md#get-runsrunidreport) - and only the executor differs.
-See [Scenario runs](scenario-runs.md#scenario-runs) below for what it does while it runs and what it leaves behind.
+See [Scenario runs](scenario-runs.md#scenario-runs) for what it does while it runs and what it leaves behind.
 
 **Every rejection is a `400`** with `error.code: "invalid_scenario"`, raised before any run row exists - an empty or oversized sequence is never silently run as a smaller one:
 
@@ -548,7 +548,7 @@ See [Scenario runs](scenario-runs.md#scenario-runs) below for what it does while
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
 | `dataFileName` holding a `/` or `\` | A display name, never a path (issue #2051): a path would be stored and listed back to every reader of the run. Send the file's name alone. |
 | `dataFileCastNumbers` present and not a boolean, or sent without `data` (`false` included) | How the client read the file (issue #2540), stored beside its name and hash; on the same rules, so a value that is not an answer, or one describing rows the run never bound, is refused rather than recorded. `null` is absent. |
-| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `dataFileCastNumbers`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
+| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `dataFileCastNumbers`, `iterations` | Refused by name, so a typo or a knob a future engine reads is never silently ignored (issue #1503). |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
 

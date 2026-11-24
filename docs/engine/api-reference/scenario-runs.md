@@ -86,7 +86,7 @@ Composition (`POST /compose`, and the plan resolution that shares it) leaves a `
 
 **A bare column name is a second, different rule and it *is* a tier** (issue #1007).
 Postman binds a dataset's columns to bare names, so an imported data-driven collection is written `{{username}}` rather than `{{data.username}}`, and while a row is bound that row's own bare column names answer **above the active environment** -
-see [D18 in variable resolution](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) for the full ladder and the tradeoff it makes against #402's guarantee above.
+see [D18 in variable resolution](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) for the full ladder and the tradeoff it makes against #402's guarantee.
 Which bare names a bind owns is not global - it is stated per composition, as the [`dataColumns`](compose.md#post-compose) field, or filled by the engine itself where it already knows the dataset (a scenario plan's steps, a single-request load run, a send carrying one row).
 A bare name **not** in that set resolves as an ordinary variable, exactly as it did before this rule existed; only a name the set names is deferred by composition the way `data.*` always was, for the run's per-row bind (`core::apply_data_template`) to join through the identical walk - the same escaping, the same missing-column and null-cell refusals, the same header rules, for either spelling.
 There is no second, looser substitution path for the bare one.
@@ -98,7 +98,7 @@ the bearer **token**, basic auth's **username** and **password**, and an api key
 Script text is never interpolated at all (a script reads its row through `pm.iterationData`, or through `pm.variables` for a bare name - see [scripting.md](../scripting.md#variables-pmvariables)).
 
 The pass runs over the **composed** text, not the text as it was authored, so a token that arrived as a *variable's value* binds like any other:
-a variable `endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after composition - it is rescanned since issue #1009, but the `data.` namespace is deferred to bind time (issue #1007), so this token survives it - and the data pass then binds it.
+a variable `endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after composition - it is rescanned (issue #1009), but the `data.` namespace is deferred to bind time (issue #1007), so this token survives it - and the data pass then binds it.
 That is usable, and it is also why the no-data refusal below says "or from the variable value it was written into" - the token it names may not appear anywhere in the request as you wrote it.
 
 **`{{$vu}}` and `{{$iteration}}` are the second reserved namespace** (issue #994), and they bind at the same moment out of the same walk - a field carrying one of each is one string, so both are split once and joined together.
@@ -216,7 +216,7 @@ The step whose error ended its iteration short of the plan's end also carries `s
 A step whose extractors found nothing carries `extractorMisses` (#3053), how many of them did, on the same absent-at-`0` terms (the rule is in [Elements](../elements.md#kinds)).
 A step whose request still held a `{{name}}` when it went to the transfer carries `unresolvedTokens` (#3248), how many distinct names, on the same terms: the residual pass answers every name the step's scopes define, so a name counted here is one nothing defined, sent as written, never refused.
 A step refused or skipped before the transfer carries none.
-Bodies are capped by `maxTraceBodyBytes`; the row count is capped by `maxScenarioStoredSteps` as described above.
+Bodies are capped by `maxTraceBodyBytes`; the row count is capped by `maxScenarioStoredSteps` ([the `scenario` block](load-runs.md#the-scenario-block-collection-runs)).
 
 A step whose scripts said anything additionally carries a **`scripts` node** (issue #724) - the same object and the same keys [`POST /execute`](execute.md#post-execute) returns and a design send stores, so a step's assertions read the same inside a run as they do on a single send.
 It is the only route those results take: a collection run answers `202` long before its scripts have run, so nothing about a step is ever returned live.
@@ -275,7 +275,7 @@ An engine shutdown stops an active run the same way.
 
 **A step's scripts can redirect the sequence.**
 `pm.execution.setNextRequest(name)` runs a named request next instead of the one that follows, `setNextRequest(null)` ends the iteration, and `pm.execution.skipRequest()` (pre-request scripts only) sends nothing and marks the step `skipped`.
-A target that names no step in the run, or one that two steps share, fails the step by name rather than guessing, and `maxStepsPerIteration` above is what stops a cycle.
+A target that names no step in the run, or one that two steps share, fails the step by name rather than guessing, and [`maxStepsPerIteration`](load-runs.md#the-scenario-block-collection-runs) is what stops a cycle.
 Both refusals end the iteration whatever `stopOnError` says, and a step whose script errored has its redirect ignored.
 The full contract, including everywhere the two methods throw, is in [scripting.md](../scripting.md#flow-control-pmexecution).
 
@@ -295,4 +295,4 @@ So `count` is one per iteration that attempted a member, and a pass whose every 
 `errors` counts the passes in which a member was an error by the report's own definition: no response, a status outside 2xx/3xx, or a failed assertion.
 `includeTimers: true` (issue #1569) also folds a between-member `timer.*` wait into that sum - excluded by default, and always excluded for a wait after the folder's own last member, which is outside the transaction's span.
 [elements.md](../elements.md#controllers) has the full close rule.
-The same shape reports on a scenario load run's summary, top-level rather than under `scenario` - see below.
+The same shape reports on a scenario load run's summary, top-level rather than under `scenario` - see `transactions` under [Scenario load runs](scenario-load.md#scenario-load-runs).

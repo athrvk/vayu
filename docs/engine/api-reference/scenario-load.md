@@ -222,7 +222,7 @@ One entry per declared `control.transaction` name that closed at least once this
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions sent a `{{token}}` composition the residual-token pass still could not answer
 - issue #1495 added a real resolution attempt here (against the executing virtual user's own scope overlay, see [`elements.md`](../elements.md#load-paths)), but the load path's rule is unchanged: never refused, only counted, so a name still unanswered (or a header-name collision the attempt itself produced) goes on the wire regardless.
 `preRequestScript` is `"skipped"` for a step whose `script.pre` did not run inline this run and absent otherwise - a step whose `script.pre` did run inline reports its real outcome in `elements` instead, never both.
-Neither `unresolvedTokens` nor `preRequestScript` ever fails the run by itself; both also feed the top-level `warnings` array below.
+Neither `unresolvedTokens` nor `preRequestScript` ever fails the run by itself; both also feed the top-level `warnings` array ([Collection run verdicts](collection-runs.md), under `warnings`).
 `extractorMisses` (#3053) counts the step's extractions that found nothing and so unset their variable, across every virtual user and iteration; it is absent at 0.
 A miss is filed under its element's `missing` too (or `skipped`, for an optional `extract.json` that could not read the body), and a miss a `default` answered is neither: the rule is in [`elements.md`](../elements.md#kinds).
 
@@ -234,17 +234,18 @@ A miss is filed under its element's `missing` too (or `skipped`, for an optional
 }
 ```
 
-**`tests`, `postRequestScript(s)` and `preRequestScript(s)` are refused outright** (`refuse_legacy_script_fields`), the same rule `POST /execute`, `PUT /requests/:id` and `PUT /collections/:id` already applied since issue #1514 - a payload carrying any of the five names (a real value, not `null`) is a `400`, before the run row exists.
+**`tests`, `postRequestScript(s)` and `preRequestScript(s)` are refused outright** (`refuse_legacy_script_fields`), the same rule `POST /execute`, `PUT /requests/:id` and `PUT /collections/:id` apply (issue #1514) - a payload carrying any of the five names (a real value, not `null`) is a `400`, before the run row exists.
 The name it points a caller at depends on the shape:
 `requestElements` for a single target (this endpoint's own `elements` means the run-level override, not a script source, and pointing there would send a caller straight into a second refusal), plain `elements` for a scenario (its steps read theirs off the bound collection's stored elements, which no field on this payload can name more precisely).
-`POST /runs` was the one route that still read the old names on a single target - it had nothing else to run a script through until its own element pipeline existed - and issue #1594 closed that gap: `requestElements` (above) is a single target's own script slot now, the same way a scenario's steps already read theirs off the plan's compiled elements.
+A single target's own script slot is [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements) (issue #1594), the same way a scenario's steps read theirs off the plan's compiled elements.
 A caller still sending `tests` gets the same refusal every other route already gives; MCP's `start_load_run` never sends it - it folds the agent-facing `postRequestScript` / `tests` argument into a `script.post` entry of `requestElements` client-side (see [mcp/request-composition.md](../mcp/request-composition.md#request-composition)).
 
 **A `script.pre` element only reaches the wire when it is marked to.**
-The ad-hoc `preRequestScript(s)` field itself is refused (see above, same as `tests`) - a pre-request script only ever rides as a stored `script.pre` element now, on either run shape.
+The ad-hoc `preRequestScript(s)` field itself is refused (see above, same as `tests`) - a pre-request script only ever rides as a stored `script.pre` element, on either run shape.
 Unmarked (`config.inline` unset, no `elements.scripts: "allInline"` override), it never runs - there is no pre-request replay to defer it to, unlike `script.post` - so a request that signs itself in one is sent unsigned.
-Since issue #1503 this is no longer silent on the scenario shape: a step whose request carries an un-inlined pre-request script reports `preRequestScript: "skipped"` on its `scenario.steps` entry, and the run's `warnings` array carries one line naming how many steps did.
-The single-target shape reports the same fact differently (see `requestElements` above): an un-inlined `script.pre` element's own entry in `summary["elements"]` counts every submission under `skipped` (never `deferred`, which is only for a `script.post` the replay runs) instead of a separate warning line.
+On the scenario shape this is reported, not silent (issue #1503): a step whose request carries an un-inlined pre-request script reports `preRequestScript: "skipped"` on its `scenario.steps` entry, and the run's `warnings` array carries one line naming how many steps did.
+The single-target shape reports the same fact differently (see [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements)):
+an un-inlined `script.pre` element's own entry in `summary["elements"]` counts every submission under `skipped` (never `deferred`, which is only for a `script.post` the replay runs) instead of a separate warning line.
 
 **Accepted ranges.**
 The numeric config is range-checked **before the run row is created**, so a rejected request leaves no `pending` row behind.
@@ -286,7 +287,7 @@ A violation is a `400` whose `error.code` is `invalid_run_config` rather than th
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](load-runs.md#carried-over-budgets-carriedbudgets). |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of them has a default.
-The route erases every top-level `null` before anything reads the config, so a `null` runs exactly as the absent key would and the stored config snapshot carries none (#1893); it used to pass this check and then throw in the run's own reader, after the row existed.
+The route erases every top-level `null` before anything reads the config, so a `null` runs exactly as the absent key would and the stored config snapshot carries none (#1893), rather than passing this check and throwing in the run's own reader after the row existed.
 The ceilings are crash guards, not policy: each client caps itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP `start_load_run` tool has a user-settable cap in Settings).
 
 **The defaults** an absent field takes are the `run_config::DEFAULT_*` constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and 10 for an `iterations` run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1.
@@ -300,9 +301,9 @@ None of them is written to the stored snapshot; only what the body carried is, s
 Both checks sit in `validate_run_config` (`check_constant_rps_rate` and `check_rate_only_on_constant_rps`, `routes/execution.cpp`) and answer a `400` with `error.code` `invalid_run_config`; `rps` is read first, and `targetRps` when `rps` is absent or `0`.
 
 - A `mode` of `constant_rps` with neither field positive is refused.
-  It used to run the closed-loop path at the default concurrency while the stored config and the report still said `constant_rps` (#1893).
+  Accepting it would run the closed-loop path at the default concurrency while the stored config and the report still said `constant_rps` (#1893).
 - Any other `mode` with either field positive is refused, naming the field and the mode (#2396).
-  A rate used to switch `constant_concurrency` to open loop and to give every other mode's event-loop workers a token bucket of `rate ÷ workers`, so a ramp reported its own throttle as latency, while the config and the report still named the declared mode.
+  Accepting a rate there would switch `constant_concurrency` to open loop and give every other mode's event-loop workers a token bucket of `rate ÷ workers`, so a ramp would report its own throttle as latency while the config and the report still named the declared mode.
   An unrecognised `mode` is held to this too.
   `0` asks for no rate and is accepted on every mode.
 - A body with **no `mode`** is `constant_rps`, as the executor reads it: it may carry a rate, which paces it open-loop, and without one it holds `concurrency` in flight closed-loop, as it always has.
@@ -432,10 +433,10 @@ A **script's own fetch** (`pm.sendRequest`) is a third read, and it takes the bo
 It refuses at that bound rather than keeping a prefix, on either path, because nothing on the object it hands the script could say the body was cut - see [scripting](../scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Wire method and body.**
-A body is sent with whatever method the request names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style search bodies work), where it previously went out as a `POST`.
+A body is sent with whatever method the request names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style search bodies work), not a `POST`.
 The one combination that cannot be sent is **`HEAD` with a body** - curl's `HEAD` support drops the body - so it is refused rather than silently changed: `statusCode: 0`, `errorCode: INVALID_METHOD`, and a message saying so.
 This holds identically for `POST /execute` and `POST /runs`.
 
 **Failed requests still report timing.**
 A transfer that fails (timeout, connection refused, capped body) carries whatever curl measured before it failed - `wireMs`, the phase breakdown, and `bytes`/throughput counts - instead of reporting zeros.
-No phase (`dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`) is ever negative: `tlsMs` is `0` for plain HTTP and for a reused keep-alive connection rather than the negative value it used to store.
+No phase (`dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`) is ever negative: `tlsMs` is `0` for plain HTTP and for a reused keep-alive connection rather than a negative value.

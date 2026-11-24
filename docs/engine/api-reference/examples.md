@@ -140,8 +140,8 @@ A storage failure answers `507`, `503` or `500`, never `400` - see [A storage fa
 ## DELETE /requests/:id/examples/:exampleId
 
 **Deleting an imported example is a decision that lasts** (issue #722).
-A spec sync rewrites the `origin: "import"` examples of every request it applies a change to, so a removed row used to come back on the next sync of any field - even a rename.
-The engine now keeps the row as a **tombstone** instead: the example is gone from every read (the list, a mock server, an export, and a `GET` or `PUT` on its id, all `404`), and a later sync leaves that response status alone rather than writing the document's example for it back.
+A spec sync rewrites the `origin: "import"` examples of every request it applies a change to, so a removed row would come back on the next sync of any field - even a rename.
+The engine therefore keeps the row as a **tombstone**: the example is gone from every read (the list, a mock server, an export, and a `GET` or `PUT` on its id, all `404`), and a later sync leaves that response status alone rather than writing the document's example for it back.
 Re-importing the document is a fresh import and does bring it back, which is the only way it returns.
 
 **Deleting an example a person saved moves it to the [trash](trash.md#trash)** (#2971).

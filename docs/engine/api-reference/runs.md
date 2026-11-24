@@ -400,7 +400,179 @@ Get the final report for a completed run.
 The response is a **nested** object; conditional sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation` only when a test script ran, `thresholdValidation` only when the run declared [budgets](load-runs.md#the-thresholds-block-passfail-budgets),
 `assertions` only when a load run asserted or an element errored, `capacity` only for a `capacity` run, `auth` only when the run's OAuth 2.0 credential could be refreshed mid-run, `coverage` only for a run measured against a bound spec, `schemaValidation` only for a run that checked at least one response against one).
 
-The whole-run aggregates come from the run's stored `summary` (written once when the run reaches a terminal status - see [db-schema.md](../db-schema.md#runs)), combined with the sampled `results` rows for the timing breakdown and the `results[]` array (at most 100 rows, failures first - see "`results[]` is not a uniform sample" below).
+**Response:**
+```json
+{
+  "metadata": {
+    "runId": "run_1234567890",
+    "runType": "load",
+    "status": "completed",
+    "startTime": 1234567890,
+    "endTime": 1234567950,
+    "requestUrl": "https://api.example.com/users",
+    "requestMethod": "GET",
+    "configuration": {
+      "mode": "constant_rps",
+      "duration": "60s",
+      "concurrency": 100,
+      "targetRps": 100,
+      "followRedirects": true,
+      "maxRedirects": 10,
+      "httpVersion": "auto",
+      "dataRowCount": 2,
+      "dataFileName": "users.csv",
+      "dataFileHash": "<sha256>",
+      "dataFileCastNumbers": true,
+      "carriedBudgets": ["latencyP99Ms"],
+      "acceptEncoding": true,
+      "expectContinue": false
+    },
+    "openapi": {
+      "specId": "spec_3f2b1c9a-...",
+      "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    }
+  },
+  "summary": {
+    "totalRequests": 6000,
+    "successfulRequests": 5970,
+    "failedRequests": 30,
+    "httpErrorRequests": 20,
+    "noResponseRequests": 10,
+    "cancelledRequests": 0,
+    "errorRate": 0.5,
+    "totalDurationSeconds": 60.4,
+    "avgRps": 99.34,
+    "testDuration": 60.4,
+    "sendRate": 100.0,
+    "throughput": 99.34,
+    "setupOverhead": 0.12,
+    "cleanupOverhead": 0.03,
+    "peakConcurrency": 100,
+    "droppedRequests": 0,
+    "skippedRequests": 0,
+    "stalledMs": 0,
+    "avgQueueWaitMs": 0.4,
+    "avgInFlight": 4.2,
+    "bytesSent": 192000,
+    "bytesReceived": 7680000,
+    "throughputBytesPerSec": 127152.32,
+    "httpVersionDowngraded": 0,
+    "connectionReplays": 0,
+    "sendingDurationSeconds": 60.0,
+    "completedWhileSending": 5990,
+    "errorClasses": {}
+  },
+  "latency": {
+    "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
+    "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
+  },
+  "statusCodes": [[0, 10], [200, 5970], [500, 20]],
+  "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
+                   "requestsSent": 6000, "requestsExpected": 6000 },
+  "errors": {
+    "total": 30,
+    "withDetails": 10,
+    "types": { "timeout": 6, "connection_failed": 4 },
+    "byStatusCode": [[0, 10], [500, 20]]
+  },
+  "timingBreakdown": {
+    "avgDnsMs": 0.15, "avgConnectMs": 0.42, "avgTlsMs": 0.31,
+    "avgFirstByteMs": 3.1, "avgDownloadMs": 0.14,
+    "phases": {
+      "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 6000, "mean": 0.15 },
+      "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 6000, "mean": 0.42 },
+      "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 6000, "mean": 0.31 },
+      "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 6000, "mean": 3.1 },
+      "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000, "mean": 0.14 }
+    }
+  },
+  "slowRequests": { "count": 12, "thresholdMs": 1000, "tracesStored": 12, "percentage": 0.2 },
+  "warnings": [
+    { "code": "unresolved_tokens",
+      "message": "12 requests sent with unresolved variables: token",
+      "count": 12, "names": ["token"] },
+    { "code": "pre_request_script_skipped",
+      "message": "1 step carries a pre-request script that does not run under load",
+      "steps": 1 },
+    { "code": "cookies_dropped",
+      "message": "4 Set-Cookie headers were dropped across the run by libcurl's cookie engine (a line over 5000 bytes, a name and value over 4096 bytes, or more than 50 in one response), so the virtual users that received them sent their later steps without those cookies.",
+      "count": 4 }
+  ],
+  "stream": { "...": "streaming runs only - see below" },
+  "sampling": {
+    "errorsDropped": 0, "successTracesDropped": 29000,
+    "slowTracesDropped": 0, "responseSamplesDropped": 998000,
+    "exemplarsDropped": 0, "sampleBodiesDropped": 12,
+    "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
+  },
+  "monitor": {
+    "samples": 58, "failures": 2, "noMatchScrapes": 0, "lastError": "timed out",
+    "series": {
+      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 58 }
+    }
+  },
+  "testValidation": {
+    "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6,
+    "console": [ { "level": "warn", "text": "cache miss for /users", "count": 412 } ],
+    "consoleDropped": 3
+  },
+  "thresholdValidation": {
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true, "evaluated": true }
+    ],
+    "passed": 1, "failed": 0, "verdict": "passed"
+  },
+  "assertions": {
+    "exact": { "passed": 0, "failed": 0 }, "sampled": { "passed": 498, "failed": 2 },
+    "errored": 0, "teardownFailed": 0
+  },
+  "customMetrics": {
+    "ttfb2": { "type": "trend", "count": 42, "p50": 10.0, "p95": 40.0, "p99": 47.0, "max": 50.0 },
+    "bytesOut": { "type": "counter", "count": 4, "value": 4096.0 },
+    "cacheHit": { "type": "rate", "count": 10, "value": 30.0 }
+  },
+  "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
+  "coverage": {
+    "operationsTotal": 18, "operationsCovered": 14,
+    "declaredResponsesTotal": 41, "declaredResponsesHit": 29,
+    "declaredResponseCoveragePct": 70.7, "undeclaredStatusesSeen": 1,
+    "operations": [
+      { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}",
+        "sent": 0, "statusesSeen": [], "declaredHit": [], "declaredMissed": ["204"],
+        "undeclaredSeen": [] }
+    ]
+  },
+  "schemaValidation": {
+    "sampled": 40, "checked": 36, "valid": 30, "failed": 6, "unevaluated": 0,
+    "uncheckedReasons": { "body_not_json": 4 },
+    "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
+    "failuresTotal": 6
+  },
+  "lifecycle": {
+    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok",
+                 "scriptRequests": [ { "scope": "collection", "status": 200, "request": { "...": "..." },
+                                       "response": { "...": "..." }, "totalMs": 41.2 } ] } ],
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
+                    "messages": [ { "kind": "error", "text": "Error: boom" } ],
+                    "console": [ { "level": "log", "text": "tearing down" } ] } ]
+  },
+  "elements": [
+    { "id": "el_1", "kind": "assert.status", "name": "Is 200",
+      "passed": 9, "failed": 1, "missing": 0, "error": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_2", "kind": "extract.json", "required": true,
+      "passed": 8, "failed": 0, "missing": 2, "error": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_3", "kind": "script.post",
+      "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 10 }
+  ],
+  "results": [ { "id": 41, "...": "request/response outcomes, failures first" } ],
+  "resultsStored": 4812,
+  "resultsCap": 100
+}
+```
+
+Each section's fields, and the per-step verdicts a collection run adds, are documented in [Collection run verdicts](collection-runs.md).
+
+The whole-run aggregates come from the run's stored `summary` (written once when the run reaches a terminal status - see [db-schema.md](../db-schema.md#runs)), combined with the sampled `results` rows for the timing breakdown and the `results[]` array (at most 100 rows, failures first - see "`results[]` is not a uniform sample" in [Collection run verdicts](collection-runs.md)).
 A run with no summary has either not reached a terminal status yet (`metadata.status` is `pending` or `running`) or failed without writing one; its report is built without it rather than erroring.
 **The response shape is the same either way.**
 A load run the engine died under is marked `failed` at the next start and given the totals of its last persisted tick instead (see "A run the engine died under" below).
@@ -691,7 +863,7 @@ An empty history answers `{"deleted": 0, "keptPinned": 0, "deletedIds": []}`.
 Delete a run and all associated metrics/results.
 
 **An active run is stopped first.**
-Deleting a run that is still executing used to remove its rows while its worker kept writing new metrics and results against the same id - orphan rows that no run owns, and a run that partially reappeared as it finished.
+Removing the rows of a run that is still executing would leave its worker writing new metrics and results against the same id - orphan rows that no run owns, and a run that partially reappeared as it finished.
 So a run that is still active is stopped exactly as `POST /runs/:runId/stop` stops it, and the rows are removed only once its worker has completed its final writes.
 Expect the call to take as long as the stop does (up to ~5s for a large run).
 

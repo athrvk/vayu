@@ -312,7 +312,7 @@ See [scripting.md](../scripting.md#script-identity-pminfo).
 Absent, `null` or non-boolean all mean `false`, and that default is a security control rather than a convenience (issue #302): Vayu's MCP target allowlist is checked in the MCP server, before it calls this endpoint, and held by the engine to the URL a send is about to dial ([`targetPolicy`](#post-execute)), so a request issued from inside a script with `pm.sendRequest` never passes either.
 Denying unless a caller asks means a client that forgets gets a script that cannot send rather than unchecked egress.
 The app's Send and load runs send `true`; the MCP server never does.
-`POST /runs` reads the same field for a `script.post` element's deferred validation (its `requestElements`, below), so one script behaves the same on both.
+`POST /runs` reads the same field for a `script.post` element's deferred validation (its [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements)), so one script behaves the same on both.
 Read **before** the `stream` branch, so a streaming send's scripts are governed by it exactly as a buffered send's are - the app sends it on both halves of Send (issue #653).
 See [scripting.md](../scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
@@ -365,7 +365,7 @@ A redirect that changes any of the three therefore starts without the hop's cook
 A same-origin hop is unchanged, and a hop back to the origin that set the cookie carries it again.
 Later requests use the jar as normal.
 This is Vayu's own rule, held by the engine's redirect loop, and it is not configurable.
-The reason is the one behind **curl 8.21.0**'s hardening (`http: don't pass on set cookies to new origins`, which the engine picked up with the vcpkg baseline bump of #679): what one origin handed the client is not the next origin's to read. libcurl's cookie engine matches by host and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride a redirect to `127.0.0.1:9090`.
+The reason is the one behind curl's hardening in 8.21.0 (`http: don't pass on set cookies to new origins`, #679): what one origin handed the client is not the next origin's to read. libcurl's cookie engine matches by host and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride a redirect to `127.0.0.1:9090`.
 A flow that depended on a cookie surviving a cross-origin hop (a login that bounces through an identity provider is the usual shape) sends the follow-up request without it.
 A hop's `Set-Cookie` is reported in `redirects` whether or not a later hop carried it, so the member says what the server sent, not what went on to the next origin.
 
@@ -376,7 +376,7 @@ This is what was *requested*; the response's own `httpVersion` (below) reports w
 The renderer always sends this field on every execute, never eliding it even when it equals the default - the same rule `followRedirects` follows, and for the same reason: an omitted field lets an engine-side default win silently.
 MCP's saved-request paths get the same guarantee from `POST /compose`, which always emits a stored request's execution options;
 its two ad-hoc tools (`run_request` / `start_load_run`) forward `httpVersion` only when the caller supplies it, since there is no saved request behind an ad-hoc call for an omission to silently override (see [mcp/request-composition.md](../mcp/request-composition.md#request-composition)).
-It governs **both** Send and load test - `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually stored (see [Requests](requests.md#requests) above); `POST /runs` (below) is simply the run-shaped way of stating the same field, not a second store.
+It governs **both** Send and load test - `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually stored (see [Requests](requests.md#requests)); [`POST /runs`](load-runs.md#post-runs) is simply the run-shaped way of stating the same field, not a second store.
 
 **Response:**
 ```json
@@ -582,7 +582,6 @@ An `assert.*` or `extract.*` element's entry carries the `scope` of the level th
 
 **The script keys are stored the same way** (issue #725).
 `testResults`, `consoleLogs`, `preScriptError`, `postScriptError` and `scriptRequests` are returned in the body above *and* written to the design run's `trace_data.scripts` as one object, so a response restored from History carries the assertions the live one showed.
-This used to hold for a streaming send only, which made a restored ordinary send's Tests pane empty whether its assertions passed or never ran.
 A send whose scripts said nothing stores no `scripts` node at all - absent means no scripts, not no results - and a `transient` execution stores neither, as it stores nothing.
 
 | Field | Meaning |
@@ -765,7 +764,7 @@ A local dev server on `http://` with the protocol set to HTTP/2 will show the wa
 A server there that speaks only h2c never gets as far as a downgrade: it cannot read the HTTP/1.1 request, so the send fails as `PROTOCOL_MISMATCH` with the h2c hint instead, and `auto` meets the same failure without the hint.
 
 This exists because the failure it names is invisible otherwise: a `200`, a latency and a body look identical whether or not the protocol you asked for was granted.
-Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215)); nothing in the API said so.
+A build whose HTTP/2 is unreachable puts every request silently on HTTP/1.1, and nothing else in the API says so ([#215](https://github.com/athrvk/vayu/issues/215)).
 The same field is stored on a design run's `trace_data.response`, and load runs and collection runs carry the whole-run count as `summary.httpVersionDowngraded` in [`GET /runs/:runId/report`](runs.md#get-runsrunidreport).
 
 **One timing convention.**
