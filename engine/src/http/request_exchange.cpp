@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/request_exchange.cpp
  * @brief The `POST /execute` handler's body, extracted (issue #353).
  *
  * Every function here was inlined in `http/routes/execution.cpp` until the

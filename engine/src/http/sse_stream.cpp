@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/sse_stream.cpp
  * @brief The streaming execution core (issue #573).
  */
 

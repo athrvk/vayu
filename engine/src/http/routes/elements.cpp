@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/elements.cpp
  * @brief `GET /elements/kinds` - the element registry's catalogue (#1513).
  */
 

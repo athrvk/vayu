@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/client.cpp
  * @brief HTTP client implementation using libcurl
  */
 

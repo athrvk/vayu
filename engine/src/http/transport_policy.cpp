@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/transport_policy.cpp
  * @brief Reading the transport policy out of settings (issue #705).
  */
 

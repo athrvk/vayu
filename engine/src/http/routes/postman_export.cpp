@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/postman_export.cpp
  * @brief `POST /export/postman` - a collection out as a Postman Collection
  *        v2.1.0 document - and `POST /export/postman-environment`, one
  *        environment out as a Postman environment export.
