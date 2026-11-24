@@ -6,49 +6,30 @@
  */
 
 /**
- * BodyPanel Component
+ * Mode selection and the editor the mode needs: a code editor for JSON, JSON-RPC, MCP, XML and
+ * text, the key/value table for form-data and urlencoded, `GraphQLBody` for GraphQL, and
+ * `BinaryBodyPanel` for a whole-file body.
  *
- * Mode selection, and whichever editor that mode needs: a code editor for JSON,
- * JSON-RPC, MCP, XML and text, the key/value table for form-data and urlencoded,
- * `GraphQLBody` for GraphQL, and `BinaryBodyPanel` for a whole-file body.
- *
- * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
- * plus an XML document the user writes whole, so the mode buys highlighting
- * (Monaco's `xml` basic language ships in the bundle already, for the response
- * viewer), the `{{` completion every other body language gets
- * (`BODY_LANGUAGES`, #1214) and an
- * auto-`Content-Type: application/xml` - not an editor of its own. The engine
- * sends its content byte for byte, with no envelope of any kind.
- *
- * **JSON-RPC is a plain JSON pane, deliberately.** Its call is one JSON text -
- * the envelope around it (`"jsonrpc":"2.0"`, and an `id` when the call names
- * none) is completed engine-side at the chokepoint every client shares, so
- * there is nothing here for a structured editor to edit. That is the opposite
- * of GraphQL, whose query and variables are two documents the user writes
- * separately, and it is why this mode adds a `BODY_MODES` row and a language
- * rather than a component.
- *
- * **MCP is that same JSON pane with a tool above it** (`McpToolFields`): the
- * engine completes the call and derives every MCP header, so what the mode adds
- * is the tool its `Mcp-Param-*` headers are read from, and a note on where the
- * derived headers appear.
- *
- * **Choosing GraphQL still adds a Content-Type header, but says so - and
- * leaving GraphQL removes it again.** The header is genuinely required, so it is still added; what changed is that
- * the panel announces it, and that the next mode change takes back the row it
- * wrote (`body/content-type.ts`, by row id - a Content-Type the user typed is
- * indistinguishable by value and must survive).
- *
- * **The resolved preview swaps rather than splits.** A resolved body is something you glance at to confirm, not something you read
- * alongside, so the two share one full-width surface.
- *
- * **The editor fills the pane rather than a fixed box.** It was 320px of
- * `useResizable` in component state with a drag handle under it, inside a tab
- * panel that already has the request pane's full height - so a 1440px window
- * showed a third of an editor over empty panel, and the drag that fixed it was
- * forgotten on the next tab switch (Radix unmounts the inactive tab). The box
- * is a `flex-1` child with a `min-h-40` floor now; the height a user wants
- * comes from the request/response splitter, which persists.
+ * - **XML is a plain code pane.** SOAP and legacy APIs are HTTP plus an XML document written whole,
+ *   so the mode buys highlighting (Monaco's `xml` language is already bundled for the response
+ *   viewer), the `{{` completion every body language gets (`BODY_LANGUAGES`, #1214) and an
+ *   automatic `Content-Type: application/xml`. The engine sends it byte for byte, no envelope.
+ * - **JSON-RPC is a plain JSON pane, deliberately.** The call is one JSON text; the envelope
+ *   (`"jsonrpc":"2.0"`, and an `id` when none is named) is completed engine-side at the chokepoint
+ *   every client shares, so a structured editor has nothing to edit. GraphQL is the opposite (two
+ *   documents), which is why this mode is a `BODY_MODES` row and a language, not a component.
+ * - **MCP is that JSON pane with a tool above it** (`McpToolFields`): the engine completes the call
+ *   and derives every MCP header, so the mode adds the tool its `Mcp-Param-*` headers are read
+ *   from, and a note on where the derived headers appear.
+ * - **GraphQL adds a Content-Type header, says so, and leaving GraphQL removes it.** The header is
+ *   required; the next mode change takes back the row it wrote (`body/content-type.ts`, by row id,
+ *   since a typed Content-Type is indistinguishable by value and must survive).
+ * - **The resolved preview swaps rather than splits**: it is glanced at to confirm, not read
+ *   alongside, so the two share one full-width surface.
+ * - **The editor fills the pane**, a `flex-1` child with a `min-h-40` floor: the height a user
+ *   wants comes from the request/response splitter, which persists. A fixed box left a tall window
+ *   a third of an editor, and its drag handle forgot the height on a tab switch (Radix unmounts the
+ *   inactive tab).
  */
 
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
@@ -93,19 +74,16 @@ import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 import { requestModelPath } from "../../../utils/editor-models";
 
 /*
- * The GraphQL pane is the entry chunk's largest optional passenger: the
- * `graphql` package plus `graphql-language-service` and the variables schema
- * work, none of which a REST request ever touches. It renders only for
- * `bodyMode === "graphql"`, so it loads then (#1146).
+ * The GraphQL pane is the entry chunk's largest optional passenger (`graphql`,
+ * `graphql-language-service`, the variables schema work), none of which REST touches. It renders
+ * only for `bodyMode === "graphql"`, so it loads then (#1146).
  */
 const LazyGraphQLBody = lazy(() => import("./body/GraphQLBody"));
 
 /**
- * The GraphQL pane with its agent reference formatter. The line names the SAVED
- * request, not the builder's draft, for the reason `ExamplesPanel` does: an
- * unsaved rename is a name the engine and the agent's tools do not know yet. A
- * wrapper rather than a hook in `BodyPanel`, so only the GraphQL mode needs the
- * query cache.
+ * The GraphQL pane with its agent reference formatter. The line names the SAVED request, not the
+ * draft, as `ExamplesPanel` does: the engine and the agent's tools do not know an unsaved rename. A
+ * wrapper, not a hook in `BodyPanel`, so only GraphQL mode needs the query cache.
  */
 function GraphQLBody(props: GraphQLBodyProps) {
 	const { data: savedRequest } = useRequestQuery(props.requestId);
@@ -120,10 +98,8 @@ function GraphQLBody(props: GraphQLBodyProps) {
 }
 
 /**
- * The floor the editor never shrinks past, as a class rather than a number.
- *
- * A short window still shows a usable editor, and what does not fit scrolls in
- * the tab panel above it. There is no ceiling: the pane is the ceiling.
+ * The editor's floor, as a class: a short window still gets a usable editor and the tab panel
+ * scrolls the rest. No ceiling: the pane is it.
  */
 const EDITOR_BOX = "min-h-40 flex-1 overflow-hidden rounded-md border border-input";
 
@@ -145,15 +121,14 @@ export default function BodyPanel() {
 		resolvedAuth,
 	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
-	// The environment scoping GraphQL introspection's compose call - the same id
-	// the builder's Send path passes.
+	// The environment GraphQL introspection composes with: the id the builder's Send passes.
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const [showResolved, setShowResolved] = useState(false);
 
 	/*
-	 * The GraphQL Variables pane's text, held by the provider so it outlives this
-	 * panel - Radix unmounts it on every glance at another tab. Stable identity,
-	 * because `GraphQLBody` re-syncs the pane in an effect that depends on it.
+	 * The GraphQL Variables text, held by the provider so it outlives this panel (Radix unmounts it
+	 * on every glance elsewhere). Stable identity: `GraphQLBody` re-syncs the pane in an effect on
+	 * it.
 	 */
 	const handleVariablesDraftChange = useCallback(
 		(text: string) => setVariablesDraft({ requestId: request.id ?? null, text }),
@@ -161,22 +136,18 @@ export default function BodyPanel() {
 	);
 
 	/*
-	 * The Content-Type this mode change added, for the notice.
-	 *
-	 * Null once dismissed, undone, or the mode changes again - the notice is
-	 * about the edit that just happened, not a standing state. *Which row* was
-	 * added is not remembered here at all: it is marked on the row itself
-	 * (`source: "body-mode"`, see `utils/auto-header.ts`), so it survives
-	 * dismissing the notice, unmounting the panel, and a reload.
+	 * The Content-Type this mode change added, for the notice. Null once dismissed, undone, or the
+	 * mode changes again: the notice is about the edit that just happened. *Which row* was added is
+	 * marked on the row itself (`source: "body-mode"`, `utils/auto-header.ts`), so it survives
+	 * dismissal, unmount and reload.
 	 */
 	const [addedContentType, setAddedContentType] = useState<string | null>(null);
 
 	/*
-	 * Force-mounted, so a request switch does not remount this panel and the two
-	 * pieces of view state above would follow the user to the next request (#3666):
-	 * the notice would state something untrue about it and its Undo would remove
-	 * that request's own Content-Type row. Reset during render, like the provider's
-	 * own per-request reset, so the stale notice never paints.
+	 * Force-mounted, so a request switch does not remount this panel, and the two view states above
+	 * would follow the user to the next request (#3666): the notice would be untrue and its Undo
+	 * would remove that request's own Content-Type row. Reset during render, as the provider's
+	 * per-request reset is, so a stale notice never paints.
 	 */
 	const [stateFor, setStateFor] = useState(memoryKey);
 	if (stateFor !== memoryKey) {
@@ -186,37 +157,25 @@ export default function BodyPanel() {
 	}
 
 	/*
-	 * What GraphQL introspection needs, unresolved: it composes
-	 * engine-side (#228), so the URL, the header rows and the auth block go over as
-	 * typed and `POST /compose` resolves them - including an `inherit` that only
-	 * the collection chain can settle, which is what an Auth-panel-authed
-	 * endpoint needs to answer introspection at all.
+	 * What GraphQL introspection needs, unresolved: it composes engine-side (#228), so the URL,
+	 * header rows and auth go as typed and `POST /compose` resolves them, including an `inherit`
+	 * only the chain can settle, which an Auth-panel-authed endpoint needs to answer introspection
+	 * at all. `resolvedUrl` and `resolvedAuth` are preview-resolved and never sent: they key the
+	 * cache, so editing a variable the URL uses, or the credential the auth resolves to, points at
+	 * another schema.
 	 *
-	 * `resolvedUrl` and `resolvedAuth` are the preview-resolved values here, and
-	 * neither is sent: they identify the cache entry, so editing a variable the
-	 * URL interpolates - or the credential the auth resolves to, wherever in the
-	 * chain it lives - points at a different schema instead of reusing the old
-	 * one.
-	 *
-	 * `resolvedUrl` is memoized on the URL text: a dynamic variable like
-	 * `{{$randomInt}}` generates a fresh value on every call
-	 * (`lib/dynamic-variables.ts`'s own contract), and `schemaCacheKey` below
-	 * folds it straight into the introspection cache key - an unmemoized call
-	 * changed that key on every render this panel took for any reason, which
-	 * read as a schema refetch loop rather than a cache.
-	 *
-	 * A `useMemo` and not `lib/dynamic-variable-cache.ts`'s module-scope cache,
-	 * unlike `ParamsPanel`'s "Sends" line: this panel is force-mounted from its
-	 * first visit onward (`RequestTabs/index.tsx`), so the tab switch that
-	 * destroys Params leaves this instance - and its memo - standing. The only
-	 * thing that unmounts it is the builder going away, which takes
-	 * `resolveString` with it and so would miss that cache anyway.
+	 * `resolvedUrl` is memoized on the URL text: a dynamic variable like `{{$randomInt}}` changes
+	 * on every call (`lib/dynamic-variables.ts`), and `schemaCacheKey` folds it into the
+	 * introspection key, so an unmemoized call changed the key every render, a refetch loop. A
+	 * `useMemo`, not `lib/dynamic-variable-cache.ts`'s module cache as `ParamsPanel`'s "Sends" line
+	 * uses: this panel is force-mounted from first visit (`RequestTabs/index.tsx`), so its memo
+	 * survives tab switches, and only the builder going away unmounts it, taking `resolveString`
+	 * and so that cache with it.
 	 */
-	// Path values substituted first, each resolved then encoded as compose does
-	// (#1764), then the URL's own tokens by the rule of the part they land in
-	// (#1773), so a changed `:name` value is a new schema target, the way a
-	// changed variable value is. Memoized on the URL and the path rows' text,
-	// not on `params`, so a query-row edit re-resolves nothing.
+	// Path values substituted first, each resolved then encoded as compose does (#1764), then the
+	// URL's tokens by the rule of the part they land in (#1773), so a changed `:name` value is a
+	// new schema target, as a changed variable is. Memoized on the URL and path rows' text, not
+	// `params`, so a query-row edit re-resolves nothing.
 	const gqlUrl = request.url || "";
 	const pathRowsText = JSON.stringify(composePathParams(request.params));
 	const resolvedGqlUrl = useMemo(() => {
@@ -242,17 +201,12 @@ export default function BodyPanel() {
 
 	const handleModeChange = (mode: BodyMode) => {
 		/*
-		 * What each kind of body held, so switching mode does not destroy it.
-		 *
-		 * JSON, text and GraphQL all share `request.body` - the stored shape is
-		 * one discriminated union - so switching handed the same string to a
-		 * different reader. From JSON to GraphQL that meant the payload was read
-		 * as a raw query, and one keystroke later the body was
-		 * `{"query":"{\"merchant\":\"mrc_8813\"}"}` with the original gone.
-		 *
-		 * The drafts belong to the provider, not to this panel: Radix unmounts an
-		 * inactive `TabsContent`, so a panel-local ref would be discarded every
-		 * time you glanced at the Headers tab.
+		 * What each kind of body held, so a mode switch does not destroy it. JSON, text and GraphQL
+		 * share `request.body` (one discriminated union), so a switch handed the string to another
+		 * reader: JSON to GraphQL read the payload as a raw query, and one keystroke later the body
+		 * was `{"query":"{\"merchant\":\"mrc_8813\"}"}`, the original gone. The drafts are the
+		 * provider's, not this panel's: Radix unmounts an inactive `TabsContent`, so a local ref
+		 * would be lost on a glance at Headers.
 		 */
 		const { body, drafts } = switchBody(
 			request.bodyMode,
@@ -266,7 +220,6 @@ export default function BodyPanel() {
 
 		updateField("bodyMode", mode);
 
-		// Initialize appropriate data for mode
 		if (mode === "form-data" && request.formData.length === 0) {
 			updateField("formData", [createEmptyKeyValue()]);
 		}
@@ -275,28 +228,23 @@ export default function BodyPanel() {
 		}
 
 		/*
-		 * The mode may require a Content-Type, and the mode being left may have
-		 * required one this panel added. Adding it automatically is right - GraphQL
-		 * genuinely needs one - but doing so *silently*, to a tab the user is not
-		 * looking at, was not, and nothing ever removed it: one visit to GraphQL
-		 * left the header on the request permanently, including after switching
-		 * back to None, which sends no body at all. Both halves happen in one call
-		 * because they read and write the same array.
+		 * The new mode may need a Content-Type, and the one being left may have had one added here.
+		 * Adding it is right (GraphQL needs one), but not silently on a tab the user is not
+		 * watching, and it must be taken back: one visit to GraphQL otherwise left it for good,
+		 * even on None, which sends no body. One call does both, since both read and write the same
+		 * array.
 		 */
 		const contentType = switchContentType(mode, request.headers);
 		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
 		setAddedContentType(contentType.added);
 
 		/*
-		 * GraphQL means something different on a GET - the document travels as
-		 * query parameters and a mutation cannot be sent at all - and a new
-		 * request is a GET (issue #1228). The method moves the
-		 * same reversible way the header above does, and back again on the way
-		 * out; `graphql-method.ts` is the rule, including why a method the user
-		 * chose is left alone in both directions. Both fields write in one call,
-		 * the way the headers update above does: writing `method` alone would
-		 * leave a stale `methodSource` marking a method the user is about to pick
-		 * for themselves as still GraphQL's.
+		 * GraphQL on a GET differs (the document travels as query parameters, a mutation cannot be
+		 * sent), and a new request is a GET (#1228). The method moves the same reversible way as
+		 * the header, and back on the way out; `graphql-method.ts` is the rule, including why a
+		 * user-chosen method is left alone both ways. Both fields write in one call, like the
+		 * headers: `method` alone would leave a stale `methodSource` marking the user's next pick
+		 * as GraphQL's.
 		 */
 		const graphqlMethod = switchGraphQLMethod(mode, request.method, request.methodSource);
 		if (
@@ -323,11 +271,9 @@ export default function BodyPanel() {
 			? binaryType.value
 			: (activeMode?.contentType ?? null);
 	const hasVariables = containsVariableToken(request.body);
-	// Memoized for the same reason as `resolvedGqlUrl` above, and a `useMemo`
-	// for the same reason too: an unmemoized call rerolled every
-	// `{{$randomInt}}`-style value in the body on every render this panel took,
-	// not only on an actual edit. A picked row's cell is written as the mode's
-	// bind writes it - escaped in a JSON string or XML (issue #2639).
+	// Memoized as `resolvedGqlUrl` is, and a `useMemo` for its reason: an unmemoized call rerolled
+	// every `{{$randomInt}}`-style value in the body each render. A picked row's cell is written as
+	// the mode's bind writes it, escaped in a JSON string or XML (#2639).
 	const resolvedBody = useMemo(
 		() =>
 			request.body
@@ -335,15 +281,14 @@ export default function BodyPanel() {
 				: NO_BODY,
 		[request.body, request.bodyMode, resolveField]
 	);
-	// Masked at render, after the memo: the memo keeps a dynamic variable's value
-	// stable across renders, and `maskSecrets` reads the secrets as of this render
-	// (#1813). Only the preview needs it, so the Source view builds no masker.
+	// Masked at render, after the memo: the memo holds a dynamic value stable, and `maskSecrets`
+	// reads secrets as of now (#1813). Only the preview needs it, so Source builds no masker.
 	const shownResolvedBody =
 		showResolved && variables.maskSecrets
 			? variables.maskSecrets(resolvedBody.text)
 			: resolvedBody.text;
-	// The names a pre-request script sets at send that the body uses: the Resolved
-	// pane leaves them written (`resolveField`) and says why (#2762).
+	// Names a pre-request script sets at send that the body uses: Resolved leaves them written
+	// (`resolveField`) and says why (#2762).
 	const deferredInBody = deferredNamesIn(variables.deferredVariables ?? NO_NAMES, [request.body]);
 	const isCodeMode =
 		request.bodyMode === "json" ||
@@ -354,9 +299,8 @@ export default function BodyPanel() {
 	const isTable =
 		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
 	const tableItems = request.bodyMode === "form-data" ? request.formData : request.urlEncoded;
-	// Stable across keystrokes for the same reason as HeadersPanel's handler:
-	// it is `KeyValueEditor`'s `onChange`, so its identity gates every row's
-	// memo (issue #1716). It changes only with the body mode.
+	// Stable, as HeadersPanel's handler: it is `KeyValueEditor`'s `onChange`, whose identity gates
+	// every row's memo (#1716). It changes only with the body mode.
 	const onTableChange = useCallback(
 		(items: KeyValueItem[]) =>
 			updateField(request.bodyMode === "form-data" ? "formData" : "urlEncoded", items),
@@ -368,11 +312,10 @@ export default function BodyPanel() {
 
 	return (
 		/*
-		 * A column that fills the tab panel: the picker, the notice and the
-		 * Source/Resolved swap keep their intrinsic height, the editor takes the
-		 * rest. `min-h-0` is what lets it take *less* than its content too - a
-		 * flex child refuses to shrink below its content without it, which is the
-		 * two-scrollbars bug in `docs/design-system/overflow-and-shrink.md`.
+		 * A column filling the tab panel: the picker, notice and Source/Resolved swap keep their
+		 * height, the editor takes the rest. `min-h-0` lets it take *less* than its content; a flex
+		 * child refuses to shrink below content without it, the two-scrollbars bug in
+		 * `docs/design-system/overflow-and-shrink.md`.
 		 */
 		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			<div className="flex items-center justify-between gap-3">
@@ -390,9 +333,7 @@ export default function BodyPanel() {
 						</SelectContent>
 					</Select>
 
-					{/*
-					 * What actually goes on the wire, beside the picker.
-					 */}
+					{/* What goes on the wire, beside the picker. */}
 					{wireContentType ? (
 						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-label text-muted-foreground">
 							{wireContentType}
@@ -406,10 +347,7 @@ export default function BodyPanel() {
 					)}
 				</div>
 
-				{/*
-				 * Source / Resolved, as a swap. Only offered when the body actually
-				 * contains a variable - there is nothing to resolve otherwise.
-				 */}
+				{/* Source / Resolved, as a swap; only when the body contains a variable. */}
 				{hasVariables && isCodeMode && (
 					<div className="flex shrink-0 items-center gap-1">
 						<Button
@@ -432,8 +370,9 @@ export default function BodyPanel() {
 				)}
 			</div>
 
-			{/* `/10` and `/30`, matching the accent tint the Load Test button and the
-			    variable popover already use - not a bespoke opacity. */}
+			{/*
+			 * `/10` and `/30`, the accent tint of the Load Test button and the variable popover.
+			 */}
 			{addedContentType && (
 				<ContentTypeNotice
 					value={addedContentType}
@@ -524,11 +463,6 @@ export default function BodyPanel() {
 
 			{request.bodyMode === "binary" && <BinaryBodyPanel />}
 
-			{/*
-			 * form-data and urlencoded render through one branch. They were two
-			 * copies of the same call, differing only in that one was wrapped in a
-			 * `space-y-2` div and the other was not.
-			 */}
 			{isTable && (
 				<KeyValueEditor
 					items={tableItems.length > 0 ? tableItems : [createEmptyKeyValue()]}
@@ -537,8 +471,8 @@ export default function BodyPanel() {
 					valuePlaceholder="Value"
 					showResolved={true}
 					allowDisable={true}
-					// Only multipart can carry a file: urlencoded's wire body is a
-					// string of pairs, and the engine refuses a file part there.
+					// Only multipart carries a file: urlencoded is a string of pairs, and the
+					// engine refuses a file part there.
 					allowFiles={request.bodyMode === "form-data"}
 					// A part's own Content-Type is multipart-only, like a file part (#3022).
 					rowExtra={request.bodyMode === "form-data" ? contentTypeRowExtra : undefined}

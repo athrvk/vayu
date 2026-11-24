@@ -6,17 +6,11 @@
  */
 
 /**
- * "Choosing this mode edited your Headers tab, and will put it back."
- *
- * Undo is the impatient version of what a mode change does anyway - the row is
- * removed when the body type next changes to one that does not need it. The
- * notice says so, because an edit to a tab you are not looking at reads as
- * permanent unless something tells you otherwise.
- *
- * Its own component so it can be rendered and tested directly. Inside the panel
- * it only appears after a Radix Select commits a value, and a Select does not
- * commit in jsdom - so a test of the notice through the panel would either not
- * run or pass without exercising anything.
+ * "Choosing this mode edited your Headers tab, and will put it back." Undo is the impatient form of
+ * what the next mode change does anyway (the row goes when the body type no longer needs it); the
+ * notice says so, since an edit to an unseen tab reads as permanent otherwise. Its own component to
+ * test directly: in the panel it appears only after a Radix Select commits, which a Select does not
+ * do in jsdom.
  */
 
 import { Button } from "@/components/ui";
@@ -30,8 +24,7 @@ export interface ContentTypeNoticeProps {
 
 export function ContentTypeNotice({ value, onUndo, onDismiss }: ContentTypeNoticeProps) {
 	return (
-		// `/10` and `/30`, matching the accent tint the Load Test button and the
-		// variable popover already use - not a bespoke opacity.
+		// `/10` and `/30`, the accent tint of the Load Test button and the variable popover.
 		<div className="enter-fade flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary-tint px-2.5 py-1.5 text-xs">
 			<span>
 				Added{" "}

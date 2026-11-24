@@ -6,23 +6,13 @@
  */
 
 /**
- * LegacyScriptNotice
- *
- * Shown in place of the inherited-scripts list for a run recorded **before**
- * the engine took over joining scripts. Those runs stored one string with the
- * collection chain's scripts glued to the request's own and nothing marking the
- * boundaries, so the request's own part cannot be recovered from it.
- *
- * It has to be *shown*, not merely known about. The editor above it is seeded
- * with `""` for such a run, because `seedFromRun` can only fill it from a part
- * list that does not exist - so without this block the pane would show an empty
- * script box for a run that demonstrably ran a script, and the user would
- * conclude nothing ran. That is the "written but never read" defect
- * `CLAUDE.md` names as this codebase's most repeated, and it would have applied
- * to every design run in a user's history on the day they upgraded.
- *
- * Renders nothing when there is no legacy string, which is every run recorded
- * since - so it must not leave an empty box behind.
+ * Shown instead of the inherited-scripts list for a run recorded **before** the engine joined
+ * scripts: those runs stored one string with the chain's scripts glued to the request's own and no
+ * boundaries, so the request's part cannot be recovered. It must be *shown*: the editor above is
+ * seeded with `""` for such a run (`seedFromRun` fills it only from a part list that does not
+ * exist), so without this the pane shows an empty script for a run that ran one, the "written but
+ * never read" defect `CLAUDE.md` names. Renders nothing without a legacy string, as for every newer
+ * run, so no empty box.
  */
 
 import { Callout } from "@/components/shared";
@@ -54,11 +44,9 @@ export default function LegacyScriptNotice({ variant, script }: LegacyScriptNoti
 			</Callout>
 
 			{/*
-			 * `surface-sunken` + `border-rule`, not `bg-muted/50` + `border-input`.
-			 * `--muted` is the one surface where no border token works: it sits
-			 * between `--border` and `--border-strong` in dark, so the edge was
-			 * wrong in one theme or the other. The surface declares the `--rule`
-			 * that reads on it.
+			 * `surface-sunken` + `border-rule`, not `bg-muted/50` + `border-input`: on `--muted` no
+			 * border token works (it sits between `--border` and `--border-strong` in dark, so one
+			 * theme was wrong). The surface declares the `--rule` that reads on it.
 			 */}
 			<pre className="m-0 p-3 surface-sunken rounded-md border border-rule max-h-48 overflow-auto text-label font-mono leading-relaxed text-foreground whitespace-pre-wrap">
 				{script}

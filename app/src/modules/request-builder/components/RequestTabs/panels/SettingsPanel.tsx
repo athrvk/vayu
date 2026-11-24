@@ -6,61 +6,37 @@
  */
 
 /**
- * SettingsPanel Component
+ * Per-request execution settings: protocol, redirect policy, timeout, event stream. Every field is
+ * stored on the request and sent on every Send and load test, never elided at the default (see the
+ * payload fields in `index.tsx` and `types/api.ts`): otherwise the engine's follow default followed
+ * a 3xx silently, and it never reached the response pane. One exception:
  *
- * Per-request execution settings: the protocol to negotiate, the redirect
- * policy, the timeout, and whether the response is consumed as an event
- * stream. The engine has always accepted `followRedirects` / `maxRedirects` and
- * defaulted to following, but nothing in the app sent them, so a 3xx was
- * followed silently and never reached the response pane. Every field here is
- * stored on the request and sent on every Send and every load test, never
- * elided even when it equals the default - see the comment on the payload
- * fields in `index.tsx` and `types/api.ts` - with one deliberate exception.
- *
- * **Timeout is the exception** (issue #2937). It has no default to send: an
- * empty field is `null`, stays off the composed payload, and the engine reads
- * the `defaultTimeout` setting at each send. Sending today's setting instead
- * would pin it on the request, so a later change to the setting would not
- * reach it. The empty field's placeholder names the setting's current value.
- *
- * **Event stream is a setting, not a body mode** (issue #574). The request's
- * body semantics are untouched by it - a stream is a GET as often as it is a
- * POST - and what it changes is how the response is *delivered*, which is
- * exactly what this tab is for.
- *
- * **The stream text path is the reply's address inside each event** (issue
- * #3773): a JSONPath the engine evaluates on every event's JSON `data`, which
- * the Events tab's Text view joins. It is declared, never detected - the two
- * presets are shortcuts for two common shapes, and the field takes any path in
- * the subset the elements read. It is shown only while Event stream is on, and
- * turning the stream off empties it (`streamPatch`), because the engine refuses
- * a path stored beside a buffered request.
- *
- * **The first content marker is the load run's first-token clock** (issue
- * #3774): literal bytes the engine watches the raw stream for, so the report's
- * Time to first match is the wait for content and not for a preamble event. It
- * follows the text path's rules (a stream's field, emptied with the toggle) and
- * is kept verbatim, never trimmed, because it is matched byte for byte.
- *
- * **Verification off is loud, not hidden** (issue #706). The row was withheld
- * for years on the grounds that exposing it weakens transport security; what
- * that produced was an unreachable knob and users with no way to reach an
- * internal host at all. The answer to a dangerous state is to make it say so -
- * the warning line below the toggle, and the Settings tab's own badge - not to
- * remove the control and leave the trust store as the only way out. The row
- * says which of the two the reader probably wants: trusting the authority in
- * Settings › Network & connectivity keeps verification on everywhere.
- *
- * **The rows are the app-settings rows** (issue #702). Sections are `Eyebrow`
- * now (11px, uppercase, muted), and a section holding one row *is* that row,
- * which is why Protocol and Streaming carry no heading of their own.
- *
- * **Postman's per-request protocol switches live here too** (issue #1765):
- * the cookie jar, URL encoding, and the automatic headers this request never
- * sends. The header list is *stored* (`disabledSystemHeaders`), unlike the
- * Headers tab's per-send untick (`disabledDefaultHeaders`, #1229), and the copy
- * says so, because the two lists name the same headers. Names Vayu keeps for
- * the Postman export without applying are shown, read-only, beside it.
+ * - **Timeout** (#2937) has no default to send: an empty field is `null`, stays off the composed
+ *   payload, and the engine reads `defaultTimeout` at each send. Sending today's setting would pin
+ *   it, so a later change would not reach the request. The placeholder names the current value.
+ * - **Event stream is a setting, not a body mode** (#574): the body is untouched (a stream is a GET
+ *   as often as a POST), and it changes how the response is *delivered*, which is this tab's
+ *   subject.
+ * - **The stream text path is the reply's address in each event** (#3773): a JSONPath the engine
+ *   runs on each event's JSON `data`, joined by the Events tab's Text view. Declared, never
+ *   detected; the presets are shortcuts and the field takes any path in the elements' subset. Shown
+ *   only with Event stream on, and emptied when it goes off (`streamPatch`): the engine refuses a
+ *   path on a buffered request.
+ * - **The first content marker is the load run's first-token clock** (#3774): literal bytes the
+ *   engine watches the raw stream for, so Time to first match waits for content, not a preamble.
+ *   Same rules as the text path, and kept verbatim, never trimmed, since it is matched byte for
+ *   byte.
+ * - **Verification off is loud, not hidden** (#706): withholding the row left an unreachable knob
+ *   and no way to reach an internal host. A dangerous state says so (the warning under the toggle,
+ *   the tab's badge). The row points at the usual better answer: trusting the authority in Settings
+ *   › Network & connectivity keeps verification on everywhere.
+ * - **The rows are the app-settings rows** (#702). Sections are `Eyebrow` (11px, uppercase, muted),
+ *   and a one-row section *is* that row, so Protocol and Streaming have no heading.
+ * - **Postman's per-request protocol switches live here** (#1765): the cookie jar, URL encoding,
+ *   and the automatic headers this request never sends. That list is *stored*
+ *   (`disabledSystemHeaders`), unlike the Headers tab's per-send untick (`disabledDefaultHeaders`,
+ *   #1229), and the copy says so, since both name the same headers. Names Vayu keeps for the
+ *   Postman export without applying are shown read-only beside it.
  */
 
 import { AlertTriangle } from "lucide-react";
@@ -139,9 +115,8 @@ export default function SettingsPanel() {
 	const unapplied = unappliedStoredHeaders(storedOff);
 
 	/**
-	 * Stored, so `updateField`: unlike the Headers tab's per-send untick, this
-	 * is a change to the request and should mark it unsaved. Names are kept
-	 * lowercased, the form the engine stores and Postman writes.
+	 * Stored, so `updateField`: unlike the Headers tab's per-send untick, this changes the request
+	 * and marks it unsaved. Names are lowercased, as the engine stores and Postman writes them.
 	 */
 	const setHeaderOff = (key: string, off: boolean) => {
 		updateField(
@@ -151,8 +126,8 @@ export default function SettingsPanel() {
 	};
 
 	/**
-	 * The URL is the query's truth and the rows hold it as written in either
-	 * mode (#1771), so the flag is all the switch changes.
+	 * The URL is the query's truth and the rows hold it as written either way (#1771), so only the
+	 * flag changes.
 	 */
 	const handleEncodingChange = (checked: boolean) => {
 		updateField("disableUrlEncoding", checked);
@@ -164,22 +139,18 @@ export default function SettingsPanel() {
 	};
 
 	/**
-	 * Turning the stream on arms `Accept: text/event-stream`; turning it off
-	 * takes that row back out again.
-	 *
-	 * `setRequest` once rather than two `updateField` calls: the flag and the
-	 * headers are one change, and the rule computes the new header list from the
-	 * current one - a second call would compute against the array it had before
-	 * the first. A request that already declares an `Accept` keeps it; see
-	 * `utils/auto-header.ts` for why ownership is by marker, not by row id.
+	 * Stream on arms `Accept: text/event-stream`; off takes that row out. One `setRequest`, not two
+	 * `updateField`s: flag and headers are one change, and the rule computes the headers from the
+	 * current list, which a second call would read stale. A request that declares its own `Accept`
+	 * keeps it; `utils/auto-header.ts` says why ownership is by marker, not row id.
 	 */
 	const handleStreamChange = (checked: boolean) => {
 		setRequest(streamPatch(request, checked));
 	};
 
 	const handleTextPathPreset = (path: string) => {
-		// Radix reports "" when the active preset is pressed again; the field is
-		// what holds the path, so there is nothing to switch off.
+		// Radix reports "" when the active preset is pressed again; the field holds the path, so
+		// nothing switches off.
 		if (path) updateField("streamTextPath", path);
 	};
 
@@ -198,14 +169,10 @@ export default function SettingsPanel() {
 	};
 
 	/**
-	 * An emptied field writes the default rather than nothing.
-	 *
-	 * `NumberSettingRow` holds an unparseable draft instead of committing it,
-	 * which is right for a setting whose owner may simply keep the old number.
-	 * This one has no such state: `maxRedirects` is a column on the request and
-	 * goes out on every Send, so "empty" would have to be serialized as
-	 * something. It is serialized as the default, and the draft stays on screen
-	 * until a number replaces it.
+	 * An emptied field writes the default. `NumberSettingRow` holds an unparseable draft, right for
+	 * a setting that may keep its old number; `maxRedirects` is a request column sent on every
+	 * Send, so "empty" must serialize as something: the default, with the draft shown until a
+	 * number replaces it.
 	 */
 	const handleMaxRedirectsDraft = (raw: string) => {
 		if (raw === "") updateField("maxRedirects", DEFAULT_MAX_REDIRECTS);
@@ -218,10 +185,8 @@ export default function SettingsPanel() {
 	};
 
 	/**
-	 * An emptied field is "use the default", which is a state of its own
-	 * rather than a draft to wait out, so it is committed as `null` the moment
-	 * it empties - unlike `maxRedirects` above, which has to be serialised as a
-	 * number.
+	 * An emptied field means "use the default", a state of its own, so it commits `null` at once,
+	 * unlike `maxRedirects`, which must serialize as a number.
 	 */
 	const handleTimeoutDraft = (raw: string) => {
 		if (raw === "") updateField("timeout", null);
@@ -230,8 +195,7 @@ export default function SettingsPanel() {
 	return (
 		<div className="space-y-6 max-w-xl">
 			{/*
-			 * The scope, once. It was on all three sections, in two variants, and
-			 * the one row it is not true of says so itself (Streaming, below).
+			 * The scope, once; the one row it is not true of (Streaming, below) says so itself.
 			 */}
 			<p className="text-xs text-muted-foreground">
 				Stored on the request and sent with every Send and every load test.
@@ -311,10 +275,9 @@ export default function SettingsPanel() {
 				/>
 
 				{/*
-				 * Text, not a Badge: it paints no background, which is the rule
-				 * `badge-hover.test.tsx` exists for - and the same treatment the
-				 * response bar gives its protocol-downgrade line, so the two
-				 * warnings in the request builder read as one thing.
+				 * Text, not a Badge: it paints no background (the `badge-hover.test.tsx` rule), as
+				 * the response bar's protocol-downgrade line does, so the builder's two warnings
+				 * read as one thing.
 				 */}
 				{!request.verifySSL && (
 					<div className="enter-fade flex items-start gap-1.5 text-xs text-status-warning-text">

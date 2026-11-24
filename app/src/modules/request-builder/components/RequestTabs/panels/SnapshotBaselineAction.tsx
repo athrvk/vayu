@@ -6,15 +6,12 @@
  */
 
 /**
- * The action on an `assert.snapshot` row that records the baseline (#3807):
- * "use what the server just answered". It reads the builder's current response
- * and hands the list at the element's method to `onRecord`, which writes it into
- * the element through the same path a typed edit takes, so the row's summary and
- * the baseline field follow.
- *
- * Lives here, not in `components/shared/ElementList`, because the response is
- * the request builder's: the list renders the control through `renderAboveForm`
- * and stays ignorant of it (the collection's Elements tab has no response).
+ * An `assert.snapshot` row's action that records the baseline (#3807), "use what the server just
+ * answered": it hands the list at the element's method, from the builder's current response, to
+ * `onRecord`, which writes it through a typed edit's path, so the summary and baseline field
+ * follow. Here, not in `components/shared/ElementList`, because the response is the builder's: the
+ * list renders it through `renderAboveForm` and knows nothing of it (the collection's tab has no
+ * response).
  */
 
 import { Button, DisabledHint } from "@/components/ui";

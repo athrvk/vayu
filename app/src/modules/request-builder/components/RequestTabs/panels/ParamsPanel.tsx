@@ -6,20 +6,12 @@
  */
 
 /**
- * ParamsPanel Component
- *
- * Query parameters, kept in step with the URL in the bar above, and under them
- * the path variables (issue #1764): one row per `:name` segment of the URL,
- * plus any declared path row the URL does not use.
- *
- * The two tables edit one `params` array, split by `in`, so each writes its
- * own half back beside the other's untouched. Path rows take their keys from
- * the URL, so their table locks the key and offers no remove - a row comes and
- * goes with its segment (`syncPathRows`). They are outside bulk edit for the
- * same reason, and the table stays visible in both modes.
- *
- * Bulk edit is `BulkEditor`; only the format differs, and that is what this
- * passes.
+ * Query parameters, in step with the URL bar, and under them the path variables (#1764): one row
+ * per `:name` segment, plus any declared path row the URL does not use. Both tables edit one
+ * `params` array split by `in`, each writing its half beside the other's. Path rows take their keys
+ * from the URL, so their table locks the key and offers no remove (a row comes and goes with its
+ * segment, `syncPathRows`); for the same reason they are outside bulk edit and the table shows in
+ * both modes. Bulk edit is `BulkEditor`; this passes the format.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -55,20 +47,15 @@ import {
 import { EmptyTableHint } from "./EmptyTableHint";
 
 /*
- * The "Sends" line's resolved URL, cached across this panel's own unmount.
- *
- * A `useMemo` here would be worthless: this tab is not force-mounted
- * (`RequestTabs/index.tsx` force-mounts Body and Elements only), so Params →
- * Headers → Params destroys the component and builds a new one, and a first
- * render has no previous value to memoize against - a `{{$randomInt}}` in the
- * URL rerolled on every round trip through another tab. See
- * `lib/dynamic-variable-cache.ts` for why this is module scope and why it is
- * keyed by request id rather than by the URL text.
+ * The "Sends" line's resolved URL, cached across this panel's unmount. A `useMemo` is useless: this
+ * tab is not force-mounted (`RequestTabs/index.tsx` force-mounts Body and Elements), so Params →
+ * Headers → Params builds a new component with nothing to memoize against, and a `{{$randomInt}}`
+ * in the URL rerolled per round trip. `lib/dynamic-variable-cache.ts` says why module scope and why
+ * keyed by request id, not URL text.
  */
 const stableResolvedUrl = createStableResolve<SendsResolved>();
 
-// Module constants for the path table's gates: `KeyValueEditor` keeps its
-// callbacks stable only while these are (issue #1716).
+// Module constants: `KeyValueEditor` keeps its callbacks stable only while these are (#1716).
 const PATH_KEY_LOCKED = (_item: KeyValueItem, field: keyof KeyValueItem) => field !== "key";
 const PATH_NOT_REMOVABLE = () => false;
 
@@ -85,15 +72,13 @@ export default function ParamsPanel() {
 	const draft = bulkDrafts.params ?? null;
 	const variables = useVariableSupport();
 
-	// Derived, never written by rendering: a `:name` no stored row answers
-	// still gets a row here, and the first edit in the table stores it, so
-	// opening a request does not mark it edited.
+	// Derived, never written by rendering: an unanswered `:name` still gets a row, stored on the
+	// first edit, so opening a request does not mark it edited.
 	const pathParams = displayPathRows(pathRowsOf(request.params), request.url);
 
-	// The editor's callbacks read the latest request through a ref, so their
-	// identity survives the keystroke that rewrites `request.params`: listing it
-	// in their deps handed `KeyValueEditor` a new `onChange` per character and
-	// re-rendered every row (issue #1716).
+	// The callbacks read the request through a ref, so their identity survives a keystroke
+	// rewriting `request.params`; listing it in deps handed `KeyValueEditor` a new `onChange` per
+	// character and re-rendered every row (#1716).
 	const latest = useRef({
 		params: request.params,
 		url: request.url,
@@ -117,9 +102,8 @@ export default function ParamsPanel() {
 		[updateField]
 	);
 
-	// Values only: the URL does not change, because a path row's value goes into
-	// its segment at send time, never into the URL text. The editor appends its
-	// trailing blank row on every change; it is not a path row and is dropped.
+	// Values only: the URL text does not change, as a path value fills its segment at send time.
+	// The editor's appended blank row is not a path row and is dropped.
 	const handlePathParamsChange = useCallback(
 		(newPathParams: KeyValueItem[]) => {
 			updateField("params", [
@@ -130,28 +114,21 @@ export default function ParamsPanel() {
 		[updateField]
 	);
 
-	// Not called inline: a dynamic variable like `{{$randomInt}}` generates a
-	// fresh value on every call (`lib/dynamic-variables.ts`'s own contract), and
-	// this panel both re-renders and *remounts* on far more than a URL edit, so
-	// the line read as changing on its own rather than describing one resolved
-	// URL. A request with no id yet shares one entry: an unsaved draft has
-	// nothing else stable to key on, and the only cost is two blank new tabs
-	// previewing the same generated value.
-	// What the line resolves is `utils/sends-url.ts`'s, shared with the tab
-	// title so the two cannot disagree about path rows or encoding.
+	// Not called inline: `{{$randomInt}}`-style variables change on every call
+	// (`lib/dynamic-variables.ts`), and this panel re-renders and *remounts* on far more than URL
+	// edits, so the line seemed to change on its own. A request with no id shares one entry
+	// (nothing else is stable; two blank tabs preview one value). What it resolves is
+	// `utils/sends-url.ts`'s, shared with the tab title, so they agree on path rows and encoding.
 	//
-	// A name a pre-request script sets at send is the engine's to name
-	// (`POST /compose`'s `deferredVariables`, read from the Code section's cache
-	// entry), and is drawn as written rather than as its stored value (#2741).
-	// Only a URL with a `{{token}}` asks: a literal one never pays a compose.
+	// A name a pre-request script sets at send is the engine's to name (`POST /compose`'s
+	// `deferredVariables`, from the Code section's cache entry) and is drawn as written (#2741).
+	// Only a URL with a `{{token}}` asks, so a literal one never pays a compose.
 	//
-	// The auth is the effective one, `inherit` walked: a key a folder places in
-	// the query is on the wire, so it is on the line and masked below (#3425).
-	// So is an OAuth 2.0 token placed there (drawn as a stand-in, as the token is
-	// fetched at send) and a GraphQL GET's document, which travels as query
-	// parameters (#3437); the method and the body are what tell those apart.
-	//
-	// An open draft is what Send would commit, so the line describes it.
+	// The auth is the effective one, `inherit` walked: a key a collection places in the query is on
+	// the wire, so it is on the line, masked below (#3425). So is a query-placed OAuth 2.0 token (a
+	// stand-in, as it is fetched at send) and a GraphQL GET's document, sent as query parameters
+	// (#3437); method and body tell those apart. An open draft is what Send commits, so the line
+	// describes it.
 	const ancestors = useCollectionAncestors(request.collectionId);
 	const auth = resolveAuthForSend(request.auth, ancestors);
 	const drafted = draft ? bulkTextPatch(request, "params", draft.text) : null;
@@ -170,12 +147,10 @@ export default function ParamsPanel() {
 		sendsCacheInput(sends, deferred),
 		sendsResolver(resolveString)
 	);
-	// Masked here, after the cache: the cache keeps the resolved URL (a
-	// `{{$randomInt}}` stays what it rolled) and only what is drawn is hidden.
-	// The appended key is masked as the resolution sent it, never re-resolved
-	// here. The auth as written covers a literal credential; one that is a
-	// `{{token}}` is a template, not a secret, so it stays out and an unset or
-	// deferred name shows as the written text that is going out.
+	// Masked here, after the cache: the cache keeps the resolved URL (a `{{$randomInt}}` stays as
+	// rolled) and only what is drawn is hidden. The appended key is masked as sent, not
+	// re-resolved. The auth as written covers a literal credential; a `{{token}}` is a template,
+	// not a secret, so it stays out and an unset or deferred name shows as the text going out.
 	const secrets = [
 		...collectSecrets(getAllVariables(), undefined),
 		...authSecrets(auth).filter((text) => !containsVariableToken(text)),
@@ -184,12 +159,10 @@ export default function ParamsPanel() {
 	const sendsText = createSecretMasker(secrets, true, undefined, SECRET_UI_MASK).apply(
 		resolvedUrl
 	);
-	// The blank row to type into is derived where the rows are rendered, as the
-	// Headers tab does (`useHeadersManager`), because `request.params` does not always
-	// carry it: a URL edit goes through `mergeParamsFromUrl`, which drops the
-	// enabled blank row (its key matches nothing in the URL), and the tab
-	// lost its spare row until the next table change (#2155). Memoised so the
-	// blank row keeps one id across renders, or focus would leave it per key.
+	// The blank row is derived where rows render, as Headers does (`useHeadersManager`), since
+	// `request.params` does not always carry it: a URL edit goes through `mergeParamsFromUrl`,
+	// which drops the enabled blank row, so the tab lost its spare row until the next table edit
+	// (#2155). Memoised so the blank row keeps one id, or focus would leave it per key.
 	const displayParams = useMemo(
 		() => withTrailingBlank(queryRowsOf(request.params)),
 		[request.params]
@@ -204,11 +177,11 @@ export default function ParamsPanel() {
 			onCommit={() => commitBulkDraft("params")}
 			placeholder={"page=1\nlimit=10\nsort=name"}
 			hint={
-				/* Params keep `=` alone - a query string is written `k=v`, and a
-				   value routinely contains a colon (`redirect=https://…`). Only the
-				   Headers editor accepts both separators. Repeated keys are all
-				   sent, joined with `&`, which is how an array parameter is
-				   expressed. */
+				/*
+				 * Params keep `=` alone: a query is `k=v` and a value often has a colon
+				 * (`redirect=https://…`); only Headers accepts both separators. Repeated keys are
+				 * all sent, joined with `&`, as an array parameter is.
+				 */
 				<>
 					<code className="bg-muted px-1 rounded-md">key=value</code>, one per line. A
 					line with no <code className="bg-muted px-1 rounded-md">=</code> splits at{" "}
@@ -224,13 +197,9 @@ export default function ParamsPanel() {
 				</EmptyTableHint>
 			}
 			/*
-			 * The resolved URL, on one line, in both modes - not just the table's.
-			 * It was a `p-3` slab under a 13px label - two rows of chrome for one
-			 * line of text - in a tab whose table is now 36px per row. It is a
-			 * labelled line now, and it stays visible while bulk-editing because
-			 * that is exactly when a pasted block of params most wants checking
-			 * against the URL it will produce - not redundant with the bar above,
-			 * which shows the URL *with* its `{{variables}}` rather than resolved.
+			 * The resolved URL on one line, in both modes. It stays visible while bulk-editing,
+			 * since that is when a pasted block most wants checking against the URL it produces,
+			 * and it is not the bar above, which shows `{{variables}}` unresolved.
 			 */
 			after={
 				<>
