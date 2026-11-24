@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief The GraphQL-over-HTTP envelope. See `vayu/http/graphql_body.hpp` for
- *        why the engine applies it rather than each client.
+ * The GraphQL-over-HTTP envelope. See `vayu/http/graphql_body.hpp` for
+ * why the engine applies it rather than each client.
  */
 
 #include "vayu/http/graphql_body.hpp"

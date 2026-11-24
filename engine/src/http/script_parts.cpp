@@ -17,9 +17,7 @@ std::string read_script (const nlohmann::json& json, const char* list_key, const
     // A payload that is not an object carries no script. The guard is load
     // bearing: `value()` throws `type_error.306` on an array or a null, and
     // this runs inside `RunContext`'s constructor on a detached worker with no
-    // catch above it. `find()` is already total, so only `value()` needed it -
-    // which is why the throw stayed hidden while every caller happened to
-    // check `contains()` first.
+    // catch above it. `find()` is already total, so only `value()` needs it.
     if (!json.is_object ()) {
         return {};
     }

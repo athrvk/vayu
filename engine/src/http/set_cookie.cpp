@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief `Set-Cookie` parsing. See `vayu/http/set_cookie.hpp` for why this
- *        exists twice (here and in the renderer) and what pins the two copies.
+ * `Set-Cookie` parsing. See `vayu/http/set_cookie.hpp` for why this
+ * exists twice (here and in the renderer) and what pins the two copies.
  */
 
 #include "vayu/http/set_cookie.hpp"
@@ -35,7 +35,7 @@ std::string trim (std::string_view s) {
 }
 
 /**
- * @brief Whether the comma at @p comma starts a new cookie.
+ * Whether the comma at @p comma starts a new cookie.
  *
  * The renderer spells this as a lookahead - `/,\s*(?=[^;,\s=]+=)/` - and this
  * is the same rule read by hand: skip whitespace, then require at least one

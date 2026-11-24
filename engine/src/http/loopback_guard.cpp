@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief Which outbound targets are Vayu's own ports (issue #2355), and
- *        which local peers a reference fetch may reach (issue #2364).
+ * Which outbound targets are Vayu's own ports (issue #2355), and
+ * which local peers a reference fetch may reach (issue #2364).
  */
 
 #include "vayu/http/loopback_guard.hpp"

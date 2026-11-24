@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief The cookie jar's storage and its two read views. See cookie_jar.hpp
- *        for the scope / lifetime / persistence / threading decisions.
+ * The cookie jar's storage and its two read views. See cookie_jar.hpp for the
+ * scope / lifetime / persistence / threading decisions.
  */
 
 #include "vayu/http/cookie_jar.hpp"
@@ -76,7 +76,7 @@ std::string_view without_trailing_dot (std::string_view host) {
 }
 
 /**
- * @brief RFC 6265 §5.1.4 path-match.
+ * RFC 6265 §5.1.4 path-match.
  *
  * The `/foo` cookie reaches `/foo` and `/foo/bar` but not `/foobar`, which is
  * the case a `starts_with` on its own gets wrong.
@@ -138,8 +138,8 @@ std::optional<UrlScope> url_scope_of (const std::string& url) {
 }
 
 /**
- * @brief Erase the cookies among @p lines that a request to @p url would have
- *        carried, optionally narrowed to one @p name.
+ * Erase the cookies among @p lines that a request to @p url would have
+ * carried, optionally narrowed to one @p name.
  *
  * The one removal rule behind both `Unset` and `ClearUrl`: the name filter is
  * the only difference between them, so it is a parameter rather than a second

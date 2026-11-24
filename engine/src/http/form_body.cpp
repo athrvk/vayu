@@ -26,10 +26,9 @@ namespace vayu::http {
 
 namespace {
 
-// The percent-encoder is `url_parts.hpp`'s, not a copy here: both wrapped the
-// same `curl_easy_escape` call, and the one that is exported is the one a
-// query-string builder can reach (issue #1228). The decoder below stays,
-// because it is *not* the same function - the `+` rule is this media type's.
+// The percent-encoder is `url_parts.hpp`'s, not a copy here, so a query-string
+// builder reaches the same one (issue #1228). The decoder below stays, because
+// it is *not* the same function: the `+` rule is this media type's.
 
 // libcurl's decoder, with the media type's `+` rule applied before unescaping so a
 // `%2B` still decodes to a literal plus. libcurl's unescape returns the decoded
@@ -84,8 +83,8 @@ std::string_view curl_file_type (std::string_view name) {
 
 } // namespace
 
-// Declared in the header since issue #1003: `pm.request.body.formdata` names a
-// part the same way the rendering does, and a second copy of the rule would not
+// Declared in the header (issue #1003): `pm.request.body.formdata` names a part
+// the same way the rendering does, and a second copy of the rule would not
 // receive this one's fixes.
 std::string declared_file_name (const FormField& field) {
     if (!field.file_name.empty ()) {
@@ -242,10 +241,10 @@ std::string implied_content_type (const Body& body) {
     case BodyMode::JsonRpc:
     case BodyMode::Mcp: return "application/json";
     case BodyMode::Xml: return "application/xml";
-    // `text/plain` is a default, not a claim that every text body is plain
-    // text (issue #2464): a typed `Content-Type` row wins (`text/csv`, a JWT's
+    // `text/plain` is a default, not a claim that every text body is plain text
+    // (issue #2464): a typed `Content-Type` row wins (`text/csv`, a JWT's
     // `application/jwt`), and `disabledSystemHeaders` removes it. Deriving
-    // nothing (#889) left the gap libcurl fills with its form type.
+    // nothing (#889) would leave the gap libcurl fills with its form type.
     case BodyMode::Text: return "text/plain";
     // The file's declared type, else what its extension names, else the
     // type that claims nothing. An empty string is absent at every tier.

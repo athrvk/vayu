@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Reading the transport policy out of settings (issue #705).
- */
+/** Reading the transport policy out of settings (issue #705). */
 
 #include "vayu/http/transport_policy.hpp"
 
@@ -78,7 +76,7 @@ std::string_view wildcard_suffix (std::string_view pattern) {
  * not to introduce - a certificate offered to a host nobody registered. Shallow
  * on purpose (digits and dots, or a colon): it decides what a *wildcard* may
  * answer for, never whether an address is well formed, and an exact entry still
- * matches an address literal the way it always did.
+ * matches an address literal.
  */
 bool is_address_literal (std::string_view host) {
     if (host.find (':') != std::string_view::npos) {
@@ -467,8 +465,8 @@ std::filesystem::path system_ca_bundle_path () {
  *
  * Renamed into place rather than truncated and rewritten, because the resolver
  * runs on the request path: a transfer that read the file halfway through a
- * rewrite would verify against a truncated bundle, and "some of your CAs" is
- * the failure shape this whole feature exists to remove.
+ * rewrite would verify against a truncated bundle, trusting some of the user's
+ * CAs and failing on the rest.
  */
 bool write_atomically (const std::filesystem::path& path, const std::string& content) {
     std::filesystem::path temp = path;
@@ -785,9 +783,8 @@ std::optional<std::string> client_cert_host_rejection (std::string_view host) {
         return std::string ("host contains whitespace");
     }
     // The one wildcard form, and every near-miss refused by name (issue #803).
-    // A `*` anywhere else is a pattern this engine does not have - stored, it
-    // would be a hostname no transfer can ever equal, which is exactly the
-    // "registered and silently never used" state this registry exists to end.
+    // A `*` anywhere else is a pattern this engine does not have: stored, it
+    // would be a hostname no transfer can ever equal.
     if (const std::string_view labels = is_wildcard_host (host) ? host.substr (2) : host;
     labels.find ('*') != std::string_view::npos) {
         return std::string (
@@ -799,10 +796,8 @@ std::optional<std::string> client_cert_host_rejection (std::string_view host) {
         "' names no domain after the '*.' - register '*.example.com'");
     }
 
-    // The three shapes a user reaches for when they copy the address bar. Each
-    // is refused by name rather than stored and quietly never matched, because
-    // a registry entry that cannot match is indistinguishable from a feature
-    // that does not work.
+    // The three shapes a user reaches for when they copy the address bar, each
+    // refused by name for the reason the function's doc gives.
     if (host.find ("://") != std::string_view::npos) {
         return std::string (
         "host must not carry a scheme - register 'api.example.com', "
@@ -837,11 +832,6 @@ std::optional<std::string> client_cert_host_rejection (std::string_view host) {
 std::optional<std::string> client_cert_file_rejection (ClientCertFormat format,
 std::string_view cert_path,
 std::string_view key_path) {
-    // Both files are checked *here*, at the moment the user can still fix the
-    // path, rather than at handshake time where curl reports
-    // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which
-    // setting named a file that is not there. A PKCS#12 row has one file to
-    // check, which is the whole difference the format makes here.
     std::vector<std::pair<const char*, std::string_view>> files{
         { "certificate file", cert_path }
     };
@@ -1063,13 +1053,12 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     // The client-certificate registry (issue #707), read whole because a policy
     // serves every host a run may reach - see TransportPolicy::client_certificates.
     for (const auto& row : db.get_client_certificates ()) {
-        // The routes refuse every shape this drops, so only a hand-edited row or
-        // a file that has moved since it was registered reaches here. Named
+        // The routes refuse every shape this drops, so only a hand-edited row
+        // or a file that has moved since it was registered reaches here. Named
         // rather than swallowed, and named *now*: the alternative is a
-        // handshake failure against the endpoint, which is precisely the "the
-        // API is down" misdiagnosis this epic exists to end. A format is never
-        // defaulted to PEM on the user's behalf: presenting the wrong shape is
-        // the same handshake failure.
+        // handshake failure against the endpoint, misread as "the API is down".
+        // A format is never defaulted to PEM on the user's behalf: presenting
+        // the wrong shape is the same handshake failure.
         const auto format = check_client_cert_row (row);
         if (!format) {
             vayu::utils::log_error ("client",
@@ -1157,10 +1146,9 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     const std::string url = db.get_config_string ("proxyUrl", "");
     if (const auto rejection = proxy_url_rejection (url)) {
         // Manual mode with an unusable URL is the one combination that must not
-        // fail quietly: leaving it in Manual would send every request direct
-        // while Settings says otherwise, which is precisely the invisible
-        // failure this issue exists to end. `Off` at least means what it says,
-        // and the log names the setting to fix.
+        // fail quietly: left in Manual, every request would go direct while
+        // Settings says otherwise. `Off` at least means what it says, and the
+        // log names the setting to fix.
         vayu::utils::log_error ("client",
         "Config 'proxyMode' is 'manual' but 'proxyUrl' is "
         "unusable (" +
