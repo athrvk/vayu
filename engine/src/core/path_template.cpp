@@ -46,12 +46,10 @@ std::string trimmed (std::string_view value) {
 namespace {
 
 /**
- * Both spellings, in one pass, with @p path_templates deciding whether a
- * single brace is one of them.
- *
- * The renderer runs two sequential regex passes and only the second is
- * conditional; a single pass produces the same answer because the `{{` branch
- * is tried first, so a `{{x}}` this pass wrote is never re-read as a `{x}`.
+ * Both spellings in one pass, @p path_templates deciding whether a single brace
+ * is one. The renderer runs two regex passes, only the second conditional; one
+ * pass answers the same because `{{` is tried first, so a `{{x}}` this pass
+ * wrote is never re-read as `{x}`.
  */
 /**
  * A `{{name}}` at @p i, rewritten to its bare form.
@@ -79,9 +77,8 @@ read_double_brace (const std::string& path, std::size_t i, std::string& out) {
 /**
  * A single-brace `{name}` path template at @p i, rewritten as `{{name}}`.
  *
- * @return where the pass continues, or nothing when the brace is not one -
- *         a `{}`, a `{x}}`, or a name with characters a path segment cannot
- *         carry.
+ * @return where the pass continues, or nothing when the brace is not one: a
+ *         `{}`, a `{x}}`, or a name a path segment cannot carry.
  */
 std::optional<std::size_t>
 read_path_template (const std::string& path, std::size_t i, std::string& out) {
