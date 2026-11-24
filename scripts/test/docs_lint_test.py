@@ -255,6 +255,45 @@ report = fails({"linker.md": FRONT + ("x" * 500 + "\n") * 2, "new.md": FRONT + "
 check("a moved page's count of long lines may not rise",
       report is not None and "long_lines ceiling raised from 1 to 2" in report, str(report))
 
+print("the CLAUDE.md guides")
+
+
+def guide_tree(guides: dict[str, str], ceilings: dict | None = None) -> Path:
+    root = tree({"a.md": FRONT}, ceilings)
+    for name, text in guides.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+def guide_lines(count: int) -> str:
+    return "rule\n" * count
+
+
+for guide in dl.GUIDES:
+    code, out = run(guide_tree({guide: guide_lines(400)}))
+    check(f"{guide} at 400 lines passes", code == 0 and out == "", out)
+    code, out = run(guide_tree({guide: guide_lines(401)}))
+    check(f"{guide} at 401 lines fails and names it", code == 1 and f"{guide}: 401 lines, over the budget of 400" in out, out)
+code, out = run(guide_tree({"CLAUDE.md": guide_lines(401)}, cfg({"CLAUDE.md": {"lines": 450}})))
+check("a guide over the budget may hold a ceiling", code == 0 and out == "", out)
+code, out = run(guide_tree({"CLAUDE.md": guide_lines(451)}, cfg({"CLAUDE.md": {"lines": 450}})))
+check("a guide over its ceiling fails", code == 1 and "over this page's ceiling of 450" in out, out)
+code, out = run(guide_tree({"CLAUDE.md": guide_lines(400)}, cfg({"CLAUDE.md": {"lines": 450}})))
+check("a ceiling on a guide now within the budget is stale", code == 1 and "stale ceiling for lines" in out, out)
+code, out = run(guide_tree({}, cfg({"engine/CLAUDE.md": {"lines": 450}})))
+check("a ceiling on a guide that does not exist is stale", code == 1 and "does not exist" in out, out)
+wide = "x" * 500 + "\n| a | " + "y" * 300 + " |\nIt used to be x.\n"
+code, out = run(guide_tree({"CLAUDE.md": wide}))
+check("a guide has no line-length, cell or history budget and needs no description", code == 0 and out == "", out)
+root = guide_tree({"CLAUDE.md": "x\n"}, cfg({"CLAUDE.md": {"max_line": 9}}))
+check("a guide ceiling for anything but its lines is exit 2", run(root)[0] == 2)
+report = fails({"CLAUDE.md": page_of_lines(601)}) or ""
+check("a file named CLAUDE.md under docs/ is an ordinary page", "over the budget of 600" in report, report)
+code, out = run(guide_tree({"CLAUDE.md": guide_lines(401), "app/CLAUDE.md": guide_lines(3)}), "--measure")
+check("--measure lists a guide over its budget by its lines alone", json.loads(out)["pages"] == {"CLAUDE.md": {"lines": 401}}, out)
+
 print("malformed input")
 for label, ceilings_text in (
     ("not JSON", "{"),

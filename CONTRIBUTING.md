@@ -517,6 +517,12 @@ in that change a maximum may rise by 32 characters and the new pages' `history`
 may total a tenth more. The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
 the ceilings file the current tree needs, for lowering it after a cleanup.
 
+The three `CLAUDE.md` guides (the root, `app/` and `engine/`) are held to one
+budget in the same run: 400 lines each. A guide holds rules a session reads
+first; reference goes on a page under `docs/` that the guide links. A guide
+over the budget would have a ceiling in the same file, with the same rules. The
+pull-request run starts when a guide changes.
+
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
 absolute `https://github.com/athrvk/vayu/blob/master/...` URLs: those files are
 outside the published tree, so a relative path 404s on the site.

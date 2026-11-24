@@ -56,6 +56,11 @@ on:
       - 'scripts/docs-lint.py'
       - 'scripts/docs-lint-ceilings.json'
       - '.github/workflows/docs.yml'
+      # The guides' line budget (scripts/docs-lint.py). Not in the `push` list:
+      # a guide is not published, so a merge that edits one needs no deploy.
+      - 'CLAUDE.md'
+      - 'app/CLAUDE.md'
+      - 'engine/CLAUDE.md'
   workflow_dispatch:
 
 permissions:

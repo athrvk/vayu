@@ -165,14 +165,16 @@ Forgetting it fails loudly (`document is not defined`), never silently.
 **A test's budget is a hang detector, sized for the slowest CI leg.**
 `src/test/timeouts.ts` holds the suite's budgets (60s a case and hook, 15s
 for `waitFor` / `findBy*`); `vitest.config.ts` and `src/test/setup.ts` read
-them. vitest's 5s and Testing Library's 1s defaults, and the hand-sized
-10-20s overrides that followed (#846, #1280, #1219), were each a measurement
-on one machine times a guess. A full parallel run on four cores measured cases
-at 6x their idle figure, and Windows runs the suite 3-4x slower again, so
-every one of those budgets failed healthy runs and cost a CI re-run. A case
-names no budget of its own: `timeouts.guard.test.ts` refuses a numeric
-`timeout:` in a test file, and a case that runs a whole build uses
-`BUILD_TEST_TIMEOUT_MS`.
+them. A hand-sized budget is a measurement on one machine times a guess: a full
+parallel run on four cores measures cases at 6x their idle figure, and Windows
+runs the suite 3-4x slower again. A case names no budget of its own:
+`timeouts.guard.test.ts` refuses a numeric `timeout:` in a test file, and a case
+that runs a whole build uses `BUILD_TEST_TIMEOUT_MS`.
+
+**A ceiling's docblock and a test file's size have guards beside that one.**
+`ceiling-docblock.guard.test.ts` keeps a ceiling's docblock to the rule, with no
+value and no raise history; `scripts/test-size-lint.py` caps a test file at
+1,500 lines (root `CLAUDE.md`, "Testing").
 
 **Render cost is held down by fixture size, not by the clock.** Ask what the
 fixture size is _for_. A property such as "past the grid's first window" needs
