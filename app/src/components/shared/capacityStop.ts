@@ -67,7 +67,8 @@ function errorsDetail(capacity: CapacityResult, stepDuration: string | undefined
 
 /**
  * Quotes the p99 rise only when the report proves one (the saturation level's p99 against the last
- * level tried); a run predating `saturation*`, or whose p99 did not rise, gets the plain sentence.
+ * level tried); a run predating `saturation*`, or whose p99 did not rise, gets the plain sentence
+ * rather than a claim about latency the report cannot back.
  */
 function plateauDetail(capacity: CapacityResult): string {
 	const lead = "More virtual users stopped buying more throughput";

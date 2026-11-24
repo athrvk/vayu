@@ -95,10 +95,11 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				</p>
 
 				{/*
-				 * Only when the gate was on (#720): "3 failed" in the step list means something
-				 * else with it, and the reader cannot tell which run this was. On `true` alone: a
-				 * load run has no flag, and a collection run not asking for the gate is the default
-				 * this block describes.
+				 * Only when the gate was on (#720). The flag is stored beside the tally because "3
+				 * failed" in the step list means something else with it, and a reader who cannot
+				 * see which run this was cannot tell the two apart. On `true` alone: a load run has
+				 * no flag, and a collection run not asking for the gate is the default this block
+				 * describes.
 				 */}
 				{validation.failOnSchemaError === true && (
 					<p className="mb-3 text-label text-muted-foreground">

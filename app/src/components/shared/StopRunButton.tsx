@@ -7,11 +7,12 @@
 
 /**
  * "Stop the run happening now", one treatment wherever a run can be cancelled (the load-test
- * dashboard header, the collection-run tab). A primitive, as the treatment is no `Button` variant:
- * a destructive *outline* over `ghost`, plus the in-flight swap to a spinner and "Stopping…".
- * `destructive-text`, not `destructive`, for the label: the bare fill as a foreground is the repo's
- * most frequent colour bug (`docs/design-system/chart-colors.md`). The caller owns the request and
- * the failure path; this says only what pending looks like.
+ * dashboard header, the collection-run tab). A primitive, not markup each view repeats: the
+ * treatment is no `Button` variant (a destructive *outline* over `ghost`, plus the in-flight swap
+ * to a spinner and "Stopping…"), and a hand-rolled copy would miss its fixes. `destructive-text`,
+ * not `destructive`, for the label: the bare fill as a foreground is the repo's most frequent
+ * colour bug (`docs/design-system/chart-colors.md`). The caller owns the request and the failure
+ * path; this says only what pending looks like.
  */
 
 import { StopCircle, Loader2 } from "lucide-react";
@@ -50,7 +51,8 @@ export function StopRunButton({
 			)}
 		>
 			{/*
-			 * No `mr-*`: the `Button` base sets `gap-2`, and a margin on top doubled the icon gap.
+			 * No `mr-*`: the `Button` base sets `gap-2`, and a margin on top would double the icon
+			 * gap.
 			 */}
 			{isStopping ? (
 				<Loader2 className="size-icon-sm animate-spin" />

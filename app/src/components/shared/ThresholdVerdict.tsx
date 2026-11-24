@@ -10,7 +10,7 @@
  * a test script asserts one response at a time and cannot say whether the p99 or error rate met a
  * budget, so a run passing every assertion can miss what it was run to check. Shown by the history
  * Overview, the dashboard's view of a finished run (#2220). Silent without budgets: absent says
- * "not judged", another claim from "judged and passed nothing". A check can be unmeasurable
+ * "not judged", a different claim from "judged and passed nothing". A check can be unmeasurable
  * (#1484): a latency ceiling over zero completed requests has no number, and "0ms" would read as a
  * real, passing measurement.
  */

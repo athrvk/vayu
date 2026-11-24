@@ -30,8 +30,8 @@ export function useAfterMenuClose() {
 
 	/**
 	 * Call first from `onCloseAutoFocus`: runs the deferred action, if any, stops Radix returning
-	 * focus over its field, and reports whether it did, so the caller leaves its own focus return
-	 * alone.
+	 * focus over the field the action opens, and reports whether it did, so the caller leaves its
+	 * own focus return alone.
 	 */
 	const runDeferred = (event: Event): boolean => {
 		const run = pending.current;

@@ -12,7 +12,7 @@
  * (`useRequestBuilderContext`, or the collection's `useVariableResolver`/`useDataContract`), so
  * this takes the resolved answers as props, each host supplying its own through `ElementList`'s
  * `renderAboveForm`. One tone table, not two that drift (the pre-#1512 panels' copies disagreed on
- * painting an undefined `pm.*` read).
+ * painting an undefined `pm.*` read destructive).
  */
 
 import { Badge } from "@/components/ui";

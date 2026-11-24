@@ -34,9 +34,9 @@
  * budgets its answered requests met, but those are not the run: a cancelled request is in no total,
  * rate or latency, and the ones the drain awaited are its slowest and hung ones (#3538). Such a run
  * (`summary.drainCut`, absent unless a Stop cut something) is **not-judged**, naming how many went
- * unanswered and nothing else. It ranks below **failed** and above every met-budget and no-budget
- * reason, failed checks and errors included; a Stop before the drain is **stopped**. The export's
- * `drain_stopped` code is the same verdict.
+ * unanswered and nothing else. It ranks below **failed** (a missed budget is already known) and
+ * above every met-budget and no-budget reason, failed checks and errors included; a Stop before the
+ * drain is **stopped**. The export's `drain_stopped` code is the same verdict.
  *
  * A budget the run could not measure (`evaluated: false`, #1484) is counted failed by the engine
  * (`passed: false`, in `failed`), so it lands in **failed** and is named like any missed budget.
@@ -361,8 +361,8 @@ export function rowOutcome(run: Run): RunJudgement | null {
 
 /**
  * The verdict as a lowercase word beside the status (`completed, verdict failed`), or `null` when
- * it adds nothing: no verdict, or a `failed` status, which always judges failed (#3643), so
- * "failed, verdict failed".
+ * it adds nothing: no verdict, or a `failed` status, which always judges failed (#3643), so the
+ * pair would read "failed, verdict failed".
  */
 export function verdictBesideStatus(
 	status: Run["status"],

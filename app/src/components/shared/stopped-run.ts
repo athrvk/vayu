@@ -8,8 +8,8 @@
 /**
  * What the budgets card says about a stopped run (#2194): the engine judges it on what it measured
  * before the stop, and "Passed" over three seconds of a twenty-second plan is a weaker claim than
- * over the plan. Both hosts of {@link ThresholdVerdict} hold the full report, so the reading is
- * done here.
+ * the same word over the whole plan. Both hosts of {@link ThresholdVerdict} hold the full report,
+ * so the reading is done here.
  */
 
 import { durationSeconds } from "@/constants/load-test";

@@ -20,8 +20,9 @@ export function elementOriginLabel(origin: ElementOrigin | undefined): string | 
 
 /**
  * One element tally row's React key. An id is unique only within its level (#3101), so a report can
- * hold one id twice; the origin joins the id, as the engine tells the rows apart. With no origin,
- * the position: a report predating origins can repeat an id with nothing else to separate them.
+ * hold one id twice; the origin joins the id, as the engine tells the rows apart. A row with no
+ * origin falls back to its position: a report predating origins can repeat an id with nothing else
+ * to separate them.
  */
 export function elementRowKey(
 	element: { id: string; origin?: ElementOrigin },

@@ -73,10 +73,10 @@ export function rowAssertionsOf(summary: LoadResultSummary): RunAssertions | und
 
 /**
  * A scenario load run's exact assertion population (#2820), or `undefined` when it made none (no
- * `assert.*`, no required `extract.*`, no inline `pm.test`), for a collection run and for an older
- * report. A single-request run answers `undefined` too, so the cards draw no Assertions block, its
- * exact tallies being the Overview's element rows. The block's `exact` is written at zero; the card
- * is not.
+ * `assert.*`, no required `extract.*`, no inline `pm.test`), for a collection run and for a report
+ * stored before the field. A single-request run answers `undefined` too, so the cards draw no
+ * Assertions block, its exact tallies being the Overview's element rows. The block's `exact` is
+ * written at zero; the card is not.
  */
 export function exactAssertionsOf(
 	report: Pick<RunReport, "assertions" | "scenario"> | null | undefined
